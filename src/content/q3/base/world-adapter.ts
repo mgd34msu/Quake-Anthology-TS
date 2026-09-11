@@ -93,6 +93,18 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
 
   unlink(number: number): void { const entity = this.records.get(number); if (entity?.inuse) { entity.r.captureLink(); this.host.bodies.unlink(entity.actor); } }
 
+  unlinkActor(actor: ActorId): (() => void) | null {
+    const owner = this.records.host.actors.resolveOwned(actor);
+    if (owner === null || this.host.bodies.linked(actor) === null) return null;
+    const native = this.records.nativeByActor(actor);
+    native?.r.captureLink(); this.host.bodies.unlink(owner);
+    return () => {
+      if (!this.records.host.actors.isLive(owner.id) || this.host.bodies.read(owner.id) === null) return;
+      if (native !== null && this.records.nativeByActor(owner.id) === native) this.link(native);
+      else this.host.bodies.link(owner);
+    };
+  }
+
   entityContact(bounds: Bounds, number: number, capsule = false): boolean {
     const entity = this.records.get(number);
     if (entity === undefined || !entity.inuse) return false;

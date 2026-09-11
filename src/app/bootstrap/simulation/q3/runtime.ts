@@ -135,7 +135,7 @@ export class Q3SourceRuntime {
       : { combat, world: this.world, get previousTime() { return runtime.level.previousTime; }, missionpack: {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
-    this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, get quadFactor() { return runtime.number("g_quadfactor"); } });
+    this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
     this.itemLifecycle = { entities: this.pool, world: this.world, product: options.product,
       get gameType() { return runtime.gameType; }, get weaponRespawnSeconds() { return runtime.integer("g_weaponrespawn"); },
       get teamWeaponRespawnSeconds() { return runtime.integer("g_weaponTeamRespawn"); }, handicapForClient: number => this.userinfo(number, "handicap"),

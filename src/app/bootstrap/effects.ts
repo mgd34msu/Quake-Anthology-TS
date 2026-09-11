@@ -223,6 +223,7 @@ export class ApplicationEffects {
   private async event(source: SimulationPresentationEvent): Promise<void> {
     if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level") return;
     if (source.kind === "q3-ballistics") {
+      if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
       let effects = this.q3Weapons.get(source.content);
       if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer); this.q3Weapons.set(source.content, effects); }
       await effects.ballistic(source.event);

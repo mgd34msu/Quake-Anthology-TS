@@ -1,3 +1,4 @@
+import { byteToDirection, directionToByte } from "../../../content/q3/base/shared/direction-byte.ts";
 import type { Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
 /* Source cgame effect producers joined to shared assets, collision and drawing. */
 import type { ContentId } from "../../../contracts/content.ts";
@@ -227,6 +228,11 @@ export class Q3ApplicationEffects {
         return;
       }
       case "shotgun": media.shotgun(event.shot, event.actor); return;
+      case "rail":
+        emitRailTrail(time, media.registry, { localEntities: this.effects.pool, settings: () => ({ oldRail: false, railTrailTime: 400 }), clientInfo: media.host.clientInfo }, 0, { ...event.trail.start }, event.trail.end);
+        if (event.trail.impact.kind === "surface") emitWeaponImpact(this.state.product, media.registry, media.host, Weapon.WP_RAILGUN, 0,
+          event.trail.end, byteToDirection(directionToByte(event.trail.impact.normal)), ImpactSound.DEFAULT);
+        return;
       case "contact": {
         const contact = event.contact;
         switch (contact.kind) {

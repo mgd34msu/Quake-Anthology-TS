@@ -189,3 +189,67 @@ export function q3ShotgunFire(host: Q3ShotgunHost, shooter: ActorId, attack: Q3B
     }
   }
 }
+
+export interface Q3RailTrail {
+  readonly start: Vec3;
+  readonly end: Vec3;
+  readonly impact: { readonly kind: "none" } | { readonly kind: "surface"; readonly normal: Vec3 };
+}
+export type Q3RailHost = Omit<ContactServices, "emit" | "creditAccuracyHit"> & ({ readonly product: "baseq3" } | {
+  readonly product: "missionpack";
+  invulnerabilityImpact: Extract<Q3ContactHost, { readonly product: "missionpack" }>["invulnerabilityImpact"];
+}) & {
+  alive(): boolean;
+  unlink(actor: ActorId): (() => void) | null;
+  trail(event: Q3RailTrail): void;
+};
+
+export function q3RailFire(host: Q3RailHost, shooter: ActorId, attack: Q3BulletAttack): number {
+  let end = add3(attack.muzzle, scale3(attack.forward, 8192)), pass: ActorId | null = shooter, hits = 0, penetrated = 0;
+  const restores: (() => void)[] = [];
+  let trace: ActorTraceResult | null = null;
+  const trail = (point: Vec3, impact: Q3RailTrail["impact"]): void => host.trail({
+    start: add3(add3(attack.muzzle, scale3(attack.right, 4)), scale3(attack.up, -1)), end: point, impact });
+  try {
+    do {
+      if (!host.alive()) break;
+      trace = host.trace(attack.muzzle, end, pass);
+      if (trace.hit.kind !== "actor") break;
+      const actor = trace.hit.actor, target = host.target(actor);
+      if (target?.damageable === true) {
+        if (host.product === "missionpack" && target.player && target.invulnerable) {
+          const impact = host.invulnerabilityImpact(actor, attack.forward, trace.end);
+          if (impact.kind === "hit") {
+            end = reflectedEnd(attack.muzzle, impact.impactPoint, impact.bounceDirection);
+            trace = { ...trace, end: snapVectorTowards(trace.end, attack.muzzle) };
+            trail(trace.end, { kind: "none" }); attack.muzzle = impact.impactPoint; pass = null;
+          }
+        } else {
+          if (target.accuracyEligible) hits++;
+          host.damage(actor, attack.forward, trace.end, scaledDamage(100, attack));
+        }
+      }
+      if (trace.contents & 1) break;
+      const restore = host.unlink(actor); if (restore !== null) restores.push(restore);
+      penetrated++;
+    } while (penetrated < 4);
+  } finally {
+    for (const restore of restores) restore();
+  }
+  if (trace !== null) trail(snapVectorTowards(trace.end, attack.muzzle), trace.surfaceFlags & 0x10 ? { kind: "none" } : { kind: "surface", normal: traceNormal(trace) });
+  return hits;
+}
+
+export interface Q3RailStatistics {
+  readonly streak: number;
+  readonly hits: number;
+  readonly impressiveCount: number;
+  readonly rewardUntil: number;
+}
+export function q3RailStatistics(state: Q3RailStatistics, hits: number, time: number): Q3RailStatistics & { readonly awarded: boolean } {
+  if (hits === 0) return { ...state, streak: 0, awarded: false };
+  const streak = (state.streak + hits) | 0, awarded = streak >= 2;
+  return { streak: awarded ? (streak - 2) | 0 : streak, hits: (state.hits + 1) | 0,
+    impressiveCount: awarded ? (state.impressiveCount + 1) | 0 : state.impressiveCount,
+    rewardUntil: awarded ? (time + 2000) | 0 : state.rewardUntil, awarded };
+}

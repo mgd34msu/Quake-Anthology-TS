@@ -780,6 +780,7 @@ export class SharedSimulation implements Simulation {
         if (this.selectedArsenal !== null && player.arsenal.state.kind === "q3") {
           this.selectedArsenal.remove(entity.actor.id); player.arsenal = this.selectedArsenal.admit(entity.actor, 100, false);
         }
+        this.selectedBallistics?.respawn(entity.actor.id);
         this.handGrenades?.respawn(entity.actor.id); this.grapple?.release(entity.actor.id); this.admitGrapple(entity.actor.id);
         return undefined;
       },
@@ -1260,6 +1261,7 @@ export class SharedSimulation implements Simulation {
     if (this.selectedArsenal !== null) { this.selectedArsenal.remove(player.actor.id); player.arsenal = this.selectedArsenal.admit(player.actor, 100, false); }
     this.combat.setTraits(player.actor, { canTakeDamage: true, invulnerable: false });
     this.setPlayerMovement(player.actor.id, { kind: "spawn", origin: add(spot.origin, { x: 0, y: 0, z: 1 }), velocity: zero, angles: spot.angles, commandAngles: player.commandAngles, holdMilliseconds: 0, spectator: false });
+    this.selectedBallistics?.respawn(player.actor.id);
     this.handGrenades?.respawn(player.actor.id); this.grapple?.release(player.actor.id); this.admitGrapple(player.actor.id);
     this.q2Characters.get(player.actor)?.respawned(); this.q1Characters.get(player.actor)?.respawn(); this.killBox(player.actor);
     return undefined;
@@ -1896,7 +1898,7 @@ export class SharedSimulation implements Simulation {
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
-    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 5 : 1, bytes });
+    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 6 : 1, bytes });
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else providers.push(...captureQ2Product(source.product));
 

@@ -4,7 +4,7 @@ import { SaveReader, decodeCheckpointValue } from "../../../persistence/value.ts
 export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderCheckpoint["schema"]): ProviderCheckpoint {
   const matches = image.providers.filter(value => value.schema === schema);
   const value = matches[0];
-  if (value === undefined || matches.length !== 1 || value.version !== (schema === "world:simulation" ? 5 : 1)) throw new Error(`Missing or unsupported saved provider ${schema}`);
+  if (value === undefined || matches.length !== 1 || value.version !== (schema === "world:simulation" ? 6 : 1)) throw new Error(`Missing or unsupported saved provider ${schema}`);
   return value;
 }
 export function simulationSaveReader(image: SaveImage): SaveReader {
