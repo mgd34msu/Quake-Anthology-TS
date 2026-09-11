@@ -8,9 +8,10 @@ import type { TouchContact } from "../../../../contracts/world.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../host.ts";
 import { angleVectors, lerpAngle, vectorAngles } from "./vectors.ts";
+import { q2ActorShotMask } from "./projection.ts";
 import { freeQ2Entity as free } from "../callbacks.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
-import { MOD, PLAYER_CONTENTS, PROJECTILE_MASK, SHOT_MASK, WATER_MASK, Q2WeaponState } from "./types.ts";
+import { MOD, PLAYER_CONTENTS, WATER_MASK, Q2WeaponState } from "./types.ts";
 import type { Q2GrenadeAdjustment, Q2NoiseRecord, Q2WeaponHooks, Q2WeaponInput } from "./types.ts";
 
 function normal(trace: TraceResult): Vec3 { return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero; }
@@ -67,8 +68,7 @@ export class Q2Ballistics {
   }
 
   private actorShotMask(game: Q2GameServices, playersCollide: boolean): number {
-    if (game.options.edition === "classic") return SHOT_MASK;
-    return playersCollide ? PROJECTILE_MASK : PROJECTILE_MASK & ~PLAYER_CONTENTS;
+    return q2ActorShotMask(game, playersCollide);
   }
 
   playerNoise(self: Q2Entity, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {

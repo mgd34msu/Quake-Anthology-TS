@@ -55,3 +55,29 @@ test("real source bindings order thinks and release/reentry cannot run stale cal
   actors.close();
   scheduler.close();
 });
+
+test("native source slots retain order while explicit equipment clocks retain their units", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("equipment scheduler"));
+  const grenade = actors.allocateAtSource("q2:equipment/hand-grenades", 9, "q2:grenade");
+  const native = actors.allocateAtSource("q1:game", 2, "q1:first");
+  const calls: { readonly slot: number; readonly time: number; readonly unit: string }[] = [];
+  const scheduler = new FrameScheduler({ actors,
+    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } },
+    clocks: [{ provider: grenade.owner, profile: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" } }],
+    sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
+    resolve: () => (actor, frame) => {
+      calls.push({ slot: actors.sourceOf(actor.id)?.slot ?? -1, time: frame.time.value, unit: frame.time.kind });
+      if (actor === grenade) scheduler.schedule(actor, "q2:think", { due: frame.time, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 2 } });
+      return undefined;
+    } });
+  scheduler.schedule(grenade, "q2:think", { due: { kind: "milliseconds", value: 1050 }, boundary: "during-physics", order: { provider: grenade.owner, actor: grenade.id, sequence: 0 } });
+  scheduler.schedule(native, "q1:think", { due: { kind: "seconds", value: 1.04 }, boundary: "during-physics", order: { provider: native.owner, actor: native.id, sequence: 0 } });
+  scheduler.advance([
+    { provider: grenade.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1050 }, elapsed: { kind: "milliseconds", value: 50 } } },
+    { provider: native.owner, frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } } },
+  ], "during-physics");
+  expect(calls).toEqual([{ slot: 2, time: 1.04, unit: "seconds" }, { slot: 9, time: 1050, unit: "milliseconds" }]);
+  expect(scheduler.pending(grenade.id)?.timing.due).toEqual({ kind: "milliseconds", value: 1050 });
+  scheduler.close();
+  actors.close();
+});

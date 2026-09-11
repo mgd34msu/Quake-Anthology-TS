@@ -183,10 +183,10 @@ export class FrameScheduler implements ActorSchedule {
   }
 
   private profile(provider: ProviderId): ClockProfile {
-    if (this.ordering.kind === "native") return this.ordering.clock;
     const profile = this.profiles.get(provider);
-    if (profile === undefined) throw new Error(`Missing scheduler clock: ${provider}`);
-    return profile;
+    if (profile !== undefined) return profile;
+    if (this.ordering.kind === "native") return this.ordering.clock;
+    throw new Error(`Missing scheduler clock: ${provider}`);
   }
 
   private assertOpen(): undefined {

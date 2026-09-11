@@ -1,13 +1,14 @@
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. The caller supplies the source clock and shared actor state. */
 import type { Vec3 } from "../../../../contracts/math.ts";
-import { add, normalize, scale, subtract, zero } from "../fields.ts";
+import { add, scale, zero } from "../fields.ts";
 import type { Q2Entity, Q2GameServices } from "../host.ts";
 import { Q2Ballistics } from "./ballistics.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
 import { angleVectors } from "./vectors.ts";
-import { MOD, PLAYER_CONTENTS, Q2WeaponState } from "./types.ts";
+import { projectQ2Actor } from "./projection.ts";
+import { MOD, Q2WeaponState } from "./types.ts";
 import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponName } from "./types.ts";
 import type { Q2NoiseRecord } from "./types.ts";
 import type { Q2NoiseCheckpoint, Q2WeaponsCheckpoint } from "./checkpoint.ts";
@@ -446,14 +447,8 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   projectSource(self: Q2Entity, game: Q2GameServices, input: Q2WeaponInput, angles: Vec3, offset: Vec3): { start: Vec3; direction: Vec3 } {
-    const axes = angleVectors(angles), side = input.hand === "left" ? -offset.y : input.hand === "center" ? 0 : offset.y;
-    const origin = game.body(self).origin;
-    if (game.options.edition === "classic") return { start: add(add(add(origin, scale(axes.forward, offset.x)), scale(axes.right, side)), { x: 0, y: 0, z: self.viewHeight + offset.z }), direction: axes.forward };
-    const eye = add(origin, { x: 0, y: 0, z: self.viewHeight });
-    const start = add(add(add(eye, scale(axes.forward, offset.x)), scale(axes.right, side)), scale(axes.up, offset.z));
-    const trace = game.host.trace({ start: eye, end: add(eye, scale(axes.forward, 8192)), bounds: null, ignore: self.actor.id, mask: this.shotMask(self, game) & ~0x4000000 });
-    const close = trace.kind !== "q1" && (trace.contents & (0x2000000 | PLAYER_CONTENTS)) !== 0 && trace.fraction * 8192 < 128;
-    return { start, direction: trace.startSolid || close ? axes.forward : normalize(subtract(trace.end, start)) };
+    return projectQ2Actor(self.actor.id, game, { hand: input.hand, viewHeight: self.viewHeight,
+      playersCollide: this.inputs.get(self.actor.id)?.playersCollide !== false }, angles, offset);
   }
 
   project(context: Q2WeaponContext, offset: Vec3, angles = context.input.angles): { start: Vec3; direction: Vec3 } {

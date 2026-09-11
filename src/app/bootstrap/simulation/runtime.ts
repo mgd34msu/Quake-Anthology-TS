@@ -1,3 +1,6 @@
+import type { MonsterState as Q2MonsterState } from "../../../content/q2/foundation/monsters/types.ts";
+import { createQ1ActorHost, createQ2ActorHost } from "./source-hosts.ts";
+import type { ActorHostRuntime } from "./source-hosts.ts";
 import { actorMotion, actorCollision, actorFlags, writeActorFlags, executeActor } from "./actor-execution.ts";
 import type { ActorExecution } from "./actor-execution.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
@@ -346,8 +349,68 @@ export class SharedSimulation implements Simulation {
   get bodies() { return this.physics.bodies; }
   get timeSeconds(): number { return seconds(this.sourceFrame.time); }
 
+  private q1ActorHost(source: ProviderReference, runtime: ActorHostRuntime): Q1FoundationHost {
+    const content = source.content;
+    return createQ1ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+        registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
+        random: () => runtime.random.nextUnit(),
+        walkMove: (actor, yaw, distance) => this.q1Movement.walkMove(actor, yaw, distance),
+        checkBottom: actor => this.q1Movement.checkBottom(actor),
+        moveToGoal: (actor, goal, distance) => this.q1Movement.moveToGoal(actor, goal, distance),
+        changeYaw: actor => { this.q1Movement.changeYaw(actor); return undefined; },
+        pushMove: (actor, displacement) => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
+          const angular = entity?.angularVelocity ?? zero, elapsed = runtime.frameSeconds();
+          return this.physics.pushMove(actor, displacement, { x: angular.x * elapsed, y: angular.y * elapsed, z: angular.z * elapsed }); },
+        scheduleThink: (actor, due) => runtime.schedule(actor, due), cancelThink: actor => runtime.schedule(actor, null),
+        emit: event => {
+          if (event.kind === "weapon") this.viewModels.set(event.player, { path: event.viewModel, frame: event.frame });
+          if (event.kind === "intermission") for (const player of this.playerStates.values()) {
+            player.viewHeight = 0;
+            this.setPlayerMovement(player.actor.id, { kind: "freeze", origin: event.origin, angles: event.angles });
+          }
+          if (event.kind === "teleport-player") { const player = this.player(event.player); if (player !== null) { player.viewAngles = event.angles; if (player.state.kind === "q1-netquake") player.state = { ...player.state, viewAngles: event.angles, teleportTimeSeconds: event.lockUntil }; } }
+          return this.events.emit(content, { kind: "q1", event });
+        }, transition: intent => { this.transitions.push(intent); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
+        checkClient: observer => this.checkClient(observer), powerup: (actor, powerup, expires) => this.powerup(actor, powerup, expires),
+        controlPlayer: (actor, control) => this.controlPlayer(actor, control),
+        setGravity: (actor, scale) => { const player = this.player(actor); if (player !== null) {
+          player.gravityMultiplier = scale;
+          if (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3") player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * scale) };
+        } return undefined; } }, { scene: this.scene, numeric: runtime.numeric, worldActor: () => this.worldActor(), sourceOrder: (a, b) => this.sourceOrder(a, b) });
+  }
+
+  private q2ActorHost(source: ProviderReference, runtime: ActorHostRuntime,
+    readMonster: (actor: ActorId) => Q2MonsterState | undefined): Q2FoundationHost {
+    const content = source.content;
+    return createQ2ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+      registerEntity: (entity, services) => this.registerActorExecution({ kind: "q2", entity, services, content, readMonster: () => readMonster(entity.actor.id) }),
+      ...(runtime.random.rerelease === null ? {} : { rereleaseRandom: runtime.random.rerelease }),
+      now: () => runtime.now(), frameSeconds: () => runtime.frameSeconds(), random: () => runtime.random.nextUnit(), schedule: (actor, due) => runtime.schedule(actor, due),
+      worldActor: () => { const actor = this.worldActor(); if (actor === null) throw new Error("Map has no source world actor"); return actor; },
+      playerViewState: actor => { const player = this.player(actor); return player === null ? null : { viewAngles: player.viewAngles, oldVelocity: this.source.kind === "q2" ? this.source.players.states.get(actor)?.oldVelocity ?? zero : zero }; },
+      prepareLevelChange: (map, landmark, serverFlags) => { this.levelChange = { map, landmark, serverFlags }; return undefined; },
+      players: () => this.players(), isPlayer: actor => this.player(actor) !== null, isMonster: actor => { const entry = this.actorExecutions.get(actor);
+        return entry?.kind === "q2" ? (entry.entity.serverFlags & 4) !== 0 : entry?.kind === "q1" && entry.entity.monster !== null; },
+      touchTriggers: actor => this.physics.touchTriggers(actor),
+      keyConsumed: actor => { if (this.source.kind === "q2") { const entity = this.source.game.entity(actor); if (entity !== null) this.source.players.consumedKey(entity, this.source.game); } return undefined; },
+      setSolid: (actor, solid, model) => this.physics.setSolid(actor, solid, model, "q2"),
+      setMotion: motion => this.physics.setMotion(motion), setAreaPortal: (portal, open) => { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); return undefined; },
+      emit: event => { if (event.kind === "model") this.sourceModels.set(event.actor, event); return this.events.emit(content, { kind: "q2", event }); },
+      transition: intent => {
+        if (!this.checkingQ2Rules && this.source.kind === "q2" && intent.kind === "campaign-level") {
+          const change = this.levelChange;
+          return this.source.players.beginIntermission(this.source.game, change?.map ?? intent.map.replace(/^q2:/, ""), change?.landmark ?? null);
+        }
+        this.transitions.push(intent); return undefined;
+      }, diagnostic: message => this.events.message({ kind: "print", level: 2, text: message }) }, { scene: this.scene, numeric: runtime.numeric, worldActor: () => this.worldActor(), sourceOrder: (a, b) => this.sourceOrder(a, b) });
+  }
+
   private createSource(): SourceRuntime {
     const recipe = this.recipe, content = recipe.map.entities.content, campaign = recipe.campaign.kind === "campaign" ? recipe.campaign.mission.provider : recipe.map.entities.provider;
+    const timing = providerTiming(recipe, recipe.map.entities.provider);
+    const actorRuntime: ActorHostRuntime = { numeric: timing.numeric, random: this.random, now: () => this.timeSeconds,
+      frameSeconds: () => timing.clock.kind === "q2-classic" ? 0.1 : timing.clock.kind === "q2-rerelease" ? timing.clock.frameMilliseconds / 1000 : seconds(this.sourceFrame.elapsed),
+      schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
     if (this.options.world.kind === "q3-bsp") {
       const product = content.includes("missionpack") ? "missionpack" : "baseq3";
       const host = createQ3SourceHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
@@ -371,41 +434,7 @@ export class SharedSimulation implements Simulation {
         ...(this.options.q3Session === undefined ? {} : { sessionCarry: this.options.q3Session }) }, host) };
     }
     if (this.options.world.kind === "q1-bsp") {
-      const host: Q1FoundationHost = { actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
-        registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
-        random: () => this.random.nextUnit(),
-        trace: request => {
-          const trace = this.scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" },
-            policy: { kind: "q1", move: request.missile ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: providerTiming(recipe, recipe.map.entities.provider).numeric, passActor: request.ignore });
-          if (trace.kind !== "q1") throw new Error("Q1 trace returned another source representation");
-          const contents = this.scene.pointContents({ point: trace.end, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: providerTiming(recipe, recipe.map.entities.provider).numeric, passActor: request.ignore });
-          return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal, actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? this.worldActor() : null,
-            startSolid: trace.startSolid, allSolid: trace.allSolid, sky: contents.kind === "q1" && contents.contents === -6, inOpen: trace.inOpen, inWater: trace.inWater };
-        },
-        contents: point => { const value = this.contents(point, "q1"); return value === -2 ? "solid" : value === -3 ? "water" : value === -4 ? "slime" : value === -5 ? "lava" : value === -6 ? "sky" : "empty"; },
-        walkMove: (actor, yaw, distance) => this.q1Movement.walkMove(actor, yaw, distance),
-        checkBottom: actor => this.q1Movement.checkBottom(actor),
-        moveToGoal: (actor, goal, distance) => this.q1Movement.moveToGoal(actor, goal, distance),
-        changeYaw: actor => { this.q1Movement.changeYaw(actor); return undefined; },
-        pushMove: (actor, displacement) => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
-          const angular = entity?.angularVelocity ?? zero, elapsed = seconds(this.sourceFrame.elapsed);
-          return this.physics.pushMove(actor, displacement, { x: angular.x * elapsed, y: angular.y * elapsed, z: angular.z * elapsed }); },
-        scheduleThink: (actor, due) => this.schedule(actor, due), cancelThink: actor => this.scheduler.cancel(actor),
-        emit: event => {
-          if (event.kind === "weapon") this.viewModels.set(event.player, { path: event.viewModel, frame: event.frame });
-          if (event.kind === "intermission") for (const player of this.playerStates.values()) {
-            player.viewHeight = 0;
-            this.setPlayerMovement(player.actor.id, { kind: "freeze", origin: event.origin, angles: event.angles });
-          }
-          if (event.kind === "teleport-player") { const player = this.player(event.player); if (player !== null) { player.viewAngles = event.angles; if (player.state.kind === "q1-netquake") player.state = { ...player.state, viewAngles: event.angles, teleportTimeSeconds: event.lockUntil }; } }
-          return this.events.emit(content, { kind: "q1", event });
-        }, transition: intent => { this.transitions.push(intent); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
-        checkClient: observer => this.checkClient(observer), powerup: (actor, powerup, expires) => this.powerup(actor, powerup, expires),
-        controlPlayer: (actor, control) => this.controlPlayer(actor, control),
-        setGravity: (actor, scale) => { const player = this.player(actor); if (player !== null) {
-          player.gravityMultiplier = scale;
-          if (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3") player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * scale) };
-        } return undefined; } };
+      const host = this.q1ActorHost(recipe.map.entities, actorRuntime);
       const cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: this.session, origin: { kind: "server-console" } },
         print: text => { this.events.message({ kind: "print", level: 2, text }); } });
       for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
@@ -481,34 +510,7 @@ export class SharedSimulation implements Simulation {
       noise: (actor, origin) => { if (this.source.kind !== "q2") throw new Error("Q2 noise before source entry"); return this.source.monsters.reportNoise(actor, origin); }, weaponInput: actor => this.q2WeaponInput(this.requirePlayer(actor)), banned: () => false,
     };
     let owningMonsters: Q2ProductRuntime["monsters"] | null = null;
-    const host: Q2FoundationHost = { actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
-      registerEntity: (entity, services) => this.registerActorExecution({ kind: "q2", entity, services, content, readMonster: () => owningMonsters?.context(entity.actor.id)?.state }),
-      ...(this.random.rerelease === null ? {} : { rereleaseRandom: this.random.rerelease }),
-      now: () => this.timeSeconds, frameSeconds: () => {
-        const clock = providerTiming(recipe, recipe.map.entities.provider).clock;
-        return clock.kind === "q2-classic" ? 0.1 : clock.kind === "q2-rerelease" ? clock.frameMilliseconds / 1000 : seconds(this.sourceFrame.elapsed);
-      }, random: () => this.random.nextUnit(),
-      schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due),
-      trace: request => this.physics.trace(request, "q2"), pointContents: point => this.contents(point, "q2"),
-      inPvs: (a, b) => this.visible(a, b, "pvs"), inPhs: (a, b) => this.visible(a, b, "phs"),
-      areasConnected: (a, b) => this.scene.areasConnected(this.scene.leafArea(this.scene.pointLeaf(a)), this.scene.leafArea(this.scene.pointLeaf(b))),
-      nearby: (origin, radius) => this.actors.observations().map(value => value.id).filter(actor => { const body = this.bodies.read(actor); return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius; }).sort((a, b) => this.sourceOrder(a, b)),
-      worldActor: () => { const actor = this.worldActor(); if (actor === null) throw new Error("Map has no source world actor"); return actor; },
-      playerViewState: actor => { const player = this.player(actor); return player === null ? null : { viewAngles: player.viewAngles, oldVelocity: this.source.kind === "q2" ? this.source.players.states.get(actor)?.oldVelocity ?? zero : zero }; },
-      prepareLevelChange: (map, landmark, serverFlags) => { this.levelChange = { map, landmark, serverFlags }; return undefined; },
-      players: () => this.players(), isPlayer: actor => this.player(actor) !== null, isMonster: actor => this.source.kind === "q2" && ((this.source.game.entity(actor)?.serverFlags ?? 0) & 4) !== 0,
-      touchTriggers: actor => this.physics.touchTriggers(actor),
-      keyConsumed: actor => { if (this.source.kind === "q2") { const entity = this.source.game.entity(actor); if (entity !== null) this.source.players.consumedKey(entity, this.source.game); } return undefined; },
-      inlineModelBounds: model => this.scene.modelBounds(model), setSolid: (actor, solid, model) => this.physics.setSolid(actor, solid, model, "q2"),
-      setMotion: motion => this.physics.setMotion(motion), setAreaPortal: (portal, open) => { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); return undefined; },
-      emit: event => { if (event.kind === "model") this.sourceModels.set(event.actor, event); return this.events.emit(content, { kind: "q2", event }); },
-      transition: intent => {
-        if (!this.checkingQ2Rules && this.source.kind === "q2" && intent.kind === "campaign-level") {
-          const change = this.levelChange;
-          return this.source.players.beginIntermission(this.source.game, change?.map ?? intent.map.replace(/^q2:/, ""), change?.landmark ?? null);
-        }
-        this.transitions.push(intent); return undefined;
-      }, diagnostic: message => this.events.message({ kind: "print", level: 2, text: message }) };
+    const host = this.q2ActorHost(recipe.map.entities, actorRuntime, actor => owningMonsters?.context(actor)?.state);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
       match: recipe.match.provider === "q2:lmctf" ? { kind: "lmctf", ...(this.options.travel?.source.kind === "q2" && this.options.travel.source.lmctf !== undefined ? { travel: this.options.travel.source.lmctf } : {}) } : { kind: recipe.match.provider === "q2:ctf" ? "ctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
@@ -668,7 +670,7 @@ export class SharedSimulation implements Simulation {
   private worldActor(): ActorId | null { return this.actors.atSource(this.recipe.map.entities.provider, this.options.world.kind === "q3-bsp" ? 1022 : 0)?.id ?? null; }
   private player(actor: ActorId | null): MovementPlayer | null { if (actor === null) return null; const owned = this.actors.resolveOwned(actor); return owned === null ? null : this.playerStates.get(owned) ?? null; }
   players(): readonly ActorId[] { return [...this.playerStates.values()].sort((a, b) => a.client.slot - b.client.slot).map(player => player.actor.id); }
-  private classname(actor: ActorId): string { return this.player(actor) !== null ? "player" : this.source.kind === "q1" ? this.source.game.entity(actor)?.classname ?? "" : this.source.kind === "q2" ? this.source.game.entity(actor)?.classname ?? "" : ""; }
+  private classname(actor: ActorId): string { return this.player(actor) !== null ? "player" : this.actorExecutions.get(actor)?.entity.classname ?? ""; }
 
   private powerup(actor: OwnedActor, powerup: Q1Powerup, expires: number): undefined {
     if (powerup === "invulnerability") this.combat.setTraits(actor, { invulnerable: expires > this.timeSeconds });
@@ -1402,18 +1404,25 @@ export class SharedSimulation implements Simulation {
   drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.takePresentation(); }
 
   presentations(): readonly SimulationPresentation[] {
-    const result: SimulationPresentation[] = [], content = this.recipe.map.entities.content;
+    const result: SimulationPresentation[] = [];
     if (this.source.kind === "q3") result.push(...this.source.game.presentations());
-    if (this.source.kind === "q1") for (const entity of this.source.game.presentations()) {
-      const body = this.bodies.read(entity.actor);
-      if (body !== null && this.player(entity.actor) === null && entity.model !== "" && entity.model !== this.recipe.map.geometry.requestedPath) result.push({ actor: entity.actor, content, family: "q1", path: entity.model,
-        frame: entity.frame, oldFrame: entity.frame, skin: entity.skin, effects: entity.effects, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false });
-    }
-    if (this.source.kind === "q2") for (const entity of this.source.game.entities.values()) {
-      const body = this.bodies.read(entity.actor.id), model = this.sourceModels.get(entity.actor.id);
-      if (body !== null && this.player(entity.actor.id) === null && entity.model !== "" && entity.classname !== "worldspawn") result.push({ actor: entity.actor.id, content, family: "q2", path: entity.model,
-        frame: model?.frame ?? entity.frame, oldFrame: model?.oldFrame ?? entity.frame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
-        renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles, scale: model?.scale ?? 1, visible: (entity.serverFlags & 1) === 0, viewWeapon: false });
+    for (const entry of this.actorExecutions.values()) {
+      const body = this.bodies.read(entry.entity.actor.id);
+      if (body === null || this.player(entry.entity.actor.id) !== null || entry.entity.model === "") continue;
+      if (entry.kind === "q1") {
+        const entity = entry.entity;
+        if (entity.model === this.recipe.map.geometry.requestedPath) continue;
+        result.push({ actor: entity.actor.id, content: entry.content, family: "q1", path: entity.model,
+          frame: entity.frame, oldFrame: entity.frame, skin: entity.skin, effects: entity.effects, renderFlags: 0,
+          origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false });
+      } else {
+        const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
+        if (entity.classname === "worldspawn") continue;
+        result.push({ actor: entity.actor.id, content: entry.content, family: "q2", path: entity.model,
+          frame: model?.frame ?? entity.frame, oldFrame: model?.oldFrame ?? entity.frame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
+          renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles,
+          scale: model?.scale ?? 1, visible: (entity.serverFlags & 1) === 0, viewWeapon: false });
+      }
     }
     for (const player of this.playerStates.values()) {
       if (player.character === "q3" || player.intermission || player.cutscene !== null) continue;

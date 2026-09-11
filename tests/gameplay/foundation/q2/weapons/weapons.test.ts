@@ -12,6 +12,7 @@ import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../../../src/co
 import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponName } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 
 import { encodeQ2WeaponsCheckpoint, decodeQ2WeaponsCheckpoint, readQ2WeaponState } from "../../../../../src/persistence/q2-weapons.ts";
+import { projectQ2Actor } from "../../../../../src/content/q2/foundation/weapons/projection.ts";
 import { SaveReader } from "../../../../../src/persistence/value.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -88,6 +89,46 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
 }
 
 describe("Q2 base weapons on shared state", () => {
+  test("actor projection preserves native handedness, pitch and rerelease aim without a source entity", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const scene = fixture(edition), foreign = scene.actors.allocate("q1:character", "q1:player");
+      scene.bodies.create(foreign, scene.game.body(scene.self));
+      expect(scene.game.entity(foreign.id)).toBeNull();
+      for (const hand of ["left", "center", "right"] satisfies readonly Q2WeaponInput["hand"][]) {
+        const view = { hand, viewHeight: scene.self.viewHeight, playersCollide: true }, offset = { x: 8, y: 8, z: -8 };
+        const projected = projectQ2Actor(foreign.id, scene.game, view, zero, offset);
+        expect(projected).toEqual(scene.weapons.projectSource(scene.self, scene.game, { ...input, hand }, zero, offset));
+        expect(projected.start).toEqual({ x: 8, y: hand === "left" ? 8 : hand === "center" ? 0 : -8, z: scene.self.viewHeight - 8 });
+        const pitched = projectQ2Actor(foreign.id, scene.game, view, { x: 45, y: 0, z: 0 }, offset);
+        expect(pitched.start.x).toBeCloseTo(edition === "classic" ? 8 * Math.SQRT1_2 : 0, 10);
+        expect(pitched.start.z).toBeCloseTo(scene.self.viewHeight - (edition === "classic" ? 8 + 8 * Math.SQRT1_2 : 16 * Math.SQRT1_2), 10);
+        if (edition === "classic") expect(pitched.direction.z).toBeCloseTo(-Math.SQRT1_2, 10);
+      }
+    }
+  });
+
+  test("rerelease projection preserves cached native collision policy and close-target aim", () => {
+    const scene = fixture("rerelease"), requests: Q2TraceRequest[] = [];
+    scene.step(0, { ...input, attack: false, playersCollide: false });
+    scene.tracing.trace = request => { requests.push(request); return clearTrace(request); };
+    const offset = { x: 8, y: 8, z: -8 };
+    scene.weapons.projectSource(scene.self, scene.game, { ...input, playersCollide: true }, zero, offset);
+    expect(requests[0]?.mask).toBe(0x02004003);
+    expect(requests[0]?.ignore).toBe(scene.player.id);
+    const view = { hand: input.hand, viewHeight: scene.self.viewHeight, playersCollide: true };
+    const aimed = projectQ2Actor(scene.player.id, scene.game, view, zero, offset);
+    expect(requests[1]?.mask).toBe(0x42004003);
+    expect(aimed.direction.y).toBeGreaterThan(0);
+    scene.tracing.trace = request => {
+      const trace = clearTrace(request);
+      if (trace.kind !== "q2") throw new Error("Expected Q2 trace fixture");
+      return { ...trace, contents: 0x2000000, fraction: 0.01 };
+    };
+    expect(projectQ2Actor(scene.player.id, scene.game, view, zero, offset).direction).toEqual({ x: 1, y: 0, z: -0 });
+    scene.tracing.trace = request => ({ ...clearTrace(request), startSolid: true });
+    expect(projectQ2Actor(scene.player.id, scene.game, view, zero, offset).direction).toEqual({ x: 1, y: 0, z: -0 });
+  });
+
   test("native hand preparation reserves the last unit and cancellation refunds only before cooking", () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const refill of [false, true]) {
       const scene = fixture(edition, "grenades");
