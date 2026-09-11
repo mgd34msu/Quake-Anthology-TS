@@ -106,6 +106,16 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
   return { runtime, report, player, actors, callbacks, bodies, combat, inventory, events, due };
 }
 
+test.skipIf(!existsSync(path))("fresh Q1 arsenal publishes its initial view without replaying attachment", async () => {
+  const game = gameFor(await loadMap()), state = game.runtime.player(game.player.id);
+  if (state === null) throw new Error("Missing source player");
+  expect(game.events.filter(event => event.kind === "weapon")).toEqual([{ kind: "weapon", player: game.player.id, weapon: "shotgun", viewModel: "progs/v_shot.mdl", frame: 0, punch: 0 }]);
+  state.attackFinished = 3; state.weaponFrame = 2;
+  expect(game.runtime.attachPlayer(game.player)).toBe(state);
+  expect(state.attackFinished).toBe(3); expect(state.weaponFrame).toBe(2);
+  expect(game.events.filter(event => event.kind === "weapon")).toHaveLength(1);
+});
+
 test.skipIf(!existsSync(path))("real e1m1 entities spawn with source inhibition and a foreign character", async () => {
   const map = await loadMap(), { runtime, report, player, actors, due } = gameFor(map);
   expect(map.entityList).toHaveLength(428);

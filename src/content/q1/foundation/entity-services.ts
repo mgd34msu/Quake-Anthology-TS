@@ -309,6 +309,7 @@ export class Q1EntityServices {
       waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };
     this.players.set(actor, state);
     for (const extension of this.playerExtensions.values()) extension.attach?.(this, state);
+    this.host.emit({ kind: "weapon", player: actor.id, weapon: state.weapon, viewModel: this.weaponModel(state.weapon, state), frame: state.weaponFrame, punch: 0 });
     return state;
   }
 
