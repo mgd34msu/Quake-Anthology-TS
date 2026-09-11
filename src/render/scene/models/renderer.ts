@@ -11,6 +11,7 @@ import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
 import type { SceneShaderRegistry } from "../shaders.ts";
 import type { SceneTexture, SceneTextureLoader } from "../textures.ts";
+import { q2MipmappedImage } from "../q2-image.ts";
 import { cameraFrustum, createViewProjector } from "../view.ts";
 import type { WorldScene, WorldViewInput } from "../world.ts";
 import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts";
@@ -167,8 +168,9 @@ export class SceneModelRenderer {
       const asset = await this.provider.textures.reader.read(name), palette = this.provider.palette;
       if (asset !== null && palette !== null) {
         const pcx = decodePcx(asset.bytes, name), pixels = sprite ? pcx.indices : floodSkin(pcx.indices, pcx.width, pcx.height, palette);
-        return this.provider.textures.register(`${entity.resource.id}:${name}`, indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], palette,
-          { kind: "index", index: 255 }), { wrap: "repeat", filter: "linear" }, asset.source);
+        const content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], palette, { kind: "index", index: 255 });
+        return this.provider.textures.register(`${entity.resource.id}:${name}`, sprite ? content : q2MipmappedImage(content),
+          { wrap: "repeat", filter: sprite ? "linear" : "linear-mipmap-nearest" }, asset.source);
       }
     }
     const texture = await this.provider.textures.load(name, { family: this.provider.family, mipmap: !sprite }) ?? this.provider.textures.missing;
@@ -181,14 +183,22 @@ export class SceneModelRenderer {
     return texture;
   }
 
-  prepare(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({})): readonly DrawBatch[] {
+  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({})): readonly DrawBatch[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
+    const optionCache = new Map<SceneEntity, ModelSourceOptions>();
+    const vertexLights = new Map<SceneEntity, Map<Vec3, Vec3>>();
+    const options: SourceOptions = entity => {
+      let value = optionCache.get(entity);
+      if (value === undefined) { value = sourceOptions(entity); optionCache.set(entity, value); }
+      return value;
+    };
     const lightingInput = this.provider.family === "q2" && input.lights === undefined && input.q2FragmentLighting !== undefined
       ? { ...input, lights: input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 })) } : input;
-    const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number): Vec3 => {
+    const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number, source: ModelSourceOptions): Vec3 => {
       if (this.provider.family === "q3") return unit;
-      const source = options(entity);
+      const cached = vertexLights.get(entity)?.get(normal);
+      if (cached !== undefined) return cached;
       let light = lightCache.get(entity);
       if (light === undefined) {
         const sampled = this.lighting.sample(entity.transform.origin, lightingInput, this.provider.family !== "q1").color;
@@ -227,11 +237,18 @@ export class SceneModelRenderer {
         const direction = normalize3({ x: Math.cos(-yaw), y: Math.sin(-yaw), z: 1 }), d = dot3(normal, direction);
         shade = 1 + (d < 0 ? d * 0.3 : d);
       }
-      return scale3(light, shade);
+      const result = scale3(light, shade);
+      // Q1 old-pose normals vary by triangle corner. Q2 uses only the current normal.
+      if (this.provider.family === "q2") {
+        let normals = vertexLights.get(entity);
+        if (normals === undefined) { normals = new Map<Vec3, Vec3>(); vertexLights.set(entity, normals); }
+        normals.set(normal, result);
+      }
+      return result;
     };
     return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
-    { draw: surface => this.draw(surface, input, options(surface.entity), lightCache.get(surface.entity)) }));
+    { draw: surface => this.draw(surface, input, surface.options, lightCache.get(surface.entity)) }));
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
@@ -324,7 +341,7 @@ export class SceneModelRenderer {
     const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
     return batches.map((batch, index): DrawBatch => {
       const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
-        cull: surface.mirrorWeapon ? "front" : batch.state.cull } satisfies DrawBatch["state"];
+        cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
       if (index !== 0 || affecting.length === 0 || shadows === undefined || shadows.atlas === null) return { ...batch, state };
       const lighting = { kind: "q2-model-shadow", worldPositions: surface.geometry.vertices.map(vertex => vertex.position),
         lights: affecting, shadeScale, atlas: shadows.atlas } satisfies DrawBatch["lighting"];

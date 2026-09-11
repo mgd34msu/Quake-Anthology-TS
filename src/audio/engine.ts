@@ -60,6 +60,8 @@ export class UnifiedAudio {
     private paused = false;
     private effectsGain = 0.7;
     private frame = 0;
+    private previousPumpFrame: number | null = null;
+    private readonly pumpIntervals: number[] = [];
     constructor(private readonly options: UnifiedAudioOptions) {
         this.sampleRate = options.sampleRate ?? 44100;
         if (!Number.isSafeInteger(this.sampleRate) || this.sampleRate < 8000 || this.sampleRate > 192000)
@@ -328,23 +330,31 @@ export class UnifiedAudio {
             throw new Error("Audio output already open");
         this.device = SdlAudioDevice.open({ ...options, sampleRate: this.sampleRate, channels: 2, sampleBits: 16 });
     }
-    /** Fill a short queue. No wall-clock advancement occurs when the device is paused. */
-    pump(aheadFrames = Math.ceil(this.sampleRate * 0.08)): number {
+    /** Cover recent frame times plus SDL's block consumption and scheduling jitter. */
+    pump(aheadFrames?: number): number {
         this.check();
         const device = this.device;
         if (device === null)
             throw new Error("Audio output is not open");
         if (this.paused)
             return 0;
-        if (!Number.isSafeInteger(aheadFrames) || aheadFrames < 0 || aheadFrames > device.maxQueuedFrames)
+        const playbackFrame = device.playbackFrames;
+        const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
+        this.pumpIntervals.push(interval);
+        if (this.pumpIntervals.length > 8)
+            this.pumpIntervals.shift();
+        const target = aheadFrames ?? Math.min(device.maxQueuedFrames,
+            Math.max(Math.ceil(this.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
+        if (!Number.isSafeInteger(target) || target < 0 || target > device.maxQueuedFrames)
             throw new RangeError("Invalid audio lookahead");
-        const frames = Math.max(0, aheadFrames - device.queuedFrames);
+        this.previousPumpFrame = playbackFrame;
+        const frames = Math.max(0, target - device.queuedFrames);
         if (frames > 0)
             device.queue(this.mix(frames));
         device.resume();
         return frames;
     }
-    pause(paused: boolean): void { this.check(); this.paused = paused; if (paused)
+    pause(paused: boolean): void { this.check(); this.paused = paused; this.previousPumpFrame = null; this.pumpIntervals.length = 0; if (paused)
         this.device?.pause();
     else
         this.device?.resume(); }

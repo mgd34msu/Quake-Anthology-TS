@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { SdlAudioDevice, SdlAudioUnavailableError } from "../../src/platform/audio.ts";
 import { VorbisDecoder } from "../../src/platform/vorbis.ts";
+import { UnifiedAudio } from "../../src/audio/engine.ts";
 
 const fixture = process.env["QUAKE_TEST_OGG"]
   ?? new URL("../../../qfiles/q1/rerelease/id1/music/track02.ogg", import.meta.url).pathname;
@@ -53,6 +54,21 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   });
 } else {
   if (process.env["SDL_AUDIODRIVER"] !== "dummy") throw new Error("Audio tests require the dummy driver");
+
+  test("shared mixer adapts its queue to frames slower than the default lookahead", async () => {
+    using engine = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => performance.now(), random: () => 0 });
+    engine.openDevice({ bufferFrames: 256 });
+    expect(engine.pump()).toBe(3840);
+    await Bun.sleep(130);
+    expect(engine.pump()).toBeGreaterThan(6000);
+    for (let frame = 0; frame < 8; frame++) engine.pump();
+    engine.stopAll();
+    expect(engine.pump()).toBe(3840);
+    engine.pause(true);
+    engine.stopAll();
+    engine.pause(false);
+    expect(engine.pump()).toBe(3840);
+  });
 
   test("U8/S16 mono/stereo own paused queues and survive enumeration", () => {
     const deviceName = SdlAudioDevice.outputDeviceNames()[0];

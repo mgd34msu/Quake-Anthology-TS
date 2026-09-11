@@ -1014,6 +1014,13 @@ export class SharedSimulation implements Simulation {
   }
 
   private jump(actor: OwnedActor, action: "jump" | "swim"): undefined {
+    if (action === "jump") {
+      const character = this.characters.get(actor);
+      if (character !== undefined) return character.jump();
+      if (this.requirePlayer(actor.id).character === "q2") return this.events.emit(this.recipe.character.definition.content,
+        { kind: "q2", event: { kind: "sound", actor: actor.id, origin: this.requirePlayer(actor.id).view().origin, path: "*jump1.wav", channel: 2,
+          volume: 1, attenuation: 1, reliable: false, loop: "once" } });
+    }
     return this.events.emit(this.recipe.movement.content, { kind: "q1", event: { kind: "sound", actor: actor.id,
       path: action === "jump" ? "player/plyrjmp8.wav" : "misc/water1.wav", channel: "body", volume: 1, attenuation: 1 } });
   }
@@ -1111,13 +1118,18 @@ export class SharedSimulation implements Simulation {
         let cursor: readonly [number, number] | null = null;
         for (;;) {
           const previous = cursor;
-          const actor = this.actors.observations().map(value => this.actors.resolveOwned(value.id)).filter((value): value is OwnedActor => {
-            if (value === null || visited.has(value)) return false;
-            const position = this.sourcePosition(value.id);
-            return previous === null || position[0] > previous[0] || position[0] === previous[0] && position[1] > previous[1];
-          }).sort((a, b) => this.sourceOrder(a.id, b.id))[0];
-          if (actor === undefined) break;
-          cursor = this.sourcePosition(actor.id);
+          let next: { readonly actor: OwnedActor; readonly position: readonly [number, number] } | null = null;
+          for (const observation of this.actors.observations()) {
+            const candidate = this.actors.resolveOwned(observation.id);
+            if (candidate === null || visited.has(candidate)) continue;
+            const position = this.sourcePosition(candidate.id);
+            if (previous !== null && (position[0] < previous[0] || position[0] === previous[0] && position[1] <= previous[1])) continue;
+            if (next === null || position[0] < next.position[0] || position[0] === next.position[0] && position[1] < next.position[1])
+              next = { actor: candidate, position };
+          }
+          if (next === null) break;
+          const actor = next.actor;
+          cursor = next.position;
           visited.add(actor);
           if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
             this.bodies.link(actor); this.physics.touchTriggers(actor);

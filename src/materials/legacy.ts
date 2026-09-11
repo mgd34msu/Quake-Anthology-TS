@@ -130,8 +130,10 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
       if (material.warp) uv = liquidTexCoords(uv, context.time, "q2", material.flowing);
       else if (material.flowing) uv = q2FlowingTexCoords(uv, context.time);
     }
+    // Q2 R_RenderBrushPoly/R_DrawAlphaSurfaces undo texture intensity on unlit brush passes.
+    const intensity = material.kind === "q2" && material.lighting.kind !== "vertex" && (material.warp || blended) ? 0.5 : 1;
     const color = material.lighting.kind === "vertex" ? { x: vertex.color.x / 255, y: vertex.color.y / 255, z: vertex.color.z / 255, w: alpha }
-      : { x: 1, y: 1, z: 1, w: alpha };
+      : { x: intensity, y: intensity, z: intensity, w: alpha };
     return { position: context.project(vertex.position), texCoord: uv, color };
   });
   const fragmentLighting = material.kind === "q2" ? context.fragmentLighting : undefined;

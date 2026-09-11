@@ -51,7 +51,9 @@ export function packGeometry(batch: DrawBatch): GeometryArrays {
     }
   }
   for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {
-    if (!values.every(Number.isFinite)) throw new RangeError("OpenGL attributes must be finite float32 values");
+    for (let index = 0; index < values.length; index++) {
+      if (!Number.isFinite(values[index])) throw new RangeError("OpenGL attributes must be finite float32 values");
+    }
   }
   return arrays;
 }

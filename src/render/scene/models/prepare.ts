@@ -96,7 +96,11 @@ function cullGeometry(bounds: Bounds | null, context: ModelPreparationContext): 
 }
 
 export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
-  const options = context.options?.(entity) ?? {}, pose = repairFrames(entity), surfaces: PreparedModelSurface[] = [];
+  return prepareEntityAtTransform(entity, entity, context);
+}
+
+function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
+  const options = context.options?.(source) ?? {}, pose = repairFrames(entity), surfaces: PreparedModelSurface[] = [];
   const flags = entity.flags, bits = flags.bits, model = entity.model;
   const shell = flags.kind === "q2" ? q2ShellColor(bits) : null;
   const portal = context.camera.clip.kind === "portal";
@@ -111,7 +115,7 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
     indices: readonly number[], unlit = false, world = false): void {
     const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => {
       const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
-      const light = context.finalVertexLight?.(entity, vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
+      const light = context.finalVertexLight?.(entity, vertex.normal, vertex.position, corner, options) ?? (flags.kind === "q2"
         ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
         : sampled ?? { x: 1, y: 1, z: 1 });
       const base = vertex.color ?? color;
@@ -121,8 +125,8 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
     const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({ ...vertex,
       position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal) })) };
     const depthHack = flags.kind === "q2" ? (bits & 16) !== 0 : flags.kind === "q3" && (bits & 8) !== 0;
-    surfaces.push({ name, entity, transform: entity.transform, image, localGeometry, geometry,
-      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : "back",
+    surfaces.push({ name, entity, options, transform: entity.transform, image, localGeometry, geometry,
+      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q2-md2" ? "front" : "back",
       alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
       translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
   }
@@ -220,7 +224,7 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
   for (const attachment of entity.attachments) {
     const tag = modelAttachmentTag(repaired, attachment.tag);
     if (tag === null) missingAttachments.push(attachment.tag);
-    else attachments.push(prepareSceneEntity(attachSceneEntity(repaired, attachment.entity, tag), context));
+    else attachments.push(prepareEntityAtTransform(attachSceneEntity(repaired, attachment.entity, tag), attachment.entity, context));
   }
   return { entity, frame, previousFrame, frameFallback: pose.fallback, lod, bounds, cull, personalModel,
     surfaces, attachments, missingAttachments, modelEffectFlags: model.kind === "q1-mdl" ? model.flags

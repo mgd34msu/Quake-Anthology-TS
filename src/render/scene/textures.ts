@@ -2,6 +2,7 @@ import type { ImageLevel, Palette, RenderImage, RendererImage, TextureSampling }
 import type { Q1MipTexture } from "../../contracts/scene.ts";
 import { decodeBmp, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeQpic, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
 import { SceneImageRegistry } from "./resources.ts";
+import { q2MipmappedImage } from "./q2-image.ts";
 
 export interface SceneAsset {
   readonly bytes: Uint8Array;
@@ -131,6 +132,7 @@ export class SceneTextureLoader {
         else if (suffix === ".tga") logicalSize = decodeTga(original.bytes, path);
         else if (suffix === ".jpg" || suffix === ".jpeg") logicalSize = decodeJpeg(original.bytes, path);
       }
+      if (options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
       return this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
     }
     return null;

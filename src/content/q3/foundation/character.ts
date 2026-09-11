@@ -117,6 +117,8 @@ export class Q3CharacterActor {
   get respawnEligibleAfterMilliseconds(): number { return this.respawnTime; }
   get spawns(): number { return this.spawnCount; }
 
+  jump(): undefined { return this.emit(EntityEvent.EV_JUMP); }
+
   capture(): Q3CharacterCheckpoint {
     return { version: 1, product: this.product, animation: { ...this.currentAnimation }, flags: this.flags,
       eventSequence: this.sequence, respawnTime: this.respawnTime, spawnCount: this.spawnCount,

@@ -64,6 +64,7 @@ test("retail Q2 shell geometry retains old-origin interpolation and shell color"
   const mdl = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
   const source = entity(parseMd2(mdl.bytes), mdl.resource, "q2");
   const normal = prepareSceneEntity(source, { camera, timeSeconds: 1 });
+  expect(normal.surfaces[0]?.cull).toBe("front");
   const shell = prepareSceneEntity({ ...source, flags: { kind: "q2", bits: 1024 | 4096 } }, { camera, timeSeconds: 1 });
   expect(shell.surfaces[0]?.geometry.indices.length).toBe(434 * 3);
   expect(shell.surfaces[0]?.image.kind).toBe("white");
@@ -79,9 +80,11 @@ test("retail Q3 lower model interpolates actual torso tag and applies custom ski
   const source = entity(toSceneMd3(parseMd3(mdl.bytes)), mdl.resource, "q3");
   const child = { ...source, attachments: [], transform: { ...source.transform, origin: { x: 0, y: 0, z: 0 } } };
   const prepared = prepareSceneEntity({ ...source, attachments: [{ tag: "tag_torso", entity: child }, { tag: "invented", entity: child }] },
-    { camera, timeSeconds: 1, options: () => ({ customShader: "models/players/sarge/lower" }) });
+    { camera, timeSeconds: 1, options: part => ({ customShader: part === child ? "models/players/sarge/upper" : "models/players/sarge/lower" }) });
   expect(prepared.surfaces.length).toBeGreaterThan(0);
   expect(prepared.attachments).toHaveLength(1);
+  expect(prepared.attachments[0]?.surfaces[0]?.image).toEqual({ kind: "external", name: "models/players/sarge/upper" });
+  expect(prepared.attachments[0]?.surfaces[0]?.options.customShader).toBe("models/players/sarge/upper");
   expect(prepared.missingAttachments).toEqual(["invented"]);
   expect(prepared.attachments[0]?.entity.transform.origin.z).toBeGreaterThan(source.transform.origin.z);
   expect(prepared.surfaces[0]?.image).toEqual({ kind: "external", name: "models/players/sarge/lower" });
