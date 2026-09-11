@@ -34,7 +34,8 @@ export function aim(game: Q1EntityServices, actor: OwnedActor, forward: Vec3): V
   const start = vadd(body.origin, { x: 0, y: 0, z: 20 });
   const team = game.host.combat.read(actor.id)?.team ?? null;
   const eligible = (target: ActorId): boolean => {
-    if (sameActor(target, actor.id) || !(game.entity(target)?.aimedDamage || game.isPlayer(target))) return false;
+    const traits = game.sourceTarget(target);
+    if (sameActor(target, actor.id) || !(traits.aimedDamage || traits.player)) return false;
     const state = game.host.combat.read(target);
     return state !== null && state.canTakeDamage && !((game.options.teamplay ?? 0) !== 0 && team !== null && team === state.team);
   };
@@ -141,11 +142,13 @@ function lightning(game: Q1EntityServices, player: Q1PlayerState): undefined {
   return undefined;
 }
 export function fireWeapon(game: Q1EntityServices, player: Q1PlayerState): boolean {
+  if (player.primaryHolstered) return false;
   if (game.registeredWeapons.has(player.weapon) || !isQ1BaseWeapon(player.weapon)) return game.fireRegisteredWeapon(player);
   return fireBaseWeapon(game, player);
 }
 /** An overriding source definition can delegate its unmodified attack without reentering its own registration. */
 export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): boolean {
+  if (player.primaryHolstered) return false;
   if (!isQ1BaseWeapon(player.weapon)) throw new Error("Base Q1 attack requires a base weapon");
   const repeating = player.continuousFiring;
   if (game.health(player.actor.id) <= 0 || game.time < (repeating ? player.nextWeaponFrame : player.attackFinished)) return false;

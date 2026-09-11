@@ -78,6 +78,7 @@ export class Q1EntityServices {
   intermission: { readonly map: string; readonly cause: ActorId | null; readonly exitAfter: number } | null = null;
   private readonly configuredOptions: Q1FoundationOptions;
   private spawnOptions: Q1FoundationOptions | null = null;
+  get provider() { return this.configuredOptions.provider ?? Q1_PROVIDER; }
   get options(): Q1FoundationOptions { return this.spawnOptions ?? this.configuredOptions; }
   private sequence = 0;
   protected nextDynamicSlot = 1;
@@ -176,6 +177,7 @@ export class Q1EntityServices {
     return ammo === null || this.host.inventory.count(player.actor.id, ammo) >= needed;
   }
   fireRegisteredWeapon(player: Q1PlayerState): boolean {
+    if (player.primaryHolstered) return false;
     const definition = this.registeredWeapons.get(player.weapon);
     if (definition === undefined) throw new Error(`Q1 weapon source not registered: ${player.weapon}`);
     if (this.health(player.actor.id) <= 0 || this.time < (player.continuousFiring ? player.nextWeaponFrame : player.attackFinished)) return false;
@@ -216,7 +218,7 @@ export class Q1EntityServices {
 
   create(classname: string, source?: Q1Entity, sourceOrdinal: number | null = null): Q1Actor {
     const slot = sourceOrdinal === null ? this.nextDynamicSlot++ : sourceOrdinal === 0 ? 0 : sourceOrdinal + (this.options.maxClients ?? 0);
-    const owner = this.host.actors.allocateAtSource(Q1_PROVIDER, slot, `q1:${classname}`);
+    const owner = this.host.actors.allocateAtSource(this.provider, slot, `q1:${classname}`);
     const entity = new Q1Actor(owner, classname, sourceOrdinal, this.host.combat, source);
     this.host.bodies.create(owner, { origin: source === undefined ? ZERO : entity.vector("origin"), angles: source === undefined ? ZERO : sourceAngles(source), velocity: ZERO, bounds: POINT, ground: null });
     this.host.combat.create(owner, { health: entity.maxHealth, armor: { kind: "none" }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
@@ -297,7 +299,7 @@ export class Q1EntityServices {
       if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, entries);
       else for (const entry of entries) this.host.inventory.configure(actor, entry);
     }
-    const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
+    const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
       continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, nailSide: 1,
       maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
       waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };
@@ -351,7 +353,7 @@ export class Q1EntityServices {
     const direction = normalize(vsub(point, source?.origin ?? point));
     return this.host.combat.apply({ target, amount: Math.fround(amount), knockback: Math.fround(amount), direction, point, normal: ZERO, delivery,
       attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
-        weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: Q1_PROVIDER, combatProvider: this.options.combatProvider,
+        weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: this.provider, combatProvider: this.options.combatProvider,
         inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } });
   }
   combatContext(request: DamageRequest): Q1CombatContext {
@@ -361,11 +363,17 @@ export class Q1EntityServices {
       teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || inflictor === null ? null :
         normalize(vsub(target.origin, vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5))) };
   }
+  sourceTarget(actor: ActorId) {
+    const observed = this.host.sourceTarget?.(actor);
+    if (observed !== undefined) return observed;
+    const entity = this.entity(actor);
+    return { aimedDamage: entity?.aimedDamage ?? false, push: entity?.movement === "push", player: this.isPlayer(actor) };
+  }
   canDamage(target: ActorId, inflictor: ActorId): boolean {
     const targetBody = this.host.bodies.read(target), source = this.host.bodies.read(inflictor); if (targetBody === null || source === null) return false;
-    const entity = this.entity(target);
-    const destination = entity?.movement === "push" ? vadd(targetBody.origin, vscale(vadd(targetBody.bounds.min, targetBody.bounds.max), 0.5)) : targetBody.origin;
-    const offsets = entity?.movement === "push" ? [ZERO] : [ZERO, { x: 15, y: 15, z: 0 }, { x: -15, y: -15, z: 0 }, { x: -15, y: 15, z: 0 }, { x: 15, y: -15, z: 0 }];
+    const push = this.sourceTarget(target).push;
+    const destination = push ? vadd(targetBody.origin, vscale(vadd(targetBody.bounds.min, targetBody.bounds.max), 0.5)) : targetBody.origin;
+    const offsets = push ? [ZERO] : [ZERO, { x: 15, y: 15, z: 0 }, { x: -15, y: -15, z: 0 }, { x: -15, y: 15, z: 0 }, { x: 15, y: -15, z: 0 }];
     return offsets.some(offset => { const trace = this.host.trace({ start: source.origin, end: vadd(destination, offset), bounds: POINT, ignore: inflictor, monsters: false }); return trace.fraction === 1 || trace.actor !== null && sameActor(trace.actor, target); });
   }
   radiusDamage(inflictor: ActorId, attacker: ActorId | null, amount: number, ignore: ActorId | null, weapon: Q1Weapon | null, deathType = ""): undefined {
@@ -512,6 +520,34 @@ export class Q1EntityServices {
     const definition = this.registeredWeapons.get(weapon); if (definition?.available !== undefined && !definition.available(this, player)) return false;
     player.weapon = weapon; player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
     this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: this.weaponModel(weapon, player), frame: 0, punch: 0 }); return true;
+  }
+  primaryWeaponHandoff(actor: OwnedActor) {
+    const player = this.players.get(actor);
+    if (player === undefined) throw new Error("Player has no Q1 weapon state");
+    const resolve = (item: ItemId): Q1Weapon | null => {
+      const weapon = [...WEAPONS, ...this.registeredWeapons.keys()].find(candidate => this.weaponItem(candidate) === item);
+      return weapon !== undefined && this.weaponAvailable(player, weapon) ? weapon : null;
+    };
+    return {
+      provider: this.provider,
+      accepts: (item: ItemId): boolean => resolve(item) !== null,
+      select: (item: ItemId): boolean => {
+        const weapon = resolve(item);
+        return weapon !== null && this.selectWeapon(actor, weapon);
+      },
+      holster: (): void => {
+        if (player.primaryHolstered) return;
+        player.primaryHolstered = true;
+        player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
+      },
+      isHolstered: (): boolean => player.primaryHolstered,
+      resume: (item: ItemId | null): void => {
+        const requested = item === null ? player.weapon : resolve(item);
+        const weapon = requested !== null && this.weaponAvailable(player, requested) ? requested : bestWeapon(this, actor);
+        this.selectWeapon(actor, weapon);
+        player.primaryHolstered = false;
+      },
+    };
   }
   chooseBest(actor: OwnedActor): Q1Weapon { return bestWeapon(this, actor); }
   givePowerup(player: Q1PlayerState, powerup: Q1Powerup, duration = 30): undefined {

@@ -88,7 +88,7 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
     const mutations: DamageMutation[] = [];
     const saved = options.sourceEffects?.armorAllowed?.(request, damage, target, attacker) === false ? 0 : saveArmor(request, target, damage, mutations, options.armor);
     const take = Math.ceil(round(damage - saved));
-    if (context.walk && context.momentumDirection !== null) addImpulse(request, mutations, context.momentumDirection, round(damage * 8), context.arithmetic);
+    if (context.walk && target.noKnockback !== true && context.momentumDirection !== null) addImpulse(request, mutations, context.momentumDirection, round(damage * 8), context.arithmetic);
     // Q1 spends armor and applies momentum even when godmode, invincibility or teamplay stops health loss.
     if ((target.invulnerable && options.sourceEffects?.protectionApplies?.(request, target, attacker) !== false) || (context.baseTeamHealth !== false && context.teamplay === 1 && sameTeam(target, attacker))) return decision(request, mutations, 0, "none");
     if (options.sourceEffects?.beforeHealth !== undefined || options.sourceEffects?.lethalHealth !== undefined) return { ...decision(request, mutations, 0, "none"), continuation: { kind: "q1-health", damage, take } };

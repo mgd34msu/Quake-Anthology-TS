@@ -5,7 +5,7 @@ import type { ProviderId } from "../../../contracts/identity.ts";
 import type { AnimationState, ArsenalState, MovementEffect, WeaponStepInput, WeaponStepResult } from "../../../contracts/movement.ts";
 import { CommandButtons, MoveFlags, PlayerAnimation, Weapon, WeaponState } from "../../../movement/q3/constants.ts";
 import { runQ3WeaponStep } from "../../../movement/q3/weapon.ts";
-import type { Q3SourceWeaponState } from "../../../movement/q3/weapon.ts";
+import type { Q3ExternalWeaponSlot, Q3SourceWeaponState } from "../../../movement/q3/weapon.ts";
 import { runQ3TorsoOperation } from "../../../movement/q3/animation.ts";
 
 export interface Q3WeaponItem {
@@ -51,6 +51,17 @@ export interface Q3ArsenalRuntimeState {
   readonly useItemHeld: boolean;
   readonly eventSequence: number;
   readonly fractionalMilliseconds: number;
+  readonly externalSlot: Q3ExternalWeaponSlot;
+}
+
+export function q3RequestWeaponHolster(runtime: Q3ArsenalRuntimeState): Q3ArsenalRuntimeState {
+  return runtime.externalSlot === "active" ? { ...runtime, externalSlot: "holster-requested" } : runtime;
+}
+
+export function q3RequestWeaponResume(runtime: Q3ArsenalRuntimeState): Q3ArsenalRuntimeState {
+  if (runtime.externalSlot === "active" || runtime.externalSlot === "resume-requested") return runtime;
+  if (runtime.externalSlot !== "holstered") throw new Error("Q3 primary must finish its source drop before resuming");
+  return { ...runtime, externalSlot: "resume-requested" };
 }
 
 export interface Q3ArsenalStep extends WeaponStepResult {
@@ -75,6 +86,7 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   let currentWeapon = input.arsenal.state.sourceWeapon;
   let currentState = input.arsenal.state.state;
   let currentTime = input.arsenal.state.timeMilliseconds;
+  const externalSlot = { phase: runtime.externalSlot };
   const weaponSnapshot = (): Extract<ArsenalState["state"], { readonly kind: "q3" }> => ({
     kind: "q3", sourceWeapon: currentWeapon, state: currentState, timeMilliseconds: currentTime,
   });
@@ -119,7 +131,7 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   if (input.environment.health > 0 && !controls.attack && !controls.useHoldable) state.pmFlags &= ~MoveFlags.RESPAWNED;
   runQ3WeaponStep(state, { buttons: (controls.attack ? CommandButtons.ATTACK : 0) | (controls.useHoldable ? CommandButtons.USE_HOLDABLE : 0),
     weapon: controls.requestedWeapon }, {
-    msec, gauntletHit: input.gauntletHit,
+    msec, gauntletHit: input.gauntletHit, externalSlot,
     event(event) { effects.push({ kind: "event", value: { provider: input.arsenal.provider, sequence: eventSequence++, event, parameter: 0 } }); },
     startTorso(torso) {
       torsoAnimations.push(torso);
@@ -136,12 +148,12 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   return { arsenal: { ...input.arsenal, activeWeapon, state: weapon, ammo: [...entries.values()] }, animation, effects, torsoAnimations,
     runtime: { ...runtime, holdableItem: state.holdableItem, holdableTag: state.holdableTag,
       respawned: (state.pmFlags & MoveFlags.RESPAWNED) !== 0, useItemHeld: (state.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0,
-      fractionalMilliseconds: clock - msec, eventSequence } };
+      fractionalMilliseconds: clock - msec, eventSequence, externalSlot: externalSlot.phase } };
 }
 
 export function q3SpawnArsenalRuntime(product: "baseq3" | "missionpack", maxHealth: number, eventSequence = 0): Q3ArsenalRuntimeState {
   return { product, maxHealth, spectator: false, persistentPowerupTag: 0, holdableItem: 0, holdableTag: 0,
-    respawned: true, useItemHeld: false, eventSequence, fractionalMilliseconds: 0 };
+    respawned: true, useItemHeld: false, eventSequence, fractionalMilliseconds: 0, externalSlot: "active" };
 }
 
 export function q3SpawnLoadout(provider: ProviderId, product: "baseq3" | "missionpack", teamDeathmatch: boolean): ArsenalState {

@@ -94,10 +94,12 @@ export interface Q1FoundationHost {
   checkClient(observer: OwnedActor): ActorId | null;
   /** The selected actor provider exposes its actual gameplay class for source exceptions. */
   classname(actor: ActorId): string;
+  sourceTarget?(actor: ActorId): { readonly aimedDamage: boolean; readonly push: boolean; readonly player: boolean };
   /** Apply a timed effect to the shared player state, including combat invulnerability. */
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
 }
 export interface Q1FoundationOptions {
+  readonly provider?: ProviderId;
   /** Only the declared source program can opt into its covered native precache calls. */
   readonly precacheProgram?: "id1";
   readonly edition: "classic" | "rerelease";
@@ -129,6 +131,7 @@ export interface Q1Presentation {
 export interface Q1PlayerState {
   readonly actor: OwnedActor;
   weapon: Q1Weapon;
+  primaryHolstered: boolean;
   attackFinished: number;
   attackHeld: boolean;
   jumpHeld: boolean;

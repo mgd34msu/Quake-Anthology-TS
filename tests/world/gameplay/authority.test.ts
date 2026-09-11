@@ -182,6 +182,21 @@ describe("shared actor and gameplay authority", () => {
     expect(() => restoredMemory.borrow(address, 32)).toThrow();
   });
 
+  test("Q1 shared no-knockback suppresses momentum without changing armor or health", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("q1-no-knockback"));
+    const target = actors.allocate("q2:game", "q2:player"), attacker = actors.allocate("q1:game", "q1:player");
+    const q1 = createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: true, momentumDirection: { x: 1, y: 0, z: 0 } }), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32" })) });
+    const victim = state(100, { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor" });
+    const request = attack(target.id, attacker.id);
+    const native = q1.decide(request, victim, state());
+    const disabled = q1.decide(request, { ...victim, noKnockback: true }, state());
+    expect(native.mutations.filter(mutation => mutation.kind === "impulse")).toEqual([{ kind: "impulse", impulse: { x: 320, y: 0, z: 0 }, movementProvider: "q1:movement" }]);
+    expect(disabled.mutations).toEqual(native.mutations.filter(mutation => mutation.kind !== "impulse"));
+    expect(disabled.appliedDamage).toBe(native.appliedDamage);
+    expect(disabled.reaction).toBe(native.reaction);
+    expect(q1.decide(request, { ...victim, noKnockback: false }, state())).toEqual(native);
+  });
+
   test("source protection orders and Q2 power armor stay distinct", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("policies"));
     const target = actors.allocate("q1:game", "q1:player");

@@ -3,6 +3,8 @@
 import { EntityEvent, Holdable, Powerup, Weapon, WeaponState, CommandButtons as B, MoveFlags as F, PlayerAnimation as A } from "./constants.ts";
 import type { Q3Command } from "./types.ts";
 
+export type Q3ExternalWeaponSlot = "active" | "holster-requested" | "dropping" | "holstered" | "resume-requested";
+
 export interface Q3SourceWeaponState {
   readonly product: "baseq3" | "missionpack";
   pmFlags: number; weapon: number; weaponState: number; weaponTime: number;
@@ -14,6 +16,7 @@ export interface Q3SourceWeaponState {
 
 export interface Q3SourceWeaponOptions {
   readonly msec: number; readonly gauntletHit: boolean;
+  readonly externalSlot?: { phase: Q3ExternalWeaponSlot };
   event(event: number): void;
   startTorso(animation: number): void;
 }
@@ -23,14 +26,17 @@ class WeaponStep {
   get msec(): number { return this.options.msec; }
   event(event: number): void { this.options.event(event); }
   startTorso(animation: number): void { this.options.startTorso(animation); }
+  private beginDrop(): void {
+    this.event(EntityEvent.EV_CHANGE_WEAPON);
+    this.state.weaponState = WeaponState.WEAPON_DROPPING;
+    this.state.weaponTime += 200;
+    this.startTorso(A.TORSO_DROP);
+  }
   private beginWeaponChange(weapon: number): void {
     const ps = this.state;
     if (weapon <= Weapon.WP_NONE || weapon >= (ps.product === "missionpack" ? 14 : 11) ||
       !(ps.ownedWeapons & (1 << weapon)) || ps.weaponState === WeaponState.WEAPON_DROPPING) return;
-    this.event(EntityEvent.EV_CHANGE_WEAPON);
-    ps.weaponState = WeaponState.WEAPON_DROPPING;
-    ps.weaponTime += 200;
-    this.startTorso(A.TORSO_DROP);
+    this.beginDrop();
   }
   private finishWeaponChange(): void {
     const ps = this.state;
@@ -66,6 +72,25 @@ class WeaponStep {
       }
     } else ps.pmFlags &= ~F.USE_ITEM_HELD;
     if (ps.weaponTime > 0) ps.weaponTime -= this.msec;
+    const external = this.options.externalSlot;
+    if (external?.phase === "holstered") return;
+    if (external?.phase === "dropping") {
+      if (ps.weaponTime <= 0) external.phase = "holstered";
+      return;
+    }
+    if (external?.phase === "resume-requested") {
+      if (ps.weaponTime > 0) return;
+      this.finishWeaponChange();
+      external.phase = "active";
+      return;
+    }
+    if (external?.phase === "holster-requested" && ps.weaponTime <= 0 &&
+      (ps.weaponState === WeaponState.WEAPON_READY || ps.weaponState === WeaponState.WEAPON_FIRING)) {
+      const requested = this.cmd.weapon;
+      const nativeSwitch = requested !== ps.weapon && requested > Weapon.WP_NONE &&
+        requested < (ps.product === "missionpack" ? 14 : 11) && (ps.ownedWeapons & (1 << requested)) !== 0;
+      if (!nativeSwitch) { this.beginDrop(); external.phase = "dropping"; return; }
+    }
     if (ps.weaponTime <= 0 || ps.weaponState !== WeaponState.WEAPON_FIRING) {
       if (ps.weapon !== this.cmd.weapon) this.beginWeaponChange(this.cmd.weapon);
     }

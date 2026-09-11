@@ -69,7 +69,7 @@ export function readPredictionSourceState(base: MovementPredictionSnapshot, ps: 
       spectator: ps.pmType === 1, persistentPowerupTag: schema.product === "missionpack" ? itemAt(ps.product, ps.stats.get(schema.persistentPowerup)).tag : 0,
       holdableItem, holdableTag: itemAt(ps.product, holdableItem).tag, respawned: (ps.pmFlags & MoveFlags.RESPAWNED) !== 0,
       useItemHeld: (ps.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0, eventSequence: ps.eventSequence,
-      fractionalMilliseconds: source.q3Arsenal?.fractionalMilliseconds ?? 0 } };
+      fractionalMilliseconds: source.q3Arsenal?.fractionalMilliseconds ?? 0, externalSlot: source.q3Arsenal?.externalSlot ?? "active" } };
 }
 
 export function writePredictionSourceState(ps: SourcePlayerState, output: MovementPredictionSnapshot,

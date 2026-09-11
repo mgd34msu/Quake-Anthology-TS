@@ -259,3 +259,53 @@ test.skipIf(!existsSync(path))("Q1 services attach existing foreign owners and r
   for (const owner of owners) expect(actors.isLive(owner.id)).toBe(false);
   actors.close(); restored.actors.close();
 });
+
+test.skipIf(!existsSync(path))("external primary holster saves the real weapon and lets a committed axe callback finish once", async () => {
+  const map = await loadMap();
+  const original = gameFor(map);
+  const { runtime, player, actors, bodies, combat, inventory } = original;
+  const state = runtime.player(player.id); if (state === null) throw new Error("Missing player");
+  expect(runtime.selectWeapon(player, "axe")).toBe(true);
+  expect(runtime.attack(player, ZERO, 0)).toBe(true);
+  const handoff = runtime.primaryWeaponHandoff(player);
+  const deadline = state.attackFinished;
+  handoff.holster(); handoff.holster();
+  expect(state.weapon).toBe("axe");
+  expect(state.attackFinished).toBe(deadline);
+  expect(state.weaponFrame).toBe(0);
+  expect(runtime.attack(player, ZERO, 1)).toBe(false);
+  const checkpoint = runtime.capture();
+  const saved: SavedTestWorld = {
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
+    bodies: captureSharedBodies(actors, bodies),
+    combat: actors.observations().flatMap(actor => { const value = combat.read(actor.id); return value === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: value }]; }),
+    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+  };
+  const restored = gameFor(map, saved);
+  const resumed = restored.runtime.primaryWeaponHandoff(restored.player);
+  expect(resumed.isHolstered()).toBe(true);
+  expect([...restored.runtime.entities.values()].filter(entity => entity.classname === "axe_strike")).toHaveLength(1);
+  restored.due(1);
+  expect([...restored.runtime.entities.values()].filter(entity => entity.classname === "axe_strike")).toHaveLength(0);
+  restored.due(2);
+  expect(resumed.accepts("q1:weapon/rocketlauncher")).toBe(false);
+  resumed.resume(null);
+  expect(resumed.isHolstered()).toBe(false);
+  expect(restored.runtime.player(restored.player.id)?.weapon).toBe("axe");
+  expect(restored.runtime.player(restored.player.id)?.attackFinished).toBe(deadline);
+  actors.close(); restored.actors.close();
+});
+
+test.skipIf(!existsSync(path))("dedicated Q1 services allocate and restore under the selected provider", async () => {
+  const original = gameFor(await loadMap());
+  const service = new Q1Foundation(original.runtime.host, { ...original.runtime.options, provider: "q1:threewave" });
+  const hook = service.create("hook");
+  expect(hook.actor.owner).toBe("q1:threewave");
+  expect(original.actors.sourceOf(hook.actor.id)?.provider).toBe("q1:threewave");
+  const saved = decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(service.capture()));
+  expect(saved.provider).toBe("q1:threewave");
+  expect(saved.entities[0]?.actorProvider).toBe("q1:threewave");
+  const wrong = new Q1Foundation(original.runtime.host, original.runtime.options);
+  expect(() => wrong.restore(saved)).toThrow("Incompatible Q1 source checkpoint");
+  original.actors.close();
+});
