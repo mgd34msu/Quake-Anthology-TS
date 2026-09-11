@@ -300,11 +300,15 @@ function laserThink(entity: GameEntity, runtime: TargetRuntime): void {
     entity.movedir = normalize3(sub3(point, entity.s.origin));
   }
   const end = add3(entity.s.origin, scale3(entity.movedir, 2_048));
-  const trace = runtime.world.trace({ start: entity.s.origin, end, shape: { kind: "point" },
-    passEntityNum: entity.slot, mask: MASK_TARGET_LASER });
-  if (trace.entityNum !== 0) {
-    damage(combatContext(runtime), runtime.entities.at(trace.entityNum), entity, entity.activation,
-      entity.movedir, trace.end, entity.damage, DamageFlags.NO_KNOCKBACK, MOD_TARGET_LASER);
+  const combat = combatContext(runtime);
+  const trace = combat.spatial.traceActor({ start: entity.s.origin, end, shape: { kind: "point" },
+    passActor: entity.actor.id, mask: MASK_TARGET_LASER });
+  if (trace.hit.kind === "actor") {
+    const target = combat.actors.participant(trace.hit.actor);
+    if (!(target instanceof GameEntity) || target.slot !== 0) {
+      damage(combat, target, entity, entity.activation,
+        entity.movedir, trace.end, entity.damage, DamageFlags.NO_KNOCKBACK, MOD_TARGET_LASER);
+    }
   }
   entity.s.origin2 = vec3(trace.end.x, trace.end.y, trace.end.z);
   runtime.entities.options.link(entity);
