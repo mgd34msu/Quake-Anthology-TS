@@ -261,7 +261,19 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const chunks: Chunk[] = [];
     let cursor = address.byteOffset;
     let remaining = byteLength;
-    for (const mapping of this.#mappings) {
+    // Mappings are disjoint and sorted. Start at the first range whose end can
+    // contain this address, retaining the same forward scan across aliases/holes.
+    let low = 0, high = this.#mappings.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const mapping = this.#mappings[middle];
+      if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
+      if (mapping.base + BigInt(mapping.byteLength) <= cursor) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < this.#mappings.length; index++) {
+      const mapping = this.#mappings[index];
+      if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (remaining === 0) break;
       const end = mapping.base + BigInt(mapping.byteLength);
       if (cursor >= end) continue;
