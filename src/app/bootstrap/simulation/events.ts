@@ -38,8 +38,7 @@ export class SimulationEvents {
     return undefined;
   }
 
-  emit(content: ContentId, source: SourcePresentationEvent): undefined {
-    const time = this.now();
+  emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now()): undefined {
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
     const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
     const reference = "actor" in event ? event.actor : null;

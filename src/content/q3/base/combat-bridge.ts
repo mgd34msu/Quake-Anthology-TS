@@ -90,7 +90,7 @@ export class Q3CombatBridge {
         const target = host.records.byActor(request.target), owner = host.records.byActor(request.attack.attacker);
         const targetClient = target?.client ?? null, ownerClient = owner?.client ?? null;
         const method = request.attack.cause.kind === "q3" ? request.attack.cause.meansOfDeath : -1;
-        const source = host.records.byActor(request.attack.inflictor);
+        const source = host.product === "missionpack" && method === 25 ? host.records.byActor(request.attack.inflictor) : null;
         const schema = statSchema(host.product);
         const guard = ownerClient !== null && schema.product === "missionpack" &&
           itemAt("missionpack", ownerClient.ps.stats.get(schema.persistentPowerup)).tag === Powerup.PW_GUARD;

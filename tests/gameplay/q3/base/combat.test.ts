@@ -46,7 +46,7 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   let time = 100;
   const frame = (): FrameContext => ({ frame: Math.trunc(time / 100), time: { kind: "milliseconds", value: time },
     elapsed: { kind: "milliseconds", value: 100 }, phase: "entity-physics" });
-  const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks, foreign: () => null,
+  const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks, foreign: () => null, isPlayer: () => false,
     damageCall: () => bridge?.currentCall ?? null,
     runThink: actor => { scheduler.run(actor.id, frame(), "during-physics"); return undefined; },
     schedule: (actor, due) => { if (due === null) scheduler.cancel(actor); else scheduler.schedule(actor, "q3:think", {

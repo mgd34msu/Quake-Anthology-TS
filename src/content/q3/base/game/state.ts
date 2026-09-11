@@ -10,7 +10,8 @@ import { EntityState } from "../shared/entity-state.ts";
 import type { ItemDefinition } from "../shared/items.ts";
 import { createPlayerState, PlayerStateSlots } from "../shared/player-state.ts";
 import type { PlayerState, UserCommand } from "../shared/player-state.ts";
-import type { OwnedActor } from "../../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
+import type { Vec3 } from "../../../../contracts/math.ts";
 import type { EntityBodyBinding } from "../shared/entity-shared.ts";
 import type { PlayerAuthorityBinding } from "../shared/player-state.ts";
 import type { MovementTrace } from "../shared/slide-move.ts";
@@ -130,7 +131,12 @@ export type EntityBlocked = (self: GameEntity, other: GameEntity) => void;
 export type EntityTouch = (self: GameEntity, other: GameEntity, trace: MovementTrace) => void;
 export type EntityUse = (self: GameEntity, other: GameEntity | null, activator: GameEntity | null) => void;
 export type EntityPain = (self: GameEntity, attacker: GameEntity, damage: number) => void;
-export type EntityDie = (self: GameEntity, inflictor: GameEntity, attacker: GameEntity,
+export type DamageInflictor = GameEntity | {
+  readonly kind: "shared-actor";
+  readonly actor: ActorId;
+  origin(): Vec3;
+};
+export type EntityDie = (self: GameEntity, inflictor: DamageInflictor, attacker: GameEntity,
   damage: number, methodOfDeath: number) => void;
 
 /** Source-zero gentity_t; slot is owned-table metadata independent of memset-zero s.number. */

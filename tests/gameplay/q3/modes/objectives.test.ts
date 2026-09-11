@@ -22,7 +22,7 @@ function objectiveGame(gameType: GameType) {
   const inventory = new SharedInventoryTable(actors);
   const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks,
     schedule: () => undefined, runThink: () => { throw new Error("Objective touch unexpectedly requested a think"); },
-    damageCall: () => null, foreign: () => null }, "q3:mode-smoke", "missionpack");
+    damageCall: () => null, foreign: () => null, isPlayer: () => false }, "q3:mode-smoke", "missionpack");
   const world: ServerWorld = {
     trace: () => { throw new Error("Objective touch unexpectedly requested a trace"); },
     pointContents: () => 0, areaEntities: () => [], entityContact: () => false,

@@ -17,7 +17,7 @@ import type { DropItemContext, LaunchItemContext } from "./item-motion.ts";
 import type { MissileRuntime } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
 import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES } from "./state.ts";
-import type { EntityDie, GameClient, GameEntity } from "./state.ts";
+import type { DamageInflictor, EntityDie, GameClient, GameEntity } from "./state.ts";
 import { findEntity } from "./utilities.ts";
 
 const CONTENTS_CORPSE = 0x4000000, CONTENTS_TRIGGER = 0x40000000, CONTENTS_NODROP = 0x80000000;
@@ -54,7 +54,7 @@ interface DeathServices {
   calculateRanks(): void;
   sendScoreboard(entity: GameEntity): void;
   log(message: string): void;
-  teamFragBonuses(victim: GameEntity, inflictor: GameEntity | null, attacker: GameEntity | null): void;
+  teamFragBonuses(victim: GameEntity, attacker: GameEntity | null): void;
   returnFlag(team: Team): void;
 }
 
@@ -166,9 +166,9 @@ export class DeathRuntime {
     client.persistantPowerup = null;
   }
 
-  lookAtKiller(self: GameEntity, inflictor: GameEntity | null, attacker: GameEntity | null): void {
+  lookAtKiller(self: GameEntity, inflictor: DamageInflictor | null, attacker: GameEntity | null): void {
     const target = attacker !== null && attacker !== self ? attacker : inflictor !== null && inflictor !== self ? inflictor : null;
-    const yaw = target === null ? self.s.angles.y : vectorToAngles(sub3(target.s.pos.base, self.s.pos.base)).y;
+    const yaw = target === null ? self.s.angles.y : vectorToAngles(sub3("kind" in target ? target.origin() : target.s.pos.base, self.s.pos.base)).y;
     // STAT_DEAD_YAW is an int, with the QVM CVFI conversion before storage.
     const integer = yaw >= -2147483648 && yaw < 2147483648 ? Math.trunc(yaw) : -2147483648;
     clientOf(self).ps.stats.set(statSchema(this.host.product).deadYaw, integer);
@@ -245,7 +245,7 @@ export class DeathRuntime {
     return null;
   }
 
-  readonly playerDie = (self: GameEntity, inflictor: GameEntity | null, attacker: GameEntity | null,
+  readonly playerDie = (self: GameEntity, inflictor: DamageInflictor | null, attacker: GameEntity | null,
     _damage: number, meansOfDeath: number): void => {
     const client = clientOf(self), frame = this.host.frame();
     if (client.ps.pmType === MoveType.PM_DEAD || frame.intermissionTime !== 0) return;
@@ -291,7 +291,7 @@ export class DeathRuntime {
         killerClient.lastKillTime = frame.time;
       }
     } else this.addScore(self, self.r.currentOrigin, -1);
-    this.host.teamFragBonuses(self, inflictor, attacker);
+    this.host.teamFragBonuses(self, attacker);
     if (meansOfDeath === MOD_SUICIDE) {
       const flag = this.carriedFlag(self);
       if (flag !== null) { this.host.returnFlag(flag.team); client.ps.powerups.set(flag.powerup, 0); }

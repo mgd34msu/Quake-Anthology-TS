@@ -110,7 +110,7 @@ export class Q3SourceRuntime {
     host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
     this.records = new Q3EntityRecords({ actors: host.actors, bodies: host.bodies, callbacks: host.callbacks,
       combat: host.combat, inventory: host.inventory, schedule: host.schedule, runThink: host.runThink,
-      damageCall: () => this.bridge.currentCall, foreign: host.foreign }, options.recipe.map.entities.provider, options.product);
+      damageCall: () => this.bridge.currentCall, foreign: host.foreign, isPlayer: host.isPlayer }, options.recipe.map.entities.provider, options.product);
     this.world = new Q3WorldAdapter({ queries: host.scene, bodies: host.bodies, collision: host.collision,
       curves: () => host.cvars.variableValue("cm_noCurves") === 0, playerCurveClip: () => host.cvars.variableValue("cm_playerCurveClip") !== 0 }, this.records);
     host.cvars.register("cm_playerCurveClip", "1");
@@ -233,7 +233,7 @@ export class Q3SourceRuntime {
       frame: () => ({ time: this.level.time, gameType: this.gameType, warmupTime: this.level.warmupTime,
         intermissionTime: this.level.intermissionTime, blood: this.integer("com_blood") !== 0 }),
       calculateRanks: () => this.match.calculateRanks(), sendScoreboard: (entity: GameEntity) => this.commands.scoreboard(entity),
-      log: (text: string) => this.log(text), teamFragBonuses: (victim: GameEntity, inflictor: GameEntity | null, attacker: GameEntity | null) => this.team.fragBonuses(victim, inflictor, attacker),
+      log: (text: string) => this.log(text), teamFragBonuses: (victim: GameEntity, attacker: GameEntity | null) => this.team.fragBonuses(victim, attacker),
       returnFlag: (team: Team) => this.team.returnFlag(team) };
     return new DeathRuntime(this.options.product === "baseq3" ? { ...services, product: "baseq3" }
       : { ...services, product: "missionpack", neutralObelisk: () => this.team.neutralObelisk,
@@ -515,7 +515,7 @@ export class Q3SourceRuntime {
     const entity = this.records.byActor(actor.id);
     if (decision.reaction === "death" && entity?.client != null) {
       const cause = decision.request.attack.cause;
-      this.death.playerDie(entity, this.records.byActor(decision.request.attack.inflictor), this.records.byActor(decision.request.attack.attacker),
+      this.death.playerDie(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.byActor(decision.request.attack.attacker),
         decision.appliedDamage, cause.kind === "q3" ? cause.meansOfDeath : 0);
     }
   }

@@ -7,6 +7,7 @@ import type { PlayerAuthorityBinding } from "./shared/player-state.ts";
 import type { Product } from "./shared/definitions.ts";
 import { statSchema } from "./shared/definitions.ts";
 import { GameClient, GameEntity, MAX_CLIENTS, MAX_GENTITIES } from "./game/state.ts";
+import type { DamageInflictor } from "./game/state.ts";
 import { q3WeaponItem, Q3_WEAPON_ITEMS } from "../foundation/arsenal.ts";
 import type { Q3DamageCall } from "./game/combat.ts";
 import { EntityShared } from "./shared/entity-shared.ts";
@@ -26,6 +27,7 @@ export interface Q3RecordHost {
   damageCall(): Q3DamageCall | null;
   /** Project actors owned by another game into the selected Q3 source-slot view. */
   foreign(actor: ActorId): GameEntity | null;
+  isPlayer(actor: ActorId): boolean;
 }
 
 interface SourceRecord {
@@ -126,6 +128,18 @@ export class Q3EntityRecords {
 
   private reactionOther(actor: ActorId | null): GameEntity { return this.byActor(actor) ?? this.record(1022).entity; }
 
+  damageInflictor(actor: ActorId | null): DamageInflictor {
+    if (actor === null) return this.record(1022).entity;
+    const native = this.records.find(record => record.actor?.id.equals(actor));
+    if (native !== undefined) return native.entity;
+    if (!this.host.actors.isLive(actor) || this.host.bodies.read(actor) === null) throw new Error("Q3 damage inflictor has no live shared body");
+    return { kind: "shared-actor", actor, origin: () => {
+      const body = this.host.bodies.read(actor);
+      if (!this.host.actors.isLive(actor) || body === null) throw new Error("Q3 damage inflictor body was released");
+      return body.origin;
+    } };
+  }
+
   private bindCallbacks(record: SourceRecord): void {
     const actor = record.actor;
     if (actor === null) throw new Error("Cannot bind inactive Q3 record callbacks");
@@ -134,12 +148,17 @@ export class Q3EntityRecords {
     const die = (reaction: DeathReaction): undefined => {
       const call = this.host.damageCall();
       if (entity.die === null) throw new Error("G_Damage lethal target has no die callback");
-      entity.die(entity, this.reactionOther(reaction.inflictor), this.reactionOther(reaction.attacker), reaction.damage,
+      entity.die(entity, this.damageInflictor(reaction.inflictor), this.reactionOther(reaction.attacker), reaction.damage,
         call?.methodOfDeath ?? 0); return undefined;
     };
     this.host.callbacks.bind(actor, {
       think: () => { entity.nextthink = 0; if (entity.think === null) throw new Error("NULL ent->think"); entity.think(entity); return undefined; },
-      touch: contact => { const other = this.byActor(contact.other); if (other !== null) entity.touch?.(entity, other,
+      touch: contact => {
+        if (entity.touch === null) return undefined;
+        const native = this.records.find(candidate => candidate.actor?.id.equals(contact.other));
+        // G_TouchTriggers admits clients before dispatching Q3 trigger callbacks.
+        if ((entity.r.contents & 0x40000000) !== 0 && !(native === undefined ? this.host.isPlayer(contact.other) : native.entity.client !== null)) return undefined;
+        const other = native?.entity ?? this.byActor(contact.other); if (other !== null) entity.touch(entity, other,
         { fraction: 0, end: entity.r.currentOrigin, entityNum: other.s.number, solidity: "clear", contents: other.r.contents,
           surfaceFlags: contact.surface?.nativeFlags ?? 0, contact: contact.plane === null ? { kind: "none" } : { kind: "plane", plane: contact.plane } }); return undefined; },
       use: (_self, other, activator) => { entity.use?.(entity, this.byActor(other), this.byActor(activator)); return undefined; }, pain, die,

@@ -68,7 +68,7 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
     schedule: (actor, due) => { if (due === null) scheduler.cancel(actor); else scheduler.schedule(actor, "world:think", {
       due: { kind: "milliseconds", value: due }, boundary: "during-physics", order: { actor: actor.id, provider: actor.owner, sequence: 0 } }); return undefined; },
     runThink: actor => { scheduler.run(actor.id, frame(), "during-physics"); return undefined; },
-    collision: (actor, collision) => physics.setCollision(actor, collision), armorContext: () => ({ screenFacingDot: 1, arithmetic: "binary32" }), foreign: () => null,
+    collision: (actor, collision) => physics.setCollision(actor, collision), armorContext: () => ({ screenFacingDot: 1, arithmetic: "binary32" }), foreign: () => null, isPlayer: () => false,
     sourceCommand: input => { const command = input.command; if (command.kind !== "q3") throw new Error("Smoke command is Q3");
       return { serverTime: command.serverTimeMilliseconds, angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] }, buttons: command.buttons,
         weapon: command.weapon, forwardmove: command.forwardMove, rightmove: command.rightMove, upmove: command.upMove }; },

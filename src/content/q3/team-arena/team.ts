@@ -184,7 +184,7 @@ export class TeamRuntime {
     }
   }
 
-  fragBonuses(target: GameEntity, _inflictor: GameEntity | null, attacker: GameEntity | null): void {
+  fragBonuses(target: GameEntity, attacker: GameEntity | null): void {
     if (target.client === null || attacker === null || attacker.client === null || target === attacker || onSameTeam(this.host.gameType, target, attacker)) return;
     const victim = target.client, killer = attacker.client, team = victim.sess.sessionTeam, opposing = otherTeam(team);
     const flag = team === Team.TEAM_RED ? Powerup.PW_REDFLAG : Powerup.PW_BLUEFLAG;

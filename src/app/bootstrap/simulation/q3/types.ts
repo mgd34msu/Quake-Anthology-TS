@@ -62,6 +62,7 @@ export interface Q3SourceHost extends ClientMovementHost {
   collision(actor: OwnedActor, collision: ActorCollision): undefined;
   armorContext(request: DamageRequest): { readonly screenFacingDot: number; readonly arithmetic: "binary32" | "binary64" };
   foreign(actor: ActorId): GameEntity | null;
+  isPlayer(actor: ActorId): boolean;
   /** Convert command units for source policy; moveClient still runs the selected provider. */
   sourceCommand(input: ActorCommand): UserCommand;
   spawnPlayer(entity: GameEntity, pose: SpawnPose): void;
