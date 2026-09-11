@@ -1,0 +1,3473 @@
+{
+  "schemaVersion": 1,
+  "title": "Unified Quake engine work packages",
+  "status": "planned",
+  "implementationAuthorized": false,
+  "architecture": "One shared TypeScript simulation and actor authority with per-source behavior, geometry, clocks, and execution profiles; private QC/QVM/native guest memory remains authoritative.",
+  "authorityDocuments": [
+    "docs/project-plan.md",
+    "docs/source-assessment.md",
+    "docs/feature-coverage.md",
+    "docs/verification-plan.md"
+  ],
+  "interpretation": {
+    "edges": "dependsOn lists acceptance prerequisites, not phase barriers. Stage labels only group related work.",
+    "readiness": "Dispatch independent ready tasks immediately after implementation authorization and replace completed workers while useful work remains.",
+    "scope": "All inherited and requested content/functionality remains required. Missing inputs, adapters, service access, or feasibility do not remove rows.",
+    "evidence": "The graph is a plan. Every task is planned; no implementation, compatibility, performance, or release completion is claimed.",
+    "proofBoundary": "W05/W41 establish ownership, callback, and source-time contracts; W16 proves Q1 solid-space collision. W74 supplies permanent representative behaviors and W73 proves a real mixed-game executable before W42–W49 bulk extraction. Native full execution remains independent until W40 joins the accepted source application.",
+    "schedule": "Any ready batches are illustrative dependency order with no duration, throughput, utilization, or completion estimate.",
+    "earlyPlayable": "W73 is the first actual mixed-game source executable; W66 integrates the full official/source-VM feature union. W40 adds native execution before final full-matrix and compiled release gates."
+  },
+  "orchestrationPolicy": {
+    "maxActiveAgents": 25,
+    "excludesLead": true,
+    "model": "gpt-6-astra",
+    "schedulingOwner": "lead",
+    "allImplementationThroughAgents": true,
+    "reviewersAndIntegratorsCount": true,
+    "subdelegation": "No unbudgeted subdelegation. The lead schedules every worker within the same active-agent budget.",
+    "announcement": "Announce Model, Effort, and Task for each dispatch.",
+    "readyOrder": "Ascending numeric work-package ID among tasks whose acceptance dependencies pass; fill available useful slots without artificial work.",
+    "stateTransitions": [
+      "planned",
+      "running",
+      "review",
+      "accepted",
+      "failed",
+      "blocked_missing_input"
+    ],
+    "writeOwnership": "Only the current exclusive owner edits owned paths. Contract/build/application registrations have named owners. Read-only reviewers own no implementation paths.",
+    "correctionRouting": "Return findings to the current path owner. Reopen only affected work and invalidate downstream evidence whose source/artifact fingerprints changed.",
+    "commits": {
+      "policy": "Commit verified bounded progress even without a remote.",
+      "gitWriter": "One lead-controlled Git index/commit writer, or isolated worktrees with reviewed integration.",
+      "staging": "Stage exact owned paths only. Concurrent workers never use blanket git add.",
+      "message": "Describe the concrete behavior/scope and relevant completed checks.",
+      "completion": "Verify the final combined snapshot and compiled binary before the final completion commit."
+    }
+  },
+  "ownershipTransfers": [
+    {
+      "from": "W08",
+      "to": "W68",
+      "paths": [
+        "src/world/scheduler.ts"
+      ],
+      "condition": "W08 accepted; W68 explicitly depends on W08 and owns later scheduler changes."
+    },
+    {
+      "from": "W18",
+      "to": "W68",
+      "paths": [
+        "src/render/cpu/dispatch.ts"
+      ],
+      "condition": "W18 accepted; W68 explicitly depends on W18 and owns later dispatch changes."
+    },
+    {
+      "from": "W66",
+      "to": "W40",
+      "paths": [
+        "src/app/modules.ts"
+      ],
+      "condition": "W66 accepted; W40 explicitly depends on W66 and adds real native guest registration."
+    },
+    {
+      "from": "W73",
+      "to": "W66",
+      "paths": [
+        "src/main.ts"
+      ],
+      "condition": "W73 accepted; W66 explicitly depends on W73 and expands the same application entry."
+    }
+  ],
+  "stages": [
+    "foundation",
+    "formats",
+    "world",
+    "render-media",
+    "runtime-ui",
+    "movement",
+    "execution",
+    "gameplay",
+    "network",
+    "bots",
+    "verification",
+    "integration",
+    "release"
+  ],
+  "taskKinds": [
+    "inventory",
+    "contracts",
+    "implementation",
+    "verification",
+    "feasibility",
+    "art",
+    "integration",
+    "packaging",
+    "review",
+    "gate"
+  ],
+  "requiredReleaseTask": "W72",
+  "sourceFeatureIds": [
+    "Q1F01",
+    "Q1F02",
+    "Q1F03",
+    "Q1F04",
+    "Q1F05",
+    "Q1F06",
+    "Q1F07",
+    "Q1F08",
+    "Q1F09",
+    "Q1F10",
+    "Q1F11",
+    "Q2F01",
+    "Q2F02",
+    "Q2F03",
+    "Q2F04",
+    "Q2F05",
+    "Q2F06",
+    "Q2F07",
+    "Q2F08",
+    "Q2F09",
+    "Q2F10",
+    "Q2F11",
+    "Q2F12",
+    "Q2F13",
+    "Q3F01",
+    "Q3F02",
+    "Q3F03",
+    "Q3F04",
+    "Q3F05",
+    "Q3F06",
+    "Q3F07",
+    "Q3F08",
+    "Q3F09",
+    "Q3F10",
+    "Q3F11",
+    "Q3F12",
+    "Q3F13",
+    "Q3F14",
+    "Q3F15",
+    "Q3F16"
+  ],
+  "featureCoverage": [
+    {
+      "id": "F01",
+      "title": "Content catalog and launch",
+      "sourceFeatureIds": [
+        "Q1F01",
+        "Q2F01"
+      ],
+      "workPackages": [
+        "W09",
+        "W60"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F02",
+      "title": "Combat, inventory, monsters, and expansion behavior",
+      "sourceFeatureIds": [
+        "Q2F02",
+        "Q3F03"
+      ],
+      "workPackages": [
+        "W41",
+        "W42",
+        "W43",
+        "W44",
+        "W45",
+        "W46",
+        "W47",
+        "W48",
+        "W49",
+        "W50",
+        "W74"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F03",
+      "title": "Campaign and arena progression",
+      "sourceFeatureIds": [
+        "Q1F01",
+        "Q2F10",
+        "Q3F01"
+      ],
+      "workPackages": [
+        "W51",
+        "W60"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F04",
+      "title": "Match modes and objectives",
+      "sourceFeatureIds": [
+        "Q1F01",
+        "Q2F02",
+        "Q3F02",
+        "Q3F03"
+      ],
+      "workPackages": [
+        "W44",
+        "W46",
+        "W47",
+        "W48",
+        "W49",
+        "W50",
+        "W61"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F05",
+      "title": "Local players and splitscreen",
+      "sourceFeatureIds": [
+        "Q1F03",
+        "Q2F03",
+        "Q3F12"
+      ],
+      "workPackages": [
+        "W08",
+        "W22",
+        "W52",
+        "W61",
+        "W66",
+        "W73"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F06",
+      "title": "Input, controllers, and haptics",
+      "sourceFeatureIds": [
+        "Q1F05",
+        "Q2F07",
+        "Q3F12"
+      ],
+      "workPackages": [
+        "W06",
+        "W22",
+        "W61"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F07",
+      "title": "Bots and navigation",
+      "sourceFeatureIds": [
+        "Q1F04",
+        "Q2F04",
+        "Q3F04"
+      ],
+      "workPackages": [
+        "W57",
+        "W58"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F08",
+      "title": "Team AI and communication",
+      "sourceFeatureIds": [
+        "Q3F05"
+      ],
+      "workPackages": [
+        "W49",
+        "W57"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F09",
+      "title": "HUD, inventory, and guidance",
+      "sourceFeatureIds": [
+        "Q1F06",
+        "Q2F05",
+        "Q3F11"
+      ],
+      "workPackages": [
+        "W17",
+        "W21",
+        "W41",
+        "W42",
+        "W43",
+        "W44",
+        "W45",
+        "W46",
+        "W47",
+        "W48",
+        "W49",
+        "W59"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F10",
+      "title": "Unified menus and legacy UI",
+      "sourceFeatureIds": [
+        "Q1F06",
+        "Q2F13",
+        "Q3F10"
+      ],
+      "workPackages": [
+        "W29",
+        "W59",
+        "W60",
+        "W61",
+        "W62"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F11",
+      "title": "Typography, localization, and accessibility",
+      "sourceFeatureIds": [
+        "Q1F06",
+        "Q2F06",
+        "Q3F11"
+      ],
+      "workPackages": [
+        "W21",
+        "W59"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F12",
+      "title": "World formats, assets, and collision",
+      "sourceFeatureIds": [
+        "Q1F07",
+        "Q2F01",
+        "Q3F04"
+      ],
+      "workPackages": [
+        "W09",
+        "W10",
+        "W11",
+        "W12",
+        "W13",
+        "W14",
+        "W15",
+        "W16"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F13",
+      "title": "CPU/GL rendering and visual options",
+      "sourceFeatureIds": [
+        "Q1F07",
+        "Q2F05",
+        "Q3F11"
+      ],
+      "workPackages": [
+        "W13",
+        "W14",
+        "W15",
+        "W16",
+        "W17",
+        "W18",
+        "W19",
+        "W63"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F14",
+      "title": "Sound, music, and environments",
+      "sourceFeatureIds": [
+        "Q1F08",
+        "Q2F08",
+        "Q3F13"
+      ],
+      "workPackages": [
+        "W20"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F15",
+      "title": "Cinematics, subtitles, and captions",
+      "sourceFeatureIds": [
+        "Q2F09",
+        "Q3F14"
+      ],
+      "workPackages": [
+        "W21"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F16",
+      "title": "Saves and durable game state",
+      "sourceFeatureIds": [
+        "Q1F09",
+        "Q2F10",
+        "Q3F16"
+      ],
+      "workPackages": [
+        "W23",
+        "W51"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F17",
+      "title": "Demos, MVD, and recorded spectating",
+      "sourceFeatureIds": [
+        "Q1F09",
+        "Q2F11",
+        "Q3F15"
+      ],
+      "workPackages": [
+        "W56"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F18",
+      "title": "Network play and prediction",
+      "sourceFeatureIds": [
+        "Q1F10",
+        "Q2F12",
+        "Q3F07"
+      ],
+      "workPackages": [
+        "W52",
+        "W53",
+        "W54",
+        "W55"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F19",
+      "title": "Discovery and server browsing",
+      "sourceFeatureIds": [
+        "Q1F10",
+        "Q2F12",
+        "Q3F08"
+      ],
+      "workPackages": [
+        "W52",
+        "W61"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F20",
+      "title": "Content transfer, pure servers, and mod discovery",
+      "sourceFeatureIds": [
+        "Q1F10",
+        "Q2F12",
+        "Q3F09"
+      ],
+      "workPackages": [
+        "W09",
+        "W52",
+        "W53",
+        "W54",
+        "W55",
+        "W60"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F21",
+      "title": "Player communication and server administration",
+      "sourceFeatureIds": [
+        "Q1F02",
+        "Q2F13",
+        "Q3F06"
+      ],
+      "workPackages": [
+        "W22",
+        "W52",
+        "W53",
+        "W54",
+        "W55",
+        "W61"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F22",
+      "title": "Configuration, console, capture, and restart",
+      "sourceFeatureIds": [
+        "Q1F09",
+        "Q2F13",
+        "Q3F15"
+      ],
+      "workPackages": [
+        "W22",
+        "W56",
+        "W59"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F23",
+      "title": "Achievements, lobbies, and service workflows",
+      "sourceFeatureIds": [
+        "Q1F11",
+        "Q3F08"
+      ],
+      "workPackages": [
+        "W23",
+        "W51",
+        "W52",
+        "W59",
+        "W60",
+        "W61"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F24",
+      "title": "Gameplay execution and mod compatibility",
+      "sourceFeatureIds": [
+        "Q1F01",
+        "Q2F02",
+        "Q3F09"
+      ],
+      "workPackages": [
+        "W27",
+        "W28",
+        "W29",
+        "W30",
+        "W31",
+        "W32",
+        "W33",
+        "W34",
+        "W35",
+        "W36",
+        "W37",
+        "W38",
+        "W39",
+        "W40",
+        "W50"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    },
+    {
+      "id": "F25",
+      "title": "Runtime cameras, navigation construction, and diagnostics",
+      "sourceFeatureIds": [
+        "Q1F07",
+        "Q3F15",
+        "Q3F16"
+      ],
+      "workPackages": [
+        "W17",
+        "W22",
+        "W58",
+        "W63"
+      ],
+      "required": true,
+      "acceptanceGates": [
+        "W67",
+        "W69",
+        "W71",
+        "W72"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "W01",
+      "title": "Inventory required features, content, and common code lineage",
+      "stage": "foundation",
+      "kind": "inventory",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [],
+      "owns": [
+        "verification/source-manifest.json",
+        "verification/product-manifest.json",
+        "verification/feature-ledger.json",
+        "docs/reference-contracts.md"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts",
+        "../quake-2-re-ts",
+        "../quake-3-ts",
+        "../qsrc",
+        "../qfiles",
+        "docs/source-assessment.md"
+      ],
+      "deliverables": [
+        "Pinned source and data identities",
+        "Feature ledger with an owner and acceptance case for every inherited or requested feature",
+        "Per-subsystem reuse, repair, consolidation, and replacement decisions"
+      ],
+      "acceptance": [
+        "Compare all three TS ports and original sources before selecting shared math, commands, cvars, filesystem, messages, entity lifetimes, resource ownership, rendering, media, and game interfaces.",
+        "Record each original/edition/expansion feature and deliberate behavior difference. Existing missing or broken implementations remain required work.",
+        "Enumerate Q1 id1, hipnotic, rogue, dopa, mg1, mg3 Dawn of the Machine, ctf, NetQuake, QuakeWorld, and the unresolved Quake 64 requirement; Q2 legacy base, xatrix, rogue, ctf, LMCTF, and rerelease base, Call of the Machine, The Reckoning, Ground Zero, Quake II 64; Q3 base and Team Arena with every inherited mode.",
+        "Distinguish Quake Live fixture provenance from official product scope. Never delete expected rows because supplied files or adapters are missing."
+      ]
+    },
+    {
+      "id": "W02",
+      "title": "Capture authoritative behavior and performance baselines",
+      "stage": "foundation",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [],
+      "owns": [
+        "tools/reference/**",
+        "verification/reference-cases/**",
+        "verification/reference-environment.json",
+        "verification/reference-targets.json"
+      ],
+      "sourceInputs": [
+        "../qsrc",
+        "../qfiles",
+        "../quake-1-re-ts/test",
+        "../quake-2-re-ts/test",
+        "../quake-3-ts/tests",
+        "../quake-3-ts/tools/verify-render.ts"
+      ],
+      "deliverables": [
+        "Reusable Bun source-differential capture drivers",
+        "Original behavior traces, render references, protocol records, and fixture hashes",
+        "Named Linux hardware baselines and proposed acceptance tolerances"
+      ],
+      "acceptance": [
+        "Establish reusable reference drivers and initial representative traces for source-defined numeric behavior, frame cadence, callbacks, progression, and observable output, with exact source/data/runtime identities. W63–W65 expand per-feature specimens alongside implementation.",
+        "Use independent original engines or source-derived oracles. Agreement among the three TS ports alone does not establish correctness.",
+        "Record per-feature image tolerances and performance targets with their evidence and acceptance status. This planning file does not approve arbitrary FPS or latency targets.",
+        "Keep retail content external and reference it by local path and hash. Capture commands and raw outputs for reruns."
+      ]
+    },
+    {
+      "id": "W03",
+      "title": "Establish strict TypeScript policy and one Bun build entry",
+      "stage": "foundation",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [],
+      "owns": [
+        "package.json",
+        "bun.lock",
+        "tsconfig.json",
+        "eslint.config.ts",
+        "tools/check-policy.ts",
+        "tools/build.ts",
+        ".github/workflows/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/package.json",
+        "../quake-3-ts/tsconfig.json",
+        "../quake-3-ts/tools",
+        "../quake-2-re-ts/package.json"
+      ],
+      "deliverables": [
+        "Bun development, verification, and compiled Linux build commands",
+        "AST policy checks for every TS source, test, and tool",
+        "One owner for package, build, and CI aggregation"
+      ],
+      "acceptance": [
+        "Reject any, type assertions including as const, non-null assertions, unchecked escapes, and suppression directives across application code, tests, and tools.",
+        "Use strict TypeScript with checked external boundaries and exhaustive variants. Keep executable project tooling in TypeScript and avoid shell-script proliferation.",
+        "Build a Linux executable from the same source graph used by Bun development. Record compiler and runtime identities.",
+        "Keep all package script, dependency, tsconfig, CI, and build registration edits with this owner. Other packages return concrete registration requests."
+      ]
+    },
+    {
+      "id": "W04",
+      "title": "Build verification interfaces and evidence accounting",
+      "stage": "foundation",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [],
+      "owns": [
+        "tools/verify/**",
+        "verification/schema/**",
+        "verification/suites.json"
+      ],
+      "sourceInputs": [
+        "docs/verification-plan.md",
+        "../quake-3-ts/tools",
+        "../quake-1-re-ts/test",
+        "../quake-2-re-ts/test"
+      ],
+      "deliverables": [
+        "Typed case, fixture, execution, and evidence contracts",
+        "Deterministic shard/resume runner",
+        "Dev, integration, full, and release verification profiles",
+        "Early typed full-composition manifest generator and expected-case contracts"
+      ],
+      "acceptance": [
+        "Accept expected case manifests before implementation exists, so independent peers can author fixtures alongside feature work.",
+        "Record PASS, FAIL, BLOCKED_MISSING_INPUT, TIMEOUT, and NOT_RUN with fingerprints, assertions, seeds, schedules, commands, and artifact hashes.",
+        "Reject duplicate IDs, zero-assertion success, missing records, silent skips, stale binaries, and resume records with changed fingerprints.",
+        "Keep independent runs isolated by output root, home directory, ports, data mounts, and display. Preserve failed attempts and raw differences.",
+        "Build the expected matrix generator before feature completion. W01 supplies its required product/feature domain; W67 executes and reconciles the complete generated set."
+      ]
+    },
+    {
+      "id": "W05",
+      "title": "Freeze shared contracts and explicit game differences",
+      "stage": "foundation",
+      "kind": "contracts",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01"
+      ],
+      "owns": [
+        "src/contracts/**",
+        "docs/contracts.md"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/core",
+        "../quake-3-ts/src/shared",
+        "../quake-3-ts/docs/ARCHITECTURE.md",
+        "../quake-1-re-ts/src/progs/profiles",
+        "../quake-2-re-ts/src/kexapi",
+        "../quake-2-re-ts/ARCHITECTURE.md"
+      ],
+      "deliverables": [
+        "Shared math, identity, resource, world, session, rendering, movement, UI, and execution contracts",
+        "Versioned composition profile and capability contracts",
+        "Documented ownership and numeric/time boundaries"
+      ],
+      "acceptance": [
+        "Select proven shared code by the W01 comparison. Use Q3's stronger typed instance boundaries where supported, and preserve stronger Q1/Q2 VM, media, campaign, ABI, and content contracts.",
+        "Separate map, movement, character, weapons, enemies, asset presentation, rules, and mod execution selections. Preserve original defaults and make each requested override explicit.",
+        "Define family differences as typed profiles, not appended enum slots, generic untyped records, or parallel whole-engine trees.",
+        "Own all shared interfaces and headers. Freeze concrete worker signatures before dependents start, without runtime stubs or casts.",
+        "Freeze combat-before-mutation, campaign-versus-round authority, source-time ordering/ties, typed callback returns, guest byte views, headless simulation, and per-seat presentation contracts before dependent providers."
+      ]
+    },
+    {
+      "id": "W06",
+      "title": "Reuse and qualify Linux SDL2 and native library bindings",
+      "stage": "foundation",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [],
+      "owns": [
+        "src/platform/**",
+        "tests/platform/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/platform",
+        "../quake-1-re-ts/src/platform",
+        "../quake-2-re-ts/src/platform"
+      ],
+      "deliverables": [
+        "Typed Bun FFI bindings and Linux library discovery",
+        "SDL2 windows, OpenGL context, events, audio devices, and controllers",
+        "Approved Vorbis and FreeType entry points and resource lifetimes"
+      ],
+      "acceptance": [
+        "Compare existing bindings and retain proven implementations. Only this platform owner imports bun:ffi.",
+        "Run real pushed SDL events, context/procedure lookup, queued audio, controller routing, partial-startup cleanup, and repeated open/close checks.",
+        "Keep FFI descriptor tuples typed and native buffers alive through their actual use. Store GLSL as embedded TypeScript strings through the rendering contract.",
+        "Support graphical and display-free dedicated startup. Game DLL/SO logic is never executed through native dlopen, a host emulator, or WASM."
+      ]
+    },
+    {
+      "id": "W07",
+      "title": "Close missing required content and Quake 64 manifests",
+      "stage": "foundation",
+      "kind": "inventory",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01"
+      ],
+      "owns": [
+        "verification/data-availability.json",
+        "docs/data-availability.md"
+      ],
+      "sourceInputs": [
+        "../qfiles",
+        "verification/product-manifest.json",
+        "verification/source-manifest.json"
+      ],
+      "deliverables": [
+        "Resolved edition/campaign data identities and expected archive manifests",
+        "Explicit Quake 64 acquisition and format/behavior evidence status"
+      ],
+      "acceptance": [
+        "Identify whether the Quake 64 requirement has usable supplied data, original behavior evidence, and required conversion/format work.",
+        "Reconcile every expected official campaign, expansion, executable, and localization/media fixture against available files.",
+        "Record missing input as BLOCKED_MISSING_INPUT with the exact requirement and source. It remains required at W72 and cannot disappear from the product manifest."
+      ]
+    },
+    {
+      "id": "W08",
+      "title": "Consolidate common engine services and session lifetimes",
+      "stage": "foundation",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W03",
+        "W05"
+      ],
+      "owns": [
+        "src/core/**",
+        "src/world/session/**",
+        "src/world/scheduler.ts",
+        "tests/core/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/engine",
+        "../quake-3-ts/src/core",
+        "../quake-1-re-ts/src/common",
+        "../quake-2-re-ts/src/qcommon",
+        "verification/source-manifest.json"
+      ],
+      "deliverables": [
+        "Shared math, command, cvar, clock, diagnostics, allocation, and session services",
+        "Explicit server/client/world/connection/module lifetimes",
+        "Initial frame scheduler with an isolated replaceable dispatch contract"
+      ],
+      "acceptance": [
+        "Consolidate common lineage only where W01 and source-profile tests establish equivalence. Retain deliberate family parsing, arithmetic, and timing differences.",
+        "Run repeated game, map, renderer, and module switches with distinct session owners; Q1/Q2 process globals must not leak between sessions.",
+        "Keep server simulation, client prediction, render resources, random generators, clocks, and published snapshots independently owned.",
+        "Preserve common console/config behavior, command ordering, resource lookup, recovery, and idempotent shutdown without carrying duplicated engine loops.",
+        "Order equal source deadlines explicitly and replay Q264/LMCTF command, ammo, weapon-event, and effect behavior without replacing source clocks with one arbitrary tick."
+      ]
+    },
+    {
+      "id": "W09",
+      "title": "Load archives and resolve independent content profiles",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W05"
+      ],
+      "owns": [
+        "src/content/catalog/**",
+        "src/content/archive/**",
+        "src/content/mounts/**",
+        "tests/content/catalog/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/common",
+        "../quake-2-re-ts/src/qcommon/files.ts",
+        "../quake-2-re-ts/src/client/menu_content.ts",
+        "../quake-3-ts/src/assets",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "PAK, ZIP/PK3, KPF, and loose-file readers",
+        "Content discovery, mount priority, map/campaign catalog, and launch resolution",
+        "Asset and mod identity manifests"
+      ],
+      "acceptance": [
+        "Read real supplied archives and loose roots with validated offsets and deterministic precedence, including classic/rerelease overlays and same-name differing assets.",
+        "Resolve geometry, game implementation, behavior profile, and presentation mounts independently. Detect conflicts before launch.",
+        "Carry inherited pure/download and mod lookup requirements through typed filesystem services.",
+        "Reject an unknown requested mod or unresolved composition with a precise missing requirement. Never select base game silently."
+      ]
+    },
+    {
+      "id": "W10",
+      "title": "Read Quake 1 maps and extended collision data",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/formats/q1-map/**",
+        "tests/formats/q1-map/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src",
+        "../qsrc/quake",
+        "../qsrc/fteqw",
+        "../qfiles/q1"
+      ],
+      "deliverables": [
+        "BSP29, BSP2, 2PSB, and BSPX readers",
+        "Q1 entity, visibility, lighting, hull, and brush descriptions"
+      ],
+      "acceptance": [
+        "Decode every supplied Q1 map variant and preserve raw entity fields, lightstyles, visibility, submodels, and extension identity.",
+        "Expose original hull data and BSPX BRUSHLIST data for W16 arbitrary-size collision reconstruction.",
+        "Compare parsed geometry and collision inputs with pinned source-derived references. Malformed offsets produce structured parse failures."
+      ]
+    },
+    {
+      "id": "W11",
+      "title": "Read Quake 2 classic and rerelease maps",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/formats/q2-map/**",
+        "tests/formats/q2-map/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/qcommon",
+        "../qsrc/quake-2",
+        "../qsrc/q2repro",
+        "../qfiles/q2"
+      ],
+      "deliverables": [
+        "IBSP38 and QBSP readers",
+        "Q2 entity, area portal, surface, visibility, submodel, and lighting descriptions"
+      ],
+      "acceptance": [
+        "Decode classic and rerelease supplied maps without discarding edition-specific entity fields or surface/content flags.",
+        "Preserve area portals, brush models, unit/map identity, and lighting data required by original progression and rendering.",
+        "Verify independent parsed-output and trace-input expectations for every required format and reject malformed or unsupported extensions explicitly."
+      ]
+    },
+    {
+      "id": "W12",
+      "title": "Read Quake 3 maps and patch surfaces",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/formats/q3-map/**",
+        "tests/formats/q3-map/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/assets",
+        "../quake-3-ts/src/collision",
+        "../qsrc/quake-iii-arena",
+        "../qfiles/q3a"
+      ],
+      "deliverables": [
+        "IBSP46 world and entity reader",
+        "Patch, fog, light-grid, area, visibility, and inline-model data"
+      ],
+      "acceptance": [
+        "Preserve Q3 patch subdivision inputs, collision facets, fog volumes, light grids, areas, and original material references.",
+        "Load required base and Team Arena maps through the shared world contract.",
+        "Use Quake Live maps only as separately identified format fixtures unless product scope is explicitly expanded."
+      ]
+    },
+    {
+      "id": "W13",
+      "title": "Read Quake 1 and Quake 2 models and sprites",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/formats/q12-model/**",
+        "tests/formats/q12-model/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_soft",
+        "../quake-1-re-ts/src/common/model.ts",
+        "../quake-2-re-ts/src/client",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "MDL, SPR, MD2, and SP2 readers",
+        "Typed frame, skin, interpolation, sprite, and attachment descriptions"
+      ],
+      "acceptance": [
+        "Load supplied model and sprite variants with validated indexes, bounds, animation intervals, skin groups, and palette references.",
+        "Retain original interpolation, orientation, weapon model, and effect semantics through shared render descriptions.",
+        "Compare source-derived geometry and animation samples independently of either backend."
+      ]
+    },
+    {
+      "id": "W14",
+      "title": "Read Quake 3 and skeletal model formats",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/formats/q3-model/**",
+        "tests/formats/q3-model/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/assets",
+        "../quake-3-ts/src/render",
+        "../qsrc",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "MD3, MD4, and required MD5 readers",
+        "Tags, LODs, skeletal poses, skin and character animation descriptions"
+      ],
+      "acceptance": [
+        "Load real required model fixtures, preserving tags, independent LOD slots, allocation/order behavior, bones, weights, and animation identity.",
+        "Verify scalar pose and geometry output against original format/renderer references before backend rendering.",
+        "Represent cross-family characters and attachments explicitly. Missing animation or model semantics remain completion defects.",
+        "Preserve rerelease MD5 replacement scale and attachments independently of collision bounds and movement profile."
+      ]
+    },
+    {
+      "id": "W15",
+      "title": "Consolidate images, palettes, lighting, and material scripts",
+      "stage": "formats",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/materials/**",
+        "src/formats/images/**",
+        "tests/materials/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_soft",
+        "../quake-1-re-ts/src/common/model.ts",
+        "../quake-2-re-ts/src/ref_gl",
+        "../quake-3-ts/src/render",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Image decoders, palette and mip processing",
+        "Q1/Q2 lighting profiles and Q3 material/shader compiler",
+        "Typed stages, deformations, blending, fog, and lightstyle resources"
+      ],
+      "acceptance": [
+        "Support every image format discovered by W01, original palettes, transparency, gamma, lightmaps, colored lighting, dynamic lights, and animated lightstyles.",
+        "Preserve Q3 material stages, animation, tcMods, deformations, sort, depth/blend state, fog, sky, portals, and cinematic texture semantics.",
+        "Compare all three ports before sharing image/resource logic; preserve source-specific processing and numeric differences as profiles.",
+        "CPU and OpenGL receive the same complete material semantics. Unsupported features cannot become silently flattened textures."
+      ]
+    },
+    {
+      "id": "W16",
+      "title": "Prove shared collision and Q1 solid-space construction",
+      "stage": "world",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W10",
+        "W11",
+        "W12"
+      ],
+      "owns": [
+        "src/world/geometry/**",
+        "src/world/collision/**",
+        "src/world/spatial/**",
+        "tests/world/collision/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/server",
+        "../quake-2-re-ts/src/qcommon",
+        "../quake-3-ts/src/collision",
+        "../qsrc/fteqw"
+      ],
+      "deliverables": [
+        "Shared world links, traces, contents, visibility, area portals, and moving-brush queries",
+        "Q1 solid-space construction for arbitrary-size hull queries and cross-format collision adapters"
+      ],
+      "acceptance": [
+        "Compare source traces for points, boxes, crouched players, arbitrary-sized actors, slopes, water, moving/rotating brushes, and patch seams.",
+        "Construct required Q1 solid-space collision for foreign entity sizes without treating the three original fixed hulls as universal.",
+        "Preserve family content masks, clipping, numeric precision, submodel transforms, area portal changes, and trace/contact ordering.",
+        "Use session-owned world links and stable entity identity. Queries cannot expose mutable future snapshots.",
+        "Prove foreign actor hulls on real Q1 maps without BRUSHLIST while preserving stock hull results, contents, startsolid/allsolid, moving submodels, and measured trace cost.",
+        "On specimens without BRUSHLIST, construct a usable solid representation from available BSP information; do not claim recovery of the original authored brushes. Cover clip-only solids, thin geometry, preprocessing size/time, and repeated query cost."
+      ]
+    },
+    {
+      "id": "W17",
+      "title": "Consolidate scene preparation and render commands",
+      "stage": "render-media",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W13",
+        "W14",
+        "W15"
+      ],
+      "owns": [
+        "src/render/scene/**",
+        "src/render/commands/**",
+        "tests/render/commands/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/render",
+        "../quake-1-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_soft",
+        "../quake-1-re-ts/src/common/model.ts",
+        "../quake-2-re-ts/src/ref_gl"
+      ],
+      "deliverables": [
+        "Shared ordered view and render-command owners",
+        "World/model/particle/effect preparation for all families",
+        "Multiple viewports, HUD layers, mirrors, portals, and preview scenes"
+      ],
+      "acceptance": [
+        "Reuse Q3 command ownership where source comparison supports it and add Q1/Q2 features absent from that path.",
+        "Preserve resource lifetime, source draw ordering, retained state, cinematics, stencil operations, portals, sky, fog, lightstyles, and per-family effects.",
+        "Prepare complete scenes once for both actual backends, including split-screen views, independent HUDs, UI previews, and overlays.",
+        "Keep commands typed and instance-owned. Do not add a parallel renderer per game family.",
+        "Preserve required runtime camera/spline behavior and independent per-seat view calculation."
+      ]
+    },
+    {
+      "id": "W18",
+      "title": "Implement the complete CPU rasterizer",
+      "stage": "render-media",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W06"
+      ],
+      "owns": [
+        "src/render/cpu/**",
+        "tests/render/cpu/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/render",
+        "../quake-1-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_soft",
+        "../quake-1-re-ts/src/common/model.ts",
+        "../quake-2-re-ts/src/ref_soft",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "Software geometry and fragment execution",
+        "SDL2 pixel presentation",
+        "A dispatch boundary for later measured worker scheduling"
+      ],
+      "acceptance": [
+        "Rasterize geometry, textures, material stages, clipping, depth, blending, lighting, fog, sky, patches, skeletal models, portals, stencil/shadows, particles, UI, and cinematics on the CPU.",
+        "Use source-derived per-feature fixtures and justified tolerances. A GPU scene presented through SDL is not a CPU renderer.",
+        "Exercise exact render-command order and buffer/resource lifetime through real SDL presentation, resize, and backend switch.",
+        "Keep backend-specific algorithms isolated and report unsupported operations as failures."
+      ]
+    },
+    {
+      "id": "W19",
+      "title": "Implement the complete OpenGL renderer",
+      "stage": "render-media",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W06"
+      ],
+      "owns": [
+        "src/render/gl/**",
+        "tests/render/gl/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/render",
+        "../quake-2-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_gl",
+        "../quake-1-re-ts/src/ref_soft",
+        "../quake-1-re-ts/src/common/model.ts",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "OpenGL resource and draw execution",
+        "Embedded GLSL programs for all required material/model effects",
+        "SDL2 GPU presentation and capability records"
+      ],
+      "acceptance": [
+        "Submit real OpenGL work for all W18-required feature families and preserve original depth/blend/stencil/state ordering.",
+        "Use typed platform entry points and embedded GLSL strings. Respect context ownership, buffer lifetime, and restart behavior.",
+        "Compare with independent source/reference renders as well as CPU output, so shared defects cannot pass by backend agreement alone.",
+        "Record actual Linux GPU, driver, context, and framebuffer capabilities during qualification."
+      ]
+    },
+    {
+      "id": "W20",
+      "title": "Consolidate audio decoding, mixing, and spatial playback",
+      "stage": "render-media",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W06",
+        "W09"
+      ],
+      "owns": [
+        "src/audio/**",
+        "tests/audio/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client",
+        "../quake-2-re-ts/src/client",
+        "../quake-3-ts/src/audio",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Required sound/music decoding and sample ownership",
+        "Source-profile channel, spatialization, looping, streaming, and music behavior",
+        "Per-seat listener and message/audio routing"
+      ],
+      "acceptance": [
+        "Support all W01-discovered sound/music formats through TypeScript or the approved typed native media boundary.",
+        "Preserve family attenuation, channel replacement, loop synchronization, streaming, sample clocks, pause, volume, and soundtrack behavior.",
+        "Exercise multiple local seats, remote clients, cinematic audio, missing optional output, and repeated session switches without stale playback.",
+        "Drive real queued SDL audio and compare sample/timing expectations with independent references.",
+        "Preserve Q2 environmental audio and reverb, Q1 soundtrack remapping, continuous configured music gain, Q3 doppler, and per-seat listener behavior."
+      ]
+    },
+    {
+      "id": "W21",
+      "title": "Preserve cinematics, typography, localization, and captions",
+      "stage": "render-media",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W06",
+        "W09"
+      ],
+      "owns": [
+        "src/media/**",
+        "src/text/**",
+        "tests/media/**",
+        "tests/text/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client",
+        "../quake-1-re-ts/src/lib",
+        "../quake-2-re-ts/src/client",
+        "../quake-3-ts/src/cinematic",
+        "../quake-3-ts/src/render/font-registry.ts",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "CIN, RoQ, OGV, and all required movie playback/transition paths",
+        "Bitmap, glyph DAT, kfont, TTF/FreeType, localization, and mod-overlay text",
+        "Caption/subtitle timing and configurable readable text services"
+      ],
+      "acceptance": [
+        "Run actual movies with audio, pause/termination, world/material usage, campaign transitions, and Q3 tier-unlock cinematics.",
+        "Preserve Unicode, localization lookup/overrides, wrapping, scaling, prompt choices, and inherited font formats in UI, console, HUD, and cinematics.",
+        "Implement required subtitle/caption behavior and accessibility settings even where existing ports only parse events or omit rendering.",
+        "Expose per-seat presentation and independent playback ownership through the common renderer. Do not depend on external shell media conversion at runtime."
+      ]
+    },
+    {
+      "id": "W22",
+      "title": "Consolidate per-seat input, controls, console, and capture",
+      "stage": "runtime-ui",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W06",
+        "W08"
+      ],
+      "owns": [
+        "src/input/**",
+        "src/console/**",
+        "src/settings/**",
+        "src/capture/**",
+        "tests/input/**",
+        "tests/settings/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/input.ts",
+        "../quake-1-re-ts/src/platform",
+        "../quake-2-re-ts/src/client",
+        "../quake-3-ts/src/platform/source-input.ts",
+        "../quake-3-ts/src/engine"
+      ],
+      "deliverables": [
+        "Per-seat keyboard, mouse, gamepad, gyro, haptic, and device lifecycle services",
+        "Complete control/configuration/console interfaces",
+        "Screenshots, levelshots, logs, and restart controls"
+      ],
+      "acceptance": [
+        "Preserve bindings, aliases, exec/wait, archived cvars, history/completion, input capture, focus loss, hotplug, device assignment, and source-specific joystick/MIDI behavior.",
+        "Expose deadzones, response curves, thresholds, inversion, sensitivity, stick swapping, rumble/.bnvib, and required gyro/accessibility controls through typed settings.",
+        "Route commands and haptics to the correct local seat across menus, modal prompts, game changes, reconnects, and device loss.",
+        "Provide real dedicated stdin/operator interaction, screenshot/capture behavior, video/input/audio restart, and config persistence without Q1/Q2 singleton assumptions.",
+        "Route per-seat private effects, layout/inventory commands, stufftext, and menu actions once to their owner; shared effects execute exactly once across mixed local/remote CPU/GL sessions."
+      ]
+    },
+    {
+      "id": "W23",
+      "title": "Save complete shared worlds and original profile state",
+      "stage": "runtime-ui",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W08",
+        "W41"
+      ],
+      "owns": [
+        "src/persistence/**",
+        "tests/persistence/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/common/host_cmd.ts",
+        "../quake-2-re-ts/src/server/sv_ccmds.ts",
+        "../quake-2-re-ts/src/kexgame/g_save.ts",
+        "../quake-3-ts/src/game/session.ts"
+      ],
+      "deliverables": [
+        "Versioned unified world/session save format",
+        "Original save import/export contracts and codec dispatch",
+        "Checkpoint/autosave and fresh-process restoration"
+      ],
+      "acceptance": [
+        "Capture composition identities, actor state, guest bytes, callbacks, source clocks, queued work, RNG, inventories, hub/landmark state, and campaign progression at a defined simulation boundary.",
+        "Retain original save semantics where representable and use the complete unified format for mixed sessions. Preserve unknown version rejection and content identity checks.",
+        "Verify uninterrupted play against save, process exit, fresh load, and continuation, including death/retry, autosave, intermission, and repeated map transitions.",
+        "Include Q2 rerelease fog, animation, maxammo, POI, and extension state omitted by classic save paths. Parsed or nonempty save files alone do not pass."
+      ]
+    },
+    {
+      "id": "W24",
+      "title": "Extract Quake 1 movement and source timing profiles",
+      "stage": "movement",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W16"
+      ],
+      "owns": [
+        "src/movement/q1/**",
+        "tests/movement/q1/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/server/sv_phys.ts",
+        "../quake-1-re-ts/src/server/sv_user.ts",
+        "../quake-1-re-ts/src/qw/pmove.ts",
+        "../qsrc/quake"
+      ],
+      "deliverables": [
+        "NetQuake, QuakeWorld, classic, rerelease, and required Quake 64 movement profiles",
+        "Typed movement results and synchronous interaction hooks"
+      ],
+      "acceptance": [
+        "Compare original traces for acceleration, jumping, friction, air/water movement, steps, collision hulls, knockback, moving brushes, and command/tick boundaries.",
+        "Retain classic frame timing, rerelease cadence, QW prediction, numeric precision, callback order, and per-profile cvar semantics.",
+        "Run movement against shared scene queries and arbitrary foreign characters without silently changing their bounds or selected weapon behavior.",
+        "Keep touch, blocked, damage, and deletion interactions synchronous at their source-defined points.",
+        "Replay predicted movement, weapon events, animation, and ammo against authoritative source-order execution, including independent movement/arsenal choices."
+      ]
+    },
+    {
+      "id": "W25",
+      "title": "Extract Quake 2 movement with matching prediction",
+      "stage": "movement",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W16"
+      ],
+      "owns": [
+        "src/movement/q2/**",
+        "tests/movement/q2/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/qcommon/pmove.ts",
+        "../quake-2-re-ts/src/kexgame/p_move.ts",
+        "../quake-2-re-ts/src/client/cl_pred.ts",
+        "../qsrc/quake-2",
+        "../qsrc/quake2-rerelease-dll"
+      ],
+      "deliverables": [
+        "Classic and rerelease movement/numeric profiles",
+        "Quake II 64 physics and game/cgame agreement"
+      ],
+      "acceptance": [
+        "Match original classic 10 Hz and rerelease variable/cadence behavior, command splitting, crouch, ladders, water, steps, impulses, and collision precision.",
+        "Correct the Q264 n64_physics client/server discrepancy and verify prediction against the exact authoritative selected movement.",
+        "Keep weapon, animation, and collision bounds ownership explicit so character and arsenal overrides do not substitute the wrong movement.",
+        "Exercise source game/cgame exported prediction as well as direct TS movement against real maps and command traces.",
+        "Replay predicted movement, weapon events, animation, and ammo against authoritative source-order execution, including independent movement/arsenal choices."
+      ]
+    },
+    {
+      "id": "W26",
+      "title": "Separate Quake 3 movement from weapon and animation choices",
+      "stage": "movement",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W16"
+      ],
+      "owns": [
+        "src/movement/q3/**",
+        "tests/movement/q3/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/shared/movement.ts",
+        "../quake-3-ts/src/shared/slide-move.ts",
+        "../quake-3-ts/src/cgame/prediction.ts",
+        "../qsrc/quake-iii-arena"
+      ],
+      "deliverables": [
+        "Base and Team Arena movement profiles",
+        "Explicit bounds, timed transition, predictable event, weapon, and animation hooks"
+      ],
+      "acceptance": [
+        "Split movePlayer's bundled weapon/ammo/animation/bounds work without changing source command subdivision, binary32 arithmetic, event order, or server/prediction agreement.",
+        "Match source jump/air/ground/water/step/knockback traces and all base/Team Arena movement variants.",
+        "Run Q3 movement with independently selected Q1/Q2 characters and arsenals through the same source-order contract.",
+        "Reject product-specific enum/stat collisions by construction instead of making Q3 numeric values universal.",
+        "Replay predicted movement, weapon events, animation, and ammo against authoritative source-order execution, including independent movement/arsenal choices."
+      ]
+    },
+    {
+      "id": "W27",
+      "title": "Host QuakeC with private authoritative guest memory",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W08"
+      ],
+      "owns": [
+        "src/compat/qc/**",
+        "tests/compat/qc/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/progs",
+        "../quake-1-re-ts/src/qw/server/progs.ts",
+        "../qsrc/quake-rerelease-qc",
+        "../qfiles/q1"
+      ],
+      "deliverables": [
+        "TypeScript progs interpreter and NQ/QW/rerelease host profiles",
+        "Source builtins, dynamic entity fields, function identity, and save hooks",
+        "Per-artifact opcode/builtin/field manifests"
+      ],
+      "acceptance": [
+        "Execute each supplied progs.dat with its own version, CRC/layout, builtin, timing, and spawn-filter contract.",
+        "Preserve float/integer byte aliasing, string representation, entity/function identity, nested synchronous callbacks, and authoritative guest stores.",
+        "Verify each campaign's function requirements separately. A union across programs cannot hide missing functions in the selected program.",
+        "Keep mod-private protocol writes and semantic override needs explicit. Unknown dialects or missing builtins remain failed required cases, not base-game fallback."
+      ]
+    },
+    {
+      "id": "W28",
+      "title": "Resolve the TypeScript QuakeC compiler and union-source lane",
+      "stage": "execution",
+      "kind": "feasibility",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W02",
+        "W05",
+        "W27"
+      ],
+      "owns": [
+        "tools/quakec/**",
+        "tests/quakec-toolchain/**",
+        "docs/decisions/quakec-compilation.md"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/ARCHITECTURE.md",
+        "../quake-1-re-ts/src",
+        "../qsrc/quake-tools",
+        "../qsrc/quake-rerelease-qc"
+      ],
+      "deliverables": [
+        "Measured choice between direct typed behavior extraction and required QuakeC source compilation",
+        "A Bun-only compiler/union build when the selected source path needs one",
+        "Reproducible source/program identity and behavior comparisons"
+      ],
+      "acceptance": [
+        "Evaluate the existing ClassicProgsPlan/union-progs intention against real classic and rerelease inputs, including campaign mechanics that rename-or-remove fallback loses.",
+        "Keep official common behavior in direct TS providers. Add compiler tooling only where it materially supplies required source/progs compatibility or semantic extraction.",
+        "If compilation is selected, produce and execute required programs entirely through TypeScript tooling and compare emitted behavior against pinned original references.",
+        "An explicit decision not to build an unneeded compiler does not waive QuakeC execution, missing-source extraction, or any requested composition."
+      ]
+    },
+    {
+      "id": "W29",
+      "title": "Host all Quake 3 QVM roles and legacy scripted interfaces",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W08"
+      ],
+      "owns": [
+        "src/compat/qvm/**",
+        "tests/compat/qvm/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/vm",
+        "../quake-3-ts/src/engine/qvm-game.ts",
+        "../quake-3-ts/src/engine/client-modules.ts",
+        "../qsrc/quake-iii-arena"
+      ],
+      "deliverables": [
+        "TypeScript qagame, cgame, and ui QVM execution",
+        "Typed role syscalls, guest records, nested calls, and restart ownership",
+        "Exact artifact-aware TS replacement selection"
+      ],
+      "acceptance": [
+        "Execute real QVM programs with source pointer arithmetic, shared entity strides, snapshot copying, syscall order, and role-specific layouts.",
+        "Preserve UI scripts/feeders/owner draws and mod UI behavior alongside the unified menu system.",
+        "Retain known retail module identity distinctions. Unrecognized bytecode is interpreted or produces an exact unsupported requirement, never guessed as base/Team Arena.",
+        "Verify nested callbacks, restart, pure filesystem choice, prediction, bot syscalls, and independent memory ownership."
+      ]
+    },
+    {
+      "id": "W30",
+      "title": "Define TypeScript guest memory and CPU execution contracts",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05"
+      ],
+      "owns": [
+        "src/guest/core/**",
+        "tests/guest/core/**"
+      ],
+      "sourceInputs": [
+        "docs/source-assessment.md",
+        "../qfiles/q2",
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "32/64-bit guest address spaces, checked bytes, allocations, and stable callback addresses",
+        "Executable-image, CPU, import, ABI, TLS, and exception contracts",
+        "Traceable guest instruction/host-call evidence"
+      ],
+      "acceptance": [
+        "Preserve guest byte authority and pointer-width arithmetic without JS number precision loss or fabricated host pointers.",
+        "Define exact register/flag/stack/FPU state and instruction/import failure records before parallel loader and CPU implementation.",
+        "Keep guest memory private to its execution owner while exposing reviewed semantic bindings to the shared actor store.",
+        "All guest instructions execute in TypeScript. Native execution, WASM, external emulators, and replacement TS game logic cannot satisfy this lane."
+      ]
+    },
+    {
+      "id": "W31",
+      "title": "Load PE32 and PE32+ modules in TypeScript",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/pe/**",
+        "tests/guest/pe/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2",
+        "verification/reference-cases",
+        "verification/source-manifest.json"
+      ],
+      "deliverables": [
+        "PE sections, relocation, symbol/import/export, TLS, and initialization loading",
+        "Required Windows guest module image records"
+      ],
+      "acceptance": [
+        "Parse actual classic i386 DLLs and rerelease x64 DLLs with checked section/address arithmetic.",
+        "Resolve reached relocations, imports, exports, TLS initialization, initialization entry points, and unwind metadata through guest contracts.",
+        "Compare loaded bytes and export addresses with independent executable-format references.",
+        "Reaching a parsed GetGameAPI export is an intermediate result, not module execution or release qualification."
+      ]
+    },
+    {
+      "id": "W32",
+      "title": "Load ELF32 and ELF64 modules in TypeScript",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/elf/**",
+        "tests/guest/elf/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "../qsrc",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "ELF dynamic image loader for i386 and x86-64",
+        "Symbols, versions, relocations, dependencies, initialization, and TLS"
+      ],
+      "acceptance": [
+        "Load real supplied ELF fixtures and independently verify mapped segments, symbol versions, relocation targets, initialization/finalization, and TLS.",
+        "Resolve required libstdc++, libm, libgcc_s, and libc interfaces through TypeScript guest runtime services.",
+        "Track Quake Live module provenance separately from official Q3 scope; use it to close the required ELF execution format lane.",
+        "Unknown required relocations or dependencies remain explicit failures. Never ask the host to load the game shared object."
+      ]
+    },
+    {
+      "id": "W33",
+      "title": "Execute i386 integer and control-flow instructions",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/x86/**",
+        "tests/guest/x86/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2/lmctf/gamex86.dll",
+        "../qfiles/q2",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "i386 decoder, integer operations, flags, memory operations, calls, and control flow",
+        "Instruction coverage and first-divergence traces"
+      ],
+      "acceptance": [
+        "Match independent traces for operand/address-size variants, integer flags, shifts, stack access, branches, indirect calls, and required atomic/string operations.",
+        "Execute actual PE32/ELF32 instruction sequences used by required modules.",
+        "Cooperate with shared ABI and FPU/SIMD contracts without duplicate architectural state.",
+        "Record unsupported instructions at exact guest addresses with reproducible input state."
+      ]
+    },
+    {
+      "id": "W34",
+      "title": "Execute x86-64 integer and control-flow instructions",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/x64/**",
+        "tests/guest/x64/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2/rerelease/baseq2/game_x64.dll",
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "x86-64 decoder, integer/register/flag operations, memory, calls, and control flow",
+        "64-bit precision and instruction coverage traces"
+      ],
+      "acceptance": [
+        "Match independent traces for REX/addressing rules, register width/zero-extension, arithmetic flags, stack alignment, branches, and indirect calls.",
+        "Execute actual PE32+/ELF64 instruction sequences without unsafe JS address conversion.",
+        "Share architectural state through W30 rather than a second incompatible CPU model.",
+        "Preserve exact fault/unsupported-operation evidence for required fixtures."
+      ]
+    },
+    {
+      "id": "W35",
+      "title": "Execute x87 and SSE floating-point behavior",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/floating-point/**",
+        "tests/guest/floating-point/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2/lmctf/gamex86.dll",
+        "../qfiles/q2/rerelease/baseq2/game_x64.dll",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "x87 stack, precision, control/status, conversions, and exception behavior",
+        "Required SSE scalar/vector and rounding behavior"
+      ],
+      "acceptance": [
+        "Match original x87 extended-precision loads/stores, control-word changes, rounding, comparison, conversion, and stack semantics reached by classic modules.",
+        "Match required SSE lanes, masks, arithmetic/conversion, and source float behavior reached by rerelease/native fixtures.",
+        "Do not reduce x87 to Math.fround or assume JS double arithmetic is equivalent.",
+        "Compare real game computations as well as isolated instruction vectors, retaining exact first differences."
+      ]
+    },
+    {
+      "id": "W36",
+      "title": "Implement Windows and System V guest calls and callbacks",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30"
+      ],
+      "owns": [
+        "src/guest/abi/**",
+        "tests/guest/abi/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2",
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "../qsrc/quake-2/game/game.h",
+        "../qsrc/quake-iii-arena/code/game/g_public.h"
+      ],
+      "deliverables": [
+        "Windows i386/x64 and System V i386/x64 calling conventions",
+        "Typed aggregate layouts, variadics, returns, callbacks, and nested entry"
+      ],
+      "acceptance": [
+        "Verify register/stack arguments, shadow space, alignment, callee/caller cleanup, aggregate layout/return, and variadic calls against independent ABI fixtures.",
+        "Round-trip host-to-guest and guest-to-host function pointers through synchronous nested calls.",
+        "Preserve guest stack/memory authority and callback identity through save/load, unload/reload, and exception transitions.",
+        "Keep ABI-specific records distinct from reshaped TS arrays and interfaces."
+      ]
+    },
+    {
+      "id": "W37",
+      "title": "Implement reached guest OS, CRT, and C++ runtime services",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W30",
+        "W36"
+      ],
+      "owns": [
+        "src/guest/runtime/**",
+        "tests/guest/runtime/**"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2",
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "TypeScript memory, file, string, locale, time, library, TLS, and process/runtime imports",
+        "Required MSVC/libstdc++ initialization, exceptions, and unwind behavior",
+        "Per-module reached import coverage"
+      ],
+      "acceptance": [
+        "Implement required KERNEL32, CRT, MSVC C++, libc/libm/libgcc/libstdc++ semantics observed in real fixtures, including TLS and unwind/exception paths.",
+        "Use guest allocation, handles, and callback addresses. Host APIs may supply approved platform services but cannot execute guest machine code.",
+        "Compare actual initialization/import/callback results with reference executions and record unsupported imports precisely.",
+        "Cover module startup, map/frame processing, save/load, and teardown imports, not only the static import table."
+      ]
+    },
+    {
+      "id": "W38",
+      "title": "Host Q2 native API 3 and rerelease game/cgame records",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W08",
+        "W16",
+        "W30",
+        "W36",
+        "W37"
+      ],
+      "owns": [
+        "src/compat/q2/**",
+        "tests/compat/q2/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/game/game.ts",
+        "../quake-2-re-ts/src/kexapi",
+        "../quake-2-re-ts/src/server/bindings",
+        "../qsrc/quake-2",
+        "../qsrc/quake2-rerelease-dll"
+      ],
+      "deliverables": [
+        "Guest-layout API 3, API 2023, and cgame 2022 adapters",
+        "Edict/player prefixes, imports/exports, callbacks, collision, messages, saves, and prediction hooks"
+      ],
+      "acceptance": [
+        "Verify exact offsets, sizes, pointers/strides, callbacks, API versions, and GetGameAPI/GetCGameAPI lifecycles for each required ABI.",
+        "Expose shared geometry and session services while keeping guest-private edicts and bytes authoritative.",
+        "Preserve classic versus rerelease frame cadence, source game/cgame Pmove agreement, save callback identity, and expanded state.",
+        "Provide reviewed semantic binding points for foreign actor interactions; copying health fields cannot stand in for damage/armor/inventory behavior."
+      ]
+    },
+    {
+      "id": "W39",
+      "title": "Host Q3 native qagame, cgame, and UI interfaces",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W08",
+        "W16",
+        "W29",
+        "W30",
+        "W36",
+        "W37"
+      ],
+      "owns": [
+        "src/compat/q3-native/**",
+        "tests/compat/q3-native/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/vm",
+        "../quake-3-ts/src/engine",
+        "../qsrc/quake-iii-arena",
+        "../qfiles/quakelive/baseq3/bin.pk3"
+      ],
+      "deliverables": [
+        "Native DLL/SO entry/dispatch and role-specific syscall hosts",
+        "Guest shared entities, player records, snapshots, bot/UI calls, and restart behavior"
+      ],
+      "acceptance": [
+        "Verify required native module entry conventions, syscall layouts, pointer/stride updates, callbacks, and role dispatch on actual fixtures.",
+        "Reuse proven QVM host semantics where byte/ABI evidence matches and preserve native-specific layouts explicitly.",
+        "Keep qagame/cgame/ui memory ownership, restart, pure selection, and prediction semantics correct.",
+        "Record distinct Quake Live fixture product/protocol requirements without silently claiming official Quake Live product completion."
+      ]
+    },
+    {
+      "id": "W40",
+      "title": "Integrate native semantic bindings and prove real guest gameplay",
+      "stage": "execution",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W23",
+        "W31",
+        "W32",
+        "W33",
+        "W34",
+        "W35",
+        "W36",
+        "W37",
+        "W38",
+        "W39",
+        "W54",
+        "W55",
+        "W65",
+        "W50",
+        "W66"
+      ],
+      "owns": [
+        "tools/native-qualification/**",
+        "verification/native-runtime/**",
+        "src/compat/native-composition/**",
+        "src/app/modules.ts"
+      ],
+      "sourceInputs": [
+        "../qfiles/q2",
+        "../qfiles/quakelive/baseq3/bin.pk3",
+        "verification/reference-cases",
+        "docs/verification-plan.md"
+      ],
+      "deliverables": [
+        "Real PE/ELF guest qualification evidence and reproducible commands",
+        "Instruction/import/host-call coverage and named-machine timing",
+        "Exact unresolved feasibility blockers",
+        "Reviewed native-private behavior bindings and application registration"
+      ],
+      "acceptance": [
+        "For required fixture profiles, execute initialization and GetGameAPI/role entry, real map spawn, player connection, movement, firing/damage, frame updates, save/load, multiplayer exchange, and teardown.",
+        "Trace game instructions and calls through the TypeScript guest engine. Source ports, parsed exports, loader success, and opcode-only benchmarks cannot pass.",
+        "Verify synchronous nested callbacks, guest byte authority, prediction agreement, module switches, and state continuity.",
+        "Measure actual gameplay cost against required source cadence on the named Linux machine. Unresolved instruction/import/semantic/performance work blocks release.",
+        "Feed complete campaign/match and composition qualification into W67/W69. Finite fixture success does not promise every future binary's semantics.",
+        "Resolve native-private movement/damage/inventory/protocol behavior through reviewed semantic interception or extraction, including partial/aliased stores before dependent decisions. Implement every requested composition; missing bindings remain blockers.",
+        "After W66, take the explicit src/app/modules.ts registration handoff and integrate real PE/ELF providers. Official content, graphics, and source-VM play do not wait for this lane."
+      ]
+    },
+    {
+      "id": "W41",
+      "title": "Prove single actor, combat, and callback authority",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W30"
+      ],
+      "owns": [
+        "src/world/actors/**",
+        "src/world/gameplay/**",
+        "tests/world/gameplay/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/server/sv_phys.ts",
+        "../quake-2-re-ts/src/game/g_combat.ts",
+        "../quake-3-ts/src/game/combat.ts",
+        "../quake-3-ts/src/shared/movement.ts",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "One actor store and shared action/interaction execution",
+        "Union weapon, ammunition, item, armor, damage, mover, trigger, objective, and progression identities",
+        "Early ownership/callback proof"
+      ],
+      "acceptance": [
+        "Run two independent sessions with nested cross-provider touch, damage, death, reaction, knockback, scoring, and entity deletion. Exactly one owner decides each mutation.",
+        "Define damage, armor/resistance, impulses, inventory/ammo, reactions, and scoring policy explicitly before bulk behavior extraction.",
+        "Keep guest-owned bytes authoritative when a guest executes. Prove partial/aliased stores, stable addresses/strides, identity, and nested reentry through reviewed views.",
+        "Separate headless Simulation.step from per-seat presentation. Preserve source clocks and immediate callbacks without running complete competing family frame loops.",
+        "Preserve typed synchronous callback returns, including Q2 ClientConnect acceptance/userinfo mutation and Q3 denial string or null, before any dependent mutation.",
+        "The early guest-view proof spans two sessions, nested delete/reuse, partial/aliased writes, stable strides, and a raw-state serialize/restore fixture in a fresh process.",
+        "This early proof uses W30 checked byte memory and a narrow typed actor/guest-view fixture. It verifies low-level state restoration, not production QC/QVM/native execution or the W23 save envelope; those retain separate acceptance gates.",
+        "Prove the worked Q1 rocket/Q2 victim/Q3 combat example with attack provenance, armor/protection order, one victim-state mutation, reentrant pain/death, impulse consumption, and scoring. Distinguish actor-owned from merely observed enumeration."
+      ]
+    },
+    {
+      "id": "W42",
+      "title": "Extract Quake 1 base gameplay into typed behavior providers",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q1/base/**",
+        "tests/gameplay/q1-base/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src",
+        "../qsrc/quake",
+        "../qsrc/quake-rerelease-qc",
+        "../qfiles/q1"
+      ],
+      "deliverables": [
+        "Direct TS id1 weapons, items, monsters, player lifecycle, movers, triggers, and mode behavior",
+        "Classic/rerelease base defaults and source-differential records"
+      ],
+      "acceptance": [
+        "Implement all original and rerelease id1 behavior against the single shared world, preserving authored defaults and deliberate edition differences.",
+        "Verify each weapon/monster/item/mover/trigger path against original QuakeC/source and actual entity data. Current TS omissions are not fidelity requirements.",
+        "Expose behavior independently of map format, movement, character appearance, arsenal, enemies, and rules selections.",
+        "Keep source function/state provenance and complete campaign-required mechanics; use W27 as mod/reference execution rather than the official built-in implementation."
+      ]
+    },
+    {
+      "id": "W43",
+      "title": "Extract Quake 1 mission-pack behaviors",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W42",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q1/missionpacks/**",
+        "tests/gameplay/q1-missionpacks/**"
+      ],
+      "sourceInputs": [
+        "../qsrc/quake",
+        "../qsrc/quake-rerelease-qc",
+        "../quake-1-re-ts/src",
+        "../qfiles/q1"
+      ],
+      "deliverables": [
+        "Classic and rerelease Hipnotic/Rogue behavior providers",
+        "Expansion weapons, ammunition, powerups, monsters, bosses, movers, objectives, and team rules"
+      ],
+      "acceptance": [
+        "Preserve every Scourge of Armagon and Dissolution of Eternity mechanic and source-profile difference.",
+        "Run source-differential firing/damage/ammo, inventory, enemy, trap/mover, boss, and progression cases for each campaign's own program.",
+        "Keep shared base behaviors imported once and expansion-private behavior explicit; do not copy a complete family engine.",
+        "Complete foreign-map and independently selected-arsenal interactions through the common semantic contract."
+      ]
+    },
+    {
+      "id": "W44",
+      "title": "Extract Quake 1 rerelease additions, CTF, and horde",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W27",
+        "W41",
+        "W42",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q1/addons/**",
+        "tests/gameplay/q1-addons/**"
+      ],
+      "sourceInputs": [
+        "../qsrc/quake-rerelease-qc",
+        "../quake-1-re-ts/src/server/compat_spawn.ts",
+        "../quake-1-re-ts/src/progs/ext",
+        "../qfiles/q1"
+      ],
+      "deliverables": [
+        "dopa, mg1, mg3 Dawn of the Machine, CTF, horde, and required Quake 64 behavior providers",
+        "Rerelease prompts, choices, boss, destructibility, and progression mechanics"
+      ],
+      "acceptance": [
+        "Recover actual sigil/rune gates, destructibility, boss teleport markers, campaign entities, and authored conditions dropped by compat_spawn.",
+        "Use direct TS behavior for built-in content, with reviewed QC/data extraction when matching source is absent.",
+        "Verify each selected program's own entity fields/functions, not a union that hides missing functions.",
+        "Implement required modes and launch options, including CTF and horde, and route achievements/level-complete/lobby events into durable shared workflows."
+      ]
+    },
+    {
+      "id": "W45",
+      "title": "Extract Quake 2 base gameplay and source behavior",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q2/base/**",
+        "tests/gameplay/q2-base/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/game",
+        "../qsrc/quake-2",
+        "../qfiles/q2"
+      ],
+      "deliverables": [
+        "Classic Q2 base behavior providers and shared Q2 behaviors",
+        "Weapons, items, monsters, movers, player lifecycle, coop/DM, and unit mechanics"
+      ],
+      "acceptance": [
+        "Compare original source and real campaign data before reusing existing TS logic.",
+        "Preserve combat, armor, knockback, source callbacks, spawn filtering, inventory, monster AI, and classic 10 Hz behavior.",
+        "Replace process-global module state with shared-world/session-owned state and narrow provider-private data.",
+        "Complete foreign actor/world interactions without relabeling another family's semantics as Q2 behavior."
+      ]
+    },
+    {
+      "id": "W46",
+      "title": "Extract Quake 2 Xatrix and Rogue expansions",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W45",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q2/missionpacks/**",
+        "tests/gameplay/q2-missionpacks/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/xatrix",
+        "../quake-2-re-ts/src/rogue",
+        "../qsrc",
+        "../qfiles/q2"
+      ],
+      "deliverables": [
+        "The Reckoning and Ground Zero classic behavior providers",
+        "Expansion weapons, items, enemies, hazards, objectives, and Tag rules"
+      ],
+      "acceptance": [
+        "Preserve each expansion's authored combat, ammunition, AI, traps, progression, and source spawnflag meanings.",
+        "Verify Rogue Tag behavior and its exact distinction from rerelease DeathBall; do not merge modes merely because menus share settings.",
+        "Reuse proven base behavior once and expose expansion mechanics through shared semantic identities.",
+        "Run real expansion combat and progression interactions under original defaults and independent foreign-map/movement choices."
+      ]
+    },
+    {
+      "id": "W47",
+      "title": "Extract Quake 2 CTF and LMCTF behaviors",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W45",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q2/ctf/**",
+        "src/content/q2/lmctf/**",
+        "tests/gameplay/q2-ctf/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/ctf",
+        "../quake-2-re-ts/src/lmctf",
+        "../qsrc/lmctf60",
+        "../qfiles/q2/lmctf"
+      ],
+      "deliverables": [
+        "ThreeWave CTF and Loki's Minions CTF behavior providers",
+        "Flag/objective, grapple, rune, item, team, and scoring mechanics"
+      ],
+      "acceptance": [
+        "Preserve actual LMCTF identity and rule differences, including all content/mechanics found by W01.",
+        "Complete capture, return, drop, death, team change, scoring, respawn, and mode-specific weapon/item flows with independent client cases.",
+        "Keep original 10 Hz/API/wire/save distinctions separate from rerelease interoperability presentation.",
+        "Supply explicit objective placement and actor behavior for every required foreign-map composition."
+      ]
+    },
+    {
+      "id": "W48",
+      "title": "Extract the complete Quake 2 rerelease feature set",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W45",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q2/rerelease/**",
+        "tests/gameplay/q2-rerelease/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/kexgame",
+        "../quake-2-re-ts/src/kexapi",
+        "../qsrc/quake2-rerelease-dll",
+        "../qfiles/q2/rerelease"
+      ],
+      "deliverables": [
+        "Rerelease base, Call of the Machine, The Reckoning, Ground Zero, and Quake II 64 providers",
+        "Rerelease weapons/enemies/objectives/Tag/DeathBall and presentation guidance",
+        "Game/cgame, bot, coop, POI/help, wheel, and transition behavior"
+      ],
+      "acceptance": [
+        "Preserve every required rerelease campaign, mode, expansion mechanic, balance option, and deliberate difference from classic source.",
+        "Verify game/cgame prediction, variable timing, Quake II 64 movement, and conflicting expansion spawnflags against authoritative source.",
+        "Expose weapon wheel, inventory capacities, POIs/help paths, health bars, prompts, fog/animation, landmark/unit state, and bot interfaces.",
+        "Round-trip all rerelease-only fields and complete real campaigns and competitive modes through shared-world providers."
+      ]
+    },
+    {
+      "id": "W49",
+      "title": "Extract Quake 3 and Team Arena gameplay providers",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41",
+        "W73"
+      ],
+      "owns": [
+        "src/content/q3/base/**",
+        "src/content/q3/team-arena/**",
+        "src/content/q3/presentation/**",
+        "tests/gameplay/q3/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/game",
+        "../quake-3-ts/src/cgame",
+        "../quake-3-ts/src/shared",
+        "../qsrc/quake-iii-arena",
+        "../qfiles/q3a"
+      ],
+      "deliverables": [
+        "Base and Team Arena gameplay, presentation, and mode providers",
+        "Arena progression, weapons, powerups/holdables, match administration, team orders, and HUD behavior"
+      ],
+      "acceptance": [
+        "Preserve FFA, tournament duel, single-player arena, team deathmatch, CTF, One Flag CTF, Overload/Obelisk, and Harvester, including warmup, queues, intermission, and restart.",
+        "Preserve Team Arena-specific stat layouts, persistent powerups, expansion weapons, mines, portals, flags, skulls/cubes, objectives, and scoring.",
+        "Expose source team leadership, text/voice orders, taunts, votes, spectator, player/HUD, and administration behavior to shared services.",
+        "Retain verified Q3 implementation strengths while removing complete-engine assumptions that prevent foreign content, world saves, and local seats."
+      ]
+    },
+    {
+      "id": "W50",
+      "title": "Compose official gameplay and source-VM semantics",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W24",
+        "W25",
+        "W26",
+        "W27",
+        "W29",
+        "W41",
+        "W42",
+        "W43",
+        "W44",
+        "W45",
+        "W46",
+        "W47",
+        "W48",
+        "W49"
+      ],
+      "owns": [
+        "src/content/composition/**",
+        "tests/composition/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/ARCHITECTURE.md",
+        "../quake-2-re-ts/src/client/menu_content.ts",
+        "../quake-3-ts/src/shared/movement.ts",
+        "docs/contracts.md",
+        "verification/feature-ledger.json"
+      ],
+      "deliverables": [
+        "Validated official composition recipes and complete entity/asset/behavior resolution",
+        "Cross-family spawn, combat, ammo, animation, objective, and progression adapters",
+        "Reviewed QC/QVM semantic extraction or bindings plus the native adapter contract"
+      ],
+      "acceptance": [
+        "Select arbitrary declared map, movement, character, weapon, enemy, asset, rule, and mod dimensions independently while preserving source defaults.",
+        "Prove nested cross-provider damage/armor/reaction/impulse/scoring, pickups/ammo capacities, mover interactions, spawn bounds, animation, and predictable weapon events.",
+        "For QC/QVM-private behavior, prove reviewed source transforms or function/field bindings before claiming independent overrides. Define the native composition contract without waiting for CPU execution; W40 implements and qualifies native-private semantics. Post-callback write masking is not a substitute.",
+        "Every requested combination remains in the expected matrix. Missing adapters, private behavior, or unsupported interactions fail explicitly instead of dropping entities or selecting base rules."
+      ]
+    },
+    {
+      "id": "W51",
+      "title": "Preserve campaign, round, achievement, and lobby state",
+      "stage": "gameplay",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W23",
+        "W41",
+        "W42",
+        "W43",
+        "W44",
+        "W45",
+        "W46",
+        "W47",
+        "W48",
+        "W49"
+      ],
+      "owns": [
+        "src/world/progression/**",
+        "tests/progression/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/common/host_cmd.ts",
+        "../quake-1-re-ts/src/progs/ext/qex.ts",
+        "../quake-2-re-ts/src/kexgame/g_save.ts",
+        "../quake-3-ts/src/ui/base/game-info.ts",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Explicit campaign versus match/round authority",
+        "Complete hub, landmark, objective, unlock, and ending state",
+        "Durable achievements/awards and level-complete/return-to-lobby events"
+      ],
+      "acceptance": [
+        "Reach every authored campaign ending through real gates, keys, sigils/runes, bosses, branches, hubs, secrets, and exits. Direct map commands establish only map loading.",
+        "Preserve inventory, callbacks, mover/enemy state, coop changes, death/retry, checkpoints, and landmark/hub returns across fresh-process saves.",
+        "Retain Q3 tiers, difficulty records, best scores, medals, podium/postgame, unlockable videos, reset, and session persistence.",
+        "Implement achievements and lobby transitions beyond packet parsing/logging; select campaign and competitive round authority explicitly in mixed sessions."
+      ]
+    },
+    {
+      "id": "W52",
+      "title": "Consolidate transport, sessions, discovery, and service workflows",
+      "stage": "network",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W06",
+        "W08"
+      ],
+      "owns": [
+        "src/network/common/**",
+        "src/network/services/**",
+        "tests/network/common/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/common/net.ts",
+        "../quake-1-re-ts/src/common/net_main.ts",
+        "../quake-1-re-ts/src/qw",
+        "../quake-2-re-ts/src/qcommon",
+        "../quake-2-re-ts/src/client/cl_servers.ts",
+        "../quake-3-ts/src/protocol",
+        "../quake-3-ts/src/engine"
+      ],
+      "deliverables": [
+        "Shared listen/dedicated/loopback/remote session and endpoint ownership",
+        "Unified protocol identities for mixed content and local seats",
+        "Discovery, downloads, administration, auth/ranking/lobby service contracts"
+      ],
+      "acceptance": [
+        "Preserve admission, reliability, fragmentation, packet scheduling, disconnect/reconnect, source transport choices, and headless operator use.",
+        "Negotiate complete composition, numeric, content, executable, and snapshot identities for mixed sessions; old family packets cannot represent foreign state by renaming IDs.",
+        "Support multiple local seats plus remote clients with private messages, identity, input, and lifecycle across every family/profile.",
+        "Inventory and resolve inherited IPX, master, authorization, ranking, add-on catalog, and lobby obligations. Implement required transports with independent packet/peer evidence. For unavailable external services, deliver usable in-engine equivalents and identify provider access separately; no silent inherited exclusions.",
+        "Preserve HTTP/UDP download policy, pure/checksum identity, contained writes, favorites/status/ping, rcon, filters, flood control, and service persistence."
+      ]
+    },
+    {
+      "id": "W53",
+      "title": "Preserve NetQuake and QuakeWorld wire behavior",
+      "stage": "network",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W24",
+        "W27",
+        "W52"
+      ],
+      "owns": [
+        "src/network/q1/**",
+        "tests/network/q1/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/common/net.ts",
+        "../quake-1-re-ts/src/common/net_main.ts",
+        "../quake-1-re-ts/src/client/cl_parse.ts",
+        "../quake-1-re-ts/src/qw",
+        "../qsrc/quake"
+      ],
+      "deliverables": [
+        "NQ protocols 15/666/999 and QW 28/29 profiles",
+        "Source messages, prediction, spectators, downloads, admin, and native-session demos"
+      ],
+      "acceptance": [
+        "Compare packet, timing, connection, entity/player, reliable, and prediction behavior with independent peers/oracles for every required profile.",
+        "Preserve QW spectator camera, masters/heartbeat, transfers, passwords, limits, rcon, filters, status/logging, and operator behavior.",
+        "Complete known QW boot/hosting registry and session-lifetime gaps, with real listen/dedicated and repeated-switch scenarios.",
+        "State exact rerelease server compatibility requirements from the feature ledger; unavailable or unimplemented required behavior remains a blocker."
+      ]
+    },
+    {
+      "id": "W54",
+      "title": "Preserve Quake 2 classic, wide, and rerelease protocols",
+      "stage": "network",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W25",
+        "W52"
+      ],
+      "owns": [
+        "src/network/q2/**",
+        "tests/network/q2/**"
+      ],
+      "sourceInputs": [
+        "../quake-2-re-ts/src/qcommon/protocol",
+        "../quake-2-re-ts/src/server/bindings",
+        "../quake-2-re-ts/src/client",
+        "../qsrc/q2repro"
+      ],
+      "deliverables": [
+        "Separate classic, expanded classic, and rerelease wire profiles",
+        "Prediction, extended state, downloads, administration, and seat adapters"
+      ],
+      "acceptance": [
+        "Distinguish protocol 1038 from expanded classic 4038 and retain actual supported protocol versions, field widths, flags, and layout semantics.",
+        "Verify native game logic, API family, wire profile, asset mounts, timing, and save container as independent axes, including LMCTF on rerelease interoperability.",
+        "Match server/client prediction and Q264 physics, source tick/command conversion, reliable commands, delta snapshots, and private seat messages.",
+        "Run actual independent clients through admission, firing/damage, map changes, reconnect, downloads, and full matches/coop progress."
+      ]
+    },
+    {
+      "id": "W55",
+      "title": "Preserve Quake 3 and Team Arena protocols",
+      "stage": "network",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W26",
+        "W29",
+        "W52"
+      ],
+      "owns": [
+        "src/network/q3/**",
+        "tests/network/q3/**"
+      ],
+      "sourceInputs": [
+        "../quake-3-ts/src/protocol",
+        "../quake-3-ts/src/server",
+        "../quake-3-ts/src/engine",
+        "../qsrc/quake-iii-arena"
+      ],
+      "deliverables": [
+        "Source Q3 protocol/prediction and base/Team Arena layouts",
+        "Pure/download/master/admin and complete session lifecycle behavior"
+      ],
+      "acceptance": [
+        "Match independent source peers/oracles for Huffman/bit messages, admission, reliable commands, fragments, snapshots, prediction, restart, and reconnect.",
+        "Preserve pure package checks, downloads, authorization/status queries, browser data, server administration, and original mode identities.",
+        "Use explicit unified extensions/client behavior for foreign state and multiple seats. Do not label those exchanges stock-client compatible.",
+        "Verify predicted weapon/ammo/event replay and original product-specific state indexes."
+      ]
+    },
+    {
+      "id": "W56",
+      "title": "Preserve demos, MVD, replay, and spectator controls",
+      "stage": "network",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W23",
+        "W53",
+        "W54",
+        "W55"
+      ],
+      "owns": [
+        "src/recording/**",
+        "tests/recording/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/cl_demo.ts",
+        "../quake-1-re-ts/src/qw/client/cl_demo.ts",
+        "../quake-2-re-ts/src/client/cl_demo.ts",
+        "../quake-2-re-ts/src/server/sv_mvd.ts",
+        "../quake-3-ts/src/engine"
+      ],
+      "deliverables": [
+        "Original demo, Q2 MVD, timedemo, and attract playback",
+        "Unified input/network/timing replay and viewing controls",
+        "Local-seat/spectator recording identity"
+      ],
+      "acceptance": [
+        "Play and record real legacy/native-profile demos and MVD streams with correct clocks, protocol dispatch, resource state, and session transitions.",
+        "Implement required spectator/camera/viewing/seek controls and account for all local seats instead of silently recording seat zero only.",
+        "Compare replayed authoritative states and predictable events with the original execution across source and compiled runs.",
+        "Keep demos, world saves, screenshots, and progression persistence as distinct supported workflows."
+      ]
+    },
+    {
+      "id": "W57",
+      "title": "Consolidate bot behavior, combat, and team orders",
+      "stage": "bots",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41"
+      ],
+      "owns": [
+        "src/bots/behavior/**",
+        "tests/bots/behavior/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/lib/bot_brain",
+        "../quake-1-re-ts/src/bots",
+        "../quake-2-re-ts/src/qcommon/bot_brain",
+        "../quake-2-re-ts/src/server/bots",
+        "../quake-3-ts/src/botlib",
+        "../quake-3-ts/src/game"
+      ],
+      "deliverables": [
+        "Chosen shared bot brain with source-specific behavior profiles",
+        "Personalities/skills, sensing, aiming, weapon choice, goals, chat/voice, and team coordination",
+        "Population, add/remove, autofill, and role ownership"
+      ],
+      "acceptance": [
+        "Compare Q1/Q2 retail bot knowledge and shared brain strengths with Q3 botlib before consolidating; source ancestry and feature evidence decide reuse.",
+        "Preserve difficulty, personalities, combat/movement goals, weapon weights, swimming/jumping, campaign enemy interactions, and population controls.",
+        "Execute human/bot leadership, orders, voice/text acknowledgements, taunts, role changes, and each objective mode's coordination.",
+        "Separate bot behavior from navigation construction and consume typed world/actor interfaces without complete game-family loops."
+      ]
+    },
+    {
+      "id": "W58",
+      "title": "Construct navigation for every required map format",
+      "stage": "bots",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W09",
+        "W16"
+      ],
+      "owns": [
+        "src/bots/navigation/**",
+        "tools/navigation/**",
+        "tests/bots/navigation/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/bots",
+        "../quake-2-re-ts/src/server/nav.ts",
+        "../quake-3-ts/src/botlib",
+        "../qsrc",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "NAV2/AAS and inherited navigation readers",
+        "TypeScript foreign-BSP navigation construction, reachability, clustering, and queries",
+        "Moving-world and per-character traversal data"
+      ],
+      "acceptance": [
+        "Generate usable navigation from Q1/Q2/Q3 geometry, including foreign maps without supplied NAV2/AAS data.",
+        "Account for selected movement, actor bounds, jumps, water, ladders, teleports, movers, objectives, and dynamic blocked routes.",
+        "Drive bots through actual routes and all inherited objective modes; parsing an existing navigation file is insufficient.",
+        "Preserve required runtime navigation/debug/camera tooling while accounting for separate authoring applications in W01."
+      ]
+    },
+    {
+      "id": "W59",
+      "title": "Build the common SDL menu, HUD, and settings system",
+      "stage": "runtime-ui",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W05",
+        "W06",
+        "W17",
+        "W21",
+        "W22"
+      ],
+      "owns": [
+        "src/ui/common/**",
+        "src/ui/settings/**",
+        "src/ui/hud/**",
+        "tests/ui/common/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/menu.ts",
+        "../quake-2-re-ts/src/client/menu.ts",
+        "../quake-2-re-ts/src/client/cl_wheel.ts",
+        "../quake-3-ts/src/ui",
+        "../quake-3-ts/src/cgame"
+      ],
+      "deliverables": [
+        "Common native SDL menus with reusable layouts and controls",
+        "Complete video/audio/input/network/accessibility/localization settings",
+        "Per-seat HUD, radial weapon wheel, inventory, guidance, prompts, and notifications"
+      ],
+      "acceptance": [
+        "Expose all inherited options with their actual behavior, including independent UI/HUD/console scales, classic/rerelease visual settings, contrast/typefaces, subtitles, and device tuning.",
+        "Render real weapon selection wheels, inventory, scores/help, POIs/help paths, health bars, objective/team state, crosshairs, prompts, and private messages.",
+        "Preserve legacy QVM/scripted menus through W29 alongside the unified workflows.",
+        "Use the shared CPU/GL draw contract and SDL input. Menu controls cannot be replaced by a browser UI or disconnected mockups."
+      ]
+    },
+    {
+      "id": "W60",
+      "title": "Build complete content, campaign, composition, and save menus",
+      "stage": "runtime-ui",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W09",
+        "W23",
+        "W50",
+        "W51",
+        "W59"
+      ],
+      "owns": [
+        "src/ui/content/**",
+        "tests/ui/content/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/menu_content.ts",
+        "../quake-2-re-ts/src/client/menu_content.ts",
+        "../quake-3-ts/src/ui",
+        "verification/product-manifest.json"
+      ],
+      "deliverables": [
+        "Campaign/episode/map browser and composition profile editor",
+        "Characters/weapons/enemies/assets previews, mods/add-ons, saves, demos, and cinematics flows",
+        "Achievement/progression and content availability presentation"
+      ],
+      "acceptance": [
+        "Start every required campaign/mode/add-on through real menu controls with correct difficulty, map dependencies, profile ordering, and asset precedence.",
+        "Expose every independent composition dimension and verify the launched session matches the saved selection.",
+        "Provide actual previews, map browsing, save/load/autosave, mod discovery/download, demo/movie, achievement, unlock, and lobby-return workflows.",
+        "Show exact missing content/adapter requirements without quietly filtering expected choices or substituting base gameplay."
+      ]
+    },
+    {
+      "id": "W61",
+      "title": "Build server, lobby, local-seat, bot, and administration menus",
+      "stage": "runtime-ui",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W22",
+        "W52",
+        "W53",
+        "W54",
+        "W55",
+        "W57",
+        "W58",
+        "W59"
+      ],
+      "owns": [
+        "src/ui/network/**",
+        "tests/ui/network/**"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/menu.ts",
+        "../quake-2-re-ts/src/client/menu_content.ts",
+        "../quake-2-re-ts/src/client/cl_seats.ts",
+        "../quake-3-ts/src/ui",
+        "../quake-3-ts/src/engine/server-browser.ts"
+      ],
+      "deliverables": [
+        "LAN/global/favorite/direct server browser and host flows",
+        "Split-screen layouts, seat identity/input, mixed local/remote play, bots, and mode controls",
+        "Player/team/chat/vote/operator/lobby and applicable ranking/service workflows"
+      ],
+      "acceptance": [
+        "Complete discover, status, filter, favorite, join, host, download, reconnect, and return-to-lobby journeys through actual network sessions.",
+        "Expose all inherited mode options and local seat counts, independent device assignment, layout, names/skins/colors, private HUD/messages/audio, and bot controls across all families.",
+        "Preserve team/spectator/leader/vote/password/ready/pause/kick/rcon/operator behavior with explicit permissions and source-mode rules.",
+        "Provide usable service equivalents where legacy ranking/auth/discovery/lobby services are unavailable, while identifying which provider access was actually verified.",
+        "Route per-seat private effects, layout/inventory commands, stufftext, and menu actions once to their owner; shared effects execute exactly once across mixed local/remote CPU/GL sessions."
+      ]
+    },
+    {
+      "id": "W62",
+      "title": "Generate and review reusable native-menu raster art",
+      "stage": "runtime-ui",
+      "kind": "art",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "dependsOn": [
+        "W01",
+        "W05"
+      ],
+      "owns": [
+        "assets/ui/**",
+        "docs/ui-art-review.md"
+      ],
+      "sourceInputs": [
+        "../quake-1-re-ts/src/client/menu.ts",
+        "../quake-2-re-ts/src/client/menu.ts",
+        "../quake-3-ts/src/ui",
+        "docs/contracts.md"
+      ],
+      "deliverables": [
+        "ImageGen-created reusable nine-slice panels, icons, and menu raster assets",
+        "Prompt, source image, slicing, scaling, and provenance records",
+        "Reviewable native UI compositions"
+      ],
+      "acceptance": [
+        "Use the current ImageGen tool for requested bitmap creation/editing, with reusable panel/icon assets rather than fixed full-screen screenshots.",
+        "Review readability, navigation states, scaling, localization, color/contrast, and layout against real native SDL UI contracts.",
+        "Keep text and functional controls live and configurable; generated imagery cannot encode an inert settings screen.",
+        "Include the art in W63/W69 CPU and OpenGL menu review before release."
+      ]
+    },
+    {
+      "id": "W63",
+      "title": "Build independent format, media, render, and runtime-tool cases",
+      "stage": "verification",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W02",
+        "W04",
+        "W05"
+      ],
+      "owns": [
+        "verification/cases/render/**",
+        "verification/cases/formats/**",
+        "verification/cases/media/**",
+        "verification/cases/runtime-tools/**"
+      ],
+      "sourceInputs": [
+        "docs/feature-coverage.md",
+        "docs/verification-plan.md",
+        "verification/reference-cases",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Independent fixtures and expected outputs for F12–F15 and runtime diagnostics",
+        "Real CPU/GL image/audio/input/camera/capture scenarios",
+        "Per-feature source differential and malformed-input cases"
+      ],
+      "acceptance": [
+        "Start case construction alongside parsers/backends rather than waiting for their implementations.",
+        "Cover every required archive/map/model/material/media format and source visual/audio option with independent expectations and real retail fixtures.",
+        "Include no-BRUSHLIST collision fixtures, MD5 replacement scale, material ordering, per-seat views/audio, runtime spline cameras, screenshots, and menu raster art.",
+        "Keep fixture absence, image mismatches, unsupported features, and physical-device gaps visible for W67/W69 reconciliation."
+      ]
+    },
+    {
+      "id": "W64",
+      "title": "Build independent gameplay, campaign, seat, and UI cases",
+      "stage": "verification",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W02",
+        "W04",
+        "W05"
+      ],
+      "owns": [
+        "verification/cases/gameplay/**",
+        "verification/cases/campaigns/**",
+        "verification/cases/ui/**",
+        "verification/cases/seats/**"
+      ],
+      "sourceInputs": [
+        "docs/feature-coverage.md",
+        "docs/verification-plan.md",
+        "verification/reference-cases",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Original-default behavior and deliberate edition-difference cases",
+        "Complete campaign/objective/mode, cross-family interaction, and progression scenarios",
+        "Native UI and mixed local/remote participation journeys"
+      ],
+      "acceptance": [
+        "Start source-derived fixtures alongside behavior extraction, including Q1 sigil/rune/destructibility and Q2 extended-state/prediction gaps.",
+        "Enumerate all weapons/items/enemies, movement/event/ammo replay, damage/armor/reaction/impulse/scoring, movers, objectives, and campaign-versus-round authority.",
+        "Require real endings, hub returns, alternate branches, bosses, saves, death/retry, coop, full matches, bots/team orders, achievements, lobbies, and complete menus.",
+        "Cover every seat's input, HUD, localization, private messages/audio/rumble, device loss, and mixed remote play across Q3 as well as Q1/Q2.",
+        "Route per-seat private effects, layout/inventory commands, stufftext, and menu actions once to their owner; shared effects execute exactly once across mixed local/remote CPU/GL sessions."
+      ]
+    },
+    {
+      "id": "W65",
+      "title": "Build independent guest, protocol, and service cases",
+      "stage": "verification",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W02",
+        "W04",
+        "W05"
+      ],
+      "owns": [
+        "verification/cases/execution/**",
+        "verification/cases/network/**",
+        "verification/cases/services/**"
+      ],
+      "sourceInputs": [
+        "docs/feature-coverage.md",
+        "docs/verification-plan.md",
+        "verification/reference-cases",
+        "../qfiles/q2",
+        "../qfiles/quakelive/baseq3/bin.pk3"
+      ],
+      "deliverables": [
+        "QC/QVM/native instruction, ABI, callback, and real-module cases",
+        "Independent original-protocol peers/oracles and adverse network schedules",
+        "Discovery/download/auth/ranking/lobby/administration expectations"
+      ],
+      "acceptance": [
+        "Start fixtures before guest/protocol implementations so first unsupported instructions/imports and semantic gaps appear early.",
+        "Cover partial/aliased guest writes, pointer strides, nested reentry, TLS/unwind, x87/SSE, saves, private state, and source versus override execution.",
+        "Exercise native modules through real map/player/fire/damage/save/multiplayer/timing behavior, not export parsing alone.",
+        "Cover loss, delay, duplication, reordering, malformed messages, reconnects, IPX/source transports, masters, pure/downloads, and service equivalents with precise verified scope."
+      ]
+    },
+    {
+      "id": "W66",
+      "title": "Integrate one source simulation and complete native SDL client",
+      "stage": "integration",
+      "kind": "integration",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W03",
+        "W06",
+        "W08",
+        "W09",
+        "W10",
+        "W11",
+        "W12",
+        "W13",
+        "W14",
+        "W15",
+        "W16",
+        "W17",
+        "W18",
+        "W19",
+        "W20",
+        "W21",
+        "W22",
+        "W23",
+        "W28",
+        "W50",
+        "W51",
+        "W53",
+        "W54",
+        "W55",
+        "W56",
+        "W57",
+        "W58",
+        "W60",
+        "W61",
+        "W62",
+        "W73"
+      ],
+      "owns": [
+        "src/app/integration/**",
+        "src/app/modules.ts",
+        "src/main.ts",
+        "tests/integration/**"
+      ],
+      "sourceInputs": [
+        "docs/project-plan.md",
+        "docs/contracts.md",
+        "verification/feature-ledger.json"
+      ],
+      "deliverables": [
+        "One application entry and composition/provider registration",
+        "Headless Simulation.step, dedicated/listen server, and per-seat presentation assembly",
+        "Complete source-mode playable integration"
+      ],
+      "acceptance": [
+        "Integrate actual accepted official and source-VM providers into one world/scheduler; do not wrap three complete engine loops. Native guest implementation proceeds independently and joins the application in W40.",
+        "Boot every original default and representative cross-family session through the same application entry, using real content and actual CPU/GL backends.",
+        "Run repeated game/map/mod/backend changes, nested cross-provider callbacks, local/remote seat transitions, normal shutdown, and recovery without stale global state.",
+        "Own application imports/registrations and integrated wiring. Request package/build edits through W03; preserve exclusive file ownership.",
+        "Full-matrix, compiled-artifact, performance, and independent review gates remain W67–W72.",
+        "Receive src/main.ts from W73 and reuse its permanent bootstrap/behavior code. Expand the accepted real slice into the complete source feature union."
+      ]
+    },
+    {
+      "id": "W67",
+      "title": "Execute every declared configuration and required behavior suite",
+      "stage": "integration",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W07",
+        "W40",
+        "W63",
+        "W64",
+        "W65",
+        "W66",
+        "W68"
+      ],
+      "owns": [
+        "tools/combinations/**",
+        "verification/matrix/**"
+      ],
+      "sourceInputs": [
+        "verification/product-manifest.json",
+        "verification/feature-ledger.json",
+        "docs/feature-coverage.md",
+        "docs/verification-plan.md"
+      ],
+      "deliverables": [
+        "Deterministic full composition-product generator",
+        "Executed required configuration and behavioral evidence",
+        "Expected-versus-observed coverage reconciliation"
+      ],
+      "acceptance": [
+        "Enumerate stable case IDs for all declared maps, movement, characters, weapons, enemies, asset profiles, rules, mods, backends, seats, and applicable campaign/mode states.",
+        "Do not remove missing adapters, invalid current implementations, failed launches, or missing fixtures from the expected requested domain.",
+        "Execute every required finite product row and mandatory behavioral suite with deterministic shards/resume. Pairwise, boot-only, and sampled runs are development evidence only.",
+        "Complete campaigns, matches, bots, save/replay, guest, network, UI, and service journeys against the common engine, retaining precise original/source comparisons.",
+        "Distinguish finite configured evidence from unbounded play histories and future arbitrary mods. Never claim exhaustive proof outside the executed domain."
+      ]
+    },
+    {
+      "id": "W68",
+      "title": "Measure and implement useful threading and performance work",
+      "stage": "integration",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W04",
+        "W08",
+        "W18",
+        "W66"
+      ],
+      "owns": [
+        "tools/performance/**",
+        "verification/performance/**",
+        "src/world/scheduler.ts",
+        "src/render/cpu/dispatch.ts"
+      ],
+      "sourceInputs": [
+        "verification/reference-environment.json",
+        "verification/reference-targets.json",
+        "src/world/scheduler.ts",
+        "src/render/cpu/dispatch.ts",
+        "docs/verification-plan.md"
+      ],
+      "deliverables": [
+        "Named-machine source/compiled CPU/GL and guest benchmarks",
+        "Measured thread/worker scheduling and dispatch changes where useful",
+        "Frame-time, load-time, memory, host-call, and guest-instruction reports"
+      ],
+      "acceptance": [
+        "Measure original and unified workloads with fixed paths, warmed assets, actual clocks/cadences, distribution statistics, and recorded hardware/driver/runtime conditions.",
+        "Use workers only where measurements justify them; keep simulation ordering, numeric behavior, snapshots, FFI/context ownership, and per-seat behavior deterministic.",
+        "Compare before/after real gameplay and input/network deadlines. Microbenchmarks alone cannot close playability.",
+        "Meet adopted evidence-backed targets and required source cadence. Keep unresolved targets, guest throughput, and backend regressions as release blockers.",
+        "Take the explicit W08/W18 file transfers only after those owners complete. Rebuild and reverify all affected integrated behavior."
+      ]
+    },
+    {
+      "id": "W69",
+      "title": "Qualify exact source and compiled Linux gameplay",
+      "stage": "release",
+      "kind": "verification",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W40",
+        "W67",
+        "W68",
+        "W70"
+      ],
+      "owns": [
+        "verification/linux-release/**",
+        "tools/linux-qualification/**"
+      ],
+      "sourceInputs": [
+        "docs/verification-plan.md",
+        "verification/matrix",
+        "verification/performance",
+        "verification/feature-ledger.json"
+      ],
+      "deliverables": [
+        "Actual Bun-source and compiled-executable Linux CPU/GL qualification",
+        "Physical/display/backend/device records and complete user journeys",
+        "Release artifact hashes linked to all mandatory evidence"
+      ],
+      "acceptance": [
+        "Run the exact candidate through real CPU rasterization and OpenGL gameplay, full required content/modes/compositions, menus, media, controllers, audio, resize/fullscreen, and recovery.",
+        "Exercise dedicated headless service and independent/mixed local/remote clients, guest modules, save/fresh load, replay, downloads, and repeated family/renderer switching.",
+        "Inspect generated art, typography, accessibility, HUD/private seat views, captions, haptics, and runtime cameras on both actual backends.",
+        "Reconcile source and compiled evidence, binary/source/data hashes, source-differential tolerances, all 25 feature rows, and all 40 source-family inventory IDs.",
+        "Any missing required input, unrun cell, failed campaign/objective, guest deficit, or unmet performance gate remains a release blocker."
+      ]
+    },
+    {
+      "id": "W70",
+      "title": "Package the Linux executable and complete player/operator docs",
+      "stage": "release",
+      "kind": "packaging",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W03",
+        "W66",
+        "W40",
+        "W68"
+      ],
+      "owns": [
+        "docs/player-guide.md",
+        "docs/server-guide.md",
+        "docs/content-guide.md",
+        "docs/compatibility.md",
+        "release/**"
+      ],
+      "sourceInputs": [
+        "docs/project-plan.md",
+        "verification/product-manifest.json",
+        "verification/feature-ledger.json",
+        "package.json"
+      ],
+      "deliverables": [
+        "Reviewable Linux release layout and content/library requirements",
+        "Player/server/mod/composition instructions and direct Bun/build invocations",
+        "Compatibility and provenance records with explicit unknowns"
+      ],
+      "acceptance": [
+        "Package the same build entry W69 qualifies, with reproducible commands, source/binary identities, native-library requirements, and checksums.",
+        "Keep commercial game assets external and explain concrete content discovery/mount behavior without duplicating retail data.",
+        "Document all native UI, singleplayer/multiplayer, local-seat, dedicated, save/demo, mod, composition, and service workflows.",
+        "Describe exactly verified source/guest/wire/feature support and outstanding blockers. Do not turn missing implementation into an intentional exclusion."
+      ]
+    },
+    {
+      "id": "W71",
+      "title": "Independently review the combined implementation and evidence",
+      "stage": "release",
+      "kind": "review",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W40",
+        "W67",
+        "W68",
+        "W69",
+        "W70"
+      ],
+      "owns": [],
+      "sourceInputs": [
+        "docs/project-plan.md",
+        "docs/work-packages.json",
+        "docs/feature-coverage.md",
+        "verification/feature-ledger.json",
+        "verification/linux-release"
+      ],
+      "deliverables": [
+        "Read-only independent findings and accepted/refuted correctness claims",
+        "Combined-tree and release-evidence review returned to the lead"
+      ],
+      "acceptance": [
+        "Inspect actual combined code, source differences, runtime evidence, full scope accounting, strict TS policy, and the exact compiled artifact.",
+        "Try to falsify shared ownership, guest byte/ABI semantics, cross-family behavior, campaign/mode closure, network compatibility, backend completeness, and performance claims.",
+        "Report concrete failures with reproduction and responsible work IDs. Return corrections to current file owners; do not edit implementation paths.",
+        "Require changed code/artifacts to invalidate and rerun affected checks. Implementer reports and isolated green suites cannot close this review."
+      ]
+    },
+    {
+      "id": "W72",
+      "title": "Reconcile all required work and close the release",
+      "stage": "release",
+      "kind": "gate",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W01",
+        "W07",
+        "W40",
+        "W67",
+        "W68",
+        "W69",
+        "W70",
+        "W71"
+      ],
+      "owns": [
+        "verification/release-evidence.json",
+        "docs/release-status.md"
+      ],
+      "sourceInputs": [
+        "docs/work-packages.json",
+        "docs/feature-coverage.md",
+        "verification/feature-ledger.json",
+        "verification/linux-release",
+        "verification/performance"
+      ],
+      "deliverables": [
+        "Machine-readable required-versus-executed release ledger",
+        "Final accepted, failed, missing-input, and unknown status with artifact identities"
+      ],
+      "acceptance": [
+        "Every planned package reaches this gate. Every required feature/configuration/campaign/mode/module row has current PASS evidence and resolved independent findings before completion.",
+        "Require source and compiled Linux CPU/GL runs, native guest gameplay/cadence, complete menus/media/seats/bots/saves/network/service behavior, and full feature union.",
+        "Refuse closure for missing required data, silent scope cuts, stale outputs, unsupported adapters, unexecuted rows, unresolved performance, or failed source differentials.",
+        "Report the finite evidence domain and any remaining unknowns accurately. The lead declares completion only from the reconciled actual artifact."
+      ]
+    },
+    {
+      "id": "W73",
+      "title": "Prove the first actual mixed-game executable before bulk content",
+      "stage": "integration",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W03",
+        "W06",
+        "W08",
+        "W09",
+        "W10",
+        "W11",
+        "W13",
+        "W14",
+        "W15",
+        "W16",
+        "W17",
+        "W18",
+        "W19",
+        "W20",
+        "W22",
+        "W23",
+        "W24",
+        "W26",
+        "W52",
+        "W63",
+        "W64",
+        "W74"
+      ],
+      "owns": [
+        "src/app/bootstrap/**",
+        "src/main.ts",
+        "tests/first-playable/**",
+        "verification/first-playable/**"
+      ],
+      "sourceInputs": [
+        "docs/project-plan.md",
+        "verification/reference-cases",
+        "docs/verification-plan.md",
+        "../qfiles"
+      ],
+      "deliverables": [
+        "Permanent native application bootstrap and first real cross-game playable profiles",
+        "Bun source CPU/GL singleplayer and coop evidence",
+        "Accepted composition/ownership contracts for dependent full-content extraction"
+      ],
+      "acceptance": [
+        "Run a pinned Q2 map with Q1 movement and a Q3 character, and Q2 characters through a pinned Q1 rerelease campaign specimen, using all real providers required by each specimen.",
+        "Drive actual SDL input, collision, weapons/damage/ammo/events, an authored mission gate, save/fresh load, and map transition through both real CPU and OpenGL backends.",
+        "Run actual distinct coop clients, including a local-seat/remote combination, with headless server separation and correct private/shared effects.",
+        "Use W74's permanent source-derived providers and real map entities. Stubs, dropped unsupported spawns, UI mockups, and synthetic-only fixtures cannot pass.",
+        "Accept the concrete combat/progression authority, callback return, source clock/prediction, guest-view boundary, and per-seat ownership contracts before W42–W49 bulk content begins.",
+        "Own initial src/main.ts and transfer it explicitly to W66. Full official content, complete menus, native binaries, and release qualification remain later required work."
+      ]
+    },
+    {
+      "id": "W74",
+      "title": "Extract permanent behaviors for the two early playable specimens",
+      "stage": "integration",
+      "kind": "implementation",
+      "status": "planned",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "dependsOn": [
+        "W02",
+        "W05",
+        "W41"
+      ],
+      "owns": [
+        "src/content/q1/foundation/**",
+        "src/content/q2/foundation/**",
+        "src/content/q3/foundation/**",
+        "tests/gameplay/foundation/**"
+      ],
+      "sourceInputs": [
+        "../qsrc/quake",
+        "../qsrc/quake-rerelease-qc",
+        "../qsrc/quake-2",
+        "../qsrc/quake-iii-arena",
+        "../quake-1-re-ts",
+        "../quake-2-re-ts",
+        "../quake-3-ts",
+        "verification/reference-cases"
+      ],
+      "deliverables": [
+        "Small permanent Q1/Q2/Q3 behavior modules reused by full family packages",
+        "Complete source behavior for the chosen actual map/entity/gate specimens",
+        "Source-differential behavior and callback records"
+      ],
+      "acceptance": [
+        "Pin two real map specimens and enumerate every spawned/reached entity behavior, required combat interaction, authored gate, and transition before coding.",
+        "Implement the actual source-derived behaviors needed by those specimens, including Q1 firing/projectiles, Q2 player/enemy reactions, Q3 character presentation, inventory/ammo, movers/triggers, and required campaign gate/exit state.",
+        "Use W41's single actor/combat/transition authority and preserve immediate typed callback returns and source timing. No competing family frame loops.",
+        "Keep these modules as the source of truth for W42–W49 reuse; do not create throwaway fixture implementations or later duplicate them.",
+        "Source-differential component evidence closes this extraction package. W73 separately proves the real complete executable, CPU/GL presentation, saves, transition, and coop."
+      ]
+    }
+  ]
+}

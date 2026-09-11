@@ -2,6 +2,8 @@
 
 This assessment grounds the unified-engine plan in the adjacent TypeScript ports and the installed reference corpus. It records the state inspected on 2026-09-10. Implementation has not started. Source inspection establishes available mechanisms and concrete gaps; inherited release labels and historical test reports do not establish a passing baseline for the combined engine.
 
+Detailed evidence is preserved in the [Q1 interoperability assessment](research/q1-interoperability.md), [Q2 interoperability assessment](research/q2-interoperability.md), and [mod execution contracts](research/mod-execution.md). These reports retain exact source comparisons, bounded observations, and commands for reproducing the inspections. Their historical test and runtime claims retain the qualifications recorded by each investigator.
+
 The user identified Q1/Q2 implementation quality as suspect and Q3 as the stronger port. This changes how the sources are used. Their product intent remains valuable, but no imported implementation receives blanket authority because it is called a direct port. All requested game content and functionality remain completion requirements. Inherited omissions are work to finish, not accepted exclusions.
 
 Three kinds of evidence remain separate throughout the plan:

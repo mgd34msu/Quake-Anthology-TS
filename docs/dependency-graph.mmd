@@ -1,0 +1,411 @@
+flowchart TD
+  %% Generated from docs/work-packages.json. Labels and every dependency are canonical.
+  subgraph foundation["foundation"]
+    W01["W01: Inventory required features, content, and common code lineage"]
+    W02["W02: Capture authoritative behavior and performance baselines"]
+    W03["W03: Establish strict TypeScript policy and one Bun build entry"]
+    W04["W04: Build verification interfaces and evidence accounting"]
+    W05["W05: Freeze shared contracts and explicit game differences"]
+    W06["W06: Reuse and qualify Linux SDL2 and native library bindings"]
+    W07["W07: Close missing required content and Quake 64 manifests"]
+    W08["W08: Consolidate common engine services and session lifetimes"]
+  end
+  subgraph formats["formats"]
+    W09["W09: Load archives and resolve independent content profiles"]
+    W10["W10: Read Quake 1 maps and extended collision data"]
+    W11["W11: Read Quake 2 classic and rerelease maps"]
+    W12["W12: Read Quake 3 maps and patch surfaces"]
+    W13["W13: Read Quake 1 and Quake 2 models and sprites"]
+    W14["W14: Read Quake 3 and skeletal model formats"]
+    W15["W15: Consolidate images, palettes, lighting, and material scripts"]
+  end
+  subgraph world["world"]
+    W16["W16: Prove shared collision and Q1 solid-space construction"]
+  end
+  subgraph render_media["render-media"]
+    W17["W17: Consolidate scene preparation and render commands"]
+    W18["W18: Implement the complete CPU rasterizer"]
+    W19["W19: Implement the complete OpenGL renderer"]
+    W20["W20: Consolidate audio decoding, mixing, and spatial playback"]
+    W21["W21: Preserve cinematics, typography, localization, and captions"]
+  end
+  subgraph runtime_ui["runtime-ui"]
+    W22["W22: Consolidate per-seat input, controls, console, and capture"]
+    W23["W23: Save complete shared worlds and original profile state"]
+    W59["W59: Build the common SDL menu, HUD, and settings system"]
+    W60["W60: Build complete content, campaign, composition, and save menus"]
+    W61["W61: Build server, lobby, local-seat, bot, and administration menus"]
+    W62["W62: Generate and review reusable native-menu raster art"]
+  end
+  subgraph movement["movement"]
+    W24["W24: Extract Quake 1 movement and source timing profiles"]
+    W25["W25: Extract Quake 2 movement with matching prediction"]
+    W26["W26: Separate Quake 3 movement from weapon and animation choices"]
+  end
+  subgraph execution["execution"]
+    W27["W27: Host QuakeC with private authoritative guest memory"]
+    W28["W28: Resolve the TypeScript QuakeC compiler and union-source lane"]
+    W29["W29: Host all Quake 3 QVM roles and legacy scripted interfaces"]
+    W30["W30: Define TypeScript guest memory and CPU execution contracts"]
+    W31["W31: Load PE32 and PE32+ modules in TypeScript"]
+    W32["W32: Load ELF32 and ELF64 modules in TypeScript"]
+    W33["W33: Execute i386 integer and control-flow instructions"]
+    W34["W34: Execute x86-64 integer and control-flow instructions"]
+    W35["W35: Execute x87 and SSE floating-point behavior"]
+    W36["W36: Implement Windows and System V guest calls and callbacks"]
+    W37["W37: Implement reached guest OS, CRT, and C++ runtime services"]
+    W38["W38: Host Q2 native API 3 and rerelease game/cgame records"]
+    W39["W39: Host Q3 native qagame, cgame, and UI interfaces"]
+    W40["W40: Integrate native semantic bindings and prove real guest gameplay"]
+  end
+  subgraph gameplay["gameplay"]
+    W41["W41: Prove single actor, combat, and callback authority"]
+    W42["W42: Extract Quake 1 base gameplay into typed behavior providers"]
+    W43["W43: Extract Quake 1 mission-pack behaviors"]
+    W44["W44: Extract Quake 1 rerelease additions, CTF, and horde"]
+    W45["W45: Extract Quake 2 base gameplay and source behavior"]
+    W46["W46: Extract Quake 2 Xatrix and Rogue expansions"]
+    W47["W47: Extract Quake 2 CTF and LMCTF behaviors"]
+    W48["W48: Extract the complete Quake 2 rerelease feature set"]
+    W49["W49: Extract Quake 3 and Team Arena gameplay providers"]
+    W50["W50: Compose official gameplay and source-VM semantics"]
+    W51["W51: Preserve campaign, round, achievement, and lobby state"]
+  end
+  subgraph network["network"]
+    W52["W52: Consolidate transport, sessions, discovery, and service workflows"]
+    W53["W53: Preserve NetQuake and QuakeWorld wire behavior"]
+    W54["W54: Preserve Quake 2 classic, wide, and rerelease protocols"]
+    W55["W55: Preserve Quake 3 and Team Arena protocols"]
+    W56["W56: Preserve demos, MVD, replay, and spectator controls"]
+  end
+  subgraph bots["bots"]
+    W57["W57: Consolidate bot behavior, combat, and team orders"]
+    W58["W58: Construct navigation for every required map format"]
+  end
+  subgraph verification["verification"]
+    W63["W63: Build independent format, media, render, and runtime-tool cases"]
+    W64["W64: Build independent gameplay, campaign, seat, and UI cases"]
+    W65["W65: Build independent guest, protocol, and service cases"]
+  end
+  subgraph integration["integration"]
+    W66["W66: Integrate one source simulation and complete native SDL client"]
+    W67["W67: Execute every declared configuration and required behavior suite"]
+    W68["W68: Measure and implement useful threading and performance work"]
+    W73["W73: Prove the first actual mixed-game executable before bulk content"]
+    W74["W74: Extract permanent behaviors for the two early playable specimens"]
+  end
+  subgraph release["release"]
+    W69["W69: Qualify exact source and compiled Linux gameplay"]
+    W70["W70: Package the Linux executable and complete player/operator docs"]
+    W71["W71: Independently review the combined implementation and evidence"]
+    W72["W72: Reconcile all required work and close the release"]
+  end
+  W01 --> W05
+  W01 --> W07
+  W03 --> W08
+  W05 --> W08
+  W01 --> W09
+  W05 --> W09
+  W02 --> W10
+  W05 --> W10
+  W02 --> W11
+  W05 --> W11
+  W02 --> W12
+  W05 --> W12
+  W02 --> W13
+  W05 --> W13
+  W02 --> W14
+  W05 --> W14
+  W02 --> W15
+  W05 --> W15
+  W05 --> W16
+  W10 --> W16
+  W11 --> W16
+  W12 --> W16
+  W05 --> W17
+  W13 --> W17
+  W14 --> W17
+  W15 --> W17
+  W02 --> W18
+  W05 --> W18
+  W06 --> W18
+  W02 --> W19
+  W05 --> W19
+  W06 --> W19
+  W05 --> W20
+  W06 --> W20
+  W09 --> W20
+  W05 --> W21
+  W06 --> W21
+  W09 --> W21
+  W05 --> W22
+  W06 --> W22
+  W08 --> W22
+  W05 --> W23
+  W08 --> W23
+  W41 --> W23
+  W02 --> W24
+  W05 --> W24
+  W16 --> W24
+  W02 --> W25
+  W05 --> W25
+  W16 --> W25
+  W02 --> W26
+  W05 --> W26
+  W16 --> W26
+  W02 --> W27
+  W05 --> W27
+  W08 --> W27
+  W01 --> W28
+  W02 --> W28
+  W05 --> W28
+  W27 --> W28
+  W02 --> W29
+  W05 --> W29
+  W08 --> W29
+  W02 --> W30
+  W05 --> W30
+  W30 --> W31
+  W30 --> W32
+  W30 --> W33
+  W30 --> W34
+  W30 --> W35
+  W30 --> W36
+  W30 --> W37
+  W36 --> W37
+  W05 --> W38
+  W08 --> W38
+  W16 --> W38
+  W30 --> W38
+  W36 --> W38
+  W37 --> W38
+  W05 --> W39
+  W08 --> W39
+  W16 --> W39
+  W29 --> W39
+  W30 --> W39
+  W36 --> W39
+  W37 --> W39
+  W02 --> W40
+  W23 --> W40
+  W31 --> W40
+  W32 --> W40
+  W33 --> W40
+  W34 --> W40
+  W35 --> W40
+  W36 --> W40
+  W37 --> W40
+  W38 --> W40
+  W39 --> W40
+  W54 --> W40
+  W55 --> W40
+  W65 --> W40
+  W50 --> W40
+  W66 --> W40
+  W02 --> W41
+  W05 --> W41
+  W30 --> W41
+  W02 --> W42
+  W05 --> W42
+  W41 --> W42
+  W73 --> W42
+  W02 --> W43
+  W05 --> W43
+  W41 --> W43
+  W42 --> W43
+  W73 --> W43
+  W02 --> W44
+  W05 --> W44
+  W27 --> W44
+  W41 --> W44
+  W42 --> W44
+  W73 --> W44
+  W02 --> W45
+  W05 --> W45
+  W41 --> W45
+  W73 --> W45
+  W02 --> W46
+  W05 --> W46
+  W41 --> W46
+  W45 --> W46
+  W73 --> W46
+  W02 --> W47
+  W05 --> W47
+  W41 --> W47
+  W45 --> W47
+  W73 --> W47
+  W02 --> W48
+  W05 --> W48
+  W41 --> W48
+  W45 --> W48
+  W73 --> W48
+  W02 --> W49
+  W05 --> W49
+  W41 --> W49
+  W73 --> W49
+  W24 --> W50
+  W25 --> W50
+  W26 --> W50
+  W27 --> W50
+  W29 --> W50
+  W41 --> W50
+  W42 --> W50
+  W43 --> W50
+  W44 --> W50
+  W45 --> W50
+  W46 --> W50
+  W47 --> W50
+  W48 --> W50
+  W49 --> W50
+  W23 --> W51
+  W41 --> W51
+  W42 --> W51
+  W43 --> W51
+  W44 --> W51
+  W45 --> W51
+  W46 --> W51
+  W47 --> W51
+  W48 --> W51
+  W49 --> W51
+  W05 --> W52
+  W06 --> W52
+  W08 --> W52
+  W24 --> W53
+  W27 --> W53
+  W52 --> W53
+  W25 --> W54
+  W52 --> W54
+  W26 --> W55
+  W29 --> W55
+  W52 --> W55
+  W23 --> W56
+  W53 --> W56
+  W54 --> W56
+  W55 --> W56
+  W02 --> W57
+  W05 --> W57
+  W41 --> W57
+  W05 --> W58
+  W09 --> W58
+  W16 --> W58
+  W05 --> W59
+  W06 --> W59
+  W17 --> W59
+  W21 --> W59
+  W22 --> W59
+  W09 --> W60
+  W23 --> W60
+  W50 --> W60
+  W51 --> W60
+  W59 --> W60
+  W22 --> W61
+  W52 --> W61
+  W53 --> W61
+  W54 --> W61
+  W55 --> W61
+  W57 --> W61
+  W58 --> W61
+  W59 --> W61
+  W01 --> W62
+  W05 --> W62
+  W01 --> W63
+  W02 --> W63
+  W04 --> W63
+  W05 --> W63
+  W01 --> W64
+  W02 --> W64
+  W04 --> W64
+  W05 --> W64
+  W01 --> W65
+  W02 --> W65
+  W04 --> W65
+  W05 --> W65
+  W03 --> W66
+  W06 --> W66
+  W08 --> W66
+  W09 --> W66
+  W10 --> W66
+  W11 --> W66
+  W12 --> W66
+  W13 --> W66
+  W14 --> W66
+  W15 --> W66
+  W16 --> W66
+  W17 --> W66
+  W18 --> W66
+  W19 --> W66
+  W20 --> W66
+  W21 --> W66
+  W22 --> W66
+  W23 --> W66
+  W28 --> W66
+  W50 --> W66
+  W51 --> W66
+  W53 --> W66
+  W54 --> W66
+  W55 --> W66
+  W56 --> W66
+  W57 --> W66
+  W58 --> W66
+  W60 --> W66
+  W61 --> W66
+  W62 --> W66
+  W73 --> W66
+  W07 --> W67
+  W40 --> W67
+  W63 --> W67
+  W64 --> W67
+  W65 --> W67
+  W66 --> W67
+  W68 --> W67
+  W02 --> W68
+  W04 --> W68
+  W08 --> W68
+  W18 --> W68
+  W66 --> W68
+  W40 --> W69
+  W67 --> W69
+  W68 --> W69
+  W70 --> W69
+  W03 --> W70
+  W66 --> W70
+  W40 --> W70
+  W68 --> W70
+  W40 --> W71
+  W67 --> W71
+  W68 --> W71
+  W69 --> W71
+  W70 --> W71
+  W01 --> W72
+  W07 --> W72
+  W40 --> W72
+  W67 --> W72
+  W68 --> W72
+  W69 --> W72
+  W70 --> W72
+  W71 --> W72
+  W03 --> W73
+  W06 --> W73
+  W08 --> W73
+  W09 --> W73
+  W10 --> W73
+  W11 --> W73
+  W13 --> W73
+  W14 --> W73
+  W15 --> W73
+  W16 --> W73
+  W17 --> W73
+  W18 --> W73
+  W19 --> W73
+  W20 --> W73
+  W22 --> W73
+  W23 --> W73
+  W24 --> W73
+  W26 --> W73
+  W52 --> W73
+  W63 --> W73
+  W64 --> W73
+  W74 --> W73
+  W02 --> W74
+  W05 --> W74
+  W41 --> W74
