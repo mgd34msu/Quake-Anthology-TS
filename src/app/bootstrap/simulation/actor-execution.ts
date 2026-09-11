@@ -1,5 +1,5 @@
 import type { ContentId } from "../../../contracts/content.ts";
-import type { OwnedActor } from "../../../contracts/identity.ts";
+import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { FrameContext, SourceTime } from "../../../contracts/time.ts";
@@ -16,7 +16,9 @@ import type { SharedPhysics, SharedPhysicsFlags, SharedSolid } from "./physics.t
 export type ActorExecution =
   | { readonly kind: "q1"; readonly entity: Q1Actor; readonly services: Q1EntityServices; readonly content: ContentId }
   | { readonly kind: "q2"; readonly entity: Q2Entity; readonly services: Q2EntityServices; readonly content: ContentId;
-      readMonster(): MonsterState | undefined };
+      readMonster(): MonsterState | undefined }
+  | { readonly kind: "q3"; readonly actor: OwnedActor; readonly owner: ActorId; readonly provider: ProviderId; readonly content: ContentId;
+      step(previousMilliseconds: number, milliseconds: number): void };
 
 export interface ActorExecutionFrame {
   readonly actors: SessionActorRegistry;
@@ -35,6 +37,7 @@ function seconds(time: SourceTime): number { return time.kind === "seconds" ? ti
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 
 export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
+  if (entry.kind === "q3") return { actor: entry.actor, velocity: body.velocity, angularVelocity: { x: 0, y: 0, z: 0 }, kind: "stationary", gravity: 1, gravityVector: down, clipMask: 0x6000001, owner: entry.owner };
   const entity = entry.entity;
   if (entry.kind === "q2") return { actor: entry.entity.actor, velocity: body.velocity, angularVelocity: entry.entity.angularVelocity,
     kind: entry.entity.motion, gravity: entry.entity.gravity, gravityVector: entry.entity.gravityVector, clipMask: entry.entity.clipMask, owner: entry.entity.owner };
@@ -44,6 +47,7 @@ export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
 }
 
 export function actorCollision(entry: ActorExecution): SharedSolid {
+  if (entry.kind === "q3") return { family: "q3", solid: "none", model: null, owner: entry.owner };
   if (entry.kind === "q1") {
     const entity = entry.entity;
     return { family: "q1", solid: entity.solid === "none" ? "none" : entity.solid === "trigger" ? "trigger" : entity.solid === "bsp" ? "brush" : "box",
@@ -55,6 +59,7 @@ export function actorCollision(entry: ActorExecution): SharedSolid {
 }
 
 export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
+  if (entry.kind === "q3") return {};
   if (entry.kind === "q1") {
     const entity = entry.entity;
     return { fly: (entity.movementFlags & 1) !== 0, swim: (entity.movementFlags & 2) !== 0, partialGround: (entity.movementFlags & 1024) !== 0,
@@ -66,6 +71,7 @@ export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
 }
 
 export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFlags): undefined {
+  if (entry.kind === "q3") return undefined;
   if (entry.kind === "q1") {
     if (changes.waterLevel !== undefined) entry.entity.waterLevel = changes.waterLevel;
     const waterType = changes.waterType;
@@ -80,7 +86,7 @@ export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFla
   return undefined;
 }
 
-export function executeActor(entry: ActorExecution, context: ActorExecutionFrame): undefined {
+export function executeActor(entry: Exclude<ActorExecution, { readonly kind: "q3" }>, context: ActorExecutionFrame): undefined {
   return entry.kind === "q1" ? executeQ1Actor(entry, context) : executeQ2Actor(entry, context);
 }
 

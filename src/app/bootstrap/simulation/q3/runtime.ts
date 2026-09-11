@@ -131,8 +131,8 @@ export class Q3SourceRuntime {
     this.combat = this.bridge.context;
     const combat = this.combat;
     this.missiles = new MissileRuntime(combat.product === "baseq3"
-      ? { combat, world: this.world, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
-      : { combat, world: this.world, get previousTime() { return runtime.level.previousTime; }, missionpack: {
+      ? { combat, world: this.world, bodies: host.bodies, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
+      : { combat, world: this.world, bodies: host.bodies, get previousTime() { return runtime.level.previousTime; }, missionpack: {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
@@ -449,6 +449,7 @@ export class Q3SourceRuntime {
 
   runActor(actor: OwnedActor): void {
     const entity = this.records.byActor(actor.id);
+    if (entity !== null && this.missiles.runOwned(actor)) return;
     if (entity === null || entity.slot === 1022 || this.pool.expireEvents(entity) !== "active") return;
     if (entity.neverFree && this.world.linkState(entity.slot)?.linked !== true) return;
     if (entity.s.eType === EntityType.ET_MISSILE) this.missiles.run(entity);

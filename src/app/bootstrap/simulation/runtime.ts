@@ -253,7 +253,7 @@ export class SharedSimulation implements Simulation {
       },
       writeAngularVelocity: (actor, velocity) => {
         const entry = this.actorExecutions.get(actor.id);
-        if (entry !== undefined) entry.entity.angularVelocity = velocity;
+        if (entry !== undefined && entry.kind !== "q3") entry.entity.angularVelocity = velocity;
         return undefined;
       },
       onBlocked: (actor, other) => {
@@ -319,6 +319,7 @@ export class SharedSimulation implements Simulation {
       const ballistics = new Q3SharedBallistics({ actors: this.actors, bodies: this.bodies, scene: this.scene, combat: this.combat,
         weaponProvider: this.weaponProvider.provider, numeric: providerTiming(this.recipe, this.weaponProvider.provider).numeric, random: this.selectedRandom,
         time: () => this.selectedMilliseconds,
+        projectile: (actor, owner, step) => { this.registerActorExecution({ kind: "q3", actor, owner, step, provider: this.weaponProvider.provider, content: this.weaponProvider.content }); },
         // Current foreign match selections do not expose Q3 GT_TEAM; CTF is a distinct mode.
         teamDeathmatch: () => false, isPlayer: actor => this.player(actor) !== null,
         teamGame: () => {
@@ -449,7 +450,7 @@ export class SharedSimulation implements Simulation {
     const selected = new SelectedMonsters(selection, map, { attach: (actor, definition, mission) => this.attachMonster(actor, definition, mission),
       resume: (actor, activator) => {
         const entry = this.actorExecutions.get(actor);
-        if (entry === undefined) throw new Error("Activated monster has no source continuation");
+        if (entry === undefined || entry.kind === "q3") throw new Error("Activated monster has no creature source continuation");
         if (entry.kind === "q1") {
           const start = entry.entity.think; entry.services.cancel(entry.entity);
           start?.();
@@ -461,8 +462,8 @@ export class SharedSimulation implements Simulation {
         }
         return undefined;
       },
-      enemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.enemy ?? null : entry?.entity.enemy ?? null; },
-      oldEnemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.oldEnemy ?? null : entry?.readMonster()?.oldEnemy ?? null; },
+      enemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.enemy ?? null : entry?.kind === "q2" ? entry.entity.enemy : null; },
+      oldEnemy: actor => { const entry = this.actorExecutions.get(actor); return entry?.kind === "q1" ? entry.entity.monster?.oldEnemy ?? null : entry?.kind === "q2" ? entry.readMonster()?.oldEnemy ?? null : null; },
       setRoute: (actor, goal, pauseUntil) => {
         const definition = selected.definitions.get(actor);
         if (definition === undefined) throw new Error("Selected route actor has no creature definition");
@@ -1080,7 +1081,7 @@ export class SharedSimulation implements Simulation {
 
   private executionProvider(actor: ActorId): ProviderId | null {
     const entry = this.actorExecutions.get(actor);
-    return entry === undefined ? null : entry.kind === "q1" ? entry.services.provider : entry.services.options.provider;
+    return entry === undefined ? null : entry.kind === "q3" ? entry.provider : entry.kind === "q1" ? entry.services.provider : entry.services.options.provider;
   }
 
   private monsterTarget(actor: ActorId) {
@@ -1102,7 +1103,7 @@ export class SharedSimulation implements Simulation {
     const source = this.actors.sourceOf(actor);
     const provider = source?.provider ?? this.actors.observe(actor)?.owner ?? "world:unknown";
     if (this.recipe.ordering.kind === "mixed") return [this.recipe.ordering.providers.indexOf(provider), source?.slot ?? actor.slot];
-    return source !== null && source.provider !== this.recipe.map.entities.provider ? [1, actor.slot] : [0, source?.slot ?? actor.slot];
+    return provider !== this.recipe.map.entities.provider ? [1, actor.slot] : [0, source?.slot ?? actor.slot];
   }
 
   private collision(actor: OwnedActor): SharedSolid | null {
@@ -1116,9 +1117,9 @@ export class SharedSimulation implements Simulation {
   }
 
   private registerActorExecution(entry: ActorExecution): undefined {
-    const actor = entry.entity.actor, previous = this.actorExecutions.get(actor.id);
+    const actor = entry.kind === "q3" ? entry.actor : entry.entity.actor, previous = this.actorExecutions.get(actor.id);
     this.actors.assertOwned(actor);
-    if (previous !== undefined && previous.services !== entry.services) throw new Error("Actor already has another source execution owner");
+    if (previous !== undefined && (previous.kind === "q3" || entry.kind === "q3" ? previous !== entry : previous.services !== entry.services)) throw new Error("Actor already has another source execution owner");
     this.actorExecutions.set(actor.id, entry);
     return undefined;
   }
@@ -1148,7 +1149,7 @@ export class SharedSimulation implements Simulation {
   private worldActor(): ActorId | null { return this.actors.atSource(this.recipe.map.entities.provider, this.options.world.kind === "q3-bsp" ? 1022 : 0)?.id ?? null; }
   private player(actor: ActorId | null): MovementPlayer | null { if (actor === null) return null; const owned = this.actors.resolveOwned(actor); return owned === null ? null : this.playerStates.get(owned) ?? null; }
   players(): readonly ActorId[] { return [...this.playerStates.values()].sort((a, b) => a.client.slot - b.client.slot).map(player => player.actor.id); }
-  private classname(actor: ActorId): string { return this.player(actor) !== null ? "player" : this.actorExecutions.get(actor)?.entity.classname ?? ""; }
+  private classname(actor: ActorId): string { const entry = this.actorExecutions.get(actor); return this.player(actor) !== null ? "player" : entry?.kind === "q3" ? "q3:projectile" : entry?.entity.classname ?? ""; }
 
   private powerup(actor: OwnedActor, powerup: Q1Powerup, expires: number): undefined {
     if (powerup === "invulnerability") this.combat.setTraits(actor, { invulnerable: expires > this.timeSeconds });
@@ -1746,10 +1747,9 @@ export class SharedSimulation implements Simulation {
         const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
         if (!paused) this.physics.commitAttachments();
       }
-      if (!paused) this.selectedBallistics?.step(previousSelectedMilliseconds, this.selectedMilliseconds);
-      if (run) {
-        if (this.source.kind === "q2") this.source.monsters.beginFrame(this.source.game);
-        if (this.source.kind === "q3") this.source.game.beginFrame(this.sourceFrame);
+      if (!paused) {
+        if (run && this.source.kind === "q2") this.source.monsters.beginFrame(this.source.game);
+        if (run && this.source.kind === "q3") this.source.game.beginFrame(this.sourceFrame);
         const visited = new Set<OwnedActor>();
         let cursor: readonly [number, number] | null = null;
         for (;;) {
@@ -1767,9 +1767,12 @@ export class SharedSimulation implements Simulation {
           const actor = next.actor;
           cursor = next.position;
           visited.add(actor);
-          if (this.selectedBallistics?.owns(actor) === true) continue;
-          if (this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
           const execution = this.actorExecutions.get(actor.id);
+          if (execution?.kind === "q3") {
+            execution.step(previousSelectedMilliseconds, this.selectedMilliseconds);
+            this.physics.commitAttachments(); continue;
+          }
+          if (!run || this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
           const equipmentPlayer = this.playerStates.get(actor);
           if (equipmentPlayer !== undefined) {
             this.stepHandGrenade(equipmentPlayer);
@@ -1970,6 +1973,7 @@ export class SharedSimulation implements Simulation {
     const result: SimulationPresentation[] = [];
     if (this.source.kind === "q3") result.push(...this.source.game.presentations());
     for (const entry of this.actorExecutions.values()) {
+      if (entry.kind === "q3") continue;
       const body = this.bodies.read(entry.entity.actor.id);
       if (this.selectedMonsters?.active(entry.entity.actor.id) === false) continue;
       if (body === null || this.player(entry.entity.actor.id) !== null || entry.entity.model === "") continue;
@@ -2102,7 +2106,7 @@ export class SharedSimulation implements Simulation {
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
-    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 7 : 1, bytes });
+    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 8 : 1, bytes });
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else providers.push(...captureQ2Product(source.product));
 
@@ -2116,7 +2120,7 @@ export class SharedSimulation implements Simulation {
       portals: [...this.areaPortals].map(([portal, open]) => ({ portal, open })),
       selectedBallistics: this.selectedBallistics === null ? null : { milliseconds: this.selectedMilliseconds, randomSeed: this.selectedRandom.seed,
         weaponStatistics: this.selectedBallistics.checkpointWeaponStatistics().map(state => ({ ...state, actor: savedActorId(state.actor.id) })),
-        projectiles: this.selectedBallistics.checkpoint().map(state => ({ ...state, actor: savedActorId(state.actor.id), owner: savedActorId(state.owner.id) })) },
+        projectiles: this.selectedBallistics.checkpoint() },
       handGrenades: this.handGrenades?.capture() ?? null, grapple: this.grapple?.capture() ?? null, weaponSlots: [...this.weaponSlots].map(([actor, slot]) => ({ actor: savedActorId(actor), state: slot.snapshot() })),
       selectedMonsters: this.captureSelectedMonsters(),
       selectedArsenals: this.selectedArsenal === null ? null : this.players().map(actor => ({ actor: savedActorId(actor), state: this.selectedArsenal?.capture(actor) })),
@@ -2175,7 +2179,7 @@ export class SharedSimulation implements Simulation {
     if (this.selectedBallistics !== null) {
       this.selectedMilliseconds = selectedBallistics.field("milliseconds").finite();
       this.selectedRandom.reset(selectedBallistics.field("randomSeed").integer());
-      this.selectedBallistics.restore(readQ3ProjectileStates(selectedBallistics.field("projectiles"), owner));
+      this.selectedBallistics.restore(readQ3ProjectileStates(selectedBallistics.field("projectiles"), owner, saved => this.actors.referenceSaved(saved)));
       this.selectedBallistics.restoreWeaponStatistics(readQ3WeaponStatistics(selectedBallistics.field("weaponStatistics"), owner));
     } else if (selectedBallistics.value !== undefined && selectedBallistics.value !== null) selectedBallistics.fail("Saved selected ballistics has no matching authority");
     const selected = reader.field("selectedArsenals");

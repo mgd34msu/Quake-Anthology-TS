@@ -253,6 +253,7 @@ export class Q3ApplicationEffects {
           settings: () => ({ oldRail: false, railTrailTime: 400 }), clientInfo: media.host.clientInfo }, 0, { ...event.origin }, event.end);
         return;
       case "impact": {
+        this.projectiles.delete(event.actor);
         if ((event.surfaceFlags & 16) !== 0) return;
         if (event.hitKind === "flesh") {
           if (event.target !== null) {
