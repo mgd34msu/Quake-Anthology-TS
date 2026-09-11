@@ -1,3 +1,6 @@
+import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
+import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
+import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
 import { Q3SharedBallistics, readQ3ProjectileStates } from "./q3-ballistics.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
@@ -8,7 +11,8 @@ import { playerMovementEnvironment } from "./player-movement.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ContentId, ExecutableRecipe, ProviderReference, ResolvedResourceReference } from "../../../contracts/content.ts";
-import type { AttackProvenance, TransitionIntent } from "../../../contracts/gameplay.ts";
+import type { PickupSupplyProfile } from "../../../contracts/pickups.ts";
+import type { AttackProvenance, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -73,6 +77,10 @@ const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 function subtract(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
 function seconds(time: SourceTime): number { return time.kind === "seconds" ? time.value : time.value / 1000; }
+function replacedSupplyItems(profile: PickupSupplyProfile): readonly ItemId[] {
+  const mappings = [...profile.ammo, ...profile.weapons], retained = new Set(mappings.flatMap(mapping => mapping.destinations));
+  return mappings.map(mapping => mapping.source).filter(source => !retained.has(source));
+}
 function sourceModel(path: string): number | null { return /^\*[0-9]+$/.test(path) ? Number(path.slice(1)) : null; }
 
 
@@ -285,13 +293,37 @@ export class SharedSimulation implements Simulation {
           movementProvider: this.recipe.movement.provider, cause: { kind: "q3", meansOfDeath: method, damageFlags: flags } }),
         event: event => this.events.emit(this.weaponProvider.content, { kind: "q3-ballistics", event }) });
       this.selectedBallistics = ballistics;
-      this.selectedArsenal = new Q3SelectedArsenal({ provider: this.weaponProvider.provider, product: "baseq3", inventory: this.inventory,
+      const q1Supply = this.source.kind === "q1" && this.source.composition.selection.program === "id1" ? {
+        profile: Q1_Q3_SUPPLY_PROFILE.id, loadout: q1Q3SupplyLoadout(this.weaponProvider.provider),
+        replacedItems: replacedSupplyItems(Q1_Q3_SUPPLY_PROFILE),
+      } : undefined;
+      const q2Supply = this.source.kind === "q2" && this.source.product.configuration.program === "baseq2"
+        && (this.source.product.configuration.match === undefined || this.source.product.configuration.match.kind === "standard") ? {
+          profile: Q2_Q3_SUPPLY_PROFILE.id, loadout: q3SpawnLoadout(this.weaponProvider.provider, "baseq3", false),
+          replacedItems: [...replacedSupplyItems(Q2_Q3_SUPPLY_PROFILE), "q2:weapon_blaster"] satisfies readonly ItemId[],
+        } : undefined;
+      const supply = q1Supply ?? q2Supply;
+      const selectedArsenal = new Q3SelectedArsenal({ ...(supply === undefined ? {} : { supply }), provider: this.weaponProvider.provider, product: "baseq3", inventory: this.inventory,
         fire: (actor, weapon, input) => {
           ballistics.fire(actor, weapon, input);
           if (this.source.kind === "q1") this.source.composition.fired(actor.id, q3WeaponItem(weapon)?.item ?? null);
           return undefined;
         },
         useHoldable: () => { throw new Error("Selected foreign Q3 holdable services are not implemented"); } });
+      this.selectedArsenal = selectedArsenal;
+      if (q1Supply !== undefined && this.source.kind === "q1") {
+        const game = this.source.game;
+        game.pickupAdmission = new SharedPickupAdmission({ inventory: this.inventory, profile: Q1_Q3_SUPPLY_PROFILE,
+          ammoGranted: (actor, grants) => { selectedArsenal.pickupAmmo(actor, grants, game.player(actor.id)?.autoSwitch !== "never");
+            this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; },
+          weaponGranted: (actor, weapons, selection) => { selectedArsenal.pickupWeapons(actor, weapons, selection);
+            this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; } });
+      } else if (q2Supply !== undefined && this.source.kind === "q2") {
+        this.source.items.setPickupAdmission(new SharedPickupAdmission({ inventory: this.inventory, profile: Q2_Q3_SUPPLY_PROFILE,
+          ammoGranted: actor => { this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; },
+          weaponGranted: (actor, weapons, selection) => { selectedArsenal.pickupWeapons(actor, weapons, selection);
+            this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; } }));
+      }
     }
     try {
     options.monsterNavigation?.install(this, this.q1Movement);

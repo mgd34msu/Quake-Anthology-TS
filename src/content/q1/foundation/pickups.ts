@@ -54,6 +54,7 @@ function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
   if (ammo !== null) return { model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
     respawn: game.options.deathmatch === 3 || game.options.deathmatch === 5 ? 15 : 30,
     take: (runtime, _entity, player) => {
+      if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, ammo) ? "taken" : "refused";
       const best = runtime.chooseBest(player.actor);
       if (runtime.host.inventory.give(player.actor, ammo.item, ammo.amount) === 0) return "refused";
       if (player.weapon === best && player.autoSwitch !== "never") runtime.selectWeapon(player.actor, runtime.chooseBest(player.actor)); return "taken";
@@ -80,6 +81,15 @@ function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
 }
 function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
   const leave = game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch));
+  if (game.pickupAdmission !== null) {
+    const owned = game.pickupAdmission.owns(player.actor.id, weaponItem(weapon));
+    if (leave && owned) return "refused";
+    const ammo = ammoItem(weapon), amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
+    const autoSwitch = player.autoSwitch === "always" || player.autoSwitch === "new" && !owned;
+    const accepted = game.pickupAdmission.weapon(player.actor, { item: weaponItem(weapon), ammo: ammo === null ? [] : [{ item: ammo, amount }] },
+      !autoSwitch ? "never" : game.options.deathmatch === 0 ? "always" : "better");
+    return !accepted ? "refused" : leave ? "leave" : "taken";
+  }
   const owned = game.host.inventory.count(player.actor.id, weaponItem(weapon)) > 0;
   if (leave && owned) return "refused";
   game.host.inventory.give(player.actor, weaponItem(weapon), 1);

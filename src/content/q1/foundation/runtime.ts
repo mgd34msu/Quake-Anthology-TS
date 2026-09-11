@@ -3,6 +3,7 @@ import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { CombatState, DamageOutcome, DamagePreparation, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
+import type { PickupAdmission } from "../../../contracts/pickups.ts";
 import type { Q1CombatContext, Q1DamageSourceEffects } from "../../../world/gameplay/policies.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity, Q1Map } from "../../../formats/q1-map/index.ts";
@@ -59,6 +60,7 @@ export class Q1Foundation {
     },
   };
   pickupRules: Q1PickupRules | null = null;
+  pickupAdmission: PickupAdmission | null = null;
   private readonly weaponRules = new Map<string, Q1WeaponRules>();
   readonly registeredWeapons = new Map<Q1Weapon, Q1WeaponDefinition>();
   readonly playerExtensions = new Map<string, Q1PlayerExtension>();

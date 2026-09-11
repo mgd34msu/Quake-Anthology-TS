@@ -18,6 +18,9 @@ import type { TraceResult } from "../../../../src/contracts/scene.ts";
 import { inhibitQ2Spawn, parseQ2Entities } from "../../../../src/content/q2/foundation/fields.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ2Bsp } from "../../../../src/formats/q2-map/index.ts";
+import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
+import { Q2_Q3_SUPPLY_PROFILE } from "../../../../src/content/composition/q2-q3-supply.ts";
+import { Q3_WEAPON_ITEMS, q3SpawnLoadout } from "../../../../src/content/q3/foundation/arsenal.ts";
 
 const options: Q2GameOptions = { edition: "classic", mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0,
   maxClients: 4, provider: "q2:official", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" };
@@ -71,6 +74,64 @@ function targetGame(selected: Q2GameOptions = options) {
 }
 
 describe("Q2 permanent gameplay foundation", () => {
+  test("selected Q3 supply consumes retail base1 weapons and preserves Q2 refusal, drops and respawn", async () => {
+    const archive = await openArchive(`${import.meta.dir}/../../../../../qfiles/q2/baseq2/pak0.pak`);
+    try {
+      const entry = archive.findEntries("maps/base1.bsp")[0];
+      if (entry === undefined) throw new Error("Missing base1");
+      const authored = parseQ2Entities(readQ2Bsp(await archive.readEntry(entry)).entities).find(entity => entity.classname === "weapon_shotgun");
+      if (authored === undefined) throw new Error("Missing retail shotgun");
+      for (const mode of ["singleplayer", "coop", "deathmatch"] satisfies readonly Q2GameOptions["mode"][]) {
+        const { game, host, player, items } = targetGame({ ...options, mode });
+        for (const item of q3SpawnLoadout("q3:arsenal", "baseq3", false).ammo) host.inventory.configure(player, item);
+        for (const mapping of Q2_Q3_SUPPLY_PROFILE.weapons) for (const destination of mapping.destinations) expect(Q3_WEAPON_ITEMS.some(item => item.item === destination)).toBe(true);
+        const selected: string[] = [];
+        const selections: string[] = [];
+        items.setPickupAdmission(new SharedPickupAdmission({ inventory: host.inventory, profile: Q2_Q3_SUPPLY_PROFILE,
+          ammoGranted: () => undefined, weaponGranted: (_actor, weapons, selection) => { selected.push(...weapons); selections.push(selection); return undefined; } }));
+        const shotgun = game.create(authored.classname, authored.values); expect(items.spawn(shotgun, game)).toBe(true);
+        items.touch(shotgun, game, player.id);
+        expect(host.inventory.count(player.id, "q3:weapon/shotgun")).toBe(1);
+        expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(10);
+        expect(host.inventory.count(player.id, "q2:weapon_shotgun")).toBe(0);
+        expect(selected).toEqual(["q3:weapon/shotgun"]);
+        expect(selections).toEqual(["always"]);
+        if (mode === "coop") { items.touch(shotgun, game, player.id); expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(10); }
+        if (mode === "deathmatch") { expect(host.actors.isLive(shotgun.actor.id)).toBe(true); expect(shotgun.visible).toBe(false); }
+        if (mode === "singleplayer") expect(host.actors.isLive(shotgun.actor.id)).toBe(false);
+        for (const flags of [0x10000, 0x20000]) {
+          const dropped = game.create("weapon_shotgun", new Map([["spawnflags", String(flags)]])); items.spawn(dropped, game);
+          const before = host.inventory.count(player.id, "q3:ammo/shotgun"); items.touch(dropped, game, player.id);
+          expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(before + (flags === 0x10000 ? 0 : 10));
+          expect(host.actors.isLive(dropped.actor.id)).toBe(false);
+        }
+        host.inventory.give(player, "q3:ammo/grenadelauncher", 200);
+        const report = game.load('{ "classname" "ammo_grenades" "target" "attempt" } { "classname" "target_secret" "targetname" "attempt" }');
+        const grenades = report.spawned[0]; if (grenades === undefined) throw new Error("Missing grenades");
+        items.touch(grenades, game, player.id); items.touch(grenades, game, player.id);
+        expect(game.counters.foundSecrets).toBe(mode === "deathmatch" ? 0 : 1); expect(host.actors.isLive(grenades.actor.id)).toBe(true);
+        expect(host.inventory.count(player.id, "q3:weapon/grenadelauncher")).toBe(0);
+        host.inventory.consume(player, "q3:ammo/grenadelauncher", 200); grenades.count = 3;
+        items.touch(grenades, game, player.id);
+        expect(host.inventory.count(player.id, "q3:ammo/grenadelauncher")).toBe(3);
+        expect(host.inventory.count(player.id, "q3:weapon/grenadelauncher")).toBe(1);
+        expect(host.inventory.count(player.id, "q2:ammo_grenades")).toBe(0);
+        expect(selections).toEqual(["always", "never", "never", "always"]);
+        const cells = game.create("ammo_cells"), shield = game.create("item_power_shield");
+        items.spawn(cells, game); items.spawn(shield, game);
+        items.touch(cells, game, player.id); items.touch(shield, game, player.id);
+        expect(host.inventory.count(player.id, "q2:ammo_cells")).toBe(50);
+        expect(host.inventory.count(player.id, "q3:ammo/plasmagun")).toBe(50);
+        expect(host.inventory.count(player.id, "q3:ammo/lightning")).toBe(50);
+        expect(host.inventory.count(player.id, "q3:ammo/bfg")).toBe(50);
+        if (mode !== "deathmatch") expect(items.use(player, "q2:item_power_shield", game)).toBe(true);
+        expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 50 } });
+        host.inventory.consume(player, "q2:ammo_cells", 10);
+        expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 40 } });
+        expect(host.inventory.count(player.id, "q3:ammo/plasmagun")).toBe(50);
+      }
+    } finally { archive.close(); }
+  });
   test("source gravity direction supports ceiling walking and ceiling water sampling independently of gravity strength", () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2GameOptions["edition"][]) {
       const scene = targetGame({ ...options, edition });

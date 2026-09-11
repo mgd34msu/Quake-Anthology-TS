@@ -1,6 +1,7 @@
 /* Pickup and inventory behaviors adapted from Quake II game/g_items.c and p_weapon.c. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ArmorState, ItemId } from "../../../contracts/gameplay.ts";
+import type { PickupAdmission, PickupAmmoGrant } from "../../../contracts/pickups.ts";
 import { add, movedir, scale, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "./host.ts";
 import { Q2_BASE_WEAPONS } from "./weapons/definitions.ts";
@@ -123,6 +124,8 @@ export interface Q2ItemsCheckpoint {
 }
 
 function id(item: Item): ItemId { return `q2:${item.classname}`; }
+const baseAmmoIds = new Set(ammunition.map(id));
+const baseWeaponIds = new Set(Q2_BASE_WEAPONS.map(weapon => weapon.item));
 function isDropped(entity: Q2Entity): boolean { return (entity.spawnflags & 0x30000) !== 0; }
 function staysCoop(item: Item): boolean {
   return item.kind === "key" || item.kind === "weapon" && (item.coopStay ?? true) || (item.kind === "power" || item.kind === "custom") && item.coopStay;
@@ -137,6 +140,7 @@ export class Q2ItemModule implements Q2SpawnModule {
   private powerArmorBindings = new WeakSet<ActorId>();
   private powerCubeCount = 0;
   private pickupPolicy: Q2PickupPolicy | null = null;
+  private pickupAdmission: PickupAdmission | null = null;
   constructor(private readonly hooks: Q2ItemHooks) {}
 
   register(item: Q2ItemDefinition): undefined {
@@ -147,6 +151,7 @@ export class Q2ItemModule implements Q2SpawnModule {
   itemName(classname: string): string | null { return this.catalog.get(classname)?.name ?? null; }
 
   setPickupPolicy(policy: Q2PickupPolicy): undefined { this.pickupPolicy = policy; return undefined; }
+  setPickupAdmission(admission: PickupAdmission | null): undefined { this.pickupAdmission = admission; return undefined; }
 
   get callbacks(): Q2CallbackDefinitions {
     return { think: { q2_items_respawn: this.respawn, q2_items_drop_to_floor: this.dropToFloor, q2_items_make_touchable: this.makeTouchable,
@@ -399,26 +404,41 @@ export class Q2ItemModule implements Q2SpawnModule {
         break;
       }
       case "ammo": {
-        this.ensure(player, game, id(item), item.capacity);
-        const old = game.host.inventory.count(player.id, id(item));
         const quantity = item.weaponAmmo === true && item.infiniteAmmoQuantity !== null && (game.options.deathmatchFlags & 8192) !== 0
           ? item.infiniteAmmoQuantity ?? 1000 : entity.count || item.quantity;
+        if (this.pickupAdmission !== null && baseAmmoIds.has(id(item))) {
+          const taken = item.weaponAmmo === true
+            ? this.pickupAdmission.ammoWeapon(player, { item: id(item), amount: quantity, weapon: id(item) }, { mode: "always", when: "empty-ammo" })
+            : this.pickupAdmission.ammo(player, { item: id(item), amount: quantity });
+          if (!taken) return false;
+          break;
+        }
+        this.ensure(player, game, id(item), item.capacity);
+        const old = game.host.inventory.count(player.id, id(item));
         if (game.host.inventory.give(player, id(item), quantity) === 0) return false;
         if (item.weaponAmmo === true && old === 0) this.hooks.weaponPicked(player.id, id(item), true);
         break;
       }
       case "weapon": {
-        this.ensure(player, game, id(item), 32767);
-        const previous = game.host.inventory.count(player.id, id(item));
+        const admission = baseWeaponIds.has(id(item)) ? this.pickupAdmission : null;
+        if (admission !== null && id(item) === "q2:weapon_blaster") return false;
+        if (admission === null) this.ensure(player, game, id(item), 32767);
+        const previous = admission === null ? game.host.inventory.count(player.id, id(item)) : admission.owns(player.id, id(item)) ? 1 : 0;
         const weaponStays = game.options.mode === "coop" ? !(this.pickupPolicy?.instancedCoop?.(game) ?? false)
           : game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0;
         if (weaponStays && previous > 0 && !isDropped(entity)) return false;
-        game.host.inventory.give(player, id(item), 1);
+        if (admission === null) game.host.inventory.give(player, id(item), 1);
+        const grants: PickupAmmoGrant[] = [];
         if ((entity.spawnflags & 0x10000) === 0 && item.ammo !== null) {
           const ammo = this.catalog.get(item.ammo.slice(3));
-          if (ammo?.kind === "ammo") { this.ensure(player, game, id(ammo), ammo.capacity); game.host.inventory.give(player, id(ammo), (game.options.deathmatchFlags & 8192) !== 0 ? 1000 : ammo.quantity); }
+          if (ammo?.kind === "ammo") {
+            const amount = (game.options.deathmatchFlags & 8192) !== 0 ? 1000 : ammo.quantity;
+            if (admission === null) { this.ensure(player, game, id(ammo), ammo.capacity); game.host.inventory.give(player, id(ammo), amount); }
+            else grants.push({ item: id(ammo), amount });
+          }
         }
-        this.hooks.weaponPicked(player.id, id(item), previous === 0);
+        if (admission === null) this.hooks.weaponPicked(player.id, id(item), previous === 0);
+        else if (!admission.weapon(player, { item: id(item), ammo: grants }, previous === 0 ? "always" : "never")) return false;
         if (!isDropped(entity) && (game.options.mode === "coop" || game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0)) {
           this.pickup(entity).retained = true; return true;
         }
