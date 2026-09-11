@@ -1,7 +1,7 @@
 import { rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { ArmorState, CombatState, InventoryEntry } from "../contracts/gameplay.ts";
-import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, SavedBodyState } from "../contracts/session.ts";
+import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, SavedBodyAttachment, SavedBodyState } from "../contracts/session.ts";
 import type { ActorId } from "../contracts/identity.ts";
 import type { SourceActorCheckpoint } from "../world/actors/registry.ts";
 import { readGuest } from "./execution.ts";
@@ -9,11 +9,15 @@ import { readCharacter, readProvider, readRecipe } from "./recipe.ts";
 import { readBounds, readFrame, readRandom, readTime, readVector } from "./shared.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveFormatError, SaveReader } from "./value.ts";
 
-const MAGIC = new TextEncoder().encode("QTSAVE1\n");
+const MAGIC = new TextEncoder().encode("QTSAVE2\n");
 export function savedActorId(actor: ActorId): SavedActorId { return { slot: actor.slot, generation: actor.generation }; }
 export function readSavedActor(reader: SaveReader): SavedActorId { return { slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) }; }
 export function readSavedBody(reader: SaveReader): SavedBodyState {
   return { origin: readVector(reader.field("origin")), angles: readVector(reader.field("angles")), velocity: readVector(reader.field("velocity")), bounds: readBounds(reader.field("bounds")), ground: reader.field("ground").nullable(readSavedActor) };
+}
+export function readSavedBodyAttachment(reader: SaveReader): SavedBodyAttachment {
+  const follow = reader.field("follow"), kind = follow.field("kind").choice("translation", "center", "bounds-min");
+  return { anchor: readSavedActor(reader.field("anchor")), follow: kind === "center" ? { kind } : { kind, offset: readVector(follow.field("offset")) } };
 }
 function readActorSlot(reader: SaveReader): ActorSlotCheckpoint {
   const actor = readSavedActor(reader);
@@ -42,10 +46,10 @@ export function readInventoryEntry(reader: SaveReader): InventoryEntry {
 
 export function parseSaveImage(value: unknown): SaveImage {
   const reader = new SaveReader(value);
-  return { schemaVersion: reader.field("schemaVersion").literal(1), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
+  return { schemaVersion: reader.field("schemaVersion").literal(2), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
     clocks: reader.field("clocks").list(entry => ({ provider: namespaced(entry.field("provider")), time: readTime(entry.field("time")) })),
     random: reader.field("random").list(entry => ({ provider: namespaced(entry.field("provider")), state: readRandom(entry.field("state")) })), actors: reader.field("actors").list(readActorSlot),
-    bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
+    bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), attachment: entry.field("attachment").nullable(readSavedBodyAttachment), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
     combat: reader.field("combat").list(entry => ({ actor: readSavedActor(entry.field("actor")), state: readCombat(entry.field("state")) })),
     inventories: reader.field("inventories").list(entry => ({ actor: readSavedActor(entry.field("actor")), entries: entry.field("entries").list(readInventoryEntry) })),
     configurations: reader.field("configurations").list(entry => ({ actor: readSavedActor(entry.field("actor")), movement: readProvider(entry.field("movement")), character: readCharacter(entry.field("character")), weapons: entry.field("weapons").list(readProvider), inventory: readProvider(entry.field("inventory")) })),

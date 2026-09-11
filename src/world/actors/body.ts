@@ -1,6 +1,7 @@
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
-import type { BodyState, BodyTable, LinkedBody } from "../../contracts/world.ts";
+import type { NumericOperations } from "../../contracts/numeric.ts";
+import type { BodyAttachment, BodyState, BodyTable, LinkedBody } from "../../contracts/world.ts";
 import type { SessionActorRegistry } from "./registry.ts";
 
 export interface BodyStateBinding {
@@ -34,14 +35,26 @@ interface BodyRecord { readonly actor: OwnedActor; readonly binding: BodyStateBi
 
 export class SharedBodyTable implements BodyTable {
   private readonly records = new Map<number, BodyRecord>();
+  private readonly attachments = new Map<OwnedActor, BodyAttachment>();
 
   constructor(private readonly actors: SessionActorRegistry, private readonly hooks: BodyLinkHooks) {
     actors.onRelease(actor => {
-      const record = this.records.get(actor.id.slot);
-      if (record?.actor === actor) {
-        this.records.delete(actor.id.slot);
-        if (record.linked !== null) hooks.onUnlink(actor.id);
+      this.attachments.delete(actor);
+      const children: OwnedActor[] = [];
+      for (const [child, attachment] of this.attachments) if (attachment.anchor.equals(actor.id)) {
+        children.push(child);
+        this.attachments.delete(child);
       }
+      const record = this.records.get(actor.id.slot);
+      if (record?.actor === actor) this.records.delete(actor.id.slot);
+      const errors: unknown[] = [];
+      if (record?.actor === actor && record.linked !== null) {
+        try { hooks.onUnlink(actor.id); } catch (error) { errors.push(error); }
+      }
+      for (const child of children) if (actors.isLive(child.id)) {
+        try { actors.release(child); } catch (error) { errors.push(error); }
+      }
+      if (errors.length > 0) throw new AggregateError(errors, "Attached body release failed");
       return undefined;
     });
   }
@@ -68,6 +81,61 @@ export class SharedBodyTable implements BodyTable {
     const record = this.record(actor.id);
     if (record === null) return this.create(actor, state);
     return record.binding.write(copyBody(state));
+  }
+
+  attach(actor: OwnedActor, attachment: BodyAttachment): undefined {
+    this.actors.assertOwned(actor);
+    if (this.record(actor.id) === null) throw new Error("Cannot attach an actor without a body");
+    const anchor = this.record(attachment.anchor);
+    if (anchor === null) throw new Error("Cannot attach to a missing anchor body");
+    for (let ancestor: BodyRecord | null = anchor; ancestor !== null;) {
+      if (ancestor.actor === actor) throw new Error("Body attachment cycle");
+      const parent = this.attachments.get(ancestor.actor);
+      ancestor = parent === undefined ? null : this.record(parent.anchor);
+    }
+    const follow = attachment.follow;
+    this.attachments.set(actor, Object.freeze({ anchor: attachment.anchor, follow: Object.freeze(follow.kind === "center"
+      ? { kind: follow.kind } : { kind: follow.kind, offset: copyVector(follow.offset) }) }));
+    return undefined;
+  }
+
+  detach(actor: OwnedActor): undefined {
+    this.actors.assertOwned(actor);
+    this.attachments.delete(actor);
+    return undefined;
+  }
+
+  attachment(actor: ActorId): BodyAttachment | null {
+    const record = this.record(actor);
+    return record === null ? null : this.attachments.get(record.actor) ?? null;
+  }
+
+  /** Run at a committed execution boundary; spatial publication never invokes source touches. */
+  transportAttachments(numeric: NumericOperations): undefined {
+    const transported = new Set<OwnedActor>();
+    const transport = (actor: OwnedActor): void => {
+      if (transported.has(actor)) return;
+      transported.add(actor);
+      const attachment = this.attachments.get(actor);
+      if (attachment === undefined) return;
+      const anchorRecord = this.record(attachment.anchor);
+      if (anchorRecord === null) return;
+      transport(anchorRecord.actor);
+      const anchor = this.read(attachment.anchor), body = this.read(actor.id);
+      if (anchor === null || body === null) return;
+      const follow = attachment.follow;
+      const component = (axis: "x" | "y" | "z"): number => {
+        const offset = follow.kind === "center" ? numeric.multiply(numeric.add(anchor.bounds.min[axis], anchor.bounds.max[axis]), 0.5)
+          : follow.kind === "bounds-min" ? numeric.add(anchor.bounds.min[axis], follow.offset[axis]) : follow.offset[axis];
+        return numeric.store(numeric.add(anchor.origin[axis], offset));
+      };
+      const origin = { x: component("x"), y: component("y"), z: component("z") };
+      if (Object.is(origin.x, body.origin.x) && Object.is(origin.y, body.origin.y) && Object.is(origin.z, body.origin.z)) return;
+      this.write(actor, { ...body, origin });
+      this.link(actor);
+    };
+    for (const actor of this.attachments.keys()) transport(actor);
+    return undefined;
   }
 
   linked(actor: ActorId): LinkedBody | null { return this.record(actor)?.linked ?? null; }

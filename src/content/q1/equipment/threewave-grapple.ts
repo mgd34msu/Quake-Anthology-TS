@@ -82,6 +82,7 @@ export class ThreewaveGrapple {
     if (state !== undefined) { state.animation = null; state.pulling = false; }
     if (animation !== null) this.game.remove(animation);
     const hook = this.hook(actor); if (hook === null) return undefined;
+    this.game.host.bodies.detach(hook.actor);
     for (const link of this.game.entities.values()) if (link.classname === "ctf_hook_link" && link.owner !== null && sameActor(link.owner, hook.actor.id)) this.game.remove(link);
     return this.game.remove(hook);
   }
@@ -138,6 +139,8 @@ export class ThreewaveGrapple {
     const body = this.body(other);
     if (target.centered) game.setBody(hook, { origin: vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5)), velocity: ZERO });
     else game.setBody(hook, { velocity: body.velocity });
+    game.host.bodies.attach(hook.actor, { anchor: other, follow: target.centered ? { kind: "center" }
+      : { kind: "translation", offset: vsub(game.body(hook).origin, body.origin) } });
     hook.references.set("ctf.enemy", other); hook.fields.set("style", "2");
     hook.touch = null; game.link(hook); return game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_pull"));
   }

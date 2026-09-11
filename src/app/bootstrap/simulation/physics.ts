@@ -545,6 +545,12 @@ export class SharedPhysics {
     let state = this.bodies.read(actor.id);
     const motion = this.motion(actor);
     if (state === null || motion === null || elapsed === 0 || motion.kind === "stationary") return undefined;
+    if (this.bodies.attachment(actor.id) !== null) {
+      if (motion.kind === "fly" || motion.kind === "fly-missile") this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
+      this.pushEntity(actor, zero);
+      if (this.live(actor)) this.waterTransition(actor, state.origin);
+      return undefined;
+    }
     if (motion.kind === "push" || motion.kind === "stop") { this.pushMove(actor, this.scale(state.velocity, elapsed), this.scale(motion.angularVelocity, elapsed)); return undefined; }
     const family = this.family(actor), flags = this.actorFlags(actor);
     if (motion.kind === "new-toss") {
@@ -632,4 +638,6 @@ export class SharedPhysics {
     } else this.writeLive(actor, { velocity });
     return undefined;
   }
+
+  commitAttachments(): undefined { return this.bodies.transportAttachments(this.n); }
 }

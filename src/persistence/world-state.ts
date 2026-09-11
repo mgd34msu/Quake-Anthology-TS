@@ -12,8 +12,9 @@ export function captureSharedBodies(actors: SessionActorRegistry, bodies: Shared
   const result: BodyCheckpoint[] = [];
   const saveBody = (state: BodyState): SavedBodyState => ({ ...state, ground: state.ground === null ? null : savedActorId(state.ground) });
   for (const actor of actors.observations()) {
-    const body = bodies.read(actor.id), links = bodies.linkState(actor.id);
+    const body = bodies.read(actor.id), links = bodies.linkState(actor.id), attachment = bodies.attachment(actor.id);
     if (body !== null && links !== null) result.push({ actor: savedActorId(actor.id), body: saveBody(body), linkCount: links.linkCount,
+      attachment: attachment === null ? null : { ...attachment, anchor: savedActorId(attachment.anchor) },
       linked: links.linked === null ? null : { state: saveBody(links.linked.state), absoluteBounds: links.linked.absoluteBounds } });
   }
   return result;
@@ -51,6 +52,9 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
     if (host.storage(restored) === "guest") {
       if (host.bodies.read(restored.id) === null) throw new SaveFormatError("world.bodies", "guest body view has not been bound");
     } else host.bodies.create(restored, { ...entry.body, ground: entry.body.ground === null ? null : host.actors.referenceSaved(entry.body.ground) });
+  }
+  for (const entry of save.bodies) if (entry.attachment !== null) {
+    host.bodies.attach(actor(entry.actor), { ...entry.attachment, anchor: actor(entry.attachment.anchor).id });
   }
   for (const entry of save.combat) {
     const restored = actor(entry.actor);

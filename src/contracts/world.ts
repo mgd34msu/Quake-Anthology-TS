@@ -27,6 +27,15 @@ export interface BodyState {
   readonly ground: ActorId | null;
 }
 
+/** Attached bodies share their anchor's lifetime; releasing it releases its attached children. */
+export interface BodyAttachment {
+  readonly anchor: ActorId;
+  readonly follow:
+    | { readonly kind: "translation"; readonly offset: Vec3 }
+    | { readonly kind: "center" }
+    | { readonly kind: "bounds-min"; readonly offset: Vec3 };
+}
+
 /** Bounds visible to spatial queries remain those captured by the last source-defined link. */
 export interface LinkedBody {
   readonly actor: ActorId;
@@ -38,6 +47,9 @@ export interface LinkedBody {
 export interface BodyTable {
   read(actor: ActorId): BodyState | null;
   write(actor: OwnedActor, state: BodyState): undefined;
+  attach(actor: OwnedActor, attachment: BodyAttachment): undefined;
+  detach(actor: OwnedActor): undefined;
+  attachment(actor: ActorId): BodyAttachment | null;
   linked(actor: ActorId): LinkedBody | null;
   /** A source may link a snapped collision origin while preserving authoritative movement precision. */
   link(actor: OwnedActor, origin?: Vec3): undefined;

@@ -96,6 +96,7 @@ export class Q2CtfGrappleEquipment {
     source.grapple = null; source.grappleState = "fly"; source.grappleReleaseTime = game.host.now() + (game.options.edition === "rerelease" ? 1 : 0);
     this.restoreKnockback(owner, game, source); this.loop(hook, game, "");
     if (game.options.edition === "classic") this.hooks.setGrapplePrediction(owner, false);
+    game.host.bodies.detach(hook.actor);
     return game.remove(hook);
   }
 
@@ -113,6 +114,11 @@ export class Q2CtfGrappleEquipment {
       return this.resetHook(hook, game);
     }
     source.grappleState = "pull"; hook.enemy = contact.other; game.solid(hook, "none");
+    const anchor = this.hooks.anchor(contact.other, game), body = game.host.bodies.read(contact.other);
+    if (anchor === "none" || body === null) return this.resetHook(hook, game);
+    game.host.bodies.attach(hook.actor, { anchor: contact.other,
+      follow: anchor === "box" || anchor === "player" || anchor === "corpse" ? { kind: "center" }
+        : { kind: "translation", offset: subtract(game.body(hook).origin, body.origin) } });
     if (game.options.edition === "classic") this.sound(owner, owner, game, "grpull", true);
     this.sound(hook.actor.id, owner, game, "grhit");
     if (game.options.edition === "rerelease") this.loop(hook, game, "weapons/grapple/grpull.wav");

@@ -6,7 +6,10 @@ import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference } f
 import { createContentDigest, createResourceId } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
-import { SessionActorRegistry } from "../../src/world/actors/index.ts";
+import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../src/world/actors/index.ts";
+import { GameplayAuthority, SharedInventoryTable } from "../../src/world/gameplay/index.ts";
+import { createNumericOperations, Q3_BINARY32_PROFILE } from "../../src/core/numeric.ts";
+import { captureSharedBodies, restoreSharedWorldState, restoreSharedBodyLinks } from "../../src/persistence/world-state.ts";
 import { decodeSaveImage, encodeSaveImage, readSaveImage, sourceActorsCheckpoint, writeSaveImage } from "../../src/persistence/save-image.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../src/persistence/value.ts";
 import { readRecipe } from "../../src/persistence/recipe.ts";
@@ -28,13 +31,40 @@ function recipe(): ExecutableRecipe {
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
 }
 
+test("saved body attachments remap anchor generations and preserve their follow rule", () => {
+  const identity = createIdentityOwner("attached-save"), actors = new SessionActorRegistry(identity);
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  const anchor = actors.allocate("q3:game", "q3:mover"), child = actors.allocate("q2:equipment", "q2:hook");
+  const zero = { x: 0, y: 0, z: 0 }, state = { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null };
+  bodies.create(anchor, state); bodies.create(child, { ...state, origin: { x: 8, y: 0, z: 0 } });
+  bodies.attach(child, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 8, y: 0, z: 0 } } });
+  bodies.link(anchor); bodies.link(child);
+  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: actors.checkpoint(), bodies: captureSharedBodies(actors, bodies), combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
+  const saved = decodeSaveImage(encodeSaveImage(image));
+  actors.close();
+  const restored = SessionActorRegistry.restore(identity, saved.actors, []), callbacks = new ActorCallbackTable(restored);
+  const restoredBodies = new SharedBodyTable(restored, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  restoreSharedWorldState(saved, { actors: restored, bodies: restoredBodies, combat: new GameplayAuthority(restored, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory: new SharedInventoryTable(restored), storage: () => "typescript" });
+  restoreSharedBodyLinks(saved, { actors: restored, bodies: restoredBodies });
+  const restoredAnchor = restored.resolveSaved(anchor.id), restoredChild = restored.resolveSaved(child.id);
+  if (restoredAnchor === null || restoredChild === null) throw new Error("Missing restored attachment actors");
+  expect(restoredAnchor.id.generation).not.toBe(anchor.id.generation);
+  expect(restoredBodies.attachment(restoredChild.id)?.anchor).toBe(restoredAnchor.id);
+  restoredBodies.write(restoredAnchor, { ...state, origin: { x: 94, y: 0, z: 0 } });
+  restoredBodies.transportAttachments(createNumericOperations(Q3_BINARY32_PROFILE));
+  expect(restoredBodies.read(restoredChild.id)?.origin.x).toBe(102);
+  const oldSignature = encodeSaveImage(image); oldSignature[6] = 49;
+  expect(() => decodeSaveImage(oldSignature)).toThrow("signature/version");
+});
+
 test("unified save reconstructs actors, bytes, source clocks and callback identities in a fresh Bun process", async () => {
   const actors = new SessionActorRegistry(createIdentityOwner("before-save"));
   const actor = actors.allocateAtSource("q1:game", 7, "q1:player");
   const module = { id: "q3:fixture", artifactPath: "vm/qagame.qvm", digest: createContentDigest("1".repeat(64)), revision: "1" } satisfies Q2ClassicSaveLayout["module"];
-  const image: SaveImage = { schemaVersion: 1, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
+  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
     clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2.5 } }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1234, draws: 17 } }], actors: actors.checkpoint(),
-    bodies: [{ actor: actor.id, linkCount: 0, linked: null, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
+    bodies: [{ actor: actor.id, attachment: null, linkCount: 0, linked: null, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
     combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
     inventories: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: [{ item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } }] }], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
     providers: [sourceActorsCheckpoint(actors.sourceCheckpoint()), { provider: "fixture:private", schema: "fixture:bytes", version: 7, bytes: new Uint8Array([0, 255, 17]) }],

@@ -1517,6 +1517,7 @@ export class SharedSimulation implements Simulation {
         if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.afterClientThink(entity, this.source.game); }
         this.q2Characters.get(player.actor)?.afterClientThink();
         const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
+        if (!paused) this.physics.commitAttachments();
       }
       if (!paused) this.selectedBallistics?.step(previousSelectedMilliseconds, this.selectedMilliseconds);
       if (run) {
@@ -1557,15 +1558,17 @@ export class SharedSimulation implements Simulation {
             executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
               frame: execution.services === this.grapple?.source.game ? this.grappleFrame : execution.services === this.handGrenades?.independent?.game ? this.equipmentFrame : this.sourceFrame,
               timeSeconds: execution.services === this.grapple?.source.game ? seconds(this.grappleFrame.time) : execution.services === this.handGrenades?.independent?.game ? seconds(this.equipmentFrame.time) : this.timeSeconds, elapsed, visited });
+            this.physics.commitAttachments();
             continue;
           }
-          if (this.source.kind === "q3") { this.source.game.runActor(actor); const player = this.playerStates.get(actor); if (player !== undefined) this.syncQ3Player(player); continue; }
+          if (this.source.kind === "q3") { this.source.game.runActor(actor); this.physics.commitAttachments(); const player = this.playerStates.get(actor); if (player !== undefined) this.syncQ3Player(player); continue; }
           if (this.playerStates.has(actor)) {
             this.q2Characters.get(actor)?.beginFrame();
-            this.playerWeapon(this.playerStates.get(actor) ?? this.requirePlayer(actor.id)); continue;
+            this.playerWeapon(this.playerStates.get(actor) ?? this.requirePlayer(actor.id)); this.physics.commitAttachments(); continue;
           }
           this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
           if (this.actors.isLive(actor.id)) this.physics.step(actor, elapsed);
+          this.physics.commitAttachments();
         }
       }
       if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
@@ -1897,7 +1900,7 @@ export class SharedSimulation implements Simulation {
       levelChange: this.levelChange === null ? null : { ...this.levelChange, landmark: this.levelChange.landmark === null ? null
         : { ...this.levelChange.landmark, player: savedActorId(this.levelChange.landmark.player) } } }));
     const actors = this.actors.observations();
-    return { schemaVersion: 1, recipe: this.recipe, frame: this.sourceFrame, nextEventSequence: this.events.nextSequence,
+    return { schemaVersion: 2, recipe: this.recipe, frame: this.sourceFrame, nextEventSequence: this.events.nextSequence,
       clocks: [{ provider, time: this.sourceFrame.time }], random: [{ provider, state: this.random.checkpoint() }], actors: this.actors.checkpoint(),
       bodies: captureSharedBodies(this.actors, this.bodies),
       combat: actors.flatMap(actor => { const state = this.combat.read(actor.id); return state === null ? [] : [{ actor: savedActorId(actor.id), state }]; }),

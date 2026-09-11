@@ -9,7 +9,7 @@ import type { RendererBackend, RenderFrame } from "./render.ts";
 import type { SceneSnapshot } from "./scene.ts";
 import type { FrameContext, SourceTime, ThinkTiming } from "./time.ts";
 import type { SeatPresentationBinding, SeatUiState } from "./ui.ts";
-import type { ActorObservation, BodyState } from "./world.ts";
+import type { ActorObservation, BodyAttachment, BodyState } from "./world.ts";
 
 /** Each actor can replace these recipe defaults independently. */
 export interface ActorConfiguration extends Pick<ExecutableRecipe, "movement" | "character" | "weapons" | "inventory"> {
@@ -82,9 +82,11 @@ export interface ActorSlotCheckpoint extends SavedActorId {
 }
 
 export interface SavedBodyState extends Omit<BodyState, "ground"> { readonly ground: SavedActorId | null; }
+export interface SavedBodyAttachment extends Omit<BodyAttachment, "anchor"> { readonly anchor: SavedActorId; }
 export interface BodyCheckpoint {
   readonly actor: SavedActorId;
   readonly body: SavedBodyState;
+  readonly attachment: SavedBodyAttachment | null;
   readonly linkCount: number;
   /** Spatial state may intentionally precede current field writes. */
   readonly linked: { readonly state: SavedBodyState; readonly absoluteBounds: BodyState["bounds"] } | null;
@@ -112,7 +114,7 @@ export interface ProviderCheckpoint {
 }
 
 export interface SaveImage {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly recipe: ExecutableRecipe;
   readonly frame: FrameContext;
   readonly nextEventSequence: number;

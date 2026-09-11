@@ -46,7 +46,7 @@ import type { SessionWorldState } from "../../../../content/q3/team-arena/sessio
 import { ShaderRemapRegistry } from "../../../../content/q3/base/game/shader-remaps.ts";
 import { spawnEntities } from "../../../../content/q3/base/game/spawn.ts";
 import type { SpawnHandler, SpawnReport } from "../../../../content/q3/base/game/spawn.ts";
-import { ConnectionState, MAX_CLIENTS, MAX_GENTITIES } from "../../../../content/q3/base/game/state.ts";
+import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES } from "../../../../content/q3/base/game/state.ts";
 import type { GameEntity } from "../../../../content/q3/base/game/state.ts";
 import { TargetLocationState, targetSpawnHandlers } from "../../../../content/q3/base/game/targets.ts";
 import { spawnTeamPoint, TeamRuntime } from "../../../../content/q3/team-arena/team.ts";
@@ -432,9 +432,27 @@ export class Q3SourceRuntime {
     if (entity.s.eType === EntityType.ET_MISSILE) this.missiles.run(entity);
     else if (entity.s.eType === EntityType.ET_ITEM || entity.physicsObject) runItem(entity, { entities: this.pool, world: this.world,
       time: this.level.time, previousTime: this.level.previousTime, freeTeamEntity: item => this.team.freeEntity(item) });
-    else if (entity.s.eType === EntityType.ET_MOVER) this.movers.run(entity);
+    else if (entity.s.eType === EntityType.ET_MOVER) this.runMover(entity);
     else if (entity.slot < MAX_CLIENTS) this.think.runClient(entity);
     else runThink(entity, this.level.time);
+  }
+
+  private runMover(entity: GameEntity): void {
+    if ((entity.flags & GameFlags.TEAMSLAVE) !== 0) return;
+    const before: { readonly actor: OwnedActor; readonly origin: Vec3 }[] = [];
+    for (let part: GameEntity | null = entity; part !== null; part = part.teamchain) {
+      before.push({ actor: part.actor, origin: { ...part.r.currentOrigin } });
+    }
+    this.movers.run(entity);
+    const elapsed = Math.fround(Math.fround(this.level.time - this.level.previousTime) * Math.fround(0.001));
+    for (const previous of before) {
+      const body = this.host.bodies.read(previous.actor.id);
+      if (body === null) continue;
+      const component = (after: number, start: number): number => elapsed <= 0 ? 0 : Math.fround(Math.fround(after - start) / elapsed);
+      this.host.bodies.write(previous.actor, { ...body, velocity: {
+        x: component(body.origin.x, previous.origin.x), y: component(body.origin.y, previous.origin.y), z: component(body.origin.z, previous.origin.z),
+      } });
+    }
   }
 
   endFrame(): void {

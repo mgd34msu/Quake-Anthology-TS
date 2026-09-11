@@ -50,7 +50,7 @@ export class LmctfGrappleEquipment {
     this.released(player);
     state.hookState = 0; state.hookLength = 0;
     const hook = game.entity(state.hook); state.hook = null;
-    if (hook !== null) { game.cancel(hook); hook.enemy = null; game.remove(hook); }
+    if (hook !== null) { game.cancel(hook); hook.enemy = null; game.host.bodies.detach(hook.actor); game.remove(hook); }
     return undefined;
   }
   private readonly die: Q2Die = (hook, game) => { const owner = hook.owner; return owner === null ? game.remove(hook) : this.abort(owner, game); };
@@ -85,6 +85,7 @@ export class LmctfGrappleEquipment {
     if (hook.enemy === null) {
       const body = game.host.bodies.read(contact.other); if (body === null) return this.abort(owner, game);
       hook.enemy = contact.other; hook.pos1 = subtract(game.body(hook).origin, add(body.origin, body.bounds.min)); game.solid(hook, "trigger");
+      game.host.bodies.attach(hook.actor, { anchor: contact.other, follow: { kind: "bounds-min", offset: hook.pos1 } });
     }
     game.host.emit({ kind: "effect", effect: "blaster", origin: game.body(hook).origin, direction: contact.plane?.normal ?? zero, count: 0, color: 0 }); return undefined;
   };

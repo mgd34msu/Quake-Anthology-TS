@@ -40,6 +40,43 @@ function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pushe
   return { actors, callbacks, world, scene, physics, actor };
 }
 
+test("attached bodies follow committed positions and do not integrate flight velocity", () => {
+  const s = setup(), anchor = s.actor("test:anchor", zero, "stationary"), hook = s.actor("test:hook", { x: 20, y: 0, z: 0 }, "fly-missile");
+  s.physics.bodies.attach(hook, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 20, y: 0, z: 0 } } });
+  const body = s.physics.bodies.read(hook.id), anchorBody = s.physics.bodies.read(anchor.id);
+  if (body === null || anchorBody === null) throw new Error("Missing attachment bodies");
+  s.physics.bodies.write(hook, { ...body, velocity: { x: 400, y: 0, z: 0 } });
+  s.physics.setMotion({ actor: hook, kind: "fly-missile", velocity: { x: 400, y: 0, z: 0 }, angularVelocity: { x: 0, y: 0, z: -500 },
+    gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+  s.physics.step(hook, 0.1);
+  expect(s.physics.bodies.read(hook.id)?.origin).toEqual({ x: 20, y: 0, z: 0 });
+  expect(s.physics.bodies.read(hook.id)?.angles.z).toBe(-50);
+  s.physics.bodies.write(anchor, { ...anchorBody, origin: { x: 94, y: 0, z: 0 }, velocity: zero });
+  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(20);
+  s.physics.commitAttachments();
+  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
+  s.physics.step(hook, 0.1);
+  s.physics.commitAttachments();
+  expect(s.physics.bodies.read(hook.id)?.origin.x).toBe(114);
+  expect(() => s.physics.bodies.attach(anchor, { anchor: hook.id, follow: { kind: "center" } })).toThrow("cycle");
+});
+
+test("anchor release cleans every attached child even when a child cleanup throws", () => {
+  const s = setup(), anchor = s.actor("test:anchor", zero, "stationary"), first = s.actor("test:first", zero, "fly-missile"), second = s.actor("test:second", zero, "fly-missile");
+  for (const child of [first, second]) s.physics.bodies.attach(child, { anchor: anchor.id, follow: { kind: "center" } });
+  s.actors.onRelease(actor => {
+    expect(s.physics.bodies.read(anchor.id)).toBeNull();
+    if (actor === first) throw new Error("source cleanup failure");
+    return undefined;
+  });
+  expect(() => s.actors.release(anchor)).toThrow();
+  for (const actor of [anchor, first, second]) {
+    expect(s.actors.isLive(actor.id)).toBe(false);
+    expect(s.physics.bodies.attachment(actor.id)).toBeNull();
+    expect(s.physics.bodies.linked(actor.id)).toBeNull();
+  }
+});
+
 test("rerelease G_Impact preserves its trace and calls the inverted contact after mover removal", () => {
   const s = setup("q2", emptyWorld(), () => undefined, "rerelease");
   const mover = s.actor("test:missile", zero, "fly-missile");
