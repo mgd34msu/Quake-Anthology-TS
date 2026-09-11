@@ -32,7 +32,7 @@ function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pushe
     const actor = actors.allocate("test:actors", name);
     physics.bodies.create(actor, { origin, angles: zero, velocity: zero, bounds, ground: null });
     physics.setSolid(actor, "box", null, family);
-    physics.setMotion({ actor, kind, velocity: zero, angularVelocity: zero, gravity: 1, clipMask: 0x6000003, owner: null });
+    physics.setMotion({ actor, kind, velocity: zero, angularVelocity: zero, gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
     physics.bodies.link(actor);
     return actor;
   };
@@ -46,7 +46,7 @@ test("Q2 push retries after an impact removes the obstacle and triggers observe 
   const seen: number[] = [];
   s.callbacks.bind(mover, { think: null, use: null, pain: null, die: null, touch: contact => { if (contact.other.equals(obstacle.id)) s.actors.release(obstacle); return undefined; } });
   s.callbacks.bind(trigger, { think: null, use: null, pain: null, die: null, touch: contact => { seen.push(s.physics.bodies.linked(contact.other)?.state.origin.x ?? -999); return undefined; } });
-  s.physics.setMotion({ actor: mover, kind: "fly-missile", velocity: { x: 100, y: 0, z: 0 }, angularVelocity: zero, gravity: 1, clipMask: 0x6000003, owner: null });
+  s.physics.setMotion({ actor: mover, kind: "fly-missile", velocity: { x: 100, y: 0, z: 0 }, angularVelocity: zero, gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
   s.physics.step(mover, 0.1);
   expect(s.actors.isLive(obstacle.id)).toBe(false);
   expect(s.physics.bodies.read(mover.id)?.origin.x).toBe(10);
@@ -87,6 +87,22 @@ test("Q2 blocked callback runs after pusher and rider rollback", () => {
   expect(positions).toEqual([0, 3]);
 });
 
+test("Q2 pusher teams roll back earlier members before the blocked callback", () => {
+  const positions: number[] = [];
+  let first: OwnedActor | null = null;
+  const s = setup("q2", emptyWorld(), () => { if (first !== null) positions.push(s.physics.bodies.read(first.id)?.origin.x ?? -999); return undefined; });
+  first = s.actor("test:first-pusher", { x: -30, y: 0, z: 0 }, "push");
+  const second = s.actor("test:second-pusher", zero, "push", { min: { x: -5, y: -5, z: -1 }, max: { x: 5, y: 5, z: 1 } });
+  const rider = s.actor("test:rider", { x: 3, y: 0, z: 1.5 }, "step");
+  const body = s.physics.bodies.read(rider.id); if (body !== null) s.physics.bodies.write(rider, { ...body, ground: second.id }); s.physics.bodies.link(rider);
+  s.actor("test:wall", { x: 7, y: 0, z: 1.5 }, "stationary");
+  for (const actor of [first, second]) s.physics.setMotion({ actor, kind: "push", velocity: { x: 40, y: 0, z: 0 }, angularVelocity: zero,
+    gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+  expect(s.physics.pushTeam([first, second], 0.1)?.equals(rider.id)).toBe(true);
+  expect(positions).toEqual([-30]);
+  expect(s.physics.bodies.read(first.id)?.origin.x).toBe(-30);
+});
+
 const pakPath = "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK";
 test.skipIf(!existsSync(pakPath))("shared toss physics settles a Q2 body on the real Quake start map", async () => {
   const archive = await openArchive(pakPath);
@@ -102,5 +118,13 @@ test.skipIf(!existsSync(pakPath))("shared toss physics settles a Q2 body on the 
     expect(state?.ground?.equals(s.world.id)).toBe(true);
     expect(state?.velocity).toEqual(zero);
     expect(state?.origin.z).toBeLessThan(z + 50);
+    const ceiling = s.actor("test:ceiling-gravity", { x, y, z: z + 30 }, "toss");
+    s.physics.setMotion({ actor: ceiling, kind: "toss", velocity: zero, angularVelocity: zero, gravity: 1,
+      gravityVector: { x: 0, y: 0, z: 1 }, clipMask: 0x6000003, owner: null });
+    for (let i = 0; i < 25; i++) s.physics.step(ceiling, 0.05);
+    const upsideDown = s.physics.bodies.read(ceiling.id);
+    expect(upsideDown?.ground?.equals(s.world.id)).toBe(true);
+    expect(upsideDown?.velocity).toEqual(zero);
+    expect(upsideDown?.origin.z).toBeGreaterThan(z + 30);
   } finally { archive.close(); }
 });

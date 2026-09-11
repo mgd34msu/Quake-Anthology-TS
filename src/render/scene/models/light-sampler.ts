@@ -102,15 +102,15 @@ export class ModelLightSampler {
     return result;
   }
 
-  entityLighting(entity: SceneEntity, input: WorldViewInput): EntityLighting {
+  entityLighting(entity: SceneEntity, input: WorldViewInput, noWorldModel = false): EntityLighting {
     const identityLight = input.identityLight ?? 1;
     const axis = entity.transform.axis.map((value, index) => scale3(value,
       index === 0 ? entity.transform.scale.x : index === 1 ? entity.transform.scale.y : entity.transform.scale.z));
     const [forward, left, up] = axis;
     if (forward === undefined || left === undefined || up === undefined) throw new Error("Model lost its three axes");
-    if (this.world.map.kind === "q3-bsp") return setupEntityLighting({ origin: entity.transform.origin,
+    if (this.world.map.kind === "q3-bsp" || noWorldModel) return setupEntityLighting({ origin: entity.transform.origin,
       lightingOrigin: entity.lightingOrigin, axis: [forward, left, up], renderFlags: entity.flags.kind === "q3" ? entity.flags.bits : 0 },
-    { grid: this.grid, ambientScale: 1, directedScale: 1, noWorldModel: false, identityLight, identityLightByte: Math.trunc(identityLight * 255),
+    { grid: this.grid, ambientScale: 1, directedScale: 1, noWorldModel, identityLight, identityLightByte: Math.trunc(identityLight * 255),
       sunDirection: this.world.shaders.sun?.direction ?? normalize3({ x: 0.45, y: 0.3, z: 0.9 }), dynamicLights: input.q3Lights ?? [] });
     const point = entity.flags.kind === "q3" && (entity.flags.bits & 128) !== 0 ? entity.lightingOrigin : entity.transform.origin;
     // Foreign lightmaps carry RGB irradiance, without Q3's separate directional lobe.

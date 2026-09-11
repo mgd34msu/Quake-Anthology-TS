@@ -9,6 +9,11 @@ import type { Q1Event } from "../../../content/q1/foundation/types.ts";
 import type { Q2PresentationEvent } from "../../../content/q2/foundation/host.ts";
 import type { SharedBodyTable } from "../../../world/actors/index.ts";
 import type { SimulationPresentationEvent, SourcePresentationEvent } from "./types.ts";
+import { readSavedActor, savedActorId } from "../../../persistence/save-image.ts";
+import { SaveReader } from "../../../persistence/value.ts";
+import { readContentId } from "../../../persistence/recipe.ts";
+import { readVector } from "../../../persistence/shared.ts";
+import type { SavedActorId } from "../../../contracts/session.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
@@ -20,6 +25,7 @@ export class SimulationEvents {
   private readonly emitted: SimulationEvent[] = [];
   private readonly resources = new Map<string, ResolvedResourceReference>();
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
+  private readonly persistent = new Map<string, SimulationPresentationEvent>();
 
   constructor(private readonly bodies: SharedBodyTable, private readonly now: () => SourceTime,
     private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null) {}
@@ -35,7 +41,17 @@ export class SimulationEvents {
   emit(content: ContentId, source: SourcePresentationEvent): undefined {
     const time = this.now();
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
-    this.source.push({ ...source, sequence: this.presentationSequence++, content, seconds });
+    const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? source.event.event : source.event;
+    const reference = "actor" in event ? event.actor : null;
+    const actor = reference === null ? null : "id" in reference ? reference.id : reference;
+    const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
+    this.source.push(presentation);
+    if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
+    if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
+    if (source.kind === "q2" && source.event.kind === "sound" && source.event.loop !== "once") {
+      const key = `sound:${source.event.actor?.slot ?? -1}:${source.event.channel}:${source.event.path}`;
+      if (source.event.loop === "stop") this.persistent.delete(key); else this.persistent.set(key, presentation);
+    }
     if (source.kind === "q1") this.q1(content, source.event);
     else if (source.kind === "q2") this.q2(content, source.event);
     else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
@@ -59,6 +75,33 @@ export class SimulationEvents {
   take(): readonly SimulationEvent[] { return this.emitted.splice(0); }
   takePresentation(): readonly SimulationPresentationEvent[] { return this.source.splice(0); }
 
+  capture() {
+    return { sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
+      persistent: [...this.persistent].map(([key, value]) => {
+        if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
+        if (value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && value.event.kind === "ambient") return { key, ...value };
+        throw new Error("Unsupported persistent source event");
+      }) };
+  }
+  restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
+    this.sequence = reader.field("sequence").integer(0); this.presentationSequence = reader.field("presentationSequence").integer(0);
+    this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.persistent.clear();
+    reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
+    reader.field("persistent").list(value => {
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2"), kind = event.field("kind").choice("ambient", "music", "sound");
+      const base = { sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
+      let restored: SimulationPresentationEvent;
+      if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
+      else if (family === "q2" && kind === "music") restored = { ...base, kind: "q2", event: { kind, track: event.field("track").string() } };
+      else if (family === "q2" && kind === "sound") restored = { ...base, kind: "q2", event: { kind, actor: event.field("actor").nullable(v => reference(readSavedActor(v))), origin: readVector(event.field("origin")), path: event.field("path").string(), channel: event.field("channel").number(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number(), reliable: event.field("reliable").boolean(), loop: event.field("loop").literal("start") } };
+      else return event.fail("Invalid persistent source event family");
+      this.persistent.set(value.field("key").string(), restored); this.source.push(restored);
+    });
+    return undefined;
+  }
+
+  lightStyle(style: number): string { return this.styles.get(style)?.pattern ?? ""; }
+
   lightStyles(seconds: number): readonly SceneLightStyle[] {
     return Array.from(this.styles, ([style, value]): SceneLightStyle => {
       const letter = value.pattern.length === 0 ? 12 : value.pattern.charCodeAt(Math.floor(seconds * 10) % value.pattern.length) - 97;
@@ -76,7 +119,7 @@ export class SimulationEvents {
 
   private q1(content: ContentId, event: Q1Event): undefined {
     if (event.kind === "sound") {
-      const channel = event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
+      const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
       this.sound(content, event.path, event.actor, this.bodies.read(event.actor)?.origin ?? zero, channel, event.volume, event.attenuation);
     } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation);
     else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player);

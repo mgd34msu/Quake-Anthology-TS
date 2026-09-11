@@ -1,6 +1,7 @@
 import type { RenderCommand, SceneCamera } from "../../contracts/render.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
 import { KeyCode } from "../../input/key-codes.ts";
+import { tokenizeCommand } from "../../core/commands/index.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
@@ -55,8 +56,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volume: SettingBinding = { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
       minimum: 0, maximum: 1, step: 0.05, read: () => audio.effectsVolume, write: value => { audio.effectsVolume = value; } };
+    const musicVolume: SettingBinding = { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
+      minimum: 0, maximum: 1, step: 0.05, read: () => audio.musicVolume, write: value => { audio.musicVolume = value; } };
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
-    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), volume, ...this.preferences.bindings()]);
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), volume, musicVolume, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
     this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Quake TypeScript", fullScreen: true,
@@ -95,14 +98,29 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         else this.messages.notify(this.local.player.seat.id, source.event.text, false, starts, duration);
       } else if (source.kind === "q2" && source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))
         this.messages.centerPrint(this.local.player.seat.id, source.event.text, starts, duration);
+      else if (source.kind === "q3-source" && source.event.kind === "server-command"
+        && (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)) {
+        const [command, text] = tokenizeCommand(source.event.text, "q3").argv;
+        if (text === undefined) continue;
+        if (command === "cp") this.messages.centerPrint(this.local.player.seat.id, text, starts, duration);
+        else if (command === "chat" || command === "tchat") this.messages.notify(this.local.player.seat.id, text, true, starts, duration);
+      } else if (source.kind === "q2-player" && source.event.kind === "print" && source.event.level === "chat"
+        && (source.event.target === null || source.event.target.equals(this.local.player.actor)))
+        this.messages.notify(this.local.player.seat.id, source.event.text, true, starts, duration);
+      else if (source.kind === "q2" && source.event.kind === "print" && source.event.level === "chat"
+        && (source.event.actor === null || source.event.actor.equals(this.local.player.actor))) {
+        this.messages.notify(this.local.player.seat.id, source.event.text, true, starts, duration);
+      }
     }
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
-    material: (draw: MaterialTextDraw) => void): void {
+    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true): void {
     const player = this.simulation.playerUi(this.local.player.actor);
     const armor = player.armor.kind === "none" ? 0 : player.armor.points;
-    const hud = { ...emptyHudData(this.local.player.seat.id), ...this.weaponWheel.drawState(), visible: this.local.input.focus.kind === "game",
+    const base = emptyHudData(this.local.player.seat.id);
+    const hud = { ...base, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+      crosshair: { ...base.crosshair, visible: crosshairVisible },
       vitals: [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false },
         ...(player.ammo === null ? [] : [{ label: "Ammo", value: player.ammo.count, icon: null, warning: player.ammo.count <= 5 }])] };
     const commands = [...drawCommonHud(context, hud, { skin: this.art.skin, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),

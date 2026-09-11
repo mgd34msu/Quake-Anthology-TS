@@ -104,13 +104,13 @@ export class Q2Foundation implements Q2GameServices {
     if (this.currentActor !== null) throw new Error("Q2 source saves require a completed callback boundary");
     const entities: Q2EntityCheckpoint[] = [];
     for (const entity of this.entities.values()) {
-      const { actor, spawn, activator, enemy, owner, goal, teamMaster, teamChain, chain, lastAttack, think, prethink, use, touch, pain, die, blocked, ...values } = entity;
+      const { actor, spawn, activator, enemy, owner, goal, teamMaster, teamChain, chain, beam, beam2, proboscus, lastAttack, think, prethink, postthink, use, touch, pain, die, blocked, ...values } = entity;
       entities.push({ actor: { slot: actor.id.slot, generation: actor.id.generation }, sourceSlot: this.sourceSlots.get(actor.id) ?? null,
         spawn: { classname: spawn.classname, ordinal: spawn.ordinal, values: [...spawn.values].map(([key, value]) => ({ key, value })) }, values: structuredClone(values),
         links: { activator: saveQ2Actor(activator), enemy: saveQ2Actor(enemy), owner: saveQ2Actor(owner), goal: saveQ2Actor(goal),
-          teamMaster: saveQ2Actor(teamMaster), teamChain: saveQ2Actor(teamChain), chain: saveQ2Actor(chain) },
+          teamMaster: saveQ2Actor(teamMaster), teamChain: saveQ2Actor(teamChain), chain: saveQ2Actor(chain), beam: saveQ2Actor(beam), beam2: saveQ2Actor(beam2), proboscus: saveQ2Actor(proboscus) },
         lastAttack: lastAttack === null ? null : { ...lastAttack, attacker: saveQ2Actor(lastAttack.attacker), inflictor: saveQ2Actor(lastAttack.inflictor) },
-        callbacks: { think: this.sourceCallbacks.think.name(think), prethink: this.sourceCallbacks.think.name(prethink), use: this.sourceCallbacks.use.name(use),
+        callbacks: { think: this.sourceCallbacks.think.name(think), prethink: this.sourceCallbacks.think.name(prethink), postthink: this.sourceCallbacks.think.name(postthink), use: this.sourceCallbacks.use.name(use),
           touch: this.sourceCallbacks.touch.name(touch), pain: this.sourceCallbacks.pain.name(pain), die: this.sourceCallbacks.die.name(die), blocked: this.sourceCallbacks.blocked.name(blocked) } });
     }
     return { version: 1, nextSourceSlot: this.nextSourceSlot, sequence: this.sequence, counters: { ...this.counters },
@@ -136,8 +136,11 @@ export class Q2Foundation implements Q2GameServices {
       Object.assign(entity, structuredClone(saved.values));
       entity.activator = reference(saved.links.activator); entity.enemy = reference(saved.links.enemy); entity.owner = reference(saved.links.owner);
       entity.goal = reference(saved.links.goal); entity.teamMaster = reference(saved.links.teamMaster); entity.teamChain = reference(saved.links.teamChain); entity.chain = reference(saved.links.chain);
+      entity.beam = reference(saved.links.beam); entity.beam2 = reference(saved.links.beam2);
+      entity.proboscus = reference(saved.links.proboscus);
       entity.lastAttack = saved.lastAttack === null ? null : { ...saved.lastAttack, attacker: reference(saved.lastAttack.attacker), inflictor: reference(saved.lastAttack.inflictor) };
       entity.think = this.sourceCallbacks.think.resolve(saved.callbacks.think); entity.prethink = this.sourceCallbacks.think.resolve(saved.callbacks.prethink);
+      entity.postthink = this.sourceCallbacks.think.resolve(saved.callbacks.postthink);
       entity.use = this.sourceCallbacks.use.resolve(saved.callbacks.use); entity.touch = this.sourceCallbacks.touch.resolve(saved.callbacks.touch);
       entity.pain = this.sourceCallbacks.pain.resolve(saved.callbacks.pain); entity.die = this.sourceCallbacks.die.resolve(saved.callbacks.die); entity.blocked = this.sourceCallbacks.blocked.resolve(saved.callbacks.blocked);
       this.entities.set(actor.id, entity);
@@ -228,6 +231,11 @@ export class Q2Foundation implements Q2GameServices {
     return entity === null ? undefined : this.invoke(actor, () => entity.prethink?.(entity, this));
   }
 
+  postPhysics(actor: ActorId): undefined {
+    const entity = this.entity(actor);
+    return entity === null ? undefined : this.invoke(actor, () => entity.postthink?.(entity, this));
+  }
+
   remove(entity: Q2Entity): undefined {
     if (!this.host.actors.isLive(entity.actor.id)) return undefined;
     this.host.bodies.unlink(entity.actor);
@@ -267,7 +275,7 @@ export class Q2Foundation implements Q2GameServices {
 
   motion(entity: Q2Entity, kind: Q2Motion["kind"]): undefined {
     entity.motion = kind;
-    return this.host.setMotion({ actor: entity.actor, kind, velocity: this.body(entity).velocity, angularVelocity: entity.angularVelocity, gravity: entity.gravity, clipMask: entity.clipMask, owner: entity.owner });
+    return this.host.setMotion({ actor: entity.actor, kind, velocity: this.body(entity).velocity, angularVelocity: entity.angularVelocity, gravity: entity.gravity, gravityVector: entity.gravityVector, clipMask: entity.clipMask, owner: entity.owner });
   }
 
   schedule(entity: Q2Entity, delaySeconds: number, think: Q2Think): undefined {

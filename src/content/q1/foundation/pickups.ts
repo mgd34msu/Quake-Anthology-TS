@@ -79,15 +79,19 @@ function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
   return null;
 }
 function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
-  const leave = game.options.coop || [2, 3, 5].includes(game.options.deathmatch);
+  const leave = game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch));
   const owned = game.host.inventory.count(player.actor.id, weaponItem(weapon)) > 0;
   if (leave && owned) return "refused";
   game.host.inventory.give(player.actor, weaponItem(weapon), 1);
+  const selected = game.pickupRules?.weaponGranted?.(game, player, weapon) ?? weapon;
   const ammo = ammoItem(weapon);
-  if (ammo !== null) game.host.inventory.give(player.actor, ammo, weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5);
-  if (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned) {
-    if (game.options.deathmatch === 0) game.selectWeapon(player.actor, weapon);
-    else if (rank(weapon) < rank(player.weapon)) game.selectWeapon(player.actor, weapon);
+  if (ammo !== null) {
+    const amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
+    game.host.inventory.give(player.actor, ammo, game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, amount) ?? amount);
+  }
+  if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned)) {
+    if (game.options.deathmatch === 0) game.selectWeapon(player.actor, selected);
+    else if ((game.pickupRules?.weaponRank?.(selected) ?? rank(selected)) < (game.pickupRules?.weaponRank?.(player.weapon) ?? rank(player.weapon))) game.selectWeapon(player.actor, selected);
   }
   return leave ? "leave" : "taken";
 }
@@ -118,11 +122,12 @@ function pickupTouch(game: Q1Foundation, entity: Q1Actor, other: import("../../.
     game.sound(player.actor, definition.sound, "item"); game.effect("pickup", game.body(entity).origin, player.actor.id);
     if (result === "leave") { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return undefined; }
     entity.solid = "none"; entity.model = ""; game.link(entity);
-    const respawns = game.options.deathmatch !== 0 && definition.respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
+    const respawn = game.pickupRules?.respawn?.(game, entity, definition.respawn) ?? definition.respawn;
+    const respawns = game.options.deathmatch !== 0 && respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
     if (game.options.edition === "classic" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
       entity.owner = player.actor.id;
       game.schedule(entity, 5, game.named.action(entity, "health_rot"));
-    } else if (respawns) game.schedule(entity, definition.respawn, game.named.action(entity, "SUB_regen"));
+    } else if (respawns) game.schedule(entity, respawn, game.named.action(entity, "SUB_regen"));
     else game.cancel(entity);
     game.useTargets(entity, other); return undefined;
 }

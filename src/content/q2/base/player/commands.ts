@@ -1,4 +1,3 @@
-import { Q2_BASE_WEAPONS } from "../../foundation/weapons/index.ts";
 import type { Q2PlayerContext } from "./types.ts";
 import type { Q2Players } from "./index.ts";
 import { q2EnvironmentDamage } from "./environment.ts";
@@ -30,7 +29,7 @@ function use(context: Q2PlayerContext, value: string): undefined {
   if (item === null) return print(context, `unknown item: ${value}\n`);
   if (!item.usable) return print(context, "Item is not usable.\n");
   if (game.host.inventory.count(entity.actor.id, item.id) === 0) return print(context, `Out of item: ${item.name}\n`);
-  const weapon = Q2_BASE_WEAPONS.find(candidate => candidate.item === item.id);
+  const weapon = weapons.registeredDefinitions().find(candidate => candidate.item === item.id);
   if (weapon !== undefined) {
     const result = weapons.requestWeapon(entity, game, weapon.name);
     if (result === "no-ammo" || result === "not-enough-ammo") return print(context, `Not enough ${weapon.ammo ?? "ammo"} for ${item.name}.\n`);
@@ -38,14 +37,14 @@ function use(context: Q2PlayerContext, value: string): undefined {
   state.selectedItem = item.id;
   return undefined;
 }
-function drop(context: Q2PlayerContext, value: string): undefined {
+function drop(players: Q2Players, context: Q2PlayerContext, value: string): undefined {
   const { entity, game, items, weapons } = context;
   const item = items.lookup(value);
   if (item === null) return print(context, `unknown item: ${value}\n`);
-  if (!item.droppable || game.options.mode === "coop" && item.stayCoop) return print(context, "Item is not dropable.\n");
+  if (!item.droppable || game.options.mode === "coop" && item.stayCoop && !players.canDropCoopStayItems(game)) return print(context, "Item is not dropable.\n");
   const count = game.host.inventory.count(entity.actor.id, item.id);
   if (count === 0) return print(context, `Out of item: ${item.name}\n`);
-  const weapon = Q2_BASE_WEAPONS.find(candidate => candidate.item === item.id);
+  const weapon = weapons.registeredDefinitions().find(candidate => candidate.item === item.id);
   if (weapon !== undefined && !weapons.canDrop(entity, game, weapon.name)) return print(context, "Can't drop current weapon\n");
   const grenade = weapons.states.get(entity.actor.id)?.weapon === "grenades" && item.id === "q2:ammo_grenades";
   const quantity = item.kind === "ammo" ? Math.min(item.quantity, count) : 1;
@@ -56,25 +55,33 @@ function drop(context: Q2PlayerContext, value: string): undefined {
 }
 function weaponCycle(context: Q2PlayerContext, direction: 1 | -1): undefined {
   const current = context.weapons.states.get(context.entity.actor.id)?.weapon;
-  const index = Q2_BASE_WEAPONS.findIndex(weapon => weapon.name === current);
-  for (let step = 1; step <= Q2_BASE_WEAPONS.length; step++) {
-    const weapon = Q2_BASE_WEAPONS[(index + direction * step + Q2_BASE_WEAPONS.length * 2) % Q2_BASE_WEAPONS.length];
+  const definitions = context.weapons.registeredDefinitions(), index = definitions.findIndex(weapon => weapon.name === current);
+  for (let step = 1; step <= definitions.length; step++) {
+    const weapon = definitions[(index + direction * step + definitions.length * 2) % definitions.length];
     if (weapon !== undefined && context.weapons.requestWeapon(context.entity, context.game, weapon.name) === "selected") break;
   }
   return undefined;
 }
-function say(players: Q2Players, context: Q2PlayerContext, args: readonly string[], teamOnly: boolean): undefined {
-  const { state, rules, game, entity, hooks } = context, now = game.host.now();
-  if (args.length === 0) return undefined;
+export function q2ChatAllowed(context: Q2PlayerContext): boolean {
+  const { state, rules, game } = context, now = game.host.now();
   if (rules.floodMessages !== 0) {
-    if (now < state.floodLockUntil) return print(context, `You can't talk for ${Math.trunc(state.floodLockUntil - now)} more seconds\n`);
+    if (now < state.floodLockUntil) {
+      print(context, `You can't talk for ${Math.trunc(state.floodLockUntil - now)} more seconds\n`);
+      return false;
+    }
     const previous = state.floodTimes[Math.max(0, state.floodTimes.length - Math.min(10, Math.trunc(rules.floodMessages)))];
     if (state.floodTimes.length >= rules.floodMessages && previous !== undefined && now - previous < rules.floodSeconds) {
       state.floodLockUntil = now + rules.floodWaitSeconds;
-      return print(context, `Flood protection:  You can't talk for ${Math.trunc(rules.floodWaitSeconds)} seconds.\n`);
+      print(context, `Flood protection:  You can't talk for ${Math.trunc(rules.floodWaitSeconds)} seconds.\n`);
+      return false;
     }
     state.floodTimes.push(now); if (state.floodTimes.length > 10) state.floodTimes.shift();
   }
+  return true;
+}
+function say(players: Q2Players, context: Q2PlayerContext, args: readonly string[], teamOnly: boolean): undefined {
+  const { state, game, entity, hooks } = context;
+  if (args.length === 0 || !q2ChatAllowed(context)) return undefined;
   const isTeam = teamOnly && (game.options.deathmatchFlags & (64 | 128)) !== 0;
   let words = args.join(" "); if (words.startsWith('"')) words = words.slice(1, words.endsWith('"') ? -1 : undefined);
   const message = `${isTeam ? `(${state.name})` : state.name}: ${words}`.slice(0, 150) + "\n";
@@ -88,6 +95,7 @@ function say(players: Q2Players, context: Q2PlayerContext, args: readonly string
 
 export function runQ2ClientCommand(players: Q2Players, context: Q2PlayerContext, sourceCommand: string, args: readonly string[]): boolean {
   const { entity, game, state, hooks } = context, command = sourceCommand.toLowerCase();
+  if (hooks.command?.(entity, game, command, args) === true) return true;
   if (command === "say" || command === "say_team") { say(players, context, args, command === "say_team"); return true; }
   if (command === "players" || command === "playerlist") {
     const list = [...players.states.values()].filter(value => value.connected).sort((left, right) => command === "players" ? left.score - right.score : left.slot - right.slot);
@@ -112,10 +120,9 @@ export function runQ2ClientCommand(players: Q2Players, context: Q2PlayerContext,
     return true;
   }
   if (players.intermission.kind !== "playing") return true;
-  if (hooks.command?.(entity, game, command, args) === true) return true;
   switch (command) {
     case "use": use(context, args.join(" ")); break;
-    case "drop": drop(context, args.join(" ")); break;
+    case "drop": drop(players, context, args.join(" ")); break;
     case "inven":
       state.showScores = false; state.showHelp = false; state.showInventory = !state.showInventory;
       if (state.showInventory) hooks.emit({ kind: "inventory", actor: entity.actor.id, entries: game.host.inventory.entries(entity.actor.id) });
@@ -127,7 +134,7 @@ export function runQ2ClientCommand(players: Q2Players, context: Q2PlayerContext,
     case "invuse": case "invdrop":
       if (state.selectedItem === null || game.host.inventory.count(entity.actor.id, state.selectedItem) === 0) select(context, 1, "all");
       if (state.selectedItem === null) print(context, "No item to use.\n");
-      else if (command === "invuse") use(context, state.selectedItem); else drop(context, state.selectedItem);
+      else if (command === "invuse") use(context, state.selectedItem); else drop(players, context, state.selectedItem);
       break;
     // The original next/previous names traverse the item table in reverse/forward order respectively.
     case "weapprev": weaponCycle(context, 1); break;

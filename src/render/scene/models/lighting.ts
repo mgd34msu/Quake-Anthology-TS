@@ -1,5 +1,6 @@
 /* Alias lighting rules from Quake II gl_mesh.c. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../contracts/math.ts";
+import type { Q2FragmentLight, Q2ModelShadowLight } from "../../../contracts/render.ts";
 
 export const Q2_SHELL_MASK = 1024 | 2048 | 4096 | 65536 | 131072;
 
@@ -34,3 +35,23 @@ export function aliasShadowPoint(point: Vec3, shadeVector: Vec3, entityHeight: n
   const height = entityHeight - floorHeight;
   return { x: point.x - shadeVector.x * (point.z + height), y: point.y - shadeVector.y * (point.z + height), z: -height + 1 };
 }
+
+/** quake-2-re-ts gl_mesh.ts enhancement: remove only each occluded light's share. */
+export function aliasShadowLightFractions(origin: Vec3, shade: Vec3, lights: readonly Q2FragmentLight[], modulate = 1, monochrome = false): readonly Q2ModelShadowLight[] {
+  const result: Q2ModelShadowLight[] = [];
+  const share = (contribution: number, channel: number): number => channel > 0 && contribution > 0 ? Math.min(1, contribution / channel) : 0;
+  for (const light of lights) {
+    if (light.shadow.kind === "none") continue;
+    const amount = (light.radius - Math.hypot(origin.x - light.origin.x, origin.y - light.origin.y, origin.z - light.origin.z)) / 256 * modulate;
+    if (amount <= 0) continue;
+    let r = amount * light.color.x, g = amount * light.color.y, b = amount * light.color.z;
+    if (monochrome) r = g = b = Math.max(r, g, b);
+    const fraction = { x: Math.fround(share(r, shade.x)), y: Math.fround(share(g, shade.y)), z: Math.fround(share(b, shade.z)) };
+    if (fraction.x <= 0 && fraction.y <= 0 && fraction.z <= 0) continue;
+    result.push({ origin: light.origin, radius: light.radius, shadow: light.shadow, fraction });
+  }
+  return result;
+}
+
+/** Alias shadedots and skinned mesh lighting can multiply the shade by at most two. */
+export function aliasShadeDivisor(shade: Vec3): number { return Math.max(1, Math.max(shade.x, shade.y, shade.z) * 2); }

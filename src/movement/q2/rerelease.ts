@@ -2,10 +2,21 @@
  * Licensed under the GNU General Public License 2.0.
  * Ported through quake-2-re-ts and checked against rerelease/p_move.cpp. */
 import type { NumericOperations } from "../../contracts/numeric.ts";
+import type { Vec3 as SceneVector } from "../../contracts/math.ts";
 import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
 import { type Vec3, type KexPmoveT, type KexTraceT, type KexTouchListT, type KexCsurfaceT, ContentsT, MASK_SOLID, MASK_DEADSOLID, MASK_PLAYERSOLID, MASK_WATER, MASK_CURRENT, SurfflagsT, WaterLevelT, KexPmTypeT, PmflagsT, ButtonT, RefdefFlagsT, MAXTOUCH, STEPSIZE, StuckResultT, PM_CONFIG_DEFAULT, type PmConfigT, type PmTraceFn, type StuckObjectTraceFn, PITCH, YAW, ROLL, axes, element } from "./types.ts";
-export function createRereleaseMovement(numericOps: NumericOperations) {
+/** The game DLL shares pml between all Pmove and SV_FlyMove calls. Prediction
+ * owns a separate context. Pmove resets it; server duplicate-plane recovery does not. */
+export class Q2RereleaseMovementContext {
+    readonly pmlOrigin: Vec3 = [0, 0, 0];
+    capture(): SceneVector { return { x: this.pmlOrigin[0], y: this.pmlOrigin[1], z: this.pmlOrigin[2] }; }
+    restore(origin: SceneVector): undefined {
+        this.pmlOrigin[0] = origin.x; this.pmlOrigin[1] = origin.y; this.pmlOrigin[2] = origin.z;
+    }
+}
+
+export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext) {
     const sourceFloat = (value: number): number => numericOps.profile.arithmetic.kind === "donor-binary64" ? value : numericOps.store(value);
     const { vec3, VectorCopy, clamp, G_AddBlend, vec3_add, vec3_sub, vec3_muls, vec3_mulEqs, vec3_addEq, vec3_dot, vec3_cross, vec3_normalize, vec3_length, vec3_lengthSquared, SlideClipVelocity, AngleVectors } = createMovementMath(numericOps, "rerelease");
     const pm_stopspeed = 100;
@@ -148,8 +159,9 @@ export function createRereleaseMovement(numericOps: NumericOperations) {
         touch.traces[touch.num] = tr;
         touch.num++;
     }
-    /** Duplicate-plane recovery intentionally nudges the live player during water-jump probes, as p_move.cpp does. */
-    function PM_StepSlideMove_Generic(origin: Vec3, velocity: Vec3, frametime: number, mins: Vec3, maxs: Vec3, touch: KexTouchListT, has_time: boolean, trace_func: PmTraceFn, liveOrigin: Vec3 = origin): void {
+    /** Native duplicate-plane recovery addresses pml.origin even when origin is
+     * a server entity or a temporary water-jump probe. Keep that source alias. */
+    function PM_StepSlideMove_Generic(origin: Vec3, velocity: Vec3, frametime: number, mins: Vec3, maxs: Vec3, touch: KexTouchListT, has_time: boolean, trace_func: PmTraceFn): void {
         const numbumps = 4;
         const primal_velocity = vec3(element(velocity, 0), element(velocity, 1), element(velocity, 2));
         let numplanes = 0;
@@ -194,9 +206,9 @@ export function createRereleaseMovement(numericOps: NumericOperations) {
             let hitDuplicate = false;
             for (i = 0; i < numplanes; i++) {
                 if (vec3_dot(trace.plane.normal, element(planes, i)) > sourceFloat(0.99)) {
-                    liveOrigin[0] = numericOps.store(numericOps.add(element(liveOrigin, 0), numericOps.multiply(element(trace.plane.normal, 0), sourceFloat(0.01))));
-                    liveOrigin[1] = numericOps.store(numericOps.add(element(liveOrigin, 1), numericOps.multiply(element(trace.plane.normal, 1), sourceFloat(0.01))));
-                    G_FixStuckObject_Generic(origin, mins, maxs, trace_func);
+                    context.pmlOrigin[0] = numericOps.store(numericOps.add(element(context.pmlOrigin, 0), numericOps.multiply(element(trace.plane.normal, 0), sourceFloat(0.01))));
+                    context.pmlOrigin[1] = numericOps.store(numericOps.add(element(context.pmlOrigin, 1), numericOps.multiply(element(trace.plane.normal, 1), sourceFloat(0.01))));
+                    G_FixStuckObject_Generic(context.pmlOrigin, mins, maxs, trace_func);
                     hitDuplicate = true;
                     break;
                 }
@@ -268,8 +280,9 @@ export function createRereleaseMovement(numericOps: NumericOperations) {
         pm.jump_sound = false;
         pm.step_clip = false;
         pm.impact_delta = 0;
+        VectorCopy(pm.s.origin, context.pmlOrigin);
         const pml: PmlT = {
-            origin: vec3(element(pm.s.origin, 0), element(pm.s.origin, 1), element(pm.s.origin, 2)),
+            origin: context.pmlOrigin,
             velocity: vec3(element(pm.s.velocity, 0), element(pm.s.velocity, 1), element(pm.s.velocity, 2)),
             forward: vec3(),
             right: vec3(),
@@ -703,7 +716,7 @@ export function createRereleaseMovement(numericOps: NumericOperations) {
                 waterjump_vel[2] = numericOps.store(numericOps.subtract(element(waterjump_vel, 2), numericOps.multiply(pm.s.gravity, time)));
                 if (element(waterjump_vel, 2) < 0)
                     has_time = false;
-                PM_StepSlideMove_Generic(waterjump_origin, waterjump_vel, time, pm.mins, pm.maxs, touches, has_time, PM_Trace_Auto, pml.origin);
+                PM_StepSlideMove_Generic(waterjump_origin, waterjump_vel, time, pm.mins, pm.maxs, touches, has_time, PM_Trace_Auto);
             }
             trace = PM_Trace(waterjump_origin, pm.mins, pm.maxs, vec3_sub(waterjump_origin, vec3(0, 0, 2)), MASK_SOLID);
             if (trace.fraction === 1 || element(trace.plane.normal, 2) < sourceFloat(0.7) || element(trace.endpos, 2) < element(pml.origin, 2))
@@ -997,4 +1010,6 @@ export function createRereleaseMovement(numericOps: NumericOperations) {
     }
     return { Pmove, PM_StepSlideMove_Generic, G_FixStuckObject_Generic };
 }
-export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT): void { createRereleaseMovement(numericOps).Pmove(pm, config); }
+export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext): void {
+    createRereleaseMovement(numericOps, context).Pmove(pm, config);
+}

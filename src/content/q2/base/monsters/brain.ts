@@ -6,6 +6,16 @@ import { beginDeath, damagedSkin, finishCorpse, humanoidBounds, move, sound, sta
 import { brainMoves } from "./tables/brain.ts";
 
 const boundPowerArmor = new WeakSet<OwnedActor>();
+function bindPowerArmor(context: MonsterContext): undefined {
+  const { entity, game } = context;
+  if (boundPowerArmor.has(entity.actor)) return undefined;
+  game.host.combat.bindPowerArmorCells(entity.actor, {
+    read: () => game.host.inventory.count(entity.actor.id, "q2:monster-power"),
+    write: count => game.host.inventory.configure(entity.actor, { item: "q2:monster-power", count, capacity: 100 }),
+  });
+  boundPowerArmor.add(entity.actor);
+  return undefined;
+}
 function screen(context: MonsterContext, active: boolean): undefined {
   const { entity, game } = context;
   const cells = game.host.inventory.count(entity.actor.id, "q2:monster-power");
@@ -21,15 +31,10 @@ export const brainDefinition: Q2MonsterDefinition = {
     const { entity, game } = context;
     if (!game.host.inventory.has(entity.actor.id)) game.host.inventory.create(entity.actor, []);
     game.host.inventory.configure(entity.actor, { item: "q2:monster-power", count: 100, capacity: 100 });
-    if (!boundPowerArmor.has(entity.actor)) {
-      game.host.combat.bindPowerArmorCells(entity.actor, {
-        read: () => game.host.inventory.count(entity.actor.id, "q2:monster-power"),
-        write: count => game.host.inventory.configure(entity.actor, { item: "q2:monster-power", count, capacity: 100 }),
-      });
-      boundPowerArmor.add(entity.actor);
-    }
+    bindPowerArmor(context);
     return screen(context, true);
   },
+  restore: bindPowerArmor,
   sight: sound("brain/brnsght1.wav"), search: sound("brain/brnsrch1.wav"),
   idle(context) { context.game.sound(context.entity, "brain/brnlens1.wav", 0, 1, 2); return context.setMove("brain_move_idle"); },
   pain(context) {

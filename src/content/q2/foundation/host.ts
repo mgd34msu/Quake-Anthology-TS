@@ -4,6 +4,7 @@ import type { AttackProvenance, DamageOutcome, ItemId, TransitionIntent } from "
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { TraceResult } from "../../../contracts/scene.ts";
+import type { Q2RereleaseRandomSource } from "../../../core/random/q2-rerelease.ts";
 import type { BodyState, DeathReaction, PainReaction, TouchContact } from "../../../contracts/world.ts";
 import type { ActorCallbackTable, SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -63,8 +64,9 @@ export interface Q2Motion {
   readonly actor: OwnedActor;
   readonly velocity: Vec3;
   readonly angularVelocity: Vec3;
-  readonly kind: "stationary" | "push" | "stop" | "toss" | "bounce" | "wall-bounce" | "fly-missile" | "step";
+  readonly kind: "stationary" | "push" | "stop" | "toss" | "new-toss" | "bounce" | "wall-bounce" | "fly" | "fly-missile" | "step";
   readonly gravity: number;
+  readonly gravityVector: Vec3;
   readonly clipMask: number;
   readonly owner: ActorId | null;
 }
@@ -86,6 +88,8 @@ export interface Q2FoundationHost {
   now(): number;
   frameSeconds(): number;
   random(): number;
+  /** Rerelease source callbacks share this stream with random(); classic hosts omit it. */
+  readonly rereleaseRandom?: Q2RereleaseRandomSource;
   /** Schedule the actor's bound think callback on the shared source clock. */
   schedule(actor: OwnedActor, dueSeconds: number | null): undefined;
   touchTriggers(actor: OwnedActor): undefined;
@@ -173,8 +177,11 @@ export class Q2Entity {
   solid: "none" | "trigger" | "box" | "brush" = "none";
   motion: Q2Motion["kind"] = "stationary";
   gravity = 1;
+  gravityVector: Vec3 = { x: 0, y: 0, z: -1 };
   angularVelocity: Vec3 = { x: 0, y: 0, z: 0 };
   movedir: Vec3 = { x: 0, y: 0, z: 0 };
+  pos1: Vec3 = { x: 0, y: 0, z: 0 };
+  pos2: Vec3 = { x: 0, y: 0, z: 0 };
   activator: ActorId | null = null;
   enemy: ActorId | null = null;
   owner: ActorId | null = null;
@@ -182,9 +189,13 @@ export class Q2Entity {
   teamMaster: ActorId | null = null;
   teamChain: ActorId | null = null;
   chain: ActorId | null = null;
+  beam: ActorId | null = null;
+  beam2: ActorId | null = null;
+  proboscus: ActorId | null = null;
   nextThink: number | null = null;
   think: Q2Think | null = null;
   prethink: Q2Think | null = null;
+  postthink: Q2Think | null = null;
   use: Q2Use | null = null;
   touch: Q2Touch | null = null;
   pain: Q2Pain | null = null;

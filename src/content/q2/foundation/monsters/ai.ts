@@ -5,6 +5,7 @@ import type { TraceResult } from "../../../../contracts/scene.ts";
 import type { Q2Entity, Q2GameServices } from "../host.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../fields.ts";
 import type { MonsterContext, MonsterFrame } from "./types.ts";
+import { alternateFlyStep } from "./alternate-fly.ts";
 
 export const MASK_MONSTERSOLID = 1 | 2 | 0x20000 | 0x2000000;
 export const MASK_SHOT = 1 | 2 | 8 | 16 | 0x2000000;
@@ -115,18 +116,27 @@ export function faceEnemy(context: MonsterContext): undefined {
 export function checkBottom(context: MonsterContext, origin: Vec3): boolean {
   const body = context.game.body(context.entity);
   const minimum = add(origin, body.bounds.min), maximum = add(origin, body.bounds.max);
+  const ceiling = context.entity.gravityVector.z > 0, direction = ceiling ? 1 : -1;
+  const support = ceiling ? maximum.z : minimum.z;
   const corners: readonly Vec3[] = [
-    { x: minimum.x, y: minimum.y, z: minimum.z - 1 }, { x: minimum.x, y: maximum.y, z: minimum.z - 1 },
-    { x: maximum.x, y: minimum.y, z: minimum.z - 1 }, { x: maximum.x, y: maximum.y, z: minimum.z - 1 },
+    { x: minimum.x, y: minimum.y, z: support + direction }, { x: minimum.x, y: maximum.y, z: support + direction },
+    { x: maximum.x, y: minimum.y, z: support + direction }, { x: maximum.x, y: maximum.y, z: support + direction },
   ];
-  if (corners.every(point => (context.game.host.pointContents(point) & 1) !== 0)) return true;
-  const start = { x: (minimum.x + maximum.x) * 0.5, y: (minimum.y + maximum.y) * 0.5, z: minimum.z };
-  const middle = context.game.host.trace({ start, end: { ...start, z: start.z - 36 }, bounds: null, ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
+  if (corners.every(point => context.game.host.pointContents(point) === 1)) return true;
+  const rerelease = context.game.options.edition === "rerelease";
+  const center = { x: (minimum.x + maximum.x) * 0.5, y: (minimum.y + maximum.y) * 0.5, z: support };
+  const start = rerelease ? { x: origin.x, y: origin.y, z: support } : center;
+  const middle = context.game.host.trace({ start, end: { ...start, z: start.z + direction * 36 },
+    bounds: rerelease ? { min: { ...body.bounds.min, z: 0 }, max: { ...body.bounds.max, z: 0 } } : null,
+    ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
   if (middle.fraction === 1) return false;
+  if (rerelease && (context.entity.spawnflags & 131072) !== 0) return true;
+  const quadrant = { x: (maximum.x - minimum.x) * 0.25, y: (maximum.y - minimum.y) * 0.25, z: 0 };
   for (const corner of corners) {
-    const point = { ...corner, z: minimum.z };
-    const trace = context.game.host.trace({ start: point, end: { ...point, z: point.z - 36 }, bounds: null, ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
-    if (trace.fraction === 1 || middle.end.z - trace.end.z > 18) return false;
+    const point = rerelease ? { x: center.x + (corner.x === minimum.x ? -quadrant.x : quadrant.x), y: center.y + (corner.y === minimum.y ? -quadrant.y : quadrant.y), z: support } : { ...corner, z: support };
+    const trace = context.game.host.trace({ start: point, end: { ...point, z: point.z + direction * 36 }, bounds: rerelease ? { min: scale(quadrant, -1), max: quadrant } : null,
+      ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
+    if (trace.fraction === 1 || (trace.end.z - middle.end.z) * direction > 18) return false;
   }
   return true;
 }
@@ -136,8 +146,11 @@ export function walkMove(context: MonsterContext, yaw: number, distance: number,
   if (context.state.locomotion === "stationary") return false;
   if (body.ground === null && context.state.locomotion === "walk") return false;
   const radians = yaw * Math.PI / 180;
-  const destination = add(body.origin, { x: Math.cos(radians) * distance, y: Math.sin(radians) * distance, z: 0 });
+  const step = context.beforeSourceMove({ x: Math.cos(radians) * distance, y: Math.sin(radians) * distance, z: 0 });
+  if (step.kind === "handled") return true;
+  const destination = add(body.origin, step.displacement);
   if (context.state.locomotion === "fly" || context.state.locomotion === "swim") {
+    if (context.game.options.edition === "rerelease" && context.state.alternateFly && alternateFlyStep(context)) return true;
     const game = context.game, entity = context.entity, state = context.state;
     const wet = (game.host.pointContents({ ...body.origin, z: body.origin.z + body.bounds.min.z + 1 }) & MASK_WATER) !== 0;
     const deep = (game.host.pointContents({ ...body.origin, z: body.origin.z + body.bounds.min.z + 27 }) & MASK_WATER) !== 0;
@@ -163,20 +176,24 @@ export function walkMove(context: MonsterContext, yaw: number, distance: number,
     }
     return false;
   }
-  const start = { ...destination, z: destination.z + 18 }, end = { ...destination, z: destination.z - 18 };
+  const gravity = context.entity.gravityVector, ceiling = gravity.z > 0;
+  const start = add(destination, scale(gravity, -18)), end = add(start, scale(gravity, 36));
   let trace = context.game.host.trace({ start, end, bounds: body.bounds, ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
   if (trace.allSolid) return false;
   if (trace.startSolid) {
-    trace = context.game.host.trace({ start: destination, end, bounds: body.bounds, ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
+    const retry = context.game.options.edition === "classic" ? { ...start, z: start.z - 18 } : destination;
+    trace = context.game.host.trace({ start: retry, end, bounds: body.bounds, ignore: context.entity.actor.id, mask: monsterSolidMask(context.game) });
     if (trace.startSolid || trace.allSolid) return false;
   }
-  const feet = { ...body.origin, z: body.origin.z + body.bounds.min.z + 1 };
-  if ((context.game.host.pointContents(feet) & MASK_WATER) === 0 && (context.game.host.pointContents({ ...trace.end, z: trace.end.z + body.bounds.min.z + 1 }) & MASK_WATER) !== 0) return false;
+  const supportOffset = ceiling ? body.bounds.max.z - 1 : body.bounds.min.z + 1;
+  const feet = { ...body.origin, z: body.origin.z + supportOffset };
+  if ((context.game.host.pointContents(feet) & MASK_WATER) === 0 && (context.game.host.pointContents({ ...trace.end, z: trace.end.z + supportOffset }) & MASK_WATER) !== 0) return false;
   if (trace.fraction === 1) {
     if ((context.entity.flags & 256) === 0) return false;
     if (commit) { context.game.move(context.entity, { origin: destination, ground: null }, relink); if (relink) context.game.host.touchTriggers(context.entity.actor); }
     return true;
   }
+  if (!context.acceptsSourceGroundMove(trace.end)) return false;
   if (!checkBottom(context, trace.end)) {
     if ((context.entity.flags & 256) === 0) return false;
     if (commit) { context.game.move(context.entity, { origin: trace.end }, relink); if (relink) context.game.host.touchTriggers(context.entity.actor); }
@@ -230,6 +247,8 @@ export function chaseDirection(context: MonsterContext, goal: Vec3, distance: nu
 
 export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], string>, distance: number): undefined {
   const { game, entity, state } = context;
+  const rogue = context.sourceCombatRules() === "rogue";
+  const extended = game.options.edition === "rerelease" || rogue;
   if (ai === "none") return undefined;
   if (ai === "turn") {
     if (distance !== 0) walkMove(context, game.body(entity).angles.y, distance);
@@ -246,15 +265,16 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
   }
   if (ai === "charge") {
     const enemy = enemyBody(context);
-    if (game.options.edition === "rerelease" && enemy === null) return undefined;
+    if (extended && enemy === null) return undefined;
+    if (rogue && game.options.edition === "classic" && enemy !== null && visible(context)) state.blindFireTarget = enemy.origin;
     if (!state.manualSteering) faceEnemy(context); else changeYaw(context);
     if (game.options.edition === "rerelease" && enemy !== null && visible(context)) state.blindFireTarget = add(enemy.origin, scale(enemy.velocity, -0.1));
     if (distance !== 0) {
-      if (game.options.edition === "rerelease" && state.charging) { context.moveToGoal(distance); return undefined; }
+      if (extended && state.charging) { context.moveToGoal(distance); return undefined; }
       const yaw = game.body(entity).angles.y;
-      if (game.options.edition === "rerelease" && state.attackState === "sliding") {
-        const side = state.lefty ? 90 : -90;
-        const sideways = distance * state.move.sidestepScale;
+      if (extended && state.attackState === "sliding") {
+        const side = rogue && game.options.edition === "classic" && entity.enemy !== null && game.entity(entity.enemy)?.classname === "tesla" ? 0 : state.lefty ? 90 : -90;
+        const sideways = game.options.edition === "classic" ? distance : distance * state.move.sidestepScale;
         if (!walkMove(context, state.idealYaw + side, sideways)) { state.lefty = !state.lefty; walkMove(context, state.idealYaw - side, sideways); }
       } else walkMove(context, yaw, distance);
     }
@@ -269,7 +289,15 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
         const enemy = enemyBody(context);
         if (enemy !== null) state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
         if (game.body(entity).angles.y !== state.idealYaw && state.temporaryStandGround) { state.standGround = false; state.temporaryStandGround = false; context.run(); }
-        changeYaw(context); context.checkAttack(0);
+        if (!rogue || !state.manualSteering) changeYaw(context);
+        const attacking = context.checkAttack(0);
+        if (rogue) {
+          const target = enemyBody(context);
+          if (target !== null && visible(context)) {
+            state.lostSight = false; state.lastSighting = target.origin; state.blindFireTarget = target.origin;
+            state.trailTime = game.host.now(); state.blindFireDelay = 0;
+          } else if (!attacking) context.findTarget();
+        }
       } else context.findTarget();
       return undefined;
     }
@@ -292,18 +320,28 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
     return undefined;
   }
   if (state.combatPoint) { context.moveToGoal(distance); return undefined; }
+  if (rogue && game.options.edition === "classic") {
+    state.ducked = false;
+    const body = game.body(entity);
+    if (body.bounds.max.z !== state.normalHeight) {
+      state.canTakeDamage = true; state.nextDuckTime = game.host.now() + 0.5;
+      game.host.combat.setTraits(entity.actor, { canTakeDamage: true });
+      game.move(entity, { bounds: { ...body.bounds, max: { ...body.bounds.max, z: state.normalHeight } } });
+    }
+  }
+  if (context.runHintPath(distance)) return undefined;
   let alreadyMoved = false;
   if (state.soundTarget !== null) {
     const delta = subtract(game.body(entity).origin, state.soundTarget.origin);
     if (length(delta) < (game.options.edition === "classic" ? 64 : 32)) {
       state.standGround = true; state.temporaryStandGround = true; context.stand(); return undefined;
     }
-    context.moveToGoal(distance); alreadyMoved = game.options.edition === "rerelease";
+    context.moveToGoal(distance); alreadyMoved = extended;
     if (!game.host.actors.isLive(entity.actor.id)) return undefined;
     if (!context.findTarget()) return undefined;
   }
   const attacking = context.checkAttack(distance);
-  if (game.options.edition === "rerelease") {
+  if (extended) {
     if (!visible(context) && state.attackState === "sliding") state.attackState = "straight";
     if (state.dodging) state.attackState = "sliding";
   } else if (attacking) return undefined;
@@ -316,6 +354,7 @@ export function runAi(context: MonsterContext, ai: Extract<MonsterFrame["ai"], s
     return undefined;
   }
   if (state.standGround) return undefined;
+  if (!visible(context) && context.checkLostHintPath()) return undefined;
   if (!visible(context) && game.options.mode === "coop" && context.findTarget()) return undefined;
   if (!alreadyMoved) context.moveToGoal(distance);
   if (!game.host.actors.isLive(entity.actor.id)) return undefined;
@@ -329,9 +368,9 @@ function slide(context: MonsterContext, distance: number): undefined {
   const side = state.lefty ? 90 : -90;
   const amount = game.options.edition === "rerelease" && state.locomotion !== "fly" ? Math.min(distance, 8 / (game.host.frameSeconds() * 100)) : distance;
   if (walkMove(context, state.idealYaw + side, amount)) return undefined;
-  if (game.options.edition === "rerelease" && state.dodging) { finishDodge(context); state.attackState = "straight"; return undefined; }
+  if ((game.options.edition === "rerelease" || context.sourceCombatRules() === "rogue") && state.dodging) { finishDodge(context); state.attackState = "straight"; return undefined; }
   state.lefty = !state.lefty;
-  if (!walkMove(context, state.idealYaw - side, amount) && game.options.edition === "rerelease") state.attackState = "straight";
+  if (!walkMove(context, state.idealYaw - side, amount) && (game.options.edition === "rerelease" || context.sourceCombatRules() === "rogue")) state.attackState = "straight";
   return undefined;
 }
 

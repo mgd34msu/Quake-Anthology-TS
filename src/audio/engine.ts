@@ -150,6 +150,10 @@ export class UnifiedAudio {
             state.q3.updateEntityPosition(entity, origin);
         }
     }
+    updateQ3SeatActor(seat: SeatId, actor: ActorId, origin: Vec3): void {
+        this.check();
+        this.seat(seat).q3.updateEntityPosition(this.entity(actor), origin);
+    }
     private origin(request: PlaySound | LoopSound): VoiceOrigin {
         switch (request.origin.kind) {
             case "local": return { kind: "local" };
@@ -201,15 +205,14 @@ export class UnifiedAudio {
                 continue;
             const origin = this.loopPosition(request, state.listener);
             state.loops.set(`${request.family}:${entity}`, request);
-            if (request.family === "q3") {
-                const options = { entity, origin, velocity: request.velocity, frameNumber: request.frameNumber,
-                    volume: Math.trunc(request.volume * (request.lifetime === "frame" ? 127 : 90)) };
-                if (request.lifetime === "frame")
-                    state.q3.updateLoopingSound(request.sound.pcm, options);
-                else
-                    state.q3.updateRealLoopingSound(request.sound.pcm, options);
-            }
+            if (request.family === "q3") this.q3Loop(state, request, origin);
         }
+    }
+    private q3Loop(state: SeatAudio, request: LoopSound, origin: Vec3): void {
+        const options = { entity: this.entity(request.actor), origin, velocity: request.velocity, frameNumber: request.frameNumber,
+            volume: Math.trunc(request.volume * (request.lifetime === "frame" ? 127 : 90)) };
+        if (request.lifetime === "frame") state.q3.updateLoopingSound(request.sound.pcm, options);
+        else state.q3.updateRealLoopingSound(request.sound.pcm, options);
     }
     beginLoopFrame(): void {
         for (const state of this.seats) {
@@ -237,6 +240,19 @@ export class UnifiedAudio {
             state.q3.stopLoopingSound(entity);
         }
         this.endLoopFrame();
+    }
+    clearQ3SeatLoops(seat: SeatId, killAll: boolean): void {
+        const state = this.seat(seat);
+        state.q3.clearLoopingSounds(killAll);
+        for (const [key, loop] of state.loops)
+            if (loop.family === "q3" && loop.audience.kind === "seat" && loop.audience.seat.equals(seat) && (killAll || loop.lifetime === "frame")) state.loops.delete(key);
+        for (const loop of state.loops.values()) if (loop.family === "q3") this.q3Loop(state, loop, this.loopPosition(loop, state.listener));
+    }
+    stopQ3SeatLoop(seat: SeatId, actor: ActorId): void {
+        const state = this.seat(seat), entity = this.entity(actor), key = `q3:${entity}`, loop = state.loops.get(key);
+        if (loop?.audience.kind === "world") return;
+        if (loop !== undefined && loop.audience.kind === "seat" && loop.audience.seat.equals(seat)) state.loops.delete(key);
+        state.q3.stopLoopingSound(entity);
     }
     addStaticSound(seat: SeatId, sound: SoundAsset, origin: Vec3, volume: number, attenuation: number): boolean { return this.seat(seat).q1.addStaticSound(sound.pcm, origin, volume, attenuation); }
     updateAmbient(seat: SeatId, sounds: readonly SoundAsset[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {

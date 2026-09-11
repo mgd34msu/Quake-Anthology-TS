@@ -3,7 +3,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
-import { ZERO, vadd, vsub, vscale, dot, overlaps, vectors } from "./types.ts";
+import { ZERO, vadd, vsub, vscale, dot, overlaps } from "./types.ts";
 
 function doorSound(entity: Q1Actor, moving: boolean): string {
   if (entity.sounds === 1) return moving ? "doors/doormv1.wav" : "doors/drclos4.wav";
@@ -35,7 +35,7 @@ function doorUse(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null)
   return undefined;
 }
 export function spawnDoor(game: Q1Foundation, entity: Q1Actor): undefined {
-  const body = game.body(entity); entity.movedir = moveDirection(body.angles); game.setBody(entity, { angles: ZERO });
+  const body = game.body(entity); entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
   entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 100; entity.wait ||= 3; entity.damage ||= 2;
   if ((entity.spawnflags & 24) !== 0) entity.wait = -1;
   entity.pos1 = body.origin;
@@ -79,7 +79,7 @@ export function linkDoors(game: Q1Foundation): undefined {
 }
 export function spawnButton(game: Q1Foundation, entity: Q1Actor): undefined {
   const body = game.body(entity); entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 40; entity.wait ||= 1;
-  entity.movedir = moveDirection(body.angles); game.setBody(entity, { angles: ZERO });
+  entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
   entity.pos1 = body.origin;
   entity.pos2 = vadd(body.origin, vscale(entity.movedir, Math.abs(dot(entity.movedir, vsub(body.bounds.max, body.bounds.min))) - (entity.number("lip") || 4)));
   entity.use = game.named.use(entity, "button_use");
@@ -144,7 +144,7 @@ function secretFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | nu
   game.host.combat.setHealth(entity.actor, 10000);
   if (entity.state !== "bottom" || entity.move !== null) return undefined;
   entity.message = ""; game.useTargets(entity, activator); entity.damageable = false; entity.state = "up";
-  const basis = vectors(entity.mangle), bounds = game.body(entity).bounds, size = vsub(bounds.max, bounds.min);
+  const basis = game.makeVectors(entity.mangle), bounds = game.body(entity).bounds, size = vsub(bounds.max, bounds.min);
   const width = entity.number("t_width") || Math.abs(dot((entity.spawnflags & 4) !== 0 ? basis.up : basis.right, size));
   const distance = entity.number("t_length") || Math.abs(dot(basis.forward, size));
   const direction = (entity.spawnflags & 4) !== 0 ? vscale(basis.up, -width) : vscale(basis.right, width * (1 - (entity.spawnflags & 2)));

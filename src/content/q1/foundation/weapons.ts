@@ -6,9 +6,10 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
 import { ammoItem } from "./runtime.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
-import { POINT, ZERO, vadd, vsub, vscale, normalize, dot, vectors, weaponItem } from "./types.ts";
+import { POINT, ZERO, vadd, vsub, vscale, normalize, dot, isQ1BaseWeapon } from "./types.ts";
 
 export function weaponModel(weapon: Q1Weapon): string {
+  if (!isQ1BaseWeapon(weapon)) throw new Error(`Use registered Q1 weapon model for ${weapon}`);
   switch (weapon) {
     case "axe": return "progs/v_axe.mdl";
     case "shotgun": return "progs/v_shot.mdl";
@@ -21,13 +22,9 @@ export function weaponModel(weapon: Q1Weapon): string {
   }
 }
 export function bestWeapon(game: Q1Foundation, actor: OwnedActor): Q1Weapon {
-  const order: readonly Q1Weapon[] = ["lightning", "supernailgun", "supershotgun", "nailgun", "shotgun", "axe"];
-  for (const weapon of order) {
-    if (game.host.inventory.count(actor.id, weaponItem(weapon)) === 0) continue;
-    if (weapon === "lightning" && (game.player(actor.id)?.waterLevel ?? 0) > 1) continue;
-    const ammo = ammoItem(weapon); const required = weapon === "supernailgun" || weapon === "supershotgun" ? 2 : 1;
-    if (ammo === null || game.host.inventory.count(actor.id, ammo) >= required) return weapon;
-  }
+  const order = game.weaponOrder ?? ["lightning", "supernailgun", "supershotgun", "nailgun", "shotgun", "axe"];
+  const player = game.player(actor.id); if (player === null) return "axe";
+  for (const weapon of order) if (game.weaponAvailable(player, weapon)) return weapon;
   return "axe";
 }
 
@@ -60,12 +57,12 @@ export function aim(game: Q1Foundation, actor: OwnedActor, forward: Vec3): Vec3 
 /** MultiDamage flushes when the next pellet changes target, preserving intervening reactions. */
 export function fireBullets(game: Q1Foundation, shooter: OwnedActor, direction: Vec3, viewAngles: Vec3, count: number, spreadX: number, spreadY: number, weapon: Q1Weapon | null): undefined {
   const body = game.host.bodies.read(shooter.id); if (body === null) return undefined;
-  const basis = vectors(viewAngles); let source = vadd(body.origin, vscale(basis.forward, 10));
+  const basis = game.makeVectors(viewAngles); let source = vadd(body.origin, vscale(basis.forward, 10));
   source = { ...source, z: Math.fround(body.origin.z + body.bounds.min.z + (body.bounds.max.z - body.bounds.min.z) * 0.7) };
   let pending: ActorId | null = null, total = 0;
   const flush = (): undefined => { if (pending !== null && game.host.actors.isLive(pending)) game.damage(pending, shooter.id, shooter.id, total, weapon); total = 0; return undefined; };
   for (let shot = 0; shot < count; shot++) {
-    const ray = vadd(vadd(direction, vscale(basis.right, (game.host.random() * 2 - 1) * spreadX)), vscale(basis.up, (game.host.random() * 2 - 1) * spreadY));
+    const ray = vadd(vadd(direction, vscale(game.basis.right, (game.host.random() * 2 - 1) * spreadX)), vscale(game.basis.up, (game.host.random() * 2 - 1) * spreadY));
     const trace = game.host.trace({ start: source, end: vadd(source, vscale(ray, 2048)), bounds: POINT, ignore: shooter.id, monsters: true });
     if (trace.fraction === 1) continue;
     if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) {
@@ -102,7 +99,7 @@ export function projectileTouch(game: Q1Foundation, entity: Q1Actor, other: Acto
       const amount = entity.projectile === "spike" ? 9 : 18;
       if (other !== null && game.host.combat.read(other)?.canTakeDamage) {
         game.effect("blood", game.body(entity).origin, other, amount); game.damage(other, entity.actor.id, entity.owner, amount, entity.projectileWeapon);
-      } else game.effect(entity.projectile, game.body(entity).origin);
+      } else game.effect(entity.classname === "wizard_spike" ? "wizard-spike" : entity.classname === "knight_spike" ? "knight-spike" : entity.projectile, game.body(entity).origin);
       return game.remove(entity);
     }
     case null: return undefined;
@@ -124,12 +121,12 @@ function lightning(game: Q1Foundation, player: Q1PlayerState): undefined {
   const body = game.host.bodies.read(player.actor.id); if (body === null) return undefined;
   const cells = game.host.inventory.count(player.actor.id, "q1:ammo/cells");
   if (player.waterLevel > 1) {
-    game.host.inventory.consume(player.actor, "q1:ammo/cells", cells); return game.radiusDamage(player.actor.id, player.actor.id, 35 * cells, null, "lightning");
+    game.consumeWeaponAmmo(player, "q1:ammo/cells", cells); return game.radiusDamage(player.actor.id, player.actor.id, 35 * cells, null, "lightning", "discharge");
   }
-  game.host.inventory.consume(player.actor, "q1:ammo/cells", 1);
-  const forward = vectors(player.viewAngles).forward, start = vadd(body.origin, { x: 0, y: 0, z: 16 });
+  game.consumeWeaponAmmo(player, "q1:ammo/cells", 1);
+  const forward = game.makeVectors(player.viewAngles).forward, start = vadd(body.origin, { x: 0, y: 0, z: 16 });
   const wall = game.host.trace({ start, end: vadd(start, vscale(forward, 600)), bounds: POINT, ignore: player.actor.id, monsters: false });
-  game.host.emit({ kind: "beam", actor: player.actor.id, start, end: wall.end });
+  game.host.emit({ kind: "beam", style: "lightning2", actor: player.actor.id, start, end: wall.end });
   const end = vadd(wall.end, vscale(forward, 4));
   // Preserve the source's discarded normalize return and sequential x/y assignments.
   const delta = vsub(end, body.origin), side = { x: -delta.y * 16, y: -delta.y * 16, z: 0 };
@@ -144,12 +141,19 @@ function lightning(game: Q1Foundation, player: Q1PlayerState): undefined {
   return undefined;
 }
 export function fireWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
+  if (game.registeredWeapons.has(player.weapon) || !isQ1BaseWeapon(player.weapon)) return game.fireRegisteredWeapon(player);
+  return fireBaseWeapon(game, player);
+}
+/** An overriding source definition can delegate its unmodified attack without reentering its own registration. */
+export function fireBaseWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
+  if (!isQ1BaseWeapon(player.weapon)) throw new Error("Base Q1 attack requires a base weapon");
   const repeating = player.continuousFiring;
   if (game.health(player.actor.id) <= 0 || game.time < (repeating ? player.nextWeaponFrame : player.attackFinished)) return false;
   const ammo = ammoItem(player.weapon);
   if (ammo !== null && game.host.inventory.count(player.actor.id, ammo) < 1) { game.selectWeapon(player.actor, bestWeapon(game, player.actor)); return false; }
   const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
-  const basis = vectors(player.viewAngles); const weapon = player.weapon; let delay = 0.1, punch = -2;
+  if (!game.registeredWeapons.has(player.weapon)) game.weaponBeforeFire(player);
+  const basis = game.makeVectors(player.viewAngles); const weapon = player.weapon; let delay = 0.1, punch = -2;
   player.continuousFiring = weapon === "nailgun" || weapon === "supernailgun" || weapon === "lightning";
   player.nextWeaponFrame = Math.fround(game.time + 0.1);
   if (!player.continuousFiring) { player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; }
@@ -164,26 +168,26 @@ export function fireWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
     }
     case "shotgun": case "supershotgun": {
       const superShot = weapon === "supershotgun" && game.host.inventory.count(player.actor.id, "q1:ammo/shells") > 1;
-      game.host.inventory.consume(player.actor, "q1:ammo/shells", superShot ? 2 : 1); delay = weapon === "supershotgun" ? 0.7 : 0.5; punch = superShot ? -4 : -2;
+      game.consumeWeaponAmmo(player, "q1:ammo/shells", superShot ? 2 : 1); delay = weapon === "supershotgun" ? 0.7 : 0.5; punch = superShot ? -4 : -2;
       game.sound(player.actor, superShot ? "weapons/shotgn2.wav" : "weapons/guncock.wav", "weapon");
       fireBullets(game, player.actor, aim(game, player.actor, basis.forward), player.viewAngles, superShot ? 14 : 6, superShot ? 0.14 : 0.04, superShot ? 0.08 : 0.04, weapon); break;
     }
     case "nailgun": case "supernailgun": {
       const superNail = weapon === "supernailgun" && game.host.inventory.count(player.actor.id, "q1:ammo/nails") >= 2;
       delay = 0.2;
-      game.host.inventory.consume(player.actor, "q1:ammo/nails", superNail ? 2 : 1);
+      game.consumeWeaponAmmo(player, "q1:ammo/nails", superNail ? 2 : 1);
       game.sound(player.actor, superNail ? "weapons/spike2.wav" : "weapons/rocket1i.wav", "weapon");
       const origin = vadd(vadd(body.origin, { x: 0, y: 0, z: 16 }), vscale(basis.right, superNail ? 0 : player.nailSide * 4));
-      projectile(game, player, superNail ? "superspike" : "spike", vscale(aim(game, player.actor, basis.forward), 1000), origin); player.nailSide *= -1; break;
+      projectile(game, player, superNail ? "superspike" : "spike", vscale(aim(game, player.actor, basis.forward), game.nailSpeed(player, 1000)), origin); player.nailSide *= -1; break;
     }
     case "grenadelauncher": {
-      game.host.inventory.consume(player.actor, "q1:ammo/rockets", 1); delay = 0.6; game.sound(player.actor, "weapons/grenade.wav", "weapon");
+      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1); delay = 0.6; game.sound(player.actor, "weapons/grenade.wav", "weapon");
       const velocity = player.viewAngles.x === 0 ? { ...vscale(aim(game, player.actor, basis.forward), 600), z: 200 } :
         vadd(vadd(vadd(vscale(basis.forward, 600), vscale(basis.up, 200)), vscale(basis.right, (game.host.random() * 2 - 1) * 10)), vscale(basis.up, (game.host.random() * 2 - 1) * 10));
       projectile(game, player, "grenade", velocity, body.origin); break;
     }
     case "rocketlauncher": {
-      game.host.inventory.consume(player.actor, "q1:ammo/rockets", 1); delay = 0.8; game.sound(player.actor, "weapons/sgun1.wav", "weapon");
+      game.consumeWeaponAmmo(player, "q1:ammo/rockets", 1); delay = 0.8; game.sound(player.actor, "weapons/sgun1.wav", "weapon");
       projectile(game, player, "rocket", vscale(aim(game, player.actor, basis.forward), 1000), vadd(vadd(body.origin, vscale(basis.forward, 8)), { x: 0, y: 0, z: 16 })); break;
     }
     case "lightning":
@@ -191,16 +195,16 @@ export function fireWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
       if (player.lightningSoundAt < game.time) { game.sound(player.actor, "weapons/lhit.wav", "weapon"); player.lightningSoundAt = game.time + 0.6; }
       lightning(game, player); if (!repeating) game.sound(player.actor, "weapons/lstart.wav", "auto"); break;
   }
-  player.attackFinished = Math.fround(game.time + delay);
+  player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay));
   player.weaponFrame = player.continuousFiring ? player.weaponFrame % (weapon === "lightning" ? 4 : 8) + 1 : player.weaponAnimationBase;
-  game.host.emit({ kind: "weapon", player: player.actor.id, weapon, viewModel: weaponModel(weapon), frame: player.weaponFrame, punch });
+  game.host.emit({ kind: "weapon", player: player.actor.id, weapon, viewModel: game.weaponModel(weapon, player), frame: player.weaponFrame, punch });
   game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 
 function axeStrike(game: Q1Foundation, strike: Q1Actor): undefined {
         const player = strike.owner === null ? null : game.player(strike.owner); if (player === null) return game.remove(strike);
         const current = game.host.bodies.read(player.actor.id); if (current === null) return game.remove(strike);
-        const start = vadd(current.origin, { x: 0, y: 0, z: 16 }), forward = vectors(player.viewAngles).forward;
+        const start = vadd(current.origin, { x: 0, y: 0, z: 16 }), forward = game.makeVectors(player.viewAngles).forward;
         const trace = game.host.trace({ start, end: vadd(start, vscale(forward, 64)), bounds: POINT, ignore: player.actor.id, monsters: true });
         if (trace.fraction < 1) {
           if (trace.actor !== null && game.host.combat.read(trace.actor)?.canTakeDamage) { game.effect("blood", trace.end, trace.actor, 20); game.damage(trace.actor, player.actor.id, player.actor.id, 20, "axe"); }

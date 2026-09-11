@@ -50,7 +50,8 @@ export class SeatConsole {
     if (text === "") return;
     this.print(`]${text}\n`);
     const explicit = text.startsWith("/") || text.startsWith("\\"), first = text.split(/\s/, 1)[0] ?? "";
-    const known = this.options.commands.exists(first) || this.options.commands.aliasNames().includes(first) || this.options.cvars.find(first) !== undefined;
+    const known = this.options.commands.exists(first) || this.options.commands.aliasNames().includes(first)
+      || this.options.commands.findCvar(first, this.options.context) !== undefined;
     const qwChat = this.options.dialect === "q1-quakeworld" && this.options.connected() && !known;
     const q3Chat = this.options.dialect === "q3" && this.options.connected();
     if (!explicit && (qwChat || q3Chat)) this.options.chat(text, false, null);
@@ -77,7 +78,8 @@ export class SeatConsole {
     }
     if (focus.kind === "console") {
       if (code === KeyCode.Tab) {
-        const completion = completeCommand(field.text, [...this.options.commands.registeredNames(), ...this.options.commands.aliasNames(), ...this.options.cvars.snapshots().map(value => value.name)]);
+        const completion = completeCommand(field.text, [...this.options.commands.registeredNames(), ...this.options.commands.aliasNames(),
+          ...this.options.commands.cvarSnapshots(this.options.context).map(value => value.name)]);
         field.setText(completion.text);
         if (completion.matches.length > 1) this.print(`]${completion.text}\n${completion.matches.map(name => `    ${name}\n`).join("")}`);
         return true;

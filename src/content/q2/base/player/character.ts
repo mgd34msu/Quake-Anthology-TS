@@ -1,6 +1,7 @@
 import type { DamageDecision } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
+import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { BodyState, DeathReaction, PainReaction } from "../../../../contracts/world.ts";
 import type { SharedBodyTable } from "../../../../world/actors/body.ts";
 import type { GameplayAuthority } from "../../../../world/gameplay/authority.ts";
@@ -14,6 +15,8 @@ import { q2WorldEffects, q2FallingDamage } from "./environment.ts";
 import { q2BuildView, q2ClientAnimation, q2ClientEffects, q2DamageFeedback } from "./view.ts";
 import { createQ2PlayerRules, Q2PlayerState } from "./types.ts";
 import type { Q2CharacterContext, Q2CharacterWeapon, Q2PlayerMovement, Q2PlayerRules, Q2PlayerView } from "./types.ts";
+import { saveQ2Actor } from "../../foundation/checkpoint.ts";
+import type { Q2CharacterCheckpoint } from "./checkpoint.ts";
 
 export interface Q2CharacterGib {
   readonly model: string;
@@ -64,6 +67,21 @@ export class Q2CharacterActor {
     this.entity.model = options.model; this.entity.skin = options.skin; this.entity.viewHeight = 22;
     this.state = new Q2PlayerState(options.slot, host.now()); this.state.airFinished = host.now() + 12;
     this.rules = createQ2PlayerRules(options.viewRules);
+  }
+  capture(): Q2CharacterCheckpoint {
+    const { entity, state } = this, attack = entity.lastAttack;
+    return { version: 1, painIndex: this.painIndex, deathIndex: this.deathIndex, state: structuredClone({ ...state, chaseTarget: saveQ2Actor(state.chaseTarget) }), rules: structuredClone(this.rules),
+      entity: { model: entity.model, model2: entity.model2, model3: entity.model3, model4: entity.model4, skin: entity.skin, frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale,
+        effects: entity.effects, renderFlags: entity.renderFlags, flags: entity.flags, serverFlags: entity.serverFlags, viewHeight: entity.viewHeight, maxHealth: entity.maxHealth, sound: entity.sound, visible: entity.visible },
+      lastAttack: attack === null ? null : structuredClone({ ...attack, attacker: saveQ2Actor(attack.attacker), inflictor: saveQ2Actor(attack.inflictor) }) };
+  }
+  restore(checkpoint: Q2CharacterCheckpoint, resolveActor: (actor: SavedActorId) => ActorId): undefined {
+    this.painIndex = checkpoint.painIndex; this.deathIndex = checkpoint.deathIndex;
+    const { chaseTarget, ...values } = structuredClone(checkpoint.state), attack = checkpoint.lastAttack;
+    Object.assign(this.state, values); this.state.chaseTarget = chaseTarget === null ? null : resolveActor(chaseTarget);
+    Object.assign(this.rules, structuredClone(checkpoint.rules)); Object.assign(this.entity, checkpoint.entity);
+    this.entity.lastAttack = attack === null ? null : { ...attack, attacker: attack.attacker === null ? null : resolveActor(attack.attacker), inflictor: attack.inflictor === null ? null : resolveActor(attack.inflictor) };
+    return undefined;
   }
   private body(): BodyState {
     const body = this.host.bodies.read(this.actor.id);
@@ -182,7 +200,12 @@ export class Q2CharacterActor {
     const view = q2BuildView(context, feedback.flashes, false); host.view(actor.id, view);
     const cycle = Math.trunc(movement.ducked ? state.bobTime * 4 : state.bobTime);
     if (state.event === "" && movement.grounded && speed > 225 && Math.trunc(state.bobTime + state.bobMove) !== cycle) state.event = "q2:footstep";
-    if (state.event !== "") { host.emit({ kind: "effect", effect: state.event, origin: this.body().origin, direction: zero, count: 1, color: 0 }); state.event = ""; }
+    if (state.event !== "") {
+      const event = state.event === "q2:footstep" ? 2 : state.event === "q2:fall-short" ? 3 : state.event === "q2:fall" ? 4 : state.event === "q2:fall-far" ? 5 : state.event === "q2:player-teleport" ? 6 : null;
+      if (event !== null) host.emit({ kind: "entity-event", actor: actor.id, event });
+      else host.emit({ kind: "effect", effect: state.event, origin: this.body().origin, direction: zero, count: 1, color: 0 });
+      state.event = "";
+    }
     q2ClientEffects(context); q2ClientAnimation(context);
     state.oldVelocity = this.body().velocity; state.oldViewAngles = view.angles;
     return this.show();

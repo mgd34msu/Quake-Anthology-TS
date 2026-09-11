@@ -24,18 +24,20 @@ export interface Q3CharacterEvent {
   readonly parameter: number;
 }
 
-export interface Q3CharacterServices {
+interface Q3CharacterAuthorities {
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
   timeMilliseconds(): number;
   emit(event: Q3CharacterEvent): undefined;
-  /** The selected map/game controller owns spawn occupancy and targets. */
-  spawnTargets(actor: OwnedActor): undefined;
-  killBox(actor: OwnedActor): undefined;
   deathContext(actor: OwnedActor): Q3CharacterDeathContext;
 }
+
+export type Q3CharacterServices = Q3CharacterAuthorities & (
+  | { readonly placement: "source-game" }
+  | { readonly placement?: "character"; spawnTargets(actor: OwnedActor): undefined; killBox(actor: OwnedActor): undefined }
+);
 
 export interface Q3CharacterDeathContext {
   readonly blood: boolean;
@@ -50,9 +52,32 @@ export interface Q3CharacterSpawn {
   readonly inventory: readonly InventoryEntry[];
 }
 
+export interface Q3CharacterCheckpoint {
+  readonly version: 1;
+  readonly product: "baseq3" | "missionpack";
+  readonly animation: Extract<AnimationState, { readonly kind: "q3" }>;
+  readonly flags: number;
+  readonly eventSequence: number;
+  readonly respawnTime: number;
+  readonly spawnCount: number;
+  readonly dead: boolean;
+  readonly gibbed: boolean;
+  readonly initialized: boolean;
+}
+
+export interface Q3DeathAnimationCheckpoint { readonly version: 1; readonly index: number; }
+
 /** Global source death animation cycling belongs to the game instance, never to a static variable. */
 export class Q3DeathAnimationSequence {
   private index = 0;
+  capture(): Q3DeathAnimationCheckpoint { return { version: 1, index: this.index }; }
+  restore(checkpoint: Q3DeathAnimationCheckpoint): undefined {
+    if (checkpoint.version !== 1 || !Number.isInteger(checkpoint.index) || checkpoint.index < 0 || checkpoint.index > 2) {
+      throw new TypeError("Invalid Q3 death animation checkpoint");
+    }
+    this.index = checkpoint.index;
+    return undefined;
+  }
   next(): { readonly animation: PlayerAnimation; readonly event: EntityEvent } {
     const result = this.index === 0 ? { animation: PlayerAnimation.BOTH_DEATH1, event: EntityEvent.EV_DEATH1 }
       : this.index === 1 ? { animation: PlayerAnimation.BOTH_DEATH2, event: EntityEvent.EV_DEATH2 }
@@ -92,20 +117,57 @@ export class Q3CharacterActor {
   get respawnEligibleAfterMilliseconds(): number { return this.respawnTime; }
   get spawns(): number { return this.spawnCount; }
 
+  capture(): Q3CharacterCheckpoint {
+    return { version: 1, product: this.product, animation: { ...this.currentAnimation }, flags: this.flags,
+      eventSequence: this.sequence, respawnTime: this.respawnTime, spawnCount: this.spawnCount,
+      dead: this.dead, gibbed: this.gibbed, initialized: this.initialized };
+  }
+
+  /** The session restores shared stores and existing callback bindings separately. */
+  restore(checkpoint: Q3CharacterCheckpoint): undefined {
+    if (checkpoint.version !== 1 || checkpoint.product !== this.product || checkpoint.animation.kind !== "q3") {
+      throw new TypeError("Q3 character checkpoint belongs to another source product");
+    }
+    if (!checkpoint.initialized && this.initialized) throw new Error("Cannot restore an unadmitted Q3 character over an admitted binding");
+    if (checkpoint.initialized && !this.initialized) {
+      if (this.services.bodies.read(this.actor.id) === null || this.services.combat.read(this.actor.id) === null
+        || !this.services.inventory.has(this.actor.id)) throw new Error("Restore shared Q3 character stores before private state");
+      this.bindCallbacks();
+    }
+    this.currentAnimation = { ...checkpoint.animation };
+    this.flags = checkpoint.flags;
+    this.sequence = checkpoint.eventSequence;
+    this.respawnTime = checkpoint.respawnTime;
+    this.spawnCount = checkpoint.spawnCount;
+    this.dead = checkpoint.dead;
+    this.gibbed = checkpoint.gibbed;
+    return undefined;
+  }
+
   private emit(event: number, parameter = 0): undefined {
     return this.services.emit({ actor: this.actor, sequence: this.sequence++, timeMilliseconds: this.services.timeMilliseconds(), event, parameter });
   }
 
+  private bindCallbacks(): void {
+    if (this.initialized) return;
+    this.services.callbacks.bind(this.actor, { think: null, touch: null, use: null,
+      pain: reaction => { const health = this.services.combat.read(reaction.self.id)?.health ?? 0;
+        this.emit(EntityEvent.EV_PAIN, health); return undefined; },
+      die: () => { this.die(); return undefined; } });
+    this.initialized = true;
+  }
+
   spawn(input: Q3CharacterSpawn): undefined {
     const { services, actor } = this;
-    if (!this.initialized) {
+    if (services.combat.read(actor.id) === null) {
       services.combat.create(actor, input.combat);
-      services.inventory.create(actor, input.inventory);
-      this.initialized = true;
     } else {
       services.combat.setHealth(actor, input.combat.health);
       services.combat.setArmor(actor, input.combat.armor);
       services.combat.setTraits(actor, input.combat);
+    }
+    if (!services.inventory.has(actor.id)) services.inventory.create(actor, input.inventory);
+    else {
       for (const entry of services.inventory.entries(actor.id)) services.inventory.configure(actor, { ...entry, count: 0 });
       for (const entry of input.inventory) services.inventory.configure(actor, entry);
     }
@@ -116,14 +178,13 @@ export class Q3CharacterActor {
     this.respawnTime = services.timeMilliseconds();
     this.spawnCount++;
     services.bodies.write(actor, input.body);
-    services.callbacks.bind(actor, { think: null, touch: null, use: null,
-      pain: reaction => { const health = services.combat.read(reaction.self.id)?.health ?? 0;
-        this.emit(EntityEvent.EV_PAIN, health); return undefined; },
-      die: () => { this.die(); return undefined; } });
-    services.killBox(actor);
-    services.bodies.link(actor);
-    services.spawnTargets(actor);
-    if (this.spawnCount > 1) this.emit(EntityEvent.EV_PLAYER_TELEPORT_IN);
+    this.bindCallbacks();
+    if (services.placement !== "source-game") {
+      services.killBox(actor);
+      services.bodies.link(actor);
+      services.spawnTargets(actor);
+      if (this.spawnCount > 1) this.emit(EntityEvent.EV_PLAYER_TELEPORT_IN);
+    }
     return undefined;
   }
 

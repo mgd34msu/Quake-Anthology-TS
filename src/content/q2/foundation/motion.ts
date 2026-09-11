@@ -2,6 +2,9 @@
 import type { Vec3 } from "../../../contracts/math.ts";
 import { add, length, scale, subtract, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2Think } from "./host.ts";
+import type { SavedActorId } from "../../../contracts/session.ts";
+import type { Q2CallbackDefinitions } from "./callbacks.ts";
+import { restoreQ2Actor } from "./checkpoint.ts";
 
 interface LinearMove {
   readonly direction: Vec3;
@@ -16,10 +19,44 @@ interface LinearMove {
   curve: { readonly positions: Float32Array; frame: number; subframe: number; readonly subframes: number } | null;
 }
 
+export type Q2LinearMotionCheckpoint = readonly { readonly actor: SavedActorId; readonly state: Omit<LinearMove, "done" | "curve"> & {
+  readonly done: string; readonly curve: { readonly positions: readonly number[]; readonly frame: number; readonly subframe: number; readonly subframes: number } | null;
+} }[];
+
 export class Q2LinearMotion {
-  private readonly moves = new WeakMap<Q2Entity, LinearMove>();
+  private moves = new WeakMap<Q2Entity, LinearMove>();
+  constructor(private readonly callbackPrefix = "q2:linear") {}
+
+  get callbacks(): Q2CallbackDefinitions {
+    return { think: { [`${this.callbackPrefix}/Move_Done`]: this.done, [`${this.callbackPrefix}/Move_Final`]: this.final,
+      [`${this.callbackPrefix}/Move_Begin`]: this.begin, [`${this.callbackPrefix}/Think_AccelMove`]: this.accelerate, [`${this.callbackPrefix}/Move_Accel_Curve`]: this.curve } };
+  }
+
+  capture(game: Q2GameServices): Q2LinearMotionCheckpoint {
+    const entries: { actor: SavedActorId; state: Q2LinearMotionCheckpoint[number]["state"] }[] = [];
+    for (const entity of game.entities.values()) {
+      const move = this.moves.get(entity); if (move === undefined) continue;
+      const done = game.sourceCallbacks.think.name(move.done);
+      if (done === null) throw new Error("Q2 linear move checkpoint has no end function");
+      entries.push({ actor: { slot: entity.actor.id.slot, generation: entity.actor.id.generation }, state: { ...move, done,
+        curve: move.curve === null ? null : { ...move.curve, positions: [...move.curve.positions] } } });
+    }
+    return structuredClone(entries);
+  }
+
+  restore(game: Q2GameServices, checkpoint: Q2LinearMotionCheckpoint): undefined {
+    this.moves = new WeakMap<Q2Entity, LinearMove>();
+    for (const saved of checkpoint) {
+      const entity = game.entity(restoreQ2Actor(game, saved.actor).id), done = game.sourceCallbacks.think.resolve(saved.state.done);
+      if (entity === null || done === null) throw new Error("Q2 linear move checkpoint has no actor or end function");
+      const state = structuredClone(saved.state);
+      this.moves.set(entity, { ...state, done, curve: state.curve === null ? null : { ...state.curve, positions: Float32Array.from(state.curve.positions) } });
+    }
+    return undefined;
+  }
 
   moveTo(entity: Q2Entity, game: Q2GameServices, destination: Vec3, done: Q2Think): undefined {
+    game.sourceCallbacks.register(this.callbacks);
     const delta = subtract(destination, game.body(entity).origin), distance = length(delta);
     const state: LinearMove = { direction: distance === 0 ? zero : scale(delta, 1 / distance), remaining: distance,
       destination, reference: game.body(entity).origin, currentSpeed: 0, moveSpeed: 0, nextSpeed: 0, decelDistance: 0, done, curve: null };

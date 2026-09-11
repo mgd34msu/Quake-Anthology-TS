@@ -49,7 +49,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   const providerTiming = timing(provider, family, rerelease);
   return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}`),
     map: { geometry: { content: product.id, path: options.map }, entities: provider },
-    campaign: { kind: "campaign", mission: provider, gamecode: provider }, movement,
+    campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
     character: { definition: character, appearance }, weapons: [provider], enemies: { kind: "map-defined" },
     presentation: { assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match: provider, transition: provider,
@@ -93,27 +93,45 @@ export class LoadedApplicationContent {
   }
 }
 
-export async function loadApplicationContent(options: ApplicationOptions): Promise<LoadedApplicationContent> {
+export function applicationOptionsForRecipe(options: ApplicationOptions, content: LoadedApplicationContent): ApplicationOptions {
+  const recipe = content.recipe;
+  const family = (provider: ProviderReference): GameFamily => {
+    const prefix = provider.provider.split(":")[0];
+    if (prefix === "q1" || prefix === "q2" || prefix === "q3") return prefix;
+    throw new Error(`Application input has no adapter for ${provider.provider}`);
+  };
+  const character = family(recipe.character.definition), prefix = `${character}:model/`;
+  if (!recipe.character.appearance.provider.startsWith(prefix)) throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
+  return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
+    map: recipe.map.geometry.requestedPath, movement: family(recipe.movement), character,
+    characterModel: recipe.character.appearance.provider.slice(prefix.length) };
+}
+
+export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe): Promise<LoadedApplicationContent> {
   const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, discoverMods: false });
-  const preset = applicationPreset(catalog, options);
-  const recipe = await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
+  const resolveRecipe = async (): Promise<ExecutableRecipe> => {
+    const preset = applicationPreset(catalog, options);
+    return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
+  };
+  const recipe = restoredRecipe ?? await resolveRecipe();
   const mounts = await openMountPlan(recipe.mounts);
   try {
     const bytes = await mounts.read(recipe.map.geometry);
-    const family = catalog.product(options.product).expectation.family;
+    const family = catalog.product(recipe.map.geometry.provenance.mount.identity.content).expectation.family;
+    const map = recipe.map.geometry.requestedPath;
     let world: ApplicationWorld;
     if (family === "q1") {
-      const [entities, lit] = await Promise.all([mounts.open(options.map.replace(/\.bsp$/, ".ent")), mounts.open(options.map.replace(/\.bsp$/, ".lit"))]);
-      world = readQ1Bsp(bytes, { source: options.map, ...(entities === null ? {} : { entities: entities.bytes }), ...(lit === null ? {} : { lit: lit.bytes }) });
+      const [entities, lit] = await Promise.all([mounts.open(map.replace(/\.bsp$/, ".ent")), mounts.open(map.replace(/\.bsp$/, ".lit"))]);
+      world = readQ1Bsp(bytes, { source: map, ...(entities === null ? {} : { entities: entities.bytes }), ...(lit === null ? {} : { lit: lit.bytes }) });
     } else if (family === "q2") {
-      const raw = readQ2Bsp(bytes, options.map);
+      const raw = readQ2Bsp(bytes, map);
       const materials = new Map<string, Uint8Array>();
       await Promise.all([...new Set(raw.textureInfo.map(texture => `textures/${texture.name}.mat`))].map(async path => {
         const asset = await mounts.open(path);
         if (asset !== null) materials.set(path, asset.bytes);
       }));
       world = toQ2WorldGeometry(raw, { readMaterial: path => materials.get(path) ?? null });
-    } else world = decodeQ3World(bytes, options.map);
+    } else world = decodeQ3World(bytes, map);
     return new LoadedApplicationContent(catalog, recipe, world, mounts);
   } catch (error) {
     mounts.close();

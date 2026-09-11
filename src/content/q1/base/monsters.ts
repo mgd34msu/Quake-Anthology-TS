@@ -4,11 +4,12 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor, Q1Monster } from "../foundation/entity.ts";
 import type { Q1Foundation } from "../foundation/runtime.ts";
-import { POINT, dot, length, normalize, vadd, vectors, vscale, vsub, yawFor } from "../foundation/types.ts";
+import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub, yawFor } from "../foundation/types.ts";
+import type { Q1Basis } from "../foundation/types.ts";
 import type { MonsterAi, MonsterFrame } from "./animation.ts";
 import { monsterFrames } from "./frames.ts";
 import type { MonsterSpecies } from "./species.ts";
-import { monsterAction } from "./monster-actions.ts";
+import { monsterAction, monsterJumpTouch } from "./monster-actions.ts";
 import { castLightning, throwGib, throwHead } from "./projectiles.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 
@@ -18,6 +19,7 @@ export interface BaseMonsterSource {
   readonly actions?: ReadonlyMap<string, (monster: BaseMonster) => undefined>;
 }
 export interface MonsterServices {
+  countMonsterKill(monster: BaseMonster): boolean;
   nextHellKnightMelee(): string;
   finale(monster: BaseMonster): undefined;
   finishFinale(monster: BaseMonster): undefined;
@@ -44,7 +46,8 @@ export class BaseMonster {
   capture() { return { currentFrame: this.currentFrame, nextFrame: this.nextFrame, inPain: this.inPain, counter: this.counter, idleUntil: this.idleUntil, lefty: this.lefty, sliding: this.sliding, lightningCount: this.lightningCount, countedDeath: this.countedDeath }; }
   restore(reader: SaveReader): undefined {
     this.currentFrame = reader.field("currentFrame").string(); this.nextFrame = reader.field("nextFrame").string();
-    if (!(this.source?.frames?.has(this.currentFrame) ?? false) && !monsterFrames.has(this.currentFrame) || !(this.source?.frames?.has(this.nextFrame) ?? false) && !monsterFrames.has(this.nextFrame)) return reader.fail("unknown source monster frame");
+    const known = (name: string): boolean => monsterFrames.has(name) || (this.source?.frames?.has(name) ?? false) || (this.source?.actions?.has(name) ?? false);
+    if (!known(this.currentFrame) || !known(this.nextFrame)) return reader.fail("unknown source monster continuation");
     this.inPain = reader.field("inPain").number(); this.counter = reader.field("counter").number(); this.idleUntil = reader.field("idleUntil").number();
     this.lefty = reader.field("lefty").boolean(); this.sliding = reader.field("sliding").boolean(); this.lightningCount = reader.field("lightningCount").number(); this.countedDeath = reader.field("countedDeath").boolean(); return undefined;
   }
@@ -81,17 +84,27 @@ export class BaseMonster {
     return undefined;
   }
   delay(seconds: number): undefined { return this.game.schedule(this.entity, seconds, this.game.named.action(this.entity, `${this.source?.callbackPrefix ?? "base"}:monster_frame`)); }
+  changeYaw(): undefined { return this.game.host.changeYaw(this.entity.actor); }
   face(): undefined {
     const target = this.target; if (target === null) return undefined;
     const body = this.game.body(this.entity); this.entity.idealYaw = yawFor(vsub(target, body.origin));
-    let turn = this.entity.idealYaw - body.angles.y; if (turn > 180) turn -= 360; if (turn < -180) turn += 360;
-    const speed = this.entity.yawSpeed;
-    return this.game.setBody(this.entity, { angles: { ...body.angles, y: (body.angles.y + Math.max(-speed, Math.min(speed, turn)) + 360) % 360 } });
+    return this.changeYaw();
   }
+  makeVectors(): Q1Basis {
+    const angles = this.game.body(this.entity).angles;
+    return this.game.makeVectors(this.game.options.edition === "rerelease" ? { ...angles, x: -angles.x } : angles);
+  }
+  eye(target: ActorId = this.entity.actor.id): Vec3 | null {
+    const body = this.game.host.bodies.read(target); if (body === null) return null;
+    const entity = this.game.entity(target);
+    const offset = entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: this.game.isPlayer(target) ? 22 : entity?.monster?.species === "fish" ? 10 : 25 };
+    return vadd(body.origin, offset);
+  }
+  rangeDistance(target = this.enemy): number { const start = this.eye(), end = target === null ? null : this.eye(target); return start === null || end === null ? Infinity : length(vsub(end, start)); }
   visible(target = this.enemy): boolean {
     if (target === null) return false;
-    const body = this.game.host.bodies.read(target); if (body === null) return false;
-    const trace = this.game.host.trace({ start: vadd(this.origin, { x: 0, y: 0, z: this.spec.movement === "swim" ? 10 : 25 }), end: vadd(body.origin, { x: 0, y: 0, z: this.game.isPlayer(target) ? 22 : this.game.entity(target)?.monster?.species === "fish" ? 10 : 25 }), bounds: POINT, ignore: this.entity.actor.id, monsters: false });
+    const start = this.eye(), end = this.eye(target); if (start === null || end === null) return false;
+    const trace = this.game.host.trace({ start, end, bounds: POINT, ignore: this.entity.actor.id, monsters: false });
     return trace.fraction === 1 && !(trace.inOpen && trace.inWater);
   }
   found(target: ActorId): undefined {
@@ -100,11 +113,11 @@ export class BaseMonster {
     if (this.game.isPlayer(target)) { this.game.sightEntity = this.entity; this.game.sightTime = this.game.time; }
     const targetBody = this.game.host.bodies.read(target); if (targetBody !== null) this.entity.idealYaw = yawFor(vsub(targetBody.origin, this.origin));
     let sound = this.spec.sight;
-    if (this.spec.species === "enforcer") {
-      const r = this.game.host.random() * 4;
-      sound = `enforcer/sight${r > 3 ? 4 : r > 2 ? 3 : r > 1 ? 2 : 1}.wav`;
+    if (this.spec.species === "enforcer" && this.game.options.edition === "classic") {
+      const r = Math.floor(this.game.host.random() * 3 + 0.5);
+      sound = `enforcer/sight${r === 1 ? 1 : r === 2 ? 2 : r === 0 ? 3 : 4}.wav`;
     }
-    this.game.sound(this.entity, sound);
+    if (sound !== "") this.game.sound(this.entity, sound);
     this.nextFrame = this.spec.run; return this.delay(0.1);
   }
   findTarget(): boolean {
@@ -113,9 +126,9 @@ export class BaseMonster {
       ? game.sightEntity.monster?.enemy ?? null : game.host.checkClient(entity.actor);
     if (candidate === null || game.health(candidate) <= 0 || (game.player(candidate)?.powerups.get("invisibility") ?? 0) > game.time) return false;
     const body = game.host.bodies.read(candidate); if (body === null) return false;
-    const delta = vsub(body.origin, this.origin), distance = length(delta);
+    const delta = vsub(body.origin, this.origin), distance = this.rangeDistance(candidate);
     if (distance >= 1000 || !this.visible(candidate)) return false;
-    const front = dot(normalize(delta), vectors(game.body(entity).angles).forward) > 0.3;
+    const front = dot(normalize(delta), this.makeVectors().forward) > 0.3;
     if (distance >= 500 && !front || distance >= 120 && distance < 500 && (game.player(candidate)?.hostileUntil ?? 0) < game.time && !front) return false;
     this.found(candidate); return true;
   }
@@ -134,7 +147,7 @@ export class BaseMonster {
       case "face": return this.face();
       case "charge": this.face(); if (this.enemy !== null) game.host.moveToGoal(entity.actor, this.enemy, distance); return undefined;
       case "charge_side": {
-        this.face(); const target = this.target; if (target !== null) game.host.walkMove(entity.actor, yawFor(vsub(vsub(target, vscale(vectors(game.body(entity).angles).right, 30)), this.origin)), 20); return undefined;
+        this.face(); const target = this.target; if (target !== null) game.host.walkMove(entity.actor, yawFor(vsub(vsub(target, vscale(this.makeVectors().right, 30)), this.origin)), 20); return undefined;
       }
       case "melee_side": this.ai("charge_side", 0); this.melee(60, 3, 3, true); return undefined;
       case "melee": this.melee(60, 3, 3, false); return undefined;
@@ -149,13 +162,15 @@ export class BaseMonster {
       else { this.enemy = null; return this.play(this.state.path === "" ? this.spec.stand : this.spec.walk); }
     }
     const enemy = this.enemy; if (enemy === null) return undefined;
-    const seen = this.visible(); if (seen) this.state.searchUntil = game.time + 5;
-    if (game.options.coop && this.state.searchUntil < game.time) { this.findTarget(); return undefined; }
+    const seen = this.visible(); game.world?.fields.set("enemy_visible", seen ? "1" : "0"); if (seen) this.state.searchUntil = game.time + 5;
+    if (this.searchForCoopTarget()) return undefined;
+    this.updateRunKnowledge();
     if (entity.attackState !== "straight") {
       this.face(); const delta = (game.body(entity).angles.y - entity.idealYaw + 360) % 360;
       if (delta <= 45 || delta >= 315) {
-        const attack = entity.attackState; entity.attackState = "straight";
+        const attack = entity.attackState;
         if (attack === "melee") this.meleeAttack(); else if (this.spec.missile !== null) this.play(this.spec.missile);
+        entity.attackState = "straight";
       }
       return undefined;
     }
@@ -163,9 +178,17 @@ export class BaseMonster {
     if (this.sliding) {
       this.face(); const direction = entity.idealYaw + (this.lefty ? 90 : -90);
       if (!game.host.walkMove(entity.actor, direction, distance)) { this.lefty = !this.lefty; game.host.walkMove(entity.actor, direction + 180, distance); }
-    } else game.host.moveToGoal(entity.actor, enemy, distance);
+    } else this.moveToEnemy(distance);
     return undefined;
   }
+  updateRunKnowledge(): undefined {
+    const delta = vsub(this.target ?? ZERO, this.origin), front = dot(normalize(delta), this.makeVectors().forward) > 0.3;
+    this.game.world?.fields.set("enemy_infront", front ? "1" : "0");
+    const distance = this.rangeDistance(); this.game.world?.fields.set("enemy_range", String(distance < 120 ? 0 : distance < 500 ? 1 : distance < 1000 ? 2 : 3));
+    this.game.world?.fields.set("enemy_yaw", String(Math.fround(yawFor(delta)))); return undefined;
+  }
+  moveToEnemy(distance: number): undefined { if (this.enemy !== null) this.game.host.moveToGoal(this.entity.actor, this.enemy, distance); return undefined; }
+  searchForCoopTarget(): boolean { return this.game.options.coop && this.state.searchUntil < this.game.time && this.findTarget(); }
   attackFinished(seconds: number): undefined {
     this.state.refired = false;
     if (this.game.options.edition === "rerelease" || this.game.options.skill !== 3) this.state.attackFinished = this.game.time + seconds;
@@ -174,7 +197,7 @@ export class BaseMonster {
   tryAttack(): boolean {
     const { game, entity, spec } = this, target = this.target, enemy = this.enemy;
     if (target === null || enemy === null) return false;
-    const distance = this.distance;
+    const distance = this.rangeDistance();
     if (spec.species === "demon") {
       if (distance < 120) { entity.attackState = "melee"; return true; }
       const body = game.body(entity), other = game.host.bodies.read(enemy); if (other === null) return false;
@@ -183,29 +206,37 @@ export class BaseMonster {
       game.sound(entity, "demon/djump.wav"); entity.attackState = "missile"; return true;
     }
     const specialized = entity.classname === "monster_ogre" || spec.species === "shambler";
+    const clearShot = (): boolean => {
+      const start = this.eye(), end = this.eye(enemy); if (start === null || end === null) return false;
+      const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
+      return trace.actor !== null && sameActor(trace.actor, enemy) && (spec.species === "wizard" || !(trace.inOpen && trace.inWater));
+    };
+    const wizardMove = (sliding: boolean): undefined => { if (this.sliding === sliding) return undefined; this.sliding = sliding; return this.play(sliding ? "wiz_side1" : "wiz_run1"); };
+    if (!specialized && spec.species !== "wizard" && !clearShot()) return false;
     if (distance < 120 && spec.melee && (!specialized || game.canDamage(enemy, entity.actor.id))) {
       if (specialized) entity.attackState = "melee"; else this.meleeAttack(); return true;
     }
-    if (spec.missile === null || game.time < this.state.attackFinished || distance >= 1000 || spec.species === "shambler" && distance > 600) return false;
-    const trace = game.host.trace({ start: vadd(this.origin, { x: 0, y: 0, z: 25 }), end: vadd(target, { x: 0, y: 0, z: game.isPlayer(enemy) ? 22 : 25 }), bounds: POINT, ignore: entity.actor.id, monsters: true });
-    if (trace.actor === null || !sameActor(trace.actor, enemy) || trace.inOpen && trace.inWater) return false;
+    if (spec.missile === null || game.time < this.state.attackFinished) return false;
+    if (distance >= 1000 || spec.species === "shambler" && distance > 600) { if (spec.species === "wizard") wizardMove(false); return false; }
+    if ((specialized || spec.species === "wizard") && !clearShot()) { if (spec.species === "wizard") wizardMove(false); return false; }
     if (specialized) {
       this.attackFinished((spec.species === "shambler" ? 2 : 1) + 2 * game.host.random()); entity.attackState = "missile"; return true;
     }
+    if (distance < 120 && spec.species !== "wizard") this.state.attackFinished = 0;
     const chance = distance < 120 ? 0.9 : distance < 500 ? spec.species === "wizard" ? 0.6 : spec.melee ? 0.2 : 0.4 : spec.species === "wizard" ? 0.2 : spec.melee ? 0.05 : 0.1;
     if (game.host.random() >= chance) {
-      if (spec.species === "wizard") { this.sliding = distance < 500; this.nextFrame = this.sliding ? "wiz_side1" : "wiz_run1"; }
+      if (spec.species === "wizard") wizardMove(distance < 500);
       return false;
     }
-    if (spec.species === "wizard") { entity.attackState = "missile"; return true; }
-    this.attackFinished(2 * game.host.random());
+    if (spec.species === "wizard") { this.sliding = false; entity.attackState = "missile"; return true; }
     if (spec.species === "zombie") { const r = game.host.random(); this.play(r < 0.3 ? "zombie_atta1" : r < 0.6 ? "zombie_attb1" : "zombie_attc1"); }
     else this.play(spec.missile);
+    this.attackFinished(2 * game.host.random());
     return true;
   }
   meleeAttack(): undefined {
     switch (this.spec.species) {
-      case "knight": return this.play(this.distance < 80 ? "knight_atk1" : "knight_runatk1");
+      case "knight": return this.play(this.rangeDistance() < 80 ? "knight_atk1" : "knight_runatk1");
       case "demon": return this.play("demon1_atta1");
       case "ogre": return this.play(this.game.host.random() > 0.5 ? "ogre_smash1" : "ogre_swing1");
       case "hellknight": this.game.sound(this.entity, "hknight/slash1.wav", "weapon"); return this.play(this.services.nextHellKnightMelee());
@@ -222,12 +253,13 @@ export class BaseMonster {
   }
   retaliate(attacker: ActorId | null): undefined {
     if (attacker === null || sameActor(attacker, this.entity.actor.id) || this.game.host.classname(attacker) === this.entity.classname) return undefined;
+    if (this.game.world !== null && sameActor(attacker, this.game.world.actor.id)) return undefined;
     if (this.enemy !== null && sameActor(attacker, this.enemy)) return undefined;
     if (this.enemy !== null && this.game.isPlayer(this.enemy)) this.state.oldEnemy = this.enemy;
     return this.found(attacker);
   }
   pain(attacker: ActorId | null, damage: number): undefined {
-    const { game, entity, state, spec } = this; this.retaliate(attacker);
+    const { game, entity, state, spec } = this; if ((entity.movementFlags & 32) !== 0) this.retaliate(attacker);
     switch (spec.species) {
       case "zombie": {
         game.host.combat.setHealth(entity.actor, 60); if (damage < 9 || this.inPain === 2) return undefined;
@@ -274,12 +306,15 @@ export class BaseMonster {
   }
   countKill(): undefined {
     if (this.countedDeath) return undefined; this.countedDeath = true;
-    this.game.killedMonsters++; this.game.host.emit({ kind: "monster-killed", actor: this.entity.actor.id, total: this.game.totalMonsters, found: this.game.killedMonsters });
+    if (this.services.countMonsterKill(this)) { this.game.killedMonsters++; this.game.host.emit({ kind: "monster-killed", actor: this.entity.actor.id, total: this.game.totalMonsters, found: this.game.killedMonsters }); }
+    if (this.game.options.edition === "rerelease" && (this.entity.movementFlags & 32) !== 0 && this.enemy !== null && !sameActor(this.enemy, this.entity.actor.id) && ((this.game.entity(this.enemy)?.movementFlags ?? 0) & 32) !== 0) this.game.host.emit({ kind: "achievement", player: null, id: "ACH_FRIENDLY_FIRE" });
+    this.entity.movementFlags &= ~3;
     return this.game.useTargets(this.entity, this.enemy);
   }
-  die(_attacker: ActorId | null): undefined {
+  die(attacker: ActorId | null): undefined {
     const { game, entity, spec } = this;
     if (this.countedDeath) return undefined;
+    this.enemy = attacker; if (game.health(entity.actor.id) < -99) game.host.combat.setHealth(entity.actor, -99);
     entity.damageable = false; entity.touch = null;
     if (spec.species === "oldone") return this.services.finale(this);
     this.countKill();
@@ -309,6 +344,7 @@ export class BaseMonster {
     if (!crucified) game.totalMonsters++;
     entity.maxHealth = spec.health; game.host.combat.setHealth(entity.actor, spec.health);
     entity.model = `progs/${spec.model}.mdl`; entity.solid = "slidebox"; entity.movement = "step"; entity.aimedDamage = true;
+    if (spec.killString !== undefined) entity.fields.set("killstring", spec.killString);
     entity.yawSpeed = entity.number("yaw_speed") || (spec.movement === "fly" || spec.movement === "swim" ? 10 : 20);
     entity.idealYaw = game.body(entity).angles.y;
     if (!crucified && spec.movement !== "boss") entity.movementFlags |= 32 | (spec.movement === "fly" ? 1 : spec.movement === "swim" ? 2 : 0);
@@ -321,19 +357,27 @@ export class BaseMonster {
     }
     if (spec.species === "oldone") { entity.damageable = true; this.nextFrame = "old_idle1"; return this.delay(0.1); }
     if (crucified) { entity.movement = "none"; return this.play("zombie_cruc1"); }
-    return game.schedule(entity, 0.1 + game.host.random() * 0.5, game.named.action(entity, `${this.source?.callbackPrefix ?? "base"}:monster_start`));
+    return game.schedule(entity, Math.max(0, entity.nextThink) + game.host.random() * 0.5 - game.time, game.named.action(entity, `${this.source?.callbackPrefix ?? "base"}:monster_start`));
   }
   start(): undefined {
       const { game, entity, spec } = this;
       if (spec.movement === "walk") {
-        const start = vadd(this.origin, { x: 0, y: 0, z: 1 }); const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: spec.bounds, ignore: entity.actor.id, monsters: true });
-        game.setBody(entity, { origin: trace.end, ground: trace.actor });
-        if (trace.fraction < 1 && !trace.allSolid) entity.movementFlags |= 512;
+        const start = vadd(this.origin, { x: 0, y: 0, z: 1 }); const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: game.body(entity).bounds, ignore: entity.actor.id, monsters: true });
+        if (trace.fraction < 1 && !trace.allSolid) { game.setBody(entity, { origin: trace.end, ground: trace.actor }); entity.movementFlags |= 512; }
+        else game.setBody(entity, { origin: start });
+        game.host.walkMove(entity.actor, 0, 0);
       }
       if (spec.species === "fish" && game.options.edition === "classic") game.totalMonsters++;
-      entity.damageable = true; game.link(entity);
-      const path = game.find(this.state.path)[0]; this.nextFrame = path?.classname === "path_corner" ? spec.walk : spec.stand;
-      return this.delay(0.1 + game.host.random() * 0.5);
+      entity.damageable = true; entity.idealYaw = game.body(entity).angles.y; game.link(entity);
+      if (spec.movement === "fly") game.host.walkMove(entity.actor, 0, 0);
+      const path = game.find(this.state.path)[0];
+      if (this.state.path !== "") {
+        if (spec.movement !== "fly") entity.idealYaw = yawFor(vsub(path === undefined ? ZERO : game.body(path).origin, this.origin));
+        if (spec.movement === "swim") this.play(spec.walk);
+        else { if (path?.classname === "path_corner") this.play(spec.walk); else this.state.pauseUntil = Math.fround(99999999); this.play(spec.stand); }
+      } else { this.state.pauseUntil = Math.fround(99999999); this.play(spec.stand); }
+      if (spec.movement !== "fly" && entity.think !== null) return game.schedule(entity, entity.nextThink - game.time + game.host.random() * 0.5, entity.think);
+      return undefined;
   }
   use(activator: ActorId | null): undefined {
     const { game, entity } = this;
@@ -349,6 +393,7 @@ export class BaseMonster {
 }
 
 export function registerMonsterCallbacks(game: Q1Foundation, prefix: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
+    game.named.register(`${prefix}:monster_jump_touch`, { touch: (_game, entity, other) => monsterJumpTouch(monster(entity), other) });
     game.named.register(`${prefix}:monster_frame`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.nextFrame); } });
     game.named.register(`${prefix}:monster_start`, { action: (_game, entity) => monster(entity).start() });
     game.named.register(`${prefix}:monster_stand`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.spec.stand); } });

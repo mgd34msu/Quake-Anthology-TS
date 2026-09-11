@@ -6,12 +6,13 @@ import type { MovementContact, MovementProvider, MovementServices, OrderedMoveme
 import type { BspPlane, Q2SurfaceInfo, TraceResult, TraceShape } from "../../contracts/scene.ts";
 import { pmoveClassic } from "./classic.ts";
 import { pmoveRerelease } from "./rerelease.ts";
+import type { Q2RereleaseMovementContext } from "./rerelease.ts";
 import { Q2_PLAYER_BOUNDS } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
 import { MASK_CLASSIC_PLAYERSOLID, plane, type ClassicPmove, type CplaneT, type CsurfaceT, type KexPmoveT, type MovementEntity, type TraceT, type Vec3 as SourceVec3 } from "./types.ts";
 
 export { pmoveClassic } from "./classic.ts";
-export { createRereleaseMovement, pmoveRerelease } from "./rerelease.ts";
+export { createRereleaseMovement, pmoveRerelease, Q2RereleaseMovementContext } from "./rerelease.ts";
 export { Q2_PLAYER_BOUNDS } from "./dimensions.ts";
 export { ButtonT, ContentsT, KexPmTypeT, PmflagsT, PmTypeT, WaterLevelT } from "./types.ts";
 export type { ClassicPmove, KexPmoveT, PmConfigT, PmTraceFn, TraceT } from "./types.ts";
@@ -121,7 +122,7 @@ export function moveQ2Classic(input: Q2MovementInput, services: MovementServices
     contacts, effects, arsenal: input.arsenal, animation: input.animation };
 }
 
-export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: MovementServices): Q2RereleaseMovementResult {
+export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: MovementServices, context: Q2RereleaseMovementContext): Q2RereleaseMovementResult {
   commandDuration(input.command.milliseconds);
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);
@@ -137,7 +138,7 @@ export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: Movem
     clip: (start, mins, maxs, end, mask) => scene.trace(start, mins, maxs, end, mask, true), pointcontents: scene.pointcontents,
     viewoffset: sourceVector(input.viewOffset), screen_blend: [0, 0, 0, 0], rdflags: 0, jump_sound: false, step_clip: false, impact_delta: 0,
   };
-  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics });
+  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics }, context);
   const presentation: Q2RereleaseMovementPresentation = { screenBlend: { x: pm.screen_blend[0], y: pm.screen_blend[1], z: pm.screen_blend[2], w: pm.screen_blend[3] },
     renderFlags: pm.rdflags, jumpSound: pm.jump_sound, stepClip: pm.step_clip, impactDelta: pm.impact_delta };
   const state: Q2RereleaseMovementState = { kind: "q2-rerelease", type: pm.s.pm_type, origin: vector(pm.s.origin), velocity: vector(pm.s.velocity),
@@ -155,8 +156,8 @@ export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: Movem
 export function createQ2ClassicMovementProvider(id: ProviderId): Extract<MovementProvider, { kind: "q2-classic" }> {
   return { id, kind: "q2-classic", move: moveQ2Classic };
 }
-export function createQ2RereleaseMovementProvider(id: ProviderId): Extract<MovementProvider, { kind: "q2-rerelease" }> {
-  return { id, kind: "q2-rerelease", move: moveQ2Rerelease };
+export function createQ2RereleaseMovementProvider(id: ProviderId, context: Q2RereleaseMovementContext): Extract<MovementProvider, { kind: "q2-rerelease" }> {
+  return { id, kind: "q2-rerelease", move: (input, services) => moveQ2Rerelease(input, services, context) };
 }
 
 /** Collision body defaults are explicit at recipe assembly, never inferred from a character model. */

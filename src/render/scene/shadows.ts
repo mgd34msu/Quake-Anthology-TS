@@ -175,7 +175,7 @@ export class Q2ShadowScene {
   constructor(readonly images: SceneImageRegistry) {}
 
   prepare(source: readonly SceneLight[], world: readonly ShadowMesh[], casters: readonly ShadowCaster[], options: ShadowAtlasOptions = {}): PreparedShadows {
-    const lights: Q2FragmentLight[] = source.filter(light => light.profile.kind === "q2").map(light => ({ origin: light.origin, radius: light.radius,
+    const lights: Q2FragmentLight[] = source.filter(light => light.profile.kind === "q2").slice(0, maximumLights).map(light => ({ origin: light.origin, radius: light.radius,
       color: light.color, scale: light.profile.kind === "q2" ? light.profile.scale : 1, cone: light.profile.kind === "q2" ? light.profile.cone : null, shadow: { kind: "none" } }));
     const q2Source = source.filter(light => light.profile.kind === "q2"), candidates: Candidate[] = [];
     if (options.enabled !== false) for (const [index, light] of lights.slice(0, maximumLights).entries()) {

@@ -51,7 +51,8 @@ export class ApplicationMusic {
     // CG_StartMusic accepts an intro and an optional loop token; an omitted loop repeats the intro.
     const [introName = "", loopName] = selected.match(/"[^"]*"|\S+/g)?.map(token => token.replace(/^"|"$/g, "")) ?? [];
     const open = async (name: string): Promise<PcmStream | null> => {
-      const path = name.startsWith("music/") ? name : `music/${name}`;
+      const normalized = name.replaceAll("\\", "/");
+      const path = normalized.startsWith("music/") ? normalized : `music/${normalized}`;
       const candidates = /\.(?:wav|ogg)$/i.test(path) ? [path] : family === "q3" ? [`${path}.wav`, `${path}.ogg`] : [`${path}.ogg`, `${path}.wav`];
       for (const candidate of candidates) {
         const stream = await bank.openMusic(candidate);

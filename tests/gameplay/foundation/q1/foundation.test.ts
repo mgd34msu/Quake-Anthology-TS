@@ -9,9 +9,12 @@ import type { Q1Map } from "../../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
-import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
+import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../src/core/numeric.ts";
+import { createQ1MonsterMovement } from "../../../../src/movement/q1/index.ts";
 import { Q1Foundation, Q1_PROVIDER, PLAYER_BOUNDS, weaponItem } from "../../../../src/content/q1/foundation/index.ts";
-import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/index.ts";
+import type { Q1Event, Q1FoundationHost, Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/index.ts";
+import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
+import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 
 const path = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
@@ -20,8 +23,17 @@ async function loadMap(): Promise<Q1Map> {
   try { const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1"); return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" }); }
   finally { archive.close(); }
 }
-function gameFor(map: Q1Map) {
-  const actors = new SessionActorRegistry(createIdentityOwner("q1-foundation")), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
+interface SavedTestWorld {
+  readonly source: Q1FoundationCheckpoint;
+  readonly slots: ReturnType<SessionActorRegistry["checkpoint"]>;
+  readonly sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]>;
+  readonly bodies: readonly import("../../../../src/contracts/session.ts").BodyCheckpoint[];
+  readonly combat: readonly import("../../../../src/contracts/session.ts").CombatCheckpoint[];
+  readonly inventories: readonly import("../../../../src/contracts/session.ts").InventoryCheckpoint[];
+}
+function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerelease" = "rerelease") {
+  const identities = createIdentityOwner("q1-foundation");
+  const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
   let game: Q1Foundation | null = null;
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
@@ -33,6 +45,14 @@ function gameFor(map: Q1Map) {
   } });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors);
+  const monsterMovement = createQ1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 },
+    read: actor => { const body = bodies.read(actor), entity = game?.entity(actor); if (body === null || entity == null) return null;
+      return { origin: body.origin, angles: body.angles, bounds: body.bounds, absoluteBounds: bodies.linked(actor)?.absoluteBounds ?? { min: vadd(body.origin, body.bounds.min), max: vadd(body.origin, body.bounds.max) },
+        flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null }; },
+    write: (actor, state) => { const body = bodies.read(actor.id), entity = game?.entity(actor.id); if (body === null || entity == null) throw new Error("Missing native yaw actor");
+      bodies.write(actor, { ...body, origin: state.origin, angles: state.angles }); entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed; return undefined; },
+    link: actor => bodies.link(actor),
+  });
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => {
       const result = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.missile === true ? "missile" : request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
@@ -45,23 +65,37 @@ function gameFor(map: Q1Map) {
       return result.contents === -2 ? "solid" : result.contents === -3 ? "water" : result.contents === -4 ? "slime" : result.contents === -5 ? "lava" : result.contents === -6 ? "sky" : "empty";
     },
     // These tests drive pickups/targets and unobstructed mover completion, not the source movement engine.
-    walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false,
+    walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false, changeYaw: actor => monsterMovement.changeYaw(actor),
     pushMove: (actor, displacement) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing mover body"); bodies.write(actor, { ...body, origin: vadd(body.origin, displacement) }); bodies.link(actor); return null; },
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined,
     players: () => players, checkClient: () => null, classname: actor => game?.entity(actor)?.classname ?? "player",
     powerup: (actor, powerup, expires) => { if (powerup === "invulnerability") combat.setTraits(actor, { invulnerable: expires > 0 }); return undefined; },
   };
-  const runtime = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
+  const runtime = new Q1Foundation(host, { edition: saved?.source.edition ?? edition, skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" });
   game = runtime;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => runtime.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
-  const report = runtime.spawnMap(map);
-  const player = actors.allocateAtSource(Q1_PROVIDER, 1, "q2:male-character");
-  const start = [...runtime.entities.values()].find(entity => entity.classname === "info_player_start"); if (start === undefined) throw new Error("Missing start");
-  bodies.create(player, { origin: runtime.body(start).origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
-  inventory.create(player, []); runtime.attachPlayer(player); players.push(player.id);
+  let report: import("../../../../src/content/q1/foundation/index.ts").Q1SpawnReport | null = null;
+  let player: OwnedActor;
+  if (saved === undefined) {
+    report = runtime.spawnMap(map);
+    player = actors.allocateAtSource(Q1_PROVIDER, 1, "q2:male-character");
+    const start = [...runtime.entities.values()].find(entity => entity.classname === "info_player_start"); if (start === undefined) throw new Error("Missing start");
+    bodies.create(player, { origin: runtime.body(start).origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
+    combat.create(player, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    inventory.create(player, []); runtime.attachPlayer(player);
+  } else {
+    const restored = actors.atSource(Q1_PROVIDER, 1); if (restored === null) throw new Error("Missing saved player"); player = restored;
+    const owner = (id: import("../../../../src/contracts/session.ts").SavedActorId): OwnedActor => { const result = actors.resolveSaved(id); if (result === null) throw new Error("Missing saved actor"); return result; };
+    for (const entry of saved.bodies) bodies.create(owner(entry.actor), { ...entry.body, ground: entry.body.ground === null ? null : actors.referenceSaved(entry.body.ground) });
+    for (const entry of saved.combat) combat.create(owner(entry.actor), entry.state);
+    for (const entry of saved.inventories) inventory.create(owner(entry.actor), entry.entries);
+    runtime.restore(saved.source, { scheduleThinks: false });
+    restoreSharedBodyLinks(saved, { actors, bodies });
+    runtime.resumeThinks();
+  }
+  players.push(player.id);
   const due = (until: number): void => {
     for (;;) {
       const entry = [...pending].filter(([_actor, time]) => time <= until).sort((a, b) => a[1] - b[1])[0]; if (entry === undefined) break;
@@ -78,6 +112,7 @@ test.skipIf(!existsSync(path))("real e1m1 entities spawn with source inhibition 
   expect(new Set(map.entityList.map(entity => entity.properties.find(property => property.key === "classname")?.value)).size).toBe(41);
   expect(runtime.totalSecrets).toBe(6);
   expect(runtime.totalMonsters).toBe(23);
+  if (report === null) throw new Error("Expected spawned map report");
   expect(report.compilerOnly).toHaveLength(5);
   expect(actors.sourceOf(player.id)?.slot).toBe(1);
   expect(runtime.find("t9")[0]?.classname).toBe("trigger_counter");
@@ -129,4 +164,55 @@ test.skipIf(!existsSync(path))("Q2 character receives Q1 arsenal, armor and sing
   expect(inventory.count(player.id, "q1:ammo/nails")).toBe(29);
   expect([...runtime.entities.values()].some(entity => entity.projectile === "spike")).toBe(true);
   actors.close();
+});
+
+test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, megahealth, axe and AI without map respawn", async () => {
+  const map = await loadMap(), original = gameFor(map, undefined, "classic");
+  const { runtime, player, callbacks, bodies, combat, inventory, actors } = original;
+  original.due(0.8);
+  const shootable = [...runtime.entities.values()].find(entity => entity.classname === "trigger_multiple" && entity.target === "t4");
+  const door = runtime.find("t4")[0];
+  const mega = [...runtime.entities.values()].find(entity => entity.classname === "item_health" && (entity.spawnflags & 3) === 2);
+  const button = [...runtime.entities.values()].find(entity => entity.classname === "func_button" && entity.target === "t9");
+  if (shootable === undefined || door === undefined || mega === undefined || button === undefined) throw new Error("Missing authored save specimen");
+  runtime.damage(shootable.actor.id, player.id, player.id, 1, "shotgun");
+  runtime.physicsEntity(door.actor, 0.85, 0.05);
+  callbacks.touch({ self: mega.actor, other: player.id, plane: null, surface: null });
+  button.delay = 0.6; runtime.useTargets(button, player.id);
+  runtime.selectWeapon(player, "axe"); runtime.attack(player, ZERO, 0.85);
+  const template = [...runtime.entities.values()].find(entity => entity.classname === "monster_army");
+  if (template === undefined) throw new Error("Missing authored clone template");
+  const templateMode = template.monster?.mode, total = runtime.totalMonsters;
+  const clone = runtime.cloneEntity(template);
+  callbacks.pain({ self: clone.actor, attacker: player.id, damage: 1, kick: 0 });
+  expect(clone.monster?.mode).toBe("pain");
+  expect(template.monster?.mode).toBe(templateMode);
+  expect(runtime.totalMonsters).toBe(total);
+  expect(runtime.body(clone)).toEqual(runtime.body(template));
+  const checkpoint = runtime.capture();
+  expect(checkpoint.entities.some(entity => entity.move !== null && entity.move.done === "door_hit_top")).toBe(true);
+  expect(checkpoint.entities.some(entity => entity.callbacks.think === "health_rot")).toBe(true);
+  expect(checkpoint.entities.some(entity => entity.callbacks.think === "DelayThink")).toBe(true);
+  expect(checkpoint.entities.some(entity => entity.callbacks.think === "player_axe3")).toBe(true);
+  expect(checkpoint.entities.some(entity => entity.callbacks.think === "monster_frame")).toBe(true);
+  const saved: SavedTestWorld = {
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
+    bodies: captureSharedBodies(actors, bodies),
+    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
+    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+  };
+  const restored = gameFor(map, saved);
+  expect(restored.events).toHaveLength(0);
+  expect(restored.report).toBe(null);
+  expect(restored.runtime.capture()).toEqual(checkpoint);
+  const restoredDoor = restored.runtime.find("t4")[0]; if (restoredDoor === undefined) throw new Error("Missing restored mover");
+  for (const entry of [{ game: original, door }, { game: restored, door: restoredDoor }]) {
+    entry.game.runtime.physicsEntity(entry.door.actor, 1, 0.15);
+    entry.game.due(6);
+  }
+  expect(restored.runtime.capture()).toEqual(original.runtime.capture());
+  expect(restored.combat.read(restored.player.id)?.health).toBe(combat.read(player.id)?.health);
+  expect(restored.runtime.find("t9")[0]?.count).toBe(2);
+  expect(restored.bodies.read(restoredDoor.actor.id)?.origin).toEqual(bodies.read(door.actor.id)?.origin);
+  actors.close(); restored.actors.close();
 });

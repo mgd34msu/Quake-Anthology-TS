@@ -17,6 +17,8 @@ export interface Q1StateExtension {
   capture(): Uint8Array;
   /** Runs after all source entity/player references exist, before thinks are scheduled. */
   restore(bytes: Uint8Array): undefined;
+  /** SUB_CopyEntity duplicates initialized source state without running a spawn function. */
+  clone?(source: Q1Actor, target: Q1Actor): undefined;
 }
 export function callbackName(callback: object | null): string | null {
   if (callback === null) return null;

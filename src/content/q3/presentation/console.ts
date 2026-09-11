@@ -92,6 +92,7 @@ export class ClientConsoleRuntime {
   initializeCommands(): void { this.open(); for (const name of clientConsoleCommandNames(this.state.product)) this.host.addCommand(name); }
   dispose(): void { this.closed = true; this.host.view.clearTestModel(); this.host.clients.reset(); }
   private open(): void { if (this.closed) throw new Error("Cgame console runtime is closed"); }
+  handles(name: string): boolean { this.open(); const key = fold(sourceBytes(name)); return this.commands.some(command => fold(command) === key); }
   execute(argv: readonly string[]): Promise<boolean> {
     if (argv.length > 1024) return Promise.reject(new RangeError("Console command exceeds MAX_STRING_TOKENS"));
     let owned: readonly string[];
@@ -102,7 +103,7 @@ export class ClientConsoleRuntime {
     const next = this.pending.then(async () => {
       this.open();
       const name = fold(argument(owned, 0));
-      if (!this.commands.some(command => fold(command) === name)) return false;
+      if (!this.handles(name)) return false;
       await this.dispatch(name, owned); this.open(); return true;
     }).catch((error: unknown) => { this.dispose(); throw error; });
     this.pending = next;

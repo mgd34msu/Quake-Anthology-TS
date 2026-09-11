@@ -13,7 +13,8 @@ const kills: ReadonlyMap<number, readonly [string, string]> = new Map([
   [13, ["was disintegrated by", "'s BFG blast"]], [14, ["couldn't hide from", "'s BFG"]], [15, ["caught", "'s handgrenade"]],
   [16, ["didn't see", "'s handgrenade"]], [24, ["feels", "'s pain"]], [21, ["tried to invade", "'s personal space"]],
 ]);
-export function q2Obituary(victim: Q2PlayerState, attacker: Q2PlayerState | null, means: number, deathmatch: boolean, coop: boolean): string {
+export function q2Obituary(victim: Q2PlayerState, attacker: Q2PlayerState | null, means: number, deathmatch: boolean, coop: boolean,
+  score: (recipient: Q2PlayerState, change: number) => undefined = (recipient, change) => { recipient.score += change; return undefined; }): string {
   const friendly = (means & 0x8000000) !== 0 || coop && attacker !== null;
   const mod = means & ~0x8000000;
   let message = environment.get(mod);
@@ -23,12 +24,12 @@ export function q2Obituary(victim: Q2PlayerState, attacker: Q2PlayerState | null
     message = mod === 24 ? "tried to put the pin back in" : mod === 7 || mod === 16 ? `tripped on ${possessive} own grenade`
       : mod === 9 ? `blew ${reflexive} up` : mod === 13 ? "should have used a smaller gun" : `killed ${reflexive}`;
   }
-  if ((deathmatch || coop) && message !== undefined) { if (deathmatch) victim.score--; return `${victim.name} ${message}.\n`; }
+  if ((deathmatch || coop) && message !== undefined) { if (deathmatch) score(victim, -1); return `${victim.name} ${message}.\n`; }
   const kill = kills.get(mod);
   if ((deathmatch || coop) && attacker !== null && kill !== undefined) {
-    if (deathmatch) attacker.score += friendly ? -1 : 1;
+    if (deathmatch) score(attacker, friendly ? -1 : 1);
     return `${victim.name} ${kill[0]} ${attacker.name}${kill[1]}\n`;
   }
-  if (deathmatch) victim.score--;
+  if (deathmatch) score(victim, -1);
   return `${victim.name} died.\n`;
 }

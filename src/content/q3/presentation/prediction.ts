@@ -244,15 +244,21 @@ export class PredictionRuntime {
           }
         }
       }
-      if (settings.pmoveFixed) this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
+      const originalServerTime = this.command.serverTime;
+      if (settings.pmoveFixed && this.host.commandTiming === "q3") this.command.serverTime = Math.imul(Math.trunc(((this.command.serverTime + settings.pmoveMsec - 1) | 0) / settings.pmoveMsec), settings.pmoveMsec);
       const result = this.host.movePlayer(ps, this.command, { trace: (start, end, bounds, skip, contents) => this.trace(start, end, bounds, skip, contents),
-        pointContents: (point, pass) => this.pointContents(point, pass), traceMask: mask, fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
+        pointContents: (point, pass) => this.pointContents(point, pass), originalServerTime, traceMask: mask, fixedMsec: settings.pmoveFixed ? settings.pmoveMsec : null,
         noFootsteps: (settings.dmFlags & 32) !== 0, gauntletHit: false });
       moved = true;
       this.touchTriggerPrediction(result.bounds, settings);
     }
     if (settings.showMiss > 1) this.host.warn(`[${this.command.serverTime} : ${state.time}] `);
-    if (!moved) { if (settings.showMiss !== 0) this.host.warn("not moved\n"); return; }
+    if (!moved) {
+      // A local authority can acknowledge every command before the next rendered frame.
+      await this.host.transitionPlayerState(ps, old);
+      if (settings.showMiss !== 0) this.host.warn("not moved\n");
+      return;
+    }
     ps.origin = adjustPositionForMover(state, ps.origin, ps.groundEntityNum, state.physicsTime, state.time);
     if (settings.showMiss !== 0 && ps.eventSequence > ((old.eventSequence + 2) | 0)) this.host.warn("WARNING: dropped event\n");
     await this.host.transitionPlayerState(ps, old);

@@ -12,3 +12,21 @@ export type { Q1CallbackHandlers, Q1StateExtension } from "./callbacks.ts";
 export { callbackName } from "./callbacks.ts";
 export type { Q1FoundationCheckpoint, Q1SavedEntity, Q1SavedPlayer, Q1EntitySourceState, Q1SavedCallbacks } from "./checkpoint.ts";
 export { saveQ1Actor } from "./checkpoint.ts";
+
+export type { Q1WeaponDefinition, Q1PlayerExtension } from "./extensions.ts";
+export type { Q1BaseWeapon } from "./types.ts";
+export { Q1_WEAPON_IDS, Q1_POWERUP_IDS, isQ1BaseWeapon } from "./types.ts";
+export type { Q1MonsterSpecies } from "./entity.ts";
+export { Q1_MONSTER_SPECIES } from "./entity.ts";
+
+export type { Q1SoundChannel } from "./types.ts";
+
+export type { Q1PickupRules } from "./extensions.ts";
+
+export type { Q1Basis } from "./types.ts";
+
+export type { Q1WeaponRules } from "./extensions.ts";
+
+export { fireBaseWeapon } from "./weapons.ts";
+
+export { spawnTeleportFog, spawnTeledeath } from "./spawns.ts";

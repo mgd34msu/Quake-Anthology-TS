@@ -1,10 +1,11 @@
 /* triggers.qc/misc.qc/world.qc/client.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
+import type { Vec3 } from "../../../contracts/math.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
-import { ZERO, vadd, vsub, vscale, dot, vectors, overlaps, yawFor } from "./types.ts";
+import { ZERO, vadd, vsub, vscale, dot, yawFor } from "./types.ts";
 import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";
 import { spawnMonster } from "./monsters.ts";
@@ -12,7 +13,7 @@ export { linkDoors } from "./movers.ts";
 
 function initTrigger(game: Q1Foundation, entity: Q1Actor): undefined {
   const angles = game.body(entity).angles;
-  entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 ? ZERO : moveDirection(angles);
+  entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 ? ZERO : moveDirection(angles, game);
   game.setBody(entity, { angles: ZERO }); entity.solid = "trigger"; entity.movement = "none"; entity.model = "";
   return undefined;
 }
@@ -91,7 +92,7 @@ export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
     case "trigger_hurt": initTrigger(game, entity); entity.damage ||= 5; entity.touch = game.named.touch(entity, "hurt_touch"); return undefined;
     case "trigger_push": initTrigger(game, entity); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
     case "info_teleport_destination": entity.mangle = game.body(entity).angles; game.setBody(entity, { angles: ZERO }); game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 27 })); if (entity.targetname === "") throw new Error("teleport destination has no targetname"); return undefined;
-    case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull": return undefined;
+    case "testplayerstart": case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull": return undefined;
     case "path_corner": {
       if (entity.targetname === "") throw new Error("monster_movetarget has no targetname");
       entity.solid = "trigger"; game.setBounds(entity, { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } });
@@ -136,22 +137,17 @@ function teleportTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): und
     if (game.health(other) <= 0 || !player && game.entity(other)?.solid !== "slidebox") return undefined;
     const target = game.find(entity.target)[0]; if (target === undefined) throw new Error("could not find teleport target");
     const owner = game.host.actors.resolveOwned(other), body = game.host.bodies.read(other); if (owner === null || body === null) return undefined;
-    game.useTargets(entity, other); game.effect("teleport", body.origin);
-    const destination = game.body(target).origin, forward = vectors(target.mangle).forward;
-    game.effect("teleport", vadd(destination, vscale(forward, 32)));
+    game.useTargets(entity, other); spawnTeleportFog(game, body.origin);
+    const destination = game.body(target).origin, forward = game.makeVectors(target.mangle).forward;
+    spawnTeleportFog(game, vadd(destination, vscale(forward, 32)));
+    spawnTeledeath(game, destination, other);
     game.host.bodies.write(owner, { ...body, origin: destination, angles: target.mangle, velocity: player ? vscale(forward, 300) : body.velocity, ground: null });
     game.host.bodies.link(owner);
-    if (player) game.host.emit({ kind: "teleport-player", player: other, angles: target.mangle, lockUntil: game.time + 0.7 });
-    const teledeath = game.create("teledeath"); teledeath.owner = other; teledeath.solid = "trigger";
-    game.setBody(teledeath, { origin: destination, bounds: { min: vadd(body.bounds.min, { x: -1, y: -1, z: -1 }), max: vadd(body.bounds.max, { x: 1, y: 1, z: 1 }) } });
-    const box = { min: vadd(destination, game.body(teledeath).bounds.min), max: vadd(destination, game.body(teledeath).bounds.max) };
-    teledeath.touch = game.named.touch(teledeath, "tdeath_touch");
-    game.link(teledeath);
-    for (const observation of game.host.actors.observations()) {
-      const otherBody = game.host.bodies.read(observation.id); if (otherBody === null) continue;
-      if (overlaps(box, { min: vadd(otherBody.origin, otherBody.bounds.min), max: vadd(otherBody.origin, otherBody.bounds.max) })) teledeath.touch(observation.id, null);
+    if (player) {
+      const state = game.player(other); if (state !== null) state.teleportUntil = game.time + 0.7;
+      game.host.emit({ kind: "teleport-player", player: other, angles: target.mangle, lockUntil: game.time + 0.7 });
     }
-    return game.schedule(teledeath, 0.2, game.named.action(teledeath, "SUB_Remove"));
+    return undefined;
 }
 
 function changelevelTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
@@ -165,6 +161,7 @@ function changelevelTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): 
 
 function pathTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
         const actor = game.entity(other), monster = actor?.monster;
+        if (actor !== null && game.sourcePathTouch(entity, actor)) return undefined;
         if (actor === null || actor === undefined || monster === null || monster === undefined || monster.path !== entity.targetname || monster.enemy !== null) return undefined;
         monster.path = entity.target;
         const target = game.find(monster.path)[0];
@@ -177,22 +174,29 @@ export function registerSpawnCallbacks(game: Q1Foundation): undefined {
   game.named.register("multi_killed", { die: multiFire });
   game.named.register("multi_touch", { touch: (runtime, entity, other) => {
     if (!runtime.isPlayer(other)) return undefined;
-    const body = runtime.host.bodies.read(other); if (body === null || dot(vectors(body.angles).forward, entity.movedir) < 0) return undefined;
+    const body = runtime.host.bodies.read(other); if (body === null || dot(runtime.makeVectors(body.angles).forward, entity.movedir) < 0) return undefined;
     return multiFire(runtime, entity, other);
   } });
   game.named.register("multi_wait", { action: (runtime, entity) => {
     if (entity.maxHealth > 0) { runtime.host.combat.setHealth(entity.actor, entity.maxHealth); entity.damageable = true; entity.solid = "bbox"; } return undefined;
   } });
   game.named.register("counter_use", { use: counterUse });
-  game.named.register("teleport_use", { use: (runtime, entity) => runtime.schedule(entity, 0.2, runtime.named.action(entity, "SUB_Null")) });
+  game.named.register("teleport_use", { use: (runtime, entity) => { runtime.forceRetouch = 2; return runtime.schedule(entity, 0.2, runtime.named.action(entity, "SUB_Null")); } });
   game.named.register("teleport_touch", { touch: teleportTouch });
+  game.named.register("play_teleport", { action: (runtime, entity) => {
+    const index = Math.min(4, Math.floor(Math.fround(runtime.host.random() * 5)));
+    runtime.sound(entity, `misc/r_tele${index + 1}.wav`); return runtime.remove(entity);
+  } });
   game.named.register("tdeath_touch", { touch: (runtime, entity, victim) => {
     const owner = entity.owner; if (owner === null || sameActor(victim, owner)) return undefined;
-    if (runtime.isPlayer(victim) && !runtime.isPlayer(owner)) { runtime.damage(owner, entity.actor.id, entity.actor.id, 50000, null, "direct", "teledeath"); return undefined; }
-    if (runtime.health(victim) !== 0) runtime.damage(victim, entity.actor.id, owner, 50000, null, "direct", "teledeath"); return undefined;
+    if (runtime.isPlayer(victim)) {
+      if ((runtime.player(victim)?.powerups.get("invulnerability") ?? 0) > runtime.time) entity.classname = "teledeath2";
+      if (!runtime.isPlayer(owner)) { runtime.damage(owner, entity.actor.id, entity.actor.id, 50000, null, "direct", entity.classname); return undefined; }
+    }
+    if (runtime.health(victim) !== 0) runtime.damage(victim, entity.actor.id, entity.actor.id, 50000, null, "direct", entity.classname); return undefined;
   } });
   game.named.register("light_use", { use: (runtime, entity) => { entity.spawnflags ^= 1; return runtime.host.emit({ kind: "lightstyle", style: entity.number("style"), pattern: (entity.spawnflags & 1) !== 0 ? "a" : "m" }); } });
-  game.named.register("barrel_die", { die: (runtime, entity, attacker) => { entity.damageable = false; entity.activator = attacker; return runtime.schedule(entity, 0.3, runtime.named.action(entity, "barrel_explode")); } });
+  game.named.register("barrel_die", { die: (runtime, entity, attacker) => { entity.classname = "explo_box"; entity.damageable = false; entity.activator = attacker; return runtime.schedule(entity, 0.3, runtime.named.action(entity, "barrel_explode")); } });
   game.named.register("barrel_explode", { action: (runtime, entity) => {
     runtime.radiusDamage(entity.actor.id, entity.activator, 160, null, null); runtime.sound(entity, "weapons/r_exp3.wav");
     runtime.effect("explosion", vadd(runtime.body(entity).origin, { x: 0, y: 0, z: 32 })); return runtime.remove(entity);
@@ -215,4 +219,21 @@ export function registerSpawnCallbacks(game: Q1Foundation): undefined {
   } });
   game.named.register("movetarget_touch", { touch: pathTouch });
   return undefined;
+}
+
+/** spawn_tfog: broadcast immediately, then choose/play the sound on its source think. */
+export function spawnTeleportFog(game: Q1Foundation, origin: Vec3): Q1Actor {
+  const fog = game.create("teleport_fog"); fog.classname = "";
+  game.setBody(fog, { origin });
+  game.schedule(fog, 0.2, game.named.action(fog, "play_teleport"));
+  game.effect("teleport", origin); return fog;
+}
+/** spawn_tdeath: force_retouch makes stationary actors participate through shared source linking. */
+export function spawnTeledeath(game: Q1Foundation, origin: Vec3, owner: ActorId): Q1Actor {
+  const body = game.host.bodies.read(owner); if (body === null) throw new Error("Teledeath owner has no shared body");
+  const death = game.create("teledeath"); death.solid = "trigger"; death.owner = owner;
+  game.setBody(death, { origin, bounds: { min: vsub(body.bounds.min, { x: 1, y: 1, z: 1 }), max: vadd(body.bounds.max, { x: 1, y: 1, z: 1 }) } });
+  death.touch = game.named.touch(death, "tdeath_touch");
+  game.schedule(death, 0.2, game.named.action(death, "SUB_Remove"));
+  game.link(death); game.forceRetouch = 2; return death;
 }

@@ -57,7 +57,10 @@ export class NativeRenderer {
   private image(operation: ImageResourceOperation): void {
     this.current.applyImageResource(operation);
     switch (operation.kind) {
-      case "create-image": this.resident.set(operation.image.ordinal, { creation: operation, updates: new Map<number, Extract<ImageResourceOperation, { readonly kind: "update-image" }>>() }); break;
+      case "create-image": {
+        const updates: ResidentImage["updates"] = new Map<number, Extract<ImageResourceOperation, { readonly kind: "update-image" }>>();
+        this.resident.set(operation.image.ordinal, { creation: operation, updates }); break;
+      }
       case "update-image": {
         const record = this.resident.get(operation.image.ordinal);
         if (record === undefined) throw new Error("Renderer update has no resident image");

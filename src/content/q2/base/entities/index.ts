@@ -1,15 +1,27 @@
 import type { Q2Entity, Q2GameServices, Q2SpawnModule } from "../../foundation/host.ts";
+import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import { Q2BaseMoverEntities } from "./movers.ts";
-import { spawnQ2BaseScenery } from "./scenery.ts";
-import { spawnQ2BaseTarget } from "./targets.ts";
-import { spawnQ2EnvironmentalTrigger } from "./triggers.ts";
+import type { Q2BaseMoversCheckpoint } from "./movers.ts";
+import { Q2BaseScenery } from "./scenery.ts";
+import type { Q2BaseSceneryCheckpoint } from "./scenery.ts";
+import { Q2BaseTargets } from "./targets.ts";
+import { Q2EnvironmentalTriggers } from "./triggers.ts";
 import { Q2TurretEntities } from "./turrets.ts";
+import type { Q2TurretsCheckpoint } from "./turrets.ts";
 import type { Q2BaseEntityHooks } from "./types.ts";
 
 export type { Q2BaseEntityHooks } from "./types.ts";
 export type { Q2PlatformState } from "./movers.ts";
 export { q2ClockText } from "./scenery.ts";
 export { snapQ2TurretEighth } from "./turrets.ts";
+
+export interface Q2BaseEntitiesCheckpoint {
+  readonly version: 1;
+  readonly movers: Q2BaseMoversCheckpoint;
+  readonly scenery: Q2BaseSceneryCheckpoint;
+  readonly turrets: Q2TurretsCheckpoint;
+  readonly windTimes: ReturnType<Q2EnvironmentalTriggers["capture"]>;
+}
 
 /** Source g_spawn.c classnames supplied here; existing foundation modules remain registered once. */
 export const q2BaseEntityClassnames: readonly string[] = [
@@ -25,15 +37,39 @@ export const q2BaseEntityClassnames: readonly string[] = [
 export class Q2BaseEntityModule implements Q2SpawnModule {
   private readonly movers: Q2BaseMoverEntities;
   private readonly turrets: Q2TurretEntities;
-  constructor(private readonly hooks: Q2BaseEntityHooks) {
+  private readonly targets: Q2BaseTargets;
+  private readonly triggers: Q2EnvironmentalTriggers;
+  private readonly scenery: Q2BaseScenery;
+  constructor(hooks: Q2BaseEntityHooks) {
     this.movers = new Q2BaseMoverEntities(hooks); this.turrets = new Q2TurretEntities(hooks);
+    this.targets = new Q2BaseTargets(hooks); this.triggers = new Q2EnvironmentalTriggers(hooks);
+    this.scenery = new Q2BaseScenery(hooks);
+  }
+
+  get callbacks(): Q2CallbackDefinitions {
+    const sources = [this.movers.callbacks, this.targets.callbacks, this.triggers.callbacks, this.scenery.callbacks, this.turrets.callbacks];
+    return { think: Object.fromEntries(sources.flatMap(source => Object.entries(source.think ?? {}))),
+      use: Object.fromEntries(sources.flatMap(source => Object.entries(source.use ?? {}))),
+      touch: Object.fromEntries(sources.flatMap(source => Object.entries(source.touch ?? {}))),
+      die: Object.fromEntries(sources.flatMap(source => Object.entries(source.die ?? {}))),
+      blocked: Object.fromEntries(sources.flatMap(source => Object.entries(source.blocked ?? {}))) };
+  }
+
+  capture(game: Q2GameServices): Q2BaseEntitiesCheckpoint {
+    return { version: 1, movers: this.movers.capture(game), scenery: this.scenery.capture(game), turrets: this.turrets.capture(game), windTimes: this.triggers.capture(game) };
+  }
+
+  /** Restore after shared tables, foundation entities and monster contexts; no source callback runs. */
+  restore(game: Q2GameServices, checkpoint: Q2BaseEntitiesCheckpoint): undefined {
+    this.movers.restore(game, checkpoint.movers); this.scenery.restore(game, checkpoint.scenery);
+    this.triggers.restore(game, checkpoint.windTimes); return this.turrets.restore(game, checkpoint.turrets);
   }
 
   platformState(entity: Q2Entity) { return this.movers.platformState(entity); }
 
   spawn(entity: Q2Entity, game: Q2GameServices): boolean {
-    return this.movers.spawn(entity, game) || spawnQ2EnvironmentalTrigger(entity, game, this.hooks) ||
-      spawnQ2BaseTarget(entity, game, this.hooks) || spawnQ2BaseScenery(entity, game, this.hooks) || this.turrets.spawn(entity, game);
+    return this.movers.spawn(entity, game) || this.triggers.spawn(entity, game) ||
+      this.targets.spawn(entity, game) || this.scenery.spawn(entity, game) || this.turrets.spawn(entity, game);
   }
 }
 

@@ -11,18 +11,36 @@ import { damagedSkin, finishCorpse, move, muzzle, shot, sound } from "./common.t
 import { boss32Frame, boss32Moves } from "./tables/boss32.ts";
 
 function run(context: MonsterContext): undefined { return context.setMove(context.state.standGround ? "makron_move_stand" : "makron_move_run"); }
-export function makronToss(context: MonsterContext, monsters: Q2Monsters): undefined {
-  const { entity, game } = context, child = game.create("monster_makron");
-  child.target = entity.target;
-  game.move(child, { origin: game.body(entity).origin }, false);
-  return game.schedule(child, 0.8, (self, services) => {
+const spawnCallbacks = new WeakMap<Q2Monsters, Q2Think>();
+function makronSpawnCallback(monsters: Q2Monsters): Q2Think {
+  const existing = spawnCallbacks.get(monsters);
+  if (existing !== undefined) return existing;
+  const spawn: Q2Think = (self, services) => {
     if (!monsters.spawn(self, services)) throw new Error("Makron definition must be registered before Jorg");
     const player = monsters.currentSightClient;
     const target = player === null ? null : services.host.bodies.read(player);
     if (target === null) return undefined;
     const body = services.body(self), direction = subtract(target.origin, body.origin);
     return services.move(self, { angles: { ...body.angles, y: vectorAngles(direction).y }, velocity: { ...scale(normalize(direction), 400), z: 200 }, ground: null });
-  });
+  };
+  spawnCallbacks.set(monsters, spawn);
+  return spawn;
+}
+export function withMakronSpawnCallbacks(definition: Q2MonsterDefinition, monsters: Q2Monsters): Q2MonsterDefinition {
+  return { ...definition, sourceCallbacks: { ...definition.sourceCallbacks, think: { ...definition.sourceCallbacks?.think,
+    "q2:base/MakronSpawn": makronSpawnCallback(monsters), "q2:base/makron_torso_think": makronTorsoThink } } };
+}
+const makronTorsoThink: Q2Think = (self, services) => {
+  self.frame++;
+  if (self.frame >= 365) self.frame = 346;
+  services.show(self);
+  return services.schedule(self, 0.1, makronTorsoThink);
+};
+export function makronToss(context: MonsterContext, monsters: Q2Monsters): undefined {
+  const { entity, game } = context, child = game.create("monster_makron");
+  child.target = entity.target;
+  game.move(child, { origin: game.body(entity).origin }, false);
+  return game.schedule(child, 0.8, makronSpawnCallback(monsters));
 }
 export const makronDefinition: Q2MonsterDefinition = {
   classname: "monster_makron", kind: "makron", model: "models/monsters/boss3/rider/tris.md2", health: 3000, gibHealth: -2000, mass: 500,
@@ -66,8 +84,7 @@ export const makronDefinition: Q2MonsterDefinition = {
     game.move(torso, { origin: { ...body.origin, y: body.origin.y - 84 }, angles: body.angles, bounds: { min: { x: -8, y: -8, z: 0 }, max: { x: 8, y: 8, z: 8 } }, velocity: zero });
     game.motion(torso, "stationary"); game.solid(torso, "none"); game.show(torso);
     game.host.emit({ kind: "sound", actor: torso.actor.id, origin: game.body(torso).origin, path: "makron/spine.wav", channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "start" });
-    const think: Q2Think = (self, services) => { self.frame++; if (self.frame >= 365) self.frame = 346; services.show(self); return services.schedule(self, 0.1, think); };
-    game.schedule(torso, 0.2, think);
+    game.schedule(torso, 0.2, makronTorsoThink);
     return context.setMove("makron_move_death2");
   },
   callbacks: {

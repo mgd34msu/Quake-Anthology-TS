@@ -1,6 +1,6 @@
 import type { ExecutableRecipe, ResourceId } from "./content.ts";
 import type { GuestCheckpoint } from "./execution.ts";
-import type { CombatState, DamageOutcome, InventoryEntry, TransitionDecision } from "./gameplay.ts";
+import type { ArsenalIntent, CombatState, DamageOutcome, InventoryEntry, TransitionDecision } from "./gameplay.ts";
 import type { ActorId, CallbackId, ClientId, ProviderId, SeatId, SessionId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
 import type { RandomState } from "./numeric.ts";
@@ -26,6 +26,8 @@ export interface ActorCommand {
   readonly source: CommandSource;
   readonly sequence: number;
   readonly command: UserCommand;
+  /** Absent for native clients whose source command already carries these actions. */
+  readonly arsenal?: ArsenalIntent;
 }
 
 export interface InputBatch {

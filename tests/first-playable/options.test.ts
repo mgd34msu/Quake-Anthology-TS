@@ -13,3 +13,14 @@ test("mixed launch selections remain independent of the renderer", () => {
   expect(command.options.mode).toBe("coop");
   expect(() => parseApplicationCommand(["--map", "../base1"])).toThrow();
 });
+
+test("native network selection preserves the requested game composition", () => {
+  const server = parseApplicationCommand(["--listen-q2", "0", "--bind", "127.0.0.1"]);
+  if (server.kind !== "run") throw new Error("Expected a runnable server command");
+  expect(server.options.network).toEqual({ kind: "q2-server", host: "127.0.0.1", port: 0 });
+  expect(server.options.mode).toBe("coop");
+  expect(server.options.movement).toBe("q1");
+  expect(server.options.character).toBe("q3");
+  expect(() => parseApplicationCommand(["--listen-q2", "27910", "--connect-q2", "localhost"])).toThrow();
+  expect(() => parseApplicationCommand(["--bind", "127.0.0.1"])).toThrow();
+});

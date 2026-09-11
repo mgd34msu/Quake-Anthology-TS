@@ -1,5 +1,5 @@
 /* client.qc source spawn, match and intermission rules. GPL-2.0-or-later. */
-import type { ActorId } from "../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1Foundation } from "../foundation/runtime.ts";
@@ -12,7 +12,12 @@ import type { SaveReader } from "../../../persistence/value.ts";
 
 export class Q1SpawnSelector {
   private lastSpawn: Q1Actor | null = null;
+  private readonly sourceSelections = new Map<string, (forceSpawn: boolean) => Q1Actor | null | undefined>();
   constructor(readonly game: Q1Foundation, readonly campaign: Q1CampaignBinding) {}
+  /** Undefined delegates to the next source rule; null deliberately defers admission. */
+  registerSelection(id: string, select: (forceSpawn: boolean) => Q1Actor | null | undefined): undefined {
+    if (this.sourceSelections.has(id)) throw new Error(`Duplicate Q1 source spawn selector ${id}`); this.sourceSelections.set(id, select); return undefined;
+  }
   capture() { return this.lastSpawn === null ? null : { slot: this.lastSpawn.actor.id.slot, generation: this.lastSpawn.actor.id.generation }; }
   restore(reader: SaveReader): undefined { this.lastSpawn = reader.nullable(value => { const actor = this.game.host.actors.resolveSaved({ slot: value.field("slot").integer(0), generation: value.field("generation").integer(0) }); if (actor === null) return value.fail("missing spawn point"); return this.game.entity(actor.id); }); return undefined; }
   private nearby(point: Q1Actor, radius: number, living: boolean): boolean {
@@ -35,6 +40,7 @@ export class Q1SpawnSelector {
   }
   /** Rerelease may defer an occupied spawn. The caller retries and forces it after five seconds. */
   select(forceSpawn = false): Q1Actor | null {
+    for (const select of this.sourceSelections.values()) { const point = select(forceSpawn); if (point !== undefined) return point; }
     const { game } = this, entities = [...game.entities.values()];
     const region = entities.find(entity => entity.classname === "testplayerstart"); if (region !== undefined) return region;
     if (game.options.coop) {
@@ -86,6 +92,14 @@ export interface Q1Obituary {
   readonly score: { readonly actor: ActorId; readonly delta: number } | null;
   readonly achievement: { readonly actor: ActorId; readonly id: string } | null;
 }
+export interface Q1ClientNotice { readonly text: string; readonly arguments: readonly string[]; readonly scoreDelta: number; }
+/** ClientConnect/ClientDisconnect/ClientKill/changelevel_touch feedback before the session commits lifecycle work. */
+export function q1ClientNotice(edition: "classic" | "rerelease", event: "connect" | "disconnect" | "suicide" | "exit", name: string, frags = 0): Q1ClientNotice {
+  const scoreDelta = event === "suicide" ? -2 : 0;
+  if (edition === "rerelease") return { text: event === "connect" ? "$qc_entered" : event === "disconnect" ? "$qc_left_game" : event === "suicide" ? "$qc_suicides" : "$qc_exited", arguments: event === "disconnect" ? [name, String(frags)] : [name], scoreDelta };
+  const text = event === "connect" ? `${name} entered the game\n` : event === "disconnect" ? `${name} left the game with ${frags} frags\n` : event === "suicide" ? `${name} suicides\n` : `${name} exited the level\n`;
+  return { text, arguments: [], scoreDelta };
+}
 /** The selected score authority commits this decision once for an accepted death. */
 export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; readonly victim: Q1ObituaryActor; readonly attacker: Q1ObituaryActor | null; readonly telefragOwner: Q1ObituaryActor | null; readonly teamplay: number; readonly deathType: string; readonly random: () => number }): Q1Obituary {
   const { victim, attacker, random } = input; const roll = random();
@@ -113,6 +127,7 @@ export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; r
       }
       case "lightning": return message(attacker.waterLevel > 1 ? "$qc_death_lg1" : "$qc_death_lg2", input.edition === "rerelease" && attacker.waterLevel > 1 && attacker.invulnerableExpires !== 0 ? { actor: attacker.actor, id: "ACH_SURVIVE_DISCHARGE" } : null);
       case null: return message(attacker.killString);
+      default: return message(attacker.killString);
     }
   }
   if (input.edition === "classic" && attacker !== null) {
@@ -128,17 +143,58 @@ export function q1Obituary(input: { readonly edition: "classic" | "rerelease"; r
   return result(input.deathType === "falling" ? "$qc_death_fall" : "$qc_death_died", victim.actor, -1);
 }
 
-export type Q1IntermissionResult = { readonly kind: "waiting" } | { readonly kind: "travel"; readonly map: string } | { readonly kind: "finale"; readonly text: string; readonly track: 2 } | { readonly kind: "sell-screen" };
+export type Q1SourceFinale = { readonly kind: "finale"; readonly text: string; readonly track: number } | { readonly kind: "sell-screen" };
+export type Q1IntermissionResult = { readonly kind: "waiting" } | { readonly kind: "travel"; readonly map: string } | Q1SourceFinale;
+export interface Q1IntermissionRule {
+  readonly id: string;
+  touch?(trigger: Q1Actor, player: ActorId): undefined;
+  begin?(map: string, cause: ActorId | null): undefined;
+  /** Null skips the base text and travels; undefined delegates to the next rule. */
+  finale?(stage: number, nextMap: string): Q1SourceFinale | null | undefined;
+  travel?(map: string, cause: ActorId | null): boolean;
+}
 export class Q1LevelRules {
   private nextMap = "";
   private stage = 0;
   private exitAfter = 0;
-  constructor(readonly game: Q1Foundation, readonly campaign: Q1CampaignBinding, readonly registered = true) {
+  private readonly playerStats = new Map<OwnedActor, { firedWeapon: boolean; tookDamage: boolean }>();
+  private readonly sourceRules = new Map<string, Q1IntermissionRule>();
+  constructor(readonly game: Q1Foundation, readonly campaign: Q1CampaignBinding, readonly registered = true, readonly officialCampaign = true) {
     game.named.register("base:next_level", { action: (_game, entity) => { this.begin(this.nextMap, null); return game.remove(entity); } });
+    game.host.actors.onRelease(actor => { this.playerStats.delete(actor); return undefined; });
   }
-  capture() { return { nextMap: this.nextMap, stage: this.stage, exitAfter: this.exitAfter }; }
-  restore(reader: SaveReader): undefined { this.nextMap = reader.field("nextMap").string(); this.stage = reader.field("stage").integer(0); this.exitAfter = reader.field("exitAfter").number(); return undefined; }
-  begin(map: string, cause: ActorId | null): undefined { this.nextMap = map; this.stage = 1; this.exitAfter = this.game.time + (this.game.options.deathmatch !== 0 ? 5 : 2); return this.game.beginIntermission(map, cause); }
+  capture() { return { nextMap: this.nextMap, stage: this.stage, exitAfter: this.exitAfter, players: [...this.playerStats].map(([actor, stats]) => ({ actor: { slot: actor.id.slot, generation: actor.id.generation }, ...stats })) }; }
+  restore(reader: SaveReader): undefined {
+    this.nextMap = reader.field("nextMap").string(); this.stage = reader.field("stage").integer(0); this.exitAfter = reader.field("exitAfter").number(); this.playerStats.clear();
+    reader.field("players").list(value => { const id = value.field("actor"), actor = this.game.host.actors.resolveSaved({ slot: id.field("slot").integer(0), generation: id.field("generation").integer(0) }); if (actor === null) return value.fail("missing level player"); this.playerStats.set(actor, { firedWeapon: value.field("firedWeapon").boolean(), tookDamage: value.field("tookDamage").boolean() }); return undefined; }); return undefined;
+  }
+  resetPlayer(actor: OwnedActor): undefined { this.playerStats.set(actor, { firedWeapon: false, tookDamage: false }); return undefined; }
+  registerIntermissionRule(rule: Q1IntermissionRule): undefined { if (this.sourceRules.has(rule.id)) throw new Error(`Duplicate Q1 intermission rule ${rule.id}`); this.sourceRules.set(rule.id, rule); return undefined; }
+  changelevelTouched(trigger: Q1Actor, player: ActorId): undefined { for (const rule of this.sourceRules.values()) rule.touch?.(trigger, player); return undefined; }
+  travelTo(map: string, cause: ActorId | null): undefined { for (const rule of this.sourceRules.values()) if (rule.travel?.(map, cause)) return undefined; return this.game.travel(map, cause); }
+  noteAttack(actor: OwnedActor, axeOnly: boolean): undefined { if (axeOnly) return undefined; const stats = this.playerStats.get(actor) ?? { firedWeapon: false, tookDamage: false }; stats.firedWeapon = true; this.playerStats.set(actor, stats); return undefined; }
+  noteDamage(actor: OwnedActor, healthDamage: number): undefined { if (healthDamage === 0) return undefined; const stats = this.playerStats.get(actor) ?? { firedWeapon: false, tookDamage: false }; stats.tookDamage = true; this.playerStats.set(actor, stats); return undefined; }
+  begin(map: string, cause: ActorId | null): undefined {
+    const { game } = this; this.nextMap = map; this.stage = 1; this.exitAfter = game.time + (game.options.deathmatch !== 0 ? 5 : 2);
+    for (const rule of this.sourceRules.values()) rule.begin?.(map, cause);
+    game.beginIntermission(map, cause);
+    if (game.options.edition === "rerelease") {
+      if (game.options.skill === 3) for (const actorId of game.host.players()) {
+        const actor = game.host.actors.resolveOwned(actorId); if (actor === null) continue; const stats = this.playerStats.get(actor);
+        if (game.mapName === "e1m1" && !(stats?.firedWeapon ?? false)) game.host.emit({ kind: "achievement", player: actorId, id: "ACH_PACIFIST" });
+        if (game.mapName === "e4m6" && !(stats?.tookDamage ?? false)) game.host.emit({ kind: "achievement", player: actorId, id: "ACH_PAINLESS_MAZE" });
+      }
+      const completed = this.officialCampaign && ["e1m7", "e2m6", "e3m6", "e4m7"].includes(game.mapName) ? `ACH_COMPLETE_${game.mapName.toUpperCase()}` : null;
+      if (completed !== null) game.host.emit({ kind: "achievement", player: null, id: completed });
+      const secret = game.mapName === "e1m4" && map === "e1m8" || game.mapName === "e2m3" && map === "e2m7" || game.mapName === "e3m4" && map === "e3m7" || game.mapName === "e4m5" && map === "e4m8";
+      if (secret) game.host.emit({ kind: "achievement", player: null, id: `ACH_FIND_${map.toUpperCase()}` });
+    }
+    return undefined;
+  }
+  beginCutscene(map: string, cause: ActorId | null, exitAfter: number): undefined {
+    this.nextMap = map; this.stage = 1; this.exitAfter = exitAfter;
+    this.game.intermission = { map, cause, exitAfter }; return undefined;
+  }
   checkLimits(seconds: number, scores: readonly number[], timelimitMinutes: number, fraglimit: number): boolean {
     if (this.nextMap !== "" || timelimitMinutes === 0 && fraglimit === 0) return false;
     if (!(timelimitMinutes !== 0 && seconds >= timelimitMinutes * 60) && !(fraglimit !== 0 && scores.some(score => score >= fraglimit))) return false;
@@ -157,10 +213,11 @@ export class Q1LevelRules {
   requestExit(seconds: number, pressed: boolean, sameLevel = false): Q1IntermissionResult {
     if (this.stage === 0 || !pressed || seconds < this.exitAfter) return { kind: "waiting" };
     const travel = (): Q1IntermissionResult => {
-      const map = sameLevel ? this.game.mapName : this.nextMap; this.game.time = seconds; this.game.intermission = null; this.game.travel(map, null); this.stage = 0; return { kind: "travel", map };
+      const map = sameLevel ? this.game.mapName : this.nextMap, cause = this.game.intermission?.cause ?? null; this.game.time = seconds; this.game.intermission = null; this.travelTo(map, cause); this.stage = 0; return { kind: "travel", map };
     };
     if (this.game.options.deathmatch !== 0) return travel();
     this.exitAfter = seconds + 1; this.stage++;
+    for (const rule of this.sourceRules.values()) { const finale = rule.finale?.(this.stage, this.nextMap); if (finale !== undefined) return finale ?? travel(); }
     if (this.stage === 2) {
       const map = this.game.mapName;
       const text = map === "e1m7" ? this.registered ? "$qc_finale_e1" : "$qc_finale_e1_shareware" : map === "e2m6" ? "$qc_finale_e2" : map === "e3m6" ? "$qc_finale_e3" : map === "e4m7" ? "$qc_finale_e4" : null;
@@ -173,4 +230,7 @@ export class Q1LevelRules {
     }
     return travel();
   }
+  clientConnected(seconds: number, sameLevel = false): Q1IntermissionResult { if (this.stage === 0) return { kind: "waiting" }; this.exitAfter = seconds; return this.requestExit(seconds, true, sameLevel); }
+  advanceFinale(seconds: number): Q1IntermissionResult { return this.clientConnected(seconds); }
+  deferExit(untilSeconds: number): undefined { this.exitAfter = untilSeconds; if (this.game.intermission !== null) this.game.intermission = { ...this.game.intermission, exitAfter: untilSeconds }; return undefined; }
 }

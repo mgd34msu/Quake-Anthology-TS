@@ -62,20 +62,27 @@ export class TextCommandSink implements TextDrawSink {
 
 export type CoordinateSpace = "pixels" | "stretch-640" | "base-ui-640" | "team-ui-640";
 export class Draw2D {
-  readonly width: number;
-  readonly height: number;
-  readonly scaleX: number;
-  readonly scaleY: number;
-  readonly biasX: number;
-  constructor(readonly commands: TextDrawSink, readonly space: CoordinateSpace) {
-    this.width = commands.target.width; this.height = commands.target.height;
-    switch (space) {
-      case "pixels": this.scaleX = 1; this.scaleY = 1; break;
-      case "stretch-640": this.scaleX = f(f(this.width) / 640); this.scaleY = f(f(this.height) / 480); break;
-      case "base-ui-640": this.scaleX = f(f(this.height) * f(1 / 480)); this.scaleY = this.scaleX; break;
-      case "team-ui-640": this.scaleX = f(f(this.width) * f(1 / 640)); this.scaleY = f(f(this.height) * f(1 / 480)); break;
+  constructor(readonly commands: TextDrawSink, readonly space: CoordinateSpace) {}
+  get width(): number { return this.commands.target.width; }
+  get height(): number { return this.commands.target.height; }
+  get scaleX(): number {
+    switch (this.space) {
+      case "pixels": return 1;
+      case "stretch-640": return f(f(this.width) / 640);
+      case "base-ui-640": return f(f(this.height) * f(1 / 480));
+      case "team-ui-640": return f(f(this.width) * f(1 / 640));
     }
-    this.biasX = space === "base-ui-640" && Math.imul(this.width, 480) > Math.imul(this.height, 640)
+  }
+  get scaleY(): number {
+    switch (this.space) {
+      case "pixels": return 1;
+      case "stretch-640": return f(f(this.height) / 480);
+      case "base-ui-640": return this.scaleX;
+      case "team-ui-640": return f(f(this.height) * f(1 / 480));
+    }
+  }
+  get biasX(): number {
+    return this.space === "base-ui-640" && Math.imul(this.width, 480) > Math.imul(this.height, 640)
       ? f(0.5 * f(f(this.width) - f(f(this.height) * f(640 / 480)))) : 0;
   }
   setColor(color: Vec4 | null): void { this.commands.setColor(color); }

@@ -17,7 +17,7 @@ import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts
 import { shadowCaster, shadowMesh } from "../shadows.ts";
 import type { ShadowCaster, ShadowMesh } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
-import { Q2_SHELL_MASK, q2AliasLight, q2ShellColor } from "./lighting.ts";
+import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { prepareSceneEntity, preparedModelBatches } from "./prepare.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldPoint } from "./transform.ts";
@@ -38,7 +38,8 @@ const normalIndices = new Map(ALIAS_NORMALS.map((normal, index) => [`${normal.x}
 
 function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
 function materialKey(entity: SceneEntity, image: ModelImageSelection, options: ModelSourceOptions): string {
-  const translation = image.kind === "indexed" && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
+  const translated = image.kind === "indexed" || entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement";
+  const translation = translated && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
   return `${entity.resource.id}\0${image.kind}\0${"name" in image ? image.name : image.kind === "default" ? image.reason : ""}\0${translation}`;
 }
 
@@ -139,7 +140,7 @@ export class SceneModelRenderer {
         this.materials.set(key, { kind: "q3", name, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
       }
       const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
-        : selection.kind === "indexed" ? this.indexedTexture(selection, options) : await this.externalTexture(entity, selection.name);
+        : selection.kind === "indexed" ? this.indexedTexture(selection, options) : await this.externalTexture(entity, selection.name, options);
       this.materials.set(key, { kind: "legacy", texture });
     })();
     this.pending.set(key, pending);
@@ -153,7 +154,7 @@ export class SceneModelRenderer {
       { wrap: "repeat", filter: "linear" });
   }
 
-  private async externalTexture(entity: SceneEntity, name: string): Promise<SceneTexture> {
+  private async externalTexture(entity: SceneEntity, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
     const sprite = entity.model.kind === "q2-sp2";
     if (this.provider.family === "q2" && name.toLowerCase().endsWith(".pcx")) {
       const base = name.slice(0, -4);
@@ -170,18 +171,27 @@ export class SceneModelRenderer {
           { kind: "index", index: 255 }), { wrap: "repeat", filter: "linear" }, asset.source);
       }
     }
-    return await this.provider.textures.load(name, { family: this.provider.family, mipmap: !sprite }) ?? this.provider.textures.missing;
+    const texture = await this.provider.textures.load(name, { family: this.provider.family, mipmap: !sprite }) ?? this.provider.textures.missing;
+    const colors = options.playerColors;
+    if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement" && colors !== undefined && texture.content.kind === "indexed8") {
+      return this.provider.textures.register(`${name}:${colors.top}:${colors.bottom}`,
+        { ...texture.content, translation: q1PlayerTranslation(colors.top, colors.bottom) },
+        { wrap: "repeat", filter: "linear-mipmap-nearest" }, texture.image.source);
+    }
+    return texture;
   }
 
   prepare(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({})): readonly DrawBatch[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
+    const lightingInput = this.provider.family === "q2" && input.lights === undefined && input.q2FragmentLighting !== undefined
+      ? { ...input, lights: input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 })) } : input;
     const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number): Vec3 => {
       if (this.provider.family === "q3") return unit;
       const source = options(entity);
       let light = lightCache.get(entity);
       if (light === undefined) {
-        const sampled = this.lighting.sample(entity.transform.origin, input, this.provider.family !== "q1").color;
+        const sampled = this.lighting.sample(entity.transform.origin, lightingInput, this.provider.family !== "q1").color;
         if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
         else {
           const channel = (value: number): number => {
@@ -221,7 +231,7 @@ export class SceneModelRenderer {
     };
     return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
-    { draw: surface => this.draw(surface, input, options(surface.entity)) }));
+    { draw: surface => this.draw(surface, input, options(surface.entity), lightCache.get(surface.entity)) }));
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
@@ -281,16 +291,17 @@ export class SceneModelRenderer {
       && center.z - radius < fog.bounds.max.z && center.z + radius > fog.bounds.min.z) ?? null;
   }
 
-  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions): readonly DrawBatch[] {
+  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, shade?: Vec3): readonly DrawBatch[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     if (material.kind === "q3") {
       const axis = surface.transform.axis;
       const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
-      const base = this.world.materialContext(input, transform, this.fogFor(surface.entity));
+      const base = this.world.materialContext(input, transform, options.noWorldModel === true ? null : this.fogFor(surface.entity));
       const project = createViewProjector(input.camera);
-      const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input),
+      const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
+        shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
         localViewOrigin: modelLocalDelta(surface.transform, sub3(input.camera.origin, surface.transform.origin)), depthRange: surface.depthRange,
         timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
@@ -305,7 +316,22 @@ export class SceneModelRenderer {
     const batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
       fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
       project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
-    return batches.map(batch => ({ ...batch, state: { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
-      cull: surface.mirrorWeapon ? "front" : batch.state.cull } }));
+    const flags = surface.entity.flags.kind === "q2" ? surface.entity.flags.bits : 0, shadows = input.q2FragmentLighting;
+    const receives = this.provider.family === "q2" && shade !== undefined && shadows !== undefined && shadows.atlas !== null
+      && !surface.unlit && options.viewModel !== true && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0
+      && !(options.infrared === true && (flags & 32768) !== 0);
+    const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, shadows.lights) : [];
+    const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
+    return batches.map((batch, index): DrawBatch => {
+      const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
+        cull: surface.mirrorWeapon ? "front" : batch.state.cull } satisfies DrawBatch["state"];
+      if (index !== 0 || affecting.length === 0 || shadows === undefined || shadows.atlas === null) return { ...batch, state };
+      const lighting = { kind: "q2-model-shadow", worldPositions: surface.geometry.vertices.map(vertex => vertex.position),
+        lights: affecting, shadeScale, atlas: shadows.atlas } satisfies DrawBatch["lighting"];
+      const color = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] =>
+        ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
+      return batch.texturing === "single" ? { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) }
+        : { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) };
+    });
   }
 }

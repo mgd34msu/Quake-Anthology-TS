@@ -7,13 +7,16 @@ import { ZERO, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { BaseMonster, registerMonsterCallbacks } from "./monsters.ts";
 import type { MonsterServices } from "./monsters.ts";
 import { baseSpecies } from "./species.ts";
-import { remainingMapClassnames, spawnRemainingMapActor } from "./map-entities.ts";
-import { throwGib } from "./projectiles.ts";
+import { remainingMapClassnames, spawnRemainingMapActor, registerMapCallbacks } from "./map-entities.ts";
+import { throwGib, registerProjectileCallbacks } from "./projectiles.ts";
 import { Q1LevelRules, Q1SpawnSelector } from "./rules.ts";
-import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
 import type { BackpackContents } from "./projectiles.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { WEAPONS } from "../foundation/types.ts";
+import { wizardFastFire } from "./monster-actions.ts";
+import { q1FinaleText } from "./finales.ts";
+import { registerCharacterCallbacks } from "./player.ts";
 
 const providers = new WeakMap<Q1Foundation, Q1Base>();
 export function q1Base(game: Q1Foundation): Q1Base { const base = providers.get(game); if (base === undefined) throw new Error("Q1 base content was not registered"); return base; }
@@ -36,6 +39,7 @@ export interface Q1BaseOptions {
   readonly finishCampaign?: () => undefined;
   readonly sameLevel?: () => boolean;
   readonly playerExited?: (actor: ActorId) => undefined;
+  readonly officialCampaign?: boolean;
 }
 export const Q1_BASE_CLASSNAMES: readonly string[] = [...baseSpecies.flatMap(spec => spec.classnames), ...remainingMapClassnames];
 
@@ -49,29 +53,67 @@ export class Q1Base implements MonsterServices {
   readonly registered: boolean;
   readonly levelRules: Q1LevelRules;
   readonly spawnSelector: Q1SpawnSelector;
+  private readonly killCountRules = new Map<string, (monster: BaseMonster) => boolean>();
   private hellKnightType = 0;
   private lightningEnd = -1;
+  private electrodes: readonly [Q1Actor, Q1Actor] | null = null;
   private finaleStarted = false;
   private finaleDismissed = false;
   constructor(readonly game: Q1Foundation, readonly options: Q1BaseOptions = {}) {
     this.campaign = options.campaign ?? new Q1CampaignState(0, game.options.skill); this.registered = options.registered ?? true;
     providers.set(game, this);
-    this.levelRules = new Q1LevelRules(game, this.campaign, this.registered); this.spawnSelector = new Q1SpawnSelector(game, this.campaign);
+    this.levelRules = new Q1LevelRules(game, this.campaign, this.registered, options.officialCampaign ?? game.options.campaign.endsWith(":id1")); this.spawnSelector = new Q1SpawnSelector(game, this.campaign);
+    game.registerPlayerExtension({ id: "q1:base-level-stats", attach: (_game, player) => this.levelRules.resetPlayer(player.actor) });
     game.host.actors.onRelease(actor => { this.monsters.delete(actor); this.backpacks.delete(actor); this.projectileTargets.delete(actor); this.wizardShots.delete(actor); return undefined; });
     const monster = (entity: Q1Actor): BaseMonster => { const value = this.monsters.get(entity.actor); if (value === undefined) throw new Error(`Missing Q1 monster controller for ${entity.classname}`); return value; };
     registerMonsterCallbacks(game, "base", monster);
-    game.registerStateExtension({ id: "q1:base", capture: () => this.capture(), restore: bytes => this.restore(bytes) });
+    registerProjectileCallbacks(game);
+    registerMapCallbacks(game);
+    registerCharacterCallbacks(game);
+    game.named.register("base:wizard_fastfire", { action: wizardFastFire });
+    game.named.register("base:lightning_use", { use: (_game, entity, _other, activator) => this.useLightning(entity, activator) });
+    game.named.register("base:lightning_fire", { action: (_game, entity) => this.fireLightning(entity) });
+    game.named.register("base:finale_2", { action: (_game, timer) => {
+      const owner = timer.owner === null ? null : game.entity(timer.owner); if (owner === null) throw new Error("Finale timer lost Shub");
+      const shub = monster(owner); game.effect("teleport", vsub(shub.origin, { x: 0, y: 100, z: 0 })); game.sound(owner, "misc/r_tele1.wav"); game.host.emit({ kind: "finale", text: "", stage: 2 });
+      return game.schedule(timer, 2, game.named.action(timer, "base:finale_3"));
+    } });
+    game.named.register("base:finale_3", { action: (_game, timer) => {
+      const owner = timer.owner === null ? null : game.entity(timer.owner); if (owner === null) throw new Error("Finale timer lost Shub");
+      const shub = monster(owner); game.sound(owner, "boss2/death.wav"); game.host.emit({ kind: "lightstyle", style: 0, pattern: "abcdefghijklmlkjihgfedcb" });
+      game.host.emit({ kind: "finale", text: "", stage: 3 }); shub.nextFrame = "old_thrash1"; shub.delay(0.1); return game.remove(timer);
+    } });
+    game.named.register("base:finale_wait", { action: (_game, timer) => {
+      if (!this.hasFinishedFinale) return game.schedule(timer, 0.1, game.named.action(timer, "base:finale_wait"));
+      game.host.emit({ kind: "finale", text: "", stage: 5 }); return game.schedule(timer, 5, game.named.action(timer, "base:finale_6"));
+    } });
+    game.named.register("base:finale_6", { action: (_game, timer) => { game.host.emit({ kind: "finale", text: "", stage: 6 }); if (game.options.coop) game.travel("start", null); else this.options.finishCampaign?.(); return game.remove(timer); } });
+    game.registerStateExtension({ id: "q1:base", capture: () => this.capture(), restore: bytes => this.restore(bytes), clone: (source, target) => this.clone(source, target) });
     for (const spec of baseSpecies) for (const classname of spec.classnames) game.registerSpawn(classname, (_game, entity) => {
       const monster = new BaseMonster(game, entity, spec, this); this.monsters.set(entity.actor, monster); return monster.spawn();
     });
     for (const classname of remainingMapClassnames) game.registerSpawn(classname, (_game, entity) => spawnRemainingMapActor(this, entity));
   }
+  registerKillCountRule(id: string, rule: (monster: BaseMonster) => boolean): undefined {
+    if (this.killCountRules.has(id)) throw new Error(`Duplicate Q1 kill-count rule ${id}`);
+    this.killCountRules.set(id, rule); return undefined;
+  }
+  countMonsterKill(monster: BaseMonster): boolean { for (const rule of this.killCountRules.values()) if (!rule(monster)) return false; return true; }
+  private clone(source: Q1Actor, target: Q1Actor): undefined {
+    const original = this.monsters.get(source.actor);
+    if (original !== undefined) { const monster = new BaseMonster(this.game, target, original.spec, this, original.source); monster.restore(new SaveReader(original.capture())); this.monsters.set(target.actor, monster); }
+    const backpack = this.backpacks.get(source.actor); if (backpack !== undefined) this.backpacks.set(target.actor, backpack);
+    const enemy = this.projectileTargets.get(source.actor); if (enemy !== undefined) this.projectileTargets.set(target.actor, enemy);
+    const shot = this.wizardShots.get(source.actor); if (shot !== undefined) this.wizardShots.set(target.actor, shot);
+    return undefined;
+  }
   private capture(): Uint8Array {
     const saved = (actor: ActorId) => ({ slot: actor.slot, generation: actor.generation });
     return encodeCheckpointValue({ version: 1, flags: this.campaign.readFlags(), hellKnightType: this.hellKnightType, lightningEnd: this.lightningEnd, finaleStarted: this.finaleStarted, finaleDismissed: this.finaleDismissed,
       spawn: this.spawnSelector.capture(), rules: this.levelRules.capture(),
+      electrodes: this.electrodes === null ? null : this.electrodes.map(entity => saved(entity.actor.id)),
       monsters: [...this.monsters.values()].map(monster => ({ actor: saved(monster.entity.actor.id), state: monster.capture() })),
-      backpacks: [...this.backpacks].map(([actor, contents]) => ({ actor: saved(actor.id), contents })),
+      backpacks: [...this.backpacks].map(([actor, contents]) => ({ actor: saved(actor.id), contents: { weapon: contents.weapon, shells: contents.shells, nails: contents.nails, rockets: contents.rockets, cells: contents.cells, extra: contents.extra ?? [], selection: contents.selection ?? "source-default", avoidUnderwaterLightning: contents.avoidUnderwaterLightning ?? this.game.options.edition === "rerelease", ownerPickupDelay: contents.ownerPickupDelay ?? 0 } })),
       targets: [...this.projectileTargets].map(([actor, enemy]) => ({ actor: saved(actor.id), enemy: saved(enemy) })),
       shots: [...this.wizardShots].map(([actor, shot]) => ({ actor: saved(actor.id), enemy: saved(shot.enemy), right: shot.right })),
     });
@@ -83,13 +125,17 @@ export class Q1Base implements MonsterServices {
     this.campaign.writeFlags(root.field("flags").number()); this.hellKnightType = root.field("hellKnightType").number(); this.lightningEnd = root.field("lightningEnd").number();
     this.finaleStarted = root.field("finaleStarted").boolean(); this.finaleDismissed = root.field("finaleDismissed").boolean();
     this.spawnSelector.restore(root.field("spawn")); this.levelRules.restore(root.field("rules"));
+    this.electrodes = root.field("electrodes").nullable(reader => {
+      const entries = reader.list(value => this.game.entity(actor(value).id)), first = entries[0], second = entries[1];
+      if (entries.length !== 2 || first === undefined || first === null || second === undefined || second === null) return reader.fail("missing lightning electrodes"); return [first, second];
+    });
     this.monsters.clear(); this.backpacks.clear(); this.projectileTargets.clear(); this.wizardShots.clear();
     root.field("monsters").list(reader => {
       const owner = actor(reader.field("actor")), entity = this.game.entity(owner.id); if (entity === null) return reader.fail("missing source monster entity");
       const spec = baseSpecies.find(species => species.classnames.includes(entity.classname)); if (spec === undefined) return reader.fail("unknown base monster");
       const monster = new BaseMonster(this.game, entity, spec, this); monster.restore(reader.field("state")); this.monsters.set(owner, monster); return undefined;
     });
-    root.field("backpacks").list(reader => { const data = reader.field("contents"); this.backpacks.set(actor(reader.field("actor")), { weapon: data.field("weapon").nullable(value => value.choice(...WEAPONS)), shells: data.field("shells").number(), nails: data.field("nails").number(), rockets: data.field("rockets").number(), cells: data.field("cells").number() }); return undefined; });
+    root.field("backpacks").list(reader => { const data = reader.field("contents"); this.backpacks.set(actor(reader.field("actor")), { weapon: data.field("weapon").nullable(value => value.choice(...WEAPONS, ...this.game.registeredWeapons.keys())), shells: data.field("shells").number(), nails: data.field("nails").number(), rockets: data.field("rockets").number(), cells: data.field("cells").number(), extra: data.field("extra").list(entry => ({ item: namespaced(entry.field("item")), count: entry.field("count").number() })), selection: data.field("selection").choice("source-default", "rank"), avoidUnderwaterLightning: data.field("avoidUnderwaterLightning").boolean(), ownerPickupDelay: data.field("ownerPickupDelay").number() }); return undefined; });
     root.field("targets").list(reader => { this.projectileTargets.set(actor(reader.field("actor")), reference(reader.field("enemy"))); return undefined; });
     root.field("shots").list(reader => { const right = reader.field("right"); this.wizardShots.set(actor(reader.field("actor")), { enemy: reference(reader.field("enemy")), right: { x: right.field("x").number(), y: right.field("y").number(), z: right.field("z").number() } }); return undefined; });
     return undefined;
@@ -101,29 +147,32 @@ export class Q1Base implements MonsterServices {
     this.hellKnightType = 0; return "hknight_watk1";
   }
   spawnLightning(entity: Q1Actor): undefined {
-    const { game } = this;
-    entity.use = (_other, activator) => {
+    entity.use = this.game.named.use(entity, "base:lightning_use"); return undefined;
+  }
+  private useLightning(entity: Q1Actor, activator: ActorId | null): undefined {
+      const { game } = this;
       if (this.lightningEnd >= game.time + 1) return undefined;
       const electrodes = [...game.entities.values()].filter(actor => actor.target === "lightning"); const first = electrodes[0], second = electrodes[1];
       if (first === undefined || second === undefined) throw new Error("event_lightning is missing its two lightning electrodes");
       if (first.state !== second.state || first.state !== "top" && first.state !== "bottom") return undefined;
-      game.cancel(first); game.cancel(second); this.lightningEnd = game.time + 1; game.sound(entity, "misc/power.wav");
-      const fire = (): undefined => {
-        if (game.time >= this.lightningEnd) { doorDown(game, first); return doorDown(game, second); }
-        const a = game.body(first), b = game.body(second);
-        const p1 = { ...vscale(vadd(a.bounds.min, a.bounds.max), 0.5), z: a.origin.z + a.bounds.min.z - 16 };
-        let p2 = { ...vscale(vadd(b.bounds.min, b.bounds.max), 0.5), z: b.origin.z + b.bounds.min.z - 16 };
-        p2 = vsub(p2, vscale(normalize(vsub(p2, p1)), 100));
-        game.host.emit({ kind: "beam", actor: game.world?.actor.id ?? entity.actor.id, start: p1, end: p2 }); return game.schedule(entity, 0.1, fire);
-      };
-      fire(); const boss = [...this.monsters.values()].find(monster => monster.spec.species === "boss");
+      game.cancel(first); game.cancel(second); this.electrodes = [first, second]; this.lightningEnd = game.time + 1; game.sound(entity, "misc/power.wav");
+      this.fireLightning(entity); const boss = [...this.monsters.values()].find(monster => monster.spec.species === "boss");
       if (boss === undefined) return undefined; boss.enemy = activator;
       if (first.state === "top" && game.health(boss.entity.actor.id) > 0) {
         game.sound(boss.entity, "boss1/pain.wav"); const health = game.health(boss.entity.actor.id) - 1; game.host.combat.setHealth(boss.entity.actor, health);
         return boss.play(health >= 2 ? "boss_shocka1" : health === 1 ? "boss_shockb1" : "boss_shockc1");
       }
       return undefined;
-    }; return undefined;
+  }
+  private fireLightning(entity: Q1Actor): undefined {
+    const { game } = this, electrodes = this.electrodes; if (electrodes === null) throw new Error("Lightning has no electrodes");
+    const [first, second] = electrodes;
+    if (game.time >= this.lightningEnd) { doorDown(game, first); return doorDown(game, second); }
+    const a = game.body(first), b = game.body(second);
+    const p1 = { ...vscale(vadd(a.bounds.min, a.bounds.max), 0.5), z: a.origin.z + a.bounds.min.z - 16 };
+    let p2 = { ...vscale(vadd(b.bounds.min, b.bounds.max), 0.5), z: b.origin.z + b.bounds.min.z - 16 };
+    p2 = vsub(p2, vscale(normalize(vsub(p2, p1)), 100));
+    game.host.emit({ kind: "beam", style: "lightning3", actor: game.world?.actor.id ?? entity.actor.id, start: p1, end: p2 }); return game.schedule(entity, 0.1, game.named.action(entity, "base:lightning_fire"));
   }
   finale(monster: BaseMonster): undefined {
     if (this.finaleStarted) return undefined; this.finaleStarted = true; const { game } = this;
@@ -143,35 +192,22 @@ export class Q1Base implements MonsterServices {
       game.host.emit({ kind: "achievement", player: null, id: "ACH_DEFEAT_SHUB" });
       if (game.options.skill === 3) game.host.emit({ kind: "achievement", player: null, id: "ACH_DEFEAT_SHUB_NIGHTMARE" });
     }
-    const timer = game.create("finale_timer");
-    return game.schedule(timer, 1, () => {
-      game.effect("teleport", vsub(monster.origin, { x: 0, y: 100, z: 0 })); game.sound(monster.entity, "misc/r_tele1.wav"); game.host.emit({ kind: "finale", text: "", stage: 2 });
-      return game.schedule(timer, 2, () => {
-        game.sound(monster.entity, "boss2/death.wav"); game.host.emit({ kind: "lightstyle", style: 0, pattern: "abcdefghijklmlkjihgfedcb" });
-        game.host.emit({ kind: "finale", text: "", stage: 3 }); monster.nextFrame = "old_thrash1"; monster.delay(0.1); return game.remove(timer);
-      });
-    });
+    const timer = game.create("finale_timer"); timer.owner = monster.entity.actor.id;
+    return game.schedule(timer, 1, game.named.action(timer, "base:finale_2"));
   }
   finishFinale(monster: BaseMonster): undefined {
     const { game } = this; const origin = monster.origin; game.sound(monster.entity, "boss2/pop2.wav");
     for (let z = 16; z <= 144; z += 96) for (let x = -64; x <= 64; x += 32) for (let y = -64; y <= 64; y += 32) {
       const r = game.host.random(); throwGib(game, vadd(origin, { x, y, z }), r < 0.3 ? "gib1" : r < 0.6 ? "gib2" : "gib3", -999);
     }
-    game.host.emit({ kind: "finale", text: "$qc_finale_end", stage: 4 });
+    game.host.emit({ kind: "finale", text: q1FinaleText(game.options.edition, "$qc_finale_end"), stage: 4 });
     const victory = game.create("finale_player"); victory.model = "progs/player.mdl"; victory.frame = 1;
     game.setBody(victory, { origin: vsub(origin, { x: 32, y: 264, z: 0 }), angles: { x: 0, y: 290, z: 0 } }); game.link(victory); game.remove(monster.entity);
     game.host.emit({ kind: "lightstyle", style: 0, pattern: "m" });
     if (game.options.edition === "classic") return undefined;
-    const timer = game.create("finale_wait");
-    const wait = (): undefined => {
-      if (!(this.options.finaleFinished?.() ?? this.finaleDismissed)) return game.schedule(timer, 0.1, wait);
-      game.host.emit({ kind: "finale", text: "", stage: 5 });
-      return game.schedule(timer, 5, () => {
-        game.host.emit({ kind: "finale", text: "", stage: 6 });
-        if (game.options.coop) game.travel("start", null); else this.options.finishCampaign?.(); return game.remove(timer);
-      });
-    }; return game.schedule(timer, 1, wait);
+    const timer = game.create("finale_wait"); return game.schedule(timer, 1, game.named.action(timer, "base:finale_wait"));
   }
   dismissFinale(): undefined { this.finaleDismissed = true; return undefined; }
+  get hasFinishedFinale(): boolean { return this.options.finaleFinished?.() ?? this.finaleDismissed; }
 }
 export function registerQ1Base(game: Q1Foundation, options: Q1BaseOptions = {}): Q1Base { return new Q1Base(game, options); }

@@ -98,7 +98,7 @@ export class ProviderRuntimeState {
 function copyRandomState(state: RandomState): RandomState {
   switch (state.kind) {
     case "q3-lcg": case "msvcrt-rand": return { ...state };
-    case "glibc-random": return { ...state, words: [...state.words] };
+    case "glibc-random": case "q2-rerelease-mt19937": return { ...state, words: [...state.words] };
     case "guest": return { ...state, bytes: state.bytes.slice() };
     default: { const exhaustive: never = state; return exhaustive; }
   }

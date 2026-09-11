@@ -2,13 +2,18 @@
  * Copyright (C) Free Software Foundation, Inc. SPDX-License-Identifier: LGPL-2.1-or-later */
 import type { RandomSource, RandomState } from "../../../contracts/numeric.ts";
 
+import { Q2RereleaseRandom } from "../../../core/random/q2-rerelease.ts";
+
 export class SourceRandom implements RandomSource {
+  readonly rerelease: Q2RereleaseRandom | null;
   private readonly words = new Int32Array(31);
   private front = 3;
   private rear = 0;
   private draws = 0;
 
-  constructor(seed: number) {
+  constructor(seed: number, profile: "classic" | "q2-rerelease" = "classic") {
+    this.rerelease = profile === "q2-rerelease" ? new Q2RereleaseRandom(seed) : null;
+    if (this.rerelease !== null) return;
     if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) throw new RangeError("Source random seed must be uint32");
     let word = (seed === 0 ? 1 : seed) | 0;
     this.words[0] = word;
@@ -20,11 +25,24 @@ export class SourceRandom implements RandomSource {
     for (let count = 0; count < 310; count++) this.draw();
   }
 
-  nextInteger(): number { this.draws++; return this.draw(); }
-  nextUnit(): number { return Math.fround((this.nextInteger() & 0x7fff) / 0x7fff); }
+  nextInteger(): number { if (this.rerelease !== null) return this.rerelease.nextUint32(); this.draws++; return this.draw(); }
+  nextUnit(): number { if (this.rerelease !== null) return this.rerelease.float(); return Math.fround((this.nextInteger() & 0x7fff) / 0x7fff); }
 
-  checkpoint(): Extract<RandomState, { readonly kind: "glibc-random" }> {
+  checkpoint(): Extract<RandomState, { readonly kind: "glibc-random" | "q2-rerelease-mt19937" }> {
+    if (this.rerelease !== null) return this.rerelease.checkpoint();
     return { kind: "glibc-random", words: Array.from(this.words), front: this.front, rear: this.rear, draws: this.draws };
+  }
+
+  restore(state: Extract<RandomState, { readonly kind: "glibc-random" | "q2-rerelease-mt19937" }>): undefined {
+    if (state.kind === "q2-rerelease-mt19937") {
+      if (this.rerelease === null) throw new Error("Rerelease random state cannot restore a classic source stream");
+      return this.rerelease.restore(state);
+    }
+    if (this.rerelease !== null) throw new Error("Classic random state cannot restore a rerelease source stream");
+    if (state.words.length !== this.words.length || state.front < 0 || state.front >= this.words.length || state.rear < 0 || state.rear >= this.words.length)
+      throw new RangeError("Invalid source random state");
+    this.words.set(state.words); this.front = state.front; this.rear = state.rear; this.draws = state.draws;
+    return undefined;
   }
 
   private draw(): number {

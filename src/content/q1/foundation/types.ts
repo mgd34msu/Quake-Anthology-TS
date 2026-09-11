@@ -7,10 +7,14 @@ import type { SessionActorRegistry, SharedBodyTable, ActorCallbackTable } from "
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 
-export type Q1Weapon = "axe" | "shotgun" | "supershotgun" | "nailgun" | "supernailgun" | "grenadelauncher" | "rocketlauncher" | "lightning";
-export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit";
+export type Q1BaseWeapon = "axe" | "shotgun" | "supershotgun" | "nailgun" | "supernailgun" | "grenadelauncher" | "rocketlauncher" | "lightning";
+export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
+export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav";
+export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav"];
+export type Q1SoundChannel = "auto" | "weapon" | "voice" | "item" | "body" | 5 | 6 | 7;
+export type Q1BeamStyle = "lightning1" | "lightning2" | "lightning3" | "grapple";
 export type Q1Solid = "none" | "trigger" | "bbox" | "slidebox" | "bsp";
-export type Q1MoveType = "none" | "push" | "step" | "toss" | "bounce" | "flymissile" | "noclip";
+export type Q1MoveType = "none" | "push" | "step" | "toss" | "bounce" | "fly" | "flymissile" | "noclip";
 export interface Q1Trace {
   readonly fraction: number;
   readonly end: Vec3;
@@ -30,13 +34,19 @@ export interface Q1TraceRequest {
   readonly monsters: boolean;
   readonly missile?: boolean;
 }
+export interface Q1Basis { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3; }
 export type Q1Event =
-  | { readonly kind: "sound"; readonly actor: ActorId; readonly path: string; readonly channel: "auto" | "weapon" | "voice" | "item" | "body"; readonly attenuation: number; readonly volume: number }
+  | { readonly kind: "sound"; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
   | { readonly kind: "ambient"; readonly origin: Vec3; readonly path: string; readonly volume: number; readonly attenuation: number }
-  | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean }
-  | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number }
-  | { readonly kind: "beam"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3 }
+  | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[] }
+  | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray" | "wizard-spike" | "knight-spike"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number }
+  | { readonly kind: "colored-explosion"; readonly origin: Vec3; readonly colorStart: number; readonly colorLength: number }
+  | { readonly kind: "particles"; readonly origin: Vec3; readonly direction: Vec3; readonly color: number; readonly count: number }
+  | { readonly kind: "server-command"; readonly text: string }
+  | { readonly kind: "camera"; readonly player: ActorId; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset?: Vec3 }
+  | { readonly kind: "beam"; readonly style: Q1BeamStyle; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3 }
   | { readonly kind: "lightstyle"; readonly style: number; readonly pattern: string }
+  | { readonly kind: "monster-total"; readonly total: number }
   | { readonly kind: "secret" | "monster-killed"; readonly actor: ActorId; readonly total: number; readonly found: number }
   | { readonly kind: "weapon"; readonly player: ActorId; readonly weapon: Q1Weapon; readonly viewModel: string; readonly frame: number; readonly punch: number }
   | { readonly kind: "teleport-player"; readonly player: ActorId; readonly angles: Vec3; readonly lockUntil: number }
@@ -53,10 +63,14 @@ export interface Q1FoundationHost {
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
   random(): number;
+  /** Required by source modules that change gravity; the selected movement provider owns the value. */
+  setGravity?(actor: ActorId, scale: number): undefined;
+  controlPlayer?(actor: ActorId, control: { readonly kind: "cutscene"; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 }): undefined;
   trace(request: Q1TraceRequest): Q1Trace;
   contents(point: Vec3): "empty" | "solid" | "water" | "slime" | "lava" | "sky";
   /** Performs source step-up / bottom checks and links the resulting body. */
   walkMove(actor: OwnedActor, yaw: number, distance: number): boolean;
+  changeYaw(actor: OwnedActor): undefined;
   moveToGoal(actor: OwnedActor, goal: ActorId, distance: number): undefined;
   checkBottom(actor: ActorId): boolean;
   /** Calls the source blocked callback before rolling riders back, then returns the blocking actor. */
@@ -104,6 +118,9 @@ export interface Q1PlayerState {
   readonly actor: OwnedActor;
   weapon: Q1Weapon;
   attackFinished: number;
+  attackHeld: boolean;
+  jumpHeld: boolean;
+  teleportUntil: number;
   weaponFrame: number;
   weaponAnimationAt: number;
   weaponAnimationBase: number;
@@ -127,7 +144,9 @@ export const Q1_PROVIDER: ProviderId = "q1:official";
 export const ZERO: Vec3 = { x: 0, y: 0, z: 0 };
 export const POINT: Bounds = { min: ZERO, max: ZERO };
 export const PLAYER_BOUNDS: Bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
-export const WEAPONS: readonly Q1Weapon[] = ["axe", "shotgun", "supershotgun", "nailgun", "supernailgun", "grenadelauncher", "rocketlauncher", "lightning"];
+export const WEAPONS: readonly Q1BaseWeapon[] = ["axe", "shotgun", "supershotgun", "nailgun", "supernailgun", "grenadelauncher", "rocketlauncher", "lightning"];
+export const Q1_WEAPON_IDS: readonly Q1Weapon[] = [...WEAPONS, "hipnotic:laser", "hipnotic:mjolnir", "hipnotic:proximity", "rogue:lava-nailgun", "rogue:lava-supernailgun", "rogue:multi-grenade", "rogue:multi-rocket", "rogue:plasma", "rogue:grapple", "mg3:laser", "mg3:mjolnir", "ctf:grapple"];
+export function isQ1BaseWeapon(weapon: Q1Weapon): weapon is Q1BaseWeapon { return WEAPONS.some(candidate => candidate === weapon); }
 export function weaponItem(weapon: Q1Weapon): ItemId { return `q1:weapon/${weapon}`; }
 export function vadd(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 export function vsub(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x - b.x), y: Math.fround(a.y - b.y), z: Math.fround(a.z - b.z) }; }
@@ -135,7 +154,7 @@ export function vscale(a: Vec3, scale: number): Vec3 { return { x: Math.fround(a
 export function dot(a: Vec3, b: Vec3): number { return Math.fround(Math.fround(Math.fround(a.x * b.x) + Math.fround(a.y * b.y)) + Math.fround(a.z * b.z)); }
 export function length(a: Vec3): number { return Math.fround(Math.sqrt(dot(a, a))); }
 export function normalize(a: Vec3): Vec3 { const magnitude = length(a); return magnitude === 0 ? ZERO : vscale(a, 1 / magnitude); }
-export function vectors(angles: Vec3): { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3 } {
+export function vectors(angles: Vec3): Q1Basis {
   const yaw = angles.y * Math.PI / 180, pitch = angles.x * Math.PI / 180, roll = angles.z * Math.PI / 180;
   const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
   return { forward: { x: Math.fround(cp * cy), y: Math.fround(cp * sy), z: Math.fround(-sp) },

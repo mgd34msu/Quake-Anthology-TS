@@ -24,6 +24,7 @@ export interface Q1SavedEntity {
   readonly sourceOrdinal: number | null;
   readonly state: Q1EntitySourceState;
   readonly fields: readonly { readonly key: string; readonly value: string }[];
+  readonly references: readonly { readonly key: string; readonly actor: SavedActorId | null }[];
   readonly owner: SavedActorId | null;
   readonly activator: SavedActorId | null;
   readonly doorGroup: readonly SavedActorId[];
@@ -41,6 +42,9 @@ export interface Q1FoundationCheckpoint {
   readonly version: 1;
   readonly edition: "classic" | "rerelease";
   readonly time: number;
+  readonly frameSeconds: number;
+  readonly forceRetouch: number;
+  readonly basis: import("./types.ts").Q1Basis;
   readonly sequence: number;
   readonly nextDynamicSlot: number;
   readonly totalSecrets: number;
@@ -68,7 +72,7 @@ export function captureEntitySourceState(entity: Q1Actor) {
     pos1: { ...entity.pos1 }, pos2: { ...entity.pos2 }, dest1: { ...entity.dest1 }, dest2: { ...entity.dest2 }, movedir: { ...entity.movedir }, mangle: { ...entity.mangle },
     state: entity.state, triggerBounds: entity.triggerBounds === null ? null : { min: { ...entity.triggerBounds.min }, max: { ...entity.triggerBounds.max } },
     attackFinished: entity.attackFinished, count: entity.count, activated: entity.activated,
-    projectile: entity.projectile, projectileWeapon: entity.projectileWeapon, angularVelocity: { ...entity.angularVelocity }, waterLevel: entity.waterLevel,
+    projectile: entity.projectile, projectileWeapon: entity.projectileWeapon, angularVelocity: { ...entity.angularVelocity }, waterLevel: entity.waterLevel, waterType: entity.waterType,
     movementFlags: entity.movementFlags, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, attackState: entity.attackState,
   };
 }
@@ -84,6 +88,7 @@ function saveEntity(game: Q1Foundation, entity: Q1Actor): Q1SavedEntity {
   return {
     actor: savedOwned(entity.actor), sourceSlot: source.slot, classname: entity.classname, sourceOrdinal: entity.sourceOrdinal,
     state: captureEntitySourceState(entity), fields: [...entity.fields].map(([key, value]) => ({ key, value })),
+    references: [...entity.references].map(([key, actor]) => ({ key, actor: saveQ1Actor(actor) })),
     owner: saveQ1Actor(entity.owner), activator: saveQ1Actor(entity.activator), doorGroup: entity.doorGroup.map(door => savedOwned(door.actor)),
     monster: monster === null ? null : { ...monster, sequence: [...monster.sequence], enemy: saveQ1Actor(monster.enemy), oldEnemy: saveQ1Actor(monster.oldEnemy) },
     move: move === null || done === null ? null : { destination: { ...move.destination }, speed: move.speed, remaining: move.remaining, done },
@@ -92,7 +97,7 @@ function saveEntity(game: Q1Foundation, entity: Q1Actor): Q1SavedEntity {
 }
 export function captureFoundation(game: Q1Foundation, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
   return {
-    format: "q1-foundation", version: 1, edition: game.options.edition, time: game.time, sequence, nextDynamicSlot,
+    format: "q1-foundation", version: 1, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
     totalSecrets: game.totalSecrets, foundSecrets: game.foundSecrets, totalMonsters: game.totalMonsters, killedMonsters: game.killedMonsters,
     worldType: game.worldType, mapName: game.mapName, world: game.world === null ? null : savedOwned(game.world.actor),
     sightEntity: game.sightEntity === null ? null : savedOwned(game.sightEntity.actor), sightTime: game.sightTime,
@@ -128,6 +133,7 @@ export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCh
   };
   for (const saved of checkpoint.entities) {
     const entity = sourceEntity(saved.actor), callbacks = saved.callbacks;
+    for (const entry of saved.references) entity.references.set(entry.key, reference(entry.actor));
     entity.owner = reference(saved.owner); entity.activator = reference(saved.activator);
     entity.doorGroup = saved.doorGroup.map(sourceEntity);
     entity.monster = saved.monster === null ? null : { ...saved.monster, sequence: [...saved.monster.sequence], enemy: reference(saved.monster.enemy), oldEnemy: reference(saved.monster.oldEnemy) };
@@ -148,7 +154,8 @@ export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCh
     for (const powerup of saved.powerups) powerups.set(powerup.kind, powerup.expires);
     game.players.set(actor, { ...saved.state, viewAngles: { ...saved.state.viewAngles }, actor, powerups });
   }
-  game.time = checkpoint.time; game.totalSecrets = checkpoint.totalSecrets; game.foundSecrets = checkpoint.foundSecrets;
+  game.time = checkpoint.time; game.frameSeconds = checkpoint.frameSeconds; game.forceRetouch = checkpoint.forceRetouch;
+  game.basis = { forward: { ...checkpoint.basis.forward }, right: { ...checkpoint.basis.right }, up: { ...checkpoint.basis.up } }; game.totalSecrets = checkpoint.totalSecrets; game.foundSecrets = checkpoint.foundSecrets;
   game.totalMonsters = checkpoint.totalMonsters; game.killedMonsters = checkpoint.killedMonsters; game.worldType = checkpoint.worldType; game.mapName = checkpoint.mapName;
   game.world = checkpoint.world === null ? null : sourceEntity(checkpoint.world);
   game.sightEntity = checkpoint.sightEntity === null ? null : game.entity(reference(checkpoint.sightEntity)); game.sightTime = checkpoint.sightTime;

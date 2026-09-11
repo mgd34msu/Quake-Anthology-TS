@@ -6,8 +6,10 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import type { TouchContact } from "../../../../contracts/world.ts";
 import { add, dot, length, normalize, scale, subtract, zero } from "../fields.ts";
-import type { Q2Entity, Q2GameServices, Q2Think } from "../host.ts";
+import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../host.ts";
 import { angleVectors, lerpAngle, vectorAngles } from "./vectors.ts";
+import { freeQ2Entity as free } from "../callbacks.ts";
+import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { MOD, PLAYER_CONTENTS, PROJECTILE_MASK, SHOT_MASK, WATER_MASK, Q2WeaponState } from "./types.ts";
 import type { Q2GrenadeAdjustment, Q2NoiseRecord, Q2WeaponHooks, Q2WeaponInput } from "./types.ts";
 
@@ -23,7 +25,7 @@ function centroid(game: Q2GameServices, actor: ActorId): Vec3 | null {
 function effect(game: Q2GameServices, name: string, origin: Vec3, direction: Vec3 = zero, count = 0, color = 0): undefined {
   return game.host.emit({ kind: "effect", effect: name, origin, direction, count, color });
 }
-const free: Q2Think = (entity, game) => game.remove(entity);
+
 function weaponForMod(mod: number): ItemId | null {
   switch (mod) {
     case MOD.blaster: return "q2:weapon_blaster";
@@ -37,6 +39,9 @@ function weaponForMod(mod: number): ItemId | null {
 }
 
 export class Q2Ballistics {
+  readonly blasterCauses = new Map<ActorId, number>();
+  private readonly releaseRegistries = new WeakSet<Q2GameServices["host"]["actors"]>();
+  get callbacks(): Q2CallbackDefinitions { return { think: { G_FreeEdict: free, Grenade_Explode: this.grenadeExplode, grenade_think: this.grenadeUpdate, bfg_think: this.bfgThink, bfg_explode: this.bfgExplode }, touch: { blaster_touch: this.blasterTouch, Grenade_Touch: this.grenadeTouch, rocket_touch: this.rocketTouch, bfg_touch: this.bfgTouch }, die: { q2_weapon_debris_die: free } }; }
   readonly states = new Map<ActorId, Q2WeaponState>();
   readonly inputs = new Map<ActorId, Q2WeaponInput>();
   readonly noises = new Map<ActorId, { primary: Q2NoiseRecord | null; secondary: Q2NoiseRecord | null }>();
@@ -71,7 +76,7 @@ export class Q2Ballistics {
     return owner === null ? undefined : this.playerNoise(owner, game, game.body(projectile).origin, "impact");
   }
 
-  protected checkDodge(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, speed: number): undefined {
+  checkDodge(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, speed: number): undefined {
     if (game.options.edition !== "classic" || !game.host.isPlayer(self.actor.id)) return undefined;
     if (game.options.skill === 0 && game.host.random() > 0.25) return undefined;
     const trace = game.host.trace({ start, end: add(start, scale(direction, 8192)), bounds: null, ignore: self.actor.id, mask: this.shotMask(self, game) });
@@ -212,6 +217,11 @@ export class Q2Ballistics {
   }
 
   private projectile(self: Q2Entity, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number): Q2Entity {
+    game.sourceCallbacks.register(this.callbacks);
+    if (!this.releaseRegistries.has(game.host.actors)) {
+      this.releaseRegistries.add(game.host.actors);
+      game.host.actors.onRelease(actor => { this.blasterCauses.delete(actor.id); return undefined; });
+    }
     const projectile = game.create(classname);
     projectile.owner = self.actor.id; projectile.model = model; projectile.effects = effects;
     projectile.clipMask = this.shotMask(self, game); projectile.projectile = true;
@@ -229,21 +239,13 @@ export class Q2Ballistics {
     const dir = game.options.edition === "classic" ? normalize(direction) : direction;
     const bolt = this.projectile(self, game, "bolt", start, dir, speed, "models/objects/laser/tris.md2", effects);
     bolt.damage = damage;
-    const impact = (entity: Q2Entity, current: Q2GameServices, other: ActorId | null, plane: Vec3, skyHit: boolean): undefined => {
-      if (other === entity.owner) return undefined;
-      if (skyHit) return current.remove(entity);
-      this.impactNoise(entity, current);
-      if (canHurt(current, other)) current.damage(other, entity, entity.owner, entity.damage, 1, current.body(entity).velocity, current.body(entity).origin, plane, meansOfDeath, 4, meansOfDeath === MOD.hyperblaster ? "q2:weapon_hyperblaster" : meansOfDeath === MOD.blaster ? "q2:weapon_blaster" : null);
-      else effect(current, "blaster", current.body(entity).origin, plane);
-      return current.remove(entity);
-    };
-    bolt.touch = (entity, current, contact) => impact(entity, current, contact.other, contact.plane?.normal ?? zero, ((contact.surface?.nativeFlags ?? 0) & 4) !== 0);
+    this.blasterCauses.set(bolt.actor.id, meansOfDeath); bolt.touch = this.blasterTouch;
     game.schedule(bolt, 2, free); game.solid(bolt, "box"); game.motion(bolt, "fly-missile"); game.show(bolt); this.loop(bolt, game, "misc/lasfly.wav", true);
     this.checkDodge(self, game, start, dir, speed);
     const trace = game.host.trace({ start: game.body(self).origin, end: start, bounds: null, ignore: bolt.actor.id, mask: bolt.clipMask });
     if (trace.fraction < 1) {
       game.move(bolt, { origin: game.options.edition === "classic" ? add(start, scale(dir, -10)) : add(trace.end, normal(trace)) });
-      impact(bolt, game, hit(trace), game.options.edition === "classic" ? zero : normal(trace), game.options.edition !== "classic" && sky(trace));
+      this.blasterImpact(bolt, game, hit(trace), game.options.edition === "classic" ? zero : normal(trace), game.options.edition !== "classic" && sky(trace));
     }
     return bolt;
   }
@@ -252,51 +254,21 @@ export class Q2Ballistics {
     const rerelease = game.options.edition === "rerelease", axes = angleVectors(vectorAngles(direction));
     const model = hand ? rerelease ? "grenade3" : "grenade2" : rerelease && !monster ? "grenade4" : "grenade";
     const grenade = this.projectile(self, game, hand ? rerelease ? "hand_grenade" : "hgrenade" : "grenade", start, direction, speed, `models/objects/${model}/tris.md2`, 32 + (rerelease && monster && !hand ? 2 ** 37 : 0));
-    grenade.damage = damage; grenade.speed = speed; grenade.spawnflags = hand ? held ? 3 : 1 : 0;
+    grenade.damageRadius = radius; grenade.damage = damage; grenade.speed = speed; grenade.spawnflags = hand ? held ? 3 : 1 : 0;
     const gravity = rerelease ? (adjustment?.gravity ?? this.inputs.get(self.actor.id)?.gravity ?? 800) / 800 : 1;
     const up = (adjustment?.up ?? 200 + (game.host.random() * 2 - 1) * 10) * gravity, right = adjustment?.right ?? (game.host.random() * 2 - 1) * 10;
     game.move(grenade, { velocity: add(add(scale(direction, speed), scale(axes.up, up)), scale(axes.right, right)) }, false);
     grenade.angularVelocity = rerelease ? hand || monster ? { x: (game.host.random() * 2 - 1) * 360, y: (game.host.random() * 2 - 1) * 360, z: (game.host.random() * 2 - 1) * 360 } : zero : { x: 300, y: 300, z: 300 };
-    const explode: Q2Think = (entity, current) => {
-      this.impactNoise(entity, current);
-      const body = current.body(entity), direct = entity.enemy;
-      if (direct !== null) {
-        const center = centroid(current, direct), targetBody = current.host.bodies.read(direct);
-        if (center !== null && targetBody !== null) {
-          const points = Math.trunc(entity.damage - 0.5 * length(subtract(body.origin, center)));
-          current.damage(direct, entity, entity.owner, points, points, subtract(targetBody.origin, body.origin), body.origin, zero, hand ? MOD.handGrenade : MOD.grenade, 1, hand ? "q2:ammo_grenades" : "q2:weapon_grenadelauncher");
-        }
-      }
-      current.radiusDamage(entity, entity.owner, entity.damage, direct, radius, held ? MOD.heldGrenade : hand ? MOD.handGrenadeSplash : MOD.grenadeSplash, 0, hand ? "q2:ammo_grenades" : "q2:weapon_grenadelauncher");
-      const wet = (current.host.pointContents(body.origin) & WATER_MASK) !== 0;
-      effect(current, `${body.ground === null ? "rocket" : "grenade"}-explosion${wet ? "-water" : ""}`, add(body.origin, scale(body.velocity, -0.02)));
-      return current.remove(entity);
-    };
-    grenade.touch = (entity, current, contact) => {
-      if (contact.other === entity.owner) return undefined;
-      if (((contact.surface?.nativeFlags ?? 0) & 4) !== 0) return current.remove(entity);
-      if (!canHurt(current, contact.other)) return current.sound(entity, hand ? current.host.random() > 0.5 ? "weapons/hgrenb1a.wav" : "weapons/hgrenb2a.wav" : "weapons/grenlb1b.wav", 2);
-      entity.enemy = contact.other;
-      return explode(entity, current);
-    };
+
+    grenade.touch = this.grenadeTouch;
     if (rerelease && !hand && !monster) {
-      const due = game.host.now() + timer;
+      grenade.timestamp = game.host.now() + timer;
       grenade.renderFlags |= 1;
       game.move(grenade, { angles: vectorAngles(game.body(grenade).velocity) }, false);
-      const update: Q2Think = (entity, current) => {
-        if (current.host.now() >= due) return explode(entity, current);
-        const body = current.body(entity), velocitySquared = dot(body.velocity, body.velocity);
-        if (velocitySquared !== 0) {
-          const fraction = Math.min(1, velocitySquared / (speed * speed));
-          const angles = vectorAngles(body.velocity);
-          current.move(entity, { angles: { x: lerpAngle(body.angles.x, angles.x, fraction), y: angles.y, z: body.angles.z + current.host.frameSeconds() * 360 * fraction } });
-        }
-        return current.schedule(entity, current.host.frameSeconds(), update);
-      };
-      game.schedule(grenade, game.host.frameSeconds(), update);
-    } else game.schedule(grenade, Math.max(0, timer), explode);
+      game.schedule(grenade, game.host.frameSeconds(), this.grenadeUpdate);
+    } else game.schedule(grenade, Math.max(0, timer), this.grenadeExplode);
     if (hand) this.loop(grenade, game, "weapons/hgrenc1b.wav", true);
-    if (hand && timer <= 0) explode(grenade, game);
+    if (hand && timer <= 0) this.grenadeExplode(grenade, game);
     else {
       if (hand) game.sound(self, "weapons/hgrent1a.wav", 1);
       game.solid(grenade, "box"); game.motion(grenade, "bounce"); game.show(grenade);
@@ -306,21 +278,8 @@ export class Q2Ballistics {
 
   fireRocket(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity {
     const rocket = this.projectile(self, game, "rocket", start, direction, speed, "models/objects/rocket/tris.md2", 16);
-    rocket.damage = damage;
-    rocket.touch = (entity, current, contact) => {
-      if (contact.other === entity.owner) return undefined;
-      if (((contact.surface?.nativeFlags ?? 0) & 4) !== 0) return current.remove(entity);
-      this.impactNoise(entity, current);
-      const body = current.body(entity), plane = contact.plane?.normal ?? zero;
-      if (canHurt(current, contact.other)) current.damage(contact.other, entity, entity.owner, entity.damage, 0, body.velocity, body.origin, plane, MOD.rocket, 0, "q2:weapon_rocketlauncher");
-      else if (current.options.mode === "singleplayer" && contact.surface !== null && (contact.surface.nativeFlags & (8 | 16 | 32 | 64)) === 0) {
-        const count = Math.floor(current.host.random() * 5);
-        for (let i = 0; i < count; i++) this.debris(entity, current);
-      }
-      current.radiusDamage(entity, entity.owner, radiusDamage, contact.other, radius, MOD.rocketSplash, 0, "q2:weapon_rocketlauncher");
-      effect(current, (current.host.pointContents(body.origin) & WATER_MASK) !== 0 ? "rocket-explosion-water" : "rocket-explosion", current.options.edition === "classic" ? add(body.origin, scale(body.velocity, -0.02)) : add(body.origin, plane));
-      return current.remove(entity);
-    };
+    rocket.damage = damage; rocket.damageRadius = radius; rocket.radiusDamage = radiusDamage;
+    rocket.touch = this.rocketTouch;
     game.schedule(rocket, 8000 / speed, free); game.solid(rocket, "box"); game.motion(rocket, "fly-missile"); game.show(rocket);
     this.loop(rocket, game, "weapons/rockfly.wav", true); this.checkDodge(self, game, start, direction, speed);
     return rocket;
@@ -332,17 +291,81 @@ export class Q2Ballistics {
     game.move(piece, { origin: body.origin, velocity: add(body.velocity, scale({ x: 100 * random(), y: 100 * random(), z: 100 + 100 * random() }, 2)) }, false);
     piece.angularVelocity = { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
     game.host.combat.create(piece.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-    piece.die = (entity, current) => current.remove(entity);
+    piece.die = free;
     game.motion(piece, "bounce"); game.solid(piece, "none"); game.show(piece);
     return game.schedule(piece, 5 + game.host.random() * 5, free);
   }
 
   fireBfg(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number): Q2Entity {
     const bfg = this.projectile(self, game, "bfg blast", start, direction, speed, "sprites/s_bfg1.sp2", 128 | 8192);
-    bfg.dodgeable = false;
-    const explode: Q2Think = (entity, current) => {
+    bfg.dodgeable = false; bfg.damage = damage; bfg.damageRadius = radius;
+
+    bfg.touch = this.bfgTouch;
+
+    this.checkDodge(self, game, start, direction, speed);
+    game.schedule(bfg, game.host.frameSeconds(), this.bfgThink); game.solid(bfg, "box"); game.motion(bfg, "fly-missile"); game.show(bfg); this.loop(bfg, game, "weapons/bfg__l1a.wav", true);
+    return bfg;
+  }
+
+  private readonly grenadeExplode: Q2Think = (entity, current) => {
+      const hand = (entity.spawnflags & 1) !== 0, held = (entity.spawnflags & 2) !== 0;
+      this.impactNoise(entity, current);
+      const body = current.body(entity), direct = entity.enemy;
+      if (direct !== null) {
+        const center = centroid(current, direct), targetBody = current.host.bodies.read(direct);
+        if (center !== null && targetBody !== null) {
+          const points = Math.trunc(entity.damage - 0.5 * length(subtract(body.origin, center)));
+          current.damage(direct, entity, entity.owner, points, points, subtract(targetBody.origin, body.origin), body.origin, zero, hand ? MOD.handGrenade : MOD.grenade, 1, hand ? "q2:ammo_grenades" : "q2:weapon_grenadelauncher");
+        }
+      }
+      current.radiusDamage(entity, entity.owner, entity.damage, direct, entity.damageRadius, held ? MOD.heldGrenade : hand ? MOD.handGrenadeSplash : MOD.grenadeSplash, 0, hand ? "q2:ammo_grenades" : "q2:weapon_grenadelauncher");
+      const wet = (current.host.pointContents(body.origin) & WATER_MASK) !== 0;
+      effect(current, `${body.ground === null ? "rocket" : "grenade"}-explosion${wet ? "-water" : ""}`, add(body.origin, scale(body.velocity, -0.02)));
+      return current.remove(entity);
+
+  };
+
+  private readonly grenadeTouch: Q2Touch = (entity, current, contact) => {
+      const hand = (entity.spawnflags & 1) !== 0;
+      if (contact.other === entity.owner) return undefined;
+      if (((contact.surface?.nativeFlags ?? 0) & 4) !== 0) return current.remove(entity);
+      if (!canHurt(current, contact.other)) return current.sound(entity, hand ? current.host.random() > 0.5 ? "weapons/hgrenb1a.wav" : "weapons/hgrenb2a.wav" : "weapons/grenlb1b.wav", 2);
+      entity.enemy = contact.other;
+      return this.grenadeExplode(entity, current);
+
+  };
+
+  private readonly grenadeUpdate: Q2Think = (entity, current) => {
+        if (current.host.now() >= entity.timestamp) return this.grenadeExplode(entity, current);
+        const body = current.body(entity), velocitySquared = dot(body.velocity, body.velocity);
+        if (velocitySquared !== 0) {
+          const fraction = Math.min(1, velocitySquared / (entity.speed * entity.speed));
+          const angles = vectorAngles(body.velocity);
+          current.move(entity, { angles: { x: lerpAngle(body.angles.x, angles.x, fraction), y: angles.y, z: body.angles.z + current.host.frameSeconds() * 360 * fraction } });
+        }
+        return current.schedule(entity, current.host.frameSeconds(), this.grenadeUpdate);
+
+  };
+
+  private readonly rocketTouch: Q2Touch = (entity, current, contact) => {
+      if (contact.other === entity.owner) return undefined;
+      if (((contact.surface?.nativeFlags ?? 0) & 4) !== 0) return current.remove(entity);
+      this.impactNoise(entity, current);
+      const body = current.body(entity), plane = contact.plane?.normal ?? zero;
+      if (canHurt(current, contact.other)) current.damage(contact.other, entity, entity.owner, entity.damage, 0, body.velocity, body.origin, plane, MOD.rocket, 0, "q2:weapon_rocketlauncher");
+      else if (current.options.mode === "singleplayer" && contact.surface !== null && (contact.surface.nativeFlags & (8 | 16 | 32 | 64)) === 0) {
+        const count = Math.floor(current.host.random() * 5);
+        for (let i = 0; i < count; i++) this.debris(entity, current);
+      }
+      current.radiusDamage(entity, entity.owner, entity.radiusDamage, contact.other, entity.damageRadius, MOD.rocketSplash, 0, "q2:weapon_rocketlauncher");
+      effect(current, (current.host.pointContents(body.origin) & WATER_MASK) !== 0 ? "rocket-explosion-water" : "rocket-explosion", current.options.edition === "classic" ? add(body.origin, scale(body.velocity, -0.02)) : add(body.origin, plane));
+      return current.remove(entity);
+
+  };
+
+  private readonly bfgExplode: Q2Think = (entity, current) => {
       if (current.options.edition === "rerelease") this.bfgAmbient(entity, current);
-      if (entity.frame === 0) for (const actor of current.host.nearby(current.body(entity).origin, radius)) {
+      if (entity.frame === 0) for (const actor of current.host.nearby(current.body(entity).origin, entity.damageRadius)) {
         if (actor === entity.owner || !canHurt(current, actor) || !current.canDamage(actor, entity)) continue;
         const owner = current.entity(entity.owner);
         if (owner !== null && !current.canDamage(actor, owner)) continue;
@@ -350,15 +373,17 @@ export class Q2Ballistics {
         const center = centroid(current, actor), body = current.host.bodies.read(actor);
         if (center === null || body === null) continue;
         const distance = length(subtract(current.body(entity).origin, center));
-        const points = Math.trunc(damage * (1 - Math.sqrt(distance / radius)));
+        const points = Math.trunc(entity.damage * (1 - Math.sqrt(distance / entity.damageRadius)));
         if (current.options.edition === "classic") effect(current, "bfg-explosion", body.origin);
         current.damage(actor, entity, entity.owner, points, 0, current.body(entity).velocity, current.options.edition === "classic" ? body.origin : center, zero, MOD.bfgEffect, 4, "q2:weapon_bfg");
         if (current.options.edition === "rerelease") this.hooks.emit({ kind: "beam", effect: "bfg-zap", actor: entity.actor.id, start: current.body(entity).origin, end: center, duration: 0 });
       }
       entity.frame++; current.show(entity);
-      return current.schedule(entity, 0.1, entity.frame === 5 ? free : explode);
-    };
-    bfg.touch = (entity, current, contact) => {
+      return current.schedule(entity, 0.1, entity.frame === 5 ? free : this.bfgExplode);
+
+  };
+
+  private readonly bfgTouch: Q2Touch = (entity, current, contact) => {
       if (contact.other === entity.owner) return undefined;
       if (((contact.surface?.nativeFlags ?? 0) & 4) !== 0) return current.remove(entity);
       this.impactNoise(entity, current);
@@ -370,9 +395,11 @@ export class Q2Ballistics {
       current.move(entity, { origin: add(body.origin, scale(body.velocity, -current.host.frameSeconds())), velocity: zero });
       current.solid(entity, "none"); current.motion(entity, "stationary"); current.show(entity);
       effect(current, "bfg-bigexplosion", current.body(entity).origin);
-      return current.schedule(entity, 0.1, explode);
-    };
-    const think: Q2Think = (entity, current) => {
+      return current.schedule(entity, 0.1, this.bfgExplode);
+
+  };
+
+  private readonly bfgThink: Q2Think = (entity, current) => {
       if (current.options.edition === "rerelease") this.bfgAmbient(entity, current);
       const origin = current.body(entity).origin;
       for (const actor of current.host.nearby(origin, 256)) {
@@ -398,12 +425,22 @@ export class Q2Ballistics {
         }
         this.hooks.emit({ kind: "beam", effect: "bfg-laser", actor: entity.actor.id, start: origin, end: trace.end, duration: 0 });
       }
-      return current.schedule(entity, 0.1, think);
-    };
-    this.checkDodge(self, game, start, direction, speed);
-    game.schedule(bfg, game.host.frameSeconds(), think); game.solid(bfg, "box"); game.motion(bfg, "fly-missile"); game.show(bfg); this.loop(bfg, game, "weapons/bfg__l1a.wav", true);
-    return bfg;
+      return current.schedule(entity, 0.1, this.bfgThink);
+
+  };
+
+  private blasterImpact(entity: Q2Entity, current: Q2GameServices, other: ActorId | null, plane: Vec3, skyHit: boolean): undefined {
+    const meansOfDeath = this.blasterCauses.get(entity.actor.id);
+    if (meansOfDeath === undefined) throw new Error("Q2 blaster projectile lost its source cause");
+      if (other === entity.owner) return undefined;
+      if (skyHit) return current.remove(entity);
+      this.impactNoise(entity, current);
+      if (canHurt(current, other)) current.damage(other, entity, entity.owner, entity.damage, 1, current.body(entity).velocity, current.body(entity).origin, plane, meansOfDeath, 4, meansOfDeath === MOD.hyperblaster ? "q2:weapon_hyperblaster" : meansOfDeath === MOD.blaster ? "q2:weapon_blaster" : null);
+      else effect(current, "blaster", current.body(entity).origin, plane);
+      return current.remove(entity);
+
   }
+  private readonly blasterTouch: Q2Touch = (entity, current, contact) => this.blasterImpact(entity, current, contact.other, contact.plane?.normal ?? zero, ((contact.surface?.nativeFlags ?? 0) & 4) !== 0);
 
   private bfgTarget(game: Q2GameServices, actor: ActorId): boolean {
     return game.host.isMonster(actor) || game.host.isPlayer(actor) || game.entity(actor)?.classname === "misc_explobox" || game.options.edition === "rerelease" && game.entity(actor)?.damageableTarget === true;

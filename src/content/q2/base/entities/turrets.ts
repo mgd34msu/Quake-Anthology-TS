@@ -1,7 +1,11 @@
 /* Quake II g_turret.c. Turret drivers reuse the permanent infantry AI/death runner. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../../contracts/math.ts";
+import type { ActorId } from "../../../../contracts/identity.ts";
 import { add, length, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
-import type { Q2Entity, Q2GameServices, Q2Think } from "../../foundation/host.ts";
+import type { Q2Entity, Q2GameServices, Q2Think, Q2Die } from "../../foundation/host.ts";
+import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
+import type { SavedActorId } from "../../../../contracts/session.ts";
+import { restoreQ2Actor, saveQ2Actor } from "../../foundation/checkpoint.ts";
 import { visible } from "../../foundation/monsters/ai.ts";
 import { infantryStand } from "../../foundation/monsters/infantry.ts";
 import type { MonsterContext } from "../../foundation/monsters/types.ts";
@@ -18,10 +22,15 @@ interface Breach {
 }
 interface Driver {
   readonly context: MonsterContext;
-  breach: Q2Entity | null;
+  readonly monsterDie: Q2Die;
+  breach: ActorId | null;
   radius: number;
   yawOffset: number;
   height: number;
+}
+export interface Q2TurretsCheckpoint {
+  readonly breaches: readonly { readonly actor: SavedActorId; readonly state: Breach }[];
+  readonly drivers: readonly { readonly actor: SavedActorId; readonly breach: SavedActorId | null; readonly radius: number; readonly yawOffset: number; readonly height: number; readonly monsterDie: string }[];
 }
 
 export function snapQ2TurretEighth(value: number): number { return Math.trunc(value * 8 + (value > 0 ? 0.5 : -0.5)) * 0.125; }
@@ -29,9 +38,42 @@ function normalizeAngle(value: number): number { while (value > 360) value -= 36
 function shortAngle(value: number): number { return value < -180 ? value + 360 : value > 180 ? value - 360 : value; }
 
 export class Q2TurretEntities {
-  private readonly breaches = new WeakMap<Q2Entity, Breach>();
-  private readonly drivers = new WeakMap<Q2Entity, Driver>();
+  private breaches = new WeakMap<Q2Entity, Breach>();
+  private drivers = new WeakMap<Q2Entity, Driver>();
   constructor(private readonly hooks: Q2BaseEntityHooks) {}
+
+  get callbacks(): Q2CallbackDefinitions {
+    return { think: { turret_breach_think: this.breachThink, turret_breach_finish_init: this.breachInit,
+      turret_driver_think: this.driverThink, turret_driver_link: this.driverLink }, die: { turret_driver_die: this.driverDie }, blocked: { turret_blocked: this.turretBlocked } };
+  }
+
+  capture(game: Q2GameServices): Q2TurretsCheckpoint {
+    const breaches: Q2TurretsCheckpoint["breaches"][number][] = [], drivers: Q2TurretsCheckpoint["drivers"][number][] = [];
+    for (const entity of game.entities.values()) {
+      const actor = { slot: entity.actor.id.slot, generation: entity.actor.id.generation }, breach = this.breaches.get(entity), driver = this.drivers.get(entity);
+      if (breach !== undefined) breaches.push({ actor, state: structuredClone(breach) });
+      if (driver !== undefined) {
+        const monsterDie = game.sourceCallbacks.die.name(driver.monsterDie); if (monsterDie === null) throw new Error("Turret driver has no named monster death callback");
+        drivers.push({ actor, monsterDie, radius: driver.radius, yawOffset: driver.yawOffset, height: driver.height,
+          breach: saveQ2Actor(driver.breach) });
+      }
+    }
+    return { breaches, drivers };
+  }
+
+  restore(game: Q2GameServices, checkpoint: Q2TurretsCheckpoint): undefined {
+    this.breaches = new WeakMap<Q2Entity, Breach>(); this.drivers = new WeakMap<Q2Entity, Driver>();
+    const reference = (actor: SavedActorId): Q2Entity => {
+      const entity = game.entity(restoreQ2Actor(game, actor).id); if (entity === null) throw new Error("Missing saved Q2 turret entity"); return entity;
+    };
+    for (const saved of checkpoint.breaches) this.breaches.set(reference(saved.actor), structuredClone(saved.state));
+    for (const saved of checkpoint.drivers) {
+      const entity = reference(saved.actor), context = this.hooks.monsterContext(entity.actor.id), monsterDie = game.sourceCallbacks.die.resolve(saved.monsterDie);
+      if (context === null || monsterDie === null) throw new Error("Restore Q2 turret drivers after their monster state");
+      this.drivers.set(entity, { context, monsterDie, breach: saved.breach === null ? null : game.host.actors.referenceSaved(saved.breach), radius: saved.radius, yawOffset: saved.yawOffset, height: saved.height });
+    }
+    return undefined;
+  }
 
   private team(entity: Q2Entity, game: Q2GameServices): readonly Q2Entity[] {
     const master = game.entity(entity.teamMaster);
@@ -44,14 +86,16 @@ export class Q2TurretEntities {
     return team === undefined ? [entity] : [...game.entities.values()].filter(member => member.spawn.values.get("team") === team);
   }
 
+  private readonly turretBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
+    const body = services.host.bodies.read(other);
+    if (body === null || services.host.combat.read(other)?.canTakeDamage !== true) return undefined;
+    const master = this.team(self, services)[0] ?? self;
+    services.damage(other, self, master.owner ?? master.actor.id, master.damage, 10, zero, body.origin, zero, 20);
+    return undefined;
+  };
+
   private blocked(entity: Q2Entity, game: Q2GameServices): undefined {
-    entity.blocked = (self, services, other) => {
-      const body = services.host.bodies.read(other);
-      if (body === null || services.host.combat.read(other)?.canTakeDamage !== true) return undefined;
-      const master = this.team(self, services)[0] ?? self;
-      services.damage(other, self, master.owner ?? master.actor.id, master.damage, 10, zero, body.origin, zero, 20);
-      return undefined;
-    };
+    entity.blocked = this.turretBlocked;
     game.solid(entity, "brush"); game.motion(entity, "push"); return game.show(entity);
   }
 
@@ -97,7 +141,8 @@ export class Q2TurretEntities {
 
   private readonly driverThink: Q2Think = (entity, game) => {
     const driver = this.drivers.get(entity);
-    if (driver === undefined || driver.breach === null) return undefined;
+    const turret = driver === undefined ? null : game.entity(driver.breach);
+    if (driver === undefined || turret === null) return undefined;
     game.schedule(entity, game.host.frameSeconds(), this.driverThink);
     const { context } = driver, state = context.state;
     if (entity.enemy !== null && (!game.host.actors.isLive(entity.enemy) || (game.host.combat.read(entity.enemy)?.health ?? 0) <= 0)) entity.enemy = null;
@@ -107,15 +152,58 @@ export class Q2TurretEntities {
     } else if (visible(context)) {
       if (state.lostSight) { state.trailTime = game.host.now(); state.lostSight = false; }
     } else { state.lostSight = true; return undefined; }
-    const enemy = entity.enemy === null ? null : game.host.bodies.read(entity.enemy), breach = this.breaches.get(driver.breach);
+    const enemy = entity.enemy === null ? null : game.host.bodies.read(entity.enemy), breach = this.breaches.get(turret);
     if (enemy === null || breach === undefined) return undefined;
     const target = add(enemy.origin, { x: 0, y: 0, z: game.entity(entity.enemy)?.viewHeight ?? 22 });
-    breach.goal = vectorAngles(subtract(target, game.body(driver.breach).origin));
+    breach.goal = vectorAngles(subtract(target, game.body(turret).origin));
     if (game.host.now() < state.attackFinished) return undefined;
     const reactionTime = 3 - game.options.skill;
     if (game.host.now() - state.trailTime < reactionTime) return undefined;
-    state.attackFinished = game.host.now() + reactionTime + 1; driver.breach.spawnflags |= 65536;
+    state.attackFinished = game.host.now() + reactionTime + 1; turret.spawnflags |= 65536;
     return undefined;
+  };
+
+  private readonly breachInit: Q2Think = (self, services) => {
+    const state = this.breaches.get(self); if (state === undefined) throw new Error("Turret breach initialization without source state");
+    const muzzle = services.pickTarget(self.target);
+    if (muzzle === null) services.host.diagnostic(`turret_breach missing muzzle target ${self.target}`);
+    else { state.muzzle = subtract(services.body(muzzle).origin, services.body(self).origin); services.remove(muzzle); }
+    const master = this.team(self, services)[0] ?? self; master.damage = self.damage;
+    return this.breachThink(self, services);
+  };
+
+  private readonly driverDie: Q2Die = (self, services, reaction) => {
+    const state = this.drivers.get(self); if (state === undefined) throw new Error("Turret driver death without source state");
+    const { context, monsterDie } = state;
+    const turret = services.entity(state.breach);
+    if (turret !== null) {
+      const breach = this.breaches.get(turret);
+      if (breach !== undefined) breach.goal = { ...breach.goal, x: 0 };
+      turret.owner = null;
+      const master = this.team(turret, services)[0] ?? turret; master.owner = null;
+      for (const member of this.team(turret, services)) {
+        if (member.teamChain?.equals(self.actor.id)) { member.teamChain = self.teamChain; break; }
+      }
+    }
+    state.breach = null; self.teamMaster = null; self.teamChain = null; self.flags &= ~1024; self.angularVelocity = zero;
+    services.motion(self, "step");
+    monsterDie(self, services, reaction);
+    if (!context.state.gibbed && services.host.actors.isLive(self.actor.id)) this.hooks.resumeMonster(self, services);
+    return undefined;
+  };
+
+  private readonly driverLink: Q2Think = (self, services) => {
+    const state = this.drivers.get(self); if (state === undefined) throw new Error("Turret driver link without source state");
+    const breach = services.pickTarget(self.target);
+    if (breach === null || !this.breaches.has(breach)) { services.host.diagnostic(`turret_driver has invalid breach ${self.target}`); return undefined; }
+    state.breach = breach.actor.id; breach.owner = self.actor.id;
+    const team = this.team(breach, services), master = team[0] ?? breach, last = team.at(-1) ?? breach;
+    master.owner = self.actor.id; master.teamMaster = master.actor.id;
+    last.teamChain = self.actor.id; self.teamMaster = master.actor.id; self.teamChain = null;
+    const body = services.body(self), target = services.body(breach), delta = subtract(body.origin, target.origin);
+    state.radius = length({ x: delta.x, y: delta.y, z: 0 }); state.yawOffset = normalizeAngle(vectorAngles(delta).y); state.height = delta.z;
+    services.move(self, { angles: target.angles }, false); self.flags |= 1024;
+    return services.schedule(self, services.host.frameSeconds(), this.driverThink);
   };
 
   spawn(entity: Q2Entity, game: Q2GameServices): boolean {
@@ -127,13 +215,7 @@ export class Q2TurretEntities {
           pitchMax: -(numberField(entity.spawn, "minpitch") || -30), pitchMin: -(numberField(entity.spawn, "maxpitch") || 30),
           yawMin: numberField(entity.spawn, "minyaw"), yawMax: numberField(entity.spawn, "maxyaw") || 360 };
         this.breaches.set(entity, state);
-        game.schedule(entity, game.host.frameSeconds(), (self, services) => {
-          const muzzle = services.pickTarget(self.target);
-          if (muzzle === null) services.host.diagnostic(`turret_breach missing muzzle target ${self.target}`);
-          else { state.muzzle = subtract(services.body(muzzle).origin, services.body(self).origin); services.remove(muzzle); }
-          const master = this.team(self, services)[0] ?? self; master.damage = self.damage;
-          return this.breachThink(self, services);
-        });
+        game.schedule(entity, game.host.frameSeconds(), this.breachInit);
         return true;
       }
       case "turret_driver": {
@@ -141,40 +223,14 @@ export class Q2TurretEntities {
         const context = this.hooks.turretDriver(entity, game);
         const monsterDie = entity.die;
         if (monsterDie === null) throw new Error("Turret driver admission did not bind infantry death");
-        const state: Driver = { context, breach: null, radius: 0, yawOffset: 0, height: 0 };
+        const state: Driver = { context, monsterDie, breach: null, radius: 0, yawOffset: 0, height: 0 };
         this.drivers.set(entity, state);
         context.state.gibHealth = 0; context.state.standGround = true; context.state.ducked = true;
         entity.flags |= 2048; entity.serverFlags |= 4; entity.renderFlags |= 64; entity.viewHeight = 24;
         infantryStand(context); entity.frame = 0;
-        entity.die = (self, services, reaction) => {
-          if (state.breach !== null) {
-            const breach = this.breaches.get(state.breach);
-            if (breach !== undefined) breach.goal = { ...breach.goal, x: 0 };
-            state.breach.owner = null;
-            const master = this.team(state.breach, services)[0] ?? state.breach; master.owner = null;
-            for (const member of this.team(state.breach, services)) {
-              if (member.teamChain?.equals(self.actor.id)) { member.teamChain = self.teamChain; break; }
-            }
-          }
-          state.breach = null; self.teamMaster = null; self.teamChain = null; self.flags &= ~1024; self.angularVelocity = zero;
-          services.motion(self, "step");
-          monsterDie(self, services, reaction);
-          if (!context.state.gibbed && services.host.actors.isLive(self.actor.id)) this.hooks.resumeMonster(self, services);
-          return undefined;
-        };
+        entity.die = this.driverDie;
         game.motion(entity, "push"); game.solid(entity, "box"); game.show(entity);
-        game.schedule(entity, game.host.frameSeconds(), (self, services) => {
-          const breach = services.pickTarget(self.target);
-          if (breach === null || !this.breaches.has(breach)) { services.host.diagnostic(`turret_driver has invalid breach ${self.target}`); return undefined; }
-          state.breach = breach; breach.owner = self.actor.id;
-          const team = this.team(breach, services), master = team[0] ?? breach, last = team.at(-1) ?? breach;
-          master.owner = self.actor.id; master.teamMaster = master.actor.id;
-          last.teamChain = self.actor.id; self.teamMaster = master.actor.id; self.teamChain = null;
-          const body = services.body(self), target = services.body(breach), delta = subtract(body.origin, target.origin);
-          state.radius = length({ x: delta.x, y: delta.y, z: 0 }); state.yawOffset = normalizeAngle(vectorAngles(delta).y); state.height = delta.z;
-          services.move(self, { angles: target.angles }, false); self.flags |= 1024;
-          return services.schedule(self, services.host.frameSeconds(), this.driverThink);
-        });
+        game.schedule(entity, game.host.frameSeconds(), this.driverLink);
         return true;
       }
       default: return false;

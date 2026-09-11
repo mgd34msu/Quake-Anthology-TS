@@ -7,7 +7,7 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2GameServices } from "../host.ts";
 import { add, length, scale, subtract, zero } from "../fields.ts";
 import { anglesVectors, changeYaw, chaseDirection, enemyBody, enemyEye, FL_NOTARGET, health, inFront, monsterSolidMask, MASK_OPAQUE, attackTraceMask, stepDirection, targetDistance, vectorAngles, visible } from "./ai.ts";
-import type { MonsterContext } from "./types.ts";
+import type { MonsterContext, Q2MonsterSourceCombatHooks, Q2MonsterHintHooks } from "./types.ts";
 
 interface Sighting { readonly actor: ActorId; readonly time: number; }
 interface Noise extends Sighting { readonly owner: ActorId; readonly origin: Vec3; }
@@ -19,18 +19,21 @@ export function facingIdeal(context: MonsterContext): boolean {
 }
 
 /** The species-specific M_CheckAttack slot; the controller handles turning and dispatch separately. */
-export function defaultCheckAttack(context: MonsterContext): boolean {
+export interface Q2AttackChanceProfile { readonly standGround: number; readonly melee: number; readonly near: number; readonly mid: number; readonly far: number; readonly strafeScalar: number; }
+const normalAttackChances: Q2AttackChanceProfile = { standGround: 0.7, melee: 0.4, near: 0.25, mid: 0.06, far: 0, strafeScalar: 1 };
+export function defaultCheckAttack(context: MonsterContext, profile: Q2AttackChanceProfile = normalAttackChances): boolean {
   const { game, state, entity } = context;
   const target = enemyEye(context);
   if (target === null) return false;
   const rerelease = game.options.edition === "rerelease";
+  const rogue = context.sourceCombatRules() === "rogue";
   const body = game.body(entity), start = { ...body.origin, z: body.origin.z + entity.viewHeight };
   if (health(game, entity.enemy) > 0) {
     const trace = game.host.trace({ start, end: target, bounds: null, ignore: entity.actor.id, mask: attackTraceMask(game) });
     if (!(trace.hit.kind === "actor" && (trace.hit.actor === entity.enemy || rerelease && game.host.isPlayer(trace.hit.actor)))) {
       const targetEntity = game.entity(entity.enemy);
-      if (!rerelease || targetEntity?.solid !== "none" || trace.fraction < 1) {
-        if (rerelease && state.blindFire && state.hadVisibility && state.blindFireDelay <= 20 && !visible(context) && !(trace.hit.kind === "actor" && game.host.isMonster(trace.hit.actor)) && game.host.now() >= state.attackFinished && game.host.now() >= state.trailTime + state.blindFireDelay) {
+      if (!rerelease && !rogue || targetEntity?.solid !== "none" || trace.fraction < 1) {
+        if ((rerelease || rogue) && state.blindFire && (!rerelease || state.hadVisibility) && state.blindFireDelay <= 20 && !visible(context) && !(trace.hit.kind === "actor" && game.host.isMonster(trace.hit.actor)) && game.host.now() >= state.attackFinished && game.host.now() >= state.trailTime + state.blindFireDelay) {
           const blind = game.host.trace({ start, end: state.blindFireTarget, bounds: null, ignore: entity.actor.id, mask: 0x2000000 });
           if (!blind.allSolid && !blind.startSolid && (blind.fraction === 1 || blind.hit.kind === "actor" && blind.hit.actor === entity.enemy)) { state.attackState = "blind"; return true; }
         }
@@ -40,24 +43,31 @@ export function defaultCheckAttack(context: MonsterContext): boolean {
   }
   const distance = targetDistance(context);
   if (rerelease ? distance <= 20 : distance < 80) {
-    if (!rerelease && game.options.skill === 0 && Math.floor(game.host.random() * 4) !== 0) return false;
+    if (!rerelease && game.options.skill === 0 && Math.floor(game.host.random() * 4) !== 0) { if (rogue) state.attackState = "straight"; return false; }
     state.attackState = state.hasMelee && (!rerelease || state.meleeTime <= game.host.now()) ? "melee" : "missile";
     return true;
   }
-  if (!state.hasRangedAttack) { if (rerelease) state.attackState = "straight"; return false; }
+  if (rerelease && state.attackState === "melee" && state.meleeTime > game.host.now()) state.attackState = "missile";
+  if (!state.hasRangedAttack) { if (rerelease || rogue) state.attackState = "straight"; return false; }
   if (game.host.now() < state.attackFinished || !rerelease && distance >= 1000) return false;
-  let chance = state.standGround ? rerelease ? 0.7 : 0.4 : distance < (rerelease ? 440 : 500) ? rerelease ? 0.25 : 0.1 : distance < (rerelease ? 940 : 1000) ? rerelease ? 0.06 : 0.02 : 0;
+  let chance = rerelease ? state.standGround ? profile.standGround : distance <= 20 ? profile.melee : distance <= 440 ? profile.near : distance <= 940 ? profile.mid : profile.far
+    : state.standGround ? 0.4 : distance < 500 ? 0.1 : distance < 1000 ? 0.02 : 0;
   if (!rerelease) chance *= game.options.skill === 0 ? 0.5 : game.options.skill >= 2 ? 2 : 1;
-  if (game.host.random() < chance) {
+  const nonSolidEnemy = game.entity(entity.enemy)?.solid === "none";
+  if (rerelease ? entity.enemy !== null && !game.host.isPlayer(entity.enemy) && nonSolidEnemy || game.host.random() < chance : game.host.random() < chance || rogue && nonSolidEnemy) {
     state.attackState = "missile";
     state.attackFinished = game.host.now() + (rerelease ? 0 : 2 * game.host.random());
     return true;
   }
   if (state.locomotion === "fly" && (!rerelease || state.strafeTime <= game.host.now())) {
-    const next = game.host.random() < (rerelease ? 0.6 : 0.3) ? "sliding" : "straight";
+    let strafeChance = rerelease || rogue ? entity.classname === "monster_daedalus" ? 0.8 : 0.6 : 0.3;
+    if ((rerelease || rogue) && (game.entity(entity.enemy)?.classname === "tesla" || rerelease && game.entity(entity.enemy)?.classname === "tesla_mine")) strafeChance = 0;
+    else if (rerelease) strafeChance *= profile.strafeScalar;
+    if (rerelease && strafeChance === 0) return false;
+    const next = game.host.random() < strafeChance ? "sliding" : "straight";
     if (rerelease && next !== state.attackState) state.strafeTime = game.host.now() + 1 + game.host.random() * 2;
     state.attackState = next;
-  }
+  } else if (rerelease && state.locomotion !== "fly" && state.pathing === null) state.attackState = "straight";
   return false;
 }
 
@@ -74,7 +84,14 @@ export class MonsterPerception {
   private readonly hostile = new Map<ActorId, number>();
   private lastFrame = -Infinity;
 
+  private sourceCombatRules: "base" | "rogue" = "base";
+  private sourceCombatHooks: Q2MonsterSourceCombatHooks | null = null;
+  private hintHooks: Q2MonsterHintHooks | null = null;
   constructor(private readonly contexts: ReadonlyMap<ActorId, MonsterContext>) {}
+  setSourceCombatRules(rules: "base" | "rogue", hooks: Q2MonsterSourceCombatHooks | null): undefined {
+    this.sourceCombatRules = rules; this.sourceCombatHooks = hooks; return undefined;
+  }
+  setHintPaths(hooks: Q2MonsterHintHooks): undefined { this.hintHooks = hooks; return undefined; }
   get currentSightClient(): ActorId | null { return this.sightClient; }
 
   bind(game: Q2GameServices): undefined { this.services = game; return undefined; }
@@ -124,7 +141,7 @@ export class MonsterPerception {
     this.sightClient = null;
     for (let i = 1; i <= players.length; i++) {
       const candidate = players[(current + i) % players.length];
-      if (candidate !== undefined && this.targetable(game, candidate)) { this.sightClient = candidate; break; }
+      if (candidate !== undefined && this.targetable(game, candidate) && (this.sourceCombatRules !== "rogue" || ((game.entity(candidate)?.flags ?? 0) & 0x8000) === 0)) { this.sightClient = candidate; break; }
     }
     for (const player of players) {
       const body = game.host.bodies.read(player);
@@ -209,6 +226,7 @@ export class MonsterPerception {
       else if (game.options.edition === "classic") candidate = this.sightClient;
     }
     if (candidate === null || !game.host.actors.isLive(candidate)) return false;
+    if (state.hintPath && game.options.mode === "coop") noise = null;
     if (candidate === entity.enemy && !(game.options.edition === "rerelease" && noise !== null && state.soundTarget !== null)) return true;
     const candidateEntity = game.entity(candidate);
     if (noise !== null) {
@@ -231,6 +249,7 @@ export class MonsterPerception {
       entity.enemy = game.host.isPlayer(candidate) ? candidate : candidateEntity?.enemy ?? null;
       if (entity.enemy === null || !game.host.isPlayer(entity.enemy)) { entity.enemy = null; return false; }
     }
+    if (state.hintPath && this.hintHooks !== null) { this.hintHooks.stop(context); return true; }
     this.foundTarget(context);
     if (state.soundTarget === null) {
       if (game.options.edition === "classic" || !state.closeSightTripped) context.dispatch("$sight");
@@ -253,6 +272,8 @@ export class MonsterPerception {
     const { game, entity, state } = context, enemy = enemyBody(context);
     if (enemy === null) return undefined;
     if (entity.enemy !== null && game.host.isPlayer(entity.enemy)) {
+      const player = game.entity(entity.enemy);
+      if (player !== null && this.sourceCombatRules === "rogue") player.flags &= ~0x8000;
       const record = { actor: entity.actor.id, time: game.host.now() };
       this.sight = record; this.alerted.set(entity.enemy, record); this.hostile.set(entity.enemy, game.host.now() + 1);
     }
@@ -263,6 +284,7 @@ export class MonsterPerception {
       state.savedGoal = enemy.origin; state.blindFireTarget = add(enemy.origin, scale(enemy.velocity, -0.1)); state.blindFireDelay = 0;
     }
     state.lastSighting = enemy.origin; state.trailTime = game.host.now();
+    if (this.sourceCombatRules === "rogue" && game.options.edition === "classic") state.blindFireTarget = enemy.origin;
     if (state.combatPoint) return undefined;
     if (state.combatTarget.length === 0) return this.huntTarget(context);
     const target = game.pickTarget(state.combatTarget);
@@ -275,9 +297,11 @@ export class MonsterPerception {
 
   reactToDamage(context: MonsterContext, attacker: ActorId | null): undefined {
     const { game, entity, state } = context;
-    if (attacker === null || attacker === entity.actor.id || attacker === entity.enemy || !game.host.isPlayer(attacker) && !game.host.isMonster(attacker)) return undefined;
+    if (attacker === null || !game.host.isPlayer(attacker) && !game.host.isMonster(attacker)) return undefined;
+    if (this.sourceCombatHooks?.beforeReact(context, attacker) === true) return undefined;
+    if (attacker === entity.actor.id || attacker === entity.enemy) return undefined;
     const other = game.entity(attacker);
-    if (state.goodGuy && (game.host.isPlayer(attacker) || this.contexts.get(attacker)?.state.goodGuy === true)) return undefined;
+    if (state.goodGuy && (game.host.isPlayer(attacker) || this.contexts.get(attacker)?.state.goodGuy === true || other !== null && this.sourceCombatHooks?.isGoodGuy(other) === true)) return undefined;
     if (game.host.isPlayer(attacker)) {
       state.soundTarget = null;
       if (entity.enemy !== null && game.host.isPlayer(entity.enemy)) {
@@ -286,7 +310,10 @@ export class MonsterPerception {
       }
       entity.enemy = attacker;
     } else if (other !== null) {
-      const retaliate = (entity.flags & 3) === (other.flags & 3) && entity.classname !== other.classname && !["monster_tank", "monster_supertank", "monster_makron", "monster_jorg"].includes(other.classname) || other.enemy === entity.actor.id;
+      const ignoreShots = this.sourceCombatRules === "rogue" || game.options.edition === "rerelease"
+        ? state.ignoreShots || this.contexts.get(attacker)?.state.ignoreShots === true
+        : ["monster_tank", "monster_supertank", "monster_makron", "monster_jorg"].includes(other.classname);
+      const retaliate = (entity.flags & 3) === (other.flags & 3) && entity.classname !== other.classname && !ignoreShots || other.enemy === entity.actor.id;
       if (entity.enemy !== null && game.host.isPlayer(entity.enemy)) state.oldEnemy = entity.enemy;
       if (retaliate) entity.enemy = attacker;
       else if (other.enemy !== null && other.enemy !== entity.actor.id) entity.enemy = other.enemy;
@@ -310,10 +337,19 @@ export class MonsterPerception {
     let enemy = enemyBody(context);
     const enemyHealth = health(game, entity.enemy);
     if (enemy === null || (state.medic ? enemyHealth > 0 : state.brutal ? game.options.edition === "classic" && enemyHealth <= -80 : enemyHealth <= 0)) {
+      if (this.sourceCombatRules === "rogue") state.medic = false;
       entity.enemy = null; state.closeSightTripped = false;
       if (game.options.edition === "rerelease") entity.goal = null;
       if (state.oldEnemy !== null && health(game, state.oldEnemy) > 0) { entity.enemy = state.oldEnemy; state.oldEnemy = null; this.huntTarget(context); enemy = enemyBody(context); }
-      else {
+      else if (this.sourceCombatRules === "rogue" && this.sourceCombatHooks !== null) {
+        entity.enemy = this.sourceCombatHooks.recoverEnemy(context);
+        if (entity.enemy !== null) { state.oldEnemy = null; this.huntTarget(context); enemy = enemyBody(context); }
+        else {
+          if (state.moveTarget !== null) { entity.goal = state.moveTarget; context.walk(); }
+          else { state.pauseTime = game.host.now() + 100000000; context.stand(); }
+          return true;
+        }
+      } else {
         if (state.moveTarget !== null && (game.options.edition === "classic" || !state.standGround)) { entity.goal = state.moveTarget; context.walk(); }
         else { state.pauseTime = game.host.now() + 100000000; context.stand(); }
         return true;
@@ -323,6 +359,7 @@ export class MonsterPerception {
     const enemyVisible = visible(context);
     if (enemyVisible) {
       state.searchTime = game.host.now() + 5; state.lastSighting = enemy.origin;
+      if (this.sourceCombatRules === "rogue" && game.options.edition === "classic") { state.lostSight = false; state.trailTime = game.host.now(); state.blindFireTarget = enemy.origin; state.blindFireDelay = 0; }
       if (game.options.edition === "rerelease") {
         state.hadVisibility = true; state.lostSight = false; state.savedGoal = enemy.origin; state.trailTime = game.host.now();
         state.blindFireTarget = add(enemy.origin, scale(enemy.velocity, -0.1)); state.blindFireDelay = 0;
@@ -330,6 +367,20 @@ export class MonsterPerception {
       }
     }
     const rerelease = game.options.edition === "rerelease";
+    if (!rerelease && this.sourceCombatRules === "rogue") {
+      const selected = check(context);
+      if (!selected) return false;
+      if (state.attackState === "missile" || state.attackState === "melee" || state.attackState === "blind") {
+        state.idealYaw = vectorAngles(subtract(enemy.origin, game.body(entity).origin)).y;
+        if (!state.manualSteering) changeYaw(context);
+        if (facingIdeal(context)) {
+          if (state.attackState === "melee") { context.melee(); state.attackState = "straight"; }
+          else { context.attack(); if (state.attackState === "missile" || state.attackState === "blind") state.attackState = "straight"; }
+        }
+        return true;
+      }
+      return enemyVisible;
+    }
     let selected = false;
     if (rerelease && state.checkAttackTime <= game.host.now()) { state.checkAttackTime = game.host.now() + 0.1; selected = check(context); }
     if (state.attackState === "missile" || state.attackState === "melee" || rerelease && state.attackState === "blind") {
@@ -351,12 +402,12 @@ export class MonsterPerception {
     if (state.locomotion === "stationary" || game.body(entity).ground === null && state.locomotion === "walk") return false;
     const enemy = enemyBody(context);
     let goal = entity.goal === null ? null : game.host.bodies.read(entity.goal)?.origin ?? null;
-    if (!state.combatPoint && state.soundTarget === null && enemy !== null && !visible(context)) goal = this.pursuitGoal(context, distance);
-    else if (!state.combatPoint && state.soundTarget === null && enemy !== null) { state.lostSight = false; state.lastSighting = enemy.origin; state.trailTime = game.host.now(); }
+    if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null && !visible(context)) goal = this.pursuitGoal(context, distance);
+    else if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null) { state.lostSight = false; state.lastSighting = enemy.origin; state.trailTime = game.host.now(); }
     if (goal === null) return false;
-    if (enemy !== null && !state.combatPoint && state.soundTarget === null && this.closeEnough(context, enemy.origin, distance, entity.enemy)) return true;
+    if (!state.hintPath && enemy !== null && !state.combatPoint && state.soundTarget === null && this.closeEnough(context, enemy.origin, distance, entity.enemy)) return true;
     if (Math.floor(game.host.random() * 4) !== 1 && stepDirection(context, state.idealYaw, distance)) return true;
-    if (game.options.edition === "rerelease" && context.blocked(distance)) return true;
+    if ((game.options.edition === "rerelease" || this.sourceCombatRules === "rogue") && context.blocked(distance)) return true;
     return chaseDirection(context, goal, distance);
   }
 

@@ -73,6 +73,9 @@ export class Q3WorldAdapter implements ServerWorld {
 
   link(entity: GameEntity): void {
     entity.r.clearBoundsOverrides();
+    const byte = (value: number): number => Math.max(1, Math.min(255, Math.trunc(value)));
+    entity.s.solid = entity.r.model.kind === "inline" ? 0xffffff : (entity.r.contents & (1 | 0x2000000)) === 0 ? 0
+      : (byte(Math.fround(entity.r.maxs.z + 32)) << 16) | (byte(-entity.r.mins.z) << 8) | byte(entity.r.maxs.x);
     const shape = entity.r.model.kind === "inline" ? { kind: "model", model: entity.r.model.index } satisfies ActorCollision["shape"] : entity.r.model;
     this.host.collision(entity.actor, { family: "q3", shape, contents: entity.r.contents,
       owner: this.actor(entity.r.ownerNum), role: (entity.r.contents & 0x40000000) !== 0 ? "trigger" : "solid", monster: false, deadMonster: false });

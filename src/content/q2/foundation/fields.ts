@@ -21,23 +21,34 @@ export function vectorField(fields: Q2SpawnFields, key: string): Vec3 {
 /** ED_NewString changes backslash-n to LF and removes other escape introducers. */
 function entityString(value: string): string { return value.replace(/\\(.)/gs, (_match, escaped: string) => escaped === "n" ? "\n" : "\\"); }
 
+function entityToken(state: { readonly data: string; index: number }, limit: number): { readonly kind: "eof" } | { readonly kind: "token"; readonly value: string } {
+  let index = state.index;
+  for (;;) {
+    while (index < state.data.length && state.data.charCodeAt(index) > 0 && state.data.charCodeAt(index) <= 32) index++;
+    if (index >= state.data.length || state.data.charCodeAt(index) === 0) return { kind: "eof" };
+    if (state.data[index] !== "/" || state.data[index + 1] !== "/") break;
+    while (index < state.data.length && state.data.charCodeAt(index) !== 0 && state.data[index] !== "\n") index++;
+  }
+  // COM_Parse's data pointer distinguishes EOF from a valid empty quoted token.
+  return { kind: "token", value: parseQ2Token(state, limit) };
+}
+
 export function parseQ2Entities(source: string, edition: Q2Edition = "classic"): readonly Q2SpawnFields[] {
   const state = { data: source, index: 0 };
   const entities: Q2SpawnFields[] = [];
   const limit = edition === "classic" ? 128 : 512;
   for (;;) {
-    const token = parseQ2Token(state, limit);
-    if (token === "") break;
-    if (token !== "{") throw new Error(`Q2 entity ${entities.length}: expected opening brace`);
+    const token = entityToken(state, limit);
+    if (token.kind === "eof") break;
+    if (token.value !== "{") throw new Error(`Q2 entity ${entities.length}: expected opening brace`);
     const values = new Map<string, string>();
     for (;;) {
-      const key = parseQ2Token(state, limit);
-      if (key === "}") break;
-      if (key === "") throw new Error(`Q2 entity ${entities.length}: EOF without closing brace`);
-      const before = state.index;
-      const value = parseQ2Token(state, limit);
-      if (value === "}" || value === "" && state.index === before) throw new Error(`Q2 entity ${entities.length}: missing value for ${key}`);
-      values.set(key, entityString(value));
+      const key = entityToken(state, limit);
+      if (key.kind === "eof") throw new Error(`Q2 entity ${entities.length}: EOF without closing brace`);
+      if (key.value === "}") break;
+      const value = entityToken(state, limit);
+      if (value.kind === "eof" || value.value === "}") throw new Error(`Q2 entity ${entities.length}: missing value for ${key.value}`);
+      values.set(key.value, entityString(value.value));
     }
     entities.push({ ordinal: entities.length, classname: values.get("classname") ?? "", values });
   }

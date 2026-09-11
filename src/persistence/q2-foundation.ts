@@ -12,13 +12,13 @@ function nativeCause(reader: SaveReader): Q2NativeCause {
 }
 function cause(reader: SaveReader): AttackProvenance["cause"] {
   switch (reader.field("kind").choice("q1", "q2", "q3", "environment")) {
-    case "q1": return { kind: "q1", deathType: reader.field("deathType").string() };
+    case "q1": return { kind: "q1", deathType: reader.field("deathType").string(), ...(reader.field("armorEffect").value === undefined ? {} : { armorEffect: reader.field("armorEffect").choice("bypass", "half-effectiveness") }) };
     case "q2": return { kind: "q2", meansOfDeath: reader.field("meansOfDeath").integer(), damageFlags: reader.field("damageFlags").integer(), ...(reader.field("native").value === undefined ? {} : { native: nativeCause(reader.field("native")) }) };
     case "q3": return { kind: "q3", meansOfDeath: reader.field("meansOfDeath").integer(), damageFlags: reader.field("damageFlags").integer() };
     case "environment": return { kind: "environment", hazard: reader.field("hazard").choice("fall", "drown", "lava", "slime", "crush", "trigger") };
   }
 }
-function attack(reader: SaveReader): Q2AttackCheckpoint {
+export function readQ2AttackCheckpoint(reader: SaveReader): Q2AttackCheckpoint {
   return { sequence: reader.field("sequence").integer(0), time: readTime(reader.field("time")), attacker: reader.field("attacker").nullable(readSavedActor), inflictor: reader.field("inflictor").nullable(readSavedActor),
     weapon: reader.field("weapon").nullable(namespaced), weaponProvider: namespaced(reader.field("weaponProvider")), combatProvider: namespaced(reader.field("combatProvider")), inventoryProvider: namespaced(reader.field("inventoryProvider")), movementProvider: namespaced(reader.field("movementProvider")), cause: cause(reader.field("cause")) };
 }
@@ -34,9 +34,9 @@ function entity(reader: SaveReader): Q2EntityCheckpoint {
     values: { classname: s("classname"), target: s("target"), targetname: s("targetname"), killtarget: s("killtarget"), combatTarget: s("combatTarget"), deathTarget: s("deathTarget"), message: s("message"), model: s("model"), model2: s("model2"), model3: s("model3"), model4: s("model4"),
       spawnflags: n("spawnflags"), delay: n("delay"), wait: n("wait"), speed: n("speed"), accel: n("accel"), decel: n("decel"), damage: n("damage"), damageRadius: n("damageRadius"), radiusDamage: n("radiusDamage"), count: n("count"), maxHealth: n("maxHealth"), viewHeight: n("viewHeight"), frame: n("frame"), oldFrame: n("oldFrame"), scale: n("scale"), skin: n("skin"), effects: n("effects"), renderFlags: n("renderFlags"), flags: n("flags"), serverFlags: n("serverFlags"), lightLevel: n("lightLevel"), powerCubes: n("powerCubes"), timestamp: n("timestamp"),
       noise: s("noise"), sound: s("sound"), volume: n("volume"), attenuation: n("attenuation"), random: n("random"), map: s("map"), style: n("style"), transitionStarted: b("transitionStarted"), clipMask: n("clipMask"), projectile: b("projectile"), dodgeable: b("dodgeable"), laserImmune: b("laserImmune"), damageableTarget: b("damageableTarget"), visible: b("visible"),
-      solid: v.field("solid").choice("none", "trigger", "box", "brush"), motion: v.field("motion").choice("stationary", "push", "stop", "toss", "bounce", "wall-bounce", "fly-missile", "step"), gravity: n("gravity"), angularVelocity: readVector(v.field("angularVelocity")), movedir: readVector(v.field("movedir")), nextThink: v.field("nextThink").nullable(value => value.number()) },
-    links: { activator: link("activator"), enemy: link("enemy"), owner: link("owner"), goal: link("goal"), teamMaster: link("teamMaster"), teamChain: link("teamChain"), chain: link("chain") }, lastAttack: reader.field("lastAttack").nullable(attack),
-    callbacks: { think: callback("think"), prethink: callback("prethink"), use: callback("use"), touch: callback("touch"), pain: callback("pain"), die: callback("die"), blocked: callback("blocked") } };
+      solid: v.field("solid").choice("none", "trigger", "box", "brush"), motion: v.field("motion").choice("stationary", "push", "stop", "toss", "new-toss", "bounce", "wall-bounce", "fly-missile", "fly", "step"), gravity: n("gravity"), gravityVector: readVector(v.field("gravityVector")), angularVelocity: readVector(v.field("angularVelocity")), movedir: readVector(v.field("movedir")), pos1: readVector(v.field("pos1")), pos2: readVector(v.field("pos2")), nextThink: v.field("nextThink").nullable(value => value.number()) },
+    links: { activator: link("activator"), enemy: link("enemy"), owner: link("owner"), goal: link("goal"), teamMaster: link("teamMaster"), teamChain: link("teamChain"), chain: link("chain"), beam: link("beam"), beam2: link("beam2"), proboscus: link("proboscus") }, lastAttack: reader.field("lastAttack").nullable(readQ2AttackCheckpoint),
+    callbacks: { think: callback("think"), prethink: callback("prethink"), postthink: callback("postthink"), use: callback("use"), touch: callback("touch"), pain: callback("pain"), die: callback("die"), blocked: callback("blocked") } };
 }
 export function readQ2FoundationCheckpoint(reader: SaveReader): Q2FoundationCheckpoint {
   const counters = reader.field("counters"), n = (name: string): number => counters.field(name).number();

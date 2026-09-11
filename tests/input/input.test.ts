@@ -12,8 +12,61 @@ import { sourceKeyNumber } from "../../src/input/bindings.ts";
 import { KeyCode } from "../../src/input/key-codes.ts";
 import { InputCommandBuilder } from "../../src/input/user-command.ts";
 import type { UserCommandFrame } from "../../src/input/user-command.ts";
+import { ApplicationConsoleRouting } from "../../src/app/bootstrap/console.ts";
+import { CvarRegistry } from "../../src/core/cvars/index.ts";
+import { Q3GameSettings } from "../../src/content/q3/base/settings.ts";
+import { ClientConfiguration } from "../../src/content/q3/presentation/config.ts";
+import { ClientGameState, ClientGameStaticState } from "../../src/content/q3/presentation/state.ts";
+import { SeatConsole } from "../../src/console/session.ts";
 
 describe("seat input", () => {
+  test("human console reaches real Q3 server settings and only the invoking cgame seat across wait and travel", async () => {
+    const identity = createIdentityOwner("console-routing");
+    const context = (index: number): CommandContext => ({ session: identity.session,
+      origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } });
+    const serverContext: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+    function server() {
+      const cvars = new CvarRegistry({ dialect: "q3", context: serverContext });
+      const settings = new Q3GameSettings({ cvars, sendServerCommand: () => {}, remapTeams: () => {} }, "baseq3");
+      settings.register("console-smoke");
+      return { cvars, settings, sharedNames: settings.definitions.map(definition => definition.name) };
+    }
+    let authority = server(); authority.cvars.set("sv_cheats", "1", true);
+    function client(index: number) {
+      const cvars = new CvarRegistry({ dialect: "q3", context: context(index), cheatsAllowed: () => authority.cvars.variableValue("sv_cheats") !== 0 });
+      const configuration = new ClientConfiguration("baseq3", { cvars, state: new ClientGameState("baseq3", index, 0),
+        staticState: new ClientGameStaticState("baseq3"), clients: { newClientInfo: async () => {} }, configString: () => "" });
+      configuration.registerCvars();
+      return { cvars, configuration };
+    }
+    const first = client(0), second = client(1), fallback = new CvarRegistry({ dialect: "q3", context: serverContext });
+    const movement = new CvarRegistry({ dialect: "q1-netquake", context: serverContext }); movement.register("m_yaw", "0.022");
+    const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => "q3", server: () => authority,
+      movement: () => movement, seat: seat => seat.equals(identity.seat(0)) ? first.cvars : seat.equals(identity.seat(1)) ? second.cvars : null });
+    const commands = new CommandBuffer({ dialect: "q3", context: context(0), cvarRouting: routing });
+    const console = new SeatConsole({ seat: identity.seat(0), dialect: "q3", context: context(0), commands, cvars: fallback,
+      now: () => 0, connected: () => true, clipboard: () => null, focus: () => {}, chat: () => {} });
+    console.field.setText("/set g_speed 600; set cg_fov 100; wait; set cg_fov 110"); console.submit();
+    commands.append("set cg_fov 120; set local_note second; set m_yaw 0.03; set sv_cheats 0; set cg_gunX 5\n", context(1));
+    commands.execute(); expect(second.cvars.variableValue("cg_fov")).toBe(90);
+    commands.execute(); authority.settings.update();
+    await first.configuration.updateCvars(); await second.configuration.updateCvars();
+    expect(authority.settings.number("g_speed")).toBe(600);
+    expect(first.configuration.readVmCvar("cg_fov").numericValue).toBe(110);
+    expect(second.configuration.readVmCvar("cg_fov").numericValue).toBe(120);
+    expect(second.cvars.variableString("local_note")).toBe("second");
+    expect(first.cvars.find("local_note")).toBeUndefined();
+    expect(fallback.snapshots()).toHaveLength(0);
+    expect(movement.variableValue("m_yaw")).toBe(Math.fround(0.03));
+    expect(second.cvars.variableValue("cg_gunX")).toBe(0);
+    expect(commands.cvarSnapshots(context(0)).filter(variable => variable.name === "g_synchronousClients")).toHaveLength(1);
+    expect(routing.owner("g_synchronousClients", context(0))).toBe(authority.cvars);
+    commands.append("wait; set g_speed 700\n", context(0)); commands.execute();
+    const previous = authority; authority = server(); commands.execute(); authority.settings.update();
+    expect(authority.settings.number("g_speed")).toBe(700); expect(previous.cvars.variableValue("g_speed")).toBe(600);
+    expect(() => routing.owner("g_speed", { session: identity.session, origin: { kind: "remote-client", client: identity.client(3, 0) } })).toThrow("explicit client owner");
+    routing.close(); expect(() => commands.findCvar("cg_fov", context(0))).toThrow("closed");
+  });
   test("shared command buffer retains seat origins through wait, focus loss and key release", () => {
     const owner = createIdentityOwner("input-smoke"), first = owner.seat(0), second = owner.seat(1);
     const context = (seat: typeof first): CommandContext => ({ session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(seat.index, 0) } });

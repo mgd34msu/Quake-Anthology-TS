@@ -1,6 +1,6 @@
 /* Quake II m_actor.c. id Software, GPL-2.0-or-later. */
 import { add, integerField, movedir, normalize, numberField, scale, subtract, zero } from "../../foundation/fields.ts";
-import type { Q2Entity, Q2GameServices, Q2SpawnModule } from "../../foundation/host.ts";
+import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Use, Q2Touch } from "../../foundation/host.ts";
 import { anglesVectors, enemyBody, health, projectFlash, vectorAngles } from "../../foundation/monsters/ai.ts";
 import { throwGib, throwHead } from "../../foundation/monsters/gibs.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
@@ -30,15 +30,7 @@ export const actorDefinition: Q2MonsterDefinition = {
     state.goodGuy = true;
     entity.maxHealth = integerField(entity.spawn, "health") || 100;
     game.host.combat.setHealth(entity.actor, entity.maxHealth);
-    entity.use = () => {
-      const target = game.pickTarget(entity.target);
-      entity.goal = state.moveTarget = target?.actor.id ?? null;
-      if (target === null || target.classname !== "target_actor") { game.host.diagnostic(`misc_actor has bad target ${entity.target}`); entity.target = ""; state.pauseTime = 100000000; return stand(context); }
-      state.idealYaw = vectorAngles(subtract(game.body(target).origin, game.body(entity).origin)).y;
-      game.move(entity, { angles: { ...game.body(entity).angles, y: state.idealYaw } });
-      context.walk(); entity.target = "";
-      return undefined;
-    };
+    entity.use = game.sourceCallbacks.use.resolve("actor_use");
     return undefined;
   },
   attack(context) { context.setMove("actor_move_attack"); context.state.pauseTime = context.game.host.now() + (Math.floor(context.game.host.random() * 16) + 10) * 0.1; return undefined; },
@@ -87,19 +79,15 @@ export const actorDefinition: Q2MonsterDefinition = {
 };
 
 export function createActorTargetModule(monsters: Q2Monsters): Q2SpawnModule {
-  return { spawn(entity, game) {
-    if (entity.classname !== "target_actor") return false;
-    if (entity.targetname === "") game.host.diagnostic(`target_actor has no targetname at ${JSON.stringify(game.body(entity).origin)}`);
-    entity.serverFlags = 1; entity.visible = false;
-    game.move(entity, { bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } });
-    if ((entity.spawnflags & 1) !== 0) {
-      entity.speed ||= 200;
-      const angles = game.body(entity).angles;
-      entity.movedir = { ...movedir({ ...angles, y: angles.y || 360 }), z: numberField(entity.spawn, "height") || 200 };
-      game.move(entity, { angles: zero });
-    }
-    game.solid(entity, "trigger");
-    entity.touch = (self, services, contact) => {
+  const use: Q2Use = (entity, game) => {
+    const context = monsters.context(entity.actor.id); if (context === null) throw new Error("Actor use without restored monster state");
+    const state = context.state, target = game.pickTarget(entity.target);
+    entity.goal = state.moveTarget = target?.actor.id ?? null;
+    if (target === null || target.classname !== "target_actor") { game.host.diagnostic(`misc_actor has bad target ${entity.target}`); entity.target = ""; state.pauseTime = 100000000; return stand(context); }
+    state.idealYaw = vectorAngles(subtract(game.body(target).origin, game.body(entity).origin)).y;
+    game.move(entity, { angles: { ...game.body(entity).angles, y: state.idealYaw } }); context.walk(); entity.target = ""; return undefined;
+  };
+  const touch: Q2Touch = (self, services, contact) => {
       const actor = services.entity(contact.other), context = monsters.context(contact.other);
       if (actor === null || context === null || context.state.moveTarget !== self.actor.id || actor.enemy !== null) return undefined;
       actor.goal = context.state.moveTarget = null;
@@ -129,6 +117,19 @@ export function createActorTargetModule(monsters: Q2Monsters): Q2SpawnModule {
       if (goal !== null && actor.goal === goal.actor.id) context.state.idealYaw = vectorAngles(subtract(services.body(goal).origin, services.body(actor).origin)).y;
       return undefined;
     };
+  return { callbacks: { use: { actor_use: use }, touch: { target_actor_touch: touch } }, spawn(entity, game) {
+    if (entity.classname !== "target_actor") return false;
+    if (entity.targetname === "") game.host.diagnostic(`target_actor has no targetname at ${JSON.stringify(game.body(entity).origin)}`);
+    entity.serverFlags = 1; entity.visible = false;
+    game.move(entity, { bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } });
+    if ((entity.spawnflags & 1) !== 0) {
+      entity.speed ||= 200;
+      const angles = game.body(entity).angles;
+      entity.movedir = { ...movedir({ ...angles, y: angles.y || 360 }), z: numberField(entity.spawn, "height") || 200 };
+      game.move(entity, { angles: zero });
+    }
+    game.solid(entity, "trigger");
+    entity.touch = touch;
     return true;
   } };
 }

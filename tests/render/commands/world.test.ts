@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import type { DecodedWorld } from "../../../src/contracts/scene.ts";
+import type { DecodedWorld, SceneEntity, SceneLight } from "../../../src/contracts/scene.ts";
 import type { Palette, RendererResourceOwner, SceneCamera } from "../../../src/contracts/render.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
@@ -15,6 +15,9 @@ import { SceneFrameBuilder, clipPicture } from "../../../src/render/commands/fra
 import { SoftwareRenderer } from "../../../src/render/cpu/rasterizer.ts";
 import { CpuRenderTarget } from "../../../src/render/cpu/commands.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { parseMd2 } from "../../../src/formats/q12-model/index.ts";
+import { SceneModelRenderer } from "../../../src/render/scene/models/renderer.ts";
+import type { WorldViewInput } from "../../../src/render/scene/world.ts";
 
 test("HUD clipping keeps texture coordinates inside an independent seat", () => {
   expect(clipPicture({ x: -10, y: 0, width: 20, height: 10 }, { s1: 0, t1: 0, s2: 1, t2: 1 }, { x: 0, y: 0, width: 100, height: 100 }))
@@ -73,9 +76,36 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
       axis: anglesToAxis({ x: 0, y: Number(spawn?.get("angle") ?? 0), z: 0 }),
       viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 16384), clip: { kind: "none" } };
     const frame = new SceneFrameBuilder(images); frame.begin();
-    const prepared = scene.prepareView({ camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 },
+    const input: WorldViewInput = { camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 },
       ...(fixture.family === "q3" ? { q3Lights: [{ origin: camera.origin, radius: 300, color: { x: 1, y: 0.25, z: 0.1 } }] } : {}),
-      clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } });
+      clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } };
+    let drawInput = input;
+    if (fixture.archive.includes("rerelease")) {
+      const modelPath = "models/monsters/soldier/tris.md2", modelBytes = await read(modelPath), member = archive.findEntries(modelPath, "ascii-insensitive")[0];
+      if (modelBytes === null || member === undefined || palette === null || palette.source.provenance.kind !== "archive") throw new Error("Missing real soldier fixture");
+      const origin = { x: camera.origin.x + camera.axis[0].x * 96, y: camera.origin.y + camera.axis[0].y * 96, z: camera.origin.z - 24 };
+      const entity: SceneEntity = { actor: null, resource: { ...palette.source, id: "resource:q2:shadow-soldier", requestedPath: modelPath,
+        digest: createContentDigest(new Bun.CryptoHasher("sha256").update(modelBytes).digest("hex")), byteLength: modelBytes.length,
+        provenance: { ...palette.source.provenance, memberPath: modelPath, memberIndex: member.ordinal } }, model: parseMd2(modelBytes),
+        transform: { origin, axis: camera.axis, scale: { x: 1, y: 1, z: 1 } }, previousOrigin: { ...origin, x: origin.x - 4 },
+        pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp: 0.5 }, skin: 0, color: { x: 1, y: 1, z: 1, w: 1 },
+        shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q2", bits: 0 }, lightingOrigin: origin, shadowPlane: 0, attachments: [] };
+      const models = new SceneModelRenderer({ family: "q2", palette, textures, shaders }, scene);
+      await models.preload([entity]);
+      const casters = models.prepareShadowCasters([entity], input);
+      expect(casters[0]?.meshes[0]?.indices.length).toBe(434 * 3);
+      expect(models.prepareShadowCasters([{ ...entity, flags: { kind: "q2", bits: 1024 } }], input)).toEqual(casters);
+      const light: SceneLight = { origin: { ...camera.origin, z: camera.origin.z + 64 }, radius: 600, color: { x: 1, y: 0.5, z: 0.25 }, additive: false,
+        profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+      const shadows = scene.prepareShadows([light], input, casters);
+      expect(shadows.stats.facesRendered).toBe(6);
+      expect(shadows.stats.entityCasters).toBe(1);
+      const lit = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
+      const batches = models.prepare([entity], lit);
+      expect(batches.some(batch => batch.lighting.kind === "q2-model-shadow" && batch.lighting.shadeScale > 1)).toBe(true);
+      drawInput = { ...lit, operations: [{ kind: "draw", batches }] };
+    }
+    const prepared = scene.prepareView(drawInput);
     expect(prepared.visibility.surfaces.length).toBeGreaterThan(0);
     expect(prepared.view.operations.some(operation => operation.kind === "draw" && operation.batches.some(batch => batch.indices.length > 0))).toBe(true);
     if (fixture.family === "q3") expect(prepared.view.operations.some(operation => operation.kind === "draw"

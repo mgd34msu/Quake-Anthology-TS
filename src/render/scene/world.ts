@@ -14,7 +14,7 @@ import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels } from "../../ma
 import type { LightmapFace, Q1LightmapEncoding, Q2LightStyle, SurfaceDynamicLight } from "../../materials/lighting.ts";
 import { createFogTexture, fogCoordinates, prepareFogVolume } from "../../materials/fog.ts";
 import type { FogVolume } from "../../materials/fog.ts";
-import { SKY_FACE_SUFFIXES, SkyBuilder } from "../../materials/sky.ts";
+import { SKY_FACE_SUFFIXES } from "../../materials/sky.ts";
 import { cross3, dot3, normalize3, sub3 } from "../../core/math.ts";
 import { geometryBounds, prepareBrushFace } from "./geometry.ts";
 import { tessellatePatch } from "./patch.ts";
@@ -34,6 +34,8 @@ import type { DynamicLight } from "../../materials/q3-lighting.ts";
 import { Q2ShadowScene, shadowCaster, shadowMesh } from "./shadows.ts";
 import type { PreparedShadows, ShadowAtlasOptions, ShadowCaster, ShadowMesh } from "./shadows.ts";
 import { shadowMaterialGeometry } from "./shadow-geometry.ts";
+import { q2SkySides } from "./q2-sky.ts";
+import type { Q2SkyView } from "./q2-sky.ts";
 
 interface SurfaceBase {
   readonly index: number;
@@ -66,6 +68,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly lights?: readonly SurfaceDynamicLight[];
   readonly q2FragmentLighting?: { readonly lights: readonly Q2FragmentLight[]; readonly atlas: Q2ShadowAtlas | null };
   readonly q2Fog?: Extract<SceneFog, { readonly kind: "q2" }>;
+  readonly q2Sky?: Q2SkyView;
   readonly q3Lights?: readonly DynamicLight[];
   readonly animationFrame?: number;
   readonly alternateAnimation?: boolean;
@@ -76,7 +79,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly beforeView?: readonly RenderOperation[];
   /** Entity lighting, video upload, shadows and private game overlays join here. */
   readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow" | "uploadCinematic">>;
-  readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean }[];
+  readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean; readonly castsShadow?: boolean }[];
   readonly prepareFlare?: (surface: WorldSurface, context: MaterialDrawContext) => readonly RenderOperation[];
 }
 export interface PreparedWorldView {
@@ -286,7 +289,8 @@ export class WorldScene {
         if (geometry !== null) meshes.push(shadowMesh(geometry));
       }
     }
-    return this.shadowScene.prepare(lights, meshes, [...casters, ...(input.inlineModels ?? []).map(model => this.shadowModel(model.model, model.transform, input))], options);
+    return this.shadowScene.prepare(lights, meshes, [...casters, ...(input.inlineModels ?? []).filter(model => model.castsShadow !== false)
+      .map(model => this.shadowModel(model.model, model.transform, input))], options);
   }
 
   private shadowGeometry(surface: WorldSurface, context: MaterialDrawContext, entity: boolean): MaterialGeometry | null {
@@ -401,12 +405,9 @@ export class WorldScene {
   }
 
   private q2SkyOperations(geometry: MaterialGeometry, input: WorldViewInput, context: MaterialDrawContext): readonly RenderOperation[] {
-    if (this.q2Sky.length === 0) throw new Error("Q2 world sky requires the current sky configstring to load its six images");
-    const builder = new SkyBuilder(); builder.clip([geometry], input.camera.origin);
-    const sky = builder.build(input.camera.origin, Math.max(2048, farClip(input.camera.origin, this.bounds)));
-    return [{ kind: "depth-range", range: [1, 1] }, ...sky.box.map(face => ({ kind: "sky-side", image: at(this.q2Sky, face.face), color: { x: 1, y: 1, z: 1, w: 1 },
-      strips: face.strips.map(strip => strip.map(index => { const vertex = at(face.geometry.vertices, index); return { position: context.project(vertex.position), texCoord: vertex.texCoord }; })) } satisfies RenderOperation)),
-      { kind: "depth-range", range: context.depthRange }];
+    const sky = input.q2Sky ?? { images: this.q2Sky, rotation: 0, autoRotate: false, axis: { x: 0, y: 0, z: 1 } };
+    const seconds = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+    return [{ kind: "depth-range", range: [1, 1] }, ...q2SkySides(geometry, input.camera.origin, sky, seconds, context.project), { kind: "depth-range", range: context.depthRange }];
   }
 
   close(): void { this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }

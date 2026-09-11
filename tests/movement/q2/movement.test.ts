@@ -7,7 +7,7 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { createNumericOperations } from "../../../src/core/numeric.ts";
 import { decodeQ2Map } from "../../../src/formats/q2-map/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
-import { applyQ2MovementContacts, ButtonT, createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider, moveQ2Rerelease, PmflagsT, q2PlayerShape } from "../../../src/movement/q2/index.ts";
+import { applyQ2MovementContacts, ButtonT, createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider, moveQ2Rerelease, Q2RereleaseMovementContext, PmflagsT, q2PlayerShape } from "../../../src/movement/q2/index.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const numericProfile: NumericProfile = { id: "q2:binary32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" };
@@ -88,7 +88,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     const map = await level();
     const services: MovementServices = { scene: createSceneQueries(map.world), numeric, touch: (_contact, state) => ({ kind: "continue", state }),
       weaponStep: () => { throw new Error("Unexpected weapon simulation"); }, animationStep: () => { throw new Error("Unexpected animation simulation"); } };
-    const provider = createQ2RereleaseMovementProvider("q2:rerelease");
+    const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     for (const n64Physics of [false, true]) {
       const input = rerelease(map.origin, n64Physics);
       let state: Q2RereleaseMovementState = input.state;
@@ -103,7 +103,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
       expect(authority).toEqual(prediction);
       if (authority.status !== "active") throw new Error("Unexpected removal");
       expect(authority.bounds.max.z).toBe(n64Physics ? 32 : 4);
-      const detailed = moveQ2Rerelease({ ...input, state, snapInitial: true, command: { ...input.command, buttons: ButtonT.BUTTON_JUMP } }, services);
+      const detailed = moveQ2Rerelease({ ...input, state, snapInitial: true, command: { ...input.command, buttons: ButtonT.BUTTON_JUMP } }, services, new Q2RereleaseMovementContext());
       if (detailed.status !== "active") throw new Error("Unexpected removal");
       expect(detailed.jumpSound).toBe(true);
       expect(detailed.state.velocity.z).toBeGreaterThan(0);
@@ -119,7 +119,7 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
       count++;
       return state.kind === "q2-rerelease" ? { kind: "continue", state: { ...state, velocity: { x: 123, y: 0, z: 0 } } } : { kind: "continue", state };
     }, weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
-    const provider = createQ2RereleaseMovementProvider("q2:rerelease");
+    const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     let state = input.state;
     for (let i = 0; i < 30 && count === 0; i++) {
       const step = provider.move({ ...input, state }, services);
@@ -154,7 +154,7 @@ test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses
     const services: MovementServices = { scene: createSceneQueries(adaptQ3Bsp(map)), numeric,
       touch: () => { throw new Error("Pmove must return contacts before ClientThink's link/trigger phase"); },
       weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
-    const provider = createQ2RereleaseMovementProvider("q2:rerelease");
+    const provider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
     let state = input.state;
     for (let frame = 0; frame < 60; frame++) {
       const result = provider.move({ ...input, state, commandSequence: frame }, services);

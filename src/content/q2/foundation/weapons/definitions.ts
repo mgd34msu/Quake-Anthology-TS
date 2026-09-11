@@ -1,6 +1,6 @@
-import type { Q2WeaponDefinition, Q2WeaponName } from "./types.ts";
+import type { Q2BaseWeaponDefinition, Q2BaseWeaponName } from "./types.ts";
 
-const definitions: Readonly<Record<Q2WeaponName, Q2WeaponDefinition>> = {
+const definitions: Readonly<Record<Q2BaseWeaponName, Q2BaseWeaponDefinition>> = {
   blaster: { name: "blaster", item: "q2:weapon_blaster", classname: "weapon_blaster", ammo: null, quantity: 0, warning: 0, viewModel: "models/weapons/v_blast/tris.md2", worldModel: "", playerModel: 1, activateLast: 4, fireLast: 8, idleLast: 52, deactivateLast: 55, pauses: [19,32], fires: [5], repeating: false },
   shotgun: { name: "shotgun", item: "q2:weapon_shotgun", classname: "weapon_shotgun", ammo: "q2:ammo_shells", quantity: 1, warning: 5, viewModel: "models/weapons/v_shotg/tris.md2", worldModel: "models/weapons/g_shotg/tris.md2", playerModel: 2, activateLast: 7, fireLast: 18, idleLast: 36, deactivateLast: 39, pauses: [22,28,34], fires: [8,9], repeating: false },
   supershotgun: { name: "supershotgun", item: "q2:weapon_supershotgun", classname: "weapon_supershotgun", ammo: "q2:ammo_shells", quantity: 2, warning: 10, viewModel: "models/weapons/v_shotg2/tris.md2", worldModel: "models/weapons/g_shotg2/tris.md2", playerModel: 3, activateLast: 6, fireLast: 17, idleLast: 57, deactivateLast: 61, pauses: [29,42,57], fires: [7], repeating: false },
@@ -14,6 +14,6 @@ const definitions: Readonly<Record<Q2WeaponName, Q2WeaponDefinition>> = {
   bfg: { name: "bfg", item: "q2:weapon_bfg", classname: "weapon_bfg", ammo: "q2:ammo_cells", quantity: 50, warning: 50, viewModel: "models/weapons/v_bfg/tris.md2", worldModel: "models/weapons/g_bfg/tris.md2", playerModel: 11, activateLast: 8, fireLast: 32, idleLast: 55, deactivateLast: 58, pauses: [39,45,50,55], fires: [9,17], repeating: false },
 };
 
-export const Q2_BASE_WEAPONS: readonly Q2WeaponDefinition[] = Object.values(definitions);
-export function q2WeaponDefinition(name: Q2WeaponName): Q2WeaponDefinition { return definitions[name]; }
-export function q2WeaponFromClassname(classname: string): Q2WeaponDefinition | null { return Q2_BASE_WEAPONS.find(definition => definition.classname === classname) ?? null; }
+export const Q2_BASE_WEAPONS: readonly Q2BaseWeaponDefinition[] = Object.values(definitions);
+export function q2WeaponDefinition(name: Q2BaseWeaponName): Q2BaseWeaponDefinition { return definitions[name]; }
+export function q2WeaponFromClassname(classname: string): Q2BaseWeaponDefinition | null { return Q2_BASE_WEAPONS.find(definition => definition.classname === classname) ?? null; }

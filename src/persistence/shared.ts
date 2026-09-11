@@ -36,10 +36,17 @@ export function readNumeric(reader: SaveReader): NumericProfile {
 }
 export function readRandom(reader: SaveReader): RandomState {
   const draws = reader.field("draws").integer(0);
-  switch (reader.field("kind").choice("q3-lcg", "msvcrt-rand", "glibc-random", "guest")) {
+  switch (reader.field("kind").choice("q3-lcg", "msvcrt-rand", "glibc-random", "q2-rerelease-mt19937", "guest")) {
     case "q3-lcg": return { kind: "q3-lcg", seed: reader.field("seed").integer(), draws };
     case "msvcrt-rand": return { kind: "msvcrt-rand", seed: reader.field("seed").integer(), draws };
     case "glibc-random": return { kind: "glibc-random", words: reader.field("words").list(value => value.integer()), front: reader.field("front").integer(0), rear: reader.field("rear").integer(0), draws };
+    case "q2-rerelease-mt19937": {
+      const words = reader.field("words").list(value => { const word = value.integer(0); return word <= 0xffffffff ? word : value.fail("expected a uint32 MT19937 word"); });
+      if (words.length !== 624) return reader.field("words").fail("expected 624 MT19937 words");
+      const index = reader.field("index").integer(0);
+      if (index > 624) return reader.field("index").fail("expected MT19937 index 0 through 624");
+      return { kind: "q2-rerelease-mt19937", distribution: reader.field("distribution").literal("msvc-2022-17.6"), words, index, draws };
+    }
     case "guest": return { kind: "guest", module: reader.field("module").string(), bytes: reader.field("bytes").bytes(), draws };
   }
 }

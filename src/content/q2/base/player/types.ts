@@ -63,9 +63,12 @@ export interface Q2PlayerHooks {
   /** Source ClientBeginServerFrame invokes weapon think exactly once unless ClientThink already did. */
   weaponInput(actor: ActorId): Q2WeaponInput;
   banned(address: string): boolean;
+  score?(victim: Q2Entity, attacker: Q2Entity | null, game: Q2GameServices, change: number, meansOfDeath: number, recipient: Q2Entity): undefined;
+  selectSpawn?(entity: Q2Entity, game: Q2GameServices): { readonly origin: Vec3; readonly angles: Vec3 } | null;
   /** Expansion modes may react synchronously after base death/disconnect state changes. */
   death?(entity: Q2Entity, game: Q2GameServices, attack: AttackProvenance | null): undefined;
   dropInventory?(entity: Q2Entity, game: Q2GameServices, attack: AttackProvenance | null): undefined;
+  beforeDeathInventory?(entity: Q2Entity, game: Q2GameServices, attack: AttackProvenance | null): undefined;
   disconnect?(entity: Q2Entity, game: Q2GameServices): undefined;
   command?(entity: Q2Entity, game: Q2GameServices, name: string, args: readonly string[]): boolean;
 }

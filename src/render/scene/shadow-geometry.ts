@@ -8,9 +8,15 @@ import type { MaterialGeometry } from "../../materials/geometry.ts";
 /** View models, transparent effects and sprites have no world-space silhouette. */
 export function entityCastsShadow(entity: SceneEntity, viewModel = false): boolean {
   if (viewModel || entity.model.kind === "q1-spr" || entity.model.kind === "q2-sp2") return false;
-  if (entity.flags.kind === "q2") return (entity.flags.bits & (4 | 16 | 32 | 128 | 8192 | 0x00200000)) === 0;
-  if (entity.flags.kind === "q3" && (entity.flags.bits & (4 | 8 | 64)) !== 0) return false;
-  return entity.color.w >= 1;
+  return sceneFlagsCastShadow(entity.flags, entity.color.w, viewModel);
+}
+
+/** Brush presentation uses the same flag rules without constructing an alias entity. */
+export function sceneFlagsCastShadow(flags: SceneEntity["flags"], alpha = 1, viewModel = false): boolean {
+  if (viewModel) return false;
+  if (flags.kind === "q2") return (flags.bits & (4 | 16 | 32 | 128 | 8192 | 0x00200000)) === 0;
+  if (flags.kind === "q3" && (flags.bits & (4 | 8 | 64)) !== 0) return false;
+  return alpha >= 1;
 }
 
 /** Run the same deformation and shader clock as the color pass before projection. */

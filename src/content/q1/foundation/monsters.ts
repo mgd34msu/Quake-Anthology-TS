@@ -5,7 +5,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor, Q1Monster } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
-import { POINT, vadd, vsub, vscale, length, normalize, dot, vectors, yawFor } from "./types.ts";
+import { POINT, vadd, vsub, vscale, length, normalize, dot, yawFor } from "./types.ts";
 import { fireBullets } from "./weapons.ts";
 
 const armyWalk: readonly number[] = [1, 1, 1, 1, 2, 3, 4, 4, 2, 2, 2, 1, 0, 1, 1, 1, 3, 3, 3, 3, 2, 1, 1, 1];
@@ -45,7 +45,7 @@ function findTarget(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): bo
   const target = game.host.bodies.read(candidate); if (target === null) return false;
   const delta = vsub(target.origin, game.body(entity).origin), distance = length(delta);
   if (distance >= 1000 || !visible(game, entity, candidate)) return false;
-  const inFront = dot(normalize(delta), vectors(game.body(entity).angles).forward) > 0.3;
+  const inFront = dot(normalize(delta), game.makeVectors(game.body(entity).angles).forward) > 0.3;
   if (distance >= 500 && !inFront || distance >= 120 && distance < 500 && (game.player(candidate)?.hostileUntil ?? 0) < game.time && !inFront) return false;
   foundTarget(game, entity, monster, candidate); return true;
 }
@@ -133,7 +133,7 @@ function monsterFrame(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): 
       if (index < 2) face(game, entity, target.origin);
       if (index === 1) {
         const body = game.body(entity); entity.movement = "toss";
-        game.setBody(entity, { origin: vadd(body.origin, { x: 0, y: 0, z: 1 }), velocity: vadd(vscale(vectors(body.angles).forward, 300), { x: 0, y: 0, z: 200 }), ground: null });
+        game.setBody(entity, { origin: vadd(body.origin, { x: 0, y: 0, z: 1 }), velocity: vadd(vscale(game.makeVectors(body.angles).forward, 300), { x: 0, y: 0, z: 200 }), ground: null });
         entity.touch = game.named.touch(entity, "Dog_JumpTouch");
       }
     }

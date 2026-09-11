@@ -22,11 +22,11 @@ export interface Q2EntityCheckpoint {
   readonly actor: SavedActorId;
   readonly sourceSlot: number | null;
   readonly spawn: { readonly classname: string; readonly ordinal: number; readonly values: readonly { readonly key: string; readonly value: string }[] };
-  readonly values: Omit<Q2Entity, "actor" | "spawn" | "activator" | "enemy" | "owner" | "goal" | "teamMaster" | "teamChain" | "chain" | "lastAttack" | "think" | "prethink" | "use" | "touch" | "pain" | "die" | "blocked">;
+  readonly values: Omit<Q2Entity, "actor" | "spawn" | "activator" | "enemy" | "owner" | "goal" | "teamMaster" | "teamChain" | "chain" | "beam" | "beam2" | "proboscus" | "lastAttack" | "think" | "prethink" | "postthink" | "use" | "touch" | "pain" | "die" | "blocked">;
   readonly links: { readonly activator: SavedActorId | null; readonly enemy: SavedActorId | null; readonly owner: SavedActorId | null; readonly goal: SavedActorId | null;
-    readonly teamMaster: SavedActorId | null; readonly teamChain: SavedActorId | null; readonly chain: SavedActorId | null; };
+    readonly teamMaster: SavedActorId | null; readonly teamChain: SavedActorId | null; readonly chain: SavedActorId | null; readonly beam: SavedActorId | null; readonly beam2: SavedActorId | null; readonly proboscus: SavedActorId | null; };
   readonly lastAttack: Q2AttackCheckpoint | null;
-  readonly callbacks: { readonly think: string | null; readonly prethink: string | null; readonly use: string | null; readonly touch: string | null;
+  readonly callbacks: { readonly think: string | null; readonly prethink: string | null; readonly postthink: string | null; readonly use: string | null; readonly touch: string | null;
     readonly pain: string | null; readonly die: string | null; readonly blocked: string | null; };
 }
 

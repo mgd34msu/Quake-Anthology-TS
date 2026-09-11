@@ -6,6 +6,7 @@ import type { SeatClientState, SeatPresentation, SimulationEvent, WorldSnapshot 
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
 import { anglesToAxis } from "../../core/math.ts";
+import { tokenizeCommand } from "../../core/commands/index.ts";
 import { drawConsole } from "../../console/draw.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { prepareMaterialText } from "../../render/commands/material2d.ts";
@@ -18,10 +19,14 @@ import { SeatTextPresentation } from "../../text/layout.ts";
 import { Draw2D, TextCommandSink } from "../../text/draw2d.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { ApplicationAssets } from "./assets.ts";
+import type { ApplicationEffects } from "./effects.ts";
+import { SourceFinale } from "./finale.ts";
 import type { LocalInput } from "./input.ts";
 import type { NativeRenderer } from "./renderer.ts";
 import type { SimulationPresentation, SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ApplicationSeatUi } from "./ui.ts";
+import type { ApplicationQ3Client } from "./q3-client.ts";
+import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 
 interface ModelGroup {
   readonly renderer: SceneModelRenderer;
@@ -49,6 +54,7 @@ export function seatViewport(index: number, count: number, width: number, height
 export class WorldSeatPresentation implements SeatPresentation {
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
+  private readonly finale: SourceFinale;
   private readonly groups = new Map<ContentId, ModelGroup>();
   private readonly characters = new Map<string, Q3CharacterPresenter>();
   private readonly lightStyles = new Map<number, string>();
@@ -59,9 +65,12 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly seatCount: number,
-    font: TextFontSelection, private readonly characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi) {
+    font: TextFontSelection, private readonly characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
+    private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
+    private readonly rerelease: ApplicationRereleasePresentation | null = null) {
     this.frames = new SceneFrameBuilder(assets.images);
     this.text = new SeatTextPresentation(local.player.seat.id, font);
+    this.finale = new SourceFinale(assets, this.text);
   }
 
   get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.local.player.seat.id.index, this.seatCount, size.width, size.height); }
@@ -74,6 +83,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   camera(): SceneCamera {
+    if (this.q3Client !== null) return this.q3Client.camera();
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
     const fovX = 90, fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     return { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
@@ -89,7 +99,12 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   sourceEvents(events: readonly SimulationPresentationEvent[]): void {
+    if (this.q3Client !== null) {
+      for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
+      return;
+    }
     this.ui.receive(events);
+    this.finale.receive(events);
     const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
     for (const source of events) {
       if (source.kind === "view-reset") {
@@ -106,6 +121,13 @@ export class WorldSeatPresentation implements SeatPresentation {
         if (event.kind === "lightstyle") this.lightStyles.set(event.style, event.pattern);
         if (event.kind === "help") this.local.console.print(`${event.text}\n`);
         if (event.kind === "pickup" && owns(event.player)) this.local.console.print(`${event.name}\n`);
+        if (event.kind === "print" && (event.actor === null || owns(event.actor))) this.local.console.print(event.text);
+      } else if (source.kind === "q2-player") {
+        if (source.event.kind === "print" && (source.event.target === null || owns(source.event.target))) this.local.console.print(source.event.text);
+      } else if (source.kind === "q3-source" && source.event.kind === "server-command"
+        && (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)) {
+        const [command, text] = tokenizeCommand(source.event.text, "q3").argv;
+        if ((command === "print" || command === "chat" || command === "tchat") && text !== undefined) this.local.console.print(text);
       }
     }
   }
@@ -113,6 +135,8 @@ export class WorldSeatPresentation implements SeatPresentation {
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.previousTime = this.preparedTime;
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
+    if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }
+    await this.finale.prepare();
     for (const group of this.groups.values()) { group.entities.length = 0; group.options.clear(); }
     const inlineModels: NonNullable<WorldViewInput["inlineModels"]>[number][] = [];
     const brushModels: BrushPresentation[] = [];
@@ -146,7 +170,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       }
       const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
         transform: { origin: source.origin, axis, scale: { x: source.scale, y: source.scale, z: source.scale } }, previousOrigin: source.origin,
-        pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: 0 }, skin: source.skin,
+        pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 }, skin: source.skin,
         color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
       await append(source.content, entity, () => ({ viewModel: source.viewWeapon,
@@ -171,29 +195,40 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
-    const time = snapshot.frame.time, camera = this.camera();
+    const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera);
     const style = (index: number, absent: number): number => {
       const pattern = this.lightStyles.get(index);
       if (pattern === undefined || pattern.length === 0) return absent;
       return pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
     };
     const input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+      ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false }, inlineModels: this.inlineModels,
+      lights: effects.lights, q3Lights: effects.q3Lights,
       q1Styles: Array.from({ length: 256 }, (_, index) => this.lightStyles.has(index) ? style(index, 12) * 22 : 256),
       q2Styles: Array.from({ length: 256 }, (_, index) => { const value = style(index, 12) / 12; return { rgb: { x: value, y: value, z: value }, white: value * 3 }; }) };
-    const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input, entity => group.options.get(entity) ?? {}));
+    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera));
     this.frames.begin();
-    const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
-    this.frames.world(this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }] }));
+    if (nativeFrame === undefined) {
+      const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input, entity => group.options.get(entity) ?? {}));
+      const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
+      this.frames.world(this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }, ...effects.operations] }));
+    } else for (const command of nativeFrame.commands) {
+      if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
+      this.frames.command(command);
+    }
     const material = (draw: Parameters<typeof prepareMaterialText>[0]): void => {
       this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: camera.viewport, clear: null, clipPlane: null,
         beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, camera.viewport, this.assets.world.materialContext(input)) }] });
     };
-    this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material);
     const draw = new Draw2D(new TextCommandSink(this.local.player.seat.id, camera.viewport, command => {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
+    this.finale.draw(draw, this.preparedTime);
+    this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, camera.viewport.height / 480));
+    this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
+      !this.finale.active && this.q3Client === null, !(this.rerelease?.storyActive(this.local.player.actor) ?? false));
     const scale = Math.max(1, Math.floor(camera.viewport.height / 300));
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(camera.viewport.height * 0.5);
@@ -212,5 +247,5 @@ export class WorldSeatPresentation implements SeatPresentation {
     return this.native.execute(frame);
   }
 
-  close(): undefined { this.ui.close(); this.groups.clear(); this.characters.clear(); return undefined; }
+  close(): undefined { this.q3Client?.close(); this.ui.close(); this.groups.clear(); this.characters.clear(); return undefined; }
 }

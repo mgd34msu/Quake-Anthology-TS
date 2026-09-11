@@ -10,8 +10,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
       for (const product of catalog.products) process.stdout.write(`${product.expectation.id}\t${product.availability.kind}\t${product.expectation.title}\n`);
       return 0;
     }
-    const { openApplication } = await import("./app/bootstrap/application.ts");
-    const application = await openApplication(command.options, { print: text => { process.stdout.write(text); return undefined; } });
+    const host = { print: (text: string): undefined => { process.stdout.write(text); return undefined; } };
+    const application = command.options.network.kind === "q2-client"
+      ? await (await import("./app/bootstrap/remote-application.ts")).RemoteApplication.open(command.options, host)
+      : await (await import("./app/bootstrap/application.ts")).openApplication(command.options, host);
     const stop = (): void => { application.requestQuit(); };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);

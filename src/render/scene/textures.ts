@@ -1,6 +1,6 @@
 import type { ImageLevel, Palette, RenderImage, RendererImage, TextureSampling } from "../../contracts/render.ts";
 import type { Q1MipTexture } from "../../contracts/scene.ts";
-import { decodeBmp, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
+import { decodeBmp, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeQpic, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
 import { SceneImageRegistry } from "./resources.ts";
 
 export interface SceneAsset {
@@ -86,14 +86,20 @@ export class SceneTextureLoader {
   private async loadUncached(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" }): Promise<SceneTexture | null> {
     const dot = name.lastIndexOf("."), slash = name.lastIndexOf("/");
     const explicit = dot > slash, base = explicit ? name.slice(0, dot) : name;
-    const extensions = options.family === "q2" ? [".png", ".tga", ".jpg", ".wal", ".pcx"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp"];
+    const extensions = options.family === "q2" ? [".png", ".tga", ".jpg", ".wal", ".pcx"]
+      : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp"];
     const candidates = explicit ? [name, ...extensions.map(extension => base + extension).filter(path => path !== name)] : extensions.map(extension => name + extension);
     for (const path of candidates) {
       const asset = await this.reader.read(path);
       if (asset === null) continue;
       const suffix = path.slice(path.lastIndexOf(".")).toLowerCase();
       let content: RenderImage;
-      if (suffix === ".wal") {
+      if (suffix === ".lmp") {
+        if (this.palette === null) throw new Error("Quake picture textures require their content palette");
+        const pic = decodeQpic(asset.bytes, path);
+        content = indexedRenderImage([{ width: pic.width, height: pic.height, pixels: pic.indices }], this.palette,
+          { kind: "opaque" }, { first: this.fullbrightFirst, last: 255 });
+      } else if (suffix === ".wal") {
         if (this.palette === null) throw new Error("WAL textures require their content palette");
         const wal = decodeWal(asset.bytes, path);
         content = indexedRenderImage(wal.levels, this.palette);

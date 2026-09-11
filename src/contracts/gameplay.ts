@@ -5,6 +5,14 @@ import type { SourceTime } from "./time.ts";
 export type ItemId = `${string}:${string}`;
 export type ObjectiveId = `${string}:${string}`;
 
+/** Selected arsenal controls travel with a command independently of its movement dialect. */
+export interface ArsenalIntent {
+  readonly provider: ProviderId;
+  /** Null retains the current selection; the arsenal owner validates named weapons. */
+  readonly weapon: ItemId | null;
+  readonly useHoldable: boolean;
+}
+
 /** Original mod encodings differ between classic game DLLs and the rerelease mod_t. */
 export type Q2NativeCause =
   | { readonly edition: "classic"; readonly game: "base" | "xatrix" | "rogue" | "ctf"; readonly value: number }

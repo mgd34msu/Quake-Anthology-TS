@@ -55,6 +55,8 @@ export interface CvarRegistryOptions {
   readonly onEffect?: (effect: CvarEffect) => undefined;
   readonly commandExists?: (name: string) => boolean;
   readonly infoTargets?: readonly CvarInfoTarget[];
+  /** A local cgame consults its live session authority before protected writes. */
+  readonly cheatsAllowed?: () => boolean | undefined;
 }
 
 export interface VmCvar {
@@ -222,9 +224,10 @@ export class CvarRegistry {
           state.modificationCount++;
           return snapshot(state);
         }
-        const cheats = this.find("sv_cheats");
-        if ((state.flags & CvarFlag.Cheat) !== 0 && !(cheats === undefined ? this.cheatsEnabled : cheats.integerValue !== 0)) {
-          this.print(`${name} is cheat protected.\n`); return snapshot(state);
+        if ((state.flags & CvarFlag.Cheat) !== 0) {
+          const cheats = this.find("sv_cheats");
+          const cheatsAllowed = this.options.cheatsAllowed?.() ?? (cheats === undefined ? this.cheatsEnabled : cheats.integerValue !== 0);
+          if (!cheatsAllowed) { this.print(`${name} is cheat protected.\n`); return snapshot(state); }
         }
       } else state.latchedValue = undefined;
     }

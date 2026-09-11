@@ -1,6 +1,6 @@
 /* Model submission adapted from Q1 r_alias/r_sprite, Q2 gl_mesh and Q3 tr_mesh.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
-import type { Bounds, Plane, Vec3, Vec4 } from "../../../contracts/math.ts";
+import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { DrawBatch, RenderImage, RenderState, SceneCamera } from "../../../contracts/render.ts";
 import type { ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
@@ -21,6 +21,8 @@ export interface ModelSourceOptions {
   readonly lodScale?: number;
   readonly lodBias?: number;
   readonly nonNormalizedAxes?: boolean;
+  readonly noWorldModel?: boolean;
+  readonly shaderTexCoord?: Vec2;
   readonly leftHand?: 0 | 1 | 2;
   readonly infrared?: boolean;
   readonly viewModel?: boolean;

@@ -6,7 +6,9 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import type { Q2Entity, Q2GameServices } from "../host.ts";
 
-export type Q2WeaponName = "blaster" | "shotgun" | "supershotgun" | "machinegun" | "chaingun" | "grenades" | "grenadelauncher" | "rocketlauncher" | "hyperblaster" | "railgun" | "bfg";
+export type Q2BaseWeaponName = "blaster" | "shotgun" | "supershotgun" | "machinegun" | "chaingun" | "grenades" | "grenadelauncher" | "rocketlauncher" | "hyperblaster" | "railgun" | "bfg";
+/** Names resolve through the selected session's source weapon registry. */
+export type Q2WeaponName = string;
 export type Q2WeaponPhase = "activating" | "ready" | "firing" | "dropping";
 export interface Q2WeaponDefinition {
   readonly name: Q2WeaponName;
@@ -26,11 +28,12 @@ export interface Q2WeaponDefinition {
   readonly fires: readonly number[];
   readonly repeating: boolean;
 }
+export interface Q2BaseWeaponDefinition extends Q2WeaponDefinition { readonly name: Q2BaseWeaponName; }
 
 export type Q2WeaponEvent =
   | { readonly kind: "muzzleflash"; readonly actor: ActorId; readonly flash: number; readonly silenced: boolean }
-  | { readonly kind: "beam"; readonly effect: "rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3; readonly duration: number }
-  | { readonly kind: "view-weapon"; readonly actor: ActorId; readonly weapon: Q2WeaponName | null; readonly model: string; readonly playerModel: number; readonly frame: number; readonly rate: number; readonly kickOrigin: Vec3; readonly kickAngles: Vec3 }
+  | { readonly kind: "beam"; readonly effect: "rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning" | "heatbeam" | "monster-heatbeam"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3; readonly duration: number }
+  | { readonly kind: "view-weapon"; readonly actor: ActorId; readonly weapon: Q2WeaponName | null; readonly model: string; readonly playerModel: number; readonly frame: number; readonly skin: number; readonly rate: number; readonly kickOrigin: Vec3; readonly kickAngles: Vec3 }
   | { readonly kind: "player-animation"; readonly actor: ActorId; readonly priority: "attack" | "pain" | "reverse"; readonly first: number; readonly last: number; readonly resetTime: boolean }
   | { readonly kind: "invisibility-reveal"; readonly actor: ActorId; readonly until: number };
 
@@ -92,7 +95,10 @@ export class Q2WeaponState {
   kickUntil = 0;
   kickDuration = 0.2;
   loopSound = "";
+  viewModel: string | null = null;
+  viewSkin = 0;
   lastFiringTime = 0;
+  sourceFiring = false;
   gunRate = 10;
   constructor(weapon: Q2WeaponName | null = "blaster") { this.weapon = weapon; }
 }

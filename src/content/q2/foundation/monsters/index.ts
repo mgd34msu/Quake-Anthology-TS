@@ -3,6 +3,7 @@ import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
 import { restoreQ2Actor, saveQ2Actor } from "../checkpoint.ts";
 import type { Q2MonstersCheckpoint } from "./checkpoint.ts";
+import { createAlternateFlyState } from "./alternate-fly-state.ts";
 import { q2GibCallbacks } from "./gibs.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { AttackProvenance } from "../../../../contracts/gameplay.ts";
@@ -17,7 +18,7 @@ import { infantryAttack, infantryCallbacks, infantryDie, infantryDuck, infantryP
 import { classic_infantryMoves, classic_soldierMoves, rerelease_infantryMoves, rerelease_soldierMoves } from "./moves.ts";
 import { defaultCheckAttack, MonsterPerception } from "./perception.ts";
 import { soldierAttack, soldierCallbacks, soldierDie, soldierDuck, soldierPain, soldierRun, soldierSidestep, soldierSight, soldierStand, soldierWalk } from "./soldier.ts";
-import type { MonsterContext, MonsterHandler, MonsterState, MonsterWeapons, Q2MonsterDefinition } from "./types.ts";
+import type { MonsterContext, MonsterHandler, MonsterState, MonsterWeapons, Q2MonsterDefinition, Q2MonsterSourceCombatHooks, Q2MonsterHintHooks } from "./types.ts";
 import { recordAt } from "./types.ts";
 
 export type { Q2MonstersCheckpoint, Q2MonsterStateCheckpoint, Q2MonsterPerceptionCheckpoint } from "./checkpoint.ts";
@@ -77,8 +78,18 @@ export class Q2Monsters implements Q2SpawnModule {
   private readonly perception = new MonsterPerception(this.contexts);
   private readonly pendingDamage = new Map<ActorId, { readonly reaction: DeathReaction; readonly attack: AttackProvenance | null }>();
   private connected = false;
+  private sourceCombatHooks: Q2MonsterSourceCombatHooks | null = null;
+  private sourceCombatRules: "base" | "rogue" = "base";
+  private hintHooks: Q2MonsterHintHooks | null = null;
 
   constructor(private readonly weapons: MonsterWeapons, private readonly hooks: Q2MonsterHooks = {}) {}
+
+  setSourceCombatRules(rules: "base" | "rogue", hooks: Q2MonsterSourceCombatHooks | null = null): undefined {
+    this.sourceCombatRules = rules;
+    this.sourceCombatHooks = hooks;
+    return this.perception.setSourceCombatRules(rules, hooks);
+  }
+  setHintPaths(hooks: Q2MonsterHintHooks): undefined { this.hintHooks = hooks; return this.perception.setHintPaths(hooks); }
 
   private requireContext(entity: Q2Entity): MonsterContext {
     const context = this.contexts.get(entity.actor.id);
@@ -168,14 +179,14 @@ export class Q2Monsters implements Q2SpawnModule {
   capture(): Q2MonstersCheckpoint {
     return { version: 1, perception: this.perception.capture(), actors: [...this.contexts.values()].map(context => {
       const { state, entity } = context;
-      const { move, nextMove, soundTarget, oldEnemy, moveTarget, ...values } = state;
+      const { move, nextMove, soundTarget, oldEnemy, moveTarget, commander, ...values } = state;
       const definition = this.actors.get(entity.actor.id);
       if (definition === undefined) throw new Error(`Cannot save missing Q2 monster definition ${entity.classname}`);
       const pending = this.pendingDamage.get(entity.actor.id);
       return { actor: { slot: entity.actor.id.slot, generation: entity.actor.id.generation }, definition: definition.classname,
         state: { ...structuredClone(values), move: move.name, nextMove: nextMove?.name ?? null,
           soundTarget: soundTarget === null ? null : { ...soundTarget, origin: { ...soundTarget.origin }, actor: { slot: soundTarget.actor.slot, generation: soundTarget.actor.generation } },
-          oldEnemy: saveQ2Actor(oldEnemy), moveTarget: saveQ2Actor(moveTarget) },
+          oldEnemy: saveQ2Actor(oldEnemy), moveTarget: saveQ2Actor(moveTarget), commander: saveQ2Actor(commander) },
         pendingDamage: pending === undefined ? null : { reaction: { damage: pending.reaction.damage, kick: pending.reaction.kick, point: { ...pending.reaction.point },
           attacker: saveQ2Actor(pending.reaction.attacker), inflictor: saveQ2Actor(pending.reaction.inflictor) },
           attack: pending.attack === null ? null : structuredClone({ ...pending.attack, attacker: saveQ2Actor(pending.attack.attacker), inflictor: saveQ2Actor(pending.attack.inflictor) }) } };
@@ -195,10 +206,10 @@ export class Q2Monsters implements Q2SpawnModule {
         if (move === undefined) throw new Error(`Unknown saved Q2 monster move ${name}`);
         return move;
       };
-      const { move, nextMove, soundTarget, oldEnemy, moveTarget, ...values } = saved.state;
+      const { move, nextMove, soundTarget, oldEnemy, moveTarget, commander, ...values } = saved.state;
       const state: MonsterState = { ...values, move: findMove(move), nextMove: nextMove === null ? null : findMove(nextMove),
         soundTarget: soundTarget === null ? null : { ...soundTarget, actor: game.host.actors.referenceSaved(soundTarget.actor) },
-        oldEnemy: reference(oldEnemy), moveTarget: reference(moveTarget) };
+        oldEnemy: reference(oldEnemy), moveTarget: reference(moveTarget), commander: reference(commander) };
       this.attachContext(entity, game, definition, state);
       const pending = saved.pendingDamage;
       if (pending !== null) this.pendingDamage.set(owner.id, {
@@ -207,12 +218,14 @@ export class Q2Monsters implements Q2SpawnModule {
       });
     }
     this.perception.restore(game, checkpoint.perception);
+    for (const context of this.contexts.values()) this.actors.get(context.entity.actor.id)?.restore?.(context);
     return undefined;
   }
 
   context(actor: ActorId): MonsterContext | null { return this.contexts.get(actor) ?? null; }
   get currentSightClient(): ActorId | null { return this.perception.currentSightClient; }
   foundTarget(context: MonsterContext): undefined { return this.perception.foundTarget(context); }
+  huntTarget(context: MonsterContext): undefined { return this.perception.huntTarget(context); }
   respawn(entity: Q2Entity, game: Q2GameServices): MonsterContext {
     const definition = this.actors.get(entity.actor.id) ?? this.definition(entity.classname, game);
     if (definition === null) throw new Error(`Cannot revive unknown Q2 monster ${entity.classname}`);
@@ -270,10 +283,23 @@ export class Q2Monsters implements Q2SpawnModule {
     return this.admit(entity, game, definition, false);
   }
 
+  /** Rogue CreateMonster sets AI_DO_NOT_COUNT before ED_CallSpawn. */
+  spawnSummoned(entity: Q2Entity, game: Q2GameServices): MonsterContext {
+    const definition = this.definition(entity.classname, game);
+    if (definition === null) throw new Error(`Cannot summon unknown Q2 monster ${entity.classname}`);
+    this.admit(entity, game, definition, false, true);
+    return this.requireContext(entity);
+  }
+
   private attachContext(entity: Q2Entity, game: Q2GameServices, definition: Q2MonsterDefinition, state: MonsterState): MonsterContext {
     const moves = new Map(definition.moves.map(move => [move.name, move]));
     const context: MonsterContext = {
       entity, game, state, weapons: this.weapons,
+      sourceCombatRules: () => this.sourceCombatRules,
+      beforeSourceMove: displacement => this.sourceCombatHooks?.beforeMove(context, displacement) ?? { kind: "move", displacement },
+      acceptsSourceGroundMove: origin => this.sourceCombatHooks?.acceptsGroundMove(context, origin) ?? true,
+      runHintPath: distance => this.hintHooks?.run(context, distance) ?? false,
+      checkLostHintPath: () => this.hintHooks?.checkLost(context) ?? false,
       schedule: (delay, callback) => {
         const think = game.sourceCallbacks.think.resolve(callback);
         if (think === null) throw new Error(`Missing monster thinker ${callback}`);
@@ -300,33 +326,38 @@ export class Q2Monsters implements Q2SpawnModule {
       moveToGoal: distance => this.perception.moveToGoal(context, distance),
       dodge: (attacker, eta, trace, gravity = false) => this.dodge(entity, game, attacker, eta, trace, gravity),
       blocked: distance => definition.blocked?.(context, distance) ?? this.blocked(context, distance),
+      platformState: actor => this.hooks.platformState?.(actor) ?? null,
     };
     this.contexts.set(entity.actor.id, context); this.actors.set(entity.actor.id, definition);
     return context;
   }
 
-  private admit(entity: Q2Entity, game: Q2GameServices, definition: Q2MonsterDefinition, reviving: boolean): boolean {
+  private admit(entity: Q2Entity, game: Q2GameServices, definition: Q2MonsterDefinition, reviving: boolean, summoned = false): boolean {
     if (game.options.mode === "deathmatch") { game.remove(entity); return true; }
     this.connect(game);
     const initial = definition.moves.find(move => move.name === definition.initialMove);
     if (initial === undefined) throw new Error(`Missing Q2 monster initial move ${definition.initialMove}`);
+    const previous = reviving ? this.contexts.get(entity.actor.id)?.state : undefined;
     const state: MonsterState = {
+      ...createAlternateFlyState(),
       kind: definition.kind, weapon: entity.classname === "monster_soldier_light" ? "blaster" : entity.classname === "monster_soldier" ? "shotgun" : "machinegun",
       locomotion: definition.locomotion ?? "walk", hasMelee: definition.melee !== undefined, hasRangedAttack: definition.hasRangedAttack !== false,
       hasIdle: definition.idle !== undefined, hasSearch: definition.search !== undefined, blindFire: definition.blindFire === true,
-      goodGuy: false, brutal: false, medic: false, resurrecting: false,
+      goodGuy: false, targetAnger: false, brutal: false, medic: false, resurrecting: false,
+      ignoreShots: previous?.ignoreShots ?? false, doNotCount: summoned || (previous?.doNotCount ?? false), spawnedBy: previous?.spawnedBy ?? "none",
+      commander: previous?.commander ?? null, monsterSlots: previous?.monsterSlots ?? 0, monsterUsed: previous?.monsterUsed ?? 0,
       move: initial, nextMove: null, nextFrame: 0, nextMoveTime: 0, scale: definition.scale, gibHealth: definition.gibHealth, canTakeDamage: true,
       dead: false, corpse: false, gibbed: false, standGround: false, temporaryStandGround: false, holdFrame: false, ducked: false, dodging: false, charging: false, manualSteering: false, combatPoint: false,
       attackState: "straight", lefty: false, idealYaw: game.body(entity).angles.y, yawSpeed: definition.yawSpeed ?? (stateLocomotion(definition) === "walk" ? 20 : 10),
       pauseTime: 0, idleTime: 0, painTime: 0, fireWait: 0, duckWait: 0, nextDuckTime: 0, dodgeTime: 0, attackFinished: 0, checkAttackTime: 0, strafeTime: 0, hadVisibility: false, closeSightTripped: false,
       meleeTime: 0, searchTime: 0, trailTime: 0, showHostile: 0, lastSighting: zero, savedGoal: null, lostSight: false, pursueNext: false, pursueTemporary: false, pursuitLastSeen: false,
       blindFireTarget: zero, blindFireDelay: 0, soundTarget: null, oldEnemy: null, moveTarget: null, combatTarget: entity.combatTarget,
-      cocked: definition.kind === "soldier", forceRefire: false, normalHeight: definition.bounds.max.z, airFinished: game.host.now() + 12, environmentalDamageTime: 0, jumpTime: 0, fliesTime: null,
+      cocked: definition.kind === "soldier", forceRefire: false, normalHeight: definition.bounds.max.z, waterLevel: 0, waterType: 0, lastLinkCount: 0, airFinished: game.host.now() + 12, environmentalDamageTime: 0, jumpTime: 0, fliesTime: null,
     };
     const context = this.attachContext(entity, game, definition, state);
     entity.model = definition.model;
     entity.maxHealth = definition.health * (game.options.edition === "rerelease" ? numberField(entity.spawn, "health_multiplier", 1) : 1);
-    entity.viewHeight = definition.viewHeight ?? (state.locomotion === "walk" ? 25 : 0);
+    entity.viewHeight = definition.viewHeight ?? (game.options.edition === "rerelease" ? 0 : state.locomotion === "swim" ? 10 : 25);
     entity.serverFlags = (entity.serverFlags | 4) & ~2;
     entity.flags |= state.locomotion === "fly" ? 1 : state.locomotion === "swim" ? 2 : 0;
     entity.clipMask = monsterSolidMask(game);
@@ -337,6 +368,7 @@ export class Q2Monsters implements Q2SpawnModule {
     state.scale *= entity.scale;
     game.move(entity, { bounds: { min: scale(definition.bounds.min, entity.scale), max: scale(definition.bounds.max, entity.scale) } }, false);
     state.normalHeight = game.body(entity).bounds.max.z;
+    if (game.options.edition === "rerelease" && entity.viewHeight === 0) entity.viewHeight = Math.trunc(state.normalHeight - 8);
     if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass: definition.mass * entity.scale, canTakeDamage: true, invulnerable: false, team: null });
     else {
       game.host.combat.setHealth(entity.actor, entity.maxHealth);
@@ -348,11 +380,12 @@ export class Q2Monsters implements Q2SpawnModule {
     if (!game.host.actors.isLive(entity.actor.id)) return true;
     if (game.options.edition === "rerelease" && (entity.spawnflags & 524288) !== 0) state.goodGuy = true;
     if (!state.goodGuy && (entity.spawnflags & 4) !== 0) entity.spawnflags = (entity.spawnflags & ~4) | 1;
-    if ((!reviving || game.options.edition === "classic") && !state.goodGuy && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.totalMonsters++;
+    if ((!reviving || game.options.edition === "classic") && !state.goodGuy && !state.doNotCount && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.totalMonsters++;
     game.solid(entity, "box"); game.motion(entity, state.locomotion === "stationary" ? "stationary" : "step");
-    entity.frame = state.move.firstFrame + Math.floor(game.host.random() * (state.move.lastFrame - state.move.firstFrame + 1));
+    const automatic = definition.startMode?.(context) !== "manual";
+    if (automatic) entity.frame = state.move.firstFrame + Math.floor(game.host.random() * (state.move.lastFrame - state.move.firstFrame + 1));
     game.show(entity);
-    game.schedule(entity, game.options.edition === "classic" ? 0.1 : game.host.frameSeconds(), this.sourceStart);
+    if (automatic) game.schedule(entity, game.options.edition === "classic" ? 0.1 : game.host.frameSeconds(), this.sourceStart);
     definition.afterSpawn?.(context);
     return true;
   }
@@ -429,9 +462,12 @@ export class Q2Monsters implements Q2SpawnModule {
   }
 
   private dropToFloor(context: MonsterContext): undefined {
-    const { game, entity } = context, body = game.body(entity), start = add(body.origin, { x: 0, y: 0, z: 1 });
-    const trace = game.host.trace({ start, end: add(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
-    if (trace.fraction !== 1 && !trace.allSolid) game.move(entity, { origin: trace.end, ground: traceGroundActor(trace, game) });
+    const { game, entity } = context, body = game.body(entity), direction = entity.gravityVector.z > 0 ? 1 : -1;
+    const offset = game.options.edition === "classic" || game.host.trace({ start: body.origin, end: body.origin, bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) }).startSolid;
+    const start = offset ? add(body.origin, { x: 0, y: 0, z: -direction }) : body.origin;
+    game.move(entity, { origin: start }, false);
+    const trace = game.host.trace({ start, end: add(start, { x: 0, y: 0, z: direction * 256 }), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+    if (trace.fraction !== 1 && !trace.allSolid) { game.move(entity, { origin: trace.end }); this.checkGround(context); this.categorizePosition(context); }
     return undefined;
   }
 
@@ -448,6 +484,9 @@ export class Q2Monsters implements Q2SpawnModule {
     game.schedule(entity, game.options.edition === "classic" ? 0.1 : game.host.frameSeconds(), this.sourceThink);
     this.moveFrame(context);
     if (!game.host.actors.isLive(entity.actor.id) || state.gibbed) return undefined;
+    const linkCount = game.host.bodies.linked(entity.actor.id)?.linkCount ?? 0;
+    if (linkCount !== state.lastLinkCount) { state.lastLinkCount = linkCount; this.checkGround(context); }
+    this.categorizePosition(context);
     this.worldEffects(context);
     if (!game.host.actors.isLive(entity.actor.id)) return undefined;
     entity.effects &= ~256; entity.renderFlags &= ~(1024 | 2048 | 4096);
@@ -503,9 +542,20 @@ export class Q2Monsters implements Q2SpawnModule {
 
   private die(context: MonsterContext, definition: Q2MonsterDefinition, reaction: DeathReaction): undefined {
     const { state, entity, game } = context;
+    this.sourceCombatHooks?.beforeKilled(context);
     if (!state.dead) {
-      if (!state.goodGuy && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.killedMonsters++;
+      const commander = state.commander === null ? null : game.entity(state.commander);
+      const commanderState = commander === null ? undefined : this.contexts.get(commander.actor.id)?.state;
+      if (commander !== null && commanderState !== undefined) {
+        if (state.spawnedBy === "carrier" && commander.classname === "monster_carrier") commanderState.monsterSlots++;
+        else if (state.spawnedBy === "medic" && commander.classname === "monster_medic_commander") commanderState.monsterSlots++;
+        else if (state.spawnedBy === "widow" && commander.classname.startsWith("monster_widow") && commanderState.monsterUsed > 0) commanderState.monsterUsed--;
+      }
+      if (!state.goodGuy && !state.doNotCount && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.killedMonsters++;
       entity.enemy = reaction.attacker;
+      if (game.options.edition === "classic" && (entity.motion === "push" || entity.motion === "stop" || entity.motion === "stationary")) {
+        definition.die(context, reaction); game.show(entity); return undefined;
+      }
       entity.touch = null;
       entity.flags &= ~3;
       const item = entity.spawn.values.get("item");
@@ -681,11 +731,29 @@ export class Q2Monsters implements Q2SpawnModule {
     return undefined;
   }
 
+  private checkGround(context: MonsterContext): undefined {
+    const { entity, game } = context, body = game.body(entity);
+    if ((entity.flags & 3) !== 0) return undefined;
+    if (body.velocity.z * entity.gravityVector.z < -100) return game.move(entity, { ground: null }, false);
+    const trace = game.host.trace({ start: body.origin, end: add(body.origin, { x: 0, y: 0, z: 0.25 * entity.gravityVector.z }), bounds: body.bounds, ignore: entity.actor.id, mask: monsterSolidMask(game) });
+    const steep = trace.contact.kind !== "plane" || (entity.gravityVector.z < 0 ? trace.contact.plane.normal.z < 0.7 : trace.contact.plane.normal.z > -0.7);
+    if (!trace.startSolid && steep) return game.move(entity, { ground: null }, false);
+    if (!trace.startSolid && !trace.allSolid) game.move(entity, { origin: trace.end, ground: traceGroundActor(trace, game), velocity: { ...body.velocity, z: 0 } }, false);
+    return undefined;
+  }
+
+  private categorizePosition(context: MonsterContext): undefined {
+    const { game, entity, state } = context, body = game.body(entity);
+    const feet = { ...body.origin, z: body.origin.z + (entity.gravityVector.z > 0 ? body.bounds.max.z - 1 : body.bounds.min.z + 1) };
+    const contents = game.host.pointContents(feet);
+    state.waterLevel = (contents & MASK_WATER) === 0 ? 0 : (game.host.pointContents(add(feet, { x: 0, y: 0, z: 26 })) & MASK_WATER) === 0 ? 1 : (game.host.pointContents(add(feet, { x: 0, y: 0, z: 48 })) & MASK_WATER) === 0 ? 2 : 3;
+    state.waterType = state.waterLevel === 0 ? 0 : contents;
+    return undefined;
+  }
+
   private worldEffects(context: MonsterContext): undefined {
     const { game, entity, state } = context, body = game.body(entity);
-    const feet = { ...body.origin, z: body.origin.z + body.bounds.min.z + 1 };
-    const contents = game.host.pointContents(feet);
-    const water = (contents & MASK_WATER) === 0 ? 0 : (game.host.pointContents(add(feet, { x: 0, y: 0, z: 26 })) & MASK_WATER) === 0 ? 1 : (game.host.pointContents(add(feet, { x: 0, y: 0, z: 48 })) & MASK_WATER) === 0 ? 2 : 3;
+    const water = state.waterLevel, contents = state.waterType;
     const world = game.host.worldActor();
     if (health(game, entity.actor.id) > 0) {
       if (state.locomotion === "swim" ? water > 0 : water < 3) state.airFinished = game.host.now() + (state.locomotion === "swim" ? 9 : 12);

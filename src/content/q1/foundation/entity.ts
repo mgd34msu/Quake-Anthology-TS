@@ -13,8 +13,10 @@ export interface Q1Move {
   remaining: number;
   readonly done: () => undefined;
 }
+export type Q1MonsterSpecies = "army" | "dog" | "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone" | "gremlin" | "scourge" | "armagon" | "spikemine" | "decoy" | "eel" | "sword" | "wrath" | "super-wrath" | "mummy" | "lava-man" | "morph" | "dragon";
+export const Q1_MONSTER_SPECIES: readonly Q1MonsterSpecies[] = ["army", "dog", "knight", "enforcer", "demon", "ogre", "hellknight", "shambler", "wizard", "shalrath", "tarbaby", "fish", "zombie", "boss", "oldone", "gremlin", "scourge", "armagon", "spikemine", "decoy", "eel", "sword", "wrath", "super-wrath", "mummy", "lava-man", "morph", "dragon"];
 export interface Q1Monster {
-  readonly species: "army" | "dog" | "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
+  readonly species: Q1MonsterSpecies;
   mode: "stand" | "walk" | "run" | "attack" | "leap" | "pain" | "death";
   frameIndex: number;
   sequence: readonly number[];
@@ -37,6 +39,7 @@ export class Q1Actor {
   solid: Q1Solid = "none";
   movement: Q1MoveType = "none";
   readonly fields = new Map<string, string>();
+  readonly references = new Map<string, ActorId | null>();
   target = "";
   targetname = "";
   killtarget = "";
@@ -79,13 +82,14 @@ export class Q1Actor {
   projectileWeapon: import("./types.ts").Q1Weapon | null = null;
   angularVelocity: Vec3 = ZERO;
   waterLevel = 0;
+  waterType: 0 | -1 | -2 | -3 | -4 | -5 | -6 = 0;
   movementFlags = 0;
   idealYaw = 0;
   yawSpeed = 20;
-  attackState: "straight" | "melee" | "missile" = "straight";
+  attackState: "straight" | "melee" | "missile" | "dodging" = "straight";
   pathEnd: (() => undefined) | null = null;
 
-  constructor(readonly actor: OwnedActor, readonly classname: string, readonly sourceOrdinal: number | null, private readonly combat: GameplayAuthority, source?: Q1Entity) {
+  constructor(readonly actor: OwnedActor, public classname: string, readonly sourceOrdinal: number | null, private readonly combat: GameplayAuthority, source?: Q1Entity) {
     if (source !== undefined) for (const property of source.properties) this.fields.set(property.key, property.value);
     this.model = this.text("model"); this.originalModel = this.model;
     this.target = this.text("target"); this.targetname = this.text("targetname"); this.killtarget = this.text("killtarget");
@@ -109,8 +113,8 @@ export function sourceAngles(source: Q1Entity): Vec3 {
   const angles = q1EntityValue(source, "angles"); if (angles !== null) return parseVector(angles);
   const angle = Number(q1EntityValue(source, "angle") ?? 0); return { x: 0, y: angle, z: 0 };
 }
-export function moveDirection(angles: Vec3): Vec3 {
+export function moveDirection(angles: Vec3, game?: import("./runtime.ts").Q1Foundation): Vec3 {
   if (angles.y === -1 && angles.x === 0 && angles.z === 0) return { x: 0, y: 0, z: 1 };
   if (angles.y === -2 && angles.x === 0 && angles.z === 0) return { x: 0, y: 0, z: -1 };
-  return vectors(angles).forward;
+  return (game === undefined ? vectors(angles) : game.makeVectors(angles)).forward;
 }

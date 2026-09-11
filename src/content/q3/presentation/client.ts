@@ -248,7 +248,8 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
 
     // Registered scalar media projections are captured only after their source registration phase.
     const pool = new LocalEntityPool(session.product);
-    const prediction: PredictionRuntime = new PredictionRuntime(state, collision, { movePlayer: (state, command, settings) => options.movement.movePlayer(state, command, settings),
+    const prediction: PredictionRuntime = new PredictionRuntime(state, collision, { commandTiming: options.movement.commandTiming,
+      movePlayer: (state, command, settings) => options.movement.movePlayer(state, command, settings),
       updateViewAngles: (state, command) => options.movement.updateViewAngles(state, command), commands: session.commands, predictItem: (entity, source) => options.predictItem(entity, source),
       ...(options.sourceDebug ? { eventDebug: { kind: "source-debug", module: "cgame",
         showEvents: () => session.cvars.get("showevents")?.value ?? "", print } } : {}),

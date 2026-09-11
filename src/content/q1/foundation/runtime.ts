@@ -2,20 +2,21 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
-import type { Q1CombatContext } from "../../../world/gameplay/policies.ts";
+import type { CombatState, DamageOutcome, DamagePreparation, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
+import type { Q1CombatContext, Q1DamageSourceEffects } from "../../../world/gameplay/policies.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity, Q1Map } from "../../../formats/q1-map/index.ts";
 import { q1EntityValue } from "../../../formats/q1-map/index.ts";
 import { Q1Actor, sourceAngles } from "./entity.ts";
-import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon } from "./types.ts";
-import { Q1_PROVIDER, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem } from "./types.ts";
+import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
+import { Q1_PROVIDER, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
 import { spawnMapActor, linkDoors } from "./spawns.ts";
 import { fireWeapon, bestWeapon, weaponModel, projectileTouch } from "./weapons.ts";
 import { spawnPickup, registerPickupCallbacks } from "./pickups.ts";
-import { captureFoundation, restoreFoundation } from "./checkpoint.ts";
+import { captureFoundation, captureEntitySourceState, restoreFoundation } from "./checkpoint.ts";
 import type { Q1FoundationCheckpoint } from "./checkpoint.ts";
-import { Q1CallbackRegistry } from "./callbacks.ts";
+import type { Q1WeaponDefinition, Q1PlayerExtension, Q1PickupRules, Q1WeaponRules } from "./extensions.ts";
+import { Q1CallbackRegistry, callbackName } from "./callbacks.ts";
 import type { Q1StateExtension } from "./callbacks.ts";
 import { registerMoverCallbacks } from "./movers.ts";
 import { registerSpawnCallbacks } from "./spawns.ts";
@@ -31,10 +32,32 @@ export interface Q1SpawnReport {
 /** Official Q1 behavior runs inside the shared session, using its bodies, scheduling and mutations. */
 export class Q1Foundation {
   readonly named = new Q1CallbackRegistry(this);
+  private baseTeamHealth = true;
+  private readonly pathTouches = new Map<string, (corner: Q1Actor, mover: Q1Actor) => boolean>();
+  private readonly sourceDamageEffects = new Map<string, Q1DamageSourceEffects>();
+  readonly damageSourceEffects: Q1DamageSourceEffects = {
+    beforeQuad: (request, amount, target, attacker) => this.prepareSourceDamage("beforeQuad", request, amount, target, attacker),
+    afterQuad: (request, amount, target, attacker) => this.prepareSourceDamage("afterQuad", request, amount, target, attacker),
+    armorAllowed: (request, amount, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.armorAllowed?.(request, amount, target, attacker) ?? true),
+    protectionApplies: (request, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.protectionApplies?.(request, target, attacker) ?? true),
+    beforeHealth: (request, amount, target, attacker) => [...this.sourceDamageEffects.values()].every(effects => effects.beforeHealth?.(request, amount, target, attacker) ?? true),
+    afterArmor: (request, take, target, attacker) => {
+      let amount = take; for (const effects of this.sourceDamageEffects.values()) amount = effects.afterArmor?.(request, amount, target, attacker) ?? amount; return amount;
+    },
+  };
+  pickupRules: Q1PickupRules | null = null;
+  private readonly weaponRules = new Map<string, Q1WeaponRules>();
+  readonly registeredWeapons = new Map<Q1Weapon, Q1WeaponDefinition>();
+  readonly playerExtensions = new Map<string, Q1PlayerExtension>();
+  weaponOrder: readonly Q1Weapon[] | null = null;
+  private weaponOrderOwner: string | null = null;
   readonly stateExtensions = new Map<string, Q1StateExtension>();
   readonly entities = new Map<OwnedActor, Q1Actor>();
   readonly players = new Map<OwnedActor, Q1PlayerState>();
   time = 0;
+  frameSeconds = 0;
+  forceRetouch = 0;
+  basis: Q1Basis = { forward: ZERO, right: ZERO, up: ZERO };
   totalSecrets = 0;
   foundSecrets = 0;
   totalMonsters = 0;
@@ -45,11 +68,15 @@ export class Q1Foundation {
   sightEntity: Q1Actor | null = null;
   sightTime = -1;
   intermission: { readonly map: string; readonly cause: ActorId | null; readonly exitAfter: number } | null = null;
+  private readonly configuredOptions: Q1FoundationOptions;
+  private spawnOptions: Q1FoundationOptions | null = null;
+  get options(): Q1FoundationOptions { return this.spawnOptions ?? this.configuredOptions; }
   private sequence = 0;
   private nextDynamicSlot = 1;
   private readonly spawners = new Map<string, (game: Q1Foundation, entity: Q1Actor) => undefined>();
 
-  constructor(readonly host: Q1FoundationHost, readonly options: Q1FoundationOptions) {
+  constructor(readonly host: Q1FoundationHost, options: Q1FoundationOptions) {
+    this.configuredOptions = options;
     this.nextDynamicSlot = (options.maxClients ?? 0) + 1;
     this.named.register("SUB_Remove", { action: (game, entity) => game.remove(entity) });
     this.named.register("SUB_Null", { action: () => undefined });
@@ -58,6 +85,95 @@ export class Q1Foundation {
     host.actors.onRelease(actor => { this.entities.delete(actor); this.players.delete(actor); host.cancelThink(actor); return undefined; });
   }
 
+  registerDamageSourceEffects(id: string, effects: Q1DamageSourceEffects): undefined {
+    if (this.sourceDamageEffects.has(id)) throw new Error(`Duplicate Q1 damage source effects: ${id}`);
+    this.sourceDamageEffects.set(id, effects); return undefined;
+  }
+  private prepareSourceDamage(phase: "beforeQuad" | "afterQuad", request: DamageRequest, initial: number, target: CombatState, attacker: CombatState | null): DamagePreparation {
+    let amount = initial;
+    for (const effects of this.sourceDamageEffects.values()) {
+      const result = effects[phase]?.(request, amount, target, attacker);
+      if (result?.kind === "cancel") return result;
+      if (result !== undefined) amount = result.amount;
+    }
+    return { kind: "continue", amount };
+  }
+  setGravity(actor: ActorId, scale: number): undefined {
+    if (this.host.setGravity === undefined) throw new Error("Q1 source gravity mutation requires the selected movement host");
+    return this.host.setGravity(actor, scale);
+  }
+  controlPlayer(actor: ActorId, control: { readonly kind: "cutscene"; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 }): undefined {
+    if (this.host.controlPlayer === undefined) throw new Error("Q1 cinematic requires the selected player control host");
+    return this.host.controlPlayer(actor, control);
+  }
+  /** Rogue combat.qc replaces the ordinary teamplay==1 gate with TeamHealthDam. */
+  setBaseTeamHealth(enabled: boolean): undefined { this.baseTeamHealth = enabled; return undefined; }
+  registerPathTouch(id: string, callback: (corner: Q1Actor, mover: Q1Actor) => boolean): undefined {
+    if (this.pathTouches.has(id)) throw new Error(`Duplicate Q1 source path touch ${id}`); this.pathTouches.set(id, callback); return undefined;
+  }
+  sourcePathTouch(corner: Q1Actor, mover: Q1Actor): boolean { for (const callback of this.pathTouches.values()) if (callback(corner, mover)) return true; return false; }
+  registerWeaponRules(rules: Q1WeaponRules): undefined {
+    if (this.weaponRules.has(rules.id)) throw new Error(`Duplicate Q1 weapon rules: ${rules.id}`);
+    if (rules.consumeAmmo !== undefined && [...this.weaponRules.values()].some(rule => rule.consumeAmmo !== undefined)) throw new Error("Q1 source ammunition consumption already registered");
+    this.weaponRules.set(rules.id, rules); return undefined;
+  }
+  consumeWeaponAmmo(player: Q1PlayerState, item: ItemId, amount: number): boolean {
+    for (const rules of this.weaponRules.values()) if (rules.consumeAmmo !== undefined) return rules.consumeAmmo(this, player, item, amount);
+    return this.host.inventory.consume(player.actor, item, amount);
+  }
+  weaponBeforeFire(player: Q1PlayerState): undefined {
+    for (const rules of this.weaponRules.values()) rules.beforeFire?.(this, player); return undefined;
+  }
+  weaponAttackDelay(player: Q1PlayerState, initial: number): number {
+    let delay = initial; for (const rules of this.weaponRules.values()) delay = rules.attackDelay?.(this, player, delay) ?? delay; return delay;
+  }
+  nailSpeed(player: Q1PlayerState, initial: number): number {
+    let speed = initial; for (const rules of this.weaponRules.values()) speed = rules.nailSpeed?.(this, player, speed) ?? speed; return speed;
+  }
+  registerPickupRules(rules: Q1PickupRules): undefined {
+    if (this.pickupRules !== null) throw new Error(`Q1 pickup rules already owned by ${this.pickupRules.id}`);
+    this.pickupRules = rules; return undefined;
+  }
+  registerWeapon(definition: Q1WeaponDefinition): undefined {
+    if (isQ1BaseWeapon(definition.id) || this.registeredWeapons.has(definition.id)) throw new Error(`Q1 weapon already registered: ${definition.id}`);
+    this.registeredWeapons.set(definition.id, definition); return undefined;
+  }
+  replaceWeapon(definition: Q1WeaponDefinition): undefined {
+    if (!isQ1BaseWeapon(definition.id) && !this.registeredWeapons.has(definition.id)) throw new Error(`No Q1 weapon to replace: ${definition.id}`);
+    this.registeredWeapons.set(definition.id, definition); return undefined;
+  }
+  registerWeaponOrder(id: string, order: readonly Q1Weapon[]): undefined {
+    if (this.weaponOrderOwner !== null) throw new Error(`Q1 weapon fallback already owned by ${this.weaponOrderOwner}`);
+    this.weaponOrderOwner = id; this.weaponOrder = [...order]; return undefined;
+  }
+  registerPlayerExtension(extension: Q1PlayerExtension): undefined {
+    if (this.playerExtensions.has(extension.id)) throw new Error(`Duplicate Q1 player extension: ${extension.id}`);
+    this.playerExtensions.set(extension.id, extension); return undefined;
+  }
+  weaponModel(weapon: Q1Weapon, player?: Q1PlayerState): string {
+    const definition = this.registeredWeapons.get(weapon);
+    if (player !== undefined && definition?.modelFor !== undefined) return definition.modelFor(this, player);
+    return definition?.model ?? weaponModel(weapon);
+  }
+  weaponItem(weapon: Q1Weapon): ItemId { return this.registeredWeapons.get(weapon)?.item ?? weaponItem(weapon); }
+  weaponAmmo(weapon: Q1Weapon): ItemId | null { const extension = this.registeredWeapons.get(weapon); return extension === undefined ? ammoItem(weapon) : extension.ammo; }
+  weaponAvailable(player: Q1PlayerState, weapon: Q1Weapon, purpose: "best" | "fire" = "best"): boolean {
+    if (this.host.inventory.count(player.actor.id, this.weaponItem(weapon)) === 0) return false;
+    const extension = this.registeredWeapons.get(weapon);
+    if (!isQ1BaseWeapon(weapon) && extension === undefined) return false;
+    if (extension?.available !== undefined && !extension.available(this, player)) return false;
+    if (purpose === "best" && extension?.bestAvailable !== undefined && !extension.bestAvailable(this, player)) return false;
+    if (purpose === "best" && weapon === "lightning" && player.waterLevel > 1) return false;
+    const ammo = this.weaponAmmo(weapon), needed = extension?.ammoPerShot ?? (purpose === "best" && (weapon === "supernailgun" || weapon === "supershotgun") ? 2 : 1);
+    return ammo === null || this.host.inventory.count(player.actor.id, ammo) >= needed;
+  }
+  fireRegisteredWeapon(player: Q1PlayerState): boolean {
+    const definition = this.registeredWeapons.get(player.weapon);
+    if (definition === undefined) throw new Error(`Q1 weapon source not registered: ${player.weapon}`);
+    if (this.health(player.actor.id) <= 0 || this.time < (player.continuousFiring ? player.nextWeaponFrame : player.attackFinished)) return false;
+    if (!this.weaponAvailable(player, player.weapon, "fire")) { this.selectWeapon(player.actor, this.chooseBest(player.actor)); return false; }
+    this.weaponBeforeFire(player); return definition.fire(this, player);
+  }
   capture(): Q1FoundationCheckpoint { return captureFoundation(this, this.sequence, this.nextDynamicSlot); }
   restore(checkpoint: Q1FoundationCheckpoint, options: { readonly scheduleThinks?: boolean } = {}): undefined {
     restoreFoundation(this, checkpoint); this.sequence = checkpoint.sequence; this.nextDynamicSlot = checkpoint.nextDynamicSlot;
@@ -93,12 +209,19 @@ export class Q1Foundation {
         // Mod_LoadBrushModel expands each authored bound by one; QC self.size includes that expansion.
         this.host.bodies.write(actor.actor, { ...body, bounds: { min: vsub(model.bounds.min, { x: 1, y: 1, z: 1 }), max: vadd(model.bounds.max, { x: 1, y: 1, z: 1 }) } });
       }
-      const extension = this.spawners.get(classname);
-      if (extension === undefined) spawnMapActor(this, actor); else extension(this, actor);
-      if (this.live(actor)) this.link(actor);
+      this.spawnEntity(actor);
     }
     linkDoors(this);
     return { spawned: this.presentations(), inhibited, compilerOnly };
+  }
+  spawnEntity(entity: Q1Actor, context: { readonly deathmatch?: number } = {}): undefined {
+    const previous = this.spawnOptions;
+    if (context.deathmatch !== undefined) this.spawnOptions = { ...this.options, deathmatch: context.deathmatch };
+    try {
+      const extension = this.spawners.get(entity.classname);
+      if (extension === undefined) spawnMapActor(this, entity); else extension(this, entity);
+      if (this.live(entity)) this.link(entity); return undefined;
+    } finally { this.spawnOptions = previous; }
   }
   registerSpawn(classname: string, handler: (game: Q1Foundation, entity: Q1Actor) => undefined): undefined {
     if (this.spawners.has(classname)) throw new Error(`Q1 spawn handler already registered: ${classname}`);
@@ -120,18 +243,53 @@ export class Q1Foundation {
     this.bindActorCallbacks(entity);
     return entity;
   }
+  cloneEntity(source: Q1Actor): Q1Actor {
+    this.host.actors.assertOwned(source.actor);
+    const callbacks = { think: callbackName(source.think), use: callbackName(source.use), touch: callbackName(source.touch),
+      pain: callbackName(source.pain), die: callbackName(source.die), blocked: callbackName(source.blocked), pathEnd: callbackName(source.pathEnd) };
+    const done = source.move === null ? null : callbackName(source.move.done);
+    const target = this.create(source.classname);
+    Object.assign(target, captureEntitySourceState(source));
+    for (const [key, value] of source.fields) target.fields.set(key, value);
+    for (const [key, actor] of source.references) target.references.set(key, actor);
+    target.owner = source.owner; target.activator = source.activator; target.doorGroup = [...source.doorGroup];
+    target.monster = source.monster === null ? null : { ...source.monster, sequence: [...source.monster.sequence] };
+    this.host.bodies.write(target.actor, this.body(source));
+    const combat = this.host.combat.read(source.actor.id); if (combat === null) throw new Error("Source clone has no combat state");
+    this.host.combat.setHealth(target.actor, combat.health); this.host.combat.setArmor(target.actor, combat.armor);
+    this.host.combat.setTraits(target.actor, { canTakeDamage: combat.canTakeDamage, mass: combat.mass, invulnerable: combat.invulnerable, team: combat.team,
+      ...(combat.noKnockback === undefined ? {} : { noKnockback: combat.noKnockback }) });
+    if (this.host.inventory.has(source.actor.id)) this.host.inventory.create(target.actor, this.host.inventory.entries(source.actor.id));
+    target.think = callbacks.think === null ? null : this.named.action(target, callbacks.think);
+    target.use = callbacks.use === null ? null : this.named.use(target, callbacks.use);
+    target.touch = callbacks.touch === null ? null : this.named.touch(target, callbacks.touch);
+    target.pain = callbacks.pain === null ? null : this.named.pain(target, callbacks.pain);
+    target.die = callbacks.die === null ? null : this.named.die(target, callbacks.die);
+    target.blocked = callbacks.blocked === null ? null : this.named.blocked(target, callbacks.blocked);
+    target.pathEnd = callbacks.pathEnd === null ? null : this.named.action(target, callbacks.pathEnd);
+    target.move = source.move === null || done === null ? null : { ...source.move, destination: { ...source.move.destination }, done: this.named.action(target, done) };
+    for (const extension of this.stateExtensions.values()) extension.clone?.(source, target);
+    if (target.think !== null && target.nextThink >= 0) this.host.scheduleThink(target.actor, target.nextThink);
+    return target;
+  }
   bindActorCallbacks(entity: Q1Actor): undefined {
     const owner = entity.actor;
     this.host.callbacks.bind(owner, {
       think: (_self, frame) => {
         this.time = frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000;
+        this.frameSeconds = frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000;
         const callback = entity.think; entity.think = null; entity.nextThink = -1;
         if (callback !== null) callback(); return undefined;
       },
       touch: contact => entity.touch?.(contact.other, contact.plane?.normal ?? null),
       use: (_self, other, activator) => entity.use?.(other, activator),
       pain: reaction => entity.pain?.(reaction.attacker, reaction.damage),
-      die: reaction => entity.die?.(reaction.attacker),
+      die: reaction => {
+        // Killed runs in the victim source even when another game supplied the attack policy.
+        if (this.health(owner.id) < -99) this.host.combat.setHealth(owner, -99);
+        if (entity.monster !== null && entity.movement !== "push" && entity.movement !== "none") entity.monster.enemy = reaction.attacker;
+        return entity.die?.(reaction.attacker);
+      },
     });
     return undefined;
   }
@@ -147,11 +305,13 @@ export class Q1Foundation {
       if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, entries);
       else for (const entry of entries) this.host.inventory.configure(actor, entry);
     }
-    const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", attackFinished: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
+    const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
       continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, nailSide: 1,
       maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
       waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };
-    this.players.set(actor, state); return state;
+    this.players.set(actor, state);
+    for (const extension of this.playerExtensions.values()) extension.attach?.(this, state);
+    return state;
   }
 
   player(actor: ActorId): Q1PlayerState | null { const owner = this.host.actors.resolveOwned(actor); return owner === null ? null : this.players.get(owner) ?? null; }
@@ -170,11 +330,11 @@ export class Q1Foundation {
     return this.host.scheduleThink(entity.actor, entity.nextThink);
   }
   cancel(entity: Q1Actor): undefined { entity.nextThink = -1; entity.think = null; return this.host.cancelThink(entity.actor); }
-  sound(entity: Q1Actor | OwnedActor, path: string, channel: "auto" | "weapon" | "voice" | "item" | "body" = "voice", attenuation = 1): undefined {
+  sound(entity: Q1Actor | OwnedActor, path: string, channel: Q1SoundChannel = "voice", attenuation = 1): undefined {
     return this.host.emit({ kind: "sound", actor: entity instanceof Q1Actor ? entity.actor.id : entity.id, path, channel, volume: 1, attenuation });
   }
-  message(player: ActorId | null, text: string, center = true): undefined {
-    if (player !== null && this.isPlayer(player) && text !== "") this.host.emit({ kind: "message", player, text, center }); return undefined;
+  message(player: ActorId | null, text: string, center = true, args: readonly (string | number)[] = []): undefined {
+    if (player !== null && this.isPlayer(player) && text !== "") this.host.emit({ kind: "message", player, text, center, ...(args.length === 0 ? {} : { args: [...args] }) }); return undefined;
   }
   effect(effect: Extract<import("./types.ts").Q1Event, { kind: "effect" }>["effect"], origin: Vec3, actor: ActorId | null = null, amount = 1): undefined {
     return this.host.emit({ kind: "effect", effect, origin, actor, amount });
@@ -193,20 +353,20 @@ export class Q1Foundation {
     return undefined;
   }
 
-  damage(target: ActorId, inflictor: ActorId, attacker: ActorId | null, amount: number, weapon: Q1Weapon | null = null, delivery: "direct" | "radius" = "direct", deathType = ""): DamageOutcome {
+  damage(target: ActorId, inflictor: ActorId, attacker: ActorId | null, amount: number, weapon: Q1Weapon | null = null, delivery: "direct" | "radius" = "direct", deathType = "", armorEffect?: "bypass" | "half-effectiveness"): DamageOutcome {
     const targetBody = this.host.bodies.read(target); const source = this.host.bodies.read(inflictor);
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
     return this.host.combat.apply({ target, amount: Math.fround(amount), knockback: Math.fround(amount), direction, point, normal: ZERO, delivery,
       attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
-        weapon: weapon === null ? null : weaponItem(weapon), weaponProvider: Q1_PROVIDER, combatProvider: this.options.combatProvider,
-        inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType } } });
+        weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: Q1_PROVIDER, combatProvider: this.options.combatProvider,
+        inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } });
   }
   combatContext(request: DamageRequest): Q1CombatContext {
     const inflictor = request.attack.inflictor === null ? null : this.host.bodies.linked(request.attack.inflictor);
     const target = this.host.bodies.read(request.target);
     return { arithmetic: "binary32", quad: request.attack.attacker !== null && (this.player(request.attack.attacker)?.powerups.get("quad") ?? 0) > this.time,
-      teamplay: this.options.teamplay ?? 0, walk: this.isPlayer(request.target), momentumDirection: target === null || inflictor === null ? null :
+      teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || inflictor === null ? null :
         normalize(vsub(target.origin, vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5))) };
   }
   canDamage(target: ActorId, inflictor: ActorId): boolean {
@@ -216,7 +376,7 @@ export class Q1Foundation {
     const offsets = entity?.movement === "push" ? [ZERO] : [ZERO, { x: 15, y: 15, z: 0 }, { x: -15, y: -15, z: 0 }, { x: -15, y: 15, z: 0 }, { x: 15, y: -15, z: 0 }];
     return offsets.some(offset => { const trace = this.host.trace({ start: source.origin, end: vadd(destination, offset), bounds: POINT, ignore: inflictor, monsters: false }); return trace.fraction === 1 || trace.actor !== null && sameActor(trace.actor, target); });
   }
-  radiusDamage(inflictor: ActorId, attacker: ActorId | null, amount: number, ignore: ActorId | null, weapon: Q1Weapon | null): undefined {
+  radiusDamage(inflictor: ActorId, attacker: ActorId | null, amount: number, ignore: ActorId | null, weapon: Q1Weapon | null, deathType = ""): undefined {
     const source = this.host.bodies.read(inflictor); if (source === null) return undefined;
     for (const observation of this.host.actors.observations()) {
       const target = observation.id; const combat = this.host.combat.read(target), body = this.host.bodies.read(target);
@@ -225,7 +385,7 @@ export class Q1Foundation {
       const distance = length(vsub(center, source.origin)); if (distance > amount + 40) continue;
       let points = Math.fround(amount - 0.5 * distance); if (attacker !== null && sameActor(target, attacker)) points *= 0.5;
       if (this.host.classname(target) === "monster_shambler") points *= 0.5;
-      if (points > 0 && this.canDamage(target, inflictor)) this.damage(target, inflictor, attacker, points, weapon, "radius");
+      if (points > 0 && this.canDamage(target, inflictor)) this.damage(target, inflictor, attacker, points, weapon, "radius", deathType);
     }
     return undefined;
   }
@@ -244,7 +404,7 @@ export class Q1Foundation {
     return undefined;
   }
   physicsEntity(actor: OwnedActor, seconds: number, elapsedSeconds: number): undefined {
-    this.time = seconds; const entity = this.entities.get(actor);
+    this.time = seconds; this.frameSeconds = elapsedSeconds; const entity = this.entities.get(actor);
     if (entity === undefined || !this.live(entity)) return undefined;
     const move = entity.move;
     if (move !== null) {
@@ -255,7 +415,11 @@ export class Q1Foundation {
       if (blocker !== null) return undefined;
       move.remaining -= duration;
       if (final) { entity.move = null; this.setBody(entity, { velocity: ZERO }); move.done(); }
-    } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
+    } else if (entity.movement === "push") {
+      const velocity = this.body(entity).velocity;
+      const angular = entity.angularVelocity;
+      if (velocity.x !== 0 || velocity.y !== 0 || velocity.z !== 0 || angular.x !== 0 || angular.y !== 0 || angular.z !== 0) this.host.pushMove(entity.actor, vscale(velocity, elapsedSeconds));
+    } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
     return undefined;
   }
   /** Weapon/powerup/environment state; jumping belongs to the independently selected movement provider. */
@@ -263,12 +427,15 @@ export class Q1Foundation {
     this.time = seconds; const player = this.players.get(actor);
     if (player === undefined) return undefined;
     if (waterLevel !== undefined) player.waterLevel = waterLevel;
-    if (!player.continuousFiring && player.weaponAnimationAt >= 0) {
+    for (const extension of this.playerExtensions.values()) extension.frame?.(this, player, seconds);
+    const weaponExtension = this.registeredWeapons.get(player.weapon);
+    weaponExtension?.animate?.(this, player, seconds);
+    if (weaponExtension?.animate === undefined && isQ1BaseWeapon(player.weapon) && !player.continuousFiring && player.weaponAnimationAt >= 0) {
       const frame = Math.floor((seconds - player.weaponAnimationAt) / 0.1);
       const count = player.weapon === "axe" ? 4 : 6;
       const next = frame >= count ? 0 : player.weaponAnimationBase + frame;
       if (next !== player.weaponFrame) {
-        player.weaponFrame = next; this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: weaponModel(player.weapon), frame: next, punch: 0 });
+        player.weaponFrame = next; this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: this.weaponModel(player.weapon, player), frame: next, punch: 0 });
       }
       if (frame >= count) player.weaponAnimationAt = -1;
     }
@@ -296,16 +463,27 @@ export class Q1Foundation {
     }
     return undefined;
   }
+  playerAfterPhysics(actor: OwnedActor, seconds: number): undefined {
+    this.time = seconds; const player = this.players.get(actor); if (player === undefined) return undefined;
+    for (const extension of this.playerExtensions.values()) extension.afterPhysics?.(this, player, seconds);
+    return undefined;
+  }
   travel(map: string, cause: ActorId | null): undefined {
     return this.host.transition({ kind: "campaign-level", campaign: this.options.campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause });
   }
   beginIntermission(map: string, cause: ActorId | null): undefined {
     const spots = [...this.entities.values()].filter(entity => entity.classname === "info_intermission");
-    const selected = spots[Math.min(spots.length - 1, Math.floor(this.host.random() * spots.length))] ?? [...this.entities.values()].find(entity => entity.classname === "info_player_start");
-    const body = selected === undefined ? null : this.body(selected);
+    let selected = spots[0];
+    if (selected !== undefined) {
+      let cycle = Math.fround(this.host.random() * 4), index = 0;
+      while (cycle > 1) { index = (index + 1) % spots.length; cycle = Math.fround(cycle - 1); }
+      selected = spots[index];
+    } else selected = [...this.entities.values()].find(entity => entity.classname === "info_player_start") ?? [...this.entities.values()].find(entity => entity.classname === "testplayerstart");
+    if (selected === undefined) throw new Error("FindIntermission: no spot");
+    const body = this.body(selected);
     const exitAfter = this.time + (this.options.deathmatch !== 0 ? 5 : 2);
     this.intermission = { map, cause, exitAfter };
-    return this.host.emit({ kind: "intermission", origin: body?.origin ?? ZERO, angles: selected?.vector("mangle") ?? body?.angles ?? ZERO, map, exitAfter, track: 3 });
+    return this.host.emit({ kind: "intermission", origin: body.origin, angles: selected.classname === "info_intermission" ? selected.vector("mangle") : body.angles, map, exitAfter, track: 3 });
   }
   requestIntermissionExit(seconds: number, pressed: boolean): boolean {
     const pending = this.intermission;
@@ -313,13 +491,23 @@ export class Q1Foundation {
     this.time = seconds; this.intermission = null; this.travel(pending.map, pending.cause); return true;
   }
 
+  makeVectors(angles: Vec3): Q1Basis { this.basis = vectors(angles); return this.basis; }
+  beginFrame(seconds: number, elapsedSeconds: number): undefined {
+    this.time = seconds; this.frameSeconds = elapsedSeconds; return undefined;
+  }
+  playerInput(actor: OwnedActor, input: { readonly attack: boolean; readonly jump: boolean; readonly teleportUntil?: number }): undefined {
+    const player = this.players.get(actor); if (player === undefined) return undefined;
+    player.attackHeld = input.attack; player.jumpHeld = input.jump;
+    if (input.teleportUntil !== undefined) player.teleportUntil = input.teleportUntil;
+    return undefined;
+  }
   attack(actor: OwnedActor, viewAngles: Vec3, seconds: number, waterLevel = 0): boolean {
     this.time = seconds; const player = this.players.get(actor); if (player === undefined) throw new Error("Player has no Q1 weapon state");
     player.viewAngles = viewAngles; player.waterLevel = waterLevel; return fireWeapon(this, player);
   }
   weaponInput(actor: OwnedActor, pressed: boolean, viewAngles: Vec3, seconds: number, waterLevel = 0): boolean {
     const player = this.players.get(actor); if (player === undefined) throw new Error("Player has no Q1 weapon state");
-    this.time = seconds; player.viewAngles = viewAngles; player.waterLevel = waterLevel;
+    this.time = seconds; player.viewAngles = viewAngles; player.waterLevel = waterLevel; player.attackHeld = pressed;
     if (!pressed) {
       if (player.continuousFiring) { player.continuousFiring = false; player.weaponAnimationAt = -1; player.weaponFrame = 0; }
       return false;
@@ -327,13 +515,15 @@ export class Q1Foundation {
     return this.attack(actor, viewAngles, seconds, waterLevel);
   }
   selectWeapon(actor: OwnedActor, weapon: Q1Weapon): boolean {
-    const player = this.players.get(actor); if (player === undefined || this.host.inventory.count(actor.id, weaponItem(weapon)) === 0) return false;
+    const player = this.players.get(actor); if (player === undefined || this.host.inventory.count(actor.id, this.weaponItem(weapon)) === 0) return false;
+    if (!isQ1BaseWeapon(weapon) && !this.registeredWeapons.has(weapon)) return false;
+    const definition = this.registeredWeapons.get(weapon); if (definition?.available !== undefined && !definition.available(this, player)) return false;
     player.weapon = weapon; player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
-    this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: weaponModel(weapon), frame: 0, punch: 0 }); return true;
+    this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: this.weaponModel(weapon, player), frame: 0, punch: 0 }); return true;
   }
   chooseBest(actor: OwnedActor): Q1Weapon { return bestWeapon(this, actor); }
-  givePowerup(player: Q1PlayerState, powerup: Q1Powerup): undefined {
-    const expires = Math.fround(this.time + 30); player.powerups.set(powerup, expires); this.host.powerup(player.actor, powerup, expires);
+  givePowerup(player: Q1PlayerState, powerup: Q1Powerup, duration = 30): undefined {
+    const expires = Math.fround(this.time + duration); player.powerups.set(powerup, expires); this.host.powerup(player.actor, powerup, expires);
     return this.host.emit({ kind: "powerup", player: player.actor.id, powerup, expires });
   }
   dropShells(origin: Vec3): undefined {
@@ -352,14 +542,14 @@ export class Q1Foundation {
   }
   private projectilePhysics(entity: Q1Actor, elapsed: number): undefined {
     let body = this.body(entity);
-    if (body.ground !== null && entity.movement !== "flymissile") return undefined;
+    if (body.ground !== null) return undefined;
     let velocity = body.velocity;
-    if (entity.movement !== "flymissile") velocity = { ...velocity, z: Math.fround(velocity.z - this.options.gravity * elapsed) };
+    if (entity.movement !== "flymissile" && entity.movement !== "fly") velocity = { ...velocity, z: Math.fround(velocity.z - this.options.gravity * elapsed) };
     const trace = this.host.trace({ start: body.origin, end: vadd(body.origin, vscale(velocity, elapsed)), bounds: body.bounds, ignore: entity.actor.id,
       monsters: entity.solid !== "none" && entity.solid !== "trigger", missile: entity.movement === "flymissile" });
     this.setBody(entity, { origin: trace.end, velocity, angles: vadd(body.angles, vscale(entity.angularVelocity, elapsed)) }); this.link(entity);
     if (trace.fraction === 1) return undefined;
-    if (trace.sky) return this.remove(entity);
+    if (trace.sky && entity.projectile !== null) return this.remove(entity);
     if (entity.projectile !== null) projectileTouch(this, entity, trace.actor, trace.normal);
     else {
       const hit = trace.actor ?? this.world?.actor.id ?? null;
@@ -369,8 +559,23 @@ export class Q1Foundation {
     body = this.body(entity);
     const overbounce = entity.movement === "bounce" ? 1.5 : 1;
     velocity = vsub(body.velocity, vscale(trace.normal, dot(body.velocity, trace.normal) * overbounce));
-    if (trace.normal.z > 0.7 && (velocity.z < 60 || entity.movement !== "bounce")) velocity = ZERO;
-    return this.setBody(entity, { velocity, ground: velocity === ZERO ? trace.actor : null });
+    if (trace.normal.z > 0.7 && (velocity.z < 60 || entity.movement !== "bounce")) { velocity = ZERO; entity.angularVelocity = ZERO; }
+    this.setBody(entity, { velocity, ground: velocity === ZERO ? trace.actor : null });
+    return this.checkWaterTransition(entity);
+  }
+  /** sv_phys.c: after STEP think, and after a surviving TOSS collision. */
+  checkWaterTransition(entity: Q1Actor): undefined {
+    const contents = this.host.contents(this.body(entity).origin);
+    const value = contents === "solid" ? -2 : contents === "water" ? -3 : contents === "slime" ? -4 : contents === "lava" ? -5 : contents === "sky" ? -6 : -1;
+    if (entity.waterType === 0) { entity.waterType = value; entity.waterLevel = 1; return undefined; }
+    if (value <= -3) {
+      if (entity.waterType === -1) this.sound(entity, "misc/h2ohit1.wav", "auto");
+      entity.waterType = value; entity.waterLevel = 1;
+    } else {
+      if (entity.waterType !== -1) this.sound(entity, "misc/h2ohit1.wav", "auto");
+      entity.waterType = -1; entity.waterLevel = value;
+    }
+    return undefined;
   }
 }
 
@@ -380,6 +585,11 @@ export function ammoItem(weapon: Q1Weapon): ItemId | null {
     case "shotgun": case "supershotgun": return "q1:ammo/shells";
     case "nailgun": case "supernailgun": return "q1:ammo/nails";
     case "grenadelauncher": case "rocketlauncher": return "q1:ammo/rockets";
-    case "lightning": return "q1:ammo/cells";
+    case "lightning": case "hipnotic:laser": case "mg3:laser": return "q1:ammo/cells";
+    case "hipnotic:mjolnir": case "rogue:grapple": case "ctf:grapple": case "mg3:mjolnir": return null;
+    case "hipnotic:proximity": return "q1:ammo/rockets";
+    case "rogue:lava-nailgun": case "rogue:lava-supernailgun": return "rogue:ammo/lava-nails";
+    case "rogue:multi-grenade": case "rogue:multi-rocket": return "rogue:ammo/multi-rockets";
+    case "rogue:plasma": return "rogue:ammo/plasma";
   }
 }

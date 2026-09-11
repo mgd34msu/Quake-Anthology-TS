@@ -1,3 +1,4 @@
+import { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 /* Shared body physics adapted from Quake sv_phys.c/sv_move.c and Quake II
  * g_phys.c/m_move.c. Copyright (C) 1996-2005 Id Software. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -13,6 +14,11 @@ import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable } from "../..
 import { SharedSceneQueries } from "../../../world/collision/index.ts";
 import type { ActorCollision } from "../../../world/collision/index.ts";
 import { boundsIntersect } from "../../../world/spatial/index.ts";
+import { savedActorId, readSavedActor } from "../../../persistence/save-image.ts";
+import { SaveReader } from "../../../persistence/value.ts";
+import { createQ2RereleaseFlyMove } from "./q2-rerelease-slide.ts";
+import { stepQ2NewToss } from "./new-toss.ts";
+import { readVector } from "../../../persistence/shared.ts";
 
 export type PhysicsFamily = "q1" | "q2" | "q3";
 export interface SharedSolid {
@@ -34,6 +40,7 @@ export interface SharedPhysicsFlags {
   readonly waterType?: number;
   readonly enemy?: ActorId | null;
   readonly deltaYaw?: number;
+  readonly teamSlave?: boolean;
 }
 export interface SharedPhysicsOptions {
   readonly actors: SessionActorRegistry;
@@ -48,8 +55,12 @@ export interface SharedPhysicsOptions {
   readonly getFlags?: (actor: OwnedActor) => SharedPhysicsFlags;
   readonly writeFlags?: (actor: OwnedActor, changes: SharedPhysicsFlags) => undefined;
   readonly writeAngularVelocity?: (actor: OwnedActor, velocity: Vec3) => undefined;
+  readonly event?: (event: PhysicsEvent) => undefined;
   readonly gravity?: number;
   readonly maxVelocity?: number;
+  readonly q2Edition?: "classic" | "rerelease";
+  readonly stopSpeed?: () => number;
+  readonly takeKillVelocity?: (actor: OwnedActor) => boolean;
 }
 interface Pushed { readonly actor: OwnedActor; readonly origin: Vec3; readonly angles: Vec3; readonly deltaYaw: number; }
 export interface PhysicsEvent { readonly actor: ActorId; readonly kind: "water-enter" | "water-leave" | "land"; readonly origin: Vec3; }
@@ -59,6 +70,7 @@ const defaultMask = 0x02020003;
 /** The scheduler calls one actor at a time. This owner never starts a family loop. */
 export class SharedPhysics {
   readonly bodies: SharedBodyTable;
+  readonly rereleaseMovement = new Q2RereleaseMovementContext();
   private readonly n: NumericOperations;
   private readonly solids = new Map<OwnedActor, SharedSolid>();
   private readonly collisions = new Map<OwnedActor, ActorCollision>();
@@ -66,8 +78,12 @@ export class SharedPhysics {
   private readonly flags = new Map<OwnedActor, SharedPhysicsFlags>();
   private readonly events: PhysicsEvent[] = [];
   private pushTransaction: Pushed[] | null = null;
+  private worldGravity: number;
+  private readonly rereleaseFlyMove;
   constructor(private readonly options: SharedPhysicsOptions) {
+    this.worldGravity = options.gravity ?? 800;
     this.n = createNumericOperations(options.numeric);
+    this.rereleaseFlyMove = createQ2RereleaseFlyMove(this.n, this.rereleaseMovement);
     this.bodies = new SharedBodyTable(options.actors, {
       absoluteBounds: (actor, state) => this.absoluteBounds(actor, state),
       onLink: body => this.linked(body),
@@ -86,8 +102,69 @@ export class SharedPhysics {
   private solid(actor: OwnedActor): SharedSolid | null { return this.options.getCollision?.(actor) ?? this.solids.get(actor) ?? null; }
   private motion(actor: OwnedActor): Q2Motion | null { return this.options.getMotion?.(actor) ?? this.motions.get(actor) ?? null; }
   private family(actor: OwnedActor): PhysicsFamily { return this.solid(actor)?.family ?? "q2"; }
+  get gravity(): number { return this.worldGravity; }
+  setWorldGravity(value: number): undefined {
+    if (!Number.isFinite(value)) throw new RangeError("World gravity must be finite");
+    this.worldGravity = value; return undefined;
+  }
+  capture() {
+    if (this.collisions.size !== 0) throw new Error("Exact Q3 collision checkpoints require the Q3 world provider checkpoint");
+    return { gravity: this.worldGravity, rereleaseMovement: this.rereleaseMovement.capture(),
+      spatial: this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } }).map(value => ({
+        actor: savedActorId(value.body.actor), collision: { ...value.collision, owner: value.collision.owner === null ? null : savedActorId(value.collision.owner) } })),
+      solids: [...this.solids].map(([actor, solid]) => ({ actor: savedActorId(actor.id), ...solid, owner: solid.owner === null ? null : savedActorId(solid.owner) })),
+      motions: [...this.motions].map(([actor, motion]) => ({ ...motion, actor: savedActorId(actor.id), owner: motion.owner === null ? null : savedActorId(motion.owner) })),
+      flags: [...this.flags].map(([actor, flags]) => ({ actor: savedActorId(actor.id), ...flags, ...(flags.enemy === undefined ? {} : { enemy: flags.enemy === null ? null : savedActorId(flags.enemy) }) })) };
+  }
+  restoreCheckpoint(reader: SaveReader): undefined {
+    this.setWorldGravity(reader.field("gravity").finite());
+    this.rereleaseMovement.restore(readVector(reader.field("rereleaseMovement")));
+    const reference = (value: SaveReader) => this.options.actors.referenceSaved(readSavedActor(value));
+    const owner = (value: SaveReader): OwnedActor => {
+      const actor = this.options.actors.resolveSaved(readSavedActor(value));
+      if (actor === null) return value.fail("Missing shared physics actor");
+      return actor;
+    };
+    this.solids.clear(); this.motions.clear(); this.flags.clear();
+    reader.field("solids").list(value => {
+      this.solids.set(owner(value.field("actor")), { solid: value.field("solid").choice("none", "trigger", "box", "brush"), model: value.field("model").nullable(v => v.integer(0)),
+        family: value.field("family").choice("q1", "q2", "q3"), owner: value.field("owner").nullable(reference),
+        ...(value.field("monster").value === undefined ? {} : { monster: value.field("monster").boolean() }),
+        ...(value.field("deadMonster").value === undefined ? {} : { deadMonster: value.field("deadMonster").boolean() }),
+        ...(value.field("item").value === undefined ? {} : { item: value.field("item").boolean() }) });
+    });
+    reader.field("motions").list(value => {
+      const actor = owner(value.field("actor"));
+      this.motions.set(actor, { actor, kind: value.field("kind").choice("stationary", "push", "stop", "toss", "new-toss", "bounce", "wall-bounce", "fly", "fly-missile", "step"),
+        velocity: readVector(value.field("velocity")), angularVelocity: readVector(value.field("angularVelocity")), gravity: value.field("gravity").number(), gravityVector: readVector(value.field("gravityVector")),
+        clipMask: value.field("clipMask").number(), owner: value.field("owner").nullable(reference) });
+    });
+    reader.field("flags").list(value => {
+      this.flags.set(owner(value.field("actor")), {
+        ...(value.field("fly").value === undefined ? {} : { fly: value.field("fly").boolean() }), ...(value.field("swim").value === undefined ? {} : { swim: value.field("swim").boolean() }),
+        ...(value.field("partialGround").value === undefined ? {} : { partialGround: value.field("partialGround").boolean() }), ...(value.field("dead").value === undefined ? {} : { dead: value.field("dead").boolean() }),
+        ...(value.field("player").value === undefined ? {} : { player: value.field("player").boolean() }), ...(value.field("waterLevel").value === undefined ? {} : { waterLevel: value.field("waterLevel").number() }),
+        ...(value.field("waterType").value === undefined ? {} : { waterType: value.field("waterType").number() }), ...(value.field("deltaYaw").value === undefined ? {} : { deltaYaw: value.field("deltaYaw").number() }),
+        ...(value.field("enemy").value === undefined ? {} : { enemy: value.field("enemy").nullable(reference) }) });
+    });
+    return undefined;
+  }
+  restoreSpatial(reader: SaveReader): undefined {
+    this.options.scene.spatial.clear();
+    reader.field("spatial").list(value => {
+      const actor = this.options.actors.resolveSaved(readSavedActor(value.field("actor"))), collision = value.field("collision"), shape = collision.field("shape");
+      const kind = shape.field("kind").choice("box", "capsule", "model");
+      const body = actor === null ? null : this.bodies.linked(actor.id);
+      if (body === null) return value.fail("Saved spatial actor has no retained body link");
+      this.options.scene.link(body, { family: collision.field("family").choice("q1", "q2", "q3"), shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
+        contents: collision.field("contents").number(), owner: collision.field("owner").nullable(v => this.options.actors.referenceSaved(readSavedActor(v))),
+        role: collision.field("role").choice("solid", "trigger"), monster: collision.field("monster").boolean(), deadMonster: collision.field("deadMonster").boolean() });
+    });
+    return undefined;
+  }
   isBrush(actor: ActorId): boolean { const owned = this.options.actors.resolveOwned(actor); return owned !== null && this.solid(owned)?.solid === "brush"; }
   drainEvents(): readonly PhysicsEvent[] { return this.events.splice(0); }
+  private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.push(event); return undefined; }
   private actorFlags(actor: OwnedActor): SharedPhysicsFlags { return { ...this.flags.get(actor), ...this.options.getFlags?.(actor) }; }
   setFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined {
     if (!this.live(actor)) return undefined;
@@ -155,14 +232,14 @@ export class SharedPhysics {
       target: { kind: "world" }, policy: this.policy(family, request.mask), numeric: this.options.numeric, passActor: request.ignore };
     return request.exclude === undefined || request.exclude.length === 0 ? this.options.scene.trace(query) : this.options.scene.traceExcluding(query, request.exclude);
   }
-  private bodyTrace(actor: OwnedActor, start: Vec3, end: Vec3, exclude: readonly ActorId[] = []): TraceResult {
+  private bodyTrace(actor: OwnedActor, start: Vec3, end: Vec3, exclude: readonly ActorId[] = [], exactMask = false, bounds?: Bounds): TraceResult {
     const body = this.bodies.read(actor.id);
     if (body === null) throw new RangeError("Cannot trace an actor without a body");
     const family = this.family(actor), motion = this.motion(actor);
     const solid = this.solid(actor)?.solid;
     const move = family === "q1" && motion?.kind === "fly-missile" ? "missile" : family === "q1" && (solid === "none" || solid === "trigger") ? "no-monsters" : "normal";
-    const query: TraceQuery = { start, end, shape: { kind: "box", bounds: body.bounds }, target: { kind: "world" },
-      policy: this.policy(family, motion?.clipMask || 3, move),
+    const query: TraceQuery = { start, end, shape: { kind: "box", bounds: bounds ?? body.bounds }, target: { kind: "world" },
+      policy: this.policy(family, exactMask ? motion?.clipMask ?? 0 : motion?.clipMask || 3, move),
       numeric: this.options.numeric, passActor: actor.id };
     return exclude.length === 0 ? this.options.scene.trace(query) : this.options.scene.traceExcluding(query, exclude);
   }
@@ -348,13 +425,14 @@ export class SharedPhysics {
   }
   private checkBottom(actor: OwnedActor, body: BodyState): boolean {
     const min = this.add(body.origin, body.bounds.min), max = this.add(body.origin, body.bounds.max);
-    const point = (x: number, y: number): TraceResult => this.options.scene.trace({ start: { x, y, z: min.z }, end: { x, y, z: min.z - 36 },
+    const direction = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 }, floor = direction.z > 0 ? max.z : min.z;
+    const point = (x: number, y: number): TraceResult => this.options.scene.trace({ start: { x, y, z: floor }, end: { x, y, z: floor + direction.z * 36 },
       shape: { kind: "point" }, passActor: actor.id, target: { kind: "world" }, policy: this.policy(this.family(actor), defaultMask, "no-monsters"), numeric: this.options.numeric });
     const middle = point((min.x + max.x) * 0.5, (min.y + max.y) * 0.5);
     if (middle.fraction === 1) return false;
     for (const x of [min.x, max.x]) for (const y of [min.y, max.y]) {
       const corner = point(x, y);
-      if (corner.fraction === 1 || middle.end.z - corner.end.z > 18) return false;
+      if (corner.fraction === 1 || (corner.end.z - middle.end.z) * direction.z > 18) return false;
     }
     return true;
   }
@@ -393,7 +471,12 @@ export class SharedPhysics {
     this.writeLive(actor, { origin: trace.end, ground: this.hitActor(trace) }, true);
     this.setFlags(actor, { partialGround: false }); this.touchTriggers(actor); return this.live(actor);
   }
-  private flyMove(actor: OwnedActor, elapsed: number): undefined {
+  private flyMove(actor: OwnedActor, elapsed: number, newToss = false): undefined {
+    if (this.family(actor) === "q2" && this.options.q2Edition === "rerelease") {
+      return this.rereleaseFlyMove(actor, elapsed, { actors: this.options.actors, bodies: this.bodies,
+        trace: (start, end, bounds) => this.bodyTrace(actor, start, end, [], newToss, bounds), hitActor: trace => this.hitActor(trace),
+        impact: trace => this.impact(actor, trace), takeKillVelocity: () => this.options.takeKillVelocity?.(actor) ?? false });
+    }
     let state = this.bodies.read(actor.id);
     if (state === null) return undefined;
     let originalVelocity = state.velocity;
@@ -402,13 +485,14 @@ export class SharedPhysics {
     this.writeLive(actor, { ground: null });
     for (let bump = 0; bump < 4; bump++) {
       state = this.bodies.read(actor.id); if (state === null) return undefined;
-      const trace = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(state.velocity, remaining)));
+      const trace = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(state.velocity, remaining)), [], newToss);
       if (trace.allSolid) { this.writeLive(actor, { velocity: zero }); return undefined; }
       if (trace.fraction > 0) { this.writeLive(actor, { origin: trace.end }); originalVelocity = state.velocity; planes.length = 0; }
       if (trace.fraction === 1) break;
       const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
       const hit = this.hitActor(trace), target = hit === null ? null : this.options.actors.resolveOwned(hit);
-      if (normal.z > 0.7 && hit !== null && (trace.hit.kind === "world" || target !== null && this.solid(target)?.solid === "brush")) this.writeLive(actor, { ground: hit });
+      const down = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 };
+      if ((newToss ? normal.z > 0.7 : this.dot(normal, down) < -0.7) && hit !== null && (trace.hit.kind === "world" || target !== null && this.solid(target)?.solid === "brush")) this.writeLive(actor, { ground: hit });
       this.impact(actor, trace);
       if (!this.live(actor)) return undefined;
       remaining = this.n.subtract(remaining, this.n.multiply(remaining, trace.fraction));
@@ -432,7 +516,7 @@ export class SharedPhysics {
     }
     return undefined;
   }
-  private waterTransition(actor: OwnedActor, previousOrigin: Vec3): undefined {
+  waterTransition(actor: OwnedActor, previousOrigin: Vec3): undefined {
     const body = this.bodies.read(actor.id); if (body === null) return undefined;
     const family = this.family(actor), before = this.actorFlags(actor);
     const contents = this.options.scene.pointContents({ point: body.origin, target: { kind: "world" },
@@ -441,47 +525,73 @@ export class SharedPhysics {
     const wet = family === "q1" ? value <= -3 && value >= -5 || value <= -9 && value >= -14 : (value & 56) !== 0;
     const wasWet = (before.waterLevel ?? 0) !== 0;
     this.setFlags(actor, { waterLevel: wet ? 1 : 0, waterType: value });
-    if (wet !== wasWet) this.events.push({ actor: actor.id, kind: wet ? "water-enter" : "water-leave", origin: wet ? previousOrigin : body.origin });
+    if (wet !== wasWet) this.emit({ actor: actor.id, kind: wet ? "water-enter" : "water-leave", origin: wet ? previousOrigin : body.origin });
     return undefined;
   }
-  step(actor: OwnedActor, elapsed: number): undefined {
+  step(actor: OwnedActor, elapsed: number): "moved" | "stopped" | "team-slave" | "removed" | undefined {
     if (!Number.isFinite(elapsed) || elapsed < 0) throw new RangeError("Invalid physics interval");
     let state = this.bodies.read(actor.id);
     const motion = this.motion(actor);
     if (state === null || motion === null || elapsed === 0 || motion.kind === "stationary") return undefined;
     if (motion.kind === "push" || motion.kind === "stop") { this.pushMove(actor, this.scale(state.velocity, elapsed), this.scale(motion.angularVelocity, elapsed)); return undefined; }
     const family = this.family(actor), flags = this.actorFlags(actor);
-    if (state.ground !== null && (!this.options.actors.isLive(state.ground) || family !== "q1" && state.velocity.z > 0)) { this.writeLive(actor, { ground: null }); state = this.bodies.read(actor.id); }
+    if (motion.kind === "new-toss") {
+      return stepQ2NewToss(actor, elapsed, motion, { actors: this.options.actors, bodies: this.bodies, numeric: this.n,
+        edition: this.options.q2Edition ?? "classic", worldGravity: this.worldGravity, maxVelocity: this.options.maxVelocity ?? 2000,
+        stopSpeed: this.options.stopSpeed?.() ?? 100, teamSlave: flags.teamSlave ?? false,
+        water: () => { const water = this.actorFlags(actor); return { waterLevel: water.waterLevel ?? 0, waterType: water.waterType ?? 0 }; },
+        trace: (start, end) => this.bodyTrace(actor, start, end, [], true),
+        hitActor: trace => trace.hit.kind === "actor" ? trace.hit.actor : this.options.worldActor(),
+        flyMove: frame => this.flyMove(actor, frame, true),
+        writeAngularVelocity: angularVelocity => { this.motions.set(actor, { ...motion, angularVelocity }); this.options.writeAngularVelocity?.(actor, angularVelocity); return undefined; },
+        touchTriggers: () => this.touchTriggers(actor), pointContents: point => {
+          const contents = this.options.scene.pointContents({ point, target: { kind: "world" }, policy: this.policy("q2", -1), numeric: this.options.numeric, passActor: actor.id });
+          if (contents.kind !== "q2") throw new Error("NewToss requires Q2 contents representation"); return contents.stored;
+        }, writeWater: (waterLevel, waterType) => this.setFlags(actor, { waterLevel, waterType }),
+        waterSound: origin => { this.emit({ actor: this.options.worldActor() ?? actor.id, kind: "water-enter", origin }); return undefined; },
+      });
+    }
+    if (state.ground !== null && (!this.options.actors.isLive(state.ground) || family !== "q1" && this.dot(state.velocity, motion.gravityVector) < 0)) { this.writeLive(actor, { ground: null }); state = this.bodies.read(actor.id); }
     if (state === null) return undefined;
     const maximum = this.options.maxVelocity ?? 2000;
     const clamp = (v: number): number => Number.isFinite(v) ? Math.max(-maximum, Math.min(maximum, v)) : 0;
     let velocity = this.vector(clamp(state.velocity.x), clamp(state.velocity.y), clamp(state.velocity.z));
     if (motion.kind === "step") {
-      const oldOrigin = state.origin, wasGrounded = state.ground !== null, fallingFast = state.velocity.z < -(this.options.gravity ?? 800) * 0.1;
-      if (family !== "q1" && state.ground === null && velocity.z <= 100) {
-        const floor = this.bodyTrace(actor, state.origin, this.add(state.origin, { x: 0, y: 0, z: -0.25 }));
-        if (floor.fraction < 1 && !floor.startSolid && floor.sourcePlane.normal.z >= 0.7) { this.writeLive(actor, { ground: this.hitActor(floor) }); state = this.bodies.read(actor.id) ?? state; }
+      if (family === "q1") {
+        if (state.ground !== null || flags.fly || flags.swim) return undefined;
+        const hitSound = state.velocity.z < -this.worldGravity * 0.1;
+        velocity = this.add(state.velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
+        this.writeLive(actor, { velocity: this.vector(clamp(velocity.x), clamp(velocity.y), clamp(velocity.z)) });
+        this.flyMove(actor, elapsed);
+        if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
+        const landed = this.bodies.read(actor.id);
+        if (hitSound && landed?.ground != null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
+        return undefined;
       }
-      if (family === "q1" && (state.ground !== null || flags.fly || flags.swim)) return undefined;
+      const wasGrounded = state.ground !== null, fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
+      if (state.ground === null && this.dot(velocity, motion.gravityVector) >= -100) {
+        const floor = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(motion.gravityVector, 0.25)));
+        if (floor.fraction < 1 && !floor.startSolid && this.dot(floor.sourcePlane.normal, motion.gravityVector) <= -0.7) { this.writeLive(actor, { ground: this.hitActor(floor) }); state = this.bodies.read(actor.id) ?? state; }
+      }
       if (state.ground === null && !flags.fly && !(flags.swim && (flags.waterLevel ?? 0) > 2) && (flags.waterLevel ?? 0) === 0)
-        velocity = this.add(velocity, { x: 0, y: 0, z: -motion.gravity * (this.options.gravity ?? 800) * elapsed });
-      if (family !== "q1" && (state.ground !== null || flags.fly || flags.swim)) {
+        velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
+      if ((state.ground !== null || flags.fly || flags.swim)) {
         const speed = Math.hypot(velocity.x, velocity.y);
         if (speed > 0 && (!flags.dead || this.checkBottom(actor, state))) {
           const fraction = Math.max(0, speed - elapsed * Math.max(speed, 100) * 6) / speed;
           velocity = this.vector(velocity.x * fraction, velocity.y * fraction, velocity.z);
         }
       }
-      if (family !== "q1" && flags.fly && velocity.z !== 0) {
+      if (flags.fly && velocity.z !== 0) {
         const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * 2) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
       }
-      if (family !== "q1" && flags.swim && velocity.z !== 0) {
+      if (flags.swim && velocity.z !== 0) {
         const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * (flags.waterLevel ?? 0)) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
       }
       this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
-      if (family !== "q1" && this.moving(motion.angularVelocity)) {
+      if (this.moving(motion.angularVelocity)) {
         const adjustment = elapsed * 600;
         const friction = (value: number): number => value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment);
         const angular = this.vector(friction(motion.angularVelocity.x), friction(motion.angularVelocity.y), friction(motion.angularVelocity.z));
@@ -490,12 +600,11 @@ export class SharedPhysics {
       this.flyMove(actor, elapsed);
       if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
       const landed = this.bodies.read(actor.id);
-      if (!wasGrounded && fallingFast && landed !== null && landed.ground !== null) this.events.push({ actor: actor.id, kind: "land", origin: landed.origin });
-      if (family === "q1") this.waterTransition(actor, oldOrigin);
+      if (!wasGrounded && fallingFast && landed !== null && landed.ground !== null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
       return undefined;
     }
     if (state.ground !== null) return undefined;
-    if (motion.kind !== "fly-missile" && motion.kind !== "wall-bounce") velocity = this.add(velocity, { x: 0, y: 0, z: -motion.gravity * (this.options.gravity ?? 800) * elapsed });
+    if (motion.kind !== "fly" && motion.kind !== "fly-missile" && motion.kind !== "wall-bounce") velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
     this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
     const trace = this.pushEntity(actor, this.scale(velocity, elapsed));
     this.waterTransition(actor, state.origin);
@@ -504,7 +613,7 @@ export class SharedPhysics {
     const currentMotion = this.motion(actor) ?? motion;
     const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
     velocity = this.clip(state.velocity, normal, currentMotion.kind === "wall-bounce" ? 2 : currentMotion.kind === "bounce" ? 1.5 : 1);
-    if (currentMotion.kind !== "wall-bounce" && normal.z > 0.7 && (velocity.z < 60 || currentMotion.kind !== "bounce")) {
+    if (currentMotion.kind !== "wall-bounce" && this.dot(normal, currentMotion.gravityVector) < -0.7 && (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")) {
       this.writeLive(actor, { velocity: zero, ground: this.hitActor(trace) });
       this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
       this.options.writeAngularVelocity?.(actor, zero);

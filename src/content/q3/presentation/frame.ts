@@ -89,7 +89,7 @@ export class Q3PresentationFrameRuntime {
   }
   private fadeTimescale(): void {
     const c = this.host.configuration, end = c.readVmCvar("cg_timescaleFadeEnd").numericValue, speed = c.readVmCvar("cg_timescaleFadeSpeed").numericValue;
-    const current = c.readVmCvar("cg_timescale").numericValue;
+    const current = c.readVmSymbol(ClientVmCvarSymbol.cg_timescale).numericValue;
     if (current === end) return;
     const delta = Math.fround(Math.fround(speed * Math.fround(this.state.frameTime)) / 1000);
     const value = current < end ? Math.min(end, Math.fround(current + delta)) : Math.max(end, Math.fround(current - delta));

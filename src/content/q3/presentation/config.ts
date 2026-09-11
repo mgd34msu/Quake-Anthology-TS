@@ -118,7 +118,7 @@ export enum ClientVmCvarSymbol {
   cg_trueLightning = "cg_trueLightning",
 }
 
-interface CvarDefinition {
+export interface CvarDefinition {
   readonly symbol: ClientVmCvarSymbol;
   readonly name: string;
   readonly defaultValue: string;
@@ -135,7 +135,7 @@ const R = CvarFlag.ReadOnly;
 const U = CvarFlag.UserInfo;
 const S = CvarFlag.ServerInfo;
 
-function cvarTable(product: Product): readonly CvarDefinition[] {
+export function cvarTable(product: Product): readonly CvarDefinition[] {
   const table: CvarDefinition[] = [
     cv(ClientVmCvarSymbol.cg_ignore, "cg_ignore", "0"),
     cv(ClientVmCvarSymbol.cg_autoswitch, "cg_autoswitch", "1", A),

@@ -16,6 +16,7 @@ import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
 import { ApplicationMusic } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds } from "./audio/q2-events.ts";
+import type { Q3SeatAudioFrame } from "./audio/q3.ts";
 
 interface ActorAudio {
   readonly actor: ActorId;
@@ -54,6 +55,7 @@ export class ApplicationAudio {
   private readonly warned = new Set<string>();
   private readonly uiSounds: { readonly seat: SeatId; readonly sound: UiSound }[] = [];
   private readonly effectSounds: ApplicationEffectSound[] = [];
+  private readonly cgameFrames: Q3SeatAudioFrame[] = [];
   private listeners: readonly AudioListener[] = [];
   private snapshot: WorldSnapshot | null = null;
   private volume = 0.7;
@@ -74,6 +76,7 @@ export class ApplicationAudio {
   pauseMusic(paused: boolean): void { this.music.pause(paused); }
   uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
   receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
+  receiveCgameFrame(frame: Q3SeatAudioFrame): void { this.cgameFrames.push(frame); }
 
   private bank(content: ContentId): Promise<SoundBank> {
     const existing = this.banks.get(content);
@@ -206,13 +209,15 @@ export class ApplicationAudio {
       if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "sound") {
-          const channel = event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
+          const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
           await this.play(source.content, "q1", event.path, event.actor, null, channel, event.volume, event.attenuation);
         } else if (event.kind === "ambient") {
           const sound = await this.sound(source.content, event.path, "q1");
           if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ sound, origin: event.origin,
             volume: Math.trunc(event.volume * 255), attenuation: Math.trunc(event.attenuation * 64), seats: [] });
         }
+      } else if (source.kind === "q1-level" && source.event.kind === "finale") {
+        await this.playMusic(source.content, String(source.event.track));
       } else if (source.kind === "q2") {
         const event = source.event;
         if (event.kind === "music") await this.playMusic(source.content, event.track);
@@ -291,6 +296,16 @@ export class ApplicationAudio {
         this.engine.updateAmbient(listener.seat, [water, wind], leaf?.ambientSound ?? [0, 0], elapsed.value / (elapsed.kind === "milliseconds" ? 1000 : 1));
       }
     }
+    for (const frame of this.cgameFrames.splice(0)) {
+      if (!listeners.some(listener => listener.seat.equals(frame.seat))) continue;
+      for (const operation of frame.operations) switch (operation.kind) {
+        case "play": this.engine.play(operation.sound); break;
+        case "loop": this.engine.loop(operation.sound); break;
+        case "position": this.engine.updateQ3SeatActor(frame.seat, operation.actor, operation.origin); break;
+        case "clear-loops": this.engine.clearQ3SeatLoops(frame.seat, operation.killAll); break;
+        case "stop-loop": this.engine.stopQ3SeatLoop(frame.seat, operation.actor); break;
+      }
+    }
     this.engine.endLoopFrame();
     this.engine.updateMusic();
     this.engine.pump();
@@ -300,7 +315,7 @@ export class ApplicationAudio {
     if (this.closed) return undefined;
     this.closed = true;
     this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
-    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0;
+    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
     this.listeners = []; this.snapshot = null;
     return undefined;
   }

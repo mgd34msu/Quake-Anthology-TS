@@ -15,10 +15,13 @@ export interface ApplicationOptions {
   readonly height: number;
   readonly seats: number;
   readonly skill: 0 | 1 | 2 | 3;
+  readonly botSkill?: 1 | 2 | 3 | 4 | 5;
   readonly mode: "singleplayer" | "coop" | "deathmatch";
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
+  readonly network: { readonly kind: "offline" } | { readonly kind: "q2-server"; readonly host: string; readonly port: number }
+    | { readonly kind: "q2-client"; readonly remote: string };
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
@@ -40,8 +43,12 @@ Usage: bun run src/main.ts [options]
   --width N --height N       Window dimensions (default 960 by 600)
   --seats N                  Local seats, 1 through 4
   --mode singleplayer|coop|deathmatch
-  --skill 0|1|2|3            Source gameplay difficulty
+  --skill 0|1|2|3            Quake I/II gameplay difficulty
+  --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
+  --listen-q2 PORT           Host the native Quake II source protocol
+  --bind ADDRESS             Server IP (default 0.0.0.0)
+  --connect-q2 ADDRESS       Join a native Quake II server
   --seed N                   Gameplay random seed
   --frames N                 Close after N simulation steps
   --hidden                   Start a hidden native window
@@ -73,9 +80,10 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   let options: ApplicationOptions = {
     corpusRoot: resolve(homedir(), "Projects/qfiles"), product: "q2-classic-baseq2", map: "maps/base1.bsp",
     movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", dedicated: false,
-    width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false,
+    width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
   let list = false;
+  let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === "--help" || flag === "-h") return { kind: "help" };
@@ -110,10 +118,18 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--seats": options = { ...options, seats: integer(value, flag, 1, 4) }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;
       case "--frames": options = { ...options, frameLimit: integer(value, flag, 1, Number.MAX_SAFE_INTEGER) }; break;
+      case "--listen-q2": listen = integer(value, flag, 0, 65535); break;
+      case "--connect-q2": remote = value; break;
+      case "--bind": bind = value; break;
       case "--skill": {
         const skill = integer(value, flag, 0, 3);
         if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new RangeError("Invalid skill");
         options = { ...options, skill }; break;
+      }
+      case "--bot-skill": {
+        const botSkill = integer(value, flag, 1, 5);
+        if (botSkill !== 1 && botSkill !== 2 && botSkill !== 3 && botSkill !== 4 && botSkill !== 5) throw new RangeError("Invalid bot skill");
+        options = { ...options, botSkill }; break;
       }
       case "--mode":
         if (value !== "singleplayer" && value !== "coop" && value !== "deathmatch") throw new Error(`Unknown game mode: ${value}`);
@@ -122,6 +138,14 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     }
   }
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };
+  if (listen !== null && remote !== null) throw new Error("Choose either --listen-q2 or --connect-q2");
+  if (listen !== null) options = { ...options, network: { kind: "q2-server", host: bind, port: listen } };
+  else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen-q2");
+  if (remote !== null) {
+    if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
+    options = { ...options, network: { kind: "q2-client", remote } };
+  }
+  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   return { kind: "run", options };
 }

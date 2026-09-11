@@ -4,12 +4,13 @@ import type { DeathReaction } from "../../../../contracts/world.ts";
 import type { Q2AttackCheckpoint } from "../checkpoint.ts";
 import type { MonsterState } from "./types.ts";
 
-export interface Q2MonsterStateCheckpoint extends Omit<MonsterState, "move" | "nextMove" | "soundTarget" | "oldEnemy" | "moveTarget"> {
+export interface Q2MonsterStateCheckpoint extends Omit<MonsterState, "move" | "nextMove" | "soundTarget" | "oldEnemy" | "moveTarget" | "commander"> {
   readonly move: string;
   readonly nextMove: string | null;
   readonly soundTarget: { readonly actor: SavedActorId; readonly origin: Vec3; readonly time: number } | null;
   readonly oldEnemy: SavedActorId | null;
   readonly moveTarget: SavedActorId | null;
+  readonly commander: SavedActorId | null;
 }
 export interface Q2MonsterDamageCheckpoint {
   readonly reaction: Omit<DeathReaction, "self" | "attacker" | "inflictor"> & { readonly attacker: SavedActorId | null; readonly inflictor: SavedActorId | null };

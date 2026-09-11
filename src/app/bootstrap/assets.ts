@@ -5,16 +5,15 @@ import type { Palette, RendererImage, RendererResourceOwner } from "../../contra
 import type { DecodedModel } from "../../contracts/scene.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import { decodePalette, decodePcx, decodeWad, indexedRenderImage } from "../../formats/images/index.ts";
-import { parseQ12Model } from "../../formats/q12-model/index.ts";
 import { readQ1Bsp } from "../../formats/q1-map/index.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
-import { parseMd3 } from "../../formats/q3-model/md3.ts";
-import { toSceneMd3 } from "../../formats/q3-model/scene.ts";
 import { decodeQ3World, parseEntities } from "../../formats/q3-map/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene } from "../../render/scene/index.ts";
 import { classicCharset } from "../../text/atlas.ts";
-import type { TextFontSelection } from "../../text/atlas.ts";
+import type { TextFontRegistry, TextFontSelection } from "../../text/atlas.ts";
+import { createMountedTextFonts } from "../../text/mounted.ts";
 import type { LoadedApplicationContent } from "./content.ts";
+import { loadApplicationModel } from "./model-loader.ts";
 
 export interface ProviderSceneAssets {
   readonly family: GameFamily;
@@ -69,6 +68,7 @@ export class ApplicationAssets {
   private readonly brushScenes: WorldScene[] = [];
   private currentWorld: WorldScene | null = null;
   private font: Promise<TextFontSelection> | null = null;
+  private fonts: TextFontRegistry | null = null;
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner) {
     this.images = new SceneImageRegistry(owner);
@@ -122,17 +122,21 @@ export class ApplicationAssets {
         image = this.images.register("conchars", indexedRenderImage([{ width: 128, height: 128, pixels: lump.bytes }], provider.palette,
           { kind: "index", index: 0 }), { wrap: "clamp", filter: "nearest" }, { kind: "resource", resource: wad.reference });
       } else if (provider.family === "q2") {
-        const asset = await provider.mounts.open("pics/conchars.pcx");
-        if (asset === null || provider.palette === null) throw new Error("Quake II console charset is missing");
-        const pcx = decodePcx(asset.bytes, "pics/conchars.pcx");
-        image = this.images.register("conchars", indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels: pcx.indices }], provider.palette,
-          { kind: "index", index: 255 }), { wrap: "clamp", filter: "nearest" }, { kind: "resource", resource: asset.reference });
+        const texture = await provider.textures.load("pics/conchars.pcx", { family: "q2", mipmap: false, wrap: "clamp" });
+        if (texture === null) throw new Error("Quake II console charset is missing");
+        image = texture.image;
       } else {
         const texture = await provider.textures.load("gfx/2d/bigchars", { mipmap: false, wrap: "clamp" });
         if (texture === null) throw new Error("Quake III console charset is missing");
         image = texture.image;
       }
-      return { kind: "classic", classic: classicCharset(image, "conchars", provider.family === "q3" ? "tinted" : "baked"), unicode: null };
+      const classic = classicCharset(image, "conchars", provider.family === "q3" ? "tinted" : "baked");
+      const product = this.content.catalog.product(this.content.recipe.presentation.assets);
+      if (provider.family === "q2" && product.expectation.edition === "rerelease") {
+        this.fonts = createMountedTextFonts(provider.mounts, this.images);
+        return this.fonts.select({ kind: "kfont", path: "fonts/qconfont.kfont" }, classic);
+      }
+      return { kind: "classic", classic, unicode: null };
     })();
     return this.font;
   }
@@ -157,14 +161,16 @@ export class ApplicationAssets {
         this.brushScenes.push(brushScene);
         return { resource: asset.reference, model: { kind: "brush-model", world, model: 0 }, provider, brushScene };
       }
-      const model = path.toLowerCase().endsWith(".md3") ? toSceneMd3(parseMd3(asset.bytes, path)) : parseQ12Model(asset.bytes, path);
-      return { resource: asset.reference, model, provider, brushScene: null };
+      return { ...await loadApplicationModel(provider, asset), provider, brushScene: null };
     })();
     this.models.set(key, pending);
     return pending;
   }
 
   close(): undefined {
+    this.fonts?.close();
+    this.fonts = null;
+    this.font = null;
     this.currentWorld?.close();
     this.currentWorld = null;
     for (const brush of this.brushScenes) brush.close();

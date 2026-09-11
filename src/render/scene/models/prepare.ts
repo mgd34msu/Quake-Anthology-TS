@@ -27,7 +27,8 @@ function repairFrames(entity: SceneEntity): { frame: number; previousFrame: numb
   if (entity.flags.kind === "q2" && (entity.flags.bits & 128) !== 0) return { frame, previousFrame, backLerp, fallback: false };
   const count = countFrames(entity.model);
   if (count === 0) throw new RangeError("Scene model has no animation frames");
-  if (entity.model.kind === "q2-sp2" || entity.model.kind === "md5" || entity.flags.kind === "q3" && (entity.flags.bits & 512) !== 0) {
+  if (entity.model.kind === "q2-sp2" || entity.model.kind === "md5" && entity.model.skinSelection.kind !== "q1-mdl-replacement"
+    || entity.flags.kind === "q3" && (entity.flags.bits & 512) !== 0) {
     frame %= count; previousFrame %= count;
   }
   const badFrame = frame < 0 || frame >= count, badOld = previousFrame < 0 || previousFrame >= count;
@@ -173,8 +174,9 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
     }
     case "md5": {
       const selection = model.skinSelection;
-      const elapsedFrame = selection.kind === "q1-mdl-replacement" && selection.timing.kind === "elapsed-time"
-        ? Math.floor((context.timeSeconds + (options.syncBase ?? 0)) * selection.timing.frameRate) % model.frames.length : null;
+      const elapsed = selection.kind === "q1-mdl-replacement" && selection.timing.kind === "elapsed-time"
+        ? Math.floor((context.timeSeconds + (options.syncBase ?? 0)) * selection.timing.frameRate) : null;
+      const elapsedFrame = elapsed === null ? null : ((elapsed % model.frames.length) + model.frames.length) % model.frames.length;
       const joints = entity.pose.kind === "skeleton" ? entity.pose.joints : elapsedFrame === null
         ? sampleMd5Pose(model, frame, previousFrame, backLerp) : sampleMd5Pose(model, elapsedFrame);
       for (const [index, mesh] of model.meshes.entries()) {

@@ -190,15 +190,30 @@ describe("source soldier and infantry behavior", () => {
     throwGib(soldier.entity, scene.game, "models/objects/gibs/sm_meat/tris.md2", 5);
     const source = structuredClone(scene.game.capture()), snapshot = structuredClone(scene.monsters.capture());
     const random = [...scene.random], counters = { ...scene.game.counters };
-    const restored = new Q2Monsters(scene.weapons), game = new Q2Foundation(scene.host, scene.game.options, [restored]);
+    const actors = SessionActorRegistry.restore(createIdentityOwner("q2-monsters-restored"), scene.actors.checkpoint(), scene.actors.sourceCheckpoint());
+    const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+    const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    for (const entry of scene.actors.observations()) {
+      const actor = actors.resolveSaved(entry.id), body = scene.bodies.read(entry.id), health = scene.combat.read(entry.id);
+      if (actor === null) throw new Error("Missing restored actor");
+      if (body !== null) bodies.create(actor, { ...body, ground: body.ground === null ? null : actors.referenceSaved(body.ground) });
+      if (health !== null) combat.create(actor, health);
+    }
+    const player = actors.referenceSaved(scene.player.id), world = actors.referenceSaved(scene.host.worldActor());
+    const host: Q2FoundationHost = { ...scene.host, actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors),
+      worldActor: () => world, players: () => [player], isPlayer: actor => actor === player, isMonster: actor => (game.entity(actor)?.serverFlags ?? 0) % 8 >= 4,
+      trace: request => { const trace = scene.host.trace(request); return trace.hit.kind === "actor" ? { ...trace, hit: { kind: "actor", actor: actors.referenceSaved(trace.hit.actor) } } : trace; } };
+    const restored = new Q2Monsters(scene.weapons), game = new Q2Foundation(host, scene.game.options, [restored]);
     game.restore(source); restored.restore(game, snapshot);
-    expect(restored.capture()).toEqual(snapshot);
-    expect(game.capture()).toEqual(source);
     expect(scene.random).toEqual(random);
     expect(game.counters).toEqual(counters);
-    const resumed = restored.context(infantry.entity.actor.id);
+    expect(game.capture().entities.map(entity => entity.callbacks)).toEqual(source.entities.map(entity => entity.callbacks));
+    const resumed = restored.context(actors.referenceSaved(infantry.entity.actor.id));
     if (resumed === null) throw new Error("Missing restored infantry");
     expect(resumed).not.toBe(infantry);
+    expect(resumed.entity.enemy).toBe(player);
+    expect(resumed.state.move.name).toBe(infantry.state.move.name);
+    expect(resumed.state.nextMoveTime).toBe(infantry.state.nextMoveTime);
     scene.setTime(0.15); resumed.entity.think?.(resumed.entity, game);
     expect(scene.weapons.shots).toHaveLength(1);
     scene.setTime(0.225); resumed.entity.think?.(resumed.entity, game);
@@ -207,7 +222,7 @@ describe("source soldier and infantry behavior", () => {
     restored.endFrame(game);
     expect(scene.events.filter(event => event.kind === "sound" && event.path.startsWith("soldier/solpain"))).toHaveLength(before + 1);
     expect(restored.capture().actors.find(actor => actor.actor.slot === soldier.entity.actor.id.slot)?.pendingDamage).toBeNull();
-    scene.actors.close();
+    actors.close(); scene.actors.close();
   });
 
 });

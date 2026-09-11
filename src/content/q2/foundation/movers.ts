@@ -2,9 +2,14 @@
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { add, dot, integerField, length, movedir, normalize, numberField, scale, subtract, zero } from "./fields.ts";
-import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "./host.ts";
+import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Use, Q2Touch, Q2Die } from "./host.ts";
 import { Q2LinearMotion } from "./motion.ts";
 import { Q2AngularMotion } from "./angular-motion.ts";
+import type { Q2LinearMotionCheckpoint } from "./motion.ts";
+import type { Q2AngularMotionCheckpoint } from "./angular-motion.ts";
+import type { SavedActorId } from "../../../contracts/session.ts";
+import type { Q2CallbackDefinitions } from "./callbacks.ts";
+import { restoreQ2Actor } from "./checkpoint.ts";
 
 interface DoorState {
   readonly start: Vec3;
@@ -23,17 +28,63 @@ interface DoorState {
   debounce: number;
 }
 interface TrainState { destination: Q2Entity | null; debounce: number; readonly ship: boolean; }
+export interface Q2MoversCheckpoint {
+  readonly doors: readonly { readonly actor: SavedActorId; readonly state: Omit<DoorState, "master" | "team">;
+    readonly master: SavedActorId; readonly team: readonly SavedActorId[] }[];
+  readonly trains: readonly { readonly actor: SavedActorId; readonly destination: SavedActorId | null; readonly debounce: number; readonly ship: boolean }[];
+  readonly linear: Q2LinearMotionCheckpoint;
+  readonly angular: Q2AngularMotionCheckpoint;
+}
 export interface Q2MoverHooks {
   pathCorner(corner: Q2Entity, game: Q2GameServices, other: ActorId): undefined;
   combatPoint(point: Q2Entity, game: Q2GameServices, other: ActorId): undefined;
 }
 
 export class Q2MoverModule implements Q2SpawnModule {
-  readonly linear = new Q2LinearMotion();
-  readonly angular = new Q2AngularMotion();
-  private readonly doors = new WeakMap<Q2Entity, DoorState>();
-  private readonly trains = new WeakMap<Q2Entity, TrainState>();
+  readonly linear = new Q2LinearMotion("q2:foundation/linear");
+  readonly angular = new Q2AngularMotion("q2:foundation/angular");
+  private doors = new WeakMap<Q2Entity, DoorState>();
+  private trains = new WeakMap<Q2Entity, TrainState>();
   constructor(private readonly hooks: Q2MoverHooks) {}
+
+  get callbacks(): Q2CallbackDefinitions {
+    return { think: { ...this.linear.callbacks.think, ...this.angular.callbacks.think, door_hit_bottom: this.bottom, door_go_down: this.down, door_hit_top: this.top,
+      Think_SpawnDoorTrigger: this.prepareDoor, smart_water_go_up: this.smartWater, train_wait: this.trainWait, train_next: this.trainNext,
+      train_piece_wait: this.trainPieceWait, func_train_find: this.trainFind },
+      use: { door_use: this.doorUse, Door_Activate: this.doorActivate, train_use: this.trainUse, rotating_use: this.rotatingUse },
+      touch: { button_touch: this.buttonTouch, door_touch: this.doorTouch, Touch_DoorTrigger: this.doorTriggerTouch, rotating_touch: this.rotatingTouch, q2_path_touch: this.pathTouch },
+      die: { door_killed: this.doorKilled }, blocked: { door_blocked: this.doorBlocked, smart_water_blocked: this.smartWaterBlocked, train_blocked: this.trainBlocked, rotating_blocked: this.rotatingDamage } };
+  }
+
+  capture(game: Q2GameServices): Q2MoversCheckpoint {
+    const doors: Q2MoversCheckpoint["doors"][number][] = [], trains: Q2MoversCheckpoint["trains"][number][] = [];
+    const reference = (entity: Q2Entity): SavedActorId => ({ slot: entity.actor.id.slot, generation: entity.actor.id.generation });
+    for (const entity of game.entities.values()) {
+      const door = this.doors.get(entity), train = this.trains.get(entity);
+      if (door !== undefined) {
+        const { master, team, ...state } = door;
+        doors.push({ actor: reference(entity), state: structuredClone(state), master: reference(master), team: team.map(reference) });
+      }
+      if (train !== undefined) trains.push({ actor: reference(entity), destination: train.destination === null ? null : reference(train.destination), debounce: train.debounce, ship: train.ship });
+    }
+    return { doors, trains, linear: this.linear.capture(game), angular: this.angular.capture(game) };
+  }
+
+  restore(game: Q2GameServices, checkpoint: Q2MoversCheckpoint): undefined {
+    this.doors = new WeakMap<Q2Entity, DoorState>(); this.trains = new WeakMap<Q2Entity, TrainState>();
+    const reference = (saved: SavedActorId): Q2Entity => {
+      const entity = game.entity(restoreQ2Actor(game, saved).id);
+      if (entity === null) throw new Error("Q2 mover checkpoint has no source actor");
+      return entity;
+    };
+    for (const saved of checkpoint.doors) this.doors.set(reference(saved.actor), { ...structuredClone(saved.state), master: reference(saved.master), team: saved.team.map(reference) });
+    for (const saved of checkpoint.trains) this.trains.set(reference(saved.actor), { destination: saved.destination === null ? null : reference(saved.destination), debounce: saved.debounce, ship: saved.ship });
+    this.linear.restore(game, checkpoint.linear); this.angular.restore(game, checkpoint.angular);
+    return undefined;
+  }
+
+  private readonly trainPieceWait: Q2Think = () => undefined;
+  private readonly rotatingTouch: Q2Touch = (entity, game, contact) => this.rotatingDamage(entity, game, contact.other);
 
   spawn(entity: Q2Entity, game: Q2GameServices): boolean {
     switch (entity.classname) {
@@ -189,70 +240,28 @@ export class Q2MoverModule implements Q2SpawnModule {
     }
     if (button) entity.effects |= 0x400;
     else if (!water) { if ((entity.spawnflags & 16) !== 0) entity.effects |= 0x1000; if (!angular && (entity.spawnflags & 64) !== 0) entity.effects |= 0x2000; }
-    entity.use = (self, services, _other, activator) => this.use(self, services, activator);
+    entity.use = this.doorUse;
     if (entity.maxHealth > 0 && !water) {
       game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-      entity.die = (self, services, reaction) => {
-        const state = this.door(self);
-        for (const member of state.team) {
-          if (member.maxHealth <= 0) continue;
-          services.host.combat.setHealth(member.actor, member.maxHealth);
-          services.host.combat.setTraits(member.actor, { canTakeDamage: false });
-        }
-        return this.use(state.master, services, reaction.attacker);
-      };
+      entity.die = this.doorKilled;
     } else if (button && entity.targetname === "") {
-      entity.touch = (self, services, contact) => {
-        if (services.host.isPlayer(contact.other) && (services.host.combat.read(contact.other)?.health ?? 0) > 0) this.use(self, services, contact.other);
-        return undefined;
-      };
+      entity.touch = this.buttonTouch;
     } else if (!button && entity.targetname !== "" && entity.message !== "") {
-      entity.touch = (self, services, contact) => {
-        const state = this.door(self);
-        if (!services.host.isPlayer(contact.other) || services.host.now() < state.debounce) return undefined;
-        state.debounce = services.host.now() + 5;
-        services.host.emit({ kind: "centerprint", actor: contact.other, text: self.message });
-        return services.sound(self, "misc/talk1.wav", 0);
-      };
+      entity.touch = this.doorTouch;
     }
-    entity.blocked = (self, services, other) => {
-      const body = services.host.bodies.read(other);
-      if (body === null) return undefined;
-      if (!services.host.isPlayer(other) && !services.host.isMonster(other)) {
-        if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, 100000, 1, zero, body.origin, zero, 20);
-        const victim = services.entity(other); if (victim !== null) services.remove(victim);
-        return undefined;
-      }
-      services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
-      if ((self.spawnflags & 4) !== 0 || self.wait < 0) return undefined;
-      const state = this.door(self), reverse = state.phase === "down";
-      for (const member of state.team) if (reverse) this.up(member, services, member.activator); else this.down(member, services);
-      return undefined;
-    };
+    entity.blocked = this.doorBlocked;
     game.show(entity);
     if (!button && !water) game.schedule(entity, game.host.frameSeconds(), this.prepareDoor);
     if (water) {
       entity.blocked = null;
       if (game.options.edition === "rerelease" && (entity.spawnflags & 2) !== 0) {
-        entity.blocked = (self, services, other) => {
-          const body = services.host.bodies.read(other); if (body === null) return undefined;
-          const living = services.host.isPlayer(other) || services.host.isMonster(other);
-          if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, living ? 100 : 100000, 1, zero, body.origin, zero, 19);
-          const victim = services.entity(other);
-          if (!living && victim !== null && services.host.actors.isLive(other) && victim.solid !== "none") services.remove(victim);
-          return undefined;
-        };
+        entity.blocked = this.smartWaterBlocked;
       }
     }
     if (game.options.edition === "rerelease" && angular && (entity.spawnflags & 0x10000) !== 0) {
-      const die = entity.die;
       if (entity.maxHealth > 0) game.host.combat.setTraits(entity.actor, { canTakeDamage: false });
       entity.die = null; game.cancel(entity);
-      entity.use = (self, services) => {
-        self.use = null; self.die = die; this.door(self).activated = true;
-        if (self.maxHealth > 0) services.host.combat.setTraits(self.actor, { canTakeDamage: true });
-        return services.schedule(self, services.host.frameSeconds(), this.prepareDoor);
-      };
+      entity.use = this.doorActivate;
     }
     return undefined;
   }
@@ -280,14 +289,7 @@ export class Q2MoverModule implements Q2SpawnModule {
     }
     const trigger = game.create("door_trigger"); trigger.owner = entity.actor.id; trigger.visible = false;
     game.move(trigger, { bounds: { min: { x: min.x - 60, y: min.y - 60, z: min.z }, max: { x: max.x + 60, y: max.y + 60, z: max.z } } }, false);
-    let debounce = 0;
-    trigger.touch = (_self, services, contact) => {
-      if ((services.host.combat.read(contact.other)?.health ?? 0) <= 0 || services.host.now() < debounce) return undefined;
-      const monster = services.host.isMonster(contact.other);
-      if (!monster && !services.host.isPlayer(contact.other) || monster && (entity.spawnflags & 8) !== 0) return undefined;
-      debounce = services.host.now() + 1;
-      return this.use(entity, services, contact.other);
-    };
+    trigger.touch = this.doorTriggerTouch;
     game.solid(trigger, "trigger");
     if ((entity.spawnflags & 1) !== 0) this.portals(entity, game, true);
     return undefined;
@@ -392,14 +394,14 @@ export class Q2MoverModule implements Q2SpawnModule {
         for (const actor of game.pushTeam(entity.actor.id)) {
           const member = game.entity(actor.id); if (member === null || member === entity) continue;
           member.speed = entity.speed; member.accel = entity.accel; member.decel = entity.decel; game.motion(member, "push");
-          this.linear.moveTo(member, game, add(game.body(member).origin, delta), () => undefined);
+          this.linear.moveTo(member, game, add(game.body(member).origin, delta), this.trainPieceWait);
         }
       }
       return undefined;
     }
   };
 
-  private spawnTrain(entity: Q2Entity, game: Q2GameServices): undefined {
+  spawnTrain(entity: Q2Entity, game: Q2GameServices): undefined {
     const ship = entity.classname !== "func_train";
     this.trains.set(entity, { destination: null, debounce: 0, ship });
     if (ship) {
@@ -410,35 +412,10 @@ export class Q2MoverModule implements Q2SpawnModule {
     game.solid(entity, ship ? "none" : "brush"); game.motion(entity, "push"); game.move(entity, { angles: zero });
     entity.speed ||= ship ? 300 : 100; entity.accel = entity.decel = entity.speed;
     entity.damage = (entity.spawnflags & 4) !== 0 ? 0 : entity.damage || 100;
-    entity.use = (self, services, _other, activator) => {
-      self.activator = activator;
-      if (ship && !self.visible) { self.visible = true; services.show(self); }
-      if ((self.spawnflags & 1) !== 0) {
-        if ((self.spawnflags & 2) === 0) return undefined;
-        self.spawnflags &= ~1; services.move(self, { velocity: zero }, false); services.motion(self, self.motion); return services.cancel(self);
-      }
-      const destination = this.train(self).destination;
-      if (destination === null) return this.trainNext(self, services);
-      self.spawnflags |= 1;
-      return this.linear.moveTo(self, services, this.trainDestination(self, destination, services), this.trainWait);
-    };
-    entity.blocked = (self, services, other) => {
-      const state = this.train(self), body = services.host.bodies.read(other);
-      if (body === null || self.damage === 0 || services.host.now() < state.debounce) return undefined;
-      state.debounce = services.host.now() + 0.5;
-      if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
-      return undefined;
-    };
+    entity.use = this.trainUse;
+    entity.blocked = this.trainBlocked;
     game.show(entity);
-    game.schedule(entity, game.host.frameSeconds(), (self, services) => {
-      const target = services.pickTarget(self.target);
-      if (target === null) { services.host.diagnostic(`Q2 train first target missing: ${self.target}`); return undefined; }
-      self.target = target.target;
-      services.move(self, { origin: this.trainDestination(self, target, services) });
-      if (self.targetname === "") self.spawnflags |= 1;
-      if ((self.spawnflags & 1) !== 0) { self.activator = self.actor.id; services.schedule(self, services.host.frameSeconds(), this.trainNext); }
-      return undefined;
-    });
+    game.schedule(entity, game.host.frameSeconds(), this.trainFind);
     return undefined;
   }
 
@@ -447,18 +424,9 @@ export class Q2MoverModule implements Q2SpawnModule {
     if ((entity.spawnflags & 2) !== 0) entity.movedir = scale(entity.movedir, -1);
     entity.speed ||= 100; entity.damage ||= 2;
     game.solid(entity, "brush"); game.motion(entity, (entity.spawnflags & 32) !== 0 ? "stop" : "push");
-    const damage = (self: Q2Entity, services: Q2GameServices, other: ActorId): undefined => {
-      const body = services.host.bodies.read(other);
-      if (body !== null && services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
-      return undefined;
-    };
-    entity.blocked = damage;
-    entity.use = (self, services) => {
-      const stop = length(self.angularVelocity) !== 0;
-      self.angularVelocity = stop ? zero : scale(self.movedir, self.speed);
-      self.touch = !stop && (self.spawnflags & 16) !== 0 ? (target, provider, contact) => damage(target, provider, contact.other) : null;
-      return services.motion(self, self.motion);
-    };
+    
+    entity.blocked = this.rotatingDamage;
+    entity.use = this.rotatingUse;
     if ((entity.spawnflags & 1) !== 0) entity.use(entity, game, null, null);
     if ((entity.spawnflags & 64) !== 0) entity.effects |= 0x1000;
     if ((entity.spawnflags & 128) !== 0) entity.effects |= 0x2000;
@@ -470,12 +438,123 @@ export class Q2MoverModule implements Q2SpawnModule {
     if (entity.targetname === "" && entity.classname === "path_corner") { game.remove(entity); return undefined; }
     game.move(entity, { bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } }, false);
     entity.visible = false;
-    entity.touch = (self, services, contact) => {
-      return self.classname === "path_corner" ? this.hooks.pathCorner(self, services, contact.other) : this.hooks.combatPoint(self, services, contact.other);
-    };
+    entity.touch = this.pathTouch;
     game.solid(entity, "trigger");
     return undefined;
   }
+
+  private readonly doorUse: Q2Use = (self, services, _other, activator) => this.use(self, services, activator);
+
+  private readonly doorKilled: Q2Die = (self, services, reaction) => {
+        const state = this.door(self);
+        for (const member of state.team) {
+          if (member.maxHealth <= 0) continue;
+          services.host.combat.setHealth(member.actor, member.maxHealth);
+          services.host.combat.setTraits(member.actor, { canTakeDamage: false });
+        }
+        return this.use(state.master, services, reaction.attacker);
+      };
+
+  private readonly buttonTouch: Q2Touch = (self, services, contact) => {
+        if (services.host.isPlayer(contact.other) && (services.host.combat.read(contact.other)?.health ?? 0) > 0) this.use(self, services, contact.other);
+        return undefined;
+      };
+
+  private readonly doorTouch: Q2Touch = (self, services, contact) => {
+        const state = this.door(self);
+        if (!services.host.isPlayer(contact.other) || services.host.now() < state.debounce) return undefined;
+        state.debounce = services.host.now() + 5;
+        services.host.emit({ kind: "centerprint", actor: contact.other, text: self.message });
+        return services.sound(self, "misc/talk1.wav", 0);
+      };
+
+  private readonly doorBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
+      const body = services.host.bodies.read(other);
+      if (body === null) return undefined;
+      if (!services.host.isPlayer(other) && !services.host.isMonster(other)) {
+        if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, 100000, 1, zero, body.origin, zero, 20);
+        const victim = services.entity(other); if (victim !== null) services.remove(victim);
+        return undefined;
+      }
+      services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
+      if ((self.spawnflags & 4) !== 0 || self.wait < 0) return undefined;
+      const state = this.door(self), reverse = state.phase === "down";
+      for (const member of state.team) if (reverse) this.up(member, services, member.activator); else this.down(member, services);
+      return undefined;
+    };
+
+  private readonly smartWaterBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
+          const body = services.host.bodies.read(other); if (body === null) return undefined;
+          const living = services.host.isPlayer(other) || services.host.isMonster(other);
+          if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, living ? 100 : 100000, 1, zero, body.origin, zero, 19);
+          const victim = services.entity(other);
+          if (!living && victim !== null && services.host.actors.isLive(other) && victim.solid !== "none") services.remove(victim);
+          return undefined;
+        };
+
+  private readonly doorActivate: Q2Use = (self, services) => {
+        self.use = null; self.die = self.maxHealth > 0 ? this.doorKilled : null; this.door(self).activated = true;
+        if (self.maxHealth > 0) services.host.combat.setTraits(self.actor, { canTakeDamage: true });
+        return services.schedule(self, services.host.frameSeconds(), this.prepareDoor);
+      };
+
+  private readonly doorTriggerTouch: Q2Touch = (self, services, contact) => {
+      const entity=services.entity(self.owner); if(entity===null)return undefined;
+      if ((services.host.combat.read(contact.other)?.health ?? 0) <= 0 || services.host.now() < self.timestamp) return undefined;
+      const monster = services.host.isMonster(contact.other);
+      if (!monster && !services.host.isPlayer(contact.other) || monster && (entity.spawnflags & 8) !== 0) return undefined;
+      self.timestamp = services.host.now() + 1;
+      return this.use(entity, services, contact.other);
+    };
+
+  private readonly trainUse: Q2Use = (self, services, _other, activator) => {
+      self.activator = activator;
+      if (this.train(self).ship && !self.visible) { self.visible = true; services.show(self); }
+      if ((self.spawnflags & 1) !== 0) {
+        if ((self.spawnflags & 2) === 0) return undefined;
+        self.spawnflags &= ~1; services.move(self, { velocity: zero }, false); services.motion(self, self.motion); return services.cancel(self);
+      }
+      const destination = this.train(self).destination;
+      if (destination === null) return this.trainNext(self, services);
+      self.spawnflags |= 1;
+      return this.linear.moveTo(self, services, this.trainDestination(self, destination, services), this.trainWait);
+    };
+
+  private readonly trainBlocked: NonNullable<Q2Entity["blocked"]> = (self, services, other) => {
+      const state = this.train(self), body = services.host.bodies.read(other);
+      if (body === null || self.damage === 0 || services.host.now() < state.debounce) return undefined;
+      state.debounce = services.host.now() + 0.5;
+      if (services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
+      return undefined;
+    };
+
+  private readonly trainFind: Q2Think = (self, services) => {
+      const target = services.pickTarget(self.target);
+      if (target === null) { services.host.diagnostic(`Q2 train first target missing: ${self.target}`); return undefined; }
+      self.target = target.target;
+      services.move(self, { origin: this.trainDestination(self, target, services) });
+      if (self.targetname === "") self.spawnflags |= 1;
+      if ((self.spawnflags & 1) !== 0) { self.activator = self.actor.id; services.schedule(self, services.host.frameSeconds(), this.trainNext); }
+      return undefined;
+    };
+
+  private readonly rotatingDamage: NonNullable<Q2Entity["blocked"]> = (self: Q2Entity, services: Q2GameServices, other: ActorId): undefined => {
+      const body = services.host.bodies.read(other);
+      if (body !== null && services.host.combat.read(other) !== null) services.damage(other, self, self.actor.id, self.damage, 1, zero, body.origin, zero, 20);
+      return undefined;
+    };
+
+  private readonly rotatingUse: Q2Use = (self, services) => {
+      const stop = length(self.angularVelocity) !== 0;
+      self.angularVelocity = stop ? zero : scale(self.movedir, self.speed);
+      self.touch = !stop && (self.spawnflags & 16) !== 0 ? this.rotatingTouch : null;
+      return services.motion(self, self.motion);
+    };
+
+  private readonly pathTouch: Q2Touch = (self, services, contact) => {
+      return self.classname === "path_corner" ? this.hooks.pathCorner(self, services, contact.other) : this.hooks.combatPoint(self, services, contact.other);
+    };
+
 }
 
 export function createQ2MoverModule(hooks: Q2MoverHooks): Q2MoverModule { return new Q2MoverModule(hooks); }

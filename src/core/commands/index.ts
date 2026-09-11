@@ -3,7 +3,7 @@
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
 import { CvarFlag } from "../cvars/index.ts";
-import type { CvarRegistry } from "../cvars/index.ts";
+import type { CvarRead, CvarRegistry, CvarSnapshot } from "../cvars/index.ts";
 import { nativeAtoi } from "../numeric.ts";
 import { asciiFold, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand } from "./text.ts";
 import { sourceFilter } from "./filter.ts";
@@ -25,10 +25,17 @@ export interface CommandInvocation {
 export type CommandHandler = (command: CommandInvocation) => undefined;
 export type CommandFallback = (command: CommandInvocation) => boolean | undefined;
 
+/** Resolves live owners; command parsing never copies or merges their variable state. */
+export interface CommandCvarRouting {
+  owner(name: string, source: CommandContext): CvarRegistry;
+  visible(source: CommandContext): readonly CvarRegistry[];
+}
+
 export interface CommandBufferOptions {
   readonly dialect: CommandDialect;
   readonly context: CommandContext;
   readonly cvars?: CvarRegistry;
+  readonly cvarRouting?: CommandCvarRouting;
   readonly print?: (text: string) => void;
   readonly readScript?: (name: string, source: CommandContext) => string | undefined;
   readonly commandLine?: readonly string[];
@@ -94,13 +101,38 @@ export class CommandBuffer {
   get tokenizedArguments(): readonly string[] { return this.tokens; }
   private print(text: string): void { this.options.print?.(text); }
 
+  private cvarOwner(name: string, source: CommandContext): CvarRegistry | undefined {
+    const owner = this.options.cvarRouting?.owner(name, source) ?? this.options.cvars;
+    if (owner !== undefined && owner.context.session !== source.session) {
+      throw new RangeError("Command cvar owner belongs to another session");
+    }
+    return owner;
+  }
+  private visibleCvars(source: CommandContext): readonly CvarRegistry[] {
+    const registries = this.options.cvarRouting?.visible(source) ?? (this.options.cvars === undefined ? [] : [this.options.cvars]);
+    for (const registry of registries) if (registry.context.session !== source.session) {
+      throw new RangeError("Visible cvar owner belongs to another session");
+    }
+    return registries;
+  }
+  findCvar(name: string, source?: CommandContext): CvarRead | undefined {
+    return this.cvarOwner(name, this.inputContext(source))?.find(name);
+  }
+  cvarSnapshots(source?: CommandContext): readonly CvarSnapshot[] {
+    const context = this.inputContext(source), result: CvarSnapshot[] = [];
+    for (const registry of this.visibleCvars(context)) for (const variable of registry.snapshots()) {
+      if (this.cvarOwner(variable.name, context) === registry) result.push(variable);
+    }
+    return Object.freeze(result);
+  }
+
   register(nameInput: string, handler: CommandHandler | null): boolean {
     const name = sourceCommandText(nameInput);
     if (this.exists(name)) {
       if (handler !== null || this.dialect !== "q3") this.print(`Cmd_AddCommand: ${name} already defined\n`);
       return false;
     }
-    if (this.dialect !== "q3" && this.options.cvars?.variableString(name)) {
+    if (this.dialect !== "q3" && this.cvarOwner(name, this.frame?.source ?? this.context)?.variableString(name)) {
       this.print(`Cmd_AddCommand: ${name} already defined as a var\n`); return false;
     }
     this.handlers = { name, handler, next: this.handlers };
@@ -228,7 +260,7 @@ export class CommandBuffer {
   }
 
   private dispatch(raw: string, source: CommandContext): number {
-    const expanded = isQ2(this.dialect) ? expandCommandMacros(raw, name => this.options.cvars?.variableString(name) ?? "", text => this.print(text)) : raw;
+    const expanded = isQ2(this.dialect) ? expandCommandMacros(raw, name => this.cvarOwner(name, source)?.variableString(name) ?? "", text => this.print(text)) : raw;
     if (expanded === undefined) { this.tokens = []; return 0; }
     const tokens = tokenizeCommand(expanded, this.dialect), name = tokens.argv[0];
     this.tokens = tokens.argv;
@@ -271,7 +303,7 @@ export class CommandBuffer {
     }
   }
   private fallback(command: CommandInvocation): void {
-    const name = command.argv[0] ?? "", cvars = this.options.cvars, variable = cvars?.find(name);
+    const name = command.argv[0] ?? "", cvars = this.cvarOwner(name, command.source), variable = cvars?.find(name);
     if (variable !== undefined && cvars !== undefined) {
       const value = command.argv[1];
       if (value === undefined) {
@@ -285,7 +317,7 @@ export class CommandBuffer {
       if (this.options.clientGame?.(command) || this.options.serverGame?.(command) || this.options.ui?.(command)) return;
     }
     if (this.dialect === "q3" || isQ2(this.dialect)) { this.options.forwardToServer?.(command); return; }
-    if (this.dialect !== "q1-quakeworld" || cvars?.variableValue("cl_warncmd") || cvars?.variableValue("developer")) this.print(`Unknown command "${name}"\n`);
+    if (this.dialect !== "q1-quakeworld" || this.findCvar("cl_warncmd", command.source)?.numericValue || this.findCvar("developer", command.source)?.numericValue) this.print(`Unknown command "${name}"\n`);
   }
 
   private registerBuiltins(): void {
@@ -347,7 +379,7 @@ export class CommandBuffer {
         this.print(`${names.length} commands\n`);
       });
       register("cvarlist", command => {
-        const variables = this.options.cvars?.snapshots() ?? [], pattern = this.dialect === "q3" ? command.argv[1] : undefined;
+        const variables = this.cvarSnapshots(command.source), pattern = this.dialect === "q3" ? command.argv[1] : undefined;
         for (const variable of variables) {
           if (pattern !== undefined && !sourceFilter(pattern, variable.name, false)) continue;
           const flag = (mask: number, marker: string): string => (variable.flags & mask) !== 0 ? marker : " ";
@@ -356,13 +388,14 @@ export class CommandBuffer {
             : flag(1, "*") + flag(2, "U") + flag(4, "S") + ((variable.flags & 8) !== 0 ? "-" : flag(16, "L"));
           this.print(`${markers} ${variable.name} "${variable.value}"\n`);
         }
-        this.print(this.dialect === "q3" ? `\n${variables.length} total cvars\n${this.options.cvars?.indexCount ?? 0} cvar indexes\n` : `${variables.length} cvars\n`);
+        const indexes = this.visibleCvars(command.source).reduce((total, registry) => total + registry.indexCount, 0);
+        this.print(this.dialect === "q3" ? `\n${variables.length} total cvars\n${indexes} cvar indexes\n` : `${variables.length} cvars\n`);
       });
     }
     if (this.dialect !== "q3") { install(); return; }
     register("vstr", command => {
       if (command.argv.length !== 2) { this.print("vstr <variablename> : execute a variable command\n"); return; }
-      command.insert(`${this.options.cvars?.variableString(command.argv[1] ?? "") ?? ""}\n`);
+      command.insert(`${this.findCvar(command.argv[1] ?? "", command.source)?.value ?? ""}\n`);
     });
     for (const [name, flag] of [["seta", CvarFlag.Archive], ["setu", CvarFlag.UserInfo], ["sets", CvarFlag.ServerInfo]] satisfies readonly (readonly [string, number])[]) {
       register(name, command => { this.setCommand(command, flag); });
@@ -370,17 +403,19 @@ export class CommandBuffer {
     register("toggle", command => {
       if (command.argv.length !== 2) { this.print("toggle <variable> : toggle a cvar on/off\n"); return; }
       const name = command.argv[1] ?? "";
-      this.options.cvars?.set(name, Math.trunc(this.options.cvars.variableValue(name)) === 0 ? "1" : "0");
+      const cvars = this.cvarOwner(name, command.source);
+      cvars?.set(name, Math.trunc(cvars.variableValue(name)) === 0 ? "1" : "0");
     });
     register("reset", command => {
       if (command.argv.length !== 2) { this.print("reset <variable> : reset a cvar\n"); return; }
-      this.options.cvars?.reset(command.argv[1] ?? "");
+      const name = command.argv[1] ?? "";
+      this.cvarOwner(name, command.source)?.reset(name);
     });
-    register("cvar_restart", () => { this.options.cvars?.resetAll(); });
+    register("cvar_restart", command => { for (const cvars of this.visibleCvars(command.source)) if (cvars.dialect === "q3") cvars.resetAll(); });
     install();
   }
   private setCommand(command: CommandInvocation, flags: number): void {
-    const cvars = this.options.cvars;
+    const cvars = this.cvarOwner(command.argv[1] ?? "", command.source);
     if (cvars === undefined) return;
     if (command.argv.length < 3 || isQ2(this.dialect) && command.argv.length > 4 || flags !== 0 && command.argv.length !== 3) { this.print("set <variable> <value>\n"); return; }
     const name = command.argv[1] ?? "", value = command.argv[2] ?? "";

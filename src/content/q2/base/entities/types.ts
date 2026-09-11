@@ -15,5 +15,7 @@ export interface Q2BaseEntityHooks {
   localTime(): { readonly hour: number; readonly minute: number; readonly second: number };
   /** Admits the turret driver's infantry state to the permanent monster runner. */
   turretDriver(entity: Q2Entity, game: Q2GameServices): MonsterContext;
+  /** Looks up an already restored monster; must not admit or spawn one. */
+  monsterContext(actor: ActorId): MonsterContext | null;
   resumeMonster(entity: Q2Entity, game: Q2GameServices): undefined;
 }
