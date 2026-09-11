@@ -45,6 +45,7 @@ export type Q3SourceBots = ClientBotServices & (
 
 /** W73 supplies the existing owners; this provider contains source game records and phase functions. */
 export interface Q3SourceHost extends ClientMovementHost {
+  primaryAttackAllowed?(actor: ActorId): boolean;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;

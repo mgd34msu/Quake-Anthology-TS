@@ -4,11 +4,15 @@ import { readSavedActor } from "../../../persistence/save-image.ts";
 import { readRandom, readVector } from "../../../persistence/shared.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import type { GrappleRuntimeCheckpoint } from "./grapple-runtime.ts";
+import { readGrappleWeaponState } from "./weapon-slot-checkpoint.ts";
 
 export function readGrappleRuntimeCheckpoint(reader: SaveReader): GrappleRuntimeCheckpoint {
   const random = readRandom(reader.field("random"));
   if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") return reader.field("random").fail("Unsupported grapple random stream");
-  const common = { version: reader.field("version").literal(1), random,
+  const common = { version: reader.field("version").literal(2), random,
+    weaponAnimations: reader.field("weaponAnimations").list(entry => ({ actor: readSavedActor(entry.field("actor")),
+      state: readGrappleWeaponState(entry.field("state")), nextFrameAt: entry.field("nextFrameAt").finite(),
+      kickOrigin: readVector(entry.field("kickOrigin")), kickPitch: entry.field("kickPitch").finite() })),
     controls: reader.field("controls").list(entry => ({ actor: readSavedActor(entry.field("actor")), held: entry.field("held").boolean(), jump: entry.field("jump").boolean(), teleportBit: entry.field("teleportBit").nullable(value => value.choice(0, 4)),
       pressed: entry.field("pressed").boolean(), released: entry.field("released").boolean(), previousVelocity: readVector(entry.field("previousVelocity")),
       predictionSuppressed: entry.field("predictionSuppressed").boolean() })) };

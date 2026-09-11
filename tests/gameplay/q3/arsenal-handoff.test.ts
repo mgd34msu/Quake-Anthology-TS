@@ -97,3 +97,21 @@ test("Q3 completes a committed native switch before external drop and uses nativ
   expect(f.arsenal.read(f.actor.id).activeWeapon).toBeNull();
   f.actors.close();
 });
+
+test("Q3 holster cancels a queued resume before any source raise commits", () => {
+  const f = fixture();
+  f.handoff.holster(); f.step(0); f.step(200);
+  expect(f.handoff.isHolstered()).toBe(true);
+  const before = f.save();
+  f.handoff.resume(null);
+  expect(f.save().runtime.externalSlot).toBe("resume-requested");
+  f.handoff.holster();
+  expect(f.handoff.isHolstered()).toBe(true);
+  expect(f.save().arsenal).toEqual(before.arsenal);
+  f.step(100, true);
+  expect(f.handoff.isHolstered()).toBe(true);
+  expect(f.shots).toHaveLength(0);
+  f.handoff.resume(null); f.step(0);
+  expect(f.save().arsenal.state).toEqual({ kind: "q3", sourceWeapon: Weapon.WP_MACHINEGUN, state: WeaponState.WEAPON_RAISING, timeMilliseconds: 250 });
+  f.actors.close();
+});

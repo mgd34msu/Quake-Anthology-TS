@@ -70,3 +70,8 @@ export class ThreewaveWeapon {
   isHolstered(): boolean { return true; }
   resume(actor: ActorId): undefined { return this.frame(actor, 0); }
 }
+
+export function threewaveCharacterPose(core: ThreewaveGrapple, actor: ActorId) {
+  const frame = core.state(actor).weaponFrame, hook = core.hook(actor);
+  return { axePose: true, frame: frame === 2 ? 137 : frame === 3 ? hook !== null && core.game.time < hook.number("ctf.fired") + 0.1 ? 138 : 139 : frame === 4 ? 73 : frame === 5 ? 140 : null };
+}

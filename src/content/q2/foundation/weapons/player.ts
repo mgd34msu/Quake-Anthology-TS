@@ -1,3 +1,4 @@
+import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound } from "./presentation.ts";
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. The caller supplies the source clock and shared actor state. */
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -309,11 +310,13 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   attackAnimation(context: Q2WeaponContext, offset = 1): undefined {
-    return this.animation(context, "attack", (context.input.ducked ? 160 : 46) - offset, context.input.ducked ? 168 : 53);
+    const frames = q2AttackFrames(context.input.ducked, offset);
+    return this.animation(context, "attack", frames.first, frames.last);
   }
 
   private reverseAnimation(context: Q2WeaponContext): undefined {
-    return this.animation(context, "reverse", context.input.ducked ? 173 : 66, context.input.ducked ? 169 : 62);
+    const frames = q2ReverseFrames(context.input.ducked);
+    return this.animation(context, "reverse", frames.first, frames.last);
   }
 
   changeWeapon(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput): undefined {
@@ -349,8 +352,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   animationTime(context: Q2WeaponContext): number {
     const { state, input, game } = context;
-    let rate = input.quickSwitch && game.host.frameSeconds() <= 0.05 && (state.phase === "activating" || state.phase === "dropping") ? 20 : 10;
-    if (state.frame !== 0) { if (input.quadFireUntil > context.now) rate *= 2; if (input.haste) rate *= 2; }
+    const rate = q2WeaponAnimationRate({ ...input, frameSeconds: game.host.frameSeconds(), phase: state.phase, frame: state.frame, now: context.now });
     state.gunRate = rate;
     // rerelease gtime_t keeps integral milliseconds.
     return Math.trunc(1000 / rate) / 1000;
@@ -401,9 +403,8 @@ export class Q2Weapons extends Q2Ballistics {
     const { self, game, input, now } = context;
     const ctf = this.sourceRules?.kind === "ctf" ? this.sourceRules : null;
     if (ctf?.strengthSound(context) !== true) {
-      if (input.quadUntil > now && input.doubleUntil > now && context.rerelease) game.sound(self, "ctf/tech2x.wav", 3);
-      else if (input.quadUntil > now) game.sound(self, "items/damage3.wav", 3);
-      else if (input.doubleUntil > now) game.sound(self, "misc/ddamage3.wav", 3);
+      const sound = q2PowerupSound({ ...input, now, rerelease: context.rerelease });
+      if (sound !== null) game.sound(self, sound, 3);
     }
     ctf?.hasteSound(context);
     return undefined;

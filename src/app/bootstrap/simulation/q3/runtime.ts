@@ -148,7 +148,7 @@ export class Q3SourceRuntime {
         smoothClients: this.integer("g_smoothClients") !== 0, forceRespawnSeconds: this.integer("g_forcerespawn"), singlePlayer: this.singlePlayerActive() }),
       setPmoveMsec: value => this.setCvar("pmove_msec", String(value)), intermissionThink: clientIntermissionThink,
       spectatorThink: (entity, command) => spectatorThink(this.policy(), entity, command), checkInactivity: client => clientInactivityTimer(this.policy(), client),
-      freeHook: hook => this.missiles.hookFree(hook), checkGauntletAttack: entity => this.weapons.checkGauntletAttack(entity),
+      freeHook: hook => this.missiles.hookFree(hook), checkGauntletAttack: entity => host.primaryAttackAllowed?.(entity.actor.id) !== false && this.weapons.checkGauntletAttack(entity),
       clientEvents: (entity, oldSequence) => this.runClientEvents(entity, oldSequence), respawn: entity => this.spawns.respawn(entity),
       appendConsoleCommand: host.engine.appendConsoleCommand, isDoorTrigger: entity => this.moverSpawns.isDoorTrigger(entity),
       botTestAas: origin => { if (host.bots.kind === "available") host.bots.testAas(origin); } });

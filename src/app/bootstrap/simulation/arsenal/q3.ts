@@ -2,7 +2,7 @@ import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/identity.ts";
 import type { ArsenalState, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
-import { Q3_WEAPON_ITEMS, q3RequestWeaponHolster, q3RequestWeaponResume, q3SpawnArsenalRuntime, q3SpawnLoadout, q3SpawnAnimation, q3WeaponItem, stepQ3Arsenal } from "../../../../content/q3/foundation/arsenal.ts";
+import { Q3_WEAPON_ITEMS, q3RequestWeapon, q3RequestWeaponHolster, q3RequestWeaponResume, q3SpawnArsenalRuntime, q3SpawnLoadout, q3SpawnAnimation, q3WeaponItem, stepQ3Arsenal } from "../../../../content/q3/foundation/arsenal.ts";
 import type { Q3ArsenalRuntimeState } from "../../../../content/q3/foundation/arsenal.ts";
 import { ItemType } from "../../../../content/q3/base/shared/definitions.ts";
 import { itemList } from "../../../../content/q3/base/shared/items.ts";
@@ -29,7 +29,6 @@ export interface Q3SelectedArsenalCheckpoint {
   readonly supplyProfile: ItemId | null;
   readonly arsenal: ArsenalState;
   readonly runtime: Q3ArsenalRuntimeState;
-  readonly requestedWeapon: ItemId | null;
   readonly torsoAnimation: number;
   readonly lastFireMilliseconds: number | null;
 }
@@ -38,7 +37,6 @@ interface PlayerArsenal {
   readonly actor: OwnedActor;
   arsenal: ArsenalState;
   runtime: Q3ArsenalRuntimeState;
-  requestedWeapon: ItemId | null;
   torsoAnimation: number;
   lastFireMilliseconds: number | null;
 }
@@ -67,7 +65,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (arsenal.provider !== this.provider || arsenal.state.kind !== "q3") throw new Error("Selected Q3 starter belongs to a different arsenal");
     this.clearReplacedItems(actor);
     for (const entry of arsenal.ammo) this.options.inventory.configure(actor, entry);
-    this.players.set(actor.id, { actor, arsenal, runtime: q3SpawnArsenalRuntime(this.options.product, maxHealth), requestedWeapon: null, torsoAnimation: q3SpawnAnimation().torso, lastFireMilliseconds: null });
+    this.players.set(actor.id, { actor, arsenal, runtime: q3SpawnArsenalRuntime(this.options.product, maxHealth), torsoAnimation: q3SpawnAnimation().torso, lastFireMilliseconds: null });
     return this.read(actor.id);
   }
 
@@ -79,9 +77,11 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     const player = this.require(actor), weapon = Q3_WEAPON_ITEMS.find(entry => entry.item === item);
     if (weapon === undefined || this.options.product === "baseq3" && weapon.weapon > 10) return false;
     if (this.options.inventory.count(actor, item) <= 0) return false;
-    player.requestedWeapon = item;
+    player.runtime = q3RequestWeapon(player.runtime, weapon.weapon);
     return true;
   }
+
+  pendingWeapon(actor: ActorId): ItemId | null { const requested = this.require(actor).runtime.requestedWeapon; return requested === null ? null : q3WeaponItem(requested)?.item ?? null; }
 
   handoff(actor: ActorId): PrimaryWeaponHandoff {
     this.require(actor);
@@ -97,8 +97,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
         if (item !== null && !Q3_WEAPON_ITEMS.some(weapon => weapon.item === item &&
           (this.options.product === "missionpack" || weapon.weapon <= 10))) throw new Error("Resume item is not a Q3 primary weapon");
         const runtime = q3RequestWeaponResume(player.runtime);
-        player.requestedWeapon = item ?? player.requestedWeapon ?? player.arsenal.activeWeapon;
-        player.runtime = runtime;
+        const requested = Q3_WEAPON_ITEMS.find(weapon => weapon.item === (item ?? player.arsenal.activeWeapon));
+        player.runtime = requested === undefined ? runtime : q3RequestWeapon(runtime, requested.weapon);
       },
     };
   }
@@ -132,15 +132,12 @@ export class Q3SelectedArsenal implements SelectedArsenal {
       if (requested === undefined || this.options.product === "baseq3" && requested.weapon > 10) throw new Error("Weapon does not belong to the selected Q3 product");
       this.select(input.actor.id, intent.weapon);
     }
-    const selection = player.requestedWeapon === null ? intent : { provider: this.provider, weapon: player.requestedWeapon,
-      useHoldable: intent?.useHoldable ?? (input.command.kind === "q3" && (input.command.buttons & 4) !== 0) };
     const weaponAnimation = { provider: this.provider, state: { ...q3SpawnAnimation(), torso: player.torsoAnimation } };
     const result = stepQ3Arsenal({ ...input, arsenal, animation: input.animation.state.kind === "q3" ? input.animation : weaponAnimation }, player.runtime,
-      resolveQ3ArsenalControls(arsenal, selection, input.command, this.options.product));
+      resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product));
     player.arsenal = result.arsenal;
     player.runtime = result.runtime;
     if (result.animation.state.kind === "q3") player.torsoAnimation = result.animation.state.torso;
-    if (player.requestedWeapon === result.arsenal.activeWeapon) player.requestedWeapon = null;
     for (const entry of result.arsenal.ammo) this.options.inventory.configure(player.actor, entry);
     if (result.arsenal.state.kind !== "q3") throw new Error("Selected Q3 step returned a foreign arsenal");
     for (const effect of result.effects) {
@@ -155,7 +152,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   capture(actor: ActorId): Q3SelectedArsenalCheckpoint {
     const player = this.require(actor);
-    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime }, requestedWeapon: player.requestedWeapon, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds };
+    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime }, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds };
   }
 
   restore(actor: OwnedActor, checkpoint: Q3SelectedArsenalCheckpoint): undefined {
@@ -163,7 +160,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (checkpoint.arsenal.provider !== this.provider || checkpoint.arsenal.state.kind !== "q3" || checkpoint.runtime.product !== this.options.product) throw new Error("Saved arsenal differs from selected Q3 provider");
     this.clearReplacedItems(actor);
     for (const entry of checkpoint.arsenal.ammo) if (this.inventoryItems.has(entry.item)) this.options.inventory.configure(actor, entry);
-    this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, requestedWeapon: checkpoint.requestedWeapon, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds });
+    this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds });
     return undefined;
   }
 
@@ -209,8 +206,7 @@ export function readQ3SelectedArsenalCheckpoint(reader: SaveReader): Q3SelectedA
       respawned: runtime.field("respawned").boolean(), useItemHeld: runtime.field("useItemHeld").boolean(),
       eventSequence: runtime.field("eventSequence").integer(0), fractionalMilliseconds: runtime.field("fractionalMilliseconds").number(),
       externalSlot: runtime.field("externalSlot").value === undefined ? "active" :
-        runtime.field("externalSlot").choice("active", "holster-requested", "dropping", "holstered", "resume-requested") },
-    requestedWeapon: reader.field("requestedWeapon").nullable(namespaced),
+        runtime.field("externalSlot").choice("active", "holster-requested", "dropping", "holstered", "resume-requested"), requestedWeapon: runtime.field("requestedWeapon").nullable(value => value.integer(0)) },
     torsoAnimation: reader.field("torsoAnimation").integer(0), lastFireMilliseconds: reader.field("lastFireMilliseconds").nullable(value => value.finite()),
   };
 }

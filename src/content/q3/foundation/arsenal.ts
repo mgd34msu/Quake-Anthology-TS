@@ -52,9 +52,16 @@ export interface Q3ArsenalRuntimeState {
   readonly eventSequence: number;
   readonly fractionalMilliseconds: number;
   readonly externalSlot: Q3ExternalWeaponSlot;
+  readonly requestedWeapon: number | null;
+}
+
+export function q3RequestWeapon(runtime: Q3ArsenalRuntimeState, weapon: number): Q3ArsenalRuntimeState {
+  if (!Q3_WEAPON_ITEMS.some(entry => entry.weapon === weapon && (runtime.product === "missionpack" || weapon <= 10))) throw new Error("Requested weapon does not belong to the Q3 product");
+  return { ...runtime, requestedWeapon: weapon };
 }
 
 export function q3RequestWeaponHolster(runtime: Q3ArsenalRuntimeState): Q3ArsenalRuntimeState {
+  if (runtime.externalSlot === "resume-requested") return { ...runtime, externalSlot: "holstered" };
   return runtime.externalSlot === "active" ? { ...runtime, externalSlot: "holster-requested" } : runtime;
 }
 
@@ -130,7 +137,7 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   // PMF_RESPAWNED clears when both source actions are released, even under foreign movement.
   if (input.environment.health > 0 && !controls.attack && !controls.useHoldable) state.pmFlags &= ~MoveFlags.RESPAWNED;
   runQ3WeaponStep(state, { buttons: (controls.attack ? CommandButtons.ATTACK : 0) | (controls.useHoldable ? CommandButtons.USE_HOLDABLE : 0),
-    weapon: controls.requestedWeapon }, {
+    weapon: runtime.requestedWeapon ?? controls.requestedWeapon }, {
     msec, gauntletHit: input.gauntletHit, externalSlot,
     event(event) { effects.push({ kind: "event", value: { provider: input.arsenal.provider, sequence: eventSequence++, event, parameter: 0 } }); },
     startTorso(torso) {
@@ -148,12 +155,12 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   return { arsenal: { ...input.arsenal, activeWeapon, state: weapon, ammo: [...entries.values()] }, animation, effects, torsoAnimations,
     runtime: { ...runtime, holdableItem: state.holdableItem, holdableTag: state.holdableTag,
       respawned: (state.pmFlags & MoveFlags.RESPAWNED) !== 0, useItemHeld: (state.pmFlags & MoveFlags.USE_ITEM_HELD) !== 0,
-      fractionalMilliseconds: clock - msec, eventSequence, externalSlot: externalSlot.phase } };
+      fractionalMilliseconds: clock - msec, eventSequence, externalSlot: externalSlot.phase, requestedWeapon: runtime.requestedWeapon === state.weapon ? null : runtime.requestedWeapon } };
 }
 
 export function q3SpawnArsenalRuntime(product: "baseq3" | "missionpack", maxHealth: number, eventSequence = 0): Q3ArsenalRuntimeState {
   return { product, maxHealth, spectator: false, persistentPowerupTag: 0, holdableItem: 0, holdableTag: 0,
-    respawned: true, useItemHeld: false, eventSequence, fractionalMilliseconds: 0, externalSlot: "active" };
+    respawned: true, useItemHeld: false, eventSequence, fractionalMilliseconds: 0, externalSlot: "active", requestedWeapon: null };
 }
 
 export function q3SpawnLoadout(provider: ProviderId, product: "baseq3" | "missionpack", teamDeathmatch: boolean): ArsenalState {

@@ -3,7 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import { WEAPONS } from "../../foundation/types.ts";
 import type { CtfState } from "./state.ts";
 import { CTF_FLAGS } from "./types.ts";
-import { ThreewaveWeapon } from "../../equipment/threewave-weapon.ts";
+import { ThreewaveWeapon, threewaveCharacterPose } from "../../equipment/threewave-weapon.ts";
 import { CTF_HASTE_INTERVALS, CTF_HASTE_NAIL_SPEED } from "./runes.ts";
 import { CTF_RUNES } from "./types.ts";
 import { runeItem } from "./state.ts";
@@ -13,8 +13,7 @@ export interface CtfCharacterPose { readonly axePose: boolean; readonly frame: n
 export function characterPose(state: CtfState, actor: ActorId): CtfCharacterPose {
   const selected = state.services.input(actor).grappleSelected;
   if (!state.nativeGrappleEnabled || !selected) return { axePose: state.services.selectedWeapon(actor) === "q1:weapon/axe", frame: null };
-  const frame = state.grappleState(actor).weaponFrame, hook = state.hook(actor);
-  return { axePose: true, frame: frame === 2 ? 137 : frame === 3 ? hook !== null && state.game.time < hook.number("ctf.fired") + 0.1 ? 138 : 139 : frame === 4 ? 73 : frame === 5 ? 140 : null };
+  return state.grapple === null ? { axePose: true, frame: null } : threewaveCharacterPose(state.grapple, actor);
 }
 
 export function spawnArsenal(state: CtfState, actor: ActorId): undefined {
