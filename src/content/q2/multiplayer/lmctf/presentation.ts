@@ -18,3 +18,12 @@ export function lmctfScoreboard(context: LmctfContext, actor: ActorId): undefine
   }
   return context.hooks.emit({ kind: "scoreboard", actor, rows, layout });
 }
+
+
+export function lmctfMenu(context: LmctfContext, actor: ActorId): undefined {
+  const entries: { readonly label: string; readonly command: string | null }[] = [
+    { label: "Join Red Team", command: "team red" }, { label: "Join Blue Team", command: "team blue" }, { label: "Become Observer", command: "observe" },
+  ];
+  if ((context.rules.ctfFlags & 32768) === 0) entries.push({ label: "Voting Menu", command: "lmctf-vote" });
+  return context.hooks.emit({ kind: "menu", actor, title: "LMCTF Menu", entries });
+}

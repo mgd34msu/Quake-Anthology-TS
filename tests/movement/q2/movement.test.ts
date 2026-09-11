@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
-import type { MovementServices, Q2MovementInput, Q2MovementState, Q2RereleaseMovementInput, Q2RereleaseMovementState } from "../../../src/contracts/movement.ts";
+import type { MovementServices, MovementTouchContact, Q2MovementInput, Q2MovementState, Q2RereleaseMovementInput, Q2RereleaseMovementState } from "../../../src/contracts/movement.ts";
 import type { NumericProfile } from "../../../src/contracts/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createNumericOperations } from "../../../src/core/numeric.ts";
@@ -115,7 +115,9 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     const scene = createSceneQueries(map.world);
     const input = rerelease(map.origin);
     let count = 0;
-    const services: MovementServices = { scene, numeric, touch: (_contact, state) => {
+    const seen: MovementTouchContact[] = [];
+    const services: MovementServices = { scene, numeric, touch: (contact, state) => {
+      seen.push(contact);
       count++;
       return state.kind === "q2-rerelease" ? { kind: "continue", state: { ...state, velocity: { x: 123, y: 0, z: 0 } } } : { kind: "continue", state };
     }, weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
@@ -123,16 +125,49 @@ describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
     let state = input.state;
     for (let i = 0; i < 30 && count === 0; i++) {
       const step = provider.move({ ...input, state }, services);
+      const first = seen.length;
       const result = applyQ2MovementContacts(input, services, step);
       if (result.status !== "active") throw new Error("Unexpected removal");
+      if (step.status !== "active") throw new Error("Unexpected movement removal");
+      for (const [index, contact] of seen.slice(first).entries()) {
+        const original = step.contacts[index];
+        if (original === undefined || original.target.kind === "none" || original.trace.kind !== "q2" || contact.sourceTrace === undefined) throw new Error("Missing full rerelease contact");
+        expect(contact.sourceTrace.kind).toBe("q2-rerelease");
+        expect(contact.sourceTrace.inverted).toBe(true);
+        expect(contact.sourceTrace.trace).toBe(original.trace);
+        expect(contact.other).toBe(original.target);
+        expect(contact.plane).toEqual(original.trace.sourcePlane);
+        expect(contact.sourceTrace.trace.contents).toBe(original.trace.contents);
+        expect(contact.sourceTrace.trace.secondary).toBe(original.trace.secondary);
+      }
+      expect(new Set(step.contacts.map(contact => contact.target)).size).toBe(step.contacts.length);
       state = result.state;
     }
     expect(count).toBeGreaterThan(0);
     expect(state.velocity.x).toBe(123);
     const moved = provider.move({ ...input, state }, services);
-    const removed = applyQ2MovementContacts(input, { ...services, touch: () => ({ kind: "actor-removed" }) }, moved);
+    let removedCalls = 0;
+    const removed = applyQ2MovementContacts(input, { ...services, touch: () => { removedCalls++; return { kind: "actor-removed" }; } }, moved);
     expect(removed.status).toBe("actor-removed");
+    expect(removedCalls).toBe(1);
     expect("state" in removed).toBe(false);
+    const classicInput = classic(map.origin), classicProvider = createQ2ClassicMovementProvider("q2:classic");
+    let classicState = classicInput.state;
+    const classicContacts: MovementTouchContact[] = [];
+    for (let i = 0; i < 30 && classicContacts.length === 0; i++) {
+      const step = classicProvider.move({ ...classicInput, state: classicState }, services);
+      const result = applyQ2MovementContacts(classicInput, { ...services, touch: (contact, state) => {
+        classicContacts.push(contact); return { kind: "continue", state };
+      } }, step);
+      if (result.status !== "active") throw new Error("Unexpected classic removal");
+      classicState = result.state;
+    }
+    expect(classicContacts.length).toBeGreaterThan(0);
+    for (const contact of classicContacts) {
+      expect(contact.plane).toBeNull();
+      expect(contact.surface).toBeNull();
+      expect(contact.sourceTrace).toBeUndefined();
+    }
   });
 });
 

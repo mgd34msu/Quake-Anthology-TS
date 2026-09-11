@@ -15,7 +15,7 @@ import type { Q2MatchSelection } from "../../../../src/content/composition/q2/in
 import { Q2Ctf } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { Q2Tag } from "../../../../src/content/q2/missionpacks/modes/index.ts";
-function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }) {
+function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -57,7 +57,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
   if (module === undefined || players === undefined) throw new Error("rerelease composition missing");
   const report = game.load(entities);
   composition.afterSpawn();
-  for (let slot = 0; slot < 2; slot++) {
+  for (let slot = 0; slot < clientCount; slot++) {
     const actor = actors.allocateAtSource("q2:players", slot + 1, "q2:male"); ids.push(actor.id);
     bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds, ground: null });
     movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: false });
@@ -295,4 +295,30 @@ test("LMCTF plasma retains signed native cell debits and infinite-ammo counters 
     expect(active.inventory.count(active.first.actor.id, "q2:ammo_cells")).toBe(scenario.expected);
     expect([...active.game.entities.values()].filter(entity => entity.classname === "goop")).toHaveLength(3);
   }
+});
+
+
+test("LMCTF native skip vote resumes ballots and strict deadline through a checkpoint", () => {
+  const tooFew = compose(true, ctfMap, { kind: "lmctf" }), refused = tooFew.composition.match.source;
+  if (!(refused instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  refused.command(tooFew.first, tooFew.game, "lmctf-vote", ["skip"]);
+  expect(refused.vote.startedAt).toBeNull();
+  const active = compose(true, ctfMap, { kind: "lmctf" }, 4), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  mode.command(active.first, active.game, "lmctf-vote", ["skip"]);
+  expect(mode.vote.startedAt).toBe(0);
+  expect((mode.states.get(active.first.actor.id)?.extraFlags ?? 0) & 192).toBe(64);
+  mode.command(active.second, active.game, "voteno", []);
+  mode.command(active.second, active.game, "voteyes", []);
+  expect((mode.states.get(active.second.actor.id)?.extraFlags ?? 0) & 192).toBe(64);
+  const checkpoint = captureQ2Product(active.composition);
+  const restored = compose(false, ctfMap, { kind: "lmctf" }, 4); restoreQ2Product(restored.composition, checkpoint);
+  const voteMode = restored.composition.match.source;
+  if (!(voteMode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  expect(voteMode.vote.startedAt).toBe(0);
+  expect((voteMode.states.get(restored.second.actor.id)?.extraFlags ?? 0) & 192).toBe(64);
+  restored.advance(30); voteMode.playerFrame(restored.first, restored.game);
+  expect(voteMode.vote.startedAt).toBe(0); expect(restored.players.intermission.kind).toBe("playing");
+  restored.advance(30.1); voteMode.playerFrame(restored.first, restored.game);
+  expect(voteMode.vote.startedAt).toBeNull(); expect(restored.players.intermission.kind).toBe("intermission");
 });

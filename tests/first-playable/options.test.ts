@@ -24,3 +24,18 @@ test("native network selection preserves the requested game composition", () => 
   expect(() => parseApplicationCommand(["--listen-q2", "27910", "--connect-q2", "localhost"])).toThrow();
   expect(() => parseApplicationCommand(["--bind", "127.0.0.1"])).toThrow();
 });
+
+
+test("native listener chooses its wire from the retained game recipe", () => {
+  for (const product of ["q1-classic-id1", "q2-classic-baseq2", "q3-baseq3"]) {
+    const parsed = parseApplicationCommand(["--game", product, "--listen", "0", "--bind", "127.0.0.1"]);
+    if (parsed.kind !== "run") throw new Error("Expected native server options");
+    expect(parsed.options.product).toBe(product);
+    expect(parsed.options.network).toEqual({ kind: "native-server", host: "127.0.0.1", port: 0 });
+    expect(parsed.options.mode).toBe(product === "q3-baseq3" ? "deathmatch" : "coop");
+    expect(parsed.options.movement).toBe("q1");
+    expect(parsed.options.character).toBe("q3");
+  }
+  expect(() => parseApplicationCommand(["--listen", "0", "--listen-q2", "0"])).toThrow();
+  expect(() => parseApplicationCommand(["--listen", "0", "--connect-q2", "localhost"])).toThrow();
+});

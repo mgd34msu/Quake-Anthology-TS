@@ -44,7 +44,7 @@ export type Q2PresentationEvent =
   | { readonly kind: "effect"; readonly effect: string; readonly origin: Vec3; readonly direction: Vec3; readonly count: number; readonly color: number }
   | { readonly kind: "pickup"; readonly player: ActorId; readonly item: ItemId; readonly icon: string; readonly name: string }
   | { readonly kind: "poi"; readonly origin: Vec3; readonly message: string; readonly fields: ReadonlyMap<string, string> }
-  | { readonly kind: "dynamic-light"; readonly actor: ActorId; readonly fields: ReadonlyMap<string, string> }
+  | ({ readonly kind: "dynamic-light" } & import("./shadow-lights.ts").Q2ShadowLightState)
   | { readonly kind: "beam"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3; readonly width: number; readonly color: number; readonly visible: boolean }
   | { readonly kind: "monster-beam"; readonly effect: "parasite" | "medic"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3 }
   | { readonly kind: "monster-muzzleflash"; readonly actor: ActorId; readonly flash: number; readonly origin: Vec3; readonly direction: Vec3 }

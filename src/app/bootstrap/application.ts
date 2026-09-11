@@ -15,7 +15,7 @@ import type { SaveImage, SimulationOutput } from "../../contracts/session.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import type { IpAddress } from "../../network/common/endpoint.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
-import { UdpTransport, Q2_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
+import { UdpTransport, Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
 import { CommandBuffer, tokenizeCommand } from "../../core/commands/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
@@ -48,10 +48,25 @@ import { readMenuArt } from "./menu-art.ts";
 import { createSimulation, savedSimulationSettings } from "./simulation/index.ts";
 import { createQ2ApplicationServerHost } from "./simulation/network.ts";
 import { Q2ServerNetwork } from "./network/q2.ts";
-import type { Q2ApplicationPlayer, Q2ApplicationServerHost } from "./network/types.ts";
+import { Q1ServerNetwork } from "./network/q1.ts";
+import { Q3ServerNetwork } from "./network/q3.ts";
+import type { Q1ApplicationServerHost } from "./network/q1-types.ts";
+import type { Q3ApplicationServerHost } from "./network/q3-types.ts";
+import { createQ1ApplicationServerHost } from "./simulation/network-q1.ts";
+import { createQ3ApplicationServerHost } from "./simulation/network-q3.ts";
+
+import type { ApplicationNetworkPlayer, Q2ApplicationServerHost } from "./network/types.ts";
 import type { SharedSimulation } from "./simulation/index.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { SimulationTravel } from "./simulation/types.ts";
+
+type NativeServerHost = { readonly kind: "q1"; readonly host: Q1ApplicationServerHost }
+  | { readonly kind: "q2"; readonly host: Q2ApplicationServerHost }
+  | { readonly kind: "q3"; readonly host: Q3ApplicationServerHost };
+type NativeServer = { readonly address: IpAddress } & (
+  { readonly kind: "q1"; readonly server: Q1ServerNetwork<IpAddress> }
+  | { readonly kind: "q2"; readonly server: Q2ServerNetwork<IpAddress> }
+  | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
 
 interface ApplicationCommandRequest { readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; }
 interface Q3SeatClient { readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost>; }
@@ -87,7 +102,7 @@ export class Application {
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
   private readonly reportedEffectGaps = new Set<string>();
-  private network: Q2ServerNetwork<IpAddress> | null = null;
+  private network: NativeServer | null = null;
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
   private pendingMap: string | null = null;
@@ -155,8 +170,8 @@ export class Application {
   get window(): NativeRenderer["window"] | null { return this.graphical?.renderer.window ?? null; }
   get presentationEvents(): readonly SimulationPresentationEvent[] { return this.sourceEvents; }
   get unhandledPresentationEffects(): readonly UnhandledApplicationEffect[] { return this.unhandledEffects; }
-  get networkAddress(): IpAddress | null { return this.network?.options.transport.address ?? null; }
-  get networkClients(): readonly Q2ApplicationPlayer[] { return this.network?.clients ?? []; }
+  get networkAddress(): IpAddress | null { return this.network?.address ?? null; }
+  get networkClients(): readonly ApplicationNetworkPlayer[] { return this.network?.server.clients ?? []; }
   get localPlayers(): readonly LocalPlayer[] { return this.graphical?.input.locals.map(local => local.player) ?? []; }
 
   input(event: SeatInputEvent): boolean {
@@ -291,7 +306,7 @@ export class Application {
       if (source.kind === "q2-composition" && source.event.kind === "kick") {
         const player = this.simulation.movementPlayer(source.event.actor);
         if (player !== null) {
-          if (this.network?.disconnectClient(player.client, "was kicked")) continue;
+          if (this.network?.server.disconnectClient(player.client, "was kicked")) continue;
           const local = this.localSeats.has(player.client);
           this.simulation.disconnectPlayer(source.event.actor);
           this.session.closeClient(player.client); this.localSeats.delete(player.client);
@@ -324,6 +339,7 @@ export class Application {
         if (actor === undefined) continue;
         const player = this.simulation.movementPlayer(actor);
         if (player === null) throw new Error("Source disconnect lost its client identity");
+        if (this.network?.server.disconnectClient(player.client, event.reason)) continue;
         const local = this.localPlayers.some(local => local.actor.equals(actor));
         this.simulation.disconnectPlayer(actor);
         this.session.closeClient(player.client);
@@ -335,24 +351,52 @@ export class Application {
     this.sourceCommands?.execute();
   }
 
-  private async networkHost(simulation = this.simulation, content = this.content): Promise<Q2ApplicationServerHost> {
-    const edition = content.catalog.product(content.recipe.map.entities.content).expectation.edition;
-    return createQ2ApplicationServerHost({ session: this.session, simulation, content,
-      protocol: edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 },
-      print: text => { this.host.print(text); } });
+  private async networkHost(simulation = this.simulation, content = this.content): Promise<NativeServerHost> {
+    const source = content.catalog.product(content.recipe.map.entities.content).expectation;
+    if (this.options.network.kind === "q2-server" && source.family !== "q2") throw new Error("--listen-q2 requires a Quake II source game; use --listen for the selected native protocol");
+    const common = { session: this.session, simulation, content, print: (text: string): void => { this.host.print(text); } };
+    switch (source.family) {
+      case "q1": return { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: { kind: "q1-netquake", version: 15 } }) };
+      case "q2": return { kind: "q2", host: await createQ2ApplicationServerHost({ ...common,
+        protocol: source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 } }) };
+      case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost(common) };
+    }
+  }
+
+  private validateNetworkHost(next: NativeServerHost): void {
+    if (this.network !== null && this.network.kind !== next.kind) throw new Error("A native server cannot change wire families while carrying connected clients");
+    const supported = next.host.supportsSourceWire();
+    if (supported.kind === "unsupported") throw new Error(`Native ${next.kind.toUpperCase()} wire is unavailable: ${supported.reasons.join("; ")}`);
+  }
+
+  private changeNetworkWorld(next: NativeServerHost): void {
+    const network = this.network;
+    if (network === null) throw new Error("Native world replacement requires an open server");
+    switch (next.kind) {
+      case "q1": if (network.kind !== "q1") throw new Error("Native Q1 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
+      case "q2": if (network.kind !== "q2") throw new Error("Native Q2 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
+      case "q3": if (network.kind !== "q3") throw new Error("Native Q3 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
+    }
   }
 
   private async openNetwork(): Promise<void> {
     const selection = this.options.network;
-    if (selection.kind !== "q2-server") return;
-    const host = await this.networkHost(), supported = host.supportsSourceWire();
-    if (supported.kind === "unsupported") throw new Error(`Native Q2 wire is unavailable: ${supported.reasons.join("; ")}`);
-    const transport = await UdpTransport.bind({ host: selection.host, port: selection.port, limits: Q2_DATAGRAM_LIMITS });
+    if (selection.kind !== "q2-server" && selection.kind !== "native-server") return;
+    const selected = await this.networkHost();
+    this.validateNetworkHost(selected);
+    const limits = selected.kind === "q1" ? UNIFIED_DATAGRAM_LIMITS : selected.kind === "q2" ? Q2_DATAGRAM_LIMITS : Q3_DATAGRAM_LIMITS;
+    const transport = await UdpTransport.bind({ host: selection.host, port: selection.port, limits });
+    const random = (): number => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
     try {
-      this.network = new Q2ServerNetwork({ transport, host, random: () => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0 });
-      this.host.print(`Listening for Quake II peers on ${addressKey(transport.address)}.\n`);
+      switch (selected.kind) {
+        case "q1": this.network = { kind: "q1", address: transport.address, server: new Q1ServerNetwork({ transport, host: selected.host }) }; break;
+        case "q2": this.network = { kind: "q2", address: transport.address, server: new Q2ServerNetwork({ transport, host: selected.host, random }) }; break;
+        case "q3": this.network = { kind: "q3", address: transport.address, server: new Q3ServerNetwork({ transport, host: selected.host, random }) }; break;
+      }
+      this.host.print(`Listening for ${selected.kind.toUpperCase()} peers on ${addressKey(transport.address)}.\n`);
     } catch (error) { transport.close(); throw error; }
   }
+
 
   private async openGraphical(): Promise<void> {
     const owner = { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
@@ -478,10 +522,7 @@ export class Application {
       }));
       nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0);
       const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content);
-      if (nextNetworkHost !== null) {
-        const supported = nextNetworkHost.supportsSourceWire();
-        if (supported.kind === "unsupported") throw new Error(`Native Q2 travel is unavailable: ${supported.reasons.join("; ")}`);
-      }
+      if (nextNetworkHost !== null) this.validateNetworkHost(nextNetworkHost);
       if (previous === null) {
         if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
         previousBots?.close(initialSourceMilliseconds !== 0);
@@ -548,7 +589,7 @@ export class Application {
         this.graphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease };
         if (q3Clients.size === 0) await audio.startWorldMusic();
       }
-      if (nextNetworkHost !== null) this.network?.changeWorld(nextNetworkHost);
+      if (nextNetworkHost !== null) this.changeNetworkWorld(nextNetworkHost);
       this.elapsed = initialSourceMilliseconds;
       this.bindSourceCommands();
       if (options.dedicated) { this.dedicatedConsole?.close(); this.openDedicatedConsole(); }
@@ -707,7 +748,7 @@ export class Application {
         this.dedicatedCommands.execute();
       }
       this.elapsed += elapsedMilliseconds;
-      const remote = await this.network?.poll(performance.now()) ?? [];
+      const remote = await this.network?.server.poll(performance.now()) ?? [];
       for (const [seat, source] of this.graphical?.q3 ?? []) {
         const selection = source.client.userCommandSelection;
         this.graphical?.input.setQ3CommandSelection(seat, selection);
@@ -721,7 +762,7 @@ export class Application {
       this.frames++;
       this.sourceEvents = this.simulation.drainPresentationEvents();
       this.bots?.receive(this.sourceEvents);
-      this.network?.publish(output, this.sourceEvents, performance.now());
+      this.network?.server.publish(output, this.sourceEvents, performance.now());
       const intents = this.simulation.takeTransitions();
       if (intents.length !== 0) {
         const campaign = this.content.recipe.campaign;
@@ -800,7 +841,7 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
-    for (const close of [() => this.bots?.close(), () => this.network?.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
+    for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }

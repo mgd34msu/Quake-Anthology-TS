@@ -1,10 +1,11 @@
+import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
 /* Application joins for Quake cl_tent/r_part and Quake II cl_tent/cl_fx.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { DrawBatch, RenderOperation, RendererImage, SceneCamera } from "../../contracts/render.ts";
-import type { SceneEntity, SceneParticle, SceneQueries } from "../../contracts/scene.ts";
+import type { SceneEntity, SceneLight, SceneParticle, SceneQueries } from "../../contracts/scene.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterView } from "../../content/q3/foundation/presentation.ts";
 import type { Q1BeamStyle } from "../../content/q1/foundation/types.ts";
@@ -73,6 +74,7 @@ export class ApplicationEffects {
   private explosions: Explosion[] = [];
   private lights: TimedLight[] = [];
   private sampledLights: SurfaceDynamicLight[] = [];
+  private readonly shadowLights = new Map<ActorId, Q2ShadowLightState>();
   private readonly sourceLights = new Map<ActorId, SurfaceDynamicLight>();
   private readonly playerViews = new Q2EffectViews();
   private readonly trackerPain = new Map<ActorId, { readonly content: ContentId; readonly until: number }>();
@@ -125,6 +127,7 @@ export class ApplicationEffects {
     const pending = this.pending; this.pending = [];
     for (const source of pending) await this.event(source);
     const liveActors = new Set(snapshot.actors.map(actor => actor.id));
+    for (const actor of this.shadowLights.keys()) if (!liveActors.has(actor)) this.shadowLights.delete(actor);
     for (const actor of this.sourceLights.keys()) if (!liveActors.has(actor)) this.sourceLights.delete(actor);
     for (const actor of this.trackerPain.keys()) if (!liveActors.has(actor)) this.trackerPain.delete(actor);
     this.playerViews.retain(liveActors);
@@ -181,6 +184,21 @@ export class ApplicationEffects {
     for (const effects of this.q3.values()) { const frame = effects.frame(camera); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights); }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });
     return { operations, lights: this.sampledLights, q3Lights: q3Lights.slice(0, 32) };
+  }
+  shadowSceneLights(camera: SceneCamera, style: (index: number) => number): readonly SceneLight[] {
+    return [...this.shadowLights.values()].flatMap(light => {
+      if (!light.visible || light.radius <= 0) return [];
+      let fade = 1;
+      if (!(light.fadeStart <= 1 && light.fadeEnd <= 1) && light.fadeStart <= light.fadeEnd) {
+        const fraction = Math.min(1, Math.max(0, length3(sub3(light.origin, camera.origin)) / light.fadeEnd)), start = light.fadeStart / light.fadeEnd;
+        if (start <= 0) fade = fraction;
+        else if (start < 1) { const value = Math.min(1, Math.max(0, (fraction - start) / (1 - start))); fade = 1 - value * value * (3 - 2 * value); }
+        else fade = fraction < 1 ? 1 : 0;
+      }
+      return fade <= 0 ? [] : [{ origin: light.origin, color: light.color, radius: light.radius, additive: true,
+        profile: { kind: "q2", scale: light.intensity * fade * (light.lightstyle === -1 ? 1 : style(light.lightstyle)),
+          cone: light.cone, shadow: { kind: "cast", resolution: light.resolution } } } satisfies SceneLight];
+    });
   }
   private palette(group: Group, index: number): Vec3 {
     const palette = group.provider.palette; if (palette === null) throw new Error("Indexed effects require their source palette");
@@ -287,7 +305,7 @@ export class ApplicationEffects {
         const group = await this.group(source.content);
         if (event.event === 1) group.particles.q2Respawn(pose.origin, source.seconds, "item"); else group.particles.q2Teleport(pose.origin, source.seconds);
       }
-    } else if (event.kind === "dynamic-light") this.reject(source, "Q2 dynamic light requires its radius and light entity state");
+    } else if (event.kind === "dynamic-light") this.shadowLights.set(event.actor, event);
   }
   private muzzle(origin: Vec3, seconds: number, flash: number, silenced: boolean, actor: ActorId): boolean {
     if (!(flash >= 0 && flash <= 20 && flash !== 15 || flash >= 30 && flash <= 39)) return false;
@@ -441,6 +459,6 @@ export class ApplicationEffects {
     for (const effects of this.q3.values()) effects.close();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.q3.clear(); this.entityTrails.clear();
-    this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

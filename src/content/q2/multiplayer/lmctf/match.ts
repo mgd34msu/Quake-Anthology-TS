@@ -10,6 +10,13 @@ export class LmctfMatch {
   paused = false;
   teamsLocked = false;
   constructor(readonly context: LmctfContext) {}
+  togglePause(game: Q2GameServices): undefined {
+    this.paused = !this.paused;
+    if (this.context.rules.autoLock) this.teamsLocked = !this.paused;
+    const text = this.paused ? "Game Paused\n" : "Game Unpaused\n";
+    for (const actor of this.context.states.keys()) if (game.entity(actor) !== null) game.host.emit({ kind: "centerprint", actor, text });
+    return game.host.diagnostic(text);
+  }
   canScore(): boolean { return this.phase !== "countdown" && this.phase !== "over"; }
   start(game: Q2GameServices): undefined {
     this.phase = "countdown"; this.remaining = Math.trunc(this.context.rules.countdownSeconds); this.nextThink = game.host.now() + 1;

@@ -1,3 +1,5 @@
+import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
+import { emitQ2ShadowLights } from "../../../content/q2/foundation/shadow-lights.ts";
 import { SimulationBotServices } from "./bots.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -991,9 +993,17 @@ export class SharedSimulation implements Simulation {
     player.commit(state, false, false);
     const other = contact.other.kind === "actor" ? contact.other.actor : this.worldActor();
     if (other !== null) {
-      this.callbacks.touch({ ...contact, other });
-      const owner = this.actors.resolveOwned(other);
-      if (owner !== null && this.actors.isLive(contact.self.id)) this.callbacks.touch({ ...contact, self: owner, other: contact.self.id });
+      const { sourceTrace, ...sharedContact } = contact;
+      if (state.kind === "q2-classic" || state.kind === "q2-rerelease") {
+        // Q2 ClientThink invokes only the touched entity's callback.
+        const owner = this.actors.resolveOwned(other);
+        if (owner !== null) this.callbacks.touch({ ...sharedContact, self: owner, other: contact.self.id,
+          ...(sourceTrace === undefined ? {} : { sourceTrace: { ...sourceTrace, ent: other } }) });
+      } else {
+        this.callbacks.touch({ ...sharedContact, other });
+        const owner = this.actors.resolveOwned(other);
+        if (owner !== null && this.actors.isLive(contact.self.id)) this.callbacks.touch({ ...sharedContact, self: owner, other: contact.self.id });
+      }
     }
     return this.actors.isLive(contact.self.id) ? { kind: "continue", state: player.readState() } : { kind: "actor-removed" };
   }
@@ -1015,10 +1025,12 @@ export class SharedSimulation implements Simulation {
         if (command.source.kind !== "bot" && (command.source.client.slot !== player.client.slot || command.source.client.generation !== player.client.generation || !this.options.identity.owns(command.source.client))) throw new Error("Command client does not own this player");
       }
       this.hostMilliseconds += input.elapsedMilliseconds;
-      this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
+      const lmctf = this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf ? this.source.product.match.source : null;
+      const paused = lmctf?.match.paused === true;
+      if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
       const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
-      const run = fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000;
+      const run = !paused && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000);
       const elapsed = fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
       if (run) {
         if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
@@ -1028,6 +1040,7 @@ export class SharedSimulation implements Simulation {
           try { this.source.product.rerelease.players.fadeFrame(this.source.game); } finally { this.checkingQ2Rules = false; }
           this.sourceFrame = this.clock.enter("frame-exit");
           if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000;
+          emitQ2ShadowLights(this.source.game);
           return { snapshot: this.snapshot(), events: this.events.take() };
         }
         if (this.source.kind === "q1") {
@@ -1044,12 +1057,20 @@ export class SharedSimulation implements Simulation {
           }
         }
       }
-      if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) return { snapshot: this.snapshot(), events: this.events.take() };
+      if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
+        emitQ2ShadowLights(this.source.game);
+        return { snapshot: this.snapshot(), events: this.events.take() };
+      }
       const botCommands = run && this.source.kind === "q3" ? this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000) : [];
-      for (const command of [...input.commands, ...botCommands]) {
+      for (const received of [...input.commands, ...botCommands]) {
+        const command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
         const player = this.player(command.actor);
         if (player === null) throw new Error("Command targets an unadmitted player");
         if (command.sequence <= player.lastSequence) continue;
+        if (paused && lmctf !== null && !lmctf.canMove(player.actor.id)) {
+          player.lastSequence = command.sequence;
+          continue;
+        }
         if (player.cutscene !== null) {
           player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
           continue;
@@ -1074,7 +1095,7 @@ export class SharedSimulation implements Simulation {
           } finally { player.gravityMultiplier = gravityMultiplier; }
         }
         if (this.source.kind === "q1" && this.actors.isLive(player.actor.id)) { this.source.game.playerAfterPhysics(player.actor, this.timeSeconds); this.source.composition.playerPostThink(player.actor.id); }
-        if (this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.afterClientThink(entity, this.source.game); }
+        if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.afterClientThink(entity, this.source.game); }
         this.q2Characters.get(player.actor)?.afterClientThink();
         const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
       }
@@ -1160,15 +1181,17 @@ export class SharedSimulation implements Simulation {
             });
           }
         }
+      }
+      if (run || paused) {
         if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.endFrame(entity, this.source.game); }
-        if (this.source.kind === "q2") {
+        if (run && this.source.kind === "q2") {
           this.source.product.afterPlayerFrames();
           this.source.monsters.endFrame(this.source.game);
           this.checkingQ2Rules = true;
           try { this.source.product.checkRules(); } finally { this.checkingQ2Rules = false; }
         }
         if (this.source.kind === "q3") this.source.game.endFrame();
-        for (const [actor, character] of this.q2Characters) if (this.timeSeconds + 0.001 >= (this.characterTicks.get(actor) ?? 0)) {
+        for (const [actor, character] of this.q2Characters) if (paused || this.timeSeconds + 0.001 >= (this.characterTicks.get(actor) ?? 0)) {
           this.characterTicks.set(actor, this.timeSeconds + 0.1); character.endFrame();
           const player = this.playerStates.get(actor); if (player !== undefined) player.animation = { provider: this.recipe.character.definition.provider,
             state: { kind: "q2", frame: character.entity.frame, endFrame: character.state.animationEnd, priority: character.state.animationPriority, duck: character.state.animationDuck, run: character.state.animationRun } };
@@ -1182,10 +1205,13 @@ export class SharedSimulation implements Simulation {
           if (this.source.kind === "q1") this.source.composition.characterFrame(actor.id, frame);
           player.animation = { provider: this.recipe.character.definition.provider, state: { kind: "q1", frame: frame.frame, nextFrameSeconds: this.timeSeconds + 0.1 } };
         }
+      }
+      if (run) {
         if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) this.source.game.forceRetouch--;
         if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
         else { this.sourceFrame = this.clock.enter("frame-exit"); if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }
       }
+      if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);
       return { snapshot: this.snapshot(), events: this.events.take() };
     } finally { this.stepping = false; }
   }
@@ -1340,6 +1366,7 @@ export class SharedSimulation implements Simulation {
     } else if (this.source.kind === "q2") {
       const entity = this.source.game.entity(actor); if (entity === null) throw new Error("Q2 player entity missing");
       if (name !== "weapnext" && name !== "weapprev" && name !== "use") { this.source.players.clientCommand(entity, this.source.game, name, args); return undefined; }
+      if (this.source.product.match.source instanceof Q2Lmctf && !this.source.product.match.source.canMove(actor)) return undefined;
       const source = this.source, active = source.weapons.states.get(actor)?.weapon, owned = source.weapons.registeredDefinitions().filter(weapon => this.inventory.count(actor, weapon.item) > 0);
       const requested = args.join("").toLowerCase().replaceAll(" ", "");
       const weapon = name === "weapnext" || name === "weapprev" ? owned[(owned.findIndex(value => value.name === active) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length] : source.weapons.registeredDefinitions().find(value => value.name === requested || value.item === requested);

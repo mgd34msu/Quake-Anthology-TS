@@ -21,12 +21,13 @@ export interface ApplicationNetwork {
     publish(output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): void;
     close(): void;
 }
-export interface Q2ApplicationPlayer {
+export interface ApplicationNetworkPlayer {
     readonly client: ClientId;
     readonly actor: ActorId;
     /** Supplied by the source entity registry, never derived from ActorId.slot. */
     readonly sourceEntity: number;
 }
+export type Q2ApplicationPlayer = ApplicationNetworkPlayer;
 export type Q2ApplicationAdmission = {
     readonly kind: 'accepted';
     readonly player: Q2ApplicationPlayer;

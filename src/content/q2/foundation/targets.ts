@@ -4,6 +4,7 @@ import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { dot, integerField, movedir, numberField, subtract, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think, Q2Use, Q2Touch } from "./host.ts";
+import { dynamic_light_use, spawnQ2ShadowLight } from "./shadow-lights.ts";
 import { freeQ2Entity } from "./callbacks.ts";
 
 const multi_wait: Q2Think = (entity, game) => game.cancel(entity);
@@ -97,7 +98,7 @@ export function createQ2TargetModule(): Q2SpawnModule {
         }
         return true;
       }
-      case "dynamic_light": game.host.emit({ kind: "dynamic-light", actor: entity.actor.id, fields: entity.spawn.values }); return true;
+      case "dynamic_light": spawnQ2ShadowLight(entity, game); return true;
       case "target_speaker": speaker(entity, game); return true;
       case "func_timer": timer(entity, game); return true;
       case "trigger_once": case "trigger_multiple": triggerMultiple(entity, game); return true;
@@ -300,6 +301,6 @@ const Use_Areaportal: Q2Use = (self, services) => { self.count ^= 1; return serv
 
 const targetCallbacks = {
 think: { multi_wait, func_timer_think, target_explosion_explode: explode },
-use: { Use_Multi, Use_Target_Speaker, func_timer_use, use_target_changelevel, light_use, trigger_relay_use, trigger_counter_use, trigger_key_use, use_target_help, use_target_secret_or_goal, use_target_explosion, use_target_splash, use_target_poi, Use_Areaportal },
+use: { dynamic_light_use, Use_Multi, Use_Target_Speaker, func_timer_use, use_target_changelevel, light_use, trigger_relay_use, trigger_counter_use, trigger_key_use, use_target_help, use_target_secret_or_goal, use_target_explosion, use_target_splash, use_target_poi, Use_Areaportal },
 touch: { Touch_Multi }
 };

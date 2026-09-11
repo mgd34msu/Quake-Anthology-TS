@@ -21,7 +21,7 @@ export interface ApplicationOptions {
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
-  readonly network: { readonly kind: "offline" } | { readonly kind: "q2-server"; readonly host: string; readonly port: number }
+  readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server"; readonly host: string; readonly port: number }
     | { readonly kind: "q2-client"; readonly remote: string };
 }
 
@@ -48,6 +48,7 @@ Usage: bun run src/main.ts [options]
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
+  --listen PORT              Host the selected game's native source protocol
   --listen-q2 PORT           Host the native Quake II source protocol
   --bind ADDRESS             Server IP (default 0.0.0.0)
   --connect-q2 ADDRESS       Join a native Quake II server
@@ -85,6 +86,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
   let list = false;
+  let listenKind: "native-server" | "q2-server" = "q2-server";
   let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -120,7 +122,11 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--seats": options = { ...options, seats: integer(value, flag, 1, 4) }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;
       case "--frames": options = { ...options, frameLimit: integer(value, flag, 1, Number.MAX_SAFE_INTEGER) }; break;
-      case "--listen-q2": listen = integer(value, flag, 0, 65535); break;
+      case "--listen": case "--listen-q2": {
+        const kind = flag === "--listen" ? "native-server" : "q2-server";
+        if (listen !== null && listenKind !== kind) throw new Error("Choose either --listen or --listen-q2");
+        listenKind = kind; listen = integer(value, flag, 0, 65535); break;
+      }
       case "--connect-q2": remote = value; break;
       case "--bind": bind = value; break;
       case "--skill": {
@@ -144,14 +150,14 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   }
   if (options.rules === "ctf" || options.rules === "lmctf" || options.rules === undefined && (options.product === "q2-classic-ctf" || options.product === "q2-classic-lmctf")) options = { ...options, mode: "deathmatch" };
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };
-  if (listen !== null && remote !== null) throw new Error("Choose either --listen-q2 or --connect-q2");
-  if (listen !== null) options = { ...options, network: { kind: "q2-server", host: bind, port: listen } };
-  else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen-q2");
+  if (listen !== null && remote !== null) throw new Error("Choose a native server listener or --connect-q2");
+  if (listen !== null) options = { ...options, network: { kind: listenKind, host: bind, port: listen } };
+  else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen or --listen-q2");
   if (remote !== null) {
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: "q2-client", remote } };
   }
-  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: "coop" };
+  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && options.product.startsWith("q3-") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   return { kind: "run", options };
 }

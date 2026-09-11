@@ -203,7 +203,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (pattern === undefined || pattern.length === 0) return absent;
       return pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
     };
-    const input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+    let input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false }, inlineModels: this.inlineModels,
       lights: effects.lights, q3Lights: effects.q3Lights,
@@ -212,6 +212,13 @@ export class WorldSeatPresentation implements SeatPresentation {
     const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera));
     this.frames.begin();
     if (nativeFrame === undefined) {
+      const shadowLights = this.effects.shadowSceneLights(camera, index => style(index, 12) / 12);
+      if (shadowLights.length > 0) {
+        const casters = [...this.groups.values()].flatMap(group => group.renderer.prepareShadowCasters(group.entities, input, entity => group.options.get(entity) ?? {}));
+        const shadows = this.assets.world.prepareShadows([...shadowLights, ...effects.lights.map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: true,
+          profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
+        input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
+      }
       const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input,
         entity => ({ ...group.options.get(entity), infrared: playerView.infrared })));
       const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));

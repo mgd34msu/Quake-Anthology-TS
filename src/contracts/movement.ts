@@ -238,8 +238,9 @@ export interface AnimationStepInput {
 export interface AnimationStepResult { readonly animation: ActorAnimationState; readonly effects: readonly MovementEffect[]; }
 export type MovementContinuation = { readonly kind: "continue"; readonly state: MovementState }
   | { readonly kind: "actor-removed" };
-export type MovementTouchContact = Omit<TouchContact, "other"> & {
+export type MovementTouchContact = Omit<TouchContact, "other" | "sourceTrace"> & {
   readonly other: Exclude<TraceHit, { readonly kind: "none" }>;
+  readonly sourceTrace?: Omit<NonNullable<TouchContact["sourceTrace"]>, "ent">;
 };
 export interface MovementServices {
   readonly scene: SceneQueries;

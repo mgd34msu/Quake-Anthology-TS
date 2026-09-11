@@ -6,9 +6,10 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule } from "../../foundation/host.ts";
 import { zero } from "../../foundation/fields.ts";
+import { LmctfVote } from "./vote.ts";
 import { LmctfMatch } from "./match.ts";
 import { lmctfAdminCommand } from "./admin.ts";
-import { lmctfScoreboard } from "./presentation.ts";
+import { lmctfMenu, lmctfScoreboard } from "./presentation.ts";
 import { LmctfWeapons } from "./weapons.ts";
 import { LmctfFlags } from "./flags.ts";
 import { LmctfRunes } from "./runes.ts";
@@ -21,13 +22,14 @@ export class Q2Lmctf implements Q2SpawnModule {
   readonly states = new Map<ActorId, LmctfPlayerState>();
   readonly context: LmctfContext;
   readonly match: LmctfMatch;
+  readonly vote: LmctfVote;
   readonly weapons: LmctfWeapons;
   readonly flags: LmctfFlags;
   readonly runes: LmctfRunes;
   readonly grapple: LmctfGrapple;
   constructor(readonly hooks: LmctfHooks, readonly rules: LmctfRules = createLmctfRules()) {
     this.context = { hooks, rules, states: this.states, plasmaQuad: false, canScore: () => this.match.canScore(), flagsTouchable: () => this.match.phase !== "countdown" };
-    this.match = new LmctfMatch(this.context); this.weapons = new LmctfWeapons(this.context);
+    this.match = new LmctfMatch(this.context); this.vote = new LmctfVote(this.context); this.weapons = new LmctfWeapons(this.context);
     this.flags = new LmctfFlags(this.context); this.runes = new LmctfRunes(this.context, game => this.flags.flag(1, game)); this.grapple = new LmctfGrapple(this.context);
     hooks.weapons.setSourceRules({ kind: "lmctf", postNativeThink: (current, repeat) => this.runes.weaponFrame(current.self, current.game, current.state.sourceFiring, repeat) });
   }
@@ -49,7 +51,7 @@ export class Q2Lmctf implements Q2SpawnModule {
   postSpawn(game: Q2GameServices): undefined { game.sourceCallbacks.register(this.callbacks); this.flags.postSpawn(game); return this.runes.postSpawn(game); }
   capture() {
     const { refPassword: _password, rconPassword: _rconPassword, ...rules } = this.rules;
-    return { rules, match: this.match.capture(), plasmaQuad: this.context.plasmaQuad, flags: this.flags.capture(), runes: this.runes.capture(),
+    return { rules, match: this.match.capture(), vote: this.vote.capture(), plasmaQuad: this.context.plasmaQuad, flags: this.flags.capture(), runes: this.runes.capture(),
       players: [...this.states].map(([actor, state]) => ({ actor: saveCtfActor(actor), state: { ...state,
         rune: state.rune === null ? null : saveCtfActor(state.rune), hook: state.hook === null ? null : saveCtfActor(state.hook), statistics: [...state.statistics].map(([key, count]) => ({ key, count })) } })) };
   }
@@ -72,7 +74,7 @@ export class Q2Lmctf implements Q2SpawnModule {
       for (const statistic of saved.field("statistics").list(value => ({ key: value.field("key").string(), count: value.field("count").finite() }))) state.statistics.set(statistic.key, statistic.count);
       return { actor: actor.id, state };
     });
-    this.match.restore(reader.field("match")); this.context.plasmaQuad = reader.field("plasmaQuad").boolean();
+    this.match.restore(reader.field("match")); this.vote.restore(reader.field("vote")); this.context.plasmaQuad = reader.field("plasmaQuad").boolean();
     const flags = reader.field("flags");
     this.flags.restore(game, { lastTakenSound: flags.field("lastTakenSound").finite(), flags: flags.field("flags").list(flag => ({ team: flag.field("team").choice(1, 2), actor: readSavedActor(flag.field("actor")) })) });
     this.runes.restore({ forward: reader.field("runes").field("forward").boolean() });
@@ -128,12 +130,17 @@ export class Q2Lmctf implements Q2SpawnModule {
   dropInventory(entity: Q2Entity, game: Q2GameServices): undefined { this.flags.drop(entity, game); this.runes.drop(entity.actor.id, game); return this.states.get(entity.actor.id)?.hook === null ? undefined : this.grapple.abort(entity, game); }
   playerDeath(entity: Q2Entity, game: Q2GameServices): undefined { lmctfStat(this.context, entity.actor.id, "deaths", 1); return this.dropInventory(entity, game); }
   disconnect(entity: Q2Entity, game: Q2GameServices): undefined { this.dropInventory(entity, game); this.states.delete(entity.actor.id); return undefined; }
-  playerFrame(entity: Q2Entity, game: Q2GameServices): undefined { this.match.frame(game); this.runes.playerFrame(entity, game); if ((this.states.get(entity.actor.id)?.hookState ?? 0) !== 0) this.grapple.fire(entity, game); return undefined; }
+  playerFrame(entity: Q2Entity, game: Q2GameServices): undefined { this.match.frame(game); this.vote.frame(game); this.runes.playerFrame(entity, game); if ((this.states.get(entity.actor.id)?.hookState ?? 0) !== 0) this.grapple.fire(entity, game); return undefined; }
+  canMove(actor: ActorId): boolean { return !this.match.paused || ((this.states.get(actor)?.extraFlags ?? 0) & 2) !== 0; }
   gravityScale(actor: ActorId): 0 | 1 { return this.grapple.gravityScale(actor); }
   command(entity: Q2Entity, game: Q2GameServices, name: string, args: readonly string[]): boolean {
     name = name.toLowerCase();
     if (lmctfAdminCommand(this.context, this.match, entity, game, name, args)) return true;
+    if (!this.canMove(entity.actor.id) && !["ctfmenu", "voteyes", "voteno", "lmctf-vote", "score", "say", "say_team", "players", "playerlist"].includes(name)) return true;
     switch (name) {
+      case "ctfmenu": lmctfMenu(this.context, entity.actor.id); return true;
+      case "voteyes": case "voteno": this.vote.ballot(entity.actor.id, game, name === "voteyes"); return true;
+      case "lmctf-vote": if (args[0] === "skip") this.vote.start(entity.actor.id, game); else this.vote.menu(entity.actor.id); return true;
       case "score": lmctfScoreboard(this.context, entity.actor.id); return true;
       case "hook": case "+hook": this.grapple.command(entity, game, true); return true;
       case "unhook": case "-hook": this.grapple.command(entity, game, false); return true;

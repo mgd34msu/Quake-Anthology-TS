@@ -6,6 +6,10 @@ import { lmctfName, lmctfPlayer, lmctfPrint, type LmctfContext } from "./types.t
 export function lmctfAdminCommand(context: LmctfContext, match: LmctfMatch, entity: Q2Entity, game: Q2GameServices, name: string, args: readonly string[]): boolean {
   const state = lmctfPlayer(context, entity.actor.id);
   const print = (text: string) => lmctfPrint(game, text, entity.actor.id);
+  if (name === "pausematch" || name === "unpausematch" || name === "pause_match") {
+    if (name !== "pause_match" || (state.extraFlags & 2) !== 0) match.togglePause(game);
+    return true;
+  }
   if (name === "referee") {
     const password = args.join(" ");
     if (password === context.rules.rconPassword) {

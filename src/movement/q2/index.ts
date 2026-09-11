@@ -61,7 +61,7 @@ function traceAdapter(input: Q2MovementInput | Q2RereleaseMovementInput, service
   return { trace, pointcontents };
 }
 
-function contactTrace(trace: TraceT): TraceResult {
+function contactTrace(trace: TraceT): Extract<TraceResult, { readonly kind: "q2" }> {
   const result = trace.source;
   if (result.kind !== "q2") throw new Error("Q2 movement received a foreign trace representation");
   return { ...result, sourcePlane: scenePlane(trace.plane), surface: trace.surface,
@@ -87,7 +87,8 @@ function touchContacts<T extends Q2MovementState | Q2RereleaseMovementState>(inp
       effect: { kind: "touch", target: contact.target, substep: 0 } });
     const rrTrace = input.kind === "q2-rerelease" && contact.trace.kind === "q2" ? contact.trace : null;
     const continuation = services.touch({ self: input.actor, other: contact.target,
-      plane: rrTrace?.contact.kind === "plane" ? rrTrace.contact.plane : null,
+      ...(rrTrace === null ? {} : { sourceTrace: { kind: "q2-rerelease", trace: rrTrace, inverted: true } }),
+      plane: rrTrace?.sourcePlane ?? null,
       surface: rrTrace?.surface === null || rrTrace === null ? null : { name: rrTrace.surface.name, nativeFlags: rrTrace.surface.flags, nativeValue: rrTrace.surface.value } }, state);
     if (continuation.kind === "actor-removed") return continuation;
     if (continuation.state.kind !== input.kind) throw new Error("Touch changed Quake II movement family during one source command");
