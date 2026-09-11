@@ -317,7 +317,7 @@ export class ParticleSystem {
     p.startFade = f32(this.state.time); p.width = p.height = p.endHeight = p.endWidth = f32(size); p.type = ParticleType.Sprite; p.origin = { ...origin }; p.rotate = false;
   }
 
-  addParticles(): readonly RefPoly[] {
+  addParticles(viewOrigin?: Vec3): readonly RefPoly[] {
     const output: RefPoly[] = [];
     this.viewAxes = this.state.refdef.viewAxis;
     const angles = vectorToAngles(this.viewAxes[0]);
@@ -331,7 +331,7 @@ export class ParticleSystem {
       const timed = p.type === ParticleType.Smoke || p.type === ParticleType.Animated || p.type === ParticleType.Bleed || p.type === ParticleType.SmokeImpact || p.type === ParticleType.WeatherFlurry || p.type === ParticleType.FlatScaleUpFade;
       if (alpha <= 0 || (timed && f32(this.state.time) > p.endTime)) { this.release(current, p); continue; }
       if ((p.type === ParticleType.Bat || p.type === ParticleType.Sprite) && p.endTime < 0) {
-        this.addToScene(p, p.origin, output); this.release(current, p); continue;
+        this.addToScene(p, p.origin, output, viewOrigin); this.release(current, p); continue;
       }
       p.next = -1;
       if (tail === -1) head = current; else this.at(tail).next = current;
@@ -340,13 +340,14 @@ export class ParticleSystem {
       const origin = vec3(add(add(p.origin.x, multiply(p.velocity.x, elapsed)), multiply(p.acceleration.x, squared)),
         add(add(p.origin.y, multiply(p.velocity.y, elapsed)), multiply(p.acceleration.y, squared)),
         add(add(p.origin.z, multiply(p.velocity.z, elapsed)), multiply(p.acceleration.z, squared)));
-      this.addToScene(p, origin, output);
+      this.addToScene(p, origin, output, viewOrigin);
     }
     this.active = head;
     return output;
   }
 
-  private distance(origin: Vec3): number {
+  private distance(origin: Vec3, viewOrigin?: Vec3): number {
+    if (viewOrigin !== undefined) return length3(sub3(viewOrigin, origin));
     if (this.state.snap === null) throw new Error("particle distance culling requires the current cgame snapshot");
     return length3(sub3(this.state.snap.playerState.origin, origin));
   }
@@ -355,7 +356,7 @@ export class ParticleSystem {
     const angles = vectorToAngles(this.state.refdef.viewAxis[0]), axes = qvmAngleVectors(vec3(angles.x, angles.y, add(angles.z, roll)));
     return [axes.right, axes.up];
   }
-  private addToScene(p: Particle, origin: Vec3, output: RefPoly[]): void {
+  private addToScene(p: Particle, origin: Vec3, output: RefPoly[], viewOrigin?: Vec3): void {
     const white = vec4(255, 255, 255, 255);
     const vertex = (position: Vec3, s: number, t: number, color = white): RefPolyVertex => ({ position, texCoord: vec2(s, t), color });
     const byte = (value: number): number => qvmFloatToInt(multiply(255, value)) & 255;
@@ -388,7 +389,7 @@ export class ParticleSystem {
           if (!p.link) return;
           p.alpha = 1;
         }
-        if (this.distance(origin) > 1024) return;
+        if (this.distance(origin, viewOrigin) > 1024) return;
         const color = vec4(255, 255, 255, byte(p.alpha));
         const right = this.viewAxes[1], up = this.viewAxes[2];
         vertices = bubble ? quad(p.width, p.height, right, up, color) : [vertex(point(-p.height, -p.width, right, up), 1, 0, color), vertex(point(p.height, -p.width, right, up), 0, 0, color), vertex(point(p.height, p.width, right, up), 0, 1, color)];
@@ -399,11 +400,11 @@ export class ParticleSystem {
         const amount = ratio(); vertices = sprite(size(p.width, p.endWidth, amount), size(p.height, p.endHeight, amount)); break;
       }
       case ParticleType.Smoke: case ParticleType.SmokeImpact: {
-        if (p.type === ParticleType.SmokeImpact && this.distance(origin) > 1024) return;
+        if (p.type === ParticleType.SmokeImpact && this.distance(origin, viewOrigin) > 1024) return;
         let color = vec3(1, 1, 1);
         if (p.color === ParticleColor.Blood) color = vec3(0.22, 0, 0);
         else if (p.color === ParticleColor.Grey75) {
-          const distance = this.distance(origin), grey = Math.min(multiply(0.25, divide(4096, distance === 0 ? 1 : distance)), 0.5); color = vec3(grey, grey, grey);
+          const distance = this.distance(origin, viewOrigin), grey = Math.min(multiply(0.25, divide(4096, distance === 0 ? 1 : distance)), 0.5); color = vec3(grey, grey, grey);
         }
         const amount = ratio(); let inverse: number;
         if (f32(this.state.time) > p.startFade) {
@@ -440,7 +441,7 @@ export class ParticleSystem {
       case ParticleType.Animated: {
         let amount = ratio(); if (amount >= 1) amount = f32(0.9999);
         const width = size(p.width, p.endWidth, amount), height = size(p.height, p.endHeight, amount);
-        if (this.distance(origin) < divide(width, 1.5)) return;
+        if (this.distance(origin, viewOrigin) < divide(width, 1.5)) return;
         const animation = this.animations[p.shaderAnimation];
         if (animation === undefined) throw new RangeError(`invalid particle animation ${p.shaderAnimation}`);
         const frame = qvmFloatToInt(Math.floor(multiply(amount, animation.count))), shader = animation.frames[frame];

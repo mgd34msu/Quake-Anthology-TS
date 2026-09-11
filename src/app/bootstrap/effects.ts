@@ -67,6 +67,8 @@ export class ApplicationEffects {
   private readonly groups = new Map<ContentId, Group>();
   private readonly images = new Map<"q1" | "q2", RendererImage>();
   private readonly q3 = new Map<ContentId, Q3ApplicationEffects>();
+  private readonly q3Weapons = new Map<ContentId, Q3ApplicationEffects>();
+  private readonly q3WeaponTimes = new Map<ContentId, number>();
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
   private pending: SimulationPresentationEvent[] = [];
   private unhandled: UnhandledApplicationEffect[] = [];
@@ -93,7 +95,7 @@ export class ApplicationEffects {
     }
   }
   drainUnhandled(): readonly UnhandledApplicationEffect[] { const result = this.unhandled; this.unhandled = []; return result; }
-  drainSounds() { return [...this.sounds.splice(0), ...[...this.q3.values()].flatMap(effects => effects.drainSounds())]; }
+  drainSounds() { return [...this.sounds.splice(0), ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
   playerView(actor: ActorId, camera: SceneCamera) { return this.playerViews.frame(actor, camera, this.time ?? 0, actor => this.pose(actor)); }
   private reject(source: SimulationPresentationEvent, reason: string): void { this.unhandled.push({ source, reason }); }
   private pose(actor: ActorId) { return this.poses.find(pose => pose.actor.equals(actor)); }
@@ -117,7 +119,8 @@ export class ApplicationEffects {
     if (old >= 0) this.beams.splice(old, 1);
     this.beams.push(beam);
   }
-  async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[] = []): Promise<void> {
+  async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[] = [],
+    weaponClock: { readonly content: ContentId; readonly timeMilliseconds: number } | null = null): Promise<void> {
     if (this.closed) throw new Error("Effect world is closed");
     const now = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
@@ -158,10 +161,17 @@ export class ApplicationEffects {
       group.sampled = group.provider.family === "q1" ? samples.q1 : samples.q2;
       await group.renderer.preload(group.models);
     }
-    for (const effects of this.q3.values()) await effects.prepare(now, elapsed);
+    for (const effects of this.q3.values()) await effects.prepare(Math.trunc(now * 1000), Math.trunc(elapsed * 1000));
+    for (const [content, effects] of this.q3Weapons) {
+      if (weaponClock === null || weaponClock.content !== content) throw new Error("Q3 ballistic effects require the selected weapon clock");
+      const current = weaponClock.timeMilliseconds, previous = this.q3WeaponTimes.get(content) ?? current;
+      if (current < previous) throw new Error("Q3 weapon effect clock rewound without replacing its world owner");
+      await effects.prepare(current, current - previous);
+      this.q3WeaponTimes.set(content, current);
+    }
     this.time = now;
   }
-  frame(camera: SceneCamera): ApplicationEffectFrame {
+  frame(camera: SceneCamera, viewer: ActorId | null = null): ApplicationEffectFrame {
     if (this.closed) throw new Error("Effect world is closed");
     const time = { kind: "seconds", value: this.time ?? 0 } satisfies WorldSnapshot["frame"]["time"];
     const project = createViewProjector(camera), batches: DrawBatch[] = [], q3Lights: DynamicLight[] = [];
@@ -181,9 +191,13 @@ export class ApplicationEffects {
           alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null }));
     }
     const operations: RenderOperation[] = [{ kind: "draw", batches }];
-    for (const effects of this.q3.values()) { const frame = effects.frame(camera); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights); }
+    const sourceLights: SurfaceDynamicLight[] = [];
+    for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
+      const frame = effects.frame(camera, viewer); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
+      sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
+    }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });
-    return { operations, lights: this.sampledLights, q3Lights: q3Lights.slice(0, 32) };
+    return { operations, lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
   }
   shadowSceneLights(camera: SceneCamera, style: (index: number) => number): readonly SceneLight[] {
     return [...this.shadowLights.values()].flatMap(light => {
@@ -208,6 +222,12 @@ export class ApplicationEffects {
   }
   private async event(source: SimulationPresentationEvent): Promise<void> {
     if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level") return;
+    if (source.kind === "q3-ballistics") {
+      let effects = this.q3Weapons.get(source.content);
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content); this.q3Weapons.set(source.content, effects); }
+      await effects.ballistic(source.event);
+      return;
+    }
     if (source.kind === "q3-source") {
       if (source.event.kind === "entity-event") this.reject(source, "Native Q3 entity event requires its per-seat cgame snapshot and weapon presentation context");
       return;
@@ -339,11 +359,11 @@ export class ApplicationEffects {
     switch (name) {
       case "heatbeam-sparks": case "heatbeam-steam":
         p.q2Steam(event.origin, event.direction, name === "heatbeam-sparks" ? 8 : 0xe0, name === "heatbeam-sparks" ? 50 : 20, 60, time);
-        this.sounds.push({ content: source.content, path: "weapons/lashit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time }); break;
+        this.sounds.push({ content: source.content, path: "weapons/lashit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
       case "chainfist-smoke": p.q2Steam(event.origin, { x: 0, y: 0, z: 1 }, 0, 20, 20, time, true); break;
       case "tracker-explosion":
         p.q2ColorExplosion(event.origin, time, 0, 1); this.light(event.origin, time, 150, 0.1, { x: -1, y: -1, z: -1 }, 0, 250);
-        this.sounds.push({ content: source.content, path: "weapons/disrupthit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time }); break;
+        this.sounds.push({ content: source.content, path: "weapons/disrupthit.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } }); break;
       case "blood": p.q2Impact(event.origin, event.direction, 0xe8, 60, time); break;
       case "moreblood": p.q2Impact(event.origin, event.direction, 0xe8, 250, time); break;
       case "gunshot": case "shotgun": p.q2Impact(event.origin, event.direction, 0, name === "gunshot" ? 40 : 20, time); break;
@@ -456,9 +476,9 @@ export class ApplicationEffects {
   close(): void {
     if (this.closed) return;
     this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];
-    for (const effects of this.q3.values()) effects.close();
+    for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) effects.close();
     for (const image of this.images.values()) this.assets.images.release(image);
-    this.images.clear(); this.groups.clear(); this.q3.clear(); this.entityTrails.clear();
+    this.images.clear(); this.groups.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
     this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

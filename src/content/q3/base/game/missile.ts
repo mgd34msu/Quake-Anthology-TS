@@ -1,6 +1,7 @@
+import { q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "./ballistics-math.ts";
 // Ported from id Software's game/g_missile.c and g_weapon.c grapple helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
-import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
+import { add3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerTraceResult, ServerWorld } from "../world.ts";
@@ -97,11 +98,9 @@ export class MissileRuntime {
   bounce(entity: GameEntity, trace: ServerTraceResult): void {
     this.owned(entity);
     const time = this.host.combat.time, previous = this.host.previousTime;
-    const elapsed = Math.fround((time - previous) | 0);
-    const hitTime = qvmFloatToInt(Math.fround(Math.fround(previous) + Math.fround(elapsed * Math.fround(trace.fraction))));
+    const hitTime = q3MissileHitTime(previous, time, trace.fraction);
     const velocity = evaluateTrajectoryDelta(entity.s.pos, hitTime), normal = normalOf(trace);
-    let delta = add3(velocity, scale3(normal, Math.fround(-2 * dot3(velocity, normal))));
-    if (entity.s.eFlags & EF_BOUNCE_HALF) delta = scale3(delta, Math.fround(0.65));
+    const delta = q3BounceVelocity(velocity, normal, (entity.s.eFlags & EF_BOUNCE_HALF) !== 0);
     entity.s.pos = { ...entity.s.pos, delta };
     if ((entity.s.eFlags & EF_BOUNCE_HALF) && normal.z > Math.fround(0.2) && length3(delta) < 40) {
       setOrigin(entity, trace.end);
@@ -305,17 +304,21 @@ export class MissileRuntime {
   }
 
   firePlasma(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_PLASMAGUN, "plasma", 2000, 10000, false, 20, 15, 20, 8, 9);
+    const spec = q3MissileParameters(Weapon.WP_PLASMAGUN);
+    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_PLASMAGUN, "plasma", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
   }
   fireGrenade(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRENADE_LAUNCHER, "grenade", 700, 2500, true, 100, 100, 150, 4, 5);
+    const spec = q3MissileParameters(Weapon.WP_GRENADE_LAUNCHER);
+    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRENADE_LAUNCHER, "grenade", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
     bolt.s.eFlags = EF_BOUNCE_HALF; return bolt;
   }
   fireRocket(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_ROCKET_LAUNCHER, "rocket", 900, 15000, false, 100, 100, 120, 6, 7);
+    const spec = q3MissileParameters(Weapon.WP_ROCKET_LAUNCHER);
+    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_ROCKET_LAUNCHER, "rocket", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
   }
   fireBfg(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_BFG, "bfg", 2000, 10000, false, 100, 100, 120, 12, 13);
+    const spec = q3MissileParameters(Weapon.WP_BFG);
+    return this.launch(self, start, normalizeDirection(direction), Weapon.WP_BFG, "bfg", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
   }
   fireGrapple(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRAPPLING_HOOK, "hook", 800, 10000, false, 0, 0, 0,
@@ -330,13 +333,8 @@ export class MissileRuntime {
   fireNail(self: GameEntity, start: Vec3, forward: Vec3, right: Vec3, up: Vec3): GameEntity {
     const random = this.missionpack().random;
     const bolt = this.launch(self, start, vec3(0, 0, 0), Weapon.WP_NAILGUN, "nail", 0, 10000, false, 20, 0, 0, 23, 0);
-    const angle = Math.fround(Math.fround(random.random() * Math.fround(Math.PI)) * 2);
-    const vertical = Math.fround(Math.fround(Math.fround(Math.fround(Math.sin(angle)) * random.crandom()) * 500) * 16);
-    const horizontal = Math.fround(Math.fround(Math.fround(Math.fround(Math.cos(angle)) * random.crandom()) * 500) * 16);
-    const end = add3(add3(add3(start, scale3(forward, 8192 * 16)), scale3(right, horizontal)), scale3(up, vertical));
-    const direction = normalize3(sub3(end, start));
-    const speed = Math.fround(555 + Math.fround(random.random() * 1800));
-    bolt.s.pos = { ...bolt.s.pos, time: this.host.combat.time, delta: snapVector(scale3(direction, speed)) };
+    const velocity = q3NailVelocity(start, forward, right, up, random);
+    bolt.s.pos = { ...bolt.s.pos, time: this.host.combat.time, delta: snapVector(velocity) };
     return bolt;
   }
 }

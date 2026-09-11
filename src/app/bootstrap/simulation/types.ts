@@ -1,3 +1,5 @@
+import type { Q3SharedBallisticEvent } from "./q3-ballistics.ts";
+import type { Q3SelectedArsenalCheckpoint } from "./arsenal/q3.ts";
 import type { LmctfTravel } from "../../../content/q2/multiplayer/lmctf/types.ts";
 import type { ApplicationMonsterNavigation } from "./monster-navigation.ts";
 import type { Q2RereleaseCampaignState } from "../../../content/q2/rerelease/campaign.ts";
@@ -48,7 +50,7 @@ export interface SimulationTravel {
   readonly source: { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
     | { readonly kind: "q2"; readonly serverFlags: number; readonly lmctf?: LmctfTravel; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
       readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null };
-  readonly players: readonly { readonly client: ClientId; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } }[];
+  readonly players: readonly { readonly client: ClientId; readonly selectedArsenal?: { readonly state: Q3SelectedArsenalCheckpoint; readonly milliseconds: number }; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } }[];
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
@@ -90,6 +92,8 @@ export interface SimulationPresentation {
   readonly alpha?: number;
   readonly visible: boolean;
   readonly viewWeapon: boolean;
+  readonly q3Weapon?: { readonly timeMilliseconds: number; readonly torsoAnimation: number; readonly lastFireMilliseconds: number | null;
+    readonly firing: boolean; readonly horizontalSpeed: number; readonly bobCycle: number; readonly weapon: number };
 }
 
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
@@ -102,6 +106,7 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
   | { readonly kind: "q2-rerelease"; readonly event: Q2RereleaseEvent }
   | { readonly kind: "q2-player"; readonly event: Q2PlayerEvent }
   | { readonly kind: "q3-character"; readonly event: Q3CharacterEvent }
+  | { readonly kind: "q3-ballistics"; readonly event: Q3SharedBallisticEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
 export type SimulationPresentationEvent = SourcePresentationEvent & { readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
 

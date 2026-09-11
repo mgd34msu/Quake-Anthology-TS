@@ -17,6 +17,7 @@ import type { UiSound } from "../../ui/common/controller.ts";
 import { ApplicationMusic } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds } from "./audio/q2-events.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
+import type { SourceEffectSound } from "./effects/q3.ts";
 
 interface ActorAudio {
   readonly actor: ActorId;
@@ -32,14 +33,7 @@ interface StaticAudio {
   readonly attenuation: number;
   readonly seats: SeatId[];
 }
-export interface ApplicationEffectSound {
-  readonly content: ContentId;
-  readonly path: string;
-  readonly origin: Vec3;
-  readonly channel: number;
-  readonly volume: number;
-  readonly seconds: number;
-}
+export type ApplicationEffectSound = SourceEffectSound;
 
 /** The output device mixes independent local listeners without advancing the game. */
 export class ApplicationAudio {
@@ -265,8 +259,15 @@ export class ApplicationAudio {
         channel: 0, volume: 1, attenuation: 0 });
     }
     await this.receive(events);
-    for (const sound of this.effectSounds.splice(0)) await this.play(sound.content, this.content.catalog.product(sound.content).expectation.family,
-      sound.path, null, sound.origin, sound.channel, sound.volume, 1);
+    for (const sound of this.effectSounds.splice(0)) {
+      const family = this.content.catalog.product(sound.content).expectation.family;
+      if (sound.playback.kind === "once") await this.play(sound.content, family, sound.path, null, sound.origin, sound.channel, sound.volume, 1);
+      else {
+        const asset = await this.sound(sound.content, sound.path, family, sound.playback.actor);
+        if (asset !== null) this.engine.loop({ sound: asset, family, actor: sound.playback.actor, origin: { kind: "fixed", position: sound.origin },
+          audience: { kind: "world" }, volume: sound.volume, attenuation: 1, velocity: sound.playback.velocity, frameNumber: snapshot.frame.frame, lifetime: "frame" });
+      }
+    }
     if (this.closed) return;
     this.engine.setListeners(listeners.map(listener => {
       if (listener.actor === null) return listener;

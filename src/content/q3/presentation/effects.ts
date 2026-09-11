@@ -6,7 +6,7 @@ import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
 import { qRandom, qvmFloatToInt } from "../../../core/numeric.ts";
 import { qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/qvm-math.ts";
 import { createModelEntity, createSpriteEntity, createLightningEntity, RF_THIRD_PERSON } from "./ref-entity.ts";
-import type { SceneModel, SceneShader } from "./ref-entity.ts";
+import type { RefSpriteEntity, SceneModel, SceneShader } from "./ref-entity.ts";
 import { TrajectoryType } from "../base/shared/trajectory.ts";
 import type { ClientGameState } from "./state.ts";
 import { LocalEntityFlags } from "./local-entities.ts";
@@ -167,10 +167,16 @@ export class ClientEffects {
     if (!this.options.blood) return;
     const snapshot = this.state.snap;
     if (snapshot === null) throw new Error("CG_Bleed requires a current snapshot");
+    this.bleedAt(origin, entityNum === snapshot.playerState.clientNum);
+  }
+
+  bleedAt(origin: Vec3, hideInFirstPerson: boolean): RefSpriteEntity | null {
+    if (!this.options.blood) return null;
     const ref = createSpriteEntity(), le = this.pool.allocate("explosion", ref);
     le.startTime = this.state.time; le.endTime = (le.startTime + 500) | 0;
     ref.origin = copy(origin); ref.rotation = this.rand() % 360; ref.radius = 24; ref.customShader = this.media.bloodExplosionShader;
-    if (entityNum === snapshot.playerState.clientNum) ref.renderFlags |= RF_THIRD_PERSON;
+    if (hideInFirstPerson) ref.renderFlags |= RF_THIRD_PERSON;
+    return ref;
   }
 
   launchGib(origin: Vec3, velocity: Vec3, model: SceneModel): ModelLocalEntity {

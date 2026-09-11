@@ -1,9 +1,10 @@
+import { q3BulletEndpoint, q3ShotgunEndpoints } from "./ballistics-math.ts";
 // Ported from id Software's game/g_weapon.c and g_combat.c ray/invulnerability helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
-import { add3, cross3, dot3, length3, normalize3, normalize3OrZero, perpendicularVector, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
+import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
-import { qCrandom, qvmFloatToInt } from "../../../../core/numeric.ts";
+import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerTraceResult } from "../world.ts";
 import { EntityEvent, EntityType, GameType, PersistentIndex, Powerup, Weapon } from "../shared/definitions.ts";
 import { directionToByte } from "../shared/direction-byte.ts";
@@ -177,10 +178,7 @@ export class WeaponRuntime {
 
   private bullet(entity: GameEntity, attack: Attack, spread: number, amount: number): void {
     const combat = this.host.missiles.host.combat, pool = combat.entities, random = this.host.random;
-    const angle = Math.fround(Math.fround(random.random() * Math.fround(Math.PI)) * 2);
-    const vertical = Math.fround(Math.fround(Math.fround(Math.fround(Math.sin(angle)) * random.crandom()) * spread) * 16);
-    const horizontal = Math.fround(Math.fround(Math.fround(Math.fround(Math.cos(angle)) * random.crandom()) * spread) * 16);
-    let end = add3(add3(add3(attack.muzzle, scale3(attack.forward, 131072)), scale3(attack.right, horizontal)), scale3(attack.up, vertical));
+    let end = q3BulletEndpoint(attack, spread, random);
     let pass = entity.s.number;
     for (let count = 0; count < 10; count++) {
       const trace = this.trace(entity, attack.muzzle, end, pass);
@@ -229,12 +227,8 @@ export class WeaponRuntime {
     const combat = this.host.missiles.host.combat, event = combat.entities.tempEntity(attack.muzzle, EntityEvent.EV_SHOTGUN);
     event.s.origin2 = snapVector(scale3(attack.forward, 4096)); event.s.eventParm = this.host.random.rand() & 255;
     event.s.otherEntityNum = entity.s.number;
-    const forward = normalize3OrZero(event.s.origin2), right = perpendicularVector(forward), up = cross3(forward, right);
-    let seed = event.s.eventParm, hitClient = false;
-    for (let count = 0; count < 11; count++) {
-      const r = qCrandom(seed), u = qCrandom(r.seed); seed = u.seed;
-      const horizontal = Math.fround(Math.fround(r.value * 700) * 16), vertical = Math.fround(Math.fround(u.value * 700) * 16);
-      const end = add3(add3(add3(event.s.pos.base, scale3(forward, 131072)), scale3(right, horizontal)), scale3(up, vertical));
+    let hitClient = false;
+    for (const end of q3ShotgunEndpoints(event.s.pos.base, event.s.origin2, event.s.eventParm)) {
       if (this.pellet(entity, attack, event.s.pos.base, end) && !hitClient) {
         hitClient = true; clientOf(entity).accuracyHits = (clientOf(entity).accuracyHits + 1) | 0;
       }

@@ -820,7 +820,7 @@ export class Application {
         }
         const commonEvents = graphical.q3.size === 0 ? presentationEvents : presentationEvents.filter(event => event.kind !== "q3-source" && event.kind !== "q3-character");
         graphical.effects.receive(commonEvents);
-        await graphical.effects.prepare(output.snapshot, presentations, characters);
+        await graphical.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
         this.unhandledEffects = graphical.effects.drainUnhandled();
         for (const effect of this.unhandledEffects) {
           const key = `${effect.source.content}:${effect.reason}`;

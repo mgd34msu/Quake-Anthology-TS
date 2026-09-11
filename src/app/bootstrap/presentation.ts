@@ -1,3 +1,4 @@
+import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Rect, RendererBackend, RenderFrame, SceneCamera } from "../../contracts/render.ts";
@@ -62,6 +63,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   private brushModels: readonly BrushPresentation[] = [];
   private preparedTime = 0;
   private previousTime = 0;
+  private readonly selectedWeapons = new Map<string, SelectedQ3WeaponPresenter>();
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly seatCount: number,
@@ -159,6 +161,13 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (!source.visible || source.path === "") continue;
       if (source.viewWeapon ? !source.actor.equals(this.local.player.actor) : source.actor.equals(this.local.player.actor)) continue;
       if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
+      if (source.q3Weapon !== undefined) {
+        const key = `${source.content}/${source.actor.slot}/${source.actor.generation}`;
+        let presenter = this.selectedWeapons.get(key);
+        if (presenter === undefined) { presenter = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, presenter); }
+        await append(source.content, await presenter.frame(source), () => ({ viewModel: true }));
+        continue;
+      }
       const asset = await this.assets.model(source.content, source.path);
       const axis = anglesToAxis(source.angles);
       if (asset.model.kind === "brush-model") {
@@ -196,7 +205,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
-    const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera);
+    const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera, this.local.player.actor);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => {
       const pattern = this.lightStyles.get(index);
@@ -209,7 +218,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       lights: effects.lights, q3Lights: effects.q3Lights,
       q1Styles: Array.from({ length: 256 }, (_, index) => this.lightStyles.has(index) ? style(index, 12) * 22 : 256),
       q2Styles: Array.from({ length: 256 }, (_, index) => { const value = style(index, 12) / 12; return { rgb: { x: value, y: value, z: value }, white: value * 3 }; }) };
-    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera));
+    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera, this.local.player.actor));
     this.frames.begin();
     if (nativeFrame === undefined) {
       const shadowLights = this.effects.shadowSceneLights(camera, index => style(index, 12) / 12);
