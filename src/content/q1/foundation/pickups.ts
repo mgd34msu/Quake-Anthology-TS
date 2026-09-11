@@ -61,7 +61,7 @@ function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
   if (name === "item_key1" || name === "item_key2") {
     const item: ItemId = name === "item_key1" ? "q1:key/silver" : "q1:key/gold";
     const prefix = game.worldType === 0 ? "w" : game.worldType === 1 ? "m" : "b";
-    return { model: `progs/${prefix}_${name === "item_key1" ? "silver" : "gold"}.mdl`, sound: game.worldType === 2 ? "misc/basekey.wav" : game.worldType === 1 ? "misc/runekey.wav" : "misc/medkey.wav", bounds: "weapon", skin: 0, respawn: -1,
+    return { model: `progs/${prefix}_${name === "item_key1" ? "s" : "g"}_key.mdl`, sound: game.worldType === 2 ? "misc/basekey.wav" : game.worldType === 1 ? "misc/runekey.wav" : "misc/medkey.wav", bounds: "weapon", skin: 0, respawn: -1,
       take: (runtime, _entity, player) => {
         if (runtime.host.inventory.give(player.actor, item, 1) === 0) return "refused"; return runtime.options.coop ? "leave" : "taken";
       } };

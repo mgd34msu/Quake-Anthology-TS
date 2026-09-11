@@ -1,3 +1,4 @@
+import { ApplicationQ2Console } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
 import { ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
 import type { ApplicationBotClient } from "./simulation/bots.ts";
@@ -107,6 +108,7 @@ export class Application {
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
   private pendingMap: string | null = null;
   private sourceCommands: CommandBuffer | null = null;
+  private q2Console: ApplicationQ2Console | null = null;
   private pendingRestart: number | null = null;
   private pendingSave: SaveImage | null = null;
 
@@ -134,7 +136,7 @@ export class Application {
         source.host.cvars.set("g_spSkill", String(options.botSkill), true);
       }
       application = new Application(options, content, session, simulation, host, identity, localSeats);
-      application.bindSourceCommands();
+      await application.bindSourceCommands();
       if (options.dedicated) application.openDedicatedConsole();
       else await application.openGraphical();
       application.bots = await application.createBots(content, simulation);
@@ -205,7 +207,7 @@ export class Application {
     return { quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
       console: { dialect: () => this.sourceDialect(), server: () => {
         const source = this.simulation.q3Source();
-        return source === null ? null : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
+        return source === null ? this.q2Console === null ? null : { cvars: this.q2Console.cvars, sharedNames: this.q2Console.sharedNames } : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
       }, seat: id => this.graphical?.q3.get(id)?.client.cvars ?? null },
       clientCapturesInput: seat => this.graphical?.q3.get(seat)?.client.capturesInput ?? false,
       clientInput: event => {
@@ -234,7 +236,16 @@ export class Application {
     }
   }
 
-  private bindSourceCommands(): void {
+  private async bindSourceCommands(): Promise<void> {
+    if (this.simulation.q2Source() !== null) {
+      if (this.q2Console === null) {
+        this.q2Console = new ApplicationQ2Console({ simulation: () => this.simulation, content: () => this.content,
+          print: text => { this.host.print(text); return undefined; }, execute: (name, args) => this.queueCommand(name, args, null) });
+        await this.q2Console.initialize();
+      } else await this.q2Console.bindCurrent();
+      this.sourceCommands = this.q2Console.commands;
+      return;
+    }
     const source = this.simulation.q3Source();
     if (source === null) { this.sourceCommands = null; return; }
     source.host.cvars.set("dedicated", this.options.dedicated ? "1" : "0", true);
@@ -591,7 +602,7 @@ export class Application {
       }
       if (nextNetworkHost !== null) this.changeNetworkWorld(nextNetworkHost);
       this.elapsed = initialSourceMilliseconds;
-      this.bindSourceCommands();
+      await this.bindSourceCommands();
       if (options.dedicated) { this.dedicatedConsole?.close(); this.openDedicatedConsole(); }
       this.sourceEvents = [];
       this.clientInputs = [];
@@ -644,6 +655,8 @@ export class Application {
       }
       return;
     }
+    const matchMap = this.simulation.pendingMatchMap();
+    if (matchMap !== null) { await this.replaceWorld(mapResourcePath(matchMap), this.simulation.captureTravel()); return; }
     if (this.pendingMap !== null) {
       const map = this.pendingMap, previous = this.content;
       this.pendingMap = null;

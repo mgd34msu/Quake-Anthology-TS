@@ -16,7 +16,7 @@ import { LmctfRunes } from "./runes.ts";
 import { LmctfGrapple } from "./grapple.ts";
 import { selectLmctfSpawn } from "./spawns.ts";
 import { createLmctfRules, LmctfPlayerState, lmctfName, lmctfPlayer, lmctfPrint, lmctfScore, lmctfStat } from "./types.ts";
-import type { LmctfContext, LmctfHooks, LmctfPlayingTeam, LmctfRules, LmctfTeam } from "./types.ts";
+import type { LmctfTravel, LmctfContext, LmctfHooks, LmctfPlayingTeam, LmctfRules, LmctfTeam } from "./types.ts";
 
 export class Q2Lmctf implements Q2SpawnModule {
   readonly states = new Map<ActorId, LmctfPlayerState>();
@@ -27,9 +27,9 @@ export class Q2Lmctf implements Q2SpawnModule {
   readonly flags: LmctfFlags;
   readonly runes: LmctfRunes;
   readonly grapple: LmctfGrapple;
-  constructor(readonly hooks: LmctfHooks, readonly rules: LmctfRules = createLmctfRules()) {
+  constructor(readonly hooks: LmctfHooks, readonly rules: LmctfRules = createLmctfRules(), private readonly travel?: LmctfTravel) {
     this.context = { hooks, rules, states: this.states, plasmaQuad: false, canScore: () => this.match.canScore(), flagsTouchable: () => this.match.phase !== "countdown" };
-    this.match = new LmctfMatch(this.context); this.vote = new LmctfVote(this.context); this.weapons = new LmctfWeapons(this.context);
+    this.match = new LmctfMatch(this.context); this.match.paused = travel?.paused ?? false; this.vote = new LmctfVote(this.context); this.weapons = new LmctfWeapons(this.context);
     this.flags = new LmctfFlags(this.context); this.runes = new LmctfRunes(this.context, game => this.flags.flag(1, game)); this.grapple = new LmctfGrapple(this.context);
     hooks.weapons.setSourceRules({ kind: "lmctf", postNativeThink: (current, repeat) => this.runes.weaponFrame(current.self, current.game, current.state.sourceFiring, repeat) });
   }
@@ -48,7 +48,11 @@ export class Q2Lmctf implements Q2SpawnModule {
     if (entity.classname === "item_invulnerability" && (this.rules.ctfFlags & 2) === 0 && game.options.mode === "deathmatch") { game.remove(entity); return true; }
     return false;
   }
-  postSpawn(game: Q2GameServices): undefined { game.sourceCallbacks.register(this.callbacks); this.flags.postSpawn(game); return this.runes.postSpawn(game); }
+  postSpawn(game: Q2GameServices): undefined { game.sourceCallbacks.register(this.callbacks); this.flags.postSpawn(game); this.runes.postSpawn(game); if (this.travel?.countdown) this.match.start(game); return undefined; }
+  captureTravel(): LmctfTravel {
+    return { rules: { ...this.rules }, countdown: this.match.pendingMap?.countdown ?? false, paused: this.match.paused,
+      players: [...this.states].flatMap(([actor, state]) => { const player = this.hooks.player(actor); return player === null ? [] : [{ slot: player.slot, team: state.team, observerTeam: state.observerTeam, extraFlags: state.extraFlags }]; }) };
+  }
   capture() {
     const { refPassword: _password, rconPassword: _rconPassword, ...rules } = this.rules;
     return { rules, match: this.match.capture(), vote: this.vote.capture(), plasmaQuad: this.context.plasmaQuad, flags: this.flags.capture(), runes: this.runes.capture(),
@@ -88,6 +92,12 @@ export class Q2Lmctf implements Q2SpawnModule {
     if (this.states.has(entity.actor.id)) return undefined;
     const common = this.hooks.player(entity.actor.id); if (common === null) throw new Error("LMCTF admission requires shared source player state");
     const state = new LmctfPlayerState(); this.states.set(entity.actor.id, state);
+    const carried = this.travel?.players.find(player => player.slot === common.slot);
+    if (carried !== undefined) {
+      state.extraFlags = carried.extraFlags;
+      if (carried.team === 0) return this.observer(entity, game, carried.observerTeam);
+      return this.setTeam(entity, game, carried.team);
+    }
     if (common.spectator || common.requestedSpectator) return this.observer(entity, game, 0);
     let red = 0, blue = 0;
     for (const [actor, member] of this.states) if (!actor.equals(entity.actor.id)) { if (member.team === 1) red++; else if (member.team === 2) blue++; }

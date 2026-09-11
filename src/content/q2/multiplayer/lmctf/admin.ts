@@ -19,6 +19,14 @@ export function lmctfAdminCommand(context: LmctfContext, match: LmctfMatch, enti
     } else { state.extraFlags &= ~6; print("Incorrect Referee Password\n"); }
     return true;
   }
+  if (name === "match") {
+    if ((state.extraFlags & 2) === 0) { print("You are not a Referee\n"); return true; }
+    const map = args.join(" ");
+    if (map === "") print("USAGE: match <mapname>\n");
+    else if (!context.rules.mapList.includes(map)) print(`${map} is not a map from the maplist.\n`);
+    else { print("Match countdown beginning.\n"); match.changeMap(map, true); }
+    return true;
+  }
   if (!["lock", "unlock", "startmatch", "stopmatch", "gotomap"].includes(name)) return false;
   if ((state.extraFlags & 2) === 0) { print("Referee-only command denied.\n"); return true; }
   switch (name) {
@@ -27,7 +35,7 @@ export function lmctfAdminCommand(context: LmctfContext, match: LmctfMatch, enti
     case "stopmatch": if (match.phase === "none") print("No match running\n"); else { match.stop(); lmctfPrint(game, `Match stopped by ${lmctfName(context, entity.actor.id)}\n`); } break;
     case "gotomap": {
       const map = args.join(" ").toLowerCase();
-      if (map.length > 0) { if (context.rules.mapList.includes(map)) context.hooks.endLevel(game, map); else print(`${map} is not a map from the maplist.\n`); }
+      if (map.length > 0) { if (context.rules.mapList.includes(map)) match.changeMap(map, false); else print(`${map} is not a map from the maplist.\n`); }
       break;
     }
   }

@@ -1,3 +1,4 @@
+import type { LmctfTravel } from "../../q2/multiplayer/lmctf/types.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q2FoundationHost, Q2GameOptions } from "../../q2/foundation/host.ts";
 import type { Q2Weapons } from "../../q2/foundation/weapons/index.ts";
@@ -11,7 +12,7 @@ import type { Q2RereleaseCampaignState } from "../../q2/rerelease/entities.ts";
 
 export type Q2ClassicProgram = "baseq2" | "xatrix" | "rogue";
 export type Q2RereleaseProgram = Q2ClassicProgram | "mg2" | "n64";
-export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf" } | { readonly kind: "standard" } | { readonly kind: "tag" }
+export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf"; readonly travel?: LmctfTravel } | { readonly kind: "standard" } | { readonly kind: "tag" }
   | { readonly kind: "deathball"; readonly team1Skin: string; readonly team2Skin: string; readonly goalLimit: number };
 export type Q2CompositionEvent =
   | { readonly kind: "ctf"; readonly event: import("../../q2/multiplayer/ctf/types.ts").Q2CtfEvent }

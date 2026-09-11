@@ -1,3 +1,4 @@
+import type { LmctfTravel } from "../../../content/q2/multiplayer/lmctf/types.ts";
 import type { ApplicationMonsterNavigation } from "./monster-navigation.ts";
 import type { Q2RereleaseCampaignState } from "../../../content/q2/rerelease/campaign.ts";
 import type { ContentId, ExecutableRecipe, GameFamily, ResolvedResourceReference } from "../../../contracts/content.ts";
@@ -45,7 +46,7 @@ export interface SimulationOptions {
 export interface SimulationTravel {
   readonly spawnPoint: string;
   readonly source: { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
-    | { readonly kind: "q2"; readonly serverFlags: number; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
+    | { readonly kind: "q2"; readonly serverFlags: number; readonly lmctf?: LmctfTravel; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
       readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null };
   readonly players: readonly { readonly client: ClientId; readonly state: { readonly kind: "q1"; readonly carry: Q1TravelState } | { readonly kind: "q2"; readonly carry: Q2PlayerCarry } }[];
 }

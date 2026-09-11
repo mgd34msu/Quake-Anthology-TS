@@ -169,3 +169,90 @@ test("entity pointers preserve prefix, stride and private bit patterns", () => {
   expect(entities.at(2).int(4)).toBe(-1);
   expect(() => entities.resolvePointer(240)).toThrow("does not address entity variables");
 });
+
+test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source lifetimes and actual BSP traces", async () => {
+  const { QcWorldHost, qcLinkBounds } = await import("../../../src/compat/qc/world-host.ts");
+  const { SharedBodyTable } = await import("../../../src/world/actors/index.ts");
+  const { createSceneQueries } = await import("../../../src/world/collision/index.ts");
+  const { readQ1Bsp } = await import("../../../src/formats/q1-map/index.ts");
+  const { parseEntities } = await import("../../../src/core/common-parse.ts");
+  const archive = await openArchive(corpus + "rerelease/id1/pak0.pak");
+  try {
+    const entry = archive.findEntries("maps/start.bsp")[0];
+    if (entry === undefined) throw new Error("Missing retail start BSP");
+    const world = readQ1Bsp(await archive.readEntry(entry)), scene = createSceneQueries(world);
+    const start = parseEntities(world.entities).find(entity => entity.get("classname") === "info_player_start");
+    const coordinates = start?.get("origin")?.split(/\s+/).map(Number);
+    const x = coordinates?.[0], y = coordinates?.[1], z = coordinates?.[2];
+    if (x === undefined || y === undefined || z === undefined) throw new Error("Missing retail player start");
+    const origin = { x, y, z }, program = await readProgram("rerelease/id1/pak0.pak");
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 16);
+    const numeric = createNumericOperations(Q1_DONOR_PROFILE), actors = new SessionActorRegistry(createIdentityOwner("qc-world-test"));
+    const field = (name: string) => { const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
+    const sourceSlot = (actor: import("../../../src/contracts/identity.ts").ActorId) => {
+      const source = actors.sourceOf(actor); if (source === null) throw new Error("Missing source slot"); return source.slot;
+    };
+    const bodies = new SharedBodyTable(actors, {
+      absoluteBounds: (actor, state) => qcLinkBounds(state, entities.at(sourceSlot(actor.id)).float(field("flags")), numeric),
+      onUnlink: actor => { scene.unlink(actor); return undefined; },
+      onLink: body => {
+        const words = entities.at(sourceSlot(body.actor)), solid = words.float(field("solid"));
+        if (solid === 0) { scene.unlink(body.actor); return undefined; }
+        const owner = actors.atSource("test:qc-world", entities.slot(words.int(field("owner"))))?.id ?? null;
+        scene.link(body, { family: "q1", shape: solid === 4 ? { kind: "model", model: words.float(field("modelindex")) - 1 } : { kind: "box" },
+          contents: -2, owner, role: solid === 1 ? "trigger" : "solid", monster: (Math.trunc(words.float(field("flags"))) & 32) !== 0, deadMonster: false });
+        return undefined;
+      },
+    });
+    scene.bindActorState(actor => bodies.read(actor));
+    const storage = createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 });
+    const slots = new SourceActorSlots(actors, { provider: "test:qc-world", capacity: entities.capacity, lifetime: quakeEdictLifetime(1), storage,
+      now: () => ({ kind: "seconds", value: 1 }), unlink: actor => bodies.unlink(actor), exhausted: () => {} });
+    slots.bindExisting(0, "quakec:world");
+    const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
+    const host = new QcWorldHost({ program, entities, actors, slots, bodies, scene, numeric: Q1_DONOR_PROFILE,
+      model: name => name === "progs/player.mdl" ? { index: 2, bounds } : null,
+      foreignReference: () => { throw new Error("Fixture has no foreign source surrogate"); } });
+    host.actor(0);
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: host.host, isFreeEntity: host.isFreeEntity }), serverActive: () => true });
+    const call = (name: string, argc: number) => vm.execute(program.functionNamed(name).index, argc);
+    call("spawn", 0);
+    const reference = vm.globals.int(1), slot = entities.slot(reference), actor = host.actor(slot), fields = entities.at(slot);
+    fields.setFloat(field("solid"), 2);
+    vm.globals.setInt(4, reference); vm.globals.setInt(7, vm.strings.allocate("missing.mdl"));
+    expect(() => call("setmodel", 2)).toThrow("no precache");
+    vm.globals.setInt(7, vm.strings.allocate("progs/player.mdl")); call("setmodel", 2);
+    expect(fields.vector(field("size"))).toEqual({ x: 32, y: 32, z: 56 });
+    vm.globals.setVector(7, origin); call("setorigin", 2);
+    expect(bodies.read(actor.id)?.origin).toEqual(origin);
+    expect(scene.spatial.get(actor.id)?.body.actor).toEqual(actor.id);
+    fields.setVector(field("origin"), { ...origin, x: origin.x + 8 });
+    expect(bodies.read(actor.id)?.origin.x).toBe(origin.x + 8);
+    expect(bodies.linked(actor.id)?.state.origin).toEqual(origin);
+    const state = bodies.read(actor.id); if (state === null) throw new Error("Missing raw body");
+    bodies.write(actor, { ...state, velocity: { x: 7, y: 8, z: 9 } });
+    expect(fields.vector(field("velocity"))).toEqual({ x: 7, y: 8, z: 9 });
+    vm.globals.setInt(4, reference); vm.globals.setVector(7, { x: 2, y: 0, z: 0 }); vm.globals.setVector(10, { x: 1, y: 0, z: 0 });
+    expect(() => call("setsize", 3)).toThrow("backwards mins/maxs");
+    vm.globals.setVector(7, bounds.min); vm.globals.setVector(10, bounds.max); call("setsize", 3);
+    expect(bodies.linked(actor.id)?.state.origin.x).toBe(origin.x + 8);
+    vm.globals.setVector(4, origin); vm.globals.setFloat(7, 64); call("findradius", 2);
+    expect(vm.globals.int(1)).toBe(reference); expect(fields.int(field("chain"))).toBe(0);
+    vm.globals.setVector(4, origin); call("pointcontents", 1); expect(vm.globals.float(1)).toBe(-1);
+    const end = { ...origin, z: origin.z - 256 };
+    const direct = scene.trace({ start: origin, end, shape: { kind: "point" }, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: actor.id });
+    expect(direct.fraction).toBeLessThan(1);
+    vm.globals.setVector(4, origin); vm.globals.setVector(7, end); vm.globals.setFloat(10, 0); vm.globals.setInt(13, reference); call("traceline", 4);
+    expect(vm.globals.float(vm.globalOffset("trace_fraction"))).toBe(Math.fround(direct.fraction));
+    expect(vm.globals.vector(vm.globalOffset("trace_endpos"))).toEqual(direct.end);
+    expect(vm.globals.int(vm.globalOffset("trace_ent"))).toBe(0);
+    vm.globals.setInt(vm.globalOffset("self"), reference); call("droptofloor", 0);
+    expect(vm.globals.float(1)).toBe(1); expect(bodies.read(actor.id)?.ground).toEqual(slots.at(0)?.id ?? null);
+    vm.globals.setInt(4, reference); call("remove", 1);
+    expect(scene.spatial.get(actor.id)).toBeNull(); expect(bodies.read(actor.id)).toBeNull();
+    call("spawn", 0); expect(vm.globals.int(1)).toBe(reference);
+    expect(host.actor(slot).id.equals(actor.id)).toBe(false);
+    expect(() => host.reference(actor.id)).toThrow("stale actor");
+    expect(bodies.read(host.actor(slot).id)?.velocity).toEqual({ x: 0, y: 0, z: 0 });
+  } finally { archive.close(); }
+});

@@ -89,11 +89,14 @@ function pureLoosePath(path: string): boolean {
 export class MountedContent {
   readonly #sources = new Map<MountId, MountedSource>();
   readonly #referenced = new Map<MountId, ArchiveMount>();
+  readonly #openedResources = new Map<string, ResolvedResourceReference>();
   #closed = false;
 
   constructor(readonly plan: ResolvedMountPlan, sources: readonly MountedSource[], readonly options: OpenMountOptions = {}) {
     for (const source of sources) this.#sources.set(source.mount.identity.id, source);
   }
+
+  get openedResources(): readonly ResolvedResourceReference[] { return [...this.#openedResources.values()]; }
 
   get referencedArchives(): readonly ArchiveMount[] { return [...this.#referenced.values()]; }
 
@@ -124,7 +127,9 @@ export class MountedContent {
   #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution): OpenedResource {
     const resource = { requestedPath, provenance: read.provenance, digest: digestBytes(read.bytes), byteLength: read.bytes.length, resolution };
     if (read.provenance.kind === "archive") this.#referenced.set(read.provenance.mount.identity.id, read.provenance.mount);
-    return { reference: { ...resource, id: createResourceId(resource) }, bytes: read.bytes };
+    const reference = { ...resource, id: createResourceId(resource) };
+    this.#openedResources.set(`${reference.provenance.mount.identity.id}:${requestedPath}`, reference);
+    return { reference, bytes: read.bytes };
   }
 
   async open(path: string): Promise<OpenedResource | null> {
@@ -182,12 +187,14 @@ export class MountedContent {
       bytes = read.bytes;
     }
     if (bytes.length !== resource.byteLength || digestBytes(bytes) !== resource.digest) throw new Error(`Resource bytes changed since resolution: ${resource.requestedPath}`);
+    this.#openedResources.set(`${resource.provenance.mount.identity.id}:${resource.requestedPath}`, resource);
     return bytes;
   }
 
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#openedResources.clear();
     for (const source of this.#sources.values()) if (source.kind === "archive") source.archive.close();
   }
 

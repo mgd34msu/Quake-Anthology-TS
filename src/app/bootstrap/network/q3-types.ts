@@ -3,6 +3,9 @@ import type { ActorCommand } from '../../../contracts/session.ts';
 import type { WireAdmission } from '../../../network/common/session.ts';
 import type { Q3AcceptedConnect } from '../../../network/q3/admission.ts';
 import type { WireUserCommand } from '../../../network/q3/message.ts';
+import type { Q3PureServer } from '../../../network/q3/pure.ts';
+import type { Q3DownloadReadFile } from '../../../network/q3/download.ts';
+import type { Q3ServerRate } from '../../../network/q3/server.ts';
 import type { Gamestate } from '../../../network/q3/server-message.ts';
 import type { Product } from '../../../network/q3/state/product.ts';
 import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
@@ -11,6 +14,11 @@ export interface Q3ApplicationPlayer { readonly client: ClientId; readonly actor
 export interface Q3ApplicationServerHost {
   readonly product: Product;
   readonly maxClients: number;
+  prepare(checksumFeed: number, serverId: number): Promise<void>;
+  pure(serverId: number): Q3PureServer;
+  downloadsEnabled(): boolean;
+  openDownload(name: string): Q3DownloadReadFile | null;
+  rate(player: Q3ApplicationPlayer): Q3ServerRate;
   supportsSourceWire(): WireAdmission;
   time(): number;
   occupiedSlots(): readonly number[];

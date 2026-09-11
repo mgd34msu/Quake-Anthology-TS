@@ -25,7 +25,7 @@ export class Q2ProductMatch implements Q2SpawnModule {
       const spot = selectQ2Spawn(game, players().states.get(entity.actor.id) ?? new Q2PlayerState(0, game.host.now()), players().rules.spawnPoint);
       return { origin: q2SpawnOrigin(spot, game), angles: game.body(spot).angles };
     };
-    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }) : selection.kind === "standard" ? null : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
+    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }, selection.travel?.rules, selection.travel) : selection.kind === "standard" ? null : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
       farthestSpawn: game => {
         let selected: Q2Entity | null = null, distance = -1;
         for (const spot of q2EntitiesNamed(game, "info_player_deathmatch")) {

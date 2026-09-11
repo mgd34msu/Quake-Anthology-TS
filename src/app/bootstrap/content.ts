@@ -65,9 +65,12 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
 export class LoadedApplicationContent {
   private readonly scoped = new Map<ContentId, Promise<MountedContent>>();
   private closed = false;
+  private readonly opened = new Set<MountedContent>();
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
     readonly world: ApplicationWorld, readonly mounts: MountedContent) {}
+
+  openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
 
   forContent(content: ContentId): Promise<MountedContent> {
     if (this.closed) throw new Error("Application content is closed");
@@ -81,6 +84,7 @@ export class LoadedApplicationContent {
       const opened = await openMountPlan({ id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
         mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
       if (this.closed) { opened.close(); throw new Error("Application content closed during mount"); }
+      this.opened.add(opened);
       return opened;
     })();
     this.scoped.set(content, pending);
@@ -96,6 +100,7 @@ export class LoadedApplicationContent {
       result?.close();
     }
     this.scoped.clear();
+    this.opened.clear();
   }
 }
 

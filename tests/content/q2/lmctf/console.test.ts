@@ -1,0 +1,32 @@
+import { expect, test } from "bun:test";
+import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
+import { CommandBuffer } from "../../../../src/core/commands/index.ts";
+import { CvarRegistry, Q2CvarFlag } from "../../../../src/core/cvars/index.ts";
+import { createLmctfRules } from "../../../../src/content/q2/multiplayer/lmctf/types.ts";
+import { bindLmctfConsoleRules } from "../../../../src/app/bootstrap/q2-console.ts";
+
+test("LMCTF source console writes live rules and preserves registry settings across rule replacement", () => {
+  const owner = createIdentityOwner("lmctf-console"), context = { session: owner.session, origin: { kind: "server-console" } } satisfies import("../../../../src/contracts/common.ts").CommandContext;
+  const cvars = new CvarRegistry({ dialect: "q2-classic", context }), commands = new CommandBuffer({ dialect: "q2-classic", context, cvars });
+  const rules = createLmctfRules({ countdownSeconds: 7 }); bindLmctfConsoleRules(cvars, rules);
+  expect(cvars.variableString("countdown_time")).toBe("7");
+  expect(cvars.get("countdown_time")?.resetValue).toBe("15");
+  expect(cvars.variableString("maplist_file")).toBe("maplist.txt");
+  commands.append('set refpassword "league referee"; set rcon_password owner-secret; autolock 1; timelimit 20; countdown_time 30; set maplist_file league.txt\n');
+  commands.execute();
+  expect(rules.refPassword).toBe("league referee"); expect(rules.rconPassword).toBe("owner-secret");
+  expect(rules.autoLock).toBe(true); expect(rules.timeLimitMinutes).toBe(20); expect(rules.countdownSeconds).toBe(30);
+  expect(cvars.get("timelimit")?.flags).toBe(Q2CvarFlag.ServerInfo);
+  expect(cvars.get("refpassword")?.flags).toBe(0);
+  expect(cvars.infoString(Q2CvarFlag.ServerInfo)).not.toContain("league referee");
+  expect(cvars.infoString(Q2CvarFlag.ServerInfo)).toContain("\\timelimit\\20");
+  commands.executeNow("autolock 0.5"); expect(rules.autoLock).toBe(false);
+  commands.executeNow("autolock 1");
+  rules.timeLimitMinutes = 12;
+  expect(cvars.variableValue("timelimit")).toBe(12);
+  const nextRules = createLmctfRules(); bindLmctfConsoleRules(cvars, nextRules);
+  expect(nextRules.refPassword).toBe("league referee"); expect(nextRules.timeLimitMinutes).toBe(12);
+  expect(cvars.variableString("maplist_file")).toBe("league.txt");
+  commands.executeNow('refpassword ""'); expect(nextRules.refPassword).toBe("");
+  expect({ ...nextRules }.autoLock).toBe(true);
+});

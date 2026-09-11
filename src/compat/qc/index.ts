@@ -13,3 +13,5 @@ export type { QcExecutorHost, QcHostSavedState } from "./executor.ts";
 export { classicQcEntityLayout, describeQcHost, loadMountedQcProgram, qcProgramSearchOrder } from "./profile.ts";
 export { createQcActorBindings, createQcSourceSlotStorage } from "./entity-host.ts";
 export type { QcEdictMetadataLayout } from "./entity-host.ts";
+export { QcWorldHost, qcLinkBounds } from "./world-host.ts";
+export type { QcWorldHostOptions } from "./world-host.ts";

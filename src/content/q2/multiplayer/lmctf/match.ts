@@ -1,10 +1,11 @@
 /* LM_CTF 6.0 g_tourney.c. GPL-2.0-or-later. */
 import type { SaveReader } from "../../../../persistence/value.ts";
 import type { Q2GameServices } from "../../foundation/host.ts";
-import { lmctfPrint, type LmctfContext } from "./types.ts";
+import { lmctfPrint, type LmctfMapChange, type LmctfContext } from "./types.ts";
 
 export class LmctfMatch {
   phase: "none" | "countdown" | "inplay" | "over" = "none";
+  pendingMap: LmctfMapChange | null = null;
   remaining = 0;
   nextThink = 0;
   paused = false;
@@ -17,6 +18,12 @@ export class LmctfMatch {
     for (const actor of this.context.states.keys()) if (game.entity(actor) !== null) game.host.emit({ kind: "centerprint", actor, text });
     return game.host.diagnostic(text);
   }
+  changeMap(map: string, countdown: boolean): undefined {
+    this.stop(); this.pendingMap = { map, countdown };
+    if (countdown) this.phase = "countdown";
+    for (const [actor, state] of this.context.states) { state.statistics.clear(); const player = this.context.hooks.player(actor); if (player !== null) player.score = 0; }
+    return undefined;
+  }
   canScore(): boolean { return this.phase !== "countdown" && this.phase !== "over"; }
   start(game: Q2GameServices): undefined {
     this.phase = "countdown"; this.remaining = Math.trunc(this.context.rules.countdownSeconds); this.nextThink = game.host.now() + 1;
@@ -25,7 +32,7 @@ export class LmctfMatch {
   }
   stop(): undefined { this.phase = "none"; if (this.context.rules.autoLock) this.teamsLocked = false; return undefined; }
   frame(game: Q2GameServices): undefined {
-    if (this.phase === "none" || game.host.now() < this.nextThink) return undefined;
+    if (this.pendingMap !== null || this.phase === "none" || game.host.now() < this.nextThink) return undefined;
     this.nextThink = game.host.now() + 1;
     if (this.paused) return undefined;
     if (this.phase === "countdown") {
@@ -51,8 +58,10 @@ export class LmctfMatch {
     } else if (this.remaining <= 0) this.phase = "none";
     this.remaining--; return undefined;
   }
-  capture() { return { phase: this.phase, remaining: this.remaining, nextThink: this.nextThink, paused: this.paused, teamsLocked: this.teamsLocked }; }
+  capture() { return { pendingMap: this.pendingMap, phase: this.phase, remaining: this.remaining, nextThink: this.nextThink, paused: this.paused, teamsLocked: this.teamsLocked }; }
   restore(reader: SaveReader): undefined {
+    const pending = reader.field("pendingMap");
+    this.pendingMap = pending.value === undefined ? null : pending.nullable(value => ({ map: value.field("map").string(), countdown: value.field("countdown").boolean() }));
     this.phase = reader.field("phase").choice("none", "countdown", "inplay", "over"); this.remaining = reader.field("remaining").integer();
     this.nextThink = reader.field("nextThink").finite(); this.paused = reader.field("paused").boolean(); this.teamsLocked = reader.field("teamsLocked").boolean(); return undefined;
   }

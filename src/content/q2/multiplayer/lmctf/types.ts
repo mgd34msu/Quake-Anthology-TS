@@ -84,3 +84,11 @@ export function lmctfToss(entity: Q2Entity, player: Q2Entity, game: Q2GameServic
   return game.move(entity, { origin: game.host.trace({ start: body.origin, end: origin, bounds: game.body(entity).bounds, ignore: player.actor.id, mask: 1 }).end,
     velocity: { x: forward.x * 200, y: forward.y * 200, z: 300 } });
 }
+
+export interface LmctfMapChange { readonly map: string; readonly countdown: boolean; }
+export interface LmctfTravel {
+  readonly rules: LmctfRules;
+  readonly countdown: boolean;
+  readonly paused: boolean;
+  readonly players: readonly { readonly slot: number; readonly team: LmctfTeam; readonly observerTeam: LmctfTeam; readonly extraFlags: number }[];
+}

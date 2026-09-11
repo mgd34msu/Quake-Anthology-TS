@@ -428,7 +428,7 @@ export class SharedSimulation implements Simulation {
         this.transitions.push(intent); return undefined;
       }, diagnostic: message => this.events.message({ kind: "print", level: 2, text: message }) };
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
-      match: { kind: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
+      match: recipe.match.provider === "q2:lmctf" ? { kind: "lmctf", ...(this.options.travel?.source.kind === "q2" && this.options.travel.source.lmctf !== undefined ? { travel: this.options.travel.source.lmctf } : {}) } : { kind: recipe.match.provider === "q2:ctf" ? "ctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
         skill: this.options.skill, mode: this.options.mode, deathmatchFlags: 0, maxClients: this.options.maxClients, provider: recipe.map.entities.provider,
         campaign, combatProvider: recipe.combat.provider, movementProvider: recipe.movement.provider, inventoryProvider: recipe.inventory.provider },
@@ -1385,16 +1385,19 @@ export class SharedSimulation implements Simulation {
     const landmarkPlayer = landmark === null ? null : this.player(landmark.player);
     return { spawnPoint, source: source.kind === "q1" ? { kind: "q1", flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }
       : { kind: "q2", serverFlags: this.levelChange?.serverFlags ?? source.game.counters.serverFlags,
+        ...(source.product.match.source instanceof Q2Lmctf ? { lmctf: source.product.match.source.captureTravel() } : {}),
         ...(source.product.rerelease === null ? {} : { rerelease: source.product.rerelease.entities.campaign }),
         landmark: landmark === null || landmarkPlayer === null ? null : { clientSlot: landmarkPlayer.client.slot, name: landmark.name,
           relativeOrigin: landmark.relativeOrigin, relativeVelocity: landmark.relativeVelocity, relativeViewAngles: landmark.relativeViewAngles } },
       players: [...this.playerStates.values()].map(player => {
         if (source.kind === "q1") return { client: player.client, state: { kind: "q1", carry: this.q1Restart ? source.composition.newTravel() : source.composition.captureTravel(player.actor) } };
         const entity = source.game.entity(player.actor.id); if (entity === null) throw new Error("Q2 travel player entity is missing");
-        return { client: player.client, state: { kind: "q2", carry: source.players.saveCarry(entity, source.game) } };
+        return { client: player.client, state: { kind: "q2", carry: source.product.match.source instanceof Q2Lmctf ? { ...source.players.saveCarry(entity, source.game), score: 0 } : source.players.saveCarry(entity, source.game) } };
       }) };
   }
   admitTravel(client: ClientId, travel: SimulationTravel): PlayerAdmission { return this.admitPlayer(client, travel); }
+
+  pendingMatchMap(): string | null { return this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf ? this.source.product.match.source.match.pendingMap?.map ?? null : null; }
 
   takeTransitions(): readonly TransitionIntent[] { return this.transitions.splice(0); }
   takeLevelChange() { const change = this.levelChange; this.levelChange = null; return change; }

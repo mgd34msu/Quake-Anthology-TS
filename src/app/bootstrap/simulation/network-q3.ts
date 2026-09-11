@@ -1,5 +1,7 @@
 import type { ClientId } from '../../../contracts/identity.ts';
 import { CvarFlag } from '../../../core/cvars/index.ts';
+import { Q3ApplicationPackages } from '../network/q3-downloads.ts';
+import { q3InfoValue } from '../../../network/q3/admission.ts';
 import { Q3_PROTOCOL, toQ3UserCommand } from '../../../network/q3/adapters.ts';
 import { EntityStateRecord } from '../../../network/q3/state/entity.ts';
 import { PlayerStateRecord, PlayerStateSlots } from '../../../network/q3/state/player.ts';
@@ -13,6 +15,17 @@ export interface Q3ApplicationServerBindingOptions { readonly session: EngineSes
 export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindingOptions): Q3ApplicationServerHost {
   const simulation = options.simulation, source = simulation.q3Source();
   if (source === null) throw new Error('Q3 network requires the Q3 source game provider');
+  const cvars = source.host.cvars;
+  for (const [name, value, flags] of [
+    ['sv_pure', '1', CvarFlag.SystemInfo], ['sv_allowDownload', '0', CvarFlag.ServerInfo],
+    ['sv_maxRate', '0', CvarFlag.ServerInfo], ['sv_fps', '20', CvarFlag.None], ['sv_serverid', '0', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+    ['sv_paks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_pakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+    ['sv_referencedPaks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_referencedPakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+    ['fs_game', source.options.product === 'missionpack' ? 'missionpack' : '', CvarFlag.SystemInfo],
+  ] satisfies readonly (readonly [string, string, number])[]) cvars.register(name, value, flags);
+  let packages: Q3ApplicationPackages | null = null, preparing: Promise<Q3ApplicationPackages> | null = null;
+  let touchedCgame = false;
+  const archiveState = (): Q3ApplicationPackages => { if (packages === null) throw new Error('Q3 package metadata has not been prepared'); return packages; };
   const playerFor = (client: ClientId): Q3ApplicationPlayer => {
     const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
     if (actor === undefined) throw new Error('Application has not admitted the Q3 client');
@@ -28,6 +41,31 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   };
   return {
     product: source.options.product, maxClients: source.options.maxClients,
+    prepare: async (checksumFeed, serverId) => {
+      preparing ??= Q3ApplicationPackages.open(options.content, checksumFeed);
+      packages = await preparing;
+      if (packages.references.references.checksumFeed !== (checksumFeed >>> 0)) throw new Error('Q3 world changed checksum feed without replacing content host');
+      if (cvars.variableValue('sv_pure') !== 0 && !touchedCgame) { await options.content.mounts.resolve('vm/cgame.qvm'); touchedCgame = true; }
+      packages.collect();
+      const refs = packages.references.references;
+      cvars.set('sv_serverid', String(serverId), true);
+      cvars.set('sv_paks', cvars.variableValue('sv_pure') !== 0 ? refs.loadedPakChecksums() : '', true);
+      cvars.set('sv_pakNames', cvars.variableValue('sv_pure') !== 0 ? refs.loadedPakNames() : '', true);
+      cvars.set('sv_referencedPaks', refs.referencedPakChecksums(), true);
+      cvars.set('sv_referencedPakNames', refs.referencedPakNames(), true);
+      source.host.configstrings.set(1, cvars.infoString(CvarFlag.SystemInfo, 8192));
+      source.host.configstrings.set(0, cvars.infoString(CvarFlag.ServerInfo));
+    },
+    pure: serverId => { const state = archiveState(); return { enabled: cvars.variableValue('sv_pure') !== 0,
+      checksumFeed: state.references.references.checksumFeed | 0, checksumFeedServerId: serverId,
+      cgameChecksum: state.pureChecksum('vm/cgame.qvm'), uiChecksum: state.pureChecksum('vm/ui.qvm'),
+      loadedPureChecksums: state.packs.map(pack => pack.pack.pureChecksum) }; },
+    downloadsEnabled: () => cvars.variableValue('sv_allowDownload') !== 0,
+    openDownload: name => archiveState().openDownload(name),
+    rate: player => { const info = source.host.engine.getUserinfo(player.sourceEntity), fps = Math.max(1, cvars.variableValue('sv_fps'));
+      const requestedRate = Number.parseInt(q3InfoValue(info, 'rate'), 10), requestedSnaps = Number.parseInt(q3InfoValue(info, 'snaps'), 10);
+      return { rate: Number.isNaN(requestedRate) ? 3000 : Math.max(1000, Math.min(90000, requestedRate)), maxRate: cvars.variableValue('sv_maxRate'),
+        snapshotMsec: Math.trunc(1000 / (Number.isNaN(requestedSnaps) ? fps : Math.max(1, Math.min(fps, requestedSnaps)))), local: q3InfoValue(info, 'ip') === 'localhost', forceLan: false, lan: false }; },
     supportsSourceWire: () => {
       const reasons: string[] = [];
       if (!simulation.recipe.movement.provider.startsWith('q3:')) reasons.push('Native Q3 wire requires Q3 movement');
@@ -46,10 +84,11 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     disconnect: player => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); },
     gameState: (player, serverId) => {
       const entries = configEntries().filter(entry => entry.kind !== 'configstring' || (entry.index !== 0 && entry.index !== 1));
-      entries.unshift({ kind: 'configstring', index: 0, value: source.host.cvars.infoString(CvarFlag.ServerInfo) },
-        { kind: 'configstring', index: 1, value: `\\sv_serverid\\${serverId}\\sv_pure\\0\\fs_game\\${source.options.product === 'missionpack' ? 'missionpack' : ''}` });
+      cvars.set('sv_serverid', String(serverId), true);
+      entries.unshift({ kind: 'configstring', index: 0, value: cvars.infoString(CvarFlag.ServerInfo) },
+        { kind: 'configstring', index: 1, value: cvars.infoString(CvarFlag.SystemInfo, 8192) });
       for (let number = 1; number < source.pool.numEntities; number++) if (source.pool.at(number).inuse && source.pool.at(number).r.linked) entries.push({ kind: 'baseline', number, entity: wireEntity(number) });
-      return { kind: 'gamestate', commandSequence: 0, entries, clientNumber: player.sourceEntity, checksumFeed: 0 };
+      return { kind: 'gamestate', commandSequence: 0, entries, clientNumber: player.sourceEntity, checksumFeed: archiveState().references.references.checksumFeed | 0 };
     },
     snapshot: player => {
       const entity = source.records.byActor(player.actor); if (entity?.client === null || entity?.client === undefined) throw new Error('Q3 snapshot player disappeared');
