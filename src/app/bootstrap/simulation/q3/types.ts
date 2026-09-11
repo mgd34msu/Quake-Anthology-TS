@@ -1,3 +1,4 @@
+import type { MoverActorAccess } from "../../../../content/q3/base/game/mover.ts";
 import type { ExecutableRecipe, ProviderReference } from "../../../../contracts/content.ts";
 import type { DamageRequest } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
@@ -45,6 +46,7 @@ export type Q3SourceBots = ClientBotServices & (
 
 /** W73 supplies the existing owners; this provider contains source game records and phase functions. */
 export interface Q3SourceHost extends ClientMovementHost {
+  readonly moverActors: Pick<MoverActorAccess, "observe" | "write" | "link" | "release">;
   primaryAttackAllowed?(actor: ActorId): boolean;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;

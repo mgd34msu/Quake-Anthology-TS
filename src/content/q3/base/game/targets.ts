@@ -1,3 +1,6 @@
+import { requireUseParticipant, useClient, useActor } from "./use-participant.ts";
+import type { UseParticipantServices } from "./use-participant.ts";
+import type { UseParticipant } from "./state.ts";
 // Ported from id Software's code/game/g_target.c and the target_push section
 // of g_trigger.c. Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -18,7 +21,7 @@ import type { ItemLifecycleContext } from "./item-lifecycle.ts";
 import { teleportPlayer } from "./misc.ts";
 import type { GameRandom } from "./numeric.ts";
 import type { SpawnHandler, SpawnVariables } from "./spawn.ts";
-import type { GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
 import { aimAtTarget } from "./triggers.ts";
 import { findEntity, moveDirection, pickTarget, teamCommand, useTargets } from "./utilities.ts";
 
@@ -38,6 +41,7 @@ export class TargetLocationState {
 }
 
 export interface TargetRuntime {
+  readonly participants?: UseParticipantServices;
   readonly entities: EntityPool;
   readonly world: ServerWorld;
   readonly itemLifecycle: ItemLifecycleContext;
@@ -77,13 +81,11 @@ function combatContext(runtime: TargetRuntime): CombatContext {
   return combat;
 }
 
-function requireActivator(runtime: TargetRuntime, activator: GameEntity | null): GameEntity {
-  if (activator === null) throw new Error("Target handler requires an activator");
-  requireOwned(runtime, activator);
-  return activator;
+function requireActivator(_runtime: TargetRuntime, activator: UseParticipant | null): UseParticipant {
+  return requireUseParticipant(activator);
 }
 
-function dispatchTargets(runtime: TargetRuntime, entity: GameEntity, activator: GameEntity | null): void {
+function dispatchTargets(runtime: TargetRuntime, entity: GameEntity, activator: UseParticipant | null): void {
   useTargets({ pool: runtime.entities, time: gameTime(runtime),
     remapShader: (oldName, newName, timeSeconds) => { runtime.remapShader(oldName, newName, timeSeconds); },
     warn: message => { runtime.warn(message); } }, entity, activator);
@@ -94,9 +96,10 @@ function zeroTrace(): MovementTrace {
     contents: 0, surfaceFlags: 0, entityNum: 0 };
 }
 
-function useTargetGive(entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
-  const activator = requireActivator(runtime, activatorValue);
+  const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
+  if (activator === null) return;
   if (activator.client === null || entity.target === null) return;
   let target: GameEntity | null = null;
   while ((target = findEntity(runtime.entities, target, "targetname", entity.target)) !== null) {
@@ -112,9 +115,10 @@ function spawnTargetGive(entity: GameEntity, _variables: SpawnVariables, runtime
   entity.use = (self, other, activator) => { useTargetGive(self, other, activator, runtime); };
 }
 
-function useTargetRemovePowerups(_entity: GameEntity, _other: GameEntity | null,
-  activatorValue: GameEntity | null, runtime: TargetRuntime): void {
-  const activator = requireActivator(runtime, activatorValue);
+function useTargetRemovePowerups(_entity: GameEntity, _other: UseParticipant | null,
+  activatorValue: UseParticipant | null, runtime: TargetRuntime): void {
+  const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
+  if (activator === null) return;
   const client = activator.client;
   if (client === null) return;
   const powerups = client.ps.powerups;
@@ -143,16 +147,16 @@ function sourceFloatSchedule(time: number, seconds: number): number {
 }
 
 function thinkTargetDelay(entity: GameEntity, runtime: TargetRuntime): void {
-  dispatchTargets(runtime, entity, entity.activator);
+  dispatchTargets(runtime, entity, entity.activation);
 }
 
-function useTargetDelay(entity: GameEntity, _other: GameEntity | null, activator: GameEntity | null,
+function useTargetDelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
   const variance = Math.fround(Math.fround(entity.random) * targetCrandom(runtime));
   const seconds = Math.fround(Math.fround(entity.wait) + variance);
   entity.nextthink = sourceFloatSchedule(gameTime(runtime), seconds);
   entity.think = self => { thinkTargetDelay(self, runtime); };
-  entity.activator = activator;
+  entity.activation = activator;
 }
 
 function spawnTargetDelay(entity: GameEntity, variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -163,9 +167,10 @@ function spawnTargetDelay(entity: GameEntity, variables: SpawnVariables, runtime
   entity.use = (self, other, activator) => { useTargetDelay(self, other, activator, runtime); };
 }
 
-function useTargetScore(entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetScore(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
-  runtime.addScore(requireActivator(runtime, activatorValue), entity.r.currentOrigin, entity.count);
+  const player = useClient(requireActivator(runtime, activatorValue), runtime.participants);
+  if (player !== null) runtime.addScore(player, entity.r.currentOrigin, entity.count);
 }
 
 function spawnTargetScore(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -178,12 +183,13 @@ function centerPrint(message: string | null): string {
   return gameFormat("cp \"%s\"", [message]);
 }
 
-function useTargetPrint(entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetPrint(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
   const activator = requireActivator(runtime, activatorValue);
+  const player = useClient(activator, runtime.participants);
   const command = centerPrint(entity.message);
-  if (activator.client !== null && (entity.spawnflags & 4) !== 0) {
-    runtime.sendServerCommand(activator.slot, command);
+  if (player !== null && (entity.spawnflags & 4) !== 0) {
+    runtime.sendServerCommand(player.slot, command);
     return;
   }
   if ((entity.spawnflags & 3) !== 0) {
@@ -204,14 +210,17 @@ function speakerSoundPath(noise: string): string {
   return noise.includes(".wav") ? gameFormat("%s", [noise], 64) : gameFormat("%s.wav", [noise], 64);
 }
 
-function useTargetSpeaker(entity: GameEntity, _other: GameEntity | null, activator: GameEntity | null,
+function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
   if ((entity.spawnflags & 3) !== 0) {
     entity.s.loopSound = entity.s.loopSound !== 0 ? 0 : entity.noiseIndex;
     return;
   }
   if ((entity.spawnflags & 8) !== 0) {
-    runtime.entities.addEvent(requireActivator(runtime, activator), EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
+    const participant = requireActivator(runtime, activator);
+    const native = participant instanceof GameEntity ? participant : null;
+    if (native !== null) runtime.entities.addEvent(native, EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
+    else { if (runtime.participants === undefined) throw new Error("Shared target sound requires actor events"); runtime.participants.event(useActor(participant), EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex); }
   } else if ((entity.spawnflags & 4) !== 0) {
     runtime.entities.addEvent(entity, EntityEvent.EV_GLOBAL_SOUND, entity.noiseIndex);
   } else runtime.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.noiseIndex);
@@ -243,9 +252,10 @@ function targetSound(entity: GameEntity, soundIndex: number, runtime: TargetRunt
   sound.s.eventParm = soundIndex;
 }
 
-function useTargetPush(entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetPush(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
-  const activator = requireActivator(runtime, activatorValue);
+  const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
+  if (activator === null) return;
   const client = activator.client;
   if (client === null || client.ps.pmType !== MoveType.PM_NORMAL ||
     client.ps.powerups.get(Powerup.PW_FLIGHT) !== 0) return;
@@ -293,7 +303,7 @@ function laserThink(entity: GameEntity, runtime: TargetRuntime): void {
   const trace = runtime.world.trace({ start: entity.s.origin, end, shape: { kind: "point" },
     passEntityNum: entity.slot, mask: MASK_TARGET_LASER });
   if (trace.entityNum !== 0) {
-    damage(combatContext(runtime), runtime.entities.at(trace.entityNum), entity, entity.activator,
+    damage(combatContext(runtime), runtime.entities.at(trace.entityNum), entity, entity.activation,
       entity.movedir, trace.end, entity.damage, DamageFlags.NO_KNOCKBACK, MOD_TARGET_LASER);
   }
   entity.s.origin2 = vec3(trace.end.x, trace.end.y, trace.end.z);
@@ -302,7 +312,7 @@ function laserThink(entity: GameEntity, runtime: TargetRuntime): void {
 }
 
 function laserOn(entity: GameEntity, runtime: TargetRuntime): void {
-  if (entity.activator === null) entity.activator = entity;
+  if (entity.activation === null) entity.activation = entity;
   laserThink(entity, runtime);
 }
 
@@ -311,9 +321,9 @@ function laserOff(entity: GameEntity, runtime: TargetRuntime): void {
   entity.nextthink = 0;
 }
 
-function useTargetLaser(entity: GameEntity, _other: GameEntity | null, activator: GameEntity | null,
+function useTargetLaser(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
-  entity.activator = activator;
+  entity.activation = activator;
   if (entity.nextthink > 0) laserOff(entity, runtime);
   else laserOn(entity, runtime);
 }
@@ -341,9 +351,10 @@ function spawnTargetLaser(entity: GameEntity, _variables: SpawnVariables, runtim
   entity.nextthink = (gameTime(runtime) + 100) | 0;
 }
 
-function useTargetTeleporter(entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetTeleporter(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
-  const activator = requireActivator(runtime, activatorValue);
+  const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
+  if (activator === null) return;
   if (activator.client === null) return;
   const destination = pickTargetForRuntime(runtime, entity.target);
   if (destination === null) {
@@ -362,7 +373,7 @@ function spawnTargetTeleporter(entity: GameEntity, _variables: SpawnVariables, r
   entity.use = (self, other, activator) => { useTargetTeleporter(self, other, activator, runtime); };
 }
 
-function useTargetKill(_entity: GameEntity, _other: GameEntity | null, activatorValue: GameEntity | null,
+function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
   damage(combatContext(runtime), requireActivator(runtime, activatorValue), null, null, null, null,
     100_000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
@@ -402,16 +413,16 @@ function spawnTargetLocation(entity: GameEntity, _variables: SpawnVariables, run
   setOrigin(entity, entity.s.origin);
 }
 
-function useTargetRelay(entity: GameEntity, _other: GameEntity | null, activator: GameEntity | null,
+function useTargetRelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
   if ((entity.spawnflags & 3) !== 0 && activator === null) {
     throw new Error("Team-filtered target_relay requires an activator");
   }
-  if (activator !== null) requireOwned(runtime, activator);
-  if ((entity.spawnflags & 1) !== 0 && activator !== null && activator.client !== null &&
-    activator.client.sess.sessionTeam !== Team.TEAM_RED) return;
-  if ((entity.spawnflags & 2) !== 0 && activator !== null && activator.client !== null &&
-    activator.client.sess.sessionTeam !== Team.TEAM_BLUE) return;
+  const player = activator === null ? null : useClient(requireActivator(runtime, activator), runtime.participants);
+  if ((entity.spawnflags & 1) !== 0 && player !== null && player.client !== null &&
+    player.client.sess.sessionTeam !== Team.TEAM_RED) return;
+  if ((entity.spawnflags & 2) !== 0 && player !== null && player.client !== null &&
+    player.client.sess.sessionTeam !== Team.TEAM_BLUE) return;
   if ((entity.spawnflags & 4) !== 0) {
     const selected = pickTargetForRuntime(runtime, entity.target);
     selected?.use?.(selected, entity, activator);

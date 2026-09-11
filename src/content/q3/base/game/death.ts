@@ -16,8 +16,8 @@ import { dropItem, launchItem } from "./item-motion.ts";
 import type { DropItemContext, LaunchItemContext } from "./item-motion.ts";
 import type { MissileRuntime } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
-import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES } from "./state.ts";
-import type { DamageInflictor, EntityDie, GameClient, GameEntity } from "./state.ts";
+import { ConnectionState, GameFlags, GameEntity, MAX_CLIENTS, MAX_GENTITIES } from "./state.ts";
+import type { DamageInflictor, DamageParticipant, EntityDie, GameClient } from "./state.ts";
 import { findEntity } from "./utilities.ts";
 
 const CONTENTS_CORPSE = 0x4000000, CONTENTS_TRIGGER = 0x40000000, CONTENTS_NODROP = 0x80000000;
@@ -166,9 +166,11 @@ export class DeathRuntime {
     client.persistantPowerup = null;
   }
 
-  lookAtKiller(self: GameEntity, inflictor: DamageInflictor | null, attacker: GameEntity | null): void {
+  lookAtKiller(self: GameEntity, inflictor: DamageInflictor | null, attacker: DamageParticipant | null): void {
     const target = attacker !== null && attacker !== self ? attacker : inflictor !== null && inflictor !== self ? inflictor : null;
-    const yaw = target === null ? self.s.angles.y : vectorToAngles(sub3("kind" in target ? target.origin() : target.s.pos.base, self.s.pos.base)).y;
+    const origin = target === null ? null : "kind" in target ? target.origin() : target.s.pos.base;
+    const fallback = origin === null && inflictor !== null && inflictor !== self ? "kind" in inflictor ? inflictor.origin() : inflictor.s.pos.base : origin;
+    const yaw = fallback === null ? self.s.angles.y : vectorToAngles(sub3(fallback, self.s.pos.base)).y;
     // STAT_DEAD_YAW is an int, with the QVM CVFI conversion before storage.
     const integer = yaw >= -2147483648 && yaw < 2147483648 ? Math.trunc(yaw) : -2147483648;
     clientOf(self).ps.stats.set(statSchema(this.host.product).deadYaw, integer);
@@ -206,17 +208,17 @@ export class DeathRuntime {
     timer.activator = self;
   }
 
-  private almostReward(self: GameEntity, attacker: GameEntity | null): void {
+  private almostReward(self: GameEntity, attacker: DamageParticipant | null): void {
     const persistent = clientOf(self).ps.persistant;
     persistent.set(PersistentIndex.PERS_PLAYEREVENTS, persistent.get(PersistentIndex.PERS_PLAYEREVENTS) ^ 4);
     if (attacker === null) throw new Error("Source almost-score reward dereferences a null attacker");
-    if (attacker.client !== null) {
+    if (attacker instanceof GameEntity && attacker.client !== null) {
       const attackerPersistent = attacker.client.ps.persistant;
       attackerPersistent.set(PersistentIndex.PERS_PLAYEREVENTS, attackerPersistent.get(PersistentIndex.PERS_PLAYEREVENTS) ^ 4);
     }
   }
 
-  private checkAlmostCapture(self: GameEntity, attacker: GameEntity | null): void {
+  private checkAlmostCapture(self: GameEntity, attacker: DamageParticipant | null): void {
     const client = clientOf(self);
     if (!(client.ps.powerups.get(Powerup.PW_REDFLAG) || client.ps.powerups.get(Powerup.PW_BLUEFLAG) || client.ps.powerups.get(Powerup.PW_NEUTRALFLAG))) return;
     const blue = client.sess.sessionTeam === Team.TEAM_BLUE, ctf = this.host.frame().gameType === GameType.GT_CTF;
@@ -229,7 +231,7 @@ export class DeathRuntime {
     }
   }
 
-  private checkAlmostScored(self: GameEntity, attacker: GameEntity | null): void {
+  private checkAlmostScored(self: GameEntity, attacker: DamageParticipant | null): void {
     const client = clientOf(self);
     if (client.ps.generic1 === 0) return;
     const classname = client.sess.sessionTeam === Team.TEAM_BLUE ? "team_redobelisk" : "team_blueobelisk";
@@ -245,7 +247,7 @@ export class DeathRuntime {
     return null;
   }
 
-  readonly playerDie = (self: GameEntity, inflictor: DamageInflictor | null, attacker: GameEntity | null,
+  readonly playerDie = (self: GameEntity, inflictor: DamageInflictor | null, attacker: DamageParticipant | null,
     _damage: number, meansOfDeath: number): void => {
     const client = clientOf(self), frame = this.host.frame();
     if (client.ps.pmType === MoveType.PM_DEAD || frame.intermissionTime !== 0) return;
@@ -258,8 +260,8 @@ export class DeathRuntime {
       self.activator.nextthink = frame.time;
     }
     client.ps.pmType = MoveType.PM_DEAD;
-    let killer = attacker === null ? ENTITYNUM_WORLD : attacker.s.number;
-    let killerName = attacker === null ? "<world>" : attacker.client === null ? "<non-client>" : attacker.client.pers.netname;
+    let killer = attacker instanceof GameEntity ? attacker.s.number : ENTITYNUM_WORLD;
+    let killerName = attacker === null ? "<world>" : attacker instanceof GameEntity && attacker.client !== null ? attacker.client.pers.netname : "<non-client>";
     if (killer < 0 || killer >= MAX_CLIENTS) { killer = ENTITYNUM_WORLD; killerName = "<world>"; }
     const obituary = this.#modNames[meansOfDeath] ?? "<bad obituary>";
     this.host.log(gameFormat("Kill: %i %i %i: %s killed %s by %s\n", [killer, self.s.number, meansOfDeath, killerName, client.pers.netname, obituary]));
@@ -268,9 +270,8 @@ export class DeathRuntime {
     obituaryEvent.s.otherEntityNum = self.s.number;
     obituaryEvent.s.otherEntityNum2 = killer;
     obituaryEvent.r.svFlags = ServerEntityFlags.BROADCAST;
-    self.enemy = attacker;
     client.ps.persistant.set(PersistentIndex.PERS_KILLED, client.ps.persistant.get(PersistentIndex.PERS_KILLED) + 1);
-    if (attacker !== null && attacker.client !== null) {
+    if (attacker instanceof GameEntity && attacker.client !== null) {
       const killerClient = attacker.client;
       killerClient.lastKilledClient = self.s.number;
       const sameTeam = frame.gameType >= GameType.GT_TEAM && client.sess.sessionTeam === killerClient.sess.sessionTeam;
@@ -291,7 +292,7 @@ export class DeathRuntime {
         killerClient.lastKillTime = frame.time;
       }
     } else this.addScore(self, self.r.currentOrigin, -1);
-    this.host.teamFragBonuses(self, attacker);
+    if (attacker === null || attacker instanceof GameEntity) this.host.teamFragBonuses(self, attacker);
     if (meansOfDeath === MOD_SUICIDE) {
       const flag = this.carriedFlag(self);
       if (flag !== null) { this.host.returnFlag(flag.team); client.ps.powerups.set(flag.powerup, 0); }

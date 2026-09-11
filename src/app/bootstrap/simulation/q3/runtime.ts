@@ -1,3 +1,7 @@
+import { q3AdmitTargetDamage } from "../../../../content/q3/base/game/combat.ts";
+import type { UseParticipant } from "../../../../content/q3/base/game/state.ts";
+import type { UseParticipantServices } from "../../../../content/q3/base/game/use-participant.ts";
+import { EntityState } from "../../../../content/q3/base/shared/entity-state.ts";
 /* Source game composition from id Software g_main.c; W73 owns time and actor traversal. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../../contracts/session.ts";
@@ -63,9 +67,9 @@ export class Q3SourceRuntime {
   readonly matchState = new MatchModuleState();
   readonly remaps;
   readonly settings;
-  readonly records;
+  readonly records: Q3EntityRecords;
   readonly world;
-  readonly pool;
+  readonly pool: EntityPool;
   readonly memory;
   readonly config;
   readonly registeredItems;
@@ -110,6 +114,9 @@ export class Q3SourceRuntime {
     host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
     this.records = new Q3EntityRecords({ actors: host.actors, bodies: host.bodies, callbacks: host.callbacks,
       combat: host.combat, inventory: host.inventory, schedule: host.schedule, runThink: host.runThink,
+      admitDamage: (entity, request): "continue" | "handled" => q3AdmitTargetDamage(this.combat, entity,
+        request.attack.inflictor === null ? this.pool.at(1022) : this.records.useParticipant(request.attack.inflictor),
+        request.attack.attacker === null ? this.pool.at(1022) : this.records.useParticipant(request.attack.attacker)),
       damageCall: () => this.bridge.currentCall, foreign: host.foreign, isPlayer: host.isPlayer }, options.recipe.map.entities.provider, options.product);
     this.world = new Q3WorldAdapter({ queries: host.scene, bodies: host.bodies, collision: host.collision,
       curves: () => host.cvars.variableValue("cm_noCurves") === 0, playerCurveClip: () => host.cvars.variableValue("cm_playerCurveClip") !== 0 }, this.records);
@@ -279,7 +286,7 @@ export class Q3SourceRuntime {
       spectatorEndFrame: entity => spectatorClientEndFrame(this.policy(), entity) };
   }
   private moverServices() {
-    return { world: this.world, config: this.config, useTargets: (entity: GameEntity, activator: GameEntity) => useTargets(this.targets(), entity, activator),
+    return { world: this.world, spatial: this.world, actors: { ...this.host.moverActors, native: (actor: ActorId) => this.records.nativeByActor(actor), participant: (actor: ActorId) => this.records.damageInflictor(actor) }, config: this.config, useTargets: (entity: GameEntity, activator: UseParticipant) => useTargets(this.targets(), entity, activator),
       adjustAreaPortalState: (entity: GameEntity, open: boolean) => this.adjustAreaPortalState(entity, open),
       returnDroppedFlag: (entity: GameEntity) => this.team.freeEntity(entity) };
   }
@@ -332,7 +339,7 @@ export class Q3SourceRuntime {
   }
 
   private spawnHandlers(): ReadonlyMap<string, SpawnHandler> {
-    const shared = { entities: this.pool, world: this.world, random: this.random, combat: () => this.combat,
+    const shared = { entities: this.pool, world: this.world, random: this.random, combat: () => this.combat, participants: this.useParticipants(),
       gravity: () => this.number("g_gravity"), soundIndex: (path: string) => this.config.soundIndex(path),
       remapShader: (oldName: string, newName: string, time: number) => this.remapShader(oldName, newName, time), warn: this.host.engine.print };
     const handlers = new Map<string, SpawnHandler>([
@@ -377,6 +384,15 @@ export class Q3SourceRuntime {
     const obelisks = this.options.product !== "missionpack" ? [] : this.gameType === GameType.GT_OBELISK ? ["team_redobelisk", "team_blueobelisk"]
       : this.gameType === GameType.GT_HARVESTER ? ["team_redobelisk", "team_blueobelisk", "team_neutralobelisk"] : [];
     for (const name of obelisks) if (findEntity(this.pool, null, "classname", name) === null) this.host.engine.print(`^3WARNING: No ${name} in map`);
+  }
+
+  private useParticipants(): UseParticipantServices {
+    return { live: actor => this.host.actors.isLive(actor), isPlayer: this.host.isPlayer, native: actor => this.records.nativeByActor(actor),
+      event: (actor, event, parameter) => {
+        const body = this.host.bodies.read(actor); if (body === null) return;
+        const state = new EntityState(); state.event = event; state.eventParm = parameter;
+        this.host.entityEvent({ kind: "entity-event", actor, state, origin: body.origin, time: this.level.time });
+      } };
   }
 
   private targets(): TargetUseContext {
@@ -533,7 +549,7 @@ export class Q3SourceRuntime {
     const entity = this.records.nativeByActor(actor.id);
     if (decision.reaction === "death" && entity?.client != null) {
       const cause = decision.request.attack.cause;
-      this.death.playerDie(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.byActor(decision.request.attack.attacker),
+      this.death.playerDie(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.damageInflictor(decision.request.attack.attacker),
         decision.appliedDamage, cause.kind === "q3" ? cause.meansOfDeath : 0);
     }
   }

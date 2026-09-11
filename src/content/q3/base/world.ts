@@ -1,5 +1,6 @@
 import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 import type { GameEntity } from "./game/state.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 export type TraceShape = { readonly kind: "point" } | { readonly kind: "box" | "capsule"; readonly mins: Vec3; readonly maxs: Vec3 };
 export interface ServerTraceQuery { readonly start: Vec3; readonly end: Vec3; readonly shape: TraceShape; readonly passEntityNum: number; readonly mask: number; }
 export interface ServerTraceResult {
@@ -7,6 +8,14 @@ export interface ServerTraceResult {
   readonly solidity: "clear" | "start-solid" | "all-solid";
   readonly contact: { readonly kind: "none" } | { readonly kind: "plane"; readonly plane: Plane };
   readonly contents: number; readonly surfaceFlags: number;
+}
+export interface ActorTraceQuery extends Omit<ServerTraceQuery, "passEntityNum"> { readonly passActor: ActorId | null; }
+export interface ActorTraceResult extends Omit<ServerTraceResult, "entityNum"> {
+  readonly hit: { readonly kind: "none" } | { readonly kind: "world" } | { readonly kind: "actor"; readonly actor: ActorId };
+}
+export interface ActorSpatialQueries {
+  areaActors(bounds: Bounds, maximum: number): readonly ActorId[];
+  traceActor(query: ActorTraceQuery): ActorTraceResult;
 }
 export interface LinkState { readonly absbounds: Bounds; readonly linked: boolean; readonly linkcount: number; }
 /** Source-shaped operations over the session collision and body owners. No world storage lives here. */

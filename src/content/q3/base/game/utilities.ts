@@ -1,3 +1,4 @@
+import type { UseParticipant } from "./state.ts";
 // Source game/g_utils.c configstring indices, target dispatch, team commands
 // and editor direction conversion. GPL-2.0-or-later, id Software 1999-2005.
 import { add3, cross3, dot3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
@@ -164,7 +165,7 @@ export interface TargetUseContext {
   warn(message: string): void;
 }
 
-export function useTargets(context: TargetUseContext, entity: GameEntity | null, activator: GameEntity | null): void {
+export function useTargets(context: TargetUseContext, entity: GameEntity | null, activator: UseParticipant | null): void {
   if (entity === null) return;
   if (entity.targetShaderName !== null && entity.targetShaderNewName !== null) {
     const timeSeconds = Math.fround(Math.fround(context.time) * Math.fround(0.001));

@@ -63,6 +63,18 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   const frame = (): FrameContext => ({ frame: time / 100, time: { kind: "milliseconds", value: time }, elapsed: { kind: "milliseconds", value: 100 }, phase: "entity-physics" });
   const events: Q3SourceEvent[] = [];
   const host = createQ3SourceHost({ actors, bodies: physics.bodies, callbacks, combat, inventory, scene,
+    moverActors: {
+      observe: id => {
+        const actor = actors.resolveOwned(id), state = physics.bodies.read(id), linked = physics.bodies.linked(id);
+        if (actor === null || state === null || linked === null) return null;
+        const motion = physics.motionOf(id);
+        return { actor, state, absoluteBounds: linked.absoluteBounds, clipMask: motion?.clipMask ?? 1,
+          kind: physics.bodies.attachment(id) !== null ? "attached" : runtime?.records.nativeByActor(id)?.client != null ? "player"
+            : motion === null || motion.kind === "stationary" || motion.kind === "push" || motion.kind === "stop" ? "fixed" : "movable" };
+      },
+      write: (actor, origin, ground) => { const body = physics.bodies.read(actor.id); if (body !== null) physics.bodies.write(actor, { ...body, origin, ground }); return undefined; },
+      link: actor => physics.bodies.link(actor), release: actor => actors.release(actor),
+    },
     bots: { kind: "unavailable", reason: "This source phase smoke admits human actors" }, deathAnimations: new Q3DeathAnimationSequence(), now: () => time,
     emit: event => { events.push(event); }, clientNumber: actor => actors.sourceOf(actor)?.slot ?? -1,
     schedule: (actor, due) => { if (due === null) scheduler.cancel(actor); else scheduler.schedule(actor, "world:think", {

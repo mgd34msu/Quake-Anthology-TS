@@ -391,3 +391,30 @@ describe("shared actor and gameplay authority", () => {
     expect(() => transitions.commit(travel)).toThrow();
   });
 });
+
+test("target damage admission handles source use before policy and preserves reentrant lifetime", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("target-damage-admission"));
+  const callbacks = new ActorCallbackTable(actors), calls: string[] = [];
+  const target = actors.allocate("q3:game", "q3:mover"), attacker = actors.allocate("q1:game", "q1:player");
+  const authority = new GameplayAuthority(actors, callbacks, {
+    impulse: () => { calls.push("impulse"); return undefined; },
+    beforeReaction: () => { calls.push("reaction"); return undefined; },
+    confirmed: () => { calls.push("confirmed"); return undefined; },
+  });
+  authority.register({ id: "q3:combat", prepare: () => { calls.push("prepare"); return { kind: "cancel" }; },
+    decide: request => { calls.push("decide"); return { request, mutations: [], appliedDamage: 0, reaction: "none" }; } });
+  let removeOnUse = false;
+  authority.bind(target, { read: () => state(), writeHealth: () => { calls.push("health"); return undefined; },
+    writeArmor: () => { calls.push("armor"); return undefined; },
+    admitDamage: request => { expect(request.attack.attacker).toBe(attacker.id); calls.push("use"); if (removeOnUse) actors.release(target); return "handled"; } });
+  const first = authority.apply(attack(target.id, attacker.id));
+  expect(first.kind).toBe("committed");
+  if (first.kind === "committed") { expect(first.decision.mutations).toEqual([]); expect(first.decision.reaction).toBe("none"); expect(first.survived).toBe(true); }
+  expect(calls).toEqual(["use", "confirmed"]);
+  removeOnUse = true;
+  const removed = authority.apply(attack(target.id, attacker.id, 2));
+  expect(removed.kind).toBe("committed");
+  if (removed.kind === "committed") expect(removed.survived).toBe(false);
+  expect(calls).toEqual(["use", "confirmed", "use", "confirmed"]);
+  actors.close();
+});

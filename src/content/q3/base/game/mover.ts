@@ -1,3 +1,8 @@
+import type { UseParticipant } from "./state.ts";
+import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
+import type { BodyState } from "../../../../contracts/world.ts";
+import type { ActorSpatialQueries } from "../world.ts";
+import type { DamageParticipant } from "./state.ts";
 /* Push transactions and binary movers translated from id Software's g_mover.c.
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
 import { add3, dot3, length3, radiusFromBounds, scale3, sub3, vec3 } from "../../../../core/math.ts";
@@ -13,28 +18,47 @@ import type { CombatContext } from "./combat.ts";
 import { runThink } from "./entities.ts";
 import type { SpawnVariables } from "./spawn.ts";
 import { GameFlags, MAX_GENTITIES, MoverState } from "./state.ts";
-import type { GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
 import type { ConfigStringRegistry } from "./utilities.ts";
 
 interface MoverServices {
   readonly world: ServerWorld;
+  readonly spatial: ActorSpatialQueries;
+  readonly actors: MoverActorAccess;
   readonly previousTime: number;
   readonly config: Pick<ConfigStringRegistry, "modelIndex" | "soundIndex">;
-  useTargets(entity: GameEntity, activator: GameEntity): void;
+  useTargets(entity: GameEntity, activator: UseParticipant): void;
   adjustAreaPortalState(entity: GameEntity, open: boolean): void;
   returnDroppedFlag(entity: GameEntity): void;
+}
+export interface SharedMoverBody {
+  readonly actor: OwnedActor;
+  readonly kind: "player" | "movable" | "fixed" | "attached";
+  readonly state: BodyState;
+  readonly absoluteBounds: Bounds;
+  readonly clipMask: number;
+}
+export interface MoverActorAccess {
+  native(actor: ActorId): GameEntity | null;
+  participant(actor: ActorId): DamageParticipant;
+  observe(actor: ActorId): SharedMoverBody | null;
+  write(actor: OwnedActor, origin: Vec3, ground: ActorId | null): undefined;
+  link(actor: OwnedActor): undefined;
+  release(actor: OwnedActor): undefined;
 }
 /** Time properties must remain live while installed callbacks are scheduled. */
 export type MoverHost = MoverServices & (
   | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
   | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: { explodeMissile(entity: GameEntity): void } }
 );
-interface PushedEntity {
+interface PushedNative {
+  readonly kind: "native";
   readonly entity: GameEntity;
   readonly origin: Vec3;
   readonly angles: Vec3;
   readonly view: { readonly kind: "none" } | { readonly kind: "client"; readonly yaw: number };
 }
+type PushedEntity = PushedNative | { readonly kind: "shared"; readonly body: SharedMoverBody };
 const EF_MOVER_STOP = 0x400;
 const MOD_CRUSH = 17;
 const f32 = Math.fround;
@@ -42,6 +66,14 @@ const f32 = Math.fround;
 function baseOrigin(entity: GameEntity, origin: Vec3): void { entity.s.pos = { ...entity.s.pos, base: { ...origin } }; }
 function baseAngles(entity: GameEntity, angles: Vec3): void { entity.s.apos = { ...entity.s.apos, base: { ...angles } }; }
 function angleShort(angle: number): number { return qvmFloatToInt(f32(f32(angle * 65536) / 360)) & 65535; }
+function pushRotation(origin: Vec3, pusherOrigin: Vec3, amove: Vec3): Vec3 {
+  const axes = qvmAngleVectors(amove);
+  const matrix = [axes.forward, scale3(axes.right, -1), axes.up] satisfies readonly [Vec3, Vec3, Vec3];
+  const org = sub3(origin, pusherOrigin);
+  const rotated = vec3(dot3(org, vec3(matrix[0].x, matrix[1].x, matrix[2].x)),
+    dot3(org, vec3(matrix[0].y, matrix[1].y, matrix[2].y)), dot3(org, vec3(matrix[0].z, matrix[1].z, matrix[2].z)));
+  return sub3(rotated, org);
+}
 
 export class MoverRuntime {
   constructor(readonly host: MoverHost) {
@@ -56,29 +88,24 @@ export class MoverRuntime {
     return { min: entity.r.absmin, max: entity.r.absmax };
   }
 
-  testEntityPosition(entity: GameEntity): GameEntity | null {
+  testEntityPosition(entity: GameEntity): DamageParticipant | null {
     this.owned(entity);
     const start = entity.client === null ? entity.s.pos.base : entity.client.ps.origin;
-    const result = this.host.world.trace({ start, end: start,
+    const result = this.host.spatial.traceActor({ start, end: start,
       shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
-      passEntityNum: entity.s.number, mask: entity.clipmask === 0 ? 1 : entity.clipmask });
-    return result.solidity === "clear" ? null : this.host.combat.entities.at(result.entityNum);
+      passActor: entity.actor.id, mask: entity.clipmask === 0 ? 1 : entity.clipmask });
+    return result.solidity === "clear" ? null : result.hit.kind === "actor" ? this.host.actors.participant(result.hit.actor)
+      : this.host.combat.entities.at(1022);
   }
 
   private tryPushing(check: GameEntity, pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): boolean {
     if ((pusher.s.eFlags & EF_MOVER_STOP) !== 0 && check.s.groundEntityNum !== pusher.s.number) return false;
     if (pushed.length >= MAX_GENTITIES) throw new Error("pushed stack exceeds MAX_GENTITIES");
-    const saved: PushedEntity = { entity: check,
+    const saved: PushedNative = { kind: "native", entity: check,
       origin: { ...(check.client === null ? check.s.pos.base : check.client.ps.origin) }, angles: { ...check.s.apos.base },
       view: check.client === null ? { kind: "none" } : { kind: "client", yaw: f32(check.client.ps.deltaAngles.y) } };
     pushed.push(saved);
-    const axes = qvmAngleVectors(amove);
-    // G_CreateRotationMatrix uses VectorInverse, including its signed zeros.
-    const matrix = [axes.forward, scale3(axes.right, -1), axes.up] satisfies readonly [Vec3, Vec3, Vec3];
-    const org = sub3(saved.origin, pusher.r.currentOrigin);
-    const rotated = vec3(dot3(org, vec3(matrix[0].x, matrix[1].x, matrix[2].x)),
-      dot3(org, vec3(matrix[0].y, matrix[1].y, matrix[2].y)), dot3(org, vec3(matrix[0].z, matrix[1].z, matrix[2].z)));
-    const rotationMove = sub3(rotated, org);
+    const rotationMove = pushRotation(saved.origin, pusher.r.currentOrigin, amove);
     baseOrigin(check, add3(add3(check.s.pos.base, move), rotationMove));
     if (check.client !== null) {
       const ps = check.client.ps;
@@ -106,8 +133,55 @@ export class MoverRuntime {
   private checkProximityPosition(entity: GameEntity): boolean {
     const start = add3(entity.s.pos.base, scale3(entity.movedir, 0.125));
     const end = add3(entity.s.pos.base, scale3(entity.movedir, 2));
-    const trace = this.host.world.trace({ start, end, shape: { kind: "point" }, passEntityNum: entity.s.number, mask: 1 });
+    const trace = this.host.spatial.traceActor({ start, end, shape: { kind: "point" }, passActor: entity.actor.id, mask: 1 });
     return trace.solidity === "clear" && trace.fraction === 1;
+  }
+
+  private sharedPositionBlocked(check: SharedMoverBody): boolean {
+    const body = this.host.actors.observe(check.actor.id);
+    if (body === null) return false;
+    const trace = this.host.spatial.traceActor({ start: body.state.origin, end: body.state.origin,
+      shape: { kind: "box", mins: body.state.bounds.min, maxs: body.state.bounds.max },
+      passActor: check.actor.id, mask: check.clipMask === 0 ? 1 : check.clipMask });
+    return trace.solidity !== "clear";
+  }
+
+  private tryPushingShared(check: SharedMoverBody, pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): boolean {
+    const rider = check.state.ground?.equals(pusher.actor.id) === true;
+    if ((pusher.s.eFlags & EF_MOVER_STOP) !== 0 && !rider) return false;
+    if (pushed.length >= MAX_GENTITIES) throw new Error("pushed stack exceeds MAX_GENTITIES");
+    pushed.push({ kind: "shared", body: check });
+    const rotation = pushRotation(check.state.origin, pusher.r.currentOrigin, amove);
+    this.host.actors.write(check.actor, add3(add3(check.state.origin, move), rotation), rider ? check.state.ground : null);
+    if (!this.sharedPositionBlocked(check)) { this.host.actors.link(check.actor); return true; }
+    this.host.actors.write(check.actor, check.state.origin, rider ? check.state.ground : null);
+    if (!this.sharedPositionBlocked(check)) {
+      this.host.actors.write(check.actor, check.state.origin, null);
+      pushed.pop();
+      return true;
+    }
+    return false;
+  }
+
+  private restorePushed(pushed: readonly PushedEntity[]): void {
+    for (const saved of [...pushed].reverse()) {
+      if (saved.kind === "shared") {
+        const current = this.host.actors.observe(saved.body.actor.id);
+        if (current !== null) {
+          this.host.actors.write(saved.body.actor, saved.body.state.origin, current.state.ground);
+          this.host.actors.link(saved.body.actor);
+        }
+        continue;
+      }
+      const entity = saved.entity;
+      baseOrigin(entity, saved.origin); baseAngles(entity, saved.angles);
+      if (entity.client !== null) {
+        if (saved.view.kind !== "client") throw new Error("pushed entity acquired a client during the transaction");
+        entity.client.ps.deltaAngles = { ...entity.client.ps.deltaAngles, y: qvmFloatToInt(saved.view.yaw) };
+        entity.client.ps.origin = { ...saved.origin };
+      }
+      this.host.world.link(entity);
+    }
   }
 
   private pushProximityMine(entity: GameEntity, pusher: GameEntity, move: Vec3, amove: Vec3): boolean {
@@ -122,7 +196,7 @@ export class MoverRuntime {
     return true;
   }
 
-  private pushPart(pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): GameEntity | null {
+  private pushPart(pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): DamageParticipant | null {
     const world = this.host.world;
     let destination: Bounds, total: Bounds;
     if (pusher.r.currentAngles.x !== 0 || pusher.r.currentAngles.y !== 0 || pusher.r.currentAngles.z !== 0 || amove.x !== 0 || amove.y !== 0 || amove.z !== 0) {
@@ -138,12 +212,32 @@ export class MoverRuntime {
         max: add3(bounds.max, vec3(Math.max(move.x, 0), Math.max(move.y, 0), Math.max(move.z, 0))) };
     }
     world.unlink(pusher.slot);
-    const entities = world.areaEntities(total, MAX_GENTITIES);
+    const entities = this.host.spatial.areaActors(total, MAX_GENTITIES);
     pusher.r.currentOrigin = add3(pusher.r.currentOrigin, move);
     pusher.r.currentAngles = add3(pusher.r.currentAngles, amove);
     world.link(pusher);
-    for (const number of entities) {
-      const check = this.host.combat.entities.at(number);
+    for (const actor of entities) {
+      const observed = this.host.actors.observe(actor);
+      if (observed === null || observed.kind === "attached") continue;
+      const check = this.host.actors.native(actor);
+      if (check === null) {
+        if (observed.kind === "fixed") continue;
+        const rider = observed.state.ground?.equals(pusher.actor.id) === true;
+        if (!rider) {
+          const bounds = observed.absoluteBounds;
+          if (bounds.min.x >= destination.max.x || bounds.min.y >= destination.max.y || bounds.min.z >= destination.max.z ||
+            bounds.max.x <= destination.min.x || bounds.max.y <= destination.min.y || bounds.max.z <= destination.min.z) continue;
+          if (!this.sharedPositionBlocked(observed)) continue;
+        }
+        if (this.tryPushingShared(observed, pusher, move, amove, pushed)) continue;
+        const participant = this.host.actors.participant(actor);
+        if (pusher.s.pos.type === TrajectoryType.TR_SINE || pusher.s.apos.type === TrajectoryType.TR_SINE) {
+          damage(this.host.combat, participant, pusher, pusher, null, null, 99999, 0, MOD_CRUSH);
+          continue;
+        }
+        this.restorePushed(pushed);
+        return participant;
+      }
       if (this.host.missionpack !== null && check.s.eType === EntityType.ET_MISSILE && check.classname === "prox mine") {
         const clear = check.enemy === pusher ? this.pushProximityMine(check, pusher, move, amove) : this.checkProximityPosition(check);
         if (!clear) {
@@ -166,19 +260,7 @@ export class MoverRuntime {
         damage(this.host.combat, check, pusher, pusher, null, null, 99999, 0, MOD_CRUSH);
         continue;
       }
-      for (let index = pushed.length - 1; index >= 0; index--) {
-        const saved = pushed[index];
-        if (saved === undefined) throw new Error("pushed stack index invariant");
-        const entity = saved.entity;
-        baseOrigin(entity, saved.origin); baseAngles(entity, saved.angles);
-        if (entity.client !== null) {
-          if (saved.view.kind !== "client") throw new Error("pushed entity acquired a client during the transaction");
-          entity.client.ps.deltaAngles = { ...entity.client.ps.deltaAngles, y: qvmFloatToInt(saved.view.yaw) };
-          entity.client.ps.origin = { ...saved.origin };
-        }
-        // G_MoverPush does not restore currentOrigin or groundEntityNum here.
-        world.link(entity);
-      }
+      this.restorePushed(pushed);
       return check;
     }
     return null;
@@ -188,7 +270,7 @@ export class MoverRuntime {
     this.owned(entity);
     const pushed: PushedEntity[] = [];
     const time = this.host.combat.time;
-    let obstacle: GameEntity | null = null;
+    let obstacle: DamageParticipant | null = null;
     for (let part: GameEntity | null = entity; part !== null; part = part.teamchain) {
       const move = sub3(evaluateTrajectory(part.s.pos, time), part.r.currentOrigin);
       const amove = sub3(evaluateTrajectory(part.s.apos, time), part.r.currentAngles);
@@ -257,8 +339,8 @@ export class MoverRuntime {
       if (entity.soundPos2 !== 0) this.host.combat.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.soundPos2);
       entity.think = self => { this.returnToPos1(self); };
       entity.nextthink = qvmFloatToInt(f32(f32(time) + entity.wait));
-      if (entity.activator === null) entity.activator = entity;
-      this.host.useTargets(entity, entity.activator);
+      if (entity.activation === null) entity.activation = entity;
+      this.host.useTargets(entity, entity.activation);
     } else if (entity.moverState === MoverState.TWO_TO_ONE) {
       this.setState(entity, MoverState.POS1, time);
       if (entity.soundPos1 !== 0) this.host.combat.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.soundPos1);
@@ -266,14 +348,14 @@ export class MoverRuntime {
     } else throw new Error("Reached_BinaryMover: bad moverState");
   }
 
-  useBinary(entity: GameEntity, other: GameEntity | null, activator: GameEntity | null): void {
+  useBinary(entity: GameEntity, other: UseParticipant | null, activator: UseParticipant | null): void {
     this.owned(entity);
     if ((entity.flags & GameFlags.TEAMSLAVE) !== 0) {
       if (entity.teammaster === null) throw new Error("Mover team slave has no team master");
       this.useBinary(entity.teammaster, other, activator); return;
     }
     const time = this.host.combat.time;
-    entity.activator = activator;
+    entity.activation = activator;
     if (entity.moverState === MoverState.POS1) {
       this.matchTeam(entity, MoverState.ONE_TO_TWO, (time + 50) | 0);
       if (entity.sound1to2 !== 0) this.host.combat.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.sound1to2);
@@ -313,8 +395,21 @@ export class MoverRuntime {
     entity.s.pos = { ...entity.s.pos, type: TrajectoryType.TR_STATIONARY, base: { ...entity.pos1 }, delta: scale3(move, entity.speed), duration: Math.max(duration, 1) };
   }
 
-  blockedDoor(entity: GameEntity, other: GameEntity): void {
-    this.owned(entity); this.owned(other);
+  blockedDoor(entity: GameEntity, other: DamageParticipant): void {
+    this.owned(entity);
+    if (!(other instanceof GameEntity)) {
+      const body = this.host.actors.observe(other.actor);
+      if (body === null) return;
+      if (body.kind !== "player") {
+        this.host.combat.entities.tempEntity(body.state.origin, EntityEvent.EV_ITEM_POP);
+        this.host.actors.release(body.actor);
+        return;
+      }
+      if (entity.damage !== 0) damage(this.host.combat, other, entity, entity, null, null, entity.damage, 0, MOD_CRUSH);
+      if ((entity.spawnflags & 4) === 0) this.useBinary(entity, entity, other);
+      return;
+    }
+    this.owned(other);
     if (other.client === null) {
       if (other.s.eType === EntityType.ET_ITEM) {
         if (other.item === null) throw new Error("Blocked item has no item definition");

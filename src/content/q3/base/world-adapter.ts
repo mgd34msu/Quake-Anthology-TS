@@ -7,7 +7,7 @@ import type { ActorCollision, SharedSceneQueries } from "../../../world/collisio
 import { traceActorBody } from "../../../world/collision/body.ts";
 import type { Q3EntityRecords } from "./records.ts";
 import type { GameEntity } from "./game/state.ts";
-import type { LinkState, ServerTraceQuery, ServerTraceResult, ServerWorld } from "./world.ts";
+import type { ActorSpatialQueries, ActorTraceQuery, ActorTraceResult, LinkState, ServerTraceQuery, ServerTraceResult, ServerWorld } from "./world.ts";
 
 export interface Q3WorldAdapterHost {
   readonly queries: SharedSceneQueries;
@@ -19,7 +19,7 @@ export interface Q3WorldAdapterHost {
 }
 
 /** Q3 source query words project onto the same geometry and actor index used by every provider. */
-export class Q3WorldAdapter implements ServerWorld {
+export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
   constructor(readonly host: Q3WorldAdapterHost, readonly records: Q3EntityRecords) {}
 
   private actor(number: number): ActorId | null {
@@ -28,16 +28,15 @@ export class Q3WorldAdapter implements ServerWorld {
     return entity?.inuse ? entity.actor.id : null;
   }
 
-  private query(input: ServerTraceQuery): TraceQuery {
+  private query(input: ActorTraceQuery): TraceQuery {
     return { start: input.start, end: input.end, target: { kind: "world" },
       shape: input.shape.kind === "point" ? input.shape : { kind: input.shape.kind, bounds: { min: input.shape.mins, max: input.shape.maxs } },
-      passActor: this.actor(input.passEntityNum), numeric: Q3_BINARY32_PROFILE,
+      passActor: input.passActor, numeric: Q3_BINARY32_PROFILE,
       policy: { kind: "q3", contentsMask: input.mask, curves: this.host.curves(), playerCurveClip: this.host.playerCurveClip() } };
   }
 
   trace(input: ServerTraceQuery): ServerTraceResult {
-    const result = this.host.queries.trace(this.query(input));
-    if (result.kind !== "q3") throw new Error("Shared scene did not adapt a Q3 trace policy");
+    const result = this.traceActor({ ...input, passActor: this.actor(input.passEntityNum) });
     let entityNum = result.hit.kind === "none" ? 1023 : 1022;
     if (result.hit.kind === "actor") {
       const entity = this.records.byActor(result.hit.actor);
@@ -45,22 +44,32 @@ export class Q3WorldAdapter implements ServerWorld {
       entityNum = entity.slot;
     }
     return { fraction: result.fraction, end: result.end, entityNum, contact: result.contact,
+      solidity: result.solidity, contents: result.contents, surfaceFlags: result.surfaceFlags };
+  }
+
+  traceActor(input: ActorTraceQuery): ActorTraceResult {
+    const result = this.host.queries.trace(this.query(input));
+    if (result.kind !== "q3") throw new Error("Shared scene did not adapt a Q3 trace policy");
+    return { fraction: result.fraction, end: result.end, hit: result.hit, contact: result.contact,
       solidity: result.allSolid ? "all-solid" : result.startSolid ? "start-solid" : "clear", contents: result.contents, surfaceFlags: result.surfaceFlags };
+  }
+
+  areaActors(bounds: Bounds, maximum: number): readonly ActorId[] {
+    return this.host.queries.queryActors(bounds).slice(0, maximum).map(actor => actor.body.actor);
   }
 
   areaEntities(bounds: Bounds, maximum = 1024): readonly number[] {
     const output: number[] = [];
-    for (const actor of this.host.queries.queryActors(bounds)) {
-      const entity = this.records.byActor(actor.body.actor);
+    for (const actor of this.areaActors(bounds, maximum)) {
+      const entity = this.records.byActor(actor);
       if (entity === null) throw new Error("Shared spatial actor has no Q3 source projection");
-      if (output.length === maximum) break;
       output.push(entity.slot);
     }
     return output;
   }
 
   pointContents(point: Vec3, passEntityNum: number): number {
-    const query = this.query({ start: point, end: point, shape: { kind: "point" }, passEntityNum, mask: -1 });
+    const query = this.query({ start: point, end: point, shape: { kind: "point" }, passActor: this.actor(passEntityNum), mask: -1 });
     const result = this.host.queries.pointContents({ ...query, point });
     if (result.kind !== "q3") throw new Error("Shared scene did not adapt Q3 point contents");
     return result.contents;
@@ -88,7 +97,7 @@ export class Q3WorldAdapter implements ServerWorld {
     const entity = this.records.get(number);
     if (entity === undefined || !entity.inuse) return false;
     const origin = { x: 0, y: 0, z: 0 };
-    const query = this.query({ start: origin, end: origin, shape: { kind: capsule ? "capsule" : "box", mins: bounds.min, maxs: bounds.max }, passEntityNum: 1023, mask: -1 });
+    const query = this.query({ start: origin, end: origin, shape: { kind: capsule ? "capsule" : "box", mins: bounds.min, maxs: bounds.max }, passActor: null, mask: -1 });
     if (entity.r.model.kind === "inline") return this.host.queries.geometryTrace({ ...query, target: { kind: "model", model: entity.r.model.index,
       origin: entity.r.currentOrigin, angles: entity.r.currentAngles } }).startSolid;
     const linked = this.host.bodies.linked(entity.actor.id), body = this.host.bodies.read(entity.actor.id);

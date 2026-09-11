@@ -127,16 +127,18 @@ export class GameClient {
 }
 
 export type EntityThink = (self: GameEntity) => void;
-export type EntityBlocked = (self: GameEntity, other: GameEntity) => void;
+export type EntityBlocked = (self: GameEntity, other: DamageParticipant) => void;
 export type EntityTouch = (self: GameEntity, other: GameEntity, trace: MovementTrace) => void;
-export type EntityUse = (self: GameEntity, other: GameEntity | null, activator: GameEntity | null) => void;
-export type EntityPain = (self: GameEntity, attacker: GameEntity, damage: number) => void;
-export type DamageInflictor = GameEntity | {
+export type DamageParticipant = GameEntity | {
   readonly kind: "shared-actor";
   readonly actor: ActorId;
-  origin(): Vec3;
+  origin(): Vec3 | null;
 };
-export type EntityDie = (self: GameEntity, inflictor: DamageInflictor, attacker: GameEntity,
+export type UseParticipant = DamageParticipant;
+export type EntityUse = (self: GameEntity, other: UseParticipant | null, activator: UseParticipant | null) => void;
+export type EntityPain = (self: GameEntity, attacker: DamageParticipant, damage: number) => void;
+export type DamageInflictor = DamageParticipant;
+export type EntityDie = (self: GameEntity, inflictor: DamageInflictor, attacker: DamageParticipant,
   damage: number, methodOfDeath: number) => void;
 
 /** Source-zero gentity_t; slot is owned-table metadata independent of memset-zero s.number. */
@@ -221,6 +223,7 @@ export class GameEntity implements SharedEntity {
   chain: GameEntity | null = null;
   enemy: GameEntity | null = null;
   activator: GameEntity | null = null;
+  activation: UseParticipant | null = null;
   teamchain: GameEntity | null = null;
   teammaster: GameEntity | null = null;
   kamikazeTime = 0;

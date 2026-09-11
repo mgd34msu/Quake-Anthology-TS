@@ -670,6 +670,23 @@ export class SharedSimulation implements Simulation {
         primaryAttackAllowed: actor => this.weaponSlots.get(actor)?.primarySelected() ?? true,
         foreign: actor => { if (this.actors.isLive(actor)) throw new Error("Foreign Q3 actor projection is not attached"); return null; },
         isPlayer: actor => this.player(actor) !== null,
+        moverActors: {
+          observe: id => {
+            const actor = this.actors.resolveOwned(id), state = this.bodies.read(id), linked = this.bodies.linked(id);
+            if (actor === null || state === null || linked === null) return null;
+            const motion = this.physics.motionOf(id);
+            return { actor, state, absoluteBounds: linked.absoluteBounds, clipMask: motion?.clipMask ?? 1,
+              kind: this.bodies.attachment(id) !== null ? "attached" : this.player(id) !== null ? "player"
+                : motion === null || motion.kind === "stationary" || motion.kind === "push" || motion.kind === "stop" ? "fixed" : "movable" };
+          },
+          write: (actor, origin, ground) => {
+            const body = this.bodies.read(actor.id);
+            if (body !== null) this.bodies.write(actor, { ...body, origin, ground });
+            return undefined;
+          },
+          link: actor => { if (this.actors.isLive(actor.id)) this.bodies.link(actor); return undefined; },
+          release: actor => this.actors.release(actor),
+        },
         sourceCommand: input => {
           const command = q3SourceCommand(input, this.requirePlayer(input.actor), this.sourceSchedulingMilliseconds);
           const delta = this.source.kind === "q3" ? this.source.game.records.byActor(input.actor)?.client?.ps.deltaAngles : undefined;

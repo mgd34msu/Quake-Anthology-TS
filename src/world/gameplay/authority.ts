@@ -9,6 +9,7 @@ export type CombatTraits = Pick<CombatState, "canTakeDamage" | "mass" | "invulne
 export interface PowerArmorCellBinding { read(): number; write(count: number): undefined; }
 
 export interface CombatStateBinding {
+  admitDamage?(request: DamageRequest): "continue" | "handled";
   read(): CombatState;
   writeHealth(health: number): undefined;
   writeArmor(armor: ArmorState): undefined;
@@ -92,9 +93,9 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
-  create(actor: OwnedActor, initial: CombatState): undefined {
+  create(actor: OwnedActor, initial: CombatState, admitDamage?: CombatStateBinding["admitDamage"]): undefined {
     let state = copyCombat(initial);
-    return this.bind(actor, { read: () => state,
+    return this.bind(actor, { ...(admitDamage === undefined ? {} : { admitDamage }), read: () => state,
       writeHealth: health => { state = copyCombat({ ...state, health }); return undefined; },
       writeArmor: armor => { state = copyCombat({ ...state, armor }); return undefined; },
       writeTraits: traits => { state = copyCombat({ ...state, ...traits }); return undefined; } });
@@ -129,6 +130,15 @@ export class GameplayAuthority implements DamageAuthority {
     const binding = this.binding(target);
     const policy = this.policies.get(request.attack.combatProvider);
     if (policy === undefined) throw new Error(`Missing combat policy: ${request.attack.combatProvider}`);
+    const admission = binding.admitDamage?.(request);
+    if (admission === "handled") {
+      const decision = captureDecision({ request, mutations: [], appliedDamage: 0, reaction: "none" }, request);
+      const current = this.read(target.id);
+      const outcome: DamageOutcome = Object.freeze({ kind: "committed", decision, survived: current !== null && current.health > 0 });
+      this.hooks.confirmed(outcome);
+      return outcome;
+    }
+    if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     const prepared = policy.prepare?.(request, this.readState(target, binding), request.attack.attacker === null ? null : this.read(request.attack.attacker));
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     if (prepared?.kind === "continue" && !Number.isFinite(prepared.amount)) throw new RangeError("Prepared source damage must be finite");

@@ -1,3 +1,6 @@
+import { requireUseParticipant, useClient } from "./use-participant.ts";
+import type { UseParticipantServices } from "./use-participant.ts";
+import type { UseParticipant } from "./state.ts";
 // Ported from id Software's code/game/g_trigger.c and bg_misc.c:BG_TouchJumpPad.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -24,6 +27,7 @@ const MOD_TRIGGER_HURT = 22;
 const f32 = Math.fround;
 
 export interface TriggerHost {
+  readonly participants?: UseParticipantServices;
   readonly entities: EntityPool;
   readonly world: ServerWorld;
   readonly random: Pick<GameRandom, "rand" | "crandom">;
@@ -63,7 +67,7 @@ function combatContext(host: TriggerHost): CombatContext {
   return combat;
 }
 
-function dispatchTargets(host: TriggerHost, entity: GameEntity, activator: GameEntity | null): void {
+function dispatchTargets(host: TriggerHost, entity: GameEntity, activator: UseParticipant | null): void {
   useTargets({ pool: host.entities, time: gameTime(host),
     remapShader: (oldName, newName, timeSeconds) => { host.remapShader(oldName, newName, timeSeconds); },
     warn: message => { host.warn(message); } }, entity, activator);
@@ -131,12 +135,12 @@ function multiWait(entity: GameEntity): void {
   entity.nextthink = 0;
 }
 
-function multiTrigger(host: TriggerHost, entity: GameEntity, activatorValue: GameEntity | null): void {
-  if (activatorValue !== null) requireOwned(host, activatorValue);
-  entity.activator = activatorValue;
+function multiTrigger(host: TriggerHost, entity: GameEntity, activatorValue: UseParticipant | null): void {
+  if (activatorValue !== null) requireUseParticipant(activatorValue);
+  entity.activation = activatorValue;
   if (entity.nextthink !== 0) return;
   if (activatorValue === null) throw new Error("trigger_multiple requires an activator");
-  const client = activatorValue.client;
+  const client = useClient(activatorValue, host.participants)?.client ?? null;
   if (client !== null) {
     if ((entity.spawnflags & 1) !== 0 && client.sess.sessionTeam !== Team.TEAM_RED) return;
     if ((entity.spawnflags & 2) !== 0 && client.sess.sessionTeam !== Team.TEAM_BLUE) return;
@@ -243,7 +247,7 @@ function spawnTriggerHurt(host: TriggerHost, entity: GameEntity): void {
 }
 
 function timerThink(host: TriggerHost, entity: GameEntity): void {
-  dispatchTargets(host, entity, entity.activator);
+  dispatchTargets(host, entity, entity.activation);
   entity.nextthink = sourceSchedule(gameTime(host), entity.wait, entity.random, checkedCrandom(host));
 }
 
@@ -252,8 +256,8 @@ function spawnFuncTimer(host: TriggerHost, entity: GameEntity, variables: SpawnV
   entity.random = variables.float("random", "1").value;
   entity.wait = variables.float("wait", "1").value;
   entity.use = (self, _other, activator) => {
-    if (activator !== null) requireOwned(host, activator);
-    self.activator = activator;
+    if (activator !== null) requireUseParticipant(activator);
+    self.activation = activator;
     if (self.nextthink !== 0) self.nextthink = 0;
     else timerThink(host, self);
   };
@@ -264,7 +268,7 @@ function spawnFuncTimer(host: TriggerHost, entity: GameEntity, variables: SpawnV
   }
   if ((entity.spawnflags & 1) !== 0) {
     entity.nextthink = (gameTime(host) + FRAMETIME) | 0;
-    entity.activator = entity;
+    entity.activation = entity;
   }
   entity.r.svFlags = ServerEntityFlags.NOCLIENT;
 }

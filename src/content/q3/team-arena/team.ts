@@ -1,3 +1,4 @@
+import { GameEntity } from "../base/game/state.ts";
 // Ported from id Software's code/game/g_team.c and g_team.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { dot3, length3, sub3, vec3 } from "../../../core/math.ts";
@@ -11,7 +12,7 @@ import { setOrigin } from "../base/game/entities.ts";
 import type { EntityPool } from "../base/game/entities.ts";
 import { gameFormat } from "../base/game/format.ts";
 import { ConnectionState, GameFlags, MAX_CLIENTS } from "../base/game/state.ts";
-import type { EntityDie, EntityPain, EntityThink, EntityTouch, GameClient, GameEntity } from "../base/game/state.ts";
+import type { EntityDie, EntityPain, EntityThink, EntityTouch, GameClient } from "../base/game/state.ts";
 import { findEntity } from "../base/game/utilities.ts";
 
 export enum FlagStatus { AT_BASE = 0, TAKEN = 1, TAKEN_RED = 2, TAKEN_BLUE = 3, DROPPED = 4 }
@@ -504,10 +505,12 @@ export class TeamRuntime {
     model.s.modelindex2 = 255;
     model.s.frame = 2;
     this.host.pool.addEvent(model, EntityEvent.EV_OBELISKEXPLODE, 0);
-    this.host.addScore(attacker, self.r.currentOrigin, 100);
-    this.award(attacker, 0x800);
-    const ps = clientOf(attacker).ps;
-    ps.persistant.set(PersistentIndex.PERS_CAPTURES, ps.persistant.get(PersistentIndex.PERS_CAPTURES) + 1);
+    if (attacker instanceof GameEntity && attacker.client !== null) {
+      this.host.addScore(attacker, self.r.currentOrigin, 100);
+      this.award(attacker, 0x800);
+      const ps = clientOf(attacker).ps;
+      ps.persistant.set(PersistentIndex.PERS_CAPTURES, ps.persistant.get(PersistentIndex.PERS_CAPTURES) + 1);
+    }
     this.state.redObeliskAttackedTime = 0;
     this.state.blueObeliskAttackedTime = 0;
   };
@@ -533,7 +536,7 @@ export class TeamRuntime {
     model.s.modelindex2 = Math.trunc(Math.imul(self.health, 255) / this.obeliskSettings().health) | 0;
     if (model.s.frame === 0) this.host.pool.addEvent(self, EntityEvent.EV_OBELISKPAIN, 0);
     model.s.frame = 1;
-    this.host.addScore(attacker, self.r.currentOrigin, actualDamage);
+    if (attacker instanceof GameEntity) this.host.addScore(attacker, self.r.currentOrigin, actualDamage);
   };
 
   private obeliskTeam(entity: GameEntity): Team {

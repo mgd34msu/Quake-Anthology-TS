@@ -1,3 +1,5 @@
+import type { DamageRequest } from "../../../contracts/gameplay.ts";
+import type { UseParticipant } from "./game/state.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { BodyState, DeathReaction, PainReaction } from "../../../contracts/world.ts";
 import type { SessionActorRegistry, SharedBodyTable, ActorCallbackTable } from "../../../world/actors/index.ts";
@@ -25,6 +27,7 @@ export interface Q3RecordHost {
   runThink(actor: OwnedActor, timeMilliseconds: number): undefined;
   /** The innermost source call is retained until all synchronous pain/death callbacks return. */
   damageCall(): Q3DamageCall | null;
+  admitDamage?(entity: GameEntity, request: DamageRequest): "continue" | "handled";
   /** Project actors owned by another game into the selected Q3 source-slot view. */
   foreign(actor: ActorId): GameEntity | null;
   isPlayer(actor: ActorId): boolean;
@@ -79,7 +82,7 @@ export class Q3EntityRecords {
     record.actor = actor;
     this.host.bodies.create(actor, ZERO_BODY);
     this.host.combat.create(actor, { health: 0, armor: { kind: "q3", points: 0, protection: Math.fround(0.66) },
-      mass: 200, canTakeDamage: false, invulnerable: false, team: null });
+      mass: 200, canTakeDamage: false, invulnerable: false, team: null }, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
     this.host.inventory.create(actor, []);
     this.bindCallbacks(record);
     return actor;
@@ -130,17 +133,20 @@ export class Q3EntityRecords {
     return this.records.find(record => record.actor?.id.equals(actor))?.entity ?? this.host.foreign(actor);
   }
 
-  private reactionOther(actor: ActorId | null): GameEntity { return this.byActor(actor) ?? this.record(1022).entity; }
+  private reactionOther(actor: ActorId | null): DamageInflictor { return this.damageInflictor(actor); }
+
+  useParticipant(actor: ActorId | null): UseParticipant | null {
+    if (actor === null) return null;
+    return this.damageInflictor(actor);
+  }
 
   damageInflictor(actor: ActorId | null): DamageInflictor {
     if (actor === null) return this.record(1022).entity;
     const native = this.records.find(record => record.actor?.id.equals(actor));
     if (native !== undefined) return native.entity;
-    if (!this.host.actors.isLive(actor) || this.host.bodies.read(actor) === null) throw new Error("Q3 damage inflictor has no live shared body");
     return { kind: "shared-actor", actor, origin: () => {
       const body = this.host.bodies.read(actor);
-      if (!this.host.actors.isLive(actor) || body === null) throw new Error("Q3 damage inflictor body was released");
-      return body.origin;
+      return this.host.actors.isLive(actor) && body !== null ? body.origin : null;
     } };
   }
 
@@ -153,7 +159,7 @@ export class Q3EntityRecords {
       const call = this.host.damageCall();
       if (entity.die === null) throw new Error("G_Damage lethal target has no die callback");
       entity.die(entity, this.damageInflictor(reaction.inflictor), this.reactionOther(reaction.attacker), reaction.damage,
-        call?.methodOfDeath ?? 0); return undefined;
+        call?.methodOfDeath ?? (reaction.attack?.cause.kind === "q3" ? reaction.attack.cause.meansOfDeath : 0)); return undefined;
     };
     this.host.callbacks.bind(actor, {
       think: () => { entity.nextthink = 0; if (entity.think === null) throw new Error("NULL ent->think"); entity.think(entity); return undefined; },
@@ -165,7 +171,7 @@ export class Q3EntityRecords {
         const other = native?.entity ?? this.byActor(contact.other); if (other !== null) entity.touch(entity, other,
         { fraction: 0, end: entity.r.currentOrigin, entityNum: other.s.number, solidity: "clear", contents: other.r.contents,
           surfaceFlags: contact.surface?.nativeFlags ?? 0, contact: contact.plane === null ? { kind: "none" } : { kind: "plane", plane: contact.plane } }); return undefined; },
-      use: (_self, other, activator) => { entity.use?.(entity, this.byActor(other), this.byActor(activator)); return undefined; }, pain, die,
+      use: (_self, other, activator) => { entity.use?.(entity, this.useParticipant(other), this.useParticipant(activator)); return undefined; }, pain, die,
     });
   }
 

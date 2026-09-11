@@ -8,7 +8,9 @@ import type { ServerWorld } from "./world.ts";
 import type { EntityPool } from "./game/entities.ts";
 import type { CombatContext, DamageDiagnostic, Q3DamageCall } from "./game/combat.ts";
 import { q3DamageFeedback } from "./game/combat.ts";
-import type { GameEntity } from "./game/state.ts";
+import { GameEntity } from "./game/state.ts";
+import type { UseParticipant } from "./game/state.ts";
+import { useActor } from "./game/use-participant.ts";
 import { GameFlags } from "./game/state.ts";
 import { GameType, Powerup, statSchema } from "./shared/definitions.ts";
 import { q3WeaponItem } from "../foundation/arsenal.ts";
@@ -50,9 +52,9 @@ export class Q3CombatBridge {
       get time() { return host.time(); }, get intermissionQueued() { return host.intermissionQueued(); },
       get gameType() { return host.gameType(); }, get friendlyFire() { return host.friendlyFire(); }, get knockback() { return host.knockback(); },
       debugDamage: host.debugDamage,
-      attack: (inflictor: GameEntity, attacker: GameEntity, weapon: ItemId | null, meansOfDeath: number, flags: number): AttackProvenance => ({
-        sequence: this.sequence++, time: { kind: "milliseconds", value: host.time() }, attacker: attacker.actor.id, inflictor: inflictor.actor.id,
-        weapon: weapon ?? q3WeaponItem(inflictor.s.weapon || attacker.s.weapon)?.item ?? null, weaponProvider: host.weaponProvider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider,
+      attack: (inflictor: GameEntity, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number): AttackProvenance => ({
+        sequence: this.sequence++, time: { kind: "milliseconds", value: host.time() }, attacker: useActor(attacker), inflictor: inflictor.actor.id,
+        weapon: weapon ?? q3WeaponItem(inflictor.s.weapon || (attacker instanceof GameEntity ? attacker.s.weapon : 0))?.item ?? null, weaponProvider: host.weaponProvider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider,
         movementProvider: host.movementProvider, cause: { kind: "q3", meansOfDeath, damageFlags: flags },
       }),
       dispatch: (call: Q3DamageCall, operation: () => DamageOutcome): DamageOutcome => {
@@ -63,7 +65,11 @@ export class Q3CombatBridge {
     };
     this.context = host.product === "baseq3" ? { ...shared, product: "baseq3" } : {
       ...shared, product: "missionpack",
-      checkObeliskAttack: (target, attacker) => host.checkObeliskAttack(target, attacker),
+      checkObeliskAttack: (target, attacker) => {
+        const native = attacker instanceof GameEntity ? attacker : host.records.nativeByActor(attacker.actor);
+        if (native === null && host.records.host.isPlayer(useActor(attacker))) throw new Error("Admitted Q3 map player has no native client behavior record");
+        return native === null ? false : host.checkObeliskAttack(target, native);
+      },
       invulnerabilityEffect: (target, direction, point) => host.invulnerabilityEffect(target, direction, point),
     };
     // Object spread evaluates accessor properties. Install the live source cvars and clocks on the final context.
