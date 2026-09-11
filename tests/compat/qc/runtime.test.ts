@@ -214,7 +214,29 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
       model: name => name === "progs/player.mdl" ? { index: 2, bounds } : null,
       foreignReference: () => { throw new Error("Fixture has no foreign source surrogate"); } });
     host.actor(0);
-    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: host.host, isFreeEntity: host.isFreeEntity }), serverActive: () => true });
+    const { createQcPresentationBindings } = await import("../../../src/compat/qc/presentation-host.ts");
+    const { SimulationEvents } = await import("../../../src/app/bootstrap/simulation/events.ts");
+    const { openMountPlan, digestFile } = await import("../../../src/content/mounts/index.ts");
+    const content = "q1:rerelease:id1:retail";
+    const mounted = await openMountPlan({ id: "mount-plan:qc-presentation:retail", prefixOrders: [], defaultOrder: ["mount:qc:retail"],
+      mounts: [{ kind: "archive", identity: { id: "mount:qc:retail", content, generation: 0 }, format: "pak", archivePath: corpus + "rerelease/id1/pak0.pak", archiveDigest: await digestFile(corpus + "rerelease/id1/pak0.pak") }] });
+    const media = new Map<string, import("../../../src/contracts/content.ts").ResolvedResourceReference>();
+    try {
+      for (const path of ["sound/ambience/water1.wav", "progs/player.mdl"]) {
+        const opened = await mounted.open(path); if (opened === null) throw new Error(`Missing retail ${path}`); media.set(path, opened.reference);
+      }
+    } finally { mounted.close(); }
+    const events = new SimulationEvents(bodies, () => ({ kind: "seconds", value: 1 }), () => null, sourceSlot);
+    const cache = new Map<string, import("../../../src/compat/qc/presentation-host.ts").QcPrecachedResource>(), prints: string[] = [];
+    let loading = true;
+    const presentation = createQcPresentationBindings(host, { content, events, loading: () => loading,
+      print: text => { prints.push(text); return undefined; }, lookup: (kind, name) => cache.get(`${kind}:${name}`) ?? null,
+      precache: (kind, name) => {
+        const key = `${kind}:${name}`, previous = cache.get(key); if (previous !== undefined) return previous;
+        const resource = media.get(kind === "sound" ? `sound/${name}` : name); if (resource === undefined) throw new Error(`Unprepared test media ${name}`);
+        const value = { index: cache.size + 1, resource }; cache.set(key, value); return value;
+      } });
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: new Map([...host.host, ...presentation]), isFreeEntity: host.isFreeEntity }), serverActive: () => true });
     const call = (name: string, argc: number) => vm.execute(program.functionNamed(name).index, argc);
     call("spawn", 0);
     const reference = vm.globals.int(1), slot = entities.slot(reference), actor = host.actor(slot), fields = entities.at(slot);
@@ -254,5 +276,30 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     expect(host.actor(slot).id.equals(actor.id)).toBe(false);
     expect(() => host.reference(actor.id)).toThrow("stale actor");
     expect(bodies.read(host.actor(slot).id)?.velocity).toEqual({ x: 0, y: 0, z: 0 });
+    const sample = vm.strings.allocate("ambience/water1.wav");
+    vm.globals.setInt(4, sample); call("precache_sound", 1); expect(vm.globals.int(1)).toBe(sample);
+    call("precache_sound", 1); expect(cache.size).toBe(1);
+    vm.globals.setInt(4, vm.strings.allocate("progs/player.mdl")); call("precache_model", 1); expect(cache.size).toBe(2);
+    loading = false; expect(() => call("precache_model", 1)).toThrow("spawn functions");
+    vm.globals.setInt(4, sample); call("precache_file", 1); expect(vm.globals.int(1)).toBe(sample);
+    const current = host.actor(slot), body = bodies.read(current.id); if (body === null) throw new Error("Missing presentation body");
+    bodies.write(current, { ...body, origin, bounds });
+    vm.globals.setInt(4, reference); vm.globals.setFloat(7, 7); vm.globals.setInt(10, sample); vm.globals.setFloat(13, 0.5); vm.globals.setFloat(16, 0.75);
+    call("sound", 5);
+    const soundResource = media.get("sound/ambience/water1.wav"); if (soundResource === undefined) throw new Error("Missing sound identity");
+    expect(events.take()[0]?.payload).toEqual({ kind: "sound", resource: soundResource.id, actor: current.id, origin: { ...origin, z: origin.z + 4 }, channel: 7, volume: 127 / 255, attenuation: 0.75 });
+    vm.globals.setFloat(7, 0); call("sound", 5); expect(events.take()[0]?.payload).toMatchObject({ kind: "sound", channel: 0 });
+    vm.globals.setFloat(7, 8); expect(() => call("sound", 5)).toThrow("channel = 8");
+    vm.globals.setFloat(7, 1); vm.globals.setFloat(13, 2); expect(() => call("sound", 5)).toThrow("volume");
+    vm.globals.setFloat(13, 1); vm.globals.setFloat(16, 5); expect(() => call("sound", 5)).toThrow("attenuation");
+    vm.globals.setFloat(16, 1); vm.globals.setInt(10, vm.strings.allocate("absent.wav")); call("sound", 5);
+    expect(prints).toEqual(["SV_StartSound: absent.wav not precacheed\n"]); expect(events.take()).toEqual([]);
+    vm.globals.setVector(4, origin); vm.globals.setInt(7, sample); vm.globals.setFloat(10, 0.25); vm.globals.setFloat(13, 2); call("ambientsound", 4);
+    expect(events.capture().persistent).toHaveLength(1);
+    vm.globals.setVector(4, origin); vm.globals.setVector(7, { x: 1, y: -2, z: 3 }); vm.globals.setFloat(10, 73); vm.globals.setFloat(13, 12); call("particle", 4);
+    loading = true; vm.globals.setFloat(4, 2); vm.globals.setInt(7, vm.strings.allocate("az")); call("lightstyle", 2);
+    expect(events.lightStyle(2)).toBe("az"); expect(events.lightStyles(1)).toContainEqual({ kind: "q1", style: 2, value: 0 });
+    expect(events.takePresentation().some(value => value.kind === "q1" && value.event.kind === "particles" && value.event.count === 12 && value.event.color === 73)).toBe(true);
+
   } finally { archive.close(); }
 });

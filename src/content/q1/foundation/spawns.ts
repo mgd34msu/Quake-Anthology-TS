@@ -6,6 +6,7 @@ import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
 import { ZERO, vadd, vsub, vscale, dot, yawFor } from "./types.ts";
+import { precacheQ1World } from "./precache-world.ts";
 import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";
 import { spawnMonster } from "./monsters.ts";
@@ -24,6 +25,9 @@ function spawnMulti(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.wait = once ? -1 : entity.wait || 0.2;
   if (secret) { game.totalSecrets++; entity.message ||= "$qc_found_secret"; entity.sounds ||= 1; }
 
+  const sound = entity.sounds === 1 ? "misc/secret.wav" : entity.sounds === 2 ? "misc/talk.wav" : entity.sounds === 3 ? "misc/trigger1.wav" : null;
+  if (game.usesId1Precaches && (secret && (entity.sounds === 1 || entity.sounds === 2) && sound !== null)) game.precacheSound(sound);
+  if (game.usesId1Precaches && (sound !== null)) game.precacheSound(sound);
   entity.use = game.named.use(entity, "multi_use");
   if (entity.maxHealth > 0) {
     if ((entity.spawnflags & 1) !== 0) throw new Error("health and notouch do not make sense");
@@ -42,6 +46,7 @@ function teleport(game: Q1Foundation, entity: Q1Actor): undefined {
   if (entity.target === "") throw new Error("trigger_teleport has no target");
   entity.use = game.named.use(entity, "teleport_use");
   if ((entity.spawnflags & 2) === 0) {
+    if (game.usesId1Precaches) game.precacheSound("ambience/hum1.wav");
     const bounds = game.body(entity).bounds;
     game.host.emit({ kind: "ambient", origin: vscale(vadd(bounds.min, bounds.max), 0.5), path: "ambience/hum1.wav", volume: 0.5, attenuation: 3 });
   }
@@ -55,11 +60,14 @@ function spawnLight(game: Q1Foundation, entity: Q1Actor): undefined {
     entity.use = game.named.use(entity, "light_use");
     game.host.emit({ kind: "lightstyle", style, pattern: (entity.spawnflags & 1) !== 0 ? "a" : "m" });
   }
+  if (game.usesId1Precaches && (entity.classname === "light_fluoro")) game.precacheSound("ambience/fl_hum1.wav");
+  if (game.usesId1Precaches && (entity.classname === "light_fluorospark")) game.precacheSound("ambience/buzz1.wav");
   if (entity.classname === "light_fluoro" || entity.classname === "light_fluorospark") game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "light_fluoro" ? "ambience/fl_hum1.wav" : "ambience/buzz1.wav", volume: 0.5, attenuation: 3 });
   return undefined;
 }
 function spawnBarrel(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.model = entity.classname === "misc_explobox2" ? "maps/b_exbox2.bsp" : "maps/b_explob.bsp";
+  if (game.usesId1Precaches) game.precacheModel(entity.model); if (game.usesId1Precaches) game.precacheSound("weapons/r_exp3.wav");
   entity.solid = "bsp"; entity.movement = "push"; entity.damageable = true; entity.aimedDamage = true; game.host.combat.setHealth(entity.actor, 20);
   game.setBounds(entity, { min: ZERO, max: { x: 32, y: 32, z: entity.classname === "misc_explobox2" ? 32 : 64 } });
   entity.die = game.named.die(entity, "barrel_die");
@@ -72,7 +80,7 @@ export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
   if (spawnPickup(game, entity)) return undefined;
   switch (entity.classname) {
     case "worldspawn": {
-      game.world = entity; game.worldType = entity.number("worldtype"); entity.solid = "bsp";
+      game.world = entity; game.worldType = entity.number("worldtype"); entity.solid = "bsp"; if (game.usesId1Precaches) precacheQ1World(game);
       const styles = ["m", "mmnmmommommnonmmonqnmmo", "abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba", "mmmmmaaaaammmmmaaaaaabcdefgabcdefg", "mamamamamama", "jklmnopqrstuvwxyzyxwvutsrqponmlkj", "nmonqnmomnmomomno", "mmmaaaabcdefgmmmmaaaammmaamm", "mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa", "aaaaaaaazzzzzzzz", "mmamammmmammamamaaamammma", "abcdefghijklmnopqrrqponmlkjihgfedcba"];
       for (const [style, pattern] of styles.entries()) game.host.emit({ kind: "lightstyle", style, pattern }); return undefined;
     }
@@ -90,7 +98,7 @@ export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
       entity.touch = game.named.touch(entity, "changelevel_touch"); return undefined;
     }
     case "trigger_hurt": initTrigger(game, entity); entity.damage ||= 5; entity.touch = game.named.touch(entity, "hurt_touch"); return undefined;
-    case "trigger_push": initTrigger(game, entity); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
+    case "trigger_push": if (game.usesId1Precaches) game.precacheSound("ambience/windfly.wav"); initTrigger(game, entity); entity.speed ||= 1000; entity.touch = game.named.touch(entity, "push_touch"); return undefined;
     case "info_teleport_destination": entity.mangle = game.body(entity).angles; game.setBody(entity, { angles: ZERO }); game.setOrigin(entity, vadd(game.body(entity).origin, { x: 0, y: 0, z: 27 })); if (entity.targetname === "") throw new Error("teleport destination has no targetname"); return undefined;
     case "testplayerstart": case "info_player_start": case "info_player_coop": case "info_player_deathmatch": case "info_player_start2": case "info_intermission": case "info_notnull": return undefined;
     case "path_corner": {
@@ -99,7 +107,7 @@ export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
       entity.touch = game.named.touch(entity, "movetarget_touch"); return undefined;
     }
     case "light": case "light_fluoro": case "light_fluorospark": return spawnLight(game, entity);
-    case "ambient_comp_hum": case "ambient_drone": game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav", volume: entity.classname === "ambient_comp_hum" ? 1 : 0.5, attenuation: 3 }); return undefined;
+    case "ambient_comp_hum": case "ambient_drone": if (game.usesId1Precaches) game.precacheSound(entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav"); game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "ambient_comp_hum" ? "ambience/comp1.wav" : "ambience/drone6.wav", volume: entity.classname === "ambient_comp_hum" ? 1 : 0.5, attenuation: 3 }); return undefined;
     case "misc_explobox": case "misc_explobox2": return spawnBarrel(game, entity);
     case "monster_army": case "monster_dog": return spawnMonster(game, entity);
     default: throw new Error(`Q1 official spawn not yet implemented: ${entity.classname} at source entity ${entity.sourceOrdinal}`);

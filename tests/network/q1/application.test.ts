@@ -21,11 +21,12 @@ interface NativeClient {
         readonly kind: 'reliable' | 'unreliable';
     }[];
     sounds: readonly string[];
+    models: readonly string[];
 }
 async function client(name: string): Promise<NativeClient> {
     const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     return { transport, handshake: new NetQuakeConnectClient(), channel: new NetQuakeChannel(), decoder: new NetQuakeDecoder(),
-        signon: new NetQuakeSignon({ name, color: 0, spawnParameters: '', extensionFlags: null }), queued: [], messages: [], deliveries: [], sounds: [] };
+        signon: new NetQuakeSignon({ name, color: 0, spawnParameters: '', extensionFlags: null }), queued: [], messages: [], deliveries: [], sounds: [], models: [] };
 }
 test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects and travel', async () => {
     const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--mode', 'coop', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
@@ -79,6 +80,7 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
                         if (message.kind === 'server-info') {
                             peer.signon.stage = 0;
                             peer.sounds = message.sounds;
+                            peer.models = message.models;
                         }
                         if (message.kind === 'signon')
                             peer.queued.push(peer.signon.receive(message.stage));
@@ -91,6 +93,7 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
         for (let i = 0; i < 100 && peers.some(peer => !peer.signon.active); i++)
             await exchange();
         for (const peer of peers) {
+            if (!peer.signon.active) throw new Error(`Native signon failed: ${prints.join('\n')}`);
             expect(peer.signon.active).toBe(true);
             expect(peer.handshake.state.kind).toBe('connected');
         }
@@ -116,6 +119,16 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
         const source = app.simulation.q1Source(), owner = app.simulation.actors.resolveOwned(player.actor), body = app.simulation.bodies.read(player.actor);
         if (source === null || owner === null || body === null)
             throw new Error('Source player missing');
+        expect(source.game.precaches.phase).toBe('frozen');
+        const world = app.simulation.options.world;
+        if (world.kind !== 'q1-bsp') throw new Error('Expected the retail Q1 world');
+        const seededModels = ['maps/e1m1.bsp', ...world.models.slice(1).map((_model,index) => `*${index+1}`)];
+        expect(source.game.precaches.models.slice(1, seededModels.length+1)).toEqual(seededModels);
+        expect(source.game.precaches.sounds.slice(1,5)).toEqual(['weapons/r_exp3.wav','weapons/rocket1i.wav','weapons/sgun1.wav','weapons/guncock.wav']);
+        for (const peer of peers) {
+            expect(peer.models).toEqual(source.game.precaches.models.slice(1));
+            expect(peer.sounds).toEqual(source.game.precaches.sounds.slice(1));
+        }
         const soundOrigin = { x: body.origin.x + (body.bounds.min.x + body.bounds.max.x) * 0.5, y: body.origin.y + (body.bounds.min.y + body.bounds.max.y) * 0.5, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) * 0.5 };
         for (const peer of peers) {
             peer.messages.length = 0;
@@ -123,6 +136,8 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
         }
         const projectile = source.game.create('network_sound_projectile');
         source.game.setOrigin(projectile, soundOrigin);
+        source.game.setBounds(projectile, { min: { x: -4, y: -8, z: -12 }, max: { x: 20, y: 12, z: 28 } });
+        const removedSoundOrigin = { x: soundOrigin.x + 8, y: soundOrigin.y + 2, z: soundOrigin.z + 8 };
         const projectileNumber = app.simulation.actors.sourceOf(projectile.actor.id)?.slot;
         source.game.sound(projectile, 'weapons/r_exp3.wav', 'voice');
         source.game.remove(projectile);
@@ -146,7 +161,9 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
             const removed = peer.messages.find(message => message.kind === 'sound' && message.entity === projectileNumber && peer.sounds[message.index - 1] === 'weapons/r_exp3.wav');
             if (removed?.kind !== 'sound')
                 throw new Error('Removed projectile lost its sound');
-            expect(Math.abs(removed.origin.x - soundOrigin.x)).toBeLessThan(0.126);
+            expect(Math.abs(removed.origin.x - removedSoundOrigin.x)).toBeLessThan(0.126);
+            expect(Math.abs(removed.origin.y - removedSoundOrigin.y)).toBeLessThan(0.126);
+            expect(Math.abs(removed.origin.z - removedSoundOrigin.z)).toBeLessThan(0.126);
             const state = app.simulation.events.capture();
             expect(state.styles.some(style => style.style === 32 && style.pattern === 'az')).toBe(true);
             expect(peer.sounds[sound.message.index - 1]).toBe('weapons/shotgn2.wav');

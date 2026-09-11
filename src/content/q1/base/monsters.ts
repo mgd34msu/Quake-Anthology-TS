@@ -8,6 +8,7 @@ import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub, yawFor } from 
 import type { Q1Basis } from "../foundation/types.ts";
 import type { MonsterAi, MonsterFrame } from "./animation.ts";
 import { monsterFrames } from "./frames.ts";
+import { precacheId1Monster } from "./species.ts";
 import type { MonsterSpecies } from "./species.ts";
 import { monsterAction, monsterJumpTouch } from "./monster-actions.ts";
 import { castLightning, throwGib, throwHead } from "./projectiles.ts";
@@ -341,6 +342,10 @@ export class BaseMonster {
   }
   spawn(): undefined {
     const { game, entity, spec } = this;
+    if (this.source === undefined && game.usesId1Precaches) {
+      if (game.options.deathmatch !== 0) return game.remove(entity);
+      precacheId1Monster(game, spec.species);
+    }
     const crucified = spec.species === "zombie" && (entity.spawnflags & 1) !== 0;
     if (!crucified) game.totalMonsters++;
     entity.maxHealth = spec.health; game.host.combat.setHealth(entity.actor, spec.health);

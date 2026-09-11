@@ -1,4 +1,5 @@
 /* QuakeC monster spawn defaults. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
+import type { Q1Foundation } from "../foundation/runtime.ts";
 import type { Bounds } from "../../../contracts/math.ts";
 import type { Q1Monster } from "../foundation/entity.ts";
 export type BaseSpecies = "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
@@ -38,3 +39,156 @@ export const baseSpecies: readonly MonsterSpecies[] = [
   { species: "boss", killString: "$qc_ks_chthon", classnames: ["monster_boss"], model: "boss", head: null, health: 3, gibHealth: -Infinity, gibs: [], bounds: { min: { x: -128, y: -128, z: -24 }, max: { x: 128, y: 128, z: 256 } }, stand: "boss_idle1", walk: "boss_idle1", run: "boss_missile1", sight: "boss1/sight1.wav", missile: "boss_missile1", melee: false, movement: "boss" },
   { species: "oldone", killString: "$qc_ks_shub", classnames: ["monster_oldone"], model: "oldone", head: null, health: 40000, gibHealth: -Infinity, gibs: [], bounds: { min: { x: -160, y: -128, z: -24 }, max: { x: 160, y: 128, z: 256 } }, stand: "old_idle1", walk: "old_idle1", run: "old_idle1", sight: "boss2/sight.wav", missile: null, melee: false, movement: "boss" },
 ];
+
+/** progs106 monster spawn declarations, before model assignment and startup. */
+export function precacheId1Monster(game: Q1Foundation, species: Q1Monster["species"]): undefined {
+  switch (species) {
+    case "knight":
+      game.precacheModel("progs/knight.mdl");
+      game.precacheModel("progs/h_knight.mdl");
+      game.precacheSound("knight/kdeath.wav");
+      game.precacheSound("knight/khurt.wav");
+      game.precacheSound("knight/ksight.wav");
+      game.precacheSound("knight/sword1.wav");
+      game.precacheSound("knight/sword2.wav");
+      game.precacheSound("knight/idle.wav");
+      return undefined;
+    case "enforcer":
+      game.precacheModel("progs/enforcer.mdl");
+      game.precacheModel("progs/h_mega.mdl");
+      game.precacheModel("progs/laser.mdl");
+      game.precacheSound("enforcer/death1.wav");
+      game.precacheSound("enforcer/enfire.wav");
+      game.precacheSound("enforcer/enfstop.wav");
+      game.precacheSound("enforcer/idle1.wav");
+      game.precacheSound("enforcer/pain1.wav");
+      game.precacheSound("enforcer/pain2.wav");
+      game.precacheSound("enforcer/sight1.wav");
+      game.precacheSound("enforcer/sight2.wav");
+      game.precacheSound("enforcer/sight3.wav");
+      game.precacheSound("enforcer/sight4.wav");
+      return undefined;
+    case "demon":
+      game.precacheModel("progs/demon.mdl");
+      game.precacheModel("progs/h_demon.mdl");
+      game.precacheSound("demon/ddeath.wav");
+      game.precacheSound("demon/dhit2.wav");
+      game.precacheSound("demon/djump.wav");
+      game.precacheSound("demon/dpain1.wav");
+      game.precacheSound("demon/idle1.wav");
+      game.precacheSound("demon/sight2.wav");
+      return undefined;
+    case "ogre":
+      game.precacheModel("progs/ogre.mdl");
+      game.precacheModel("progs/h_ogre.mdl");
+      game.precacheModel("progs/grenade.mdl");
+      game.precacheSound("ogre/ogdrag.wav");
+      game.precacheSound("ogre/ogdth.wav");
+      game.precacheSound("ogre/ogidle.wav");
+      game.precacheSound("ogre/ogidle2.wav");
+      game.precacheSound("ogre/ogpain1.wav");
+      game.precacheSound("ogre/ogsawatk.wav");
+      game.precacheSound("ogre/ogwake.wav");
+      return undefined;
+    case "hellknight":
+      game.precacheModel("progs/hknight.mdl");
+      game.precacheModel("progs/k_spike.mdl");
+      game.precacheModel("progs/h_hellkn.mdl");
+      game.precacheSound("hknight/attack1.wav");
+      game.precacheSound("hknight/death1.wav");
+      game.precacheSound("hknight/pain1.wav");
+      game.precacheSound("hknight/sight1.wav");
+      game.precacheSound("hknight/hit.wav");
+      game.precacheSound("hknight/slash1.wav");
+      game.precacheSound("hknight/idle.wav");
+      game.precacheSound("hknight/grunt.wav");
+      game.precacheSound("knight/sword1.wav");
+      game.precacheSound("knight/sword2.wav");
+      return undefined;
+    case "shambler":
+      game.precacheModel("progs/shambler.mdl");
+      game.precacheModel("progs/s_light.mdl");
+      game.precacheModel("progs/h_shams.mdl");
+      game.precacheModel("progs/bolt.mdl");
+      game.precacheSound("shambler/sattck1.wav");
+      game.precacheSound("shambler/sboom.wav");
+      game.precacheSound("shambler/sdeath.wav");
+      game.precacheSound("shambler/shurt2.wav");
+      game.precacheSound("shambler/sidle.wav");
+      game.precacheSound("shambler/ssight.wav");
+      game.precacheSound("shambler/melee1.wav");
+      game.precacheSound("shambler/melee2.wav");
+      game.precacheSound("shambler/smack.wav");
+      return undefined;
+    case "wizard":
+      game.precacheModel("progs/wizard.mdl");
+      game.precacheModel("progs/h_wizard.mdl");
+      game.precacheModel("progs/w_spike.mdl");
+      game.precacheSound("wizard/hit.wav");
+      game.precacheSound("wizard/wattack.wav");
+      game.precacheSound("wizard/wdeath.wav");
+      game.precacheSound("wizard/widle1.wav");
+      game.precacheSound("wizard/widle2.wav");
+      game.precacheSound("wizard/wpain.wav");
+      game.precacheSound("wizard/wsight.wav");
+      return undefined;
+    case "shalrath":
+      game.precacheModel("progs/shalrath.mdl");
+      game.precacheModel("progs/h_shal.mdl");
+      game.precacheModel("progs/v_spike.mdl");
+      game.precacheSound("shalrath/attack.wav");
+      game.precacheSound("shalrath/attack2.wav");
+      game.precacheSound("shalrath/death.wav");
+      game.precacheSound("shalrath/idle.wav");
+      game.precacheSound("shalrath/pain.wav");
+      game.precacheSound("shalrath/sight.wav");
+      return undefined;
+    case "tarbaby":
+      game.precacheModel("progs/tarbaby.mdl");
+      game.precacheSound("blob/death1.wav");
+      game.precacheSound("blob/hit1.wav");
+      game.precacheSound("blob/land1.wav");
+      game.precacheSound("blob/sight1.wav");
+      return undefined;
+    case "fish":
+      game.precacheModel("progs/fish.mdl");
+      game.precacheSound("fish/death.wav");
+      game.precacheSound("fish/bite.wav");
+      game.precacheSound("fish/idle.wav");
+      return undefined;
+    case "zombie":
+      game.precacheModel("progs/zombie.mdl");
+      game.precacheModel("progs/h_zombie.mdl");
+      game.precacheModel("progs/zom_gib.mdl");
+      game.precacheSound("zombie/z_idle.wav");
+      game.precacheSound("zombie/z_idle1.wav");
+      game.precacheSound("zombie/z_shot1.wav");
+      game.precacheSound("zombie/z_gib.wav");
+      game.precacheSound("zombie/z_pain.wav");
+      game.precacheSound("zombie/z_pain1.wav");
+      game.precacheSound("zombie/z_fall.wav");
+      game.precacheSound("zombie/z_miss.wav");
+      game.precacheSound("zombie/z_hit.wav");
+      game.precacheSound("zombie/idle_w2.wav");
+      return undefined;
+    case "boss":
+      game.precacheModel("progs/boss.mdl");
+      game.precacheModel("progs/lavaball.mdl");
+      game.precacheSound("weapons/rocket1i.wav");
+      game.precacheSound("boss1/out1.wav");
+      game.precacheSound("boss1/sight1.wav");
+      game.precacheSound("misc/power.wav");
+      game.precacheSound("boss1/throw.wav");
+      game.precacheSound("boss1/pain.wav");
+      game.precacheSound("boss1/death.wav");
+      return undefined;
+    case "oldone":
+      game.precacheModel("progs/oldone.mdl");
+      game.precacheSound("boss2/death.wav");
+      game.precacheSound("boss2/idle.wav");
+      game.precacheSound("boss2/sight.wav");
+      game.precacheSound("boss2/pop2.wav");
+      return undefined;
+    default: throw new Error(`No id1 base monster precaches for ${species}`);
+  }
+}

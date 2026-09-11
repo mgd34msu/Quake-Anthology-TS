@@ -6,11 +6,10 @@ import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { ActorAnimationState, ArsenalState, MovementContinuation, MovementInput, MovementProfile, MovementResult, MovementServices, MovementState, Q1MovementInput, Q2MovementInput, Q2RereleaseMovementInput, Q3MovementInput } from "../../../contracts/movement.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
-import type { SceneQueries, TraceHit, TracePolicy } from "../../../contracts/scene.ts";
+import type { SceneQueries, TraceHit } from "../../../contracts/scene.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
-import { createQ1MovementProvider, createQwMovementProvider } from "../../../movement/q1/index.ts";
-import { applyQ2MovementContacts, createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider } from "../../../movement/q2/index.ts";
-import { createQ3MovementProvider, Q3_SOURCE_POSTURES, Q3_SOURCE_STANDING_BOUNDS } from "../../../movement/q3/index.ts";
+import { applyQ2MovementContacts } from "../../../movement/q2/index.ts";
+import { createPlayerMovementProvider, playerMovementEnvironment, playerStandingBounds, selectedMovementProfile } from "./player-movement.ts";
 import type { Q3MovementHooks } from "../../../movement/q3/types.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -18,7 +17,6 @@ import type { PlayerView } from "./types.ts";
 import type { ClientMovementOptions } from "./q3/types.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-const classicBounds: Bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 
 export interface PlayerMovementHost {
   readonly actors: SessionActorRegistry;
@@ -105,7 +103,7 @@ export class MovementPlayer {
   constructor(readonly actor: OwnedActor, readonly client: ClientId, readonly recipe: ExecutableRecipe,
     private readonly host: PlayerMovementHost, origin: Vec3, angles: Vec3, arsenal: ArsenalState) {
     this.character = providerFamily(recipe.character.definition.provider);
-    this.standingBounds = this.character === "q3" ? Q3_SOURCE_STANDING_BOUNDS : classicBounds;
+    this.standingBounds = playerStandingBounds(this.character);
     this.bounds = this.standingBounds;
     this.viewHeight = this.character === "q3" ? 26 : 22;
     this.viewAngles = angles;
@@ -182,11 +180,9 @@ export class MovementPlayer {
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Player has no combat state");
     const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.standingBounds },
-      environment: this.sourceEnvironment === null ? { health: combat.health, flight: false, haste: false, invulnerable: combat.invulnerable, gravityMultiplier: this.state.kind === "q3" ? 1 : this.gravityMultiplier }
-        : { ...this.sourceEnvironment, health: combat.health, invulnerable: this.sourceEnvironment.invulnerable || combat.invulnerable, gravityMultiplier: this.state.kind === "q3" ? 1 : this.sourceEnvironment.gravityMultiplier },
+      environment: playerMovementEnvironment(this, combat),
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
-    const state = this.state, profile = this.profile.kind === "q1-netquake" || this.profile.kind === "q1-quakeworld"
-      ? { ...this.profile, parameters: { ...this.profile.parameters, gravity: this.worldGravity } } : this.profile, command = input.command;
+    const state = this.state, profile = selectedMovementProfile(this), command = input.command;
     const q1Options = { viewHeight: this.viewHeight, hooks: {
       playerAction: (actor: OwnedActor, action: "jump" | "swim") => this.host.jump(actor, action),
       link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
@@ -194,14 +190,15 @@ export class MovementPlayer {
       beforePhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
       afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
     } };
+    const provider = createPlayerMovementProvider(this, { q1: q1Options, q2: this.host.rereleaseMovement, q3: this.host.q3Hooks });
     let result: MovementResult;
-    if (profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
-      result = createQ1MovementProvider(profile.id, q1Options).move({ ...base, kind: "q1-netquake", profile, state, command }, this.services);
-    } else if (profile.kind === "q1-quakeworld" && state.kind === "q1-quakeworld" && command.kind === "q1-quakeworld") {
-      result = createQwMovementProvider(profile.id, q1Options).move({ ...base, kind: "q1-quakeworld", profile, state, command }, this.services);
-    } else if (profile.kind === "q2-classic" && state.kind === "q2-classic" && command.kind === "q2-classic") {
+    if (provider.kind === "q1-netquake" && profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
+      result = provider.move({ ...base, kind: "q1-netquake", profile, state, command }, this.services);
+    } else if (provider.kind === "q1-quakeworld" && profile.kind === "q1-quakeworld" && state.kind === "q1-quakeworld" && command.kind === "q1-quakeworld") {
+      result = provider.move({ ...base, kind: "q1-quakeworld", profile, state, command }, this.services);
+    } else if (provider.kind === "q2-classic" && profile.kind === "q2-classic" && state.kind === "q2-classic" && command.kind === "q2-classic") {
       const move: Q2MovementInput = { ...base, kind: "q2-classic", profile, state, command };
-      const moved = createQ2ClassicMovementProvider(profile.id).move(move, this.services);
+      const moved = provider.move(move, this.services);
       if (moved.status === "active") {
         this.accept(moved);
         const afterTriggers = this.commit(moved.state, true, true);
@@ -209,9 +206,9 @@ export class MovementPlayer {
           : afterTriggers.state.kind === "q2-classic" ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
             : this.wrongFamily();
       } else result = moved;
-    } else if (profile.kind === "q2-rerelease" && state.kind === "q2-rerelease" && command.kind === "q2-rerelease") {
+    } else if (provider.kind === "q2-rerelease" && profile.kind === "q2-rerelease" && state.kind === "q2-rerelease" && command.kind === "q2-rerelease") {
       const move: Q2RereleaseMovementInput = { ...base, kind: "q2-rerelease", profile, state, command, viewOffset: { x: 0, y: 0, z: this.viewHeight }, snapInitial: true };
-      const moved = createQ2RereleaseMovementProvider(profile.id, this.host.rereleaseMovement).move(move, this.services);
+      const moved = provider.move(move, this.services);
       if (moved.status === "active") {
         this.accept(moved);
         const afterTriggers = this.commit(moved.state, true, true);
@@ -219,14 +216,9 @@ export class MovementPlayer {
           : afterTriggers.state.kind === "q2-rerelease" ? applyQ2MovementContacts(move, this.services, { ...moved, state: afterTriggers.state })
             : this.wrongFamily();
       } else result = moved;
-    } else if (profile.kind === "q3" && state.kind === "q3" && command.kind === "q3") {
-      const sourceMovement = this.sourceMovement;
-      const move: Q3MovementInput = { ...base, kind: "q3", profile: sourceMovement === null ? profile
-        : { ...profile, fixedMilliseconds: sourceMovement.fixedMsec, noFootsteps: sourceMovement.noFootsteps }, state, command };
-      result = createQ3MovementProvider({ id: profile.id, hooks: this.host.q3Hooks, postures: () => this.character === "q3" ? Q3_SOURCE_POSTURES
-        : { standingViewHeight: this.viewHeight, crouched: { bounds: { ...this.standingBounds, max: { ...this.standingBounds.max, z: 4 } }, viewHeight: -2 },
-          dead: { bounds: { ...this.standingBounds, max: { ...this.standingBounds.max, z: -8 } }, viewHeight: -16 }, invulnerabilityExpanded: Q3_SOURCE_POSTURES.invulnerabilityExpanded },
-        ...(sourceMovement === null ? {} : { tracePolicy: () => ({ kind: "q3", contentsMask: sourceMovement.traceMask, curves: true, playerCurveClip: true } satisfies Extract<TracePolicy, { readonly kind: "q3" }>) }) }).move(move, this.services);
+    } else if (provider.kind === "q3" && profile.kind === "q3" && state.kind === "q3" && command.kind === "q3") {
+      const move: Q3MovementInput = { ...base, kind: "q3", profile, state, command };
+      result = provider.move(move, this.services);
     } else throw new Error(`Command ${command.kind} does not match movement ${profile.kind}`);
     if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
       this.accept(result);

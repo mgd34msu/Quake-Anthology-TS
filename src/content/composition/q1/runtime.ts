@@ -243,8 +243,9 @@ export class Q1SourceComposition {
   }
 }
 
-export function createQ1SourceComposition(host: Q1FoundationHost, options: Q1FoundationOptions, selection: Q1SourceSelection, services: Q1CompositionServices): Q1SourceComposition {
-  return new Q1SourceComposition(new Q1Foundation(host, { ...options,
+export function createQ1SourceComposition(host: Q1FoundationHost, options: Omit<Q1FoundationOptions, "precacheProgram">, selection: Q1SourceSelection, services: Q1CompositionServices): Q1SourceComposition {
+  const precacheProfile: Pick<Q1FoundationOptions, "precacheProgram"> = selection.program === "id1" ? { precacheProgram: "id1" } : {};
+  return new Q1SourceComposition(new Q1Foundation(host, { ...options, ...precacheProfile,
     get skill() { const value = services.cvar("skill"); return value >= 3 ? 3 : value >= 2 ? 2 : value >= 1 ? 1 : 0; },
     get teamplay() { return services.cvar("teamplay"); }, get gravity() { return services.cvar("sv_gravity"); } }), selection, services);
 }

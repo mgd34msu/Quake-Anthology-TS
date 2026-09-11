@@ -29,6 +29,9 @@ function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
 function train(game: Q1Foundation, entity: Q1Actor): undefined {
   const teleport = entity.classname === "misc_teleporttrain";
   if (entity.target === "") throw new Error(`${entity.classname} without a target`);
+  const sounds = teleport || entity.sounds === 0 ? ["misc/null.wav", "misc/null.wav"] : entity.sounds === 1 ? ["plats/train2.wav", "plats/train1.wav"] : [];
+  for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
+  if (game.usesId1Precaches && (teleport)) game.precacheModel("progs/teleport.mdl");
   entity.speed ||= 100; entity.damage ||= 2; entity.movement = "push"; entity.solid = teleport ? "none" : "bsp";
   if (teleport) { entity.model = "progs/teleport.mdl"; entity.angularVelocity = { x: 100, y: 200, z: 300 }; }
   else entity.classname = "train";
@@ -44,6 +47,8 @@ function sigilTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefi
 }
 function sigil(game: Q1Foundation, entity: Q1Actor): undefined {
   const bits = entity.spawnflags & 15; if (bits === 0) throw new Error("item_sigil has no episode spawnflags");
+  if (game.usesId1Precaches) game.precacheSound("misc/runekey.wav");
+  for (let episode = 1; episode <= 4; episode++) if (game.usesId1Precaches && ((bits & (1 << (episode - 1))) !== 0)) game.precacheModel(`progs/end${episode}.mdl`);
   const number = (bits & 8) !== 0 ? 4 : (bits & 4) !== 0 ? 3 : (bits & 2) !== 0 ? 2 : 1;
   entity.model = `progs/end${number}.mdl`; entity.solid = "trigger"; entity.movement = "toss";
   game.setBounds(entity, { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
@@ -57,6 +62,9 @@ function shooterFire(game: Q1Foundation, entity: Q1Actor): undefined {
 function shooter(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.fields.set("killstring", "$qc_ks_spiked");
   entity.movedir = moveDirection(game.body(entity).angles, game); game.setBody(entity, { angles: ZERO }); entity.use = game.named.use(entity, "base:shooter_fire");
+  if ((entity.spawnflags & 2) !== 0) {
+    if (game.usesId1Precaches) game.precacheModel("progs/laser.mdl"); if (game.usesId1Precaches) game.precacheSound("enforcer/enfire.wav"); if (game.usesId1Precaches) game.precacheSound("enforcer/enfstop.wav");
+  } else if (game.usesId1Precaches) game.precacheSound("weapons/spike2.wav");
   if (entity.classname === "trap_spikeshooter") return undefined;
   entity.wait ||= 1; return later(game, entity, entity.number("nextthink") + entity.wait, "base:shooter_think");
 }
@@ -144,22 +152,26 @@ export function spawnRemainingMapActor(base: Q1Base, entity: Q1Actor): undefined
     }
     case "func_illusionary": game.setBody(entity, { angles: ZERO }); entity.solid = "none"; entity.movement = "none"; return undefined;
     case "trigger_setskill": initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:setskill_touch"); return undefined;
-    case "trigger_onlyregistered": initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:registered_touch"); return undefined;
+    case "trigger_onlyregistered": if (game.usesId1Precaches) game.precacheSound("misc/talk.wav"); initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:registered_touch"); return undefined;
     case "trigger_monsterjump": if (game.body(entity).angles.y === 0) game.setBody(entity, { angles: { x: 0, y: 360, z: 0 } }); initTrigger(game, entity); entity.speed ||= 200; entity.touch = game.named.touch(entity, "base:monsterjump_touch"); return undefined;
     case "trap_spikeshooter": case "trap_shooter": return shooter(game, entity);
-    case "misc_fireball": entity.classname = "fireball"; entity.fields.set("killstring", "$qc_ks_lavaball"); entity.speed ||= 1000; return later(game, entity, game.host.random() * 5, "base:fireball_fly");
-    case "air_bubbles": return game.options.deathmatch !== 0 ? game.remove(entity) : later(game, entity, 1, "base:make_bubbles");
-    case "light_globe": entity.model = "progs/s_light.spr"; return undefined;
+    case "misc_fireball": if (game.usesId1Precaches) game.precacheModel("progs/lavaball.mdl"); entity.classname = "fireball"; entity.fields.set("killstring", "$qc_ks_lavaball"); entity.speed ||= 1000; return later(game, entity, game.host.random() * 5, "base:fireball_fly");
+    case "air_bubbles": if (game.options.deathmatch !== 0) return game.remove(entity); if (game.usesId1Precaches) game.precacheModel("progs/s_bubble.spr"); return later(game, entity, 1, "base:make_bubbles");
+    case "light_globe": if (game.usesId1Precaches) game.precacheModel("progs/s_light.spr"); entity.model = "progs/s_light.spr"; return undefined;
     case "light_torch_small_walltorch": case "light_flame_large_yellow": case "light_flame_small_yellow": case "light_flame_small_white":
       entity.model = entity.classname === "light_torch_small_walltorch" ? "progs/flame.mdl" : "progs/flame2.mdl"; entity.frame = entity.classname === "light_flame_large_yellow" ? 1 : 0;
+      if (game.usesId1Precaches) game.precacheModel(entity.model); if (game.usesId1Precaches) game.precacheSound("ambience/fire1.wav");
       return game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
     case "ambient_suck_wind": case "ambient_flouro_buzz": case "ambient_drip": case "ambient_thunder": case "ambient_light_buzz": case "ambient_swamp1": case "ambient_swamp2": {
       const name = entity.classname;
       const path = name === "ambient_suck_wind" ? "suck1" : name === "ambient_flouro_buzz" ? "buzz1" : name === "ambient_drip" ? "drip1" : name === "ambient_thunder" ? "thunder1" : name === "ambient_light_buzz" ? "fl_hum1" : name === "ambient_swamp1" ? "swamp1" : "swamp2";
+      if (game.usesId1Precaches) game.precacheSound(`ambience/${path}.wav`);
       return game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: `ambience/${path}.wav`, volume: name === "ambient_suck_wind" || name === "ambient_flouro_buzz" ? 1 : 0.5, attenuation: 3 });
     }
-    case "viewthing": entity.model = "progs/player.mdl"; return undefined;
-    case "misc_noisemaker": return later(game, entity, 0.1 + game.host.random(), "base:noisemaker");
+    case "viewthing": if (game.usesId1Precaches) game.precacheModel("progs/player.mdl"); entity.model = "progs/player.mdl"; return undefined;
+    case "misc_noisemaker":
+      for (const path of ["enfire", "enfstop", "sight1", "sight2", "sight3", "sight4", "pain1", "pain2", "death1", "idle1"]) if (game.usesId1Precaches) game.precacheSound(`enforcer/${path}.wav`);
+      return later(game, entity, 0.1 + game.host.random(), "base:noisemaker");
     default: throw new Error(`Unknown base Q1 map class ${entity.classname}`);
   }
 }

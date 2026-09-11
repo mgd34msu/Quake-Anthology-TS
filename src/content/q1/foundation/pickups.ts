@@ -100,6 +100,34 @@ function rank(weapon: Q1Weapon): number {
 }
 export function spawnPickup(game: Q1Foundation, entity: Q1Actor): boolean {
   const definition = pickupDefinition(game, entity); if (definition === null) return false;
+  if (game.usesId1Precaches) {
+    if (entity.classname === "item_weapon") {
+      const size = (entity.spawnflags & 8) !== 0 ? 1 : 0;
+      if ((entity.spawnflags & 1) !== 0) game.precacheModel(`maps/b_shell${size}.bsp`);
+      if ((entity.spawnflags & 4) !== 0) game.precacheModel(`maps/b_nail${size}.bsp`);
+      if ((entity.spawnflags & 2) !== 0) game.precacheModel(`maps/b_rock${size}.bsp`);
+    } else if (entity.classname !== "item_backpack") {
+      game.precacheModel(definition.model);
+    }
+    if (entity.classname === "item_health" || entity.classname === "item_key1" || entity.classname === "item_key2") {
+      game.precacheSound(definition.sound);
+    } else if (entity.classname === "item_artifact_invulnerability") {
+      game.precacheSound("items/protect.wav");
+      game.precacheSound("items/protect2.wav");
+      game.precacheSound("items/protect3.wav");
+    } else if (entity.classname === "item_artifact_envirosuit") {
+      game.precacheSound("items/suit.wav");
+      game.precacheSound("items/suit2.wav");
+    } else if (entity.classname === "item_artifact_invisibility") {
+      game.precacheSound("items/inv1.wav");
+      game.precacheSound("items/inv2.wav");
+      game.precacheSound("items/inv3.wav");
+    } else if (entity.classname === "item_artifact_super_damage") {
+      game.precacheSound("items/damage.wav");
+      game.precacheSound("items/damage2.wav");
+      game.precacheSound("items/damage3.wav");
+    }
+  }
   entity.model = definition.model; entity.originalModel = entity.model; entity.skin = definition.skin;
   entity.solid = "none"; entity.movement = "none";
   game.setBounds(entity, definition.bounds === "box" ? { min: ZERO, max: { x: 32, y: 32, z: 56 } } : definition.bounds === "weapon" ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } } : { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -9,12 +9,12 @@ import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { Q1MonsterMovement } from "../../../src/movement/q1/monsters.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
-import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
+import { readQ1Bsp, parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import type { Q1Map } from "../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
 import { PLAYER_BOUNDS, ZERO, vadd } from "../../../src/content/q1/foundation/types.ts";
-import { registerQ1Base, Q1CharacterActor, Q1CampaignState, captureQ1Travel, admitQ1Travel, newQ1Travel, baseSpecies, BaseMonster, q1Obituary, dropBackpack } from "../../../src/content/q1/base/index.ts";
+import { registerQ1Base, Q1CharacterActor, Q1CampaignState, captureQ1Travel, admitQ1Travel, newQ1Travel, q1Obituary, dropBackpack } from "../../../src/content/q1/base/index.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/index.ts";
 import { monsterFrames } from "../../../src/content/q1/base/frames.ts";
 import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/index.ts";
@@ -35,7 +35,7 @@ interface SavedBaseWorld {
   readonly combat: readonly import("../../../src/contracts/session.ts").CombatCheckpoint[];
   readonly inventories: readonly import("../../../src/contracts/session.ts").InventoryCheckpoint[];
 }
-function createGame(map: Q1Map, saved?: SavedBaseWorld) {
+function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0) {
   const identities = createIdentityOwner("q1-base-smoke");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
@@ -69,7 +69,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld) {
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
   };
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
+  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", precacheProgram: "id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const campaign = new Q1CampaignState(), base = registerQ1Base(game, { campaign });
   let report: import("../../../src/content/q1/foundation/index.ts").Q1SpawnReport | null = null, player: OwnedActor;
@@ -103,9 +103,10 @@ test.skipIf(!existsSync(archivePath))("real base maps register bosses, monsters,
 });
 
 test.skipIf(!existsSync(archivePath))("zombie recovery and gib death use shared combat state", async () => {
-  const { game, base, actors, combat, player } = createGame(await readMap("e1m7"));
-  const spec = baseSpecies.find(candidate => candidate.species === "zombie"); if (spec === undefined) throw new Error("Missing zombie provider");
-  const entity = game.create("monster_zombie"), monster = new BaseMonster(game, entity, spec, base); base.monsters.set(entity.actor, monster); monster.spawn(); entity.damageable = true;
+  const map = await readMap("e1m7"), source = parseQ1Entities('{ "classname" "monster_zombie" "targetname" "recovery_test" }');
+  const { game, base, actors, combat, player } = createGame({ ...map, entityList: [...map.entityList, ...source] });
+  const entity = game.find("recovery_test")[0], monster = entity === undefined ? undefined : base.monsters.get(entity.actor);
+  if (entity === undefined || monster === undefined) throw new Error("Missing source-spawned zombie"); entity.damageable = true;
   game.damage(entity.actor.id, player.id, player.id, 10); expect(combat.read(entity.actor.id)?.health).toBe(60);
   game.damage(entity.actor.id, player.id, player.id, 25); expect(monster.currentFrame).toBe("zombie_paine1");
   const before = game.killedMonsters; game.damage(entity.actor.id, player.id, player.id, 100);
@@ -144,6 +145,10 @@ test.skipIf(!existsSync(archivePath))("actual Shub finale resumes named source s
     inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
   };
   const restored = createGame(map, saved); expect(restored.report).toBe(null); expect(restored.events).toHaveLength(0); expect(restored.game.capture()).toEqual(source);
+  expect(restored.game.precaches.models).toEqual(game.precaches.models); expect(restored.game.precaches.sounds).toEqual(game.precaches.sounds);
+  expect(restored.game.precaches.phase).toBe("frozen");
+  expect(() => restored.game.precacheModel("progs/oldone.mdl")).toThrow("spawn functions");
+  expect(() => restored.game.precacheSound("boss2/death.wav")).toThrow("spawn functions");
   for (const current of [original, restored]) {
     const timer = [...current.game.entities.values()].find(entity => entity.classname === "finale_timer"); if (timer === undefined) throw new Error("Missing saved finale timer");
     for (const seconds of [1, 3]) current.game.host.callbacks.think(timer.actor, { frame: 0, time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
@@ -168,4 +173,35 @@ test.skipIf(!existsSync(archivePath))("source episode exit and classic versus re
   expect(base.levelRules.requestExit(2, true)).toEqual({ kind: "finale", text: "$qc_finale_e1", track: 2 });
   campaign.writeFlags(15); expect(base.levelRules.requestExit(3, true)).toEqual({ kind: "finale", text: "$qc_finale_all_runes", track: 2 });
   expect(base.levelRules.requestExit(4, true)).toEqual({ kind: "travel", map: "start" }); expect(game.intermission).toBe(null); actors.close();
+});
+
+
+test.skipIf(!existsSync(archivePath))("id1 monster precaches match native spawn declaration order and inhibition", async () => {
+  const map = await readMap("e1m1"), world = parseQ1Entities('{ "classname" "worldspawn" }');
+  const baseline = createGame({ ...map, entityList: world }), models = [...baseline.game.precaches.models], sounds = [...baseline.game.precaches.sounds]; baseline.actors.close();
+  for (const [classname, file] of [["monster_army", "soldier"], ["monster_dog", "dog"], ["monster_knight", "knight"], ["monster_enforcer", "enforcer"], ["monster_demon1", "demon"], ["monster_ogre", "ogre"], ["monster_ogre_marksman", "ogre"], ["monster_hell_knight", "hknight"], ["monster_shambler", "shambler"], ["monster_wizard", "wizard"], ["monster_shalrath", "shalrath"], ["monster_tarbaby", "tarbaby"], ["monster_fish", "fish"], ["monster_zombie", "zombie"], ["monster_boss", "boss"], ["monster_oldone", "oldone"]] satisfies [string, string][]) {
+    const source = readFileSync(`/home/buzzkill/Projects/qsrc/quake/progs106/${file}.qc`, "utf8"), spawn = source.search(/void\(\)\s+monster_\w+\s*=\s*\{/);
+    expect(spawn).toBeGreaterThanOrEqual(0);
+    const declarations = [...source.slice(spawn).matchAll(/precache_(model|sound)2?\s*\(\s*"([^"]+)"\s*\)/g)];
+    const expected = (kind: string, initial: readonly string[]): readonly string[] => [...new Set([...initial, ...declarations.flatMap(match => match[1] === kind && match[2] !== undefined ? [match[2]] : [])])];
+    for (const flags of classname === "monster_zombie" ? [0, 1] : [0]) {
+      const entities = [...world, ...parseQ1Entities(`{ "classname" "${classname}" "spawnflags" "${flags}" }`)];
+      const state = createGame({ ...map, entityList: entities });
+      try {
+        expect(state.game.precaches.models).toEqual(expected("model", models)); expect(state.game.precaches.sounds).toEqual(expected("sound", sounds));
+        const total = state.game.totalMonsters, removed = state.game.create(classname); state.game.spawnEntity(removed, { deathmatch: 1 });
+        expect(state.game.live(removed)).toBe(false); expect(state.game.totalMonsters).toBe(total);
+        expect(() => state.game.precacheModel(expected("model", models)[1] ?? "progs/player.mdl")).toThrow("spawn functions");
+      } finally { state.actors.close(); }
+      const inhibited = createGame({ ...map, entityList: entities }, undefined, 1);
+      try { expect(inhibited.game.precaches.models).toEqual(models); expect(inhibited.game.precaches.sounds).toEqual(sounds); } finally { inhibited.actors.close(); }
+    }
+  }
+  for (const name of ["e1m1", "e1m2"]) {
+    const state = createGame(await readMap(name));
+    try {
+      expect(state.game.precaches.models).toContain("progs/soldier.mdl"); expect(state.game.precaches.models).toContain("progs/h_guard.mdl");
+      expect(state.game.precaches.sounds).toContain("soldier/sattck1.wav"); expect(state.game.precaches.phase).toBe("frozen");
+    } finally { state.actors.close(); }
+  }
 });

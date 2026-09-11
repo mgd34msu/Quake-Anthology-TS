@@ -35,6 +35,10 @@ function doorUse(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null)
   return undefined;
 }
 export function spawnDoor(game: Q1Foundation, entity: Q1Actor): undefined {
+  const keySounds = game.worldType === 0 ? ["doors/medtry.wav", "doors/meduse.wav"] : game.worldType === 1 ? ["doors/runetry.wav", "doors/runeuse.wav"] : game.worldType === 2 ? ["doors/basetry.wav", "doors/baseuse.wav"] : [];
+  for (const path of keySounds) if (game.usesId1Precaches) game.precacheSound(path);
+  const sounds = [["misc/null.wav", "misc/null.wav"], ["doors/drclos4.wav", "doors/doormv1.wav"], ["doors/hydro1.wav", "doors/hydro2.wav"], ["doors/stndr1.wav", "doors/stndr2.wav"], ["doors/ddoor1.wav", "doors/ddoor2.wav"]][entity.sounds] ?? [];
+  for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
   const body = game.body(entity); entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
   entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 100; entity.wait ||= 3; entity.damage ||= 2;
   if ((entity.spawnflags & 24) !== 0) entity.wait = -1;
@@ -78,6 +82,8 @@ export function linkDoors(game: Q1Foundation): undefined {
   return undefined;
 }
 export function spawnButton(game: Q1Foundation, entity: Q1Actor): undefined {
+  const sound = ["buttons/airbut1.wav", "buttons/switch21.wav", "buttons/switch02.wav", "buttons/switch04.wav"][entity.sounds];
+  if (game.usesId1Precaches && (sound !== undefined)) game.precacheSound(sound);
   const body = game.body(entity); entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 40; entity.wait ||= 1;
   entity.movedir = moveDirection(body.angles, game); game.setBody(entity, { angles: ZERO });
   entity.pos1 = body.origin;
@@ -88,6 +94,8 @@ export function spawnButton(game: Q1Foundation, entity: Q1Actor): undefined {
   return undefined;
 }
 export function spawnSecretDoor(game: Q1Foundation, entity: Q1Actor): undefined {
+  const sounds = entity.sounds === 1 ? ["doors/latch2.wav", "doors/winch2.wav", "doors/drclos4.wav"] : entity.sounds === 2 ? ["doors/airdoor1.wav", "doors/airdoor2.wav"] : entity.sounds === 0 || entity.sounds === 3 ? ["doors/basesec1.wav", "doors/basesec2.wav"] : [];
+  for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
   const body = game.body(entity); entity.mangle = body.angles; game.setBody(entity, { angles: ZERO });
   entity.solid = "bsp"; entity.movement = "push"; entity.speed = 50; entity.wait ||= 5; entity.damage ||= 2;
   entity.pos1 = body.origin; entity.sounds ||= 3;
@@ -97,6 +105,8 @@ export function spawnSecretDoor(game: Q1Foundation, entity: Q1Actor): undefined 
   return undefined;
 }
 export function spawnPlat(game: Q1Foundation, entity: Q1Actor): undefined {
+  const sounds = entity.sounds === 1 ? ["plats/plat1.wav", "plats/plat2.wav"] : entity.sounds === 0 || entity.sounds === 2 ? ["plats/medplat1.wav", "plats/medplat2.wav"] : [];
+  for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
   const body = game.body(entity), size = vsub(body.bounds.max, body.bounds.min);
   entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 150; entity.pos1 = body.origin;
   entity.pos2 = vadd(body.origin, { x: 0, y: 0, z: -(entity.number("height") || size.z - 8) });

@@ -126,7 +126,14 @@ export class SimulationEvents {
   private q1(content: ContentId, event: Q1Event): undefined {
     if (event.kind === "sound") {
       const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
-      this.sound(content, event.path, event.actor, this.bodies.read(event.actor)?.origin ?? zero, channel, event.volume, event.attenuation);
+      const body = this.bodies.read(event.actor);
+      // SV_StartSound captures origin + 0.5 * (mins + maxs) before the source edict can move or disappear.
+      const center = body === null ? zero : {
+        x: Math.fround(body.origin.x + Math.fround(body.bounds.min.x + body.bounds.max.x) * 0.5),
+        y: Math.fround(body.origin.y + Math.fround(body.bounds.min.y + body.bounds.max.y) * 0.5),
+        z: Math.fround(body.origin.z + Math.fround(body.bounds.min.z + body.bounds.max.z) * 0.5),
+      };
+      this.sound(content, event.path, event.actor, center, channel, event.volume, event.attenuation);
     } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation);
     else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player);
     else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q1", pattern: event.pattern });

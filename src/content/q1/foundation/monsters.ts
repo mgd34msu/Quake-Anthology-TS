@@ -161,6 +161,31 @@ function gib(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): undefined
 }
 export function spawnMonster(game: Q1Foundation, entity: Q1Actor): undefined {
   const species = entity.classname === "monster_army" ? "army" : "dog";
+  if (game.usesId1Precaches) {
+    if (game.options.deathmatch !== 0) return game.remove(entity);
+    if (species === "army") {
+      game.precacheModel("progs/soldier.mdl");
+      game.precacheModel("progs/h_guard.mdl");
+      game.precacheModel("progs/gib1.mdl");
+      game.precacheModel("progs/gib2.mdl");
+      game.precacheModel("progs/gib3.mdl");
+      game.precacheSound("soldier/death1.wav");
+      game.precacheSound("soldier/idle.wav");
+      game.precacheSound("soldier/pain1.wav");
+      game.precacheSound("soldier/pain2.wav");
+      game.precacheSound("soldier/sattck1.wav");
+      game.precacheSound("soldier/sight1.wav");
+      game.precacheSound("player/udeath.wav");
+    } else {
+      game.precacheModel("progs/h_dog.mdl");
+      game.precacheModel("progs/dog.mdl");
+      game.precacheSound("dog/dattack1.wav");
+      game.precacheSound("dog/ddeath.wav");
+      game.precacheSound("dog/dpain1.wav");
+      game.precacheSound("dog/dsight.wav");
+      game.precacheSound("dog/idle.wav");
+    }
+  }
   const monster: Q1Monster = { species, mode: "stand", frameIndex: 0, sequence: [], firstFrame: 0, enemy: null, oldEnemy: null, path: entity.target,
     pauseUntil: 0, attackFinished: 0, painFinished: 0, searchUntil: 0, deathDrop: false, refired: false };
   entity.monster = monster; stand(monster); entity.solid = "slidebox"; entity.movement = "step"; entity.aimedDamage = true;

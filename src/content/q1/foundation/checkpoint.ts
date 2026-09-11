@@ -4,7 +4,7 @@ import type { SavedActorId } from "../../../contracts/session.ts";
 import { Q1Actor } from "./entity.ts";
 import type { Q1Monster } from "./entity.ts";
 import type { Q1Foundation } from "./runtime.ts";
-import type { Q1PlayerState, Q1Powerup } from "./types.ts";
+import type { Q1PlayerState, Q1Powerup, Q1PrecacheTables } from "./types.ts";
 import { Q1_PROVIDER } from "./types.ts";
 import { callbackName } from "./callbacks.ts";
 
@@ -39,7 +39,8 @@ export interface Q1SavedPlayer {
 }
 export interface Q1FoundationCheckpoint {
   readonly format: "q1-foundation";
-  readonly version: 1;
+  readonly version: 2;
+  readonly precaches: Q1PrecacheTables;
   readonly edition: "classic" | "rerelease";
   readonly time: number;
   readonly frameSeconds: number;
@@ -97,7 +98,8 @@ function saveEntity(game: Q1Foundation, entity: Q1Actor): Q1SavedEntity {
 }
 export function captureFoundation(game: Q1Foundation, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
   return {
-    format: "q1-foundation", version: 1, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
+    format: "q1-foundation", version: 2,
+    precaches: { phase: game.precaches.phase, models: [...game.precaches.models], sounds: [...game.precaches.sounds] }, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
     totalSecrets: game.totalSecrets, foundSecrets: game.foundSecrets, totalMonsters: game.totalMonsters, killedMonsters: game.killedMonsters,
     worldType: game.worldType, mapName: game.mapName, world: game.world === null ? null : savedOwned(game.world.actor),
     sightEntity: game.sightEntity === null ? null : savedOwned(game.sightEntity.actor), sightTime: game.sightTime,
@@ -113,8 +115,9 @@ export function captureFoundation(game: Q1Foundation, sequence: number, nextDyna
 
 /** Restores source objects around existing authority tables. It never runs a spawn function. */
 export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCheckpoint): undefined {
-  if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 1 || checkpoint.edition !== game.options.edition) throw new Error("Incompatible Q1 source checkpoint");
+  if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 2 || checkpoint.edition !== game.options.edition) throw new Error("Incompatible Q1 source checkpoint");
   if (game.entities.size !== 0 || game.players.size !== 0) throw new Error("Restore Q1 source state into a fresh provider");
+  game.precaches.restore(checkpoint.precaches);
   const owned = (saved: SavedActorId): OwnedActor => {
     const actor = game.host.actors.resolveSaved(saved); if (actor === null) throw new Error(`Missing restored Q1 actor ${saved.slot}/${saved.generation}`); return actor;
   };

@@ -21,12 +21,21 @@ for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpu
       const { actor } = simulation.admitPlayer(identity.client(0, 1));
       const player = simulation.movementPlayer(actor);
       if (player === null) throw new Error("Admitted player missing");
+      const initialNavigation = navigation.forClient(0);
+      simulation.setWorldGravity(420);
+      const changedNavigation = navigation.forClient(0);
+      expect(changedNavigation).not.toBe(initialNavigation);
+      expect(navigation.forClient(0)).toBe(changedNavigation);
+      const sourcePlayer = simulation.q3Source()?.pool.at(0).client?.ps;
+      const sourceBefore = sourcePlayer?.copy();
+      const combatBefore = simulation.combat.read(actor), inventoryBefore = simulation.inventory.entries(actor);
+      const arsenalBefore = JSON.stringify(player.arsenal);
       const before = JSON.stringify(player.state), body = simulation.bodies.read(actor), origin = player.view().origin;
       const result = navigation.predictClientMovement({ entityNum: 0, origin, presence: 2, onGround: true,
         velocity: { x: 0, y: 0, z: 0 }, commandMove: { x: 400, y: 0, z: 0 }, commandFrames: 8, maxFrames: 8,
         frameTime: 0.016, stopEvents: 0, stopArea: 0, visualize: false });
-      expect(JSON.stringify(player.state)).toBe(before);
-      expect(simulation.bodies.read(actor)).toEqual(body);
+      const selected = navigation.forClient(0).graph.profile.movement;
+      if (selected.kind === "q1-netquake" || selected.kind === "q1-quakeworld") expect(selected.parameters.gravity).toBe(player.worldGravity);
       expect(navigation.runtime.graph.asset?.kind).toBe("aas");
       expect(navigation.runtime.graph.asset?.kind === "aas" && navigation.runtime.graph.asset.vertices.length).toBe(0);
       expect(navigation.runtime.graph.nodes.length).toBeGreaterThan(100);
@@ -34,6 +43,12 @@ for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpu
       expect(result.end).not.toEqual(origin);
       expect(navigation.forClient(0).world.passActor?.equals(actor)).toBe(true);
       expect(navigation.forClient(0).route({ start: origin, goal: result.end }).kind).toBe("route");
+      expect(JSON.stringify(player.state)).toBe(before);
+      expect(sourcePlayer?.copy()).toEqual(sourceBefore);
+      expect(simulation.bodies.read(actor)).toEqual(body);
+      expect(simulation.combat.read(actor)).toEqual(combatBefore);
+      expect(simulation.inventory.entries(actor)).toEqual(inventoryBefore);
+      expect(JSON.stringify(player.arsenal)).toBe(arsenalBefore);
       if (movement === "q3") {
         const source = simulation.q3Source();
         if (source === null) throw new Error("Retail Q3 source missing");

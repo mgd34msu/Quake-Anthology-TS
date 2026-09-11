@@ -7,6 +7,7 @@ import type { Q1CombatContext, Q1DamageSourceEffects } from "../../../world/game
 import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity, Q1Map } from "../../../formats/q1-map/index.ts";
 import { q1EntityValue } from "../../../formats/q1-map/index.ts";
+import { Q1PrecacheRegistry } from "./precache.ts";
 import { Q1Actor, sourceAngles } from "./entity.ts";
 import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
 import { Q1_PROVIDER, ZERO, POINT, vadd, vsub, vscale, dot, length, normalize, WEAPONS, weaponItem, isQ1BaseWeapon, vectors } from "./types.ts";
@@ -32,6 +33,10 @@ export interface Q1SpawnReport {
 /** Official Q1 behavior runs inside the shared session, using its bodies, scheduling and mutations. */
 export class Q1Foundation {
   readonly named = new Q1CallbackRegistry(this);
+  readonly precaches = new Q1PrecacheRegistry();
+  get usesId1Precaches(): boolean { return this.options.precacheProgram === "id1"; }
+  precacheModel(path: string): string { return this.precaches.model(path); }
+  precacheSound(path: string): string { return this.precaches.sound(path); }
   private baseTeamHealth = true;
   private readonly pathTouches = new Map<string, (corner: Q1Actor, mover: Q1Actor) => boolean>();
   private readonly sourceDamageEffects = new Map<string, Q1DamageSourceEffects>();
@@ -199,6 +204,7 @@ export class Q1Foundation {
   spawnMap(map: Q1Map): Q1SpawnReport {
     if (this.entities.size > 0) throw new Error("Q1 map entities already spawned");
     this.mapName = map.source.replace(/^.*[/\\]/u, "").replace(/\.bsp$/u, "");
+    this.precaches.beginWorld(`maps/${this.mapName}.bsp`, map.models.length - 1);
     this.nextDynamicSlot = (this.options.maxClients ?? 0) + map.entityList.length;
     const inhibited: { ordinal: number; classname: string; reason: string }[] = [];
     const compilerOnly: { ordinal: number; classname: string }[] = [];
@@ -220,6 +226,7 @@ export class Q1Foundation {
       this.spawnEntity(actor);
     }
     linkDoors(this);
+    this.precaches.freeze();
     return { spawned: this.presentations(), inhibited, compilerOnly };
   }
   spawnEntity(entity: Q1Actor, context: { readonly deathmatch?: number } = {}): undefined {

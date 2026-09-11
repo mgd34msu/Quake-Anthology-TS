@@ -55,6 +55,13 @@ export type Q1Event =
   | { readonly kind: "finale"; readonly text: string; readonly stage: 1 | 2 | 3 | 4 | 5 | 6 }
   | { readonly kind: "achievement"; readonly player: ActorId | null; readonly id: string };
 
+export interface Q1PrecacheTables {
+  readonly phase: "loading" | "frozen";
+  /** Slot zero is the source empty string; world and inline models precede game declarations. */
+  readonly models: readonly string[];
+  readonly sounds: readonly string[];
+}
+
 /** Engine builtins operate on the same actor/body/combat tables used by every game. */
 export interface Q1FoundationHost {
   readonly actors: SessionActorRegistry;
@@ -88,6 +95,8 @@ export interface Q1FoundationHost {
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
 }
 export interface Q1FoundationOptions {
+  /** Only the declared source program can opt into its covered native precache calls. */
+  readonly precacheProgram?: "id1";
   readonly edition: "classic" | "rerelease";
   readonly skill: 0 | 1 | 2 | 3;
   readonly deathmatch: number;

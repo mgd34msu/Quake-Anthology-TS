@@ -5,7 +5,6 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { SharedSimulation } from './runtime.ts';
 import type { Q1ApplicationPlayer, Q1ApplicationServerHost, Q1ApplicationMessage } from '../network/q1-types.ts';
-import { Q1_ID1_MODELS, Q1_ID1_SOUNDS } from '../network/q1-effects.ts';
 import type { SimulationPresentationEvent } from './types.ts';
 import type { SimulationOutput } from '../../../contracts/session.ts';
 import { WEAPONS } from '../../../content/q1/foundation/types.ts';
@@ -21,24 +20,20 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
     if (source === null)
         throw new Error('Q1 network requires the Q1 source game');
     const game = source.game, maxClients = game.options.maxClients ?? 1, clients = new Map<number, Q1ApplicationPlayer>();
-    const models = new Map<string, number>(), sounds = new Map<string, number>(), soundResources = new Map<string, ResourceId>();
+    if (!game.usesId1Precaches || game.options.edition !== 'classic' || source.composition.selection.program !== 'id1')
+        throw new Error('Native ordered Q1 precaches currently require classic id1 source declarations');
+    if (game.precaches.phase !== 'frozen') throw new Error('Q1 source precaches are still loading');
+    if (game.precaches.models.length > 256 || game.precaches.sounds.length > 256) throw new Error('NetQuake 15 precache overflow');
+    const models = new Map(game.precaches.models.slice(1).map((path, ordinal) => [path, ordinal + 1]));
+    const sounds = new Map(game.precaches.sounds.slice(1).map((path, ordinal) => [path, ordinal + 1]));
+    const soundResources = new Map<string, ResourceId>();
     const mounts = await options.content.forContent(simulation.recipe.map.entities.content);
-    const add = (path: string, table: Map<string, number>): void => { if (path === '' || table.has(path))
-        return; if (table.size >= 255)
-        throw new Error('NetQuake 15 precache overflow'); table.set(path, table.size + 1); };
-    add(options.content.recipe.map.geometry.requestedPath, models);
-    for (const entity of game.entities.values())
-        add(entity.model, models);
-    for (const path of Q1_ID1_MODELS)
-        add(path, models);
     for (const path of models.keys())
         if (!path.startsWith('*') && await mounts.resolve(path) === null)
             throw new Error(`Q1 model precache resource is missing: ${path}`);
-    for (const path of Q1_ID1_SOUNDS) {
+    for (const path of sounds.keys()) {
         const resource = await mounts.resolve(`sound/${path}`);
-        if (resource === null)
-            throw new Error(`Q1 sound precache resource is missing: ${path}`);
-        add(path, sounds);
+        if (resource === null) throw new Error(`Q1 sound precache resource is missing: ${path}`);
         soundResources.set(path, resource.id);
         simulation.registerResource(simulation.recipe.map.entities.content, `sound/${path}`, resource);
     }
@@ -137,18 +132,16 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
                         options.print(`SV_StartSound: ${event.path} not precached\n`);
                         break;
                     }
-                    const body = simulation.bodies.read(event.actor);
                     const channel = typeof event.channel === 'number' ? event.channel : { auto: 0, weapon: 1, voice: 2, item: 3, body: 4 }[event.channel];
                     const captureIndex = capturedSounds.findIndex(value => value.actor?.equals(event.actor) && value.channel === channel && value.resource === soundResources.get(event.path));
                     const captured = captureIndex < 0 ? undefined : capturedSounds.splice(captureIndex, 1)[0];
-                    const origin = captured?.origin ?? body?.origin;
+                    const origin = captured?.origin;
                     const sourceEntity = record.sourceEntity ?? simulation.actors.sourceOf(event.actor)?.slot;
                     if (origin === undefined || sourceEntity === undefined) {
-                        options.print(`Q1 sound actor was removed without a captured origin: ${event.path}\n`);
+                        options.print(`Q1 sound has no emission-time origin: ${event.path}\n`);
                         break;
                     }
-                    const center = body === null ? origin : { x: origin.x + (body.bounds.min.x + body.bounds.max.x) * 0.5, y: origin.y + (body.bounds.min.y + body.bounds.max.y) * 0.5, z: origin.z + (body.bounds.min.z + body.bounds.max.z) * 0.5 };
-                    send({ kind: 'sound', entity: sourceEntity, channel, index: sound, volume: Math.trunc(event.volume * 255), attenuation: event.attenuation, origin: center });
+                    send({ kind: 'sound', entity: sourceEntity, channel, index: sound, volume: Math.trunc(event.volume * 255), attenuation: event.attenuation, origin });
                     break;
                 }
                 case 'ambient': break;

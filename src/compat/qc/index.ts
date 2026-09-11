@@ -15,3 +15,5 @@ export { createQcActorBindings, createQcSourceSlotStorage } from "./entity-host.
 export type { QcEdictMetadataLayout } from "./entity-host.ts";
 export { QcWorldHost, qcLinkBounds } from "./world-host.ts";
 export type { QcWorldHostOptions } from "./world-host.ts";
+export { createQcPresentationBindings } from "./presentation-host.ts";
+export type { QcPresentationServices, QcPresentationEvent, QcPrecachedResource } from "./presentation-host.ts";
