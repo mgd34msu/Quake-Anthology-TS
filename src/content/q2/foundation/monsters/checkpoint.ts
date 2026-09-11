@@ -7,7 +7,7 @@ import type { MonsterState } from "./types.ts";
 export interface Q2MonsterStateCheckpoint extends Omit<MonsterState, "move" | "nextMove" | "soundTarget" | "oldEnemy" | "moveTarget" | "commander"> {
   readonly move: string;
   readonly nextMove: string | null;
-  readonly soundTarget: { readonly actor: SavedActorId; readonly origin: Vec3; readonly time: number } | null;
+  readonly soundTarget: { readonly actor: SavedActorId; readonly owner: SavedActorId; readonly origin: Vec3; readonly time: number } | null;
   readonly oldEnemy: SavedActorId | null;
   readonly moveTarget: SavedActorId | null;
   readonly commander: SavedActorId | null;

@@ -92,7 +92,7 @@ export interface MonsterState extends Q2AlternateFlyState {
   pursuitLastSeen: boolean;
   blindFireTarget: Vec3;
   blindFireDelay: number;
-  soundTarget: { readonly actor: ActorId; readonly origin: Vec3; readonly time: number } | null;
+  soundTarget: { readonly actor: ActorId; readonly owner: ActorId; readonly origin: Vec3; readonly time: number } | null;
   oldEnemy: ActorId | null;
   moveTarget: ActorId | null;
   combatTarget: string;

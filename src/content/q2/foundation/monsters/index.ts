@@ -185,7 +185,7 @@ export class Q2Monsters implements Q2SpawnModule {
       const pending = this.pendingDamage.get(entity.actor.id);
       return { actor: { slot: entity.actor.id.slot, generation: entity.actor.id.generation }, definition: definition.classname,
         state: { ...structuredClone(values), move: move.name, nextMove: nextMove?.name ?? null,
-          soundTarget: soundTarget === null ? null : { ...soundTarget, origin: { ...soundTarget.origin }, actor: { slot: soundTarget.actor.slot, generation: soundTarget.actor.generation } },
+          soundTarget: soundTarget === null ? null : { ...soundTarget, origin: { ...soundTarget.origin }, actor: { slot: soundTarget.actor.slot, generation: soundTarget.actor.generation }, owner: { slot: soundTarget.owner.slot, generation: soundTarget.owner.generation } },
           oldEnemy: saveQ2Actor(oldEnemy), moveTarget: saveQ2Actor(moveTarget), commander: saveQ2Actor(commander) },
         pendingDamage: pending === undefined ? null : { reaction: { damage: pending.reaction.damage, kick: pending.reaction.kick, point: { ...pending.reaction.point },
           attacker: saveQ2Actor(pending.reaction.attacker), inflictor: saveQ2Actor(pending.reaction.inflictor) },
@@ -208,7 +208,7 @@ export class Q2Monsters implements Q2SpawnModule {
       };
       const { move, nextMove, soundTarget, oldEnemy, moveTarget, commander, ...values } = saved.state;
       const state: MonsterState = { ...values, move: findMove(move), nextMove: nextMove === null ? null : findMove(nextMove),
-        soundTarget: soundTarget === null ? null : { ...soundTarget, actor: game.host.actors.referenceSaved(soundTarget.actor) },
+        soundTarget: soundTarget === null ? null : { ...soundTarget, actor: game.host.actors.referenceSaved(soundTarget.actor), owner: game.host.actors.referenceSaved(soundTarget.owner) },
         oldEnemy: reference(oldEnemy), moveTarget: reference(moveTarget), commander: reference(commander) };
       this.attachContext(entity, game, definition, state);
       const pending = saved.pendingDamage;
