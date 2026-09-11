@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { SdlWindow, decodeSdlEvent, type SdlInjectedEvent } from "../../src/platform/sdl.ts";
 import { loadGl } from "../../src/platform/gl.ts";
+import { loadGlPrograms } from "../../src/platform/gl-programs.ts";
 import { openPlatform } from "../../src/platform/runtime.ts";
 import { SdlControllers, VirtualSdlController } from "../../src/platform/controller.ts";
 import { SdlAudioDevice } from "../../src/platform/audio.ts";
@@ -177,6 +178,58 @@ describe.skipIf(process.env["QUAKE_PLATFORM_NATIVE_TEST"] !== "1")("native SDL w
       }
       first.close(); second.swap();
     } finally { first.close(); second.close(); }
+  });
+
+  test.skipIf(process.env["SDL_VIDEODRIVER"] !== "x11")("GLSL 120 compiles, links and draws through native client arrays", () => {
+    using window = SdlWindow.open({ title: "GLSL platform smoke", width: 8, height: 8, backend: "gl", hidden: true });
+    const fixed = loadGl(window), programs = loadGlPrograms(window);
+    const api = programs.symbols, gl = fixed.symbols, shaders: number[] = [];
+    let program = 0;
+    const compile = (type: number, source: string): number => {
+      const shader = api.glCreateShader(type);
+      expect(shader).toBeGreaterThan(0);
+      shaders.push(shader);
+      programs.shaderSource(shader, source);
+      Bun.gc(true);
+      api.glCompileShader(shader);
+      const status = new Int32Array(1), length = new Int32Array(1), log = new Uint8Array(1024);
+      api.glGetShaderiv(shader, 0x8b81, status);
+      api.glGetShaderInfoLog(shader, log.length, length, log);
+      if (status[0] !== 1) throw new Error(`GLSL compilation failed: ${new TextDecoder().decode(log)}`);
+      return shader;
+    };
+    try {
+      const vertex = compile(0x8b31, "#version 120\n// café shader source owns UTF-8 bytes\nvoid main() { gl_Position = gl_Vertex; }\n");
+      const fragment = compile(0x8b30, "#version 120\nuniform int mode; uniform float intensity;\nvoid main() { gl_FragColor = mode == 1 ? vec4(0.0, intensity, 0.0, 1.0) : vec4(1.0); }\n");
+      program = api.glCreateProgram();
+      expect(program).toBeGreaterThan(0);
+      api.glAttachShader(program, vertex); api.glAttachShader(program, fragment); api.glLinkProgram(program);
+      const status = new Int32Array(1), length = new Int32Array(1), log = new Uint8Array(1024);
+      api.glGetProgramiv(program, 0x8b82, status);
+      api.glGetProgramInfoLog(program, log.length, length, log);
+      if (status[0] !== 1) throw new Error(`GLSL link failed: ${new TextDecoder().decode(log)}`);
+      api.glUseProgram(program);
+      const mode = api.glGetUniformLocation(program, Buffer.from("mode\0"));
+      const intensity = api.glGetUniformLocation(program, Buffer.from("intensity\0"));
+      expect(mode).toBeGreaterThanOrEqual(0); expect(intensity).toBeGreaterThanOrEqual(0);
+      api.glUniform1i(mode, 1); api.glUniform1f(intensity, 1);
+      gl.glViewport(0, 0, 8, 8);
+      const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
+      gl.glEnableClientState(0x8074); gl.glVertexPointer(2, 0x1406, 0, vertices);
+      gl.glDrawElements(0x0004, 3, 0x1403, new Uint16Array([0, 1, 2]));
+      gl.glDisableClientState(0x8074);
+      const pixels = new Uint8Array(8 * 8 * 4);
+      gl.glReadPixels(0, 0, 8, 8, 0x1908, 0x1401, pixels);
+      expect(gl.glGetError()).toBe(0);
+      expect(pixels).toEqual(Uint8Array.from({ length: pixels.length }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+      window.swap();
+      expect(() => window.close()).toThrow("procedure tables");
+    } finally {
+      api.glUseProgram(0);
+      if (program !== 0) api.glDeleteProgram(program);
+      for (const shader of shaders) api.glDeleteShader(shader);
+      programs.close(); programs.close(); fixed.close();
+    }
   });
 });
 

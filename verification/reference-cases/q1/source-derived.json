@@ -6,7 +6,7 @@
     "measuredOriginalExecution": false,
     "method": "Independently transcribed original-source equations evaluated in TypeScript, compared with fixed hand-derived expected steps."
   },
-  "capturedAt": "2026-09-11T05:41:14.011Z",
+  "capturedAt": "2026-09-11T06:02:32.972Z",
   "command": [
     "/home/buzzkill/.bun/bin/bun",
     "run",
@@ -23,7 +23,7 @@
   "architecture": "x64",
   "environment": {
     "LANG": "en_US.UTF-8",
-    "LC_ALL": "C.UTF-8",
+    "LC_ALL": "C",
     "TZ": null
   },
   "arithmetic": {
@@ -56,13 +56,13 @@
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
-      "size": 14481,
-      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+      "size": 16469,
+      "sha256": "8f8c119454a59f6c1ec11ddbf92ff8ce6a229f44282a505220b21877a1e224e0"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
-      "size": 2876,
-      "sha256": "64c22a0901739fdaa711cdcedf1d824ab1ea5d279421d1a8cf4143ebb255edf4"
+      "size": 4251,
+      "sha256": "f4fd8f8c3687da006d51f1a6a5a9c29d1e0ae493a2f4720d8765de7c0b354247"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/verify/hash.ts",
@@ -71,8 +71,8 @@
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/package.json",
-      "size": 1132,
-      "sha256": "024802203c7a039732a7083474d2850e89b7329658997e2ab7f2e35365af9788"
+      "size": 1284,
+      "sha256": "9380763ee28fd491353f7f01bc67f465d121043b169a3bfd10a73141fb31a157"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/bun.lock",

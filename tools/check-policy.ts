@@ -228,10 +228,13 @@ const glSymbols = new Set([
   "glEnableClientState", "glDisableClientState", "glVertexPointer", "glColorPointer", "glTexCoordPointer", "glDrawElements",
   "glArrayElement", "glGenTextures", "glDeleteTextures", "glBindTexture", "glTexParameteri", "glTexParameterfv",
   "glTexEnvi", "glTexEnvf", "glTexImage2D", "glTexSubImage2D", "glFinish", "glPixelStorei", "glReadPixels",
+  "glCreateShader", "glShaderSource", "glCompileShader", "glGetShaderiv", "glGetShaderInfoLog", "glDeleteShader",
+  "glCreateProgram", "glAttachShader", "glLinkProgram", "glGetProgramiv", "glGetProgramInfoLog", "glDeleteProgram",
+  "glUseProgram", "glGetUniformLocation", "glUniform1i", "glUniform1f",
 ]);
 
 function linkedGlPointer(node: ts.Expression, symbolName: string, checker: ts.TypeChecker, projectRoot: string, projectPath: string): boolean {
-  if (projectPath === "src/platform/gl.ts" && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+  if (["src/platform/gl.ts", "src/platform/gl-programs.ts"].includes(projectPath) && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
     && node.expression.name.text === "getGlProcAddress" && node.arguments.length === 1) {
     const name = node.arguments[0];
     const getter = checker.getSymbolAtLocation(node.expression.name);

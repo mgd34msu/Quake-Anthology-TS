@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "q2-initial-source-derived-contracts",
   "oracleKind": "source-derived",
-  "capturedAt": "2026-09-11T05:42:09.443Z",
+  "capturedAt": "2026-09-11T06:02:33.321Z",
   "captureCommand": [
     "bun",
     "run",
@@ -163,18 +163,18 @@
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
-      "size": 14481,
-      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+      "size": 16469,
+      "sha256": "8f8c119454a59f6c1ec11ddbf92ff8ce6a229f44282a505220b21877a1e224e0"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
-      "size": 4271,
-      "sha256": "608515418999e1eb604ca209b32a31c080faf2ba854bf775c297c1ab09e48835"
+      "size": 4251,
+      "sha256": "f4fd8f8c3687da006d51f1a6a5a9c29d1e0ae493a2f4720d8765de7c0b354247"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/verification/schema/contracts.ts",
-      "size": 6243,
-      "sha256": "b72b5f75f588f54de146dbb299d96d901577ac4ed4cecb8f01ba515a5d8c7519"
+      "size": 6285,
+      "sha256": "df5e7bc90f8032c9fcf3f9332c5fa1e3b7f01c691b9004f5302d12b3b4b9e7b4"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tsconfig.json",

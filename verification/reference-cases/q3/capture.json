@@ -7,9 +7,9 @@
     "tools/reference/q3/capture.ts"
   ],
   "cwd": "/home/buzzkill/Projects/quake-typescript",
-  "startedAt": "2026-09-11T05:39:52.713Z",
-  "finishedAt": "2026-09-11T05:39:52.789Z",
-  "durationMs": 75.569444,
+  "startedAt": "2026-09-11T06:02:33.641Z",
+  "finishedAt": "2026-09-11T06:02:33.719Z",
+  "durationMs": 77.82347099999998,
   "sources": [
     {
       "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/bg_pmove.c",
@@ -80,13 +80,13 @@
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
-      "size": 14481,
-      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+      "size": 16469,
+      "sha256": "8f8c119454a59f6c1ec11ddbf92ff8ce6a229f44282a505220b21877a1e224e0"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
-      "size": 2876,
-      "sha256": "64c22a0901739fdaa711cdcedf1d824ab1ea5d279421d1a8cf4143ebb255edf4"
+      "size": 4251,
+      "sha256": "f4fd8f8c3687da006d51f1a6a5a9c29d1e0ae493a2f4720d8765de7c0b354247"
     },
     {
       "path": "/home/buzzkill/Projects/quake-typescript/tsconfig.json",
