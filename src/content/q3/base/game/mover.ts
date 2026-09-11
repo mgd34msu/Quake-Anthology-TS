@@ -15,6 +15,7 @@ import { ServerEntityFlags } from "../shared/entity-shared.ts";
 import { evaluateTrajectory, TrajectoryType } from "../shared/trajectory.ts";
 import { damage } from "./combat.ts";
 import type { CombatContext } from "./combat.ts";
+import { loseGround, rides } from "./ground.ts";
 import { runThink } from "./entities.ts";
 import type { SpawnVariables } from "./spawn.ts";
 import { GameFlags, MAX_GENTITIES, MoverState } from "./state.ts";
@@ -99,7 +100,7 @@ export class MoverRuntime {
   }
 
   private tryPushing(check: GameEntity, pusher: GameEntity, move: Vec3, amove: Vec3, pushed: PushedEntity[]): boolean {
-    if ((pusher.s.eFlags & EF_MOVER_STOP) !== 0 && check.s.groundEntityNum !== pusher.s.number) return false;
+    if ((pusher.s.eFlags & EF_MOVER_STOP) !== 0 && !rides(check, pusher)) return false;
     if (pushed.length >= MAX_GENTITIES) throw new Error("pushed stack exceeds MAX_GENTITIES");
     const saved: PushedNative = { kind: "native", entity: check,
       origin: { ...(check.client === null ? check.s.pos.base : check.client.ps.origin) }, angles: { ...check.s.apos.base },
@@ -112,7 +113,7 @@ export class MoverRuntime {
       ps.origin = add3(add3(ps.origin, move), rotationMove);
       ps.deltaAngles = { ...ps.deltaAngles, y: (ps.deltaAngles.y + angleShort(amove.y)) | 0 };
     }
-    if (check.s.groundEntityNum !== pusher.s.number) check.s.groundEntityNum = -1;
+    if (!rides(check, pusher)) loseGround(check);
     if (this.testEntityPosition(check) === null) {
       check.r.currentOrigin = { ...(check.client === null ? check.s.pos.base : check.client.ps.origin) };
       this.host.world.link(check);
@@ -123,7 +124,7 @@ export class MoverRuntime {
     if (check.client !== null) check.client.ps.origin = { ...saved.origin };
     baseAngles(check, saved.angles);
     if (this.testEntityPosition(check) === null) {
-      check.s.groundEntityNum = -1;
+      loseGround(check);
       pushed.pop();
       return true;
     }
@@ -249,7 +250,7 @@ export class MoverRuntime {
         continue;
       }
       if (check.s.eType !== EntityType.ET_ITEM && check.s.eType !== EntityType.ET_PLAYER && !check.physicsObject) continue;
-      if (check.s.groundEntityNum !== pusher.s.number) {
+      if (!rides(check, pusher)) {
         const bounds = this.bounds(check);
         if (bounds.min.x >= destination.max.x || bounds.min.y >= destination.max.y || bounds.min.z >= destination.max.z ||
           bounds.max.x <= destination.min.x || bounds.max.y <= destination.min.y || bounds.max.z <= destination.min.z) continue;

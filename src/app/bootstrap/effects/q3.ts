@@ -48,6 +48,7 @@ interface WeaponEffects {
   readonly plasma: SceneShader;
   readonly smoke: SceneShader;
   readonly nailSmoke: SceneShader | null;
+  readonly quad: PcmSound | null;
   readonly bounce: readonly [PcmSound | null, PcmSound | null];
   sound(pcm: PcmSound | null, origin: Vec3, channel: number, volume: number): void;
   loop(pcm: PcmSound | null, actor: ActorId, origin: Vec3, velocity: Vec3): void;
@@ -155,6 +156,7 @@ export class Q3ApplicationEffects {
         startSound: (origin, _entity, channel, pcm) => { if (origin !== null) sourceSound(pcm, origin, channel, 1); },
       };
       return { registry, host, particles, view, plasma: await shader("sprites/plasma1"), smoke: await shader("smokePuff"), nailSmoke: product === "missionpack" ? await shader("nailtrail") : null,
+        quad: await sound("sound/items/damage3.wav"),
         bounce: [await sound("sound/weapons/grenade/hgrenb1a.wav"), await sound("sound/weapons/grenade/hgrenb2a.wav")],
         sound: sourceSound, contents: shared.collision.pointContents,
         loop: (pcm, actor, origin, velocity) => {
@@ -202,6 +204,19 @@ export class Q3ApplicationEffects {
           }
         }
         return;
+      }
+      case "contact": {
+        const contact = event.contact;
+        switch (contact.kind) {
+          case "gauntlet-quad": media.sound(media.quad, event.origin, 4, 1); return;
+          case "hit": {
+            const blood = this.effects.bleedAt(contact.point, false);
+            if (blood !== null) this.bloodOwners.set(blood, contact.target);
+            return;
+          }
+          case "miss": emitWeaponImpact(this.state.product, media.registry, media.host, Weapon.WP_NONE, 0, contact.point, contact.normal, ImpactSound.DEFAULT); return;
+          case "lightning-reflection": throw new Error("Selected missionpack reflection requires its source presentation binding");
+        }
       }
       case "bounce": media.sound(media.bounce[media.host.random.rand() & 1] ?? null, event.end, 0, 1); return;
       case "trail":

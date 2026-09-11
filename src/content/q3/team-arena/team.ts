@@ -3,10 +3,10 @@ import { GameEntity } from "../base/game/state.ts";
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { dot3, length3, sub3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
-import type { ServerWorld } from "../base/world.ts";
+import { traceGround, writeGround } from "../base/game/ground.ts";
+import type { ActorSpatialQueries, ServerWorld } from "../base/world.ts";
 import { EntityEvent, EntityType, GameType, PersistentIndex, Powerup, Team, statSchema } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
-import { ENTITYNUM_NONE } from "../base/shared/player-state.ts";
 import type { PlayerStateSlots } from "../base/shared/player-state.ts";
 import { setOrigin } from "../base/game/entities.ts";
 import type { EntityPool } from "../base/game/entities.ts";
@@ -24,7 +24,7 @@ export enum GlobalTeamSound {
 
 interface TeamServices {
   readonly pool: EntityPool;
-  readonly world: ServerWorld;
+  readonly world: ServerWorld & Pick<ActorSpatialQueries, "traceActor">;
   readonly gameType: number;
   readonly time: number;
   readonly teamScores: PlayerStateSlots;
@@ -573,16 +573,16 @@ export class TeamRuntime {
     else {
       entity.s.origin = vec3(origin.x, origin.y, origin.z + 1);
       const destination = vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z - 4096);
-      const trace = this.host.world.trace({ start: entity.s.origin, end: destination,
-        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: entity.s.number, mask: 1 });
+      const trace = this.host.world.traceActor({ start: entity.s.origin, end: destination,
+        shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passActor: entity.actor.id, mask: 1 });
       if (trace.solidity !== "clear") {
         entity.s.origin = vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z - 1);
         this.host.warn(gameFormat("SpawnObelisk: %s startsolid at %s\n",
           [entity.classname, this.host.pool.utilities.vtos(entity.s.origin).readString()]));
-        entity.s.groundEntityNum = ENTITYNUM_NONE;
+        writeGround(entity, null, this.host.pool);
         setOrigin(entity, entity.s.origin);
       } else {
-        entity.s.groundEntityNum = trace.entityNum;
+        traceGround(entity, trace.hit, this.host.pool);
         setOrigin(entity, trace.end);
       }
     }

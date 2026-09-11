@@ -1,3 +1,4 @@
+import { writeGround } from "../base/game/ground.ts";
 /*
  * Ported from id Software's game/g_client.c and g_team.c spawn selectors.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -10,7 +11,7 @@ import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { ActorSpatialQueries, ServerWorld } from "../base/world.ts";
 import { EntityEvent, GameType, GIB_HEALTH, PersistentIndex, Team, Weapon, WeaponState, statSchema, weaponCount } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
-import { ENTITYNUM_NONE, MoveFlags, PlayerAnimation } from "../base/shared/player-state.ts";
+import { MoveFlags, PlayerAnimation } from "../base/shared/player-state.ts";
 import type { UserCommand } from "../base/shared/player-state.ts";
 import { playerStateToEntityState } from "../base/shared/snapshot-state.ts";
 import { TrajectoryType } from "../base/shared/trajectory.ts";
@@ -224,6 +225,7 @@ export class ClientSpawnRuntime {
     queue.index = (queue.index + 1) % BODY_QUEUE_SIZE;
     this.host.world.unlink(body.slot);
     Object.assign(body.s, entity.s.copy());
+    writeGround(body, entity.binding.body.read().ground, this.host.pool);
     body.s.eFlags = EF_DEAD;
     if (client.ps.product === "missionpack" && (entity.s.eFlags & EF_KAMIKAZE)) {
       body.s.eFlags |= EF_KAMIKAZE;
@@ -238,7 +240,7 @@ export class ClientSpawnRuntime {
     body.timestamp = time;
     body.physicsObject = true;
     body.physicsBounce = 0;
-    body.s.pos = body.s.groundEntityNum === ENTITYNUM_NONE
+    body.s.pos = body.binding.body.read().ground === null
       ? { ...body.s.pos, type: TrajectoryType.TR_GRAVITY, time, delta: { ...client.ps.velocity } }
       : { ...body.s.pos, type: TrajectoryType.TR_STATIONARY };
     body.s.event = 0;
@@ -306,7 +308,7 @@ export class ClientSpawnRuntime {
     const schema = statSchema(ps.product);
     ps.stats.set(schema.maxHealth, pers.maxHealth);
     ps.eFlags = flags;
-    entity.s.groundEntityNum = ENTITYNUM_NONE;
+    writeGround(entity, null, this.host.pool);
     entity.takedamage = true;
     this.host.pool.activateClient(entity.slot);
     entity.classname = "player";

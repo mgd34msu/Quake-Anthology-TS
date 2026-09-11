@@ -140,10 +140,13 @@ export class MovementPlayer {
     const body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Player no longer has a body");
     const state = this.state;
-    if (body.ground !== null) this.ground = { kind: "actor", actor: body.ground };
+    const world = this.host.worldActor();
+    this.ground = body.ground === null ? { kind: "none" } : world !== null && body.ground.equals(world)
+      ? { kind: "world", model: 0 } : { kind: "actor", actor: body.ground };
     switch (state.kind) {
       case "q1-netquake": return { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles,
-        ground: state.ground, health: this.host.combat.read(this.actor.id)?.health ?? 0 };
+        ground: this.ground, flags: this.ground.kind === "none" ? state.flags & ~512 : state.flags | 512,
+        health: this.host.combat.read(this.actor.id)?.health ?? 0 };
       case "q1-quakeworld": return { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
       case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 2 : state.type };
       case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 4 : state.type };

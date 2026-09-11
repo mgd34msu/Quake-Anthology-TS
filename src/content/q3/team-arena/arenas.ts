@@ -1,3 +1,4 @@
+import { writeGround } from "../base/game/ground.ts";
 // Ported from id Software's code/game/g_arenas.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
@@ -147,7 +148,7 @@ export class ArenaRuntime {
     body.physicsBounce = 0;
     body.s.event = 0;
     body.s.pos = { ...body.s.pos, type: TrajectoryType.TR_STATIONARY };
-    body.s.groundEntityNum = ENTITYNUM_WORLD;
+    writeGround(body, this.pool.at(ENTITYNUM_WORLD).actor.id, this.pool);
     body.s.legsAnim = PlayerAnimation.LEGS_IDLE;
     body.s.torsoAnim = PlayerAnimation.TORSO_STAND;
     if (body.s.weapon === Weapon.WP_NONE) body.s.weapon = Weapon.WP_MACHINEGUN;

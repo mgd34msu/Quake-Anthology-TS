@@ -4,8 +4,8 @@ import { q3ShotgunEndpoints } from "./ballistics-math.ts";
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
-import { q3AccuracyHit, q3BulletFire } from "./hitscan.ts";
-import type { Q3AccuracySubject, Q3BulletAttack, Q3BulletHost } from "./hitscan.ts";
+import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire } from "./hitscan.ts";
+import type { Q3AccuracySubject, Q3BulletAttack, Q3BulletHost, Q3ContactHost } from "./hitscan.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerTraceResult } from "../world.ts";
@@ -125,18 +125,8 @@ export class WeaponRuntime {
 
   checkGauntletAttack(entity: GameEntity): boolean {
     this.owned(entity);
-    const combat = this.host.missiles.host.combat, pool = combat.entities, attack = this.attack(entity, 1);
-    const trace = this.trace(entity, attack.muzzle, add3(attack.muzzle, scale3(attack.forward, 32)));
-    if (trace.surfaceFlags & SURF_NOIMPACT) return false;
-    const target = pool.at(trace.entityNum);
-    if (target.takedamage && target.client !== null) {
-      const event = pool.tempEntity(trace.end, EntityEvent.EV_MISSILE_HIT);
-      event.s.otherEntityNum = target.s.number; event.s.eventParm = directionToByte(normal(trace)); event.s.weapon = entity.s.weapon;
-    }
-    if (!target.takedamage) return false;
-    if (clientOf(entity).ps.powerups.get(Powerup.PW_QUAD)) pool.addEvent(entity, EntityEvent.EV_POWERUP_QUAD);
-    damage(combat, target, entity, entity, attack.forward, trace.end, this.scaled(50, { ...attack, quad: this.quad(entity) }), 0, 2);
-    return true;
+    return q3GauntletAttack(this.contactHost(entity, 2), entity.actor.id, this.attack(entity, this.quad(entity)),
+      Boolean(clientOf(entity).ps.powerups.get(Powerup.PW_QUAD)));
   }
 
   fire(entity: GameEntity): void {
@@ -179,18 +169,21 @@ export class WeaponRuntime {
     }
   }
 
+  private hitTarget(attacker: Q3AccuracySubject, actor: ActorId) {
+    const combat = this.host.missiles.host.combat;
+    const state = combat.authority.read(actor); if (state === null) return null;
+    const target = combat.actors.participant(actor), native = target instanceof GameEntity ? target : null;
+    const observed = native === null ? { actor, damageable: state.canTakeDamage, player: combat.actors.isPlayer(actor), health: state.health, team: state.team } : accuracySubject(native);
+    return { damageable: observed.damageable, player: observed.player, accuracyEligible: q3AccuracyHit(combat.gameType >= GameType.GT_TEAM, observed, attacker),
+      invulnerable: native?.client !== null && native?.client !== undefined && native.client.invulnerabilityTime > combat.time };
+  }
+
   private bullet(entity: GameEntity, attack: Attack, spread: number, amount: number): void {
     const combat = this.host.missiles.host.combat, pool = combat.entities, attacker = accuracySubject(entity);
     const services = {
       random: this.host.random,
       trace: (start: Vec3, end: Vec3, pass: ActorId | null) => combat.spatial.traceActor({ start, end, shape: { kind: "point" }, passActor: pass, mask: MASK_SHOT }),
-      target: (actor: ActorId) => {
-        const state = combat.authority.read(actor); if (state === null) return null;
-        const target = combat.actors.participant(actor), native = target instanceof GameEntity ? target : null;
-        const observed = native === null ? { actor, damageable: state.canTakeDamage, player: combat.actors.isPlayer(actor), health: state.health, team: state.team } : accuracySubject(native);
-        return { damageable: observed.damageable, player: observed.player, accuracyEligible: q3AccuracyHit(combat.gameType >= GameType.GT_TEAM, observed, attacker),
-          invulnerable: native?.client !== null && native?.client !== undefined && native.client.invulnerabilityTime > combat.time };
-      },
+      target: (actor: ActorId) => this.hitTarget(attacker, actor),
       emit: (hit: Parameters<Q3BulletHost["emit"]>[0]): void => {
         const event = pool.tempEntity(hit.point, hit.flesh ? EntityEvent.EV_BULLET_HIT_FLESH : EntityEvent.EV_BULLET_HIT_WALL);
         if (hit.flesh && hit.target !== null) {
@@ -295,32 +288,40 @@ export class WeaponRuntime {
     }
   }
 
-  private lightning(entity: GameEntity, attack: Attack): void {
-    const combat = this.host.missiles.host.combat, pool = combat.entities;
-    let pass = entity.s.number;
-    for (let count = 0; count < 10; count++) {
-      const trace = this.trace(entity, attack.muzzle, add3(attack.muzzle, scale3(attack.forward, 768)), pass);
-      if (combat.product === "missionpack" && count !== 0) pool.tempEntity(attack.muzzle, EntityEvent.EV_LIGHTNINGBOLT).s.origin2 = snapVector(trace.end);
-      if (trace.entityNum === ENTITYNUM_NONE) return;
-      const target = pool.at(trace.entityNum);
-      if (target.takedamage) {
-        if (combat.product === "missionpack" && target.client !== null && target.client.invulnerabilityTime > combat.time) {
-          const impact = invulnerabilityEffect(pool, target, attack.forward, trace.end);
-          if (impact.kind === "hit") {
-            const end = bounceProjectile(attack.muzzle, impact.impactPoint, impact.bounceDirection);
-            attack.muzzle = impact.impactPoint; attack.forward = { ...normalize3(sub3(end, impact.impactPoint)) }; pass = ENTITYNUM_NONE;
-          } else { attack.muzzle = trace.end; pass = target.s.number; }
-          continue;
+  private contactHost(entity: GameEntity, method: number): Q3ContactHost {
+    const combat = this.host.missiles.host.combat, pool = combat.entities, attacker = accuracySubject(entity), firingWeapon = entity.s.weapon, firingClient = clientOf(entity);
+    const services = {
+      trace: (start: Vec3, end: Vec3, pass: ActorId | null) => combat.spatial.traceActor({ start, end, shape: { kind: "point" }, passActor: pass, mask: MASK_SHOT }),
+      target: (actor: ActorId) => this.hitTarget(attacker, actor),
+      emit: (hit: Parameters<Q3ContactHost["emit"]>[0]): void => {
+        switch (hit.kind) {
+          case "gauntlet-quad": pool.addEvent(entity, EntityEvent.EV_POWERUP_QUAD); return;
+          case "lightning-reflection": pool.tempEntity(hit.start, EntityEvent.EV_LIGHTNINGBOLT).s.origin2 = hit.end; return;
+          case "miss": pool.tempEntity(hit.point, EntityEvent.EV_MISSILE_MISS).s.eventParm = directionToByte(hit.normal); return;
+          case "hit": {
+            const target = combat.actors.participant(hit.target);
+            if (!(target instanceof GameEntity) || target.client === null) throw new Error("Admitted Q3 map player has no native client behavior record");
+            const event = pool.tempEntity(hit.point, EntityEvent.EV_MISSILE_HIT);
+            event.s.otherEntityNum = target.s.number; event.s.eventParm = directionToByte(hit.normal); event.s.weapon = firingWeapon; return;
+          }
         }
-        damage(combat, target, entity, entity, attack.forward, trace.end, this.scaled(8, attack), 0, 11);
-      }
-      if (target.takedamage && target.client !== null) {
-        const event = pool.tempEntity(trace.end, EntityEvent.EV_MISSILE_HIT);
-        event.s.otherEntityNum = target.s.number; event.s.eventParm = directionToByte(normal(trace)); event.s.weapon = entity.s.weapon;
-        if (logAccuracyHit(combat.gameType, target, entity)) clientOf(entity).accuracyHits = (clientOf(entity).accuracyHits + 1) | 0;
-      } else if (!(trace.surfaceFlags & SURF_NOIMPACT)) pool.tempEntity(trace.end, EntityEvent.EV_MISSILE_MISS).s.eventParm = directionToByte(normal(trace));
-      break;
-    }
+      },
+      damage: (target: ActorId, direction: Attack["forward"], point: Vec3, amount: number): void => {
+        damage(combat, combat.actors.participant(target), entity, entity, direction, point, amount, 0, method);
+      },
+      creditAccuracyHit: (): void => { if (combat.authority.read(attacker.actor) !== null) firingClient.accuracyHits = (firingClient.accuracyHits + 1) | 0; },
+    };
+    return combat.product === "baseq3" ? { ...services, product: "baseq3" } : {
+      ...services, product: "missionpack", invulnerabilityImpact: (actor, direction, point) => {
+        const target = combat.actors.participant(actor);
+        if (!(target instanceof GameEntity)) throw new Error("Q3 invulnerability requires its actual client behavior");
+        return invulnerabilityEffect(pool, target, direction, point);
+      },
+    };
+  }
+
+  private lightning(entity: GameEntity, attack: Attack): void {
+    q3LightningFire(this.contactHost(entity, 11), entity.actor.id, attack);
   }
 
   startKamikaze(entity: GameEntity): GameEntity {
@@ -376,7 +377,7 @@ export class WeaponRuntime {
     for (let index = 0; index < MAX_CLIENTS; index++) {
       const target = combat.entities.at(index), client = target.client;
       if (!target.inuse || client === null) continue;
-      if (client.ps.groundEntityNum !== ENTITYNUM_NONE) client.ps.velocity = vec3(
+      if (target.binding.body.read().ground !== null) client.ps.velocity = vec3(
         Math.fround(client.ps.velocity.x + Math.fround(random.crandom() * 120)),
         Math.fround(client.ps.velocity.y + Math.fround(random.crandom() * 120)),
         Math.fround(30 + Math.fround(random.random() * 25)));

@@ -5,7 +5,8 @@
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
-import type { ServerWorld } from "../world.ts";
+import { traceGround } from "./ground.ts";
+import type { ActorSpatialQueries, ServerWorld } from "../world.ts";
 import { EntityEvent, EntityType, GameType, Holdable, ItemType, MissionpackStatIndex, PersistentIndex,
   Powerup, statSchema, Weapon } from "../shared/definitions.ts";
 import type { Product } from "../shared/definitions.ts";
@@ -83,7 +84,7 @@ export class ItemRegistry {
 
 export interface ItemLifecycleContext {
   readonly entities: EntityPool;
-  readonly world: ServerWorld;
+  readonly world: ServerWorld & Pick<ActorSpatialQueries, "traceActor">;
   readonly product: Product;
   readonly gameType: number;
   readonly weaponRespawnSeconds: number;
@@ -329,11 +330,11 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
     setOrigin(entity, entity.s.origin);
   } else {
     const destination = vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z - 4_096);
-    const trace = context.world.trace({
+    const trace = context.world.traceActor({
       start: entity.s.origin,
       end: destination,
       shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
-      passEntityNum: entity.slot,
+      passActor: entity.actor.id,
       mask: CONTENTS_SOLID,
     });
     if (trace.solidity !== "clear") {
@@ -342,7 +343,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
       context.entities.free(entity);
       return;
     }
-    entity.s.groundEntityNum = trace.entityNum;
+    traceGround(entity, trace.hit, context.entities);
     setOrigin(entity, trace.end);
   }
 

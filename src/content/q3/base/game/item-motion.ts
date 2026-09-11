@@ -2,7 +2,8 @@
 // LaunchItem, and Drop_Item. Copyright (C) 1999-2005 Id Software, Inc.
 // GPL-2.0-or-later.
 
-import type { ServerTraceResult } from "../world.ts";
+import { traceGround } from "./ground.ts";
+import type { ActorTraceResult, ActorSpatialQueries } from "../world.ts";
 import { add3, dot3, scale3, vec3 } from "../../../../core/math.ts";
 import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
@@ -32,7 +33,7 @@ export interface ItemFrameTime {
 
 export interface RunItemContext extends ItemFrameTime {
   readonly entities: EntityPool;
-  readonly world: ServerWorld;
+  readonly world: ServerWorld & Pick<ActorSpatialQueries, "traceActor">;
   /** Port of Team_FreeEntity for a team item entering CONTENTS_NODROP. */
   readonly freeTeamEntity: EntityThink;
 }
@@ -76,12 +77,12 @@ function requireOwnedEntity(entities: EntityPool, entity: GameEntity): void {
   }
 }
 
-function collisionNormal(trace: ServerTraceResult): Vec3 {
+function collisionNormal(trace: ActorTraceResult): Vec3 {
   return trace.contact.kind === "plane" ? trace.contact.plane.normal : vec3(0, 0, 0);
 }
 
 /** Reflects one item trajectory at a trace impact and may settle it on the hit entity. */
-export function bounceItem(entity: GameEntity, trace: ServerTraceResult, frame: ItemFrameTime): void {
+export function bounceItem(entity: GameEntity, trace: ActorTraceResult, frame: ItemFrameTime & { readonly entities: EntityPool }): void {
   const time = gameTime(frame.time);
   const previousTime = gameTime(frame.previousTime);
   const fraction = Math.fround(trace.fraction);
@@ -101,7 +102,7 @@ export function bounceItem(entity: GameEntity, trace: ServerTraceResult, frame: 
       qvmFloatToInt(Math.fround(trace.end.z + 1)),
     );
     setOrigin(entity, stopped);
-    entity.s.groundEntityNum = trace.entityNum;
+    traceGround(entity, trace.hit, frame.entities);
     return;
   }
 
@@ -128,11 +129,12 @@ export function runItem(entity: GameEntity, context: RunItemContext): void {
   }
 
   const destination = evaluateTrajectory(entity.s.pos, time);
-  const trace = context.world.trace({
+  const owner = entity.r.ownerNum < 0 || entity.r.ownerNum >= 1022 ? undefined : context.entities.get(entity.r.ownerNum);
+  const trace = context.world.traceActor({
     start: entity.r.currentOrigin,
     end: destination,
     shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs },
-    passEntityNum: entity.r.ownerNum,
+    passActor: owner?.inuse ? owner.actor.id : null,
     mask: entity.clipmask !== 0 ? entity.clipmask : CONTENTS_SOLID | CONTENTS_PLAYERCLIP,
   });
   entity.r.currentOrigin = vec3(trace.end.x, trace.end.y, trace.end.z);
@@ -146,7 +148,7 @@ export function runItem(entity: GameEntity, context: RunItemContext): void {
     else context.entities.free(entity);
     return;
   }
-  bounceItem(entity, { ...trace, fraction }, { time, previousTime });
+  bounceItem(entity, { ...trace, fraction }, { time, previousTime, entities: context.entities });
 }
 
 function isSpecialTeamDrop(product: Product, gameType: number, item: ItemDefinition): boolean {

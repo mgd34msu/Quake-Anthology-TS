@@ -3,6 +3,7 @@
 
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
+import type { ActorId } from "../../../../contracts/identity.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import { EntityType, EVENT_VALID_MSEC, EV_EVENT_BIT1, EV_EVENT_BITS } from "../shared/definitions.ts";
 import type { Product } from "../shared/definitions.ts";
@@ -19,6 +20,7 @@ export interface EntityPoolOptions {
   /** Source records belong to the provider; actor allocation and release belong to W41. */
   readonly records: {
     get(slot: number): GameEntity | undefined;
+    nativeByActor(actor: ActorId): GameEntity | null;
     client(slot: number): GameClient;
     activate(slot: number): GameEntity;
     release(entity: GameEntity): void;

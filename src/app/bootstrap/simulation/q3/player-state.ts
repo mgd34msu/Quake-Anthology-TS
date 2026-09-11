@@ -12,23 +12,19 @@ function playerState(entity: GameEntity) {
   return entity.client.ps;
 }
 
-function sourceHit(number: number, records: Q3EntityRecords): TraceHit {
-  if (number === 1022) return { kind: "world", model: 0 };
-  const entity = number === 1023 ? undefined : records.get(number);
-  return entity?.inuse ? { kind: "actor", actor: entity.actor.id } : { kind: "none" };
-}
-
 function sourceNumber(hit: TraceHit, records: Q3EntityRecords): number {
-  return hit.kind === "world" ? 1022 : hit.kind === "none" ? 1023 : records.byActor(hit.actor)?.slot ?? 1023;
+  return hit.kind === "world" ? 1022 : hit.kind === "none" ? 1023 : records.nativeByActor(hit.actor)?.slot ?? 1023;
 }
 
 /** Read immediately before selected Q3 PMove, after game-side triggers, teleport and client policy. */
 export function readQ3MovementState(entity: GameEntity, records: Q3EntityRecords): Q3MovementState {
   const ps = playerState(entity), jumpPad = ps.jumppadEnt === 0 ? undefined : records.get(ps.jumppadEnt);
+  const ground = entity.binding.body.read().ground, world = records.get(1022);
   return { kind: "q3", commandTimeMilliseconds: ps.commandTime, movementType: ps.pmType,
     bobCycle: ps.bobCycle, movementFlags: ps.pmFlags, movementTimeMilliseconds: ps.pmTime,
     origin: { ...ps.origin }, velocity: { ...ps.velocity }, gravity: ps.gravity, speed: ps.speed,
-    deltaAngleWords: [ps.deltaAngles.x, ps.deltaAngles.y, ps.deltaAngles.z], ground: sourceHit(ps.groundEntityNum, records),
+    deltaAngleWords: [ps.deltaAngles.x, ps.deltaAngles.y, ps.deltaAngles.z],
+    ground: ground === null ? { kind: "none" } : world?.inuse && ground.equals(world.actor.id) ? { kind: "world", model: 0 } : { kind: "actor", actor: ground },
     movementDirection: ps.movementDir, grapplePoint: { ...ps.grapplePoint }, flags: ps.eFlags,
     viewAngles: { ...ps.viewangles }, viewHeight: ps.viewheight, predictableEventSequence: ps.eventSequence,
     jumpPad: jumpPad?.inuse ? jumpPad.actor.id : null, movementFrame: ps.pmoveFramecount, jumpPadFrame: ps.jumppadFrame };
@@ -43,7 +39,7 @@ export function writeQ3MovementState(entity: GameEntity, state: Q3MovementState,
   ps.groundEntityNum = sourceNumber(state.ground, records); ps.movementDir = state.movementDirection;
   ps.grapplePoint = { ...state.grapplePoint }; ps.eFlags = state.flags; ps.viewangles = { ...state.viewAngles };
   ps.viewheight = state.viewHeight; ps.pmoveFramecount = state.movementFrame; ps.jumppadFrame = state.jumpPadFrame;
-  ps.jumppadEnt = state.jumpPad === null ? 0 : records.byActor(state.jumpPad)?.slot ?? 0;
+  ps.jumppadEnt = state.jumpPad === null ? 0 : records.nativeByActor(state.jumpPad)?.slot ?? 0;
   // The ordered effects append to ps.events at the caller, maintaining its two-entry native ring.
 }
 

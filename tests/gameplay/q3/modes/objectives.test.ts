@@ -5,7 +5,7 @@ import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/g
 import { Q3EntityRecords } from "../../../../src/content/q3/base/records.ts";
 import { EntityPool } from "../../../../src/content/q3/base/game/entities.ts";
 import { ConnectionState } from "../../../../src/content/q3/base/game/state.ts";
-import type { ServerWorld } from "../../../../src/content/q3/base/world.ts";
+import type { ActorSpatialQueries, ServerWorld } from "../../../../src/content/q3/base/world.ts";
 import { GameType, PersistentIndex, Powerup, Team } from "../../../../src/content/q3/base/shared/definitions.ts";
 import { findItemForPowerup } from "../../../../src/content/q3/base/shared/items.ts";
 import { PlayerStateSlots } from "../../../../src/content/q3/base/shared/player-state.ts";
@@ -23,7 +23,8 @@ function objectiveGame(gameType: GameType) {
   const records = new Q3EntityRecords({ actors, bodies, combat, inventory, callbacks,
     schedule: () => undefined, runThink: () => { throw new Error("Objective touch unexpectedly requested a think"); },
     damageCall: () => null, foreign: () => null, isPlayer: () => false }, "q3:mode-smoke", "missionpack");
-  const world: ServerWorld = {
+  const world: ServerWorld & Pick<ActorSpatialQueries, "traceActor"> = {
+    traceActor: () => { throw new Error("Objective touch unexpectedly requested an actor trace"); },
     trace: () => { throw new Error("Objective touch unexpectedly requested a trace"); },
     pointContents: () => 0, areaEntities: () => [], entityContact: () => false,
     link: entity => { bodies.link(entity.actor); },
