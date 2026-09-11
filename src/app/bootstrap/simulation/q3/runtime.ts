@@ -512,7 +512,7 @@ export class Q3SourceRuntime {
   }
   beforeReaction(actor: OwnedActor, decision: DamageDecision): void {
     this.bridge.beforeReaction(decision);
-    const entity = this.records.byActor(actor.id);
+    const entity = this.records.nativeByActor(actor.id);
     if (decision.reaction === "death" && entity?.client != null) {
       const cause = decision.request.attack.cause;
       this.death.playerDie(entity, this.records.damageInflictor(decision.request.attack.inflictor), this.records.byActor(decision.request.attack.attacker),

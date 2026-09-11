@@ -164,6 +164,7 @@ export class SharedPhysics {
     });
     return undefined;
   }
+  solidOf(actor: ActorId): SharedSolid | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.solid(owned); }
   isBrush(actor: ActorId): boolean { const owned = this.options.actors.resolveOwned(actor); return owned !== null && this.solid(owned)?.solid === "brush"; }
   drainEvents(): readonly PhysicsEvent[] { return this.events.splice(0); }
   private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.push(event); return undefined; }

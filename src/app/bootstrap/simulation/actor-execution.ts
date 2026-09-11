@@ -68,6 +68,8 @@ export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
 export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFlags): undefined {
   if (entry.kind === "q1") {
     if (changes.waterLevel !== undefined) entry.entity.waterLevel = changes.waterLevel;
+    const waterType = changes.waterType;
+    if (waterType === 0 || waterType === -1 || waterType === -2 || waterType === -3 || waterType === -4 || waterType === -5 || waterType === -6) entry.entity.waterType = waterType;
   } else {
     const monster = entry.readMonster();
     if (monster !== undefined) {
@@ -99,6 +101,8 @@ function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>,
     } else if (step) {
       physics.step(actor, elapsed);
       entity.movementFlags = (entity.movementFlags & ~512) | (bodies.read(actor.id)?.ground == null ? 0 : 512);
+    } else if (entity.move === null && (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile")) {
+      physics.step(actor, elapsed);
     } else services.physicsEntity(actor, context.timeSeconds, elapsed);
   }
   if ((pusher || step) && actors.isLive(actor.id)) scheduler.run(actor.id, frame, "during-physics");

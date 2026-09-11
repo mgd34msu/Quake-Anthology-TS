@@ -1,3 +1,4 @@
+import type { SharedGrappleControl } from "../../../../contracts/equipment.ts";
 /* ThreeWave CTF 5 rerelease source registration. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q1AddonContext } from "../context.ts";
@@ -17,8 +18,8 @@ import { registerDrops, tossAmmo, tossWeapon } from "./drops.ts";
 
 /** Session lifecycle entry points; all mutations remain on shared actors and named source callbacks. */
 export class Q1Ctf extends CtfState {
-  constructor(context: Q1AddonContext, services: Q1CtfServices) {
-    super(context, services);
+  constructor(context: Q1AddonContext, services: Q1CtfServices, sharedGrapple: SharedGrappleControl | null = null) {
+    super(context, services, sharedGrapple);
     if (context.program !== "ctf") throw new Error("CTF requires the selected CTF source program");
     registerFlags(this); registerRunes(this); registerCombat(this); registerDrops(this); registerArsenal(this); registerMaps(this);
     this.game.registerPlayerExtension({ id: "ctf:spawn_parameters", captureTravel: (_runtime, player) => captureTravel(this, player.actor.id),
@@ -27,6 +28,7 @@ export class Q1Ctf extends CtfState {
   /** Invoke on admission/respawn, after the selected character and arsenal are initialized. */
   spawnPlayer(actor: ActorId, firstAdmission: boolean): undefined {
     spawnArsenal(this, actor);
+    if (this.sharedGrapple?.selection.kind === "disabled") this.grant(actor, "q1:ctf/weapon/grapple", 0);
     this.set(actor, "lastHurtCarrier", -10); this.set(actor, "regenTime", 0); this.set(actor, "runeNotice", 0);
     if (firstAdmission) {
       this.set(actor, "killed", 0);
@@ -34,12 +36,12 @@ export class Q1Ctf extends CtfState {
       if ((this.teamplay & CTF_FLAGS.selectTeam) !== 0 && !this.startMap) becomeObserver(this, actor);
       else checkTeam(this, actor);
     } else if (this.services.observer(actor)) becomeObserver(this, actor);
-    if (!this.startMap && !(this.teamplay & CTF_FLAGS.disableGrapple)) this.grant(actor, "q1:ctf/weapon/grapple", 1);
+    if (this.nativeGrappleEnabled && !this.startMap && !(this.teamplay & CTF_FLAGS.disableGrapple)) this.grant(actor, "q1:ctf/weapon/grapple", 1);
     this.set(actor, "stuffColor", 1); return this.update(actor);
   }
   selectSpawn(actor: ActorId) { return spawnPoint(this, actor); }
   characterPose(actor: ActorId) { return characterPose(this, actor); }
-  fallDamageAllowed(actor: ActorId): boolean { return !this.grapple.pulling(actor); }
+  fallDamageAllowed(actor: ActorId): boolean { return !this.grapplePulling(actor); }
   captureTravel(actor: ActorId): Uint8Array { return captureTravel(this, actor); }
   restoreTravel(actor: ActorId, bytes: Uint8Array): undefined { return restoreTravel(this, actor, bytes); }
   /** Source prethink, called once per player by the shared session even with foreign characters. */
@@ -63,7 +65,7 @@ export class Q1Ctf extends CtfState {
     const input = this.services.input(actor);
     if (observerImpulse(this, actor)) return true;
     if (input.impulse === 22 || input.impulse === 1 && !input.grappleSelected) {
-      if (this.teamplay & CTF_FLAGS.disableGrapple) this.game.message(actor, "$qc_no_weapon"); else this.services.selectGrapple(actor);
+      if (!this.nativeGrappleEnabled || this.teamplay & CTF_FLAGS.disableGrapple) this.game.message(actor, "$qc_no_weapon"); else this.services.selectGrapple(actor);
     } else if (!this.services.observer(actor) && (this.teamplay & CTF_FLAGS.dropItems) && input.impulse === 20) tossAmmo(this, actor);
     else if (!this.services.observer(actor) && (this.teamplay & CTF_FLAGS.dropItems) && input.impulse === 21) tossWeapon(this, actor);
     else if (input.impulse === 25) {
@@ -74,7 +76,7 @@ export class Q1Ctf extends CtfState {
   }
   attack(actor: ActorId): boolean {
     const input = this.services.input(actor);
-    if (!input.grappleSelected || !input.attack || this.services.observer(actor) || this.game.health(actor) <= 0) return false;
+    if (!this.nativeGrappleEnabled || !input.grappleSelected || !input.attack || this.services.observer(actor) || this.game.health(actor) <= 0) return false;
     grappleAttack(this, actor); return true;
   }
   /** Replaces ordinary frag credit, before dropping the carried flag needed for bonuses. */
@@ -91,7 +93,7 @@ export class Q1Ctf extends CtfState {
     return this.services.respawn(actor, this.selectSpawn(actor));
   }
 }
-export function registerCTF(context: Q1AddonContext, services: Q1CtfServices): Q1Ctf { return new Q1Ctf(context, services); }
+export function registerCTF(context: Q1AddonContext, services: Q1CtfServices, sharedGrapple: SharedGrappleControl | null = null): Q1Ctf { return new Q1Ctf(context, services, sharedGrapple); }
 export { CTF_FLAGS, CTF_RUNES } from "./types.ts";
 export { CTF_HASTE_INTERVALS, CTF_HASTE_NAIL_SPEED } from "./runes.ts";
 export type { CtfCharacterPose } from "./arsenal.ts";

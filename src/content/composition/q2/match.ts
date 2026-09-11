@@ -25,7 +25,7 @@ export class Q2ProductMatch implements Q2SpawnModule {
       const spot = selectQ2Spawn(game, players().states.get(entity.actor.id) ?? new Q2PlayerState(0, game.host.now()), players().rules.spawnPoint);
       return { origin: q2SpawnOrigin(spot, game), angles: game.body(spot).angles };
     };
-    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }, selection.travel?.rules, selection.travel) : selection.kind === "standard" ? null : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
+    this.source = selection.kind === "ctf" ? new Q2Ctf({ ...hooks, emit: event => services.emit({ kind: "ctf", event }) }, {}, services.sharedGrapple ?? null) : selection.kind === "lmctf" ? new Q2Lmctf({ ...hooks, emit: event => services.emit({ kind: "lmctf", event }) }, selection.travel?.rules, selection.travel, services.sharedGrapple ?? null) : selection.kind === "standard" ? null : selection.kind === "tag" ? new Q2Tag({ items, addScore, selectSpawn,
       farthestSpawn: game => {
         let selected: Q2Entity | null = null, distance = -1;
         for (const spot of q2EntitiesNamed(game, "info_player_deathmatch")) {
@@ -77,7 +77,7 @@ export class Q2ProductMatch implements Q2SpawnModule {
       const state = this.source.states.get(entity.actor.id);
       if (state === undefined) return undefined;
       game.host.combat.setTraits(entity.actor, { team: state.team === 0 ? null : state.team === 1 ? "RED" : "BLUE" });
-      if (state.team !== 0 && this.players().states.get(entity.actor.id)?.useQ2Weapons === true) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
+      if (this.source.grapple.nativeEnabled && state.team !== 0 && this.players().states.get(entity.actor.id)?.useQ2Weapons === true) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
       this.source.assignSkin(entity);
     }
     return undefined;

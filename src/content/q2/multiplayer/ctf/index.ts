@@ -1,3 +1,4 @@
+import type { SharedGrappleControl } from "../../../../contracts/equipment.ts";
 /* Original Quake II CTF 1.09b g_ctf.c integration. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -30,9 +31,9 @@ export class Q2Ctf implements Q2SpawnModule {
   readonly presentation: Q2CtfPresentation;
   readonly grapple: Q2CtfGrapple;
   readonly techs: Q2CtfTechs;
-  constructor(hooks: Q2CtfHooks, rules: Partial<Q2CtfRules> = {}) {
+  constructor(hooks: Q2CtfHooks, rules: Partial<Q2CtfRules> = {}, sharedGrapple: SharedGrappleControl | null = null) {
     this.context = { hooks, rules: createQ2CtfRules(rules), states: new Map<ActorId, Q2CtfPlayerState>(), match: new Q2CtfMatchState() };
-    this.flags = new Q2CtfFlags(this.context); this.grapple = new Q2CtfGrapple(this.context); this.techs = new Q2CtfTechs(this.context);
+    this.flags = new Q2CtfFlags(this.context); this.grapple = new Q2CtfGrapple(this.context, sharedGrapple); this.techs = new Q2CtfTechs(this.context);
     this.match = new Q2CtfMatch(this.context, { resetPlayers: game => this.resetPlayers(game), resetGrapple: (entity, game) => this.grapple.reset(entity, game), join: (entity, game, team, ghost) => this.join(entity, game, team, ghost) });
     this.presentation = new Q2CtfPresentation(this.context, this.flags);
     this.flags.register(); this.grapple.register(); this.techs.register();
@@ -83,7 +84,8 @@ export class Q2Ctf implements Q2SpawnModule {
   };
   afterSpawn(game: Q2GameServices): undefined { this.match.afterSpawn(game); return this.techs.setup(game); }
   admitted(entity: Q2Entity, game: Q2GameServices): undefined {
-    this.grapple.equipment.bind(game);
+    this.grapple.equipment?.bind(game);
+    if (this.grapple.shared?.selection.kind === "disabled") game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 0, capacity: 1 });
     if (this.states.has(entity.actor.id)) return undefined;
     const common = this.context.hooks.player(entity.actor.id); if (common === null) throw new Error("CTF admission requires the shared player state");
     const state = new Q2CtfPlayerState(); this.states.set(entity.actor.id, state);
@@ -104,7 +106,7 @@ export class Q2Ctf implements Q2SpawnModule {
     player.spectator = false; player.requestedSpectator = false; player.dead = false; player.noclip = false; player.god = false; entity.serverFlags &= ~1; entity.visible = true;
     this.context.hooks.spawnPlayer(entity, game);
     game.host.combat.setTraits(entity.actor, { team: ctfTeamName(ctfPlayer(this.context, entity.actor.id).team) });
-    if (player.useQ2Weapons) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
+    if (this.grapple.nativeEnabled && player.useQ2Weapons) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
     this.assignSkin(entity); return undefined;
   }
   join(entity: Q2Entity, game: Q2GameServices, team: Q2CtfPlayingTeam, ghost = false): boolean {
@@ -177,7 +179,7 @@ export class Q2Ctf implements Q2SpawnModule {
   afterPlayer(entity: Q2Entity, game: Q2GameServices): undefined {
     const state = this.states.get(entity.actor.id); if (state === undefined) return undefined;
     const player = this.context.hooks.player(entity.actor.id);
-    if (state.team !== 0 && player?.useQ2Weapons === true && !player.dead && game.host.inventory.count(entity.actor.id, "q2:weapon_grapple") === 0) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
+    if (this.grapple.nativeEnabled && state.team !== 0 && player?.useQ2Weapons === true && !player.dead && game.host.inventory.count(entity.actor.id, "q2:weapon_grapple") === 0) game.host.inventory.configure(entity.actor, { item: "q2:weapon_grapple", count: 1, capacity: 1 });
     this.grapple.playerFrame(entity, game); this.techs.regenerate(entity, game); this.flags.effects(entity, game); this.match.syncGhost(entity.actor.id); return this.presentation.hud(entity, game, this.match.status(game));
   }
   afterPlayerFrames(game: Q2GameServices): undefined { for (const actor of game.host.players()) this.match.syncGhost(actor); return undefined; }
@@ -192,6 +194,9 @@ export class Q2Ctf implements Q2SpawnModule {
     return undefined;
   }
   command(entity: Q2Entity, game: Q2GameServices, command: string, args: readonly string[]): boolean {
+    if (command === "hook" || command === "+hook" || command === "unhook" || command === "-hook") {
+      this.grapple.command(entity, command === "hook" || command === "+hook"); return true;
+    }
     if (!this.states.has(entity.actor.id)) return false;
     const state = ctfPlayer(this.context, entity.actor.id), player = this.context.hooks.player(entity.actor.id), words = args.join(" ");
     switch (command.toLowerCase()) {

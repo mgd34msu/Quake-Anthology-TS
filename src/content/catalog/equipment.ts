@@ -83,6 +83,7 @@ export function equipmentResources(equipment: EquipmentSelection): readonly Reso
         break;
       case "q2-ctf":
         add(grapple.source, ["models/weapons/grapple/hook/tris.md2", "models/weapons/grapple/hook/skin.pcx", ...["grfire", "grpull", "grhit", "grhang", "grreset"].map(name => `sound/weapons/grapple/${name}.wav`)]);
+        if (grapple.edition === "rerelease") add(grapple.source, ["sound/weapons/grapple/grfly.wav"]);
         if (grapple.binding === "slot") add(grapple.source, ["models/weapons/grapple/tris.md2", "models/weapons/grapple/skin.pcx"]);
         break;
       case "q2-lmctf":

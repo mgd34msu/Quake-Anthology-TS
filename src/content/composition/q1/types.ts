@@ -1,3 +1,4 @@
+import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -60,6 +61,7 @@ export type Q1CompositionEvent =
 
 /** Operations on the already selected session movement, character, arsenal and UI. */
 export interface Q1CompositionServices {
+  readonly sharedGrapple?: SharedGrappleControl;
   cvar(name: string): number;
   setCvar(name: string, value: string): undefined;
   emit(event: Q1CompositionEvent): undefined;

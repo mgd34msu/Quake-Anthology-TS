@@ -155,7 +155,7 @@ export class GameplayAuthority implements DamageAuthority {
     if (this.actors.isLive(target.id)) {
       const kick = decision.feedback?.kind === "q2" ? decision.feedback.knockback : request.knockback;
       const reaction = { self: target, attacker: request.attack.attacker, kick, damage: decision.appliedDamage };
-      if (decision.reaction === "death") this.callbacks.die({ ...reaction, inflictor: request.attack.inflictor, point: request.point });
+      if (decision.reaction === "death") this.callbacks.die({ ...reaction, inflictor: request.attack.inflictor, point: request.point, attack: request.attack });
       else if (decision.reaction === "pain") this.callbacks.pain(reaction);
     }
     const current = this.read(target.id);

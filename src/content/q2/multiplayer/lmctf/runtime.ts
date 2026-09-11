@@ -1,3 +1,4 @@
+import type { SharedGrappleControl } from "../../../../contracts/equipment.ts";
 import { captureLmctfGrapple, restoreLmctfGrapple } from "../../equipment/grapple-services.ts";
 /* LM_CTF selected source mode over the shared Q2 game authority. GPL-2.0-or-later. */
 import { SaveReader } from "../../../../persistence/value.ts";
@@ -28,10 +29,10 @@ export class Q2Lmctf implements Q2SpawnModule {
   readonly flags: LmctfFlags;
   readonly runes: LmctfRunes;
   readonly grapple: LmctfGrapple;
-  constructor(readonly hooks: LmctfHooks, readonly rules: LmctfRules = createLmctfRules(), private readonly travel?: LmctfTravel) {
+  constructor(readonly hooks: LmctfHooks, readonly rules: LmctfRules = createLmctfRules(), private readonly travel?: LmctfTravel, sharedGrapple: SharedGrappleControl | null = null) {
     this.context = { hooks, rules, states: this.states, plasmaQuad: false, canScore: () => this.match.canScore(), flagsTouchable: () => this.match.phase !== "countdown" };
     this.match = new LmctfMatch(this.context); this.match.paused = travel?.paused ?? false; this.vote = new LmctfVote(this.context); this.weapons = new LmctfWeapons(this.context);
-    this.flags = new LmctfFlags(this.context); this.runes = new LmctfRunes(this.context, game => this.flags.flag(1, game)); this.grapple = new LmctfGrapple(this.context);
+    this.flags = new LmctfFlags(this.context); this.runes = new LmctfRunes(this.context, game => this.flags.flag(1, game)); this.grapple = new LmctfGrapple(this.context, sharedGrapple);
     hooks.weapons.setSourceRules({ kind: "lmctf", postNativeThink: (current, repeat) => this.runes.weaponFrame(current.self, current.game, current.state.sourceFiring, repeat) });
   }
   get callbacks(): Q2CallbackDefinitions {
@@ -61,7 +62,7 @@ export class Q2Lmctf implements Q2SpawnModule {
         rune: state.rune === null ? null : saveCtfActor(state.rune), statistics: [...state.statistics].map(([key, count]) => ({ key, count })) } })) };
   }
   restore(reader: SaveReader, game: Q2GameServices): undefined {
-    this.grapple.equipment.bind(game);
+    this.grapple.equipment?.bind(game);
     const rules = reader.field("rules");
     Object.assign(this.rules, { timeLimitMinutes: rules.field("timeLimitMinutes").finite(), fragLimit: rules.field("fragLimit").integer(), mapList: rules.field("mapList").list(value => value.string()), ctfFlags: rules.field("ctfFlags").integer(0), refFlags: rules.field("refFlags").integer(0), runes: rules.field("runes").integer(0),
       skinSet: rules.field("skinSet").integer(), flagInit: rules.field("flagInit").boolean(), disabledWeapons: rules.field("disabledWeapons").integer(0),
@@ -74,7 +75,7 @@ export class Q2Lmctf implements Q2SpawnModule {
       state.plasmaMode = saved.field("plasmaMode").boolean();
       state.team = saved.field("team").choice(0, 1, 2); state.observerTeam = saved.field("observerTeam").choice(0, 1, 2);
       state.rune = saved.field("rune").nullable(value => game.host.actors.referenceSaved(readSavedActor(value)));
-      this.grapple.states.set(actor.id, restoreLmctfGrapple({ hook: saved.field("hook").nullable(readSavedActor),
+      this.grapple.equipment?.states.set(actor.id, restoreLmctfGrapple({ hook: saved.field("hook").nullable(readSavedActor),
         hookState: saved.field("hookState").choice(0, 1, 2), hookLength: saved.field("hookLength").finite(), hookHeld: saved.field("hookHeld").boolean() }, game));
       state.regenFrame = saved.field("regenFrame").integer(); state.killCarrierTime = saved.field("killCarrierTime").finite(); state.hitCarrierTime = saved.field("hitCarrierTime").finite();
       state.returnFlagTime = saved.field("returnFlagTime").finite(); state.defendFlagTime = saved.field("defendFlagTime").finite(); state.extraFlags = saved.field("extraFlags").integer(); state.spawnState = saved.field("spawnState").integer(0);
@@ -92,7 +93,7 @@ export class Q2Lmctf implements Q2SpawnModule {
     let red = 0, blue = 0; for (const [actor, state] of this.states) { const score = this.hooks.player(actor)?.score ?? 0; if (state.team === 1) red += score; else if (state.team === 2) blue += score; } return [red, blue];
   }
   admitted(entity: Q2Entity, game: Q2GameServices): undefined {
-    this.grapple.equipment.bind(game);
+    this.grapple.equipment?.bind(game);
     if (this.states.has(entity.actor.id)) return undefined;
     const common = this.hooks.player(entity.actor.id); if (common === null) throw new Error("LMCTF admission requires shared source player state");
     const state = new LmctfPlayerState(); this.states.set(entity.actor.id, state);
@@ -111,7 +112,8 @@ export class Q2Lmctf implements Q2SpawnModule {
   playerSpawned(entity: Q2Entity, game: Q2GameServices): undefined {
     const state = lmctfPlayer(this.context, entity.actor.id); this.grapple.abort(entity, game); this.grapple.state(entity.actor.id).hookHeld = false;
     if (!game.host.inventory.entries(entity.actor.id).some(entry => entry.item === "q2:weapon_hook")) game.host.inventory.configure(entity.actor, { item: "q2:weapon_hook", count: 0, capacity: 1 });
-    if (state.team !== 0) game.host.inventory.give(entity.actor, "q2:weapon_hook", 1);
+    if (this.grapple.nativeEnabled && state.team !== 0) game.host.inventory.give(entity.actor, "q2:weapon_hook", 1);
+    if (this.grapple.shared?.selection.kind === "disabled") game.host.inventory.configure(entity.actor, { item: "q2:weapon_hook", count: 0, capacity: 1 });
     game.host.combat.setTraits(entity.actor, { team: state.team === 0 || (this.rules.ctfFlags & 128) !== 0 ? null : state.team === 1 ? "RED" : "BLUE" }); return undefined;
   }
   private setTeam(entity: Q2Entity, game: Q2GameServices, team: LmctfPlayingTeam): undefined {

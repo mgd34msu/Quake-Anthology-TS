@@ -87,10 +87,10 @@ export class Q3CombatBridge {
     const policy = createQ3CombatPolicy({ id: host.combatProvider,
       armor: nativeVictimArmor(request => host.armorContext(request)),
       context: request => {
-        const target = host.records.byActor(request.target), owner = host.records.byActor(request.attack.attacker);
+        const target = host.records.nativeByActor(request.target), owner = host.records.nativeByActor(request.attack.attacker);
         const targetClient = target?.client ?? null, ownerClient = owner?.client ?? null;
         const method = request.attack.cause.kind === "q3" ? request.attack.cause.meansOfDeath : -1;
-        const source = host.product === "missionpack" && method === 25 ? host.records.byActor(request.attack.inflictor) : null;
+        const source = host.product === "missionpack" && method === 25 ? host.records.nativeByActor(request.attack.inflictor) : null;
         const schema = statSchema(host.product);
         const guard = ownerClient !== null && schema.product === "missionpack" &&
           itemAt("missionpack", ownerClient.ps.stats.get(schema.persistentPowerup)).tag === Powerup.PW_GUARD;
@@ -103,11 +103,11 @@ export class Q3CombatBridge {
           battlesuit: targetClient !== null && targetClient.ps.powerups.get(Powerup.PW_BATTLESUIT) !== 0,
           falling: method === 19, juiced: method === 27,
           proximityProtected: host.product === "missionpack" && method === 25 &&
-            (target === owner || source?.parent != null && this.sameTeam(target, source.parent)), product: host.product };
+            (target !== null && target === owner || source?.parent != null && this.sameTeam(target, source.parent)), product: host.product };
       },
     });
     const sourceState = (request: DamageRequest, state: CombatState, attacker: boolean): CombatState => {
-      const entity = host.records.byActor(attacker ? request.attack.attacker : request.target);
+      const entity = host.records.nativeByActor(attacker ? request.attack.attacker : request.target);
       return { ...state, invulnerable: state.invulnerable || entity !== null && (entity.flags & GameFlags.GODMODE) !== 0,
         team: entity?.client !== null && entity?.client !== undefined && host.gameType() >= GameType.GT_TEAM ? `q3-team:${entity.client.sess.sessionTeam}` : state.team };
     };

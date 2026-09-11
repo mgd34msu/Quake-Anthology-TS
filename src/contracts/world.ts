@@ -1,3 +1,4 @@
+import type { AttackProvenance } from "./gameplay.ts";
 import type { ActorId, CallbackId, ClientId, OwnedActor, ProviderId, SessionId } from "./identity.ts";
 import type { Bounds, Plane, Vec3 } from "./math.ts";
 import type { TraceResult } from "./scene.ts";
@@ -73,6 +74,7 @@ export interface PainReaction {
 }
 
 export interface DeathReaction extends PainReaction {
+  readonly attack?: AttackProvenance;
   readonly inflictor: ActorId | null;
   readonly point: Vec3;
 }

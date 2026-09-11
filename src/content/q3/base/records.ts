@@ -121,6 +121,10 @@ export class Q3EntityRecords {
     entity.r = new EntityShared(entity.binding.body);
   }
 
+  nativeByActor(actor: ActorId | null): GameEntity | null {
+    return actor === null ? null : this.records.find(record => record.actor?.id.equals(actor))?.entity ?? null;
+  }
+
   byActor(actor: ActorId | null): GameEntity | null {
     if (actor === null) return null;
     return this.records.find(record => record.actor?.id.equals(actor))?.entity ?? this.host.foreign(actor);

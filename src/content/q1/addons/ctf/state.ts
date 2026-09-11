@@ -1,3 +1,5 @@
+import type { ThreewaveWeapon } from "../../equipment/threewave-weapon.ts";
+import type { SharedGrappleControl } from "../../../../contracts/equipment.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
@@ -15,8 +17,17 @@ export const opposite = (team: CtfTeam): CtfTeam => team === "red" ? "blue" : "r
 export const runeItem = (rune: CtfRune): ItemId => `q1:ctf/rune/${rune}`;
 
 export class CtfState {
-  readonly grapple: ThreewaveGrapple;
-  constructor(readonly context: Q1AddonContext, readonly services: Q1CtfServices) { this.grapple = createGrapple(this); }
+  readonly grapple: ThreewaveGrapple | null;
+  grappleWeapon: ThreewaveWeapon | null = null;
+  constructor(readonly context: Q1AddonContext, readonly services: Q1CtfServices, readonly sharedGrapple: SharedGrappleControl | null = null) {
+    this.grapple = sharedGrapple !== null && !(sharedGrapple.selection.kind === "enabled" && sharedGrapple.selection.binding === "slot" && sharedGrapple.selection.mechanic === "q1-threewave" && sharedGrapple.nativeSlot("q1-threewave")) ? null : createGrapple(this);
+  }
+  get nativeGrappleEnabled(): boolean { return this.grapple !== null; }
+  grappleState(actor: ActorId) {
+    if (this.grapple === null) throw new Error("Native grapple animation requires the selected Threewave slot");
+    return this.grapple.state(actor);
+  }
+  grapplePulling(actor: ActorId): boolean { return this.grapple?.pulling(actor) ?? false; }
   get game() { return this.context.game; }
   get teamplay(): number { return this.context.services.cvar("teamplay"); }
   get startMap(): boolean { return this.game.mapName === "start"; }
@@ -31,7 +42,7 @@ export class CtfState {
   flag(team: CtfTeam): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname === (team === "red" ? "item_flag_team1" : "item_flag_team2")) ?? null; }
   flagTeam(flag: Q1Actor): CtfTeam { return flag.classname === "item_flag_team1" ? "red" : "blue"; }
   carried(actor: ActorId): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname.startsWith("item_flag_team") && entity.count === 1 && entity.owner !== null && sameActor(entity.owner, actor)) ?? null; }
-  hook(actor: ActorId): Q1Actor | null { return this.grapple.hook(actor); }
+  hook(actor: ActorId): Q1Actor | null { return this.grapple?.hook(actor) ?? null; }
   rune(actor: ActorId): CtfRune | null { return CTF_RUNES.find(rune => this.game.host.inventory.count(actor, runeItem(rune)) > 0) ?? null; }
   grant(actor: ActorId, item: ItemId, count: number, capacity = 1): undefined {
     this.game.host.inventory.configure(this.owner(actor), { item, count, capacity }); return undefined;

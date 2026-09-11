@@ -1,6 +1,5 @@
 import type { Q2CtfGrappleEquipment } from "../../equipment/ctf-grapple.ts";
-import { captureCtfGrapple, restoreCtfGrapple } from "../../equipment/grapple-services.ts";
-import type { CtfGrappleState } from "../../equipment/grapple-services.ts";
+import { CtfGrappleState, captureCtfGrapple, restoreCtfGrapple } from "../../equipment/grapple-services.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import { readSavedActor } from "../../../../persistence/save-image.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../../../persistence/value.ts";
@@ -18,34 +17,34 @@ export interface Q2CtfCheckpoint {
   readonly players: readonly { readonly actor: SavedActorId; readonly state: PlayerCheckpoint }[];
 }
 
-export function captureQ2Ctf(context: Q2CtfContext, equipment: Q2CtfGrappleEquipment): Q2CtfCheckpoint {
+export function captureQ2Ctf(context: Q2CtfContext, equipment: Q2CtfGrappleEquipment | null): Q2CtfCheckpoint {
   const { adminPassword: _password, warpList: _mapPermissions, ...rules } = context.rules;
   const { ghosts, election, ...match } = context.match;
   return { version: 1, rules, match: { ...match, ghosts: [...ghosts.values()].map(ghost => ({ ...ghost, actor: ghost.actor === null ? null : saveCtfActor(ghost.actor) })),
     election: election === null ? null : { ...election, target: saveCtfActor(election.target) } },
-    players: [...context.states].map(([actor, state]) => ({ actor: saveCtfActor(actor), state: { ...state, ...captureCtfGrapple(equipment.state(actor)) } })) };
+    players: [...context.states].map(([actor, state]) => ({ actor: saveCtfActor(actor), state: { ...state, ...captureCtfGrapple(equipment?.state(actor) ?? new CtfGrappleState()) } })) };
 }
 
 /** Shared actors, player records, inventory and the foundation restore first. */
-export function restoreQ2Ctf(context: Q2CtfContext, game: Q2GameServices, checkpoint: Q2CtfCheckpoint, equipment: Q2CtfGrappleEquipment): undefined {
-  equipment.bind(game);
+export function restoreQ2Ctf(context: Q2CtfContext, game: Q2GameServices, checkpoint: Q2CtfCheckpoint, equipment: Q2CtfGrappleEquipment | null): undefined {
+  equipment?.bind(game);
   const players = checkpoint.players.map(entry => {
     const actor = game.host.actors.resolveSaved(entry.actor);
     if (actor === null || game.entity(actor.id) === null || context.hooks.player(actor.id) === null) throw new Error("CTF restore requires the existing shared player and source entity");
     const state = new Q2CtfPlayerState();
-    const { grapple, grappleState, grappleReleaseTime, ...matchState } = entry.state;
+    const { grapple, grappleState, grappleReleaseTime, grappleNoKnockback, ...matchState } = entry.state;
     Object.assign(state, matchState);
-    const hook = restoreCtfGrapple({ grapple, grappleState, grappleReleaseTime }, game);
+    const hook = restoreCtfGrapple({ grapple, grappleState, grappleReleaseTime, grappleNoKnockback }, game);
     return { actor: actor.id, state, hook };
   });
-  context.states.clear(); equipment.states.clear();
-  for (const entry of players) { context.states.set(entry.actor, entry.state); equipment.states.set(entry.actor, entry.hook); }
+  context.states.clear(); equipment?.states.clear();
+  for (const entry of players) { context.states.set(entry.actor, entry.state); equipment?.states.set(entry.actor, entry.hook); }
   const { ghosts, election, ...match } = checkpoint.match;
   Object.assign(context.rules, checkpoint.rules); Object.assign(context.match, match);
   context.match.ghosts.clear();
   for (const ghost of ghosts) context.match.ghosts.set(ghost.code, { ...ghost, actor: ghost.actor === null ? null : game.host.actors.referenceSaved(ghost.actor) });
   context.match.election = election === null ? null : { ...election, target: game.host.actors.referenceSaved(election.target) };
-  for (const [actor, state] of equipment.states) context.hooks.setGrapplePrediction(actor, state.grapple !== null && state.grappleState === "hang");
+  if (game.options.edition === "classic") for (const [actor, state] of equipment?.states ?? []) context.hooks.setGrapplePrediction(actor, state.grapple !== null && state.grappleState === "hang");
   return undefined;
 }
 
@@ -55,7 +54,7 @@ function readPlayer(reader: SaveReader): PlayerCheckpoint {
     lastFraggedCarrier: reader.field("lastFraggedCarrier").nullable(value => value.finite()), flagSince: reader.field("flagSince").finite(),
     voted: reader.field("voted").boolean(), ready: reader.field("ready").boolean(), admin: reader.field("admin").boolean(), idView: reader.field("idView").boolean(),
     ghostCode: reader.field("ghostCode").nullable(value => value.integer(10000)), grapple: reader.field("grapple").nullable(readSavedActor),
-    grappleState: reader.field("grappleState").choice("fly", "pull", "hang"), grappleReleaseTime: reader.field("grappleReleaseTime").finite(), regenTime: reader.field("regenTime").finite(),
+    grappleState: reader.field("grappleState").choice("fly", "pull", "hang"), grappleReleaseTime: reader.field("grappleReleaseTime").finite(), grappleNoKnockback: reader.field("grappleNoKnockback").value === undefined ? null : reader.field("grappleNoKnockback").nullable(value => value.boolean()), regenTime: reader.field("regenTime").finite(),
     techSoundTime: reader.field("techSoundTime").finite(), lastTechMessage: reader.field("lastTechMessage").finite(), matchRespawnAt: reader.field("matchRespawnAt").nullable(value => value.finite()) };
 }
 export function encodeQ2CtfCheckpoint(checkpoint: Q2CtfCheckpoint): Uint8Array { return encodeCheckpointValue(checkpoint); }

@@ -1,3 +1,4 @@
+import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import type { LmctfTravel } from "../../q2/multiplayer/lmctf/types.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q2FoundationHost, Q2GameOptions } from "../../q2/foundation/host.ts";
@@ -24,6 +25,7 @@ export type Q2CompositionEvent =
 
 /** These operations use the session's selected movement and presentation owners. */
 export interface Q2CompositionServices {
+  readonly sharedGrapple?: SharedGrappleControl;
   gravity(): number;
   emit(event: Q2CompositionEvent): undefined;
   readonly hunterCamera: boolean;

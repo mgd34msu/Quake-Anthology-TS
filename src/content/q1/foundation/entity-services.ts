@@ -568,7 +568,7 @@ export class Q1EntityServices {
       monsters: entity.solid !== "none" && entity.solid !== "trigger", missile: entity.movement === "flymissile" });
     this.setBody(entity, { origin: trace.end, velocity, angles: vadd(body.angles, vscale(entity.angularVelocity, elapsed)) }); this.link(entity);
     if (trace.fraction === 1) return undefined;
-    if (trace.sky && entity.projectile !== null) return this.remove(entity);
+    if (trace.sky && entity.projectile !== null && entity.projectile !== "grenade") return this.remove(entity);
     if (entity.projectile !== null) projectileTouch(this, entity, trace.actor, trace.normal);
     else {
       const hit = trace.actor ?? this.world?.actor.id ?? null;

@@ -55,7 +55,7 @@ export class Q1SourceComposition {
       this.addon = null; this.ctf = null; this.horde = null;
     } else if (selection.program === "ctf") {
       this.packs = null; this.addon = new Q1AddonContext(this.base, "ctf", addonServices);
-      this.ctf = registerCTF(this.addon, this.ctfServices()); this.horde = null;
+      this.ctf = registerCTF(this.addon, this.ctfServices(), services.sharedGrapple ?? null); this.horde = null;
     } else if (selection.program === "dopa" || selection.program === "mg1" || selection.program === "mg3") {
       this.packs = null; this.addon = registerQ1CampaignAddons(this.base, selection.program, addonServices); this.ctf = null;
       this.horde = selection.program === "mg1" || selection.program === "dopa" ? registerQ1Horde(this.addon, {

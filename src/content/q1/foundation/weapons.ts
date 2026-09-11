@@ -1,6 +1,7 @@
 /* weapons.qc/player.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
+import type { TouchContact } from "../../../contracts/world.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
@@ -87,14 +88,14 @@ function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket
     game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
   return entity;
 }
-export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, _normal: Vec3): undefined {
+export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, _normal: Vec3, surface?: TouchContact["surface"]): undefined {
   if (other !== null && entity.owner !== null && sameActor(other, entity.owner)) return undefined;
   if (other !== null && game.entity(other)?.solid === "trigger") return undefined;
-  if (game.host.contents(game.body(entity).origin) === "sky") return game.remove(entity);
+  if (entity.projectile !== "grenade" && ((surface !== undefined && surface !== null && (surface.nativeFlags & 4) !== 0) || game.host.contents(game.body(entity).origin) === "sky")) return game.remove(entity);
   switch (entity.projectile) {
     case "rocket": return explode(game, entity, other, true);
     case "grenade":
-      if (other !== null && (game.entity(other)?.aimedDamage || game.isPlayer(other))) return explode(game, entity, null, false);
+      if (other !== null && (game.sourceTarget(other).aimedDamage || game.sourceTarget(other).player)) return explode(game, entity, null, false);
       return game.sound(entity, "weapons/bounce.wav", "weapon");
     case "spike": case "superspike": {
       const amount = entity.projectile === "spike" ? 9 : 18;
@@ -217,7 +218,7 @@ function axeStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
 }
 
 export function registerWeaponCallbacks(game: Q1EntityServices): undefined {
-  game.named.register("projectile_touch", { touch: (runtime, entity, other, normal) => projectileTouch(runtime, entity, other, normal ?? ZERO) });
+  game.named.register("projectile_touch", { touch: (runtime, entity, other, normal, surface) => projectileTouch(runtime, entity, other, normal ?? ZERO, surface) });
   game.named.register("GrenadeExplode", { action: (runtime, entity) => explode(runtime, entity, null, false) });
   game.named.register("player_axe3", { action: axeStrike });
   return undefined;

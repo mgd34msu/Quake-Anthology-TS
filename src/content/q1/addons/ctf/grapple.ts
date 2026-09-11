@@ -21,10 +21,10 @@ export function createGrapple(state: CtfState): ThreewaveGrapple {
     canDamage: (target, owner) => game.canDamage(target, owner),
   });
 }
-export function unhook(state: CtfState, actor: ActorId): undefined { return state.grapple.release(actor); }
-export function hookTouch(state: CtfState, hook: Q1Actor, other: ActorId): undefined { return state.grapple.touch(hook, other); }
+export function unhook(state: CtfState, actor: ActorId): undefined { return state.grapple !== null ? state.grapple.release(actor) : state.sharedGrapple?.release(actor); }
+export function hookTouch(state: CtfState, hook: Q1Actor, other: ActorId): undefined { return state.grapple?.touch(hook, other); }
 export function fireHook(state: CtfState, actor: ActorId): boolean {
   if ((state.teamplay & CTF_FLAGS.disableGrapple) !== 0 || state.services.observer(actor)) return false;
-  return state.grapple.fire(actor);
+  return state.grapple?.fire(actor) ?? false;
 }
-export function grappleTrail(state: CtfState, actor: ActorId): undefined { return state.grapple.trail(actor); }
+export function grappleTrail(state: CtfState, actor: ActorId): undefined { return state.grapple?.trail(actor); }
