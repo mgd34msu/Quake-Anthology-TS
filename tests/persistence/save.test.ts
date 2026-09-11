@@ -33,14 +33,15 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
   const module = { id: "q3:fixture", artifactPath: "vm/qagame.qvm", digest: createContentDigest("1".repeat(64)), revision: "1" } satisfies Q2ClassicSaveLayout["module"];
   const image: SaveImage = { schemaVersion: 1, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
     clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2.5 } }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1234, draws: 17 } }], actors: actors.checkpoint(),
-    bodies: [{ actor: actor.id, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
+    bodies: [{ actor: actor.id, linkCount: 0, linked: null, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
     combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
-    inventories: [], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
+    inventories: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: [{ item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } }] }], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
     providers: [sourceActorsCheckpoint(actors.sourceCheckpoint()), { provider: "fixture:private", schema: "fixture:bytes", version: 7, bytes: new Uint8Array([0, 255, 17]) }],
     guests: [{ kind: "qvm", module, api: { kind: "q3-qagame", version: 8 }, data: new Uint8Array([255, 0, 1, 128]), instructionIndex: 0, programStack: 4, operandStack: [], random: [], callbacks: [{ id: "q3:callback", reference: { kind: "native-guest", module, byteOffset: 0xffffffffffffffffn, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } }, parameters: [], result: "void" }], hostState: { module, format: "fixture:host", bytes: new Uint8Array([9, 8, 7]) } }] };
   // A structural SavedActorId must be encoded as fields, never as a live identity class.
   const body = image.bodies[0]; if (body === undefined) throw new Error("missing body");
-  const saved: SaveImage = { ...image, bodies: [{ ...body, actor: { slot: actor.id.slot, generation: actor.id.generation } }] };
+  const saved: SaveImage = { ...image, bodies: [{ ...body, actor: { slot: actor.id.slot, generation: actor.id.generation }, linkCount: 7,
+    linked: { state: { ...body.body, origin: { x: 0, y: 0, z: 0 } }, absoluteBounds: body.body.bounds } }] };
   expect(() => encodeSaveImage(image)).toThrow("live objects");
   const decoded = decodeSaveImage(encodeSaveImage(saved));
   expect(decoded).toEqual(saved);
@@ -54,7 +55,7 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
       import { SessionActorRegistry } from './src/world/actors/index.ts';
       import { SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from './src/world/actors/index.ts';
       import { GameplayAuthority, SharedInventoryTable } from './src/world/gameplay/index.ts';
-      import { restoreSharedWorldState } from './src/persistence/world-state.ts';
+      import { restoreSharedWorldState,restoreSharedBodyLinks } from './src/persistence/world-state.ts';
       import { createIdentityOwner } from './src/contracts/identity.ts';
       const save=await readSaveImage(process.argv[1]);
       const source=save.providers.find(p=>p.provider==='world:actors');
@@ -64,8 +65,13 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
       const combat=new GameplayAuthority(registry,new ActorCallbackTable(registry),{impulse:()=>{},beforeReaction:()=>{},confirmed:()=>{}});
       const inventory=new SharedInventoryTable(registry);
       restoreSharedWorldState(save,{actors:registry,bodies,combat,inventory,storage:()=> 'typescript'});
+      restoreSharedBodyLinks(save,{actors:registry,bodies});
       const actor=registry.atSource('q1:game',7);
       if(actor===null||combat.read(actor.id)?.health!==73||combat.read(actor.id)?.noKnockback!==true||bodies.read(actor.id)?.origin.x!==12||save.guests[0]?.kind!=='qvm'||save.guests[0].data[3]!==128) throw new Error('restore failed');
+      if(bodies.linked(actor.id)?.state.origin.x!==0||bodies.linked(actor.id)?.absoluteBounds.min.x!==-16||bodies.linked(actor.id)?.linkCount!==7) throw new Error('saved link state lost');
+      bodies.link(actor);
+      if(bodies.linked(actor.id)?.linkCount!==8||bodies.linked(actor.id)?.state.origin.x!==12) throw new Error('source link continuation failed');
+      if(inventory.count(actor.id,'q1:ammo/nails')!==-3||inventory.adjustSourceCounter(actor,'q1:ammo/nails',-1)!==-4) throw new Error('signed source counter lost');
       process.stdout.write('restored');
     `, path], { cwd: join(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" });
     const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

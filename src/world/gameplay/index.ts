@@ -6,4 +6,4 @@ export { SharedTransitionCoordinator } from "./transitions.ts";
 export { absorbNativeArmor, attackDamageFlags } from "./armor.ts";
 export type { ArmorDamageFlags, ArmorResult, VictimArmorContext, VictimArmorPolicy } from "./armor.ts";
 export { createQ1CombatPolicy, createQ2CombatPolicy, createQ3CombatPolicy, nativeVictimArmor } from "./policies.ts";
-export type { Q1CombatContext, Q2CombatContext, Q3CombatContext } from "./policies.ts";
+export type { Q1CombatContext, Q1CombatPolicyOptions, Q1DamageSourceEffects, Q2CombatContext, Q3CombatContext } from "./policies.ts";

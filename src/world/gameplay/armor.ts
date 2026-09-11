@@ -6,6 +6,8 @@ export interface ArmorDamageFlags {
   readonly noPowerArmor: boolean;
   readonly noRegularArmor: boolean;
   readonly energy: boolean;
+  /** A source attack scales regular protection; each victim retains its own armor formula. */
+  readonly regularProtectionScale?: number;
 }
 
 export interface ArmorResult { readonly armor: ArmorState; readonly powerSaved: number; readonly regularSaved: number; }
@@ -23,10 +25,11 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
   if (armor.kind === "q2" && context.q2 === undefined) throw new Error("Q2 victim armor requires an explicit classic or rerelease source profile");
   if (damage === 0 || flags.noArmor || armor.kind === "none") return { armor, powerSaved: 0, regularSaved: 0 };
   const multiply = (left: number, right: number): number => context.arithmetic === "binary32" ? Math.fround(Math.fround(left) * Math.fround(right)) : left * right;
+  const protectionScale = flags.regularProtectionScale ?? 1;
   switch (armor.kind) {
     case "q1": {
       if (flags.noRegularArmor) return { armor, powerSaved: 0, regularSaved: 0 };
-      const regularSaved = Math.min(armor.points, Math.ceil(multiply(armor.absorption, damage)));
+      const regularSaved = Math.min(armor.points, Math.ceil(multiply(multiply(armor.absorption, protectionScale), damage)));
       return { armor: { ...armor, points: armor.points - regularSaved, absorption: regularSaved >= armor.points ? 0 : armor.absorption }, powerSaved: 0, regularSaved };
     }
     case "q2": {
@@ -47,12 +50,12 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
         powerArmor = { ...powerArmor, cells: rerelease ? Math.max(0, powerArmor.cells - Math.max(damagePerCell, used)) : powerArmor.cells - used };
       }
       const protection = flags.energy ? armor.energyProtection : armor.normalProtection;
-      const regularSaved = flags.noRegularArmor ? 0 : Math.min(armor.points, Math.ceil(multiply(protection, damage - powerSaved)));
+      const regularSaved = flags.noRegularArmor ? 0 : Math.min(armor.points, Math.ceil(multiply(multiply(protection, protectionScale), damage - powerSaved)));
       return { armor: { ...armor, points: armor.points - regularSaved, powerArmor }, powerSaved, regularSaved };
     }
     case "q3": {
       if (flags.noRegularArmor) return { armor, powerSaved: 0, regularSaved: 0 };
-      const regularSaved = Math.min(armor.points, Math.ceil(Math.fround(Math.fround(damage) * Math.fround(armor.protection))));
+      const regularSaved = Math.min(armor.points, Math.ceil(Math.fround(Math.fround(damage) * Math.fround(Math.fround(armor.protection) * Math.fround(protectionScale)))));
       return { armor: { ...armor, points: armor.points - regularSaved }, powerSaved: 0, regularSaved };
     }
   }
@@ -64,10 +67,11 @@ export function attackDamageFlags(request: DamageRequest): ArmorDamageFlags & { 
   const q2 = cause.kind === "q2" ? cause.damageFlags : 0;
   const q3 = cause.kind === "q3" ? cause.damageFlags : 0;
   return {
-    noArmor: ((q2 | q3) & 2) !== 0,
+    noArmor: ((q2 | q3) & 2) !== 0 || cause.kind === "q1" && cause.armorEffect === "bypass",
     noPowerArmor: (q2 & 0x100) !== 0,
     noRegularArmor: (q2 & 0x80) !== 0,
     energy: (q2 & 4) !== 0,
+    regularProtectionScale: cause.kind === "q1" && cause.armorEffect === "half-effectiveness" ? 0.5 : 1,
     noKnockback: (q2 & 8) !== 0 || (q3 & 4) !== 0,
     noProtection: (q2 & 0x20) !== 0 || (q3 & 8) !== 0,
     noTeamProtection: (q3 & 0x10) !== 0,

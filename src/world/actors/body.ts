@@ -13,6 +13,10 @@ export interface BodyLinkHooks {
   onLink(body: LinkedBody): undefined;
   onUnlink(actor: ActorId): undefined;
 }
+export interface BodyLinkState {
+  readonly linkCount: number;
+  readonly linked: { readonly state: BodyState; readonly absoluteBounds: Bounds } | null;
+}
 
 export function copyVector(vector: Vec3): Vec3 { return Object.freeze({ x: vector.x, y: vector.y, z: vector.z }); }
 export function copyBounds(bounds: Bounds): Bounds { return Object.freeze({ min: copyVector(bounds.min), max: copyVector(bounds.max) }); }
@@ -67,6 +71,22 @@ export class SharedBodyTable implements BodyTable {
   }
 
   linked(actor: ActorId): LinkedBody | null { return this.record(actor)?.linked ?? null; }
+
+  linkState(actor: ActorId): BodyLinkState | null {
+    const record = this.record(actor);
+    return record === null ? null : Object.freeze({ linkCount: record.linkCount, linked: record.linked });
+  }
+
+  /** Installs saved spatial state directly, without source link callbacks, bounds recomputation or a new link count. */
+  restoreLinkState(actor: OwnedActor, saved: BodyLinkState): undefined {
+    this.actors.assertOwned(actor);
+    const record = this.record(actor.id);
+    if (record === null) throw new Error("Cannot restore links without an actor body");
+    if (!Number.isSafeInteger(saved.linkCount) || saved.linkCount < 0 || (saved.linked !== null && saved.linkCount === 0)) throw new RangeError("Invalid saved body link count");
+    record.linkCount = saved.linkCount;
+    record.linked = saved.linked === null ? null : Object.freeze({ actor: actor.id, state: copyBody(saved.linked.state), absoluteBounds: copyBounds(saved.linked.absoluteBounds), linkCount: saved.linkCount });
+    return record.linked === null ? this.hooks.onUnlink(actor.id) : this.hooks.onLink(record.linked);
+  }
 
   link(actor: OwnedActor): undefined {
     this.actors.assertOwned(actor);

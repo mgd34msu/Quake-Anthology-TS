@@ -79,9 +79,13 @@ export interface ActorSlotCheckpoint extends SavedActorId {
     | { readonly kind: "free"; readonly freedAt: SourceTime | null };
 }
 
+export interface SavedBodyState extends Omit<BodyState, "ground"> { readonly ground: SavedActorId | null; }
 export interface BodyCheckpoint {
   readonly actor: SavedActorId;
-  readonly body: Omit<BodyState, "ground"> & { readonly ground: SavedActorId | null };
+  readonly body: SavedBodyState;
+  readonly linkCount: number;
+  /** Spatial state may intentionally precede current field writes. */
+  readonly linked: { readonly state: SavedBodyState; readonly absoluteBounds: BodyState["bounds"] } | null;
 }
 
 export interface CombatCheckpoint { readonly actor: SavedActorId; readonly state: CombatState; }

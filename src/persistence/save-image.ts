@@ -1,7 +1,7 @@
 import { rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { ArmorState, CombatState, InventoryEntry } from "../contracts/gameplay.ts";
-import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId } from "../contracts/session.ts";
+import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, SavedBodyState } from "../contracts/session.ts";
 import type { ActorId } from "../contracts/identity.ts";
 import type { SourceActorCheckpoint } from "../world/actors/registry.ts";
 import { readGuest } from "./execution.ts";
@@ -12,6 +12,9 @@ import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveFormatErr
 const MAGIC = new TextEncoder().encode("QTSAVE1\n");
 export function savedActorId(actor: ActorId): SavedActorId { return { slot: actor.slot, generation: actor.generation }; }
 export function readSavedActor(reader: SaveReader): SavedActorId { return { slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) }; }
+export function readSavedBody(reader: SaveReader): SavedBodyState {
+  return { origin: readVector(reader.field("origin")), angles: readVector(reader.field("angles")), velocity: readVector(reader.field("velocity")), bounds: readBounds(reader.field("bounds")), ground: reader.field("ground").nullable(readSavedActor) };
+}
 function readActorSlot(reader: SaveReader): ActorSlotCheckpoint {
   const actor = readSavedActor(reader);
   const lifetime = reader.field("lifetime");
@@ -32,17 +35,19 @@ export function readArmor(reader: SaveReader): ArmorState {
   }
 }
 function readCombat(reader: SaveReader): CombatState { return { health: reader.field("health").number(), armor: readArmor(reader.field("armor")), mass: reader.field("mass").number(), canTakeDamage: reader.field("canTakeDamage").boolean(), invulnerable: reader.field("invulnerable").boolean(), team: reader.field("team").nullable(value => value.string()), ...(reader.field("noKnockback").value === undefined ? {} : { noKnockback: reader.field("noKnockback").boolean() }) }; }
-function readInventory(reader: SaveReader): InventoryEntry { return { item: namespaced(reader.field("item")), count: reader.field("count").number(), capacity: reader.field("capacity").number() }; }
+export function readInventoryEntry(reader: SaveReader): InventoryEntry {
+  const policy = reader.field("countPolicy");
+  return { item: namespaced(reader.field("item")), count: reader.field("count").number(), capacity: reader.field("capacity").number(), ...(policy.value === undefined ? {} : { countPolicy: policy.field("kind").choice("stack", "source-counter") === "stack" ? { kind: "stack" } : { kind: "source-counter", arithmetic: policy.field("arithmetic").choice("binary32", "binary64", "int32") } }) };
+}
 
 export function parseSaveImage(value: unknown): SaveImage {
   const reader = new SaveReader(value);
   return { schemaVersion: reader.field("schemaVersion").literal(1), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
     clocks: reader.field("clocks").list(entry => ({ provider: namespaced(entry.field("provider")), time: readTime(entry.field("time")) })),
     random: reader.field("random").list(entry => ({ provider: namespaced(entry.field("provider")), state: readRandom(entry.field("state")) })), actors: reader.field("actors").list(readActorSlot),
-    bodies: reader.field("bodies").list(entry => { const body = entry.field("body"); return { actor: readSavedActor(entry.field("actor")), body: {
-      origin: readVector(body.field("origin")), angles: readVector(body.field("angles")), velocity: readVector(body.field("velocity")), bounds: readBounds(body.field("bounds")), ground: body.field("ground").nullable(readSavedActor) } }; }),
+    bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
     combat: reader.field("combat").list(entry => ({ actor: readSavedActor(entry.field("actor")), state: readCombat(entry.field("state")) })),
-    inventories: reader.field("inventories").list(entry => ({ actor: readSavedActor(entry.field("actor")), entries: entry.field("entries").list(readInventory) })),
+    inventories: reader.field("inventories").list(entry => ({ actor: readSavedActor(entry.field("actor")), entries: entry.field("entries").list(readInventoryEntry) })),
     configurations: reader.field("configurations").list(entry => ({ actor: readSavedActor(entry.field("actor")), movement: readProvider(entry.field("movement")), character: readCharacter(entry.field("character")), weapons: entry.field("weapons").list(readProvider), inventory: readProvider(entry.field("inventory")) })),
     thinks: reader.field("thinks").list(entry => ({ actor: readSavedActor(entry.field("actor")), callback: namespaced(entry.field("callback")), due: readTime(entry.field("due")), boundary: entry.field("boundary").choice("before-physics", "during-physics", "after-physics"), provider: namespaced(entry.field("provider")), sequence: entry.field("sequence").integer(0) })),
     providers: reader.field("providers").list(entry => ({ provider: namespaced(entry.field("provider")), schema: namespaced(entry.field("schema")), version: entry.field("version").integer(0), bytes: entry.field("bytes").bytes() })),

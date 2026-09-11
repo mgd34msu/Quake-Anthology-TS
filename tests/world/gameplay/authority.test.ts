@@ -191,6 +191,8 @@ describe("shared actor and gameplay authority", () => {
     const result = q1.decide(attack(target.id, attacker.id), protectedState, state());
     expect(result.mutations.map(mutation => mutation.kind)).toEqual(["armor", "impulse"]);
     expect(result.appliedDamage).toBe(0);
+    const rogue = createQ1CombatPolicy({ id: "q1:rogue-combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 1, baseTeamHealth: false, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32" })) });
+    expect(rogue.decide(attack(target.id, attacker.id), { ...state(), team: "1" }, { ...state(), team: "1" }).appliedDamage).toBe(40);
     const q2 = createQ2CombatPolicy({ id: "q2:combat", context: () => q2Context, armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) });
     expect(q2.decide(attack(target.id, attacker.id), protectedState, state()).mutations.map(mutation => mutation.kind)).toEqual(["impulse"]);
     const shield: ArmorState = { kind: "q2", points: 100, normalProtection: 0.6, energyProtection: 0.3, item: "q2:armor", powerArmor: { kind: "shield", cells: 10 } };
@@ -217,6 +219,71 @@ describe("shared actor and gameplay authority", () => {
     expect(fixed.feedback?.knockback).toBe(0);
   });
 
+  test("Q1 empathy reenters after quad and reads the victim again before armor commits", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("q1-effects")), callbacks = new ActorCallbackTable(actors);
+    const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q1:game", "q1:player");
+    const authority = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    authority.create(target, state(100, { kind: "q1", points: 100, absorption: 0.5, item: "q1:armor" })); authority.create(attacker, state());
+    const observed: number[] = [];
+    const policy = createQ1CombatPolicy({ id: "q1:combat", context: request => ({ arithmetic: "binary32", quad: request.attack.sequence === 1, teamplay: 0, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1 })), sourceEffects: {
+      afterQuad(request, damage) {
+        observed.push(damage);
+        if (request.attack.sequence === 1) {
+          const reflected = attack(attacker.id, target.id, 2, damage / 2);
+          authority.apply({ ...reflected, attack: { ...reflected.attack, combatProvider: "q1:combat" } });
+          return { kind: "continue", amount: damage / 2 };
+        }
+        return { kind: "continue", amount: damage };
+      },
+    } });
+    authority.register(policy);
+    callbacks.bind(attacker, { think: null, touch: null, use: null, die: null, pain: () => {
+      authority.setHealth(target, 90); authority.setArmor(target, { kind: "q1", points: 3, absorption: 0.5, item: "q1:armor" }); return undefined;
+    } });
+    const request = attack(target.id, attacker.id, 1, 10);
+    authority.apply({ ...request, attack: { ...request.attack, combatProvider: "q1:combat" } });
+    expect(observed).toEqual([40, 20]);
+    expect([authority.read(attacker.id)?.health, authority.read(target.id)?.health]).toEqual([80, 73]);
+    const armor: ArmorState = { kind: "q1", points: 10, absorption: 0.8, item: "q1:armor" };
+    const lava = attack(target.id, attacker.id, 3, 18);
+    const half = policy.decide({ ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:super-lava", armorEffect: "half-effectiveness" } } }, state(100, armor), state());
+    expect(half.appliedDamage).toBe(10);
+    expect(half.mutations.find(mutation => mutation.kind === "armor")?.after).toEqual({ ...armor, points: 2 });
+    const bypass = policy.decide({ ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:lava", armorEffect: "bypass" } } }, state(100, armor), state());
+    expect(bypass.appliedDamage).toBe(18); expect(bypass.mutations.some(mutation => mutation.kind === "armor")).toBe(false);
+    const earth = createQ1CombatPolicy({ id: "q1:earth", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1 })), sourceEffects: { afterArmor: (_request, take) => take * 0.5 } });
+    const earthResult = earth.decide({ ...lava, amount: 10 }, state(100, { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" }), state());
+    expect(earthResult.appliedDamage).toBe(2.5);
+    expect(earthResult.mutations).toEqual([{ kind: "armor", before: { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" }, after: { kind: "q1", points: 25, absorption: 0.5, item: "q1:armor" } }, { kind: "health", before: 100, after: 97.5 }]);
+  });
+
+  test("Q1 CTF reflection observes committed protection and rereads health after nested pain", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("q1-ctf")), callbacks = new ActorCallbackTable(actors);
+    const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q1:game", "q1:player");
+    const order: string[] = [];
+    const authority = new GameplayAuthority(actors, callbacks, { impulse: actor => { order.push(`impulse:${actor.id.slot}`); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
+    authority.create(target, state(100, { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" })); authority.create(attacker, state());
+    authority.register(createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: true, momentumDirection: { x: 1, y: 0, z: 0 } }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1 })), sourceEffects: {
+      armorAllowed: request => request.attack.sequence !== 3,
+      beforeHealth(request, damage, victim) {
+        if (request.attack.sequence === 1) {
+          expect(victim.armor).toEqual({ kind: "q1", points: 10, absorption: 0.5, item: "q1:armor" });
+          order.push(`reflect:${damage}`);
+          authority.apply({ ...request, target: attacker.id, amount: damage, attack: { ...request.attack, sequence: 2 } });
+        }
+        return request.attack.sequence !== 3;
+      },
+    } }));
+    callbacks.bind(attacker, { think: null, touch: null, use: null, die: null, pain: () => { order.push("nested-pain"); authority.setHealth(target, 77); return undefined; } });
+    const request = attack(target.id, attacker.id, 1, 40);
+    authority.apply({ ...request, attack: { ...request.attack, combatProvider: "q1:combat" } });
+    expect([authority.read(target.id)?.health, authority.read(attacker.id)?.health]).toEqual([57, 60]);
+    expect(order).toEqual([`impulse:${target.id.slot}`, "reflect:40", `impulse:${attacker.id.slot}`, "nested-pain"]);
+    authority.apply({ ...request, attack: { ...request.attack, sequence: 3, combatProvider: "q1:combat" } });
+    expect(authority.read(target.id)?.health).toBe(57);
+    expect(authority.read(target.id)?.armor).toEqual({ kind: "q1", points: 10, absorption: 0.5, item: "q1:armor" });
+  });
+
   test("inventory consumption is immediate and campaign gates own combined travel", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("inventory"));
     const actor = actors.allocate("q2:game", "q2:player");
@@ -225,6 +292,15 @@ describe("shared actor and gameplay authority", () => {
     expect(inventory.consume(actor, "q1:rockets", 2)).toBe(true);
     expect(inventory.consume(actor, "q1:rockets", 1)).toBe(false);
     expect(inventory.give(actor, "q1:rockets", 20)).toBe(10);
+    expect(() => inventory.configure(actor, { item: "q1:rockets", count: -1, capacity: 10 })).toThrow("nonnegative");
+    inventory.configure(actor, { item: "q1:nails", count: 1, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } });
+    expect(inventory.adjustSourceCounter(actor, "q1:nails", -4)).toBe(-3);
+    inventory.configure(actor, { item: "q1:nails", count: -2, capacity: 200 });
+    expect(inventory.count(actor.id, "q1:nails")).toBe(-2);
+    const copied = actors.allocate("q1:game", "q1:gremlin-clone"); inventory.create(copied, inventory.entries(actor.id));
+    expect(inventory.count(copied.id, "q1:nails")).toBe(-2);
+    inventory.configure(copied, { item: "q1:nails", count: 16777216, capacity: 200 });
+    expect(inventory.adjustSourceCounter(copied, "q1:nails", 1)).toBe(16777216);
     let trips = 0;
     const transitions = new SharedTransitionCoordinator(() => { trips++; return undefined; });
     const mode = { kind: "combined", campaign: "q1:campaign", match: "q3:match", levelAuthority: "campaign-gates", simultaneous: "campaign-first" } satisfies Parameters<typeof transitions.resolve>[0];

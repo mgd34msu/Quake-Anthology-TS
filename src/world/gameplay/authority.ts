@@ -49,6 +49,18 @@ function armorEqual(left: ArmorState, right: ArmorState): boolean {
   }
 }
 
+function captureDecision(proposed: DamageDecision, request: DamageRequest): DamageDecision {
+  if (proposed.request !== request) throw new Error("Combat policy replaced attack provenance");
+  const mutations = proposed.mutations.map((mutation): DamageMutation => {
+    switch (mutation.kind) {
+      case "health": return Object.freeze({ ...mutation });
+      case "armor": return Object.freeze({ ...mutation, before: copyArmor(mutation.before), after: copyArmor(mutation.after) });
+      case "impulse": return Object.freeze({ ...mutation, impulse: copyVector(mutation.impulse) });
+    }
+  });
+  return Object.freeze({ ...proposed, request, mutations: Object.freeze(mutations), ...(proposed.continuation === undefined ? {} : { continuation: Object.freeze({ ...proposed.continuation }) }) });
+}
+
 /** Combat decisions are pure. Their stores commit synchronously before source callbacks may reenter. */
 export class GameplayAuthority implements DamageAuthority {
   private readonly bindings = new Map<OwnedActor, CombatStateBinding>();
@@ -117,35 +129,25 @@ export class GameplayAuthority implements DamageAuthority {
     const binding = this.binding(target);
     const policy = this.policies.get(request.attack.combatProvider);
     if (policy === undefined) throw new Error(`Missing combat policy: ${request.attack.combatProvider}`);
+    const prepared = policy.prepare?.(request, this.readState(target, binding), request.attack.attacker === null ? null : this.read(request.attack.attacker));
+    if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
+    if (prepared?.kind === "continue" && !Number.isFinite(prepared.amount)) throw new RangeError("Prepared source damage must be finite");
     const initial = this.readState(target, binding);
-    const proposed = policy.decide(request, initial, request.attack.attacker === null ? null : this.read(request.attack.attacker));
-    if (proposed.request !== request) throw new Error("Combat policy replaced attack provenance");
-    const mutations = proposed.mutations.map((mutation): DamageMutation => {
-      switch (mutation.kind) {
-        case "health": return Object.freeze({ ...mutation });
-        case "armor": return Object.freeze({ ...mutation, before: copyArmor(mutation.before), after: copyArmor(mutation.after) });
-        case "impulse": return Object.freeze({ ...mutation, impulse: copyVector(mutation.impulse) });
-      }
-    });
-    const decision: DamageDecision = Object.freeze({ ...proposed, request, mutations: Object.freeze(mutations) });
-    this.validateMutations(initial, mutations);
-    for (const mutation of mutations) {
-      this.actors.assertOwned(target);
-      switch (mutation.kind) {
-        case "health": {
-          if (binding.read().health !== mutation.before) throw new Error("Combat health changed before its decision committed");
-          binding.writeHealth(mutation.after);
-          break;
-        }
-        case "armor": {
-          if (!armorEqual(this.readState(target, binding).armor, mutation.before)) throw new Error("Combat armor changed before its decision committed");
-          this.writeArmor(target, binding, mutation.after);
-          break;
-        }
-        case "impulse": this.hooks.impulse(target, mutation.impulse, mutation.movementProvider); break;
-      }
+    const proposed: DamageDecision = prepared?.kind === "cancel" ? { request, mutations: [], appliedDamage: 0, reaction: "none" }
+      : policy.decide(request, initial, request.attack.attacker === null ? null : this.read(request.attack.attacker), prepared);
+    let decision = captureDecision(proposed, request);
+    this.commitMutations(target, binding, initial, decision.mutations);
+    if (decision.continuation !== undefined) {
+      if (policy.resume === undefined) throw new Error("Combat policy has no source continuation implementation");
+      const resumed = captureDecision(policy.resume(decision, { target: () => this.read(target.id), attacker: () => request.attack.attacker === null ? null : this.read(request.attack.attacker) }), request);
+      if (resumed.continuation !== undefined) throw new Error("Combat source health continuation did not complete");
+      const latest = this.read(target.id);
+      if (latest === null) {
+        if (resumed.mutations.length !== 0) throw new Error("Combat continuation mutated a removed actor");
+      } else this.commitMutations(target, binding, latest, resumed.mutations);
+      decision = captureDecision({ ...resumed, mutations: [...decision.mutations, ...resumed.mutations] }, request);
     }
-    this.hooks.beforeReaction(target, decision);
+    if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, decision);
     if (this.actors.isLive(target.id)) {
       const kick = decision.feedback?.kind === "q2" ? decision.feedback.knockback : request.knockback;
       const reaction = { self: target, attacker: request.attack.attacker, kick, damage: decision.appliedDamage };
@@ -176,6 +178,25 @@ export class GameplayAuthority implements DamageAuthority {
     const cells = this.powerArmorCells.get(actor);
     if (cells !== undefined && armor.kind === "q2" && armor.powerArmor.kind !== "none") cells.write(armor.powerArmor.cells);
     return binding.writeArmor(copyArmor(armor));
+  }
+
+  private commitMutations(target: OwnedActor, binding: CombatStateBinding, initial: CombatState, mutations: readonly DamageMutation[]): undefined {
+    this.validateMutations(initial, mutations);
+    for (const mutation of mutations) {
+      this.actors.assertOwned(target);
+      switch (mutation.kind) {
+        case "health":
+          if (binding.read().health !== mutation.before) throw new Error("Combat health changed before its decision committed");
+          binding.writeHealth(mutation.after);
+          break;
+        case "armor":
+          if (!armorEqual(this.readState(target, binding).armor, mutation.before)) throw new Error("Combat armor changed before its decision committed");
+          this.writeArmor(target, binding, mutation.after);
+          break;
+        case "impulse": this.hooks.impulse(target, mutation.impulse, mutation.movementProvider); break;
+      }
+    }
+    return undefined;
   }
 
   private validateMutations(initial: CombatState, mutations: readonly DamageMutation[]): undefined {

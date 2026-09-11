@@ -22,7 +22,7 @@ export interface AttackProvenance {
   readonly inventoryProvider: ProviderId;
   readonly movementProvider: ProviderId;
   readonly cause:
-    | { readonly kind: "q1"; readonly deathType: string }
+    | { readonly kind: "q1"; readonly deathType: string; readonly armorEffect?: "bypass" | "half-effectiveness" }
     /** meansOfDeath is the canonical engine cause ID, never an unconverted native ordinal. */
     | { readonly kind: "q2"; readonly meansOfDeath: number; readonly damageFlags: number; readonly native?: Q2NativeCause }
     | { readonly kind: "q3"; readonly meansOfDeath: number; readonly damageFlags: number }
@@ -70,12 +70,22 @@ export interface DamageDecision {
   readonly reaction: "none" | "pain" | "death";
   /** Source savings, including protection credited as armor; never infer these from spent inventory. */
   readonly feedback?: { readonly kind: "q2"; readonly powerArmor: number; readonly armor: number; readonly blood: number; readonly knockback: number };
+  /** Source TeamHealthDam runs after armor/momentum commit and before health is read again. */
+  readonly continuation?: { readonly kind: "q1-health"; readonly damage: number; readonly take: number };
 }
+
+export interface CurrentCombatState { target(): CombatState | null; attacker(): CombatState | null; }
 
 export interface CombatPolicy {
   readonly id: ProviderId;
-  decide(request: DamageRequest, target: CombatState, attacker: CombatState | null): DamageDecision;
+  /** Source stages such as empathy may synchronously reenter combat before armor is read. */
+  prepare?(request: DamageRequest, target: CombatState, attacker: CombatState | null): DamagePreparation;
+  decide(request: DamageRequest, target: CombatState, attacker: CombatState | null, prepared?: { readonly amount: number }): DamageDecision;
+  /** May synchronously reenter. Returned mutations use freshly read state after that call returns. */
+  resume?(decision: DamageDecision, current: CurrentCombatState): DamageDecision;
 }
+
+export type DamagePreparation = { readonly kind: "continue"; readonly amount: number } | { readonly kind: "cancel" };
 
 export type DamageOutcome =
   | { readonly kind: "stale-target"; readonly request: DamageRequest }
@@ -85,10 +95,13 @@ export interface DamageAuthority {
   apply(request: DamageRequest): DamageOutcome;
 }
 
+export type InventoryCountPolicy = { readonly kind: "stack" } | { readonly kind: "source-counter"; readonly arithmetic: "binary32" | "binary64" | "int32" };
 export interface InventoryEntry {
   readonly item: ItemId;
   readonly count: number;
   readonly capacity: number;
+  /** Original source fields can retain signed values; absence on a new entry selects a nonnegative stack. */
+  readonly countPolicy?: InventoryCountPolicy;
 }
 
 export interface InventoryTable {

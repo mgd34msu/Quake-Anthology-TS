@@ -12,6 +12,24 @@ function quantity(value: number): number {
   return value;
 }
 
+function sourceCount(entry: InventoryEntry, value: number): number {
+  if (!Number.isFinite(value)) throw new RangeError("Inventory counter must be finite");
+  if (entry.countPolicy?.kind !== "source-counter") return quantity(value);
+  switch (entry.countPolicy.arithmetic) {
+    case "binary32": {
+      const rounded = Math.fround(value);
+      if (!Number.isFinite(rounded)) throw new RangeError("Inventory counter exceeds binary32 range");
+      return rounded;
+    }
+    case "binary64": return value;
+    case "int32": return value | 0;
+  }
+}
+function copyEntry(entry: InventoryEntry): InventoryEntry {
+  quantity(entry.capacity);
+  return Object.freeze({ ...entry, count: sourceCount(entry, entry.count), ...(entry.countPolicy === undefined ? {} : { countPolicy: Object.freeze({ ...entry.countPolicy }) }) });
+}
+
 /** Capacity and item selection belong to the chosen inventory provider. Counts have one write path. */
 export class SharedInventoryTable implements InventoryTable {
   private readonly stores = new Map<OwnedActor, InventoryStateBinding>();
@@ -30,16 +48,15 @@ export class SharedInventoryTable implements InventoryTable {
   create(actor: OwnedActor, entries: readonly InventoryEntry[]): undefined {
     const items = new Map<ItemId, InventoryEntry>();
     for (const entry of entries) {
-      quantity(entry.count); quantity(entry.capacity);
       if (items.has(entry.item)) throw new RangeError(`Duplicate inventory item ${entry.item}`);
-      items.set(entry.item, Object.freeze({ ...entry }));
+      items.set(entry.item, copyEntry(entry));
     }
-    return this.bind(actor, { read: () => [...items.values()], write: entry => { items.set(entry.item, Object.freeze({ ...entry })); return undefined; } });
+    return this.bind(actor, { read: () => [...items.values()], write: entry => { items.set(entry.item, copyEntry(entry)); return undefined; } });
   }
 
   entries(actor: ActorId): readonly InventoryEntry[] {
     const owner = this.actors.resolveOwned(actor);
-    return owner === null ? [] : (this.stores.get(owner)?.read() ?? []).map(entry => Object.freeze({ ...entry }));
+    return owner === null ? [] : (this.stores.get(owner)?.read() ?? []).map(copyEntry);
   }
 
   has(actor: ActorId): boolean {
@@ -55,7 +72,7 @@ export class SharedInventoryTable implements InventoryTable {
     const entry = binding?.read().find(candidate => candidate.item === item);
     if (entry === undefined || binding === undefined) return count === 0;
     if (entry.count < count) return false;
-    binding.write(Object.freeze({ ...entry, count: entry.count - count }));
+    binding.write(copyEntry({ ...entry, count: entry.count - sourceCount(entry, count) }));
     return true;
   }
 
@@ -65,15 +82,28 @@ export class SharedInventoryTable implements InventoryTable {
     const entry = binding?.read().find(candidate => candidate.item === item);
     if (entry === undefined || binding === undefined) return 0;
     const given = Math.min(count, Math.max(0, entry.capacity - entry.count));
-    if (given !== 0) binding.write(Object.freeze({ ...entry, count: entry.count + given }));
-    return given;
+    if (given === 0) return 0;
+    const next = copyEntry({ ...entry, count: entry.count + sourceCount(entry, given) });
+    binding.write(next);
+    return next.count - entry.count;
   }
 
   /** Source pickups can change capacity or retain an over-cap count without a forced generic clamp. */
   configure(actor: OwnedActor, entry: InventoryEntry): undefined {
-    this.actors.assertOwned(actor); quantity(entry.count); quantity(entry.capacity);
+    this.actors.assertOwned(actor);
     const binding = this.stores.get(actor);
     if (binding === undefined) throw new Error("Actor has no inventory binding");
-    return binding.write(Object.freeze({ ...entry }));
+    const policy = entry.countPolicy ?? binding.read().find(candidate => candidate.item === entry.item)?.countPolicy;
+    return binding.write(copyEntry(policy === undefined ? entry : { ...entry, countPolicy: policy }));
+  }
+
+  /** Fixed source bursts may decrement past zero; ordinary stack consumption keeps its availability check. */
+  adjustSourceCounter(actor: OwnedActor, item: ItemId, delta: number): number {
+    this.actors.assertOwned(actor);
+    const binding = this.stores.get(actor), entry = binding?.read().find(candidate => candidate.item === item);
+    if (binding === undefined || entry === undefined || entry.countPolicy?.kind !== "source-counter") throw new Error("Item is not a signed source counter");
+    const next = copyEntry({ ...entry, count: sourceCount(entry, entry.count) + sourceCount(entry, delta) });
+    binding.write(next);
+    return next.count;
   }
 }

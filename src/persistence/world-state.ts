@@ -1,10 +1,34 @@
 import type { OwnedActor } from "../contracts/identity.ts";
-import type { SaveImage, SavedActorId } from "../contracts/session.ts";
+import type { BodyCheckpoint, SaveImage, SavedActorId, SavedBodyState } from "../contracts/session.ts";
+import type { BodyState } from "../contracts/world.ts";
 import type { SessionActorRegistry } from "../world/actors/registry.ts";
 import type { SharedBodyTable } from "../world/actors/body.ts";
 import type { GameplayAuthority } from "../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../world/gameplay/inventory.ts";
 import { SaveFormatError } from "./value.ts";
+import { savedActorId } from "./save-image.ts";
+
+export function captureSharedBodies(actors: SessionActorRegistry, bodies: SharedBodyTable): readonly BodyCheckpoint[] {
+  const result: BodyCheckpoint[] = [];
+  const saveBody = (state: BodyState): SavedBodyState => ({ ...state, ground: state.ground === null ? null : savedActorId(state.ground) });
+  for (const actor of actors.observations()) {
+    const body = bodies.read(actor.id), links = bodies.linkState(actor.id);
+    if (body !== null && links !== null) result.push({ actor: savedActorId(actor.id), body: saveBody(body), linkCount: links.linkCount,
+      linked: links.linked === null ? null : { state: saveBody(links.linked.state), absoluteBounds: links.linked.absoluteBounds } });
+  }
+  return result;
+}
+
+/** Run after provider restore has made collision metadata available, before scheduling resumes. */
+export function restoreSharedBodyLinks(save: Pick<SaveImage, "bodies">, host: Pick<SharedWorldRestoreHost, "actors" | "bodies">): undefined {
+  for (const entry of save.bodies) {
+    const actor = host.actors.resolveSaved(entry.actor);
+    if (actor === null) throw new SaveFormatError("world.body-links", `missing saved actor ${entry.actor.slot}/${entry.actor.generation}`);
+    host.bodies.restoreLinkState(actor, { linkCount: entry.linkCount, linked: entry.linked === null ? null : { absoluteBounds: entry.linked.absoluteBounds,
+      state: { ...entry.linked.state, ground: entry.linked.state.ground === null ? null : host.actors.referenceSaved(entry.linked.state.ground) } } });
+  }
+  return undefined;
+}
 
 export interface SharedWorldRestoreHost {
   readonly actors: SessionActorRegistry;

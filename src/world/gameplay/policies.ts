@@ -1,6 +1,6 @@
 // Core damage/armor/impulse ordering from original combat.qc, g_combat.c, and the TS donors.
 // AI, source event accumulation, powerup sounds, obelisks and score rules stay in the owning game provider.
-import type { CombatPolicy, CombatState, DamageDecision, DamageMutation, DamageRequest } from "../../contracts/gameplay.ts";
+import type { CombatPolicy, CombatState, DamageDecision, DamageMutation, DamagePreparation, DamageRequest } from "../../contracts/gameplay.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { sameActor } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -46,27 +46,67 @@ export interface Q1CombatContext {
   readonly arithmetic: Arithmetic;
   readonly quad: boolean;
   readonly teamplay: number;
+  /** Rogue replaces the base teamplay-one gate with its source TeamHealthDam rule. */
+  readonly baseTeamHealth?: boolean;
   readonly walk: boolean;
   /** Q1 uses target origin minus inflictor's linked bounding-box center, not the weapon's incoming direction. */
   readonly momentumDirection: Vec3 | null;
 }
 
-export function createQ1CombatPolicy(options: PolicyOptions<Q1CombatContext>): CombatPolicy {
-  return { id: options.id, decide(request, target, attacker) {
+export interface Q1DamageSourceEffects {
+  beforeQuad?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): DamagePreparation;
+  afterQuad?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): DamagePreparation;
+  armorAllowed?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): boolean;
+  protectionApplies?(request: DamageRequest, target: CombatState, attacker: CombatState | null): boolean;
+  /** Called after armor and momentum; source reflection may reenter before returning permission to damage health. */
+  beforeHealth?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): boolean;
+  /** Rogue Earth scales take after protection/team health gates, preserving spent armor and momentum. */
+  afterArmor?(request: DamageRequest, take: number, target: CombatState, attacker: CombatState | null): number;
+}
+export interface Q1CombatPolicyOptions extends PolicyOptions<Q1CombatContext> { readonly sourceEffects?: Q1DamageSourceEffects; }
+
+export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPolicy {
+  return { id: options.id,
+    prepare(request, target, attacker) {
+      if (!target.canTakeDamage) return { kind: "cancel" };
+      const context = options.context(request, target, attacker);
+      const round = (value: number): number => numberFor(context.arithmetic, value);
+      const before = options.sourceEffects?.beforeQuad?.(request, round(request.amount), target, attacker);
+      if (before?.kind === "cancel") return before;
+      const quad = options.sourceEffects?.beforeQuad === undefined ? context.quad : options.context(request, target, attacker).quad;
+      const damage = round(round(before?.amount ?? request.amount) * (quad ? 4 : 1));
+      const after = options.sourceEffects?.afterQuad?.(request, damage, target, attacker);
+      return after?.kind === "cancel" ? after : { kind: "continue", amount: round(after?.amount ?? damage) };
+    },
+    decide(request, target, attacker, prepared) {
     if (!target.canTakeDamage) return decision(request, [], 0, "none");
     const context = options.context(request, target, attacker);
     const round = (value: number): number => numberFor(context.arithmetic, value);
-    const damage = round(round(request.amount) * (context.quad ? 4 : 1));
+    const damage = prepared?.amount ?? round(round(request.amount) * (context.quad ? 4 : 1));
     const mutations: DamageMutation[] = [];
-    const saved = saveArmor(request, target, damage, mutations, options.armor);
+    const saved = options.sourceEffects?.armorAllowed?.(request, damage, target, attacker) === false ? 0 : saveArmor(request, target, damage, mutations, options.armor);
     const take = Math.ceil(round(damage - saved));
     if (context.walk && context.momentumDirection !== null) addImpulse(request, mutations, context.momentumDirection, round(damage * 8), context.arithmetic);
     // Q1 spends armor and applies momentum even when godmode, invincibility or teamplay stops health loss.
-    if (target.invulnerable || (context.teamplay === 1 && sameTeam(target, attacker))) return decision(request, mutations, 0, "none");
-    const health = Math.max(-99, round(target.health - take));
+    if ((target.invulnerable && options.sourceEffects?.protectionApplies?.(request, target, attacker) !== false) || (context.baseTeamHealth !== false && context.teamplay === 1 && sameTeam(target, attacker))) return decision(request, mutations, 0, "none");
+    if (options.sourceEffects?.beforeHealth !== undefined) return { ...decision(request, mutations, 0, "none"), continuation: { kind: "q1-health", damage, take } };
+    const healthTake = round(options.sourceEffects?.afterArmor?.(request, take, target, attacker) ?? take);
+    const health = Math.max(-99, round(target.health - healthTake));
     mutations.push({ kind: "health", before: target.health, after: health });
-    return decision(request, mutations, take, health <= 0 ? "death" : "pain");
-  } };
+    return decision(request, mutations, healthTake, health <= 0 ? "death" : "pain");
+  },
+    resume(previous, current) {
+      const { request, continuation } = previous;
+      if (continuation === undefined) throw new Error("Q1 combat resumed without a source continuation");
+      const target = current.target();
+      if (target === null || options.sourceEffects?.beforeHealth?.(request, continuation.damage, target, current.attacker()) === false) return decision(request, [], 0, "none");
+      const latest = current.target();
+      if (latest === null) return decision(request, [], 0, "none");
+      const attacker = current.attacker(), context = options.context(request, latest, attacker);
+      const take = numberFor(context.arithmetic, options.sourceEffects?.afterArmor?.(request, continuation.take, latest, attacker) ?? continuation.take);
+      const health = Math.max(-99, numberFor(context.arithmetic, latest.health - take));
+      return decision(request, [{ kind: "health", before: latest.health, after: health }], take, health <= 0 ? "death" : "pain");
+    } };
 }
 
 export interface Q2CombatContext {
