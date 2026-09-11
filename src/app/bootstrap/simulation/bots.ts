@@ -1,3 +1,6 @@
+import type { CvarRegistry } from "../../../core/cvars/index.ts";
+import { createQ2BotWorld } from "./bot-q2-world.ts";
+import type { SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -21,6 +24,7 @@ import type { SimulationPresentationEvent } from "./types.ts";
 
 /** Stable source imports are installed before the game and bound before bot admission. */
 export class SimulationBotServices {
+  get configuration(): CvarRegistry | null { return this.transport?.game.options.cvars ?? null; }
   private director: SourceBotDirector | null = null;
   private transport: ApplicationBots | null = null;
   frame(time: number, elapsed: number): readonly ActorCommand[] { return this.transport?.options.automaticFrame === true ? this.transport.frame(time, elapsed) : []; }
@@ -53,6 +57,7 @@ export interface ApplicationBotsOptions {
   readonly files: BotSourceFiles;
   readonly navigation: SelectedBotNavigation;
   readonly leafCount: number;
+  readonly configuration?: CvarRegistry;
   readonly restart?: boolean;
   readonly automaticFrame?: boolean;
   /** Existing bot connections survive source map restart/new-map session replacement. */
@@ -65,6 +70,7 @@ export interface ApplicationBotsOptions {
 export interface ApplicationBotClient {
   readonly client: SessionClient;
   readonly reliable: ServerReliableCommands;
+  readonly userinfo?: string;
 }
 interface BotConnection extends ApplicationBotClient { readonly actor: OwnedActor; }
 
@@ -72,7 +78,9 @@ interface BotConnection extends ApplicationBotClient { readonly actor: OwnedActo
 export class ApplicationBots {
   readonly director: SourceBotDirector;
   readonly population: SharedBotPopulation;
-  readonly source: Q3SourceRuntime;
+  readonly source: Q3SourceRuntime | null;
+  readonly game: SourceBotGame;
+  private readonly q2: ReturnType<typeof createQ2BotWorld> | null;
   private readonly connections = new Map<number, BotConnection>();
   private readonly snapshots = new Map<number, readonly number[]>();
   private elapsedMilliseconds = 0;
@@ -80,22 +88,29 @@ export class ApplicationBots {
 
   constructor(readonly options: ApplicationBotsOptions) {
     const source = options.simulation.q3Source();
-    if (source === null) throw new Error("The arena director requires selected Q3 game rules");
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
     this.source = source;
-    const game = q3BotGame(source, options.insertConsoleCommand);
-    this.director = new SourceBotDirector({ files: options.files, entities: source.options.entities,
+    if (source === null && options.configuration === undefined) throw new Error("Shared bot configuration requires the application console registry");
+    this.q2 = source === null && options.configuration !== undefined ? createQ2BotWorld({ simulation: options.simulation, cvars: options.configuration,
+      actor: client => this.connections.get(client)?.actor.id ?? null,
+      connect: (client, restart) => this.director.connect(client, restart), drop: client => { this.disconnect(client); },
+      print: options.print, console: options.insertConsoleCommand,
+      message: (client, text) => { for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text); } }) : null;
+    const game = source === null ? this.q2?.game : q3BotGame(source, options.insertConsoleCommand);
+    if (game === undefined) throw new Error("Bot world projection is unavailable");
+    this.game = game;
+    this.director = new SourceBotDirector({ files: options.files, entities: source?.options.entities ?? options.simulation.sourceEntityText,
       host: { game, provider: "q3:bot", allocateClient: () => this.allocateClient(),
         actor: client => this.connections.get(client)?.actor ?? null,
         encodeCommand: (client, command) => this.encodeCommand(client, command),
         snapshotEntity: (client, sequence) => this.snapshotEntity(client, sequence),
-        consoleMessage: client => this.consoleMessage(client), pointContents: point => source.world.pointContents(point, -1) },
+        consoleMessage: client => this.consoleMessage(client), pointContents: point => game.world.pointContents(point, -1) },
       library: { files: options.files, random: { nextInt: () => options.simulation.random.nextInteger() }, debug: false,
         milliseconds: () => options.simulation.timeSeconds * 1000,
         print: (_severity, text) => { options.print(text); return undefined; }, openLog: options.openLog,
         clientCommand: (client, text) => {
           const connection = this.connection(client), argv = tokenizeCommand(text, "q3").argv;
-          source.playerCommand(connection.actor.id, argv[0] ?? "", argv.slice(1)); return undefined;
+          options.simulation.playerCommand(connection.actor.id, argv[0] ?? "", argv.slice(1)); return undefined;
         } },
       navigation: library => q3BotNavigation(game, library, options.navigation) });
     this.population = new SharedBotPopulation(actor => options.simulation.actors.isLive(actor), this.director);
@@ -124,7 +139,7 @@ export class ApplicationBots {
   private allocateClient(): number {
     const simulation = this.options.simulation;
     const occupied = new Set(simulation.players().map(actor => simulation.movementPlayer(actor)?.client.slot));
-    for (let slot = 0; slot < this.source.pool.maxClients; slot++) {
+    for (let slot = 0; slot < this.game.maxClients; slot++) {
       if (occupied.has(slot)) continue;
       const client = this.options.session.createClient(slot);
       try { this.prepare(client); } catch (error) { this.options.session.closeClient(client.id); throw error; }
@@ -135,6 +150,13 @@ export class ApplicationBots {
   private restoreClient(connection: ApplicationBotClient): void {
     const { client } = connection;
     this.prepare(client, connection.reliable);
+    if (this.source === null) {
+      this.game.activateBot(client.id.slot);
+      this.game.options.engine.setUserinfo(client.id.slot, connection.userinfo ?? "");
+      const rejection = this.game.clientConnect(client.id.slot, false, true);
+      if (rejection !== null) throw new Error(rejection);
+      this.game.clientBegin(client.id.slot); return;
+    }
     const entity = this.source.pool.at(client.id.slot);
     entity.r.svFlags |= ServerEntityFlags.BOT;
     this.source.pool.activateClient(client.id.slot);
@@ -145,6 +167,9 @@ export class ApplicationBots {
   private encodeCommand(client: number, command: UserCommand): Pick<ActorCommand, "command" | "arsenal"> {
     const connection = this.connection(client), player = this.options.simulation.movementPlayer(connection.actor.id);
     if (player === null) throw new Error("Admitted bot has no selected movement player");
+    if (this.q2 !== null) return { command: selectedQ3Command(command, player, this.elapsedMilliseconds),
+      arsenal: { provider: player.arsenal.provider, weapon: this.q2.knowledge.resolveWeapon(client, command.weapon), useHoldable: false } };
+    if (this.source === null) throw new Error("Bot source observation is unavailable");
     if (player.arsenal.state.kind !== "q3") throw new Error("Q3 brain weapon inventory requires a selected arsenal projection");
     const sourcePlayer = this.source.pool.at(client).client;
     if (sourcePlayer === null) throw new Error("Source bot lost its player state");
@@ -161,15 +186,22 @@ export class ApplicationBots {
     if (!Number.isInteger(sequence) || sequence < -2147483648 || sequence > 2147483647) throw new RangeError("Bot snapshot sequence must be a signed source integer");
     if (sequence < 0) return -1;
     let snapshot = this.snapshots.get(client);
-    if (snapshot === undefined) {
-      const source = this.source.sourceState(), player = source.clients.find(value => value.slot === client);
+    if (snapshot === undefined && this.source === null) {
+      snapshot = Array.from({ length: this.game.entityCount }, (_, number) => number).filter(number => {
+        const entity = this.game.entity(number); return entity.present && entity.linked && !entity.hidden;
+      });
+      this.snapshots.set(client, snapshot);
+    }
+    if (snapshot === undefined && this.source !== null) {
+      const q3 = this.source;
+      const source = q3.sourceState(), player = source.clients.find(value => value.slot === client);
       if (player === undefined) return -1;
       snapshot = selectApplicationQ3Snapshot(player.state, source, this.options.simulation.scene,
-        number => this.source.world.linkState(number)?.absbounds ?? null, this.options.leafCount, this.options.print)
+        number => q3.world.linkState(number)?.absbounds ?? null, this.options.leafCount, this.options.print)
         .entities.map(entity => entity.number);
       this.snapshots.set(client, snapshot);
     }
-    return snapshot[sequence] ?? -1;
+    return snapshot?.[sequence] ?? -1;
   }
   private consoleMessage(client: number): string | null {
     const ring = this.connection(client).reliable;
@@ -182,7 +214,7 @@ export class ApplicationBots {
       if (event.kind !== "q3-source" || event.event.kind !== "server-command") continue;
       for (const [slot, connection] of this.connections) {
         if (event.event.client !== -1 && event.event.client !== slot) continue;
-        if (connection.reliable.add(event.event.text).kind === "overflow") this.source.host.engine.dropClient(slot, "Server command overflow");
+        if (connection.reliable.add(event.event.text).kind === "overflow") this.game.options.engine.dropClient(slot, "Server command overflow");
       }
     }
   }
@@ -190,12 +222,12 @@ export class ApplicationBots {
     if (this.closed) throw new Error("Bot transport is closed");
     this.elapsedMilliseconds = elapsedMilliseconds;
     this.snapshots.clear();
-    const sourceTime = this.options.automaticFrame === true && this.source.host.cvars.variableValue("dedicated") !== 0
+    const sourceTime = this.options.automaticFrame === true && this.source !== null && this.source.host.cvars.variableValue("dedicated") !== 0
       ? this.source.level.time : timeMilliseconds;
     return this.population.frame({ timeMilliseconds: sourceTime, elapsedMilliseconds });
   }
   clients(): readonly ApplicationBotClient[] {
-    return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable }));
+    return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable, userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot) }));
   }
   actor(client: ClientId): ActorId | null {
     const connection = this.connections.get(client.slot);
@@ -205,6 +237,7 @@ export class ApplicationBots {
   disconnect(client: number): boolean {
     const connection = this.connections.get(client);
     if (connection === undefined) return false;
+    if (this.source === null) this.director.shutdownClient(client, false);
     this.options.simulation.disconnectPlayer(connection.actor.id);
     this.connections.delete(client); this.snapshots.delete(client);
     this.options.session.closeClient(connection.client.id);

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 import type { BotLibrary } from "./library.ts";
-import type { VmCvar } from "../../../core/cvars/index.ts";
+import { CvarFlag, Q2CvarFlag } from "../../../core/cvars/index.ts";
+import type { CvarRegistry, VmCvar } from "../../../core/cvars/index.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
-import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared.ts";
 import type { PlayerState, UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import { GameAiChatState } from "./ai-chat.ts";
 import { GameAiCommandState } from "./ai-command.ts";
@@ -37,6 +37,26 @@ export interface BotSnapshotEntity {
   readonly state: EntityState;
 }
 
+/** Bot settings borrow the application registry; cached reads retain source frame update timing. */
+export class BotCvar implements VmCvar {
+  private name: string | null = null;
+  value = ""; numericValue = 0; integerValue = 0; modificationCount = 0;
+  constructor(private readonly registry: CvarRegistry) {}
+  register(name: string, defaultValue: string, flags = 0): void {
+    this.name = name;
+    const selectedFlags = this.registry.dialect === "q2-classic" || this.registry.dialect === "q2-rerelease"
+      ? (flags & (CvarFlag.Archive | CvarFlag.UserInfo | CvarFlag.ServerInfo)) | ((flags & CvarFlag.Latch) !== 0 ? Q2CvarFlag.Latch : 0) | ((flags & (CvarFlag.ReadOnly | CvarFlag.Init)) !== 0 ? Q2CvarFlag.NoSet : 0) : flags;
+    this.registry.register(name, defaultValue, selectedFlags); this.modificationCount = -1; this.update();
+  }
+  update(): void {
+    const source = this.name === null ? undefined : this.registry.find(this.name);
+    if (source === undefined || source.modificationCount === this.modificationCount) return;
+    if (source.value.length > 255) throw new RangeError("Bot cvar value exceeds source storage");
+    this.value = source.value; this.numericValue = source.numericValue; this.integerValue = source.integerValue; this.modificationCount = source.modificationCount;
+  }
+  writeInteger(value: number): void { if (!Number.isSafeInteger(value)) throw new RangeError("Bot cvar integer requires a safe integer"); this.integerValue = value | 0; }
+}
+
 /** Construction allocates source cells only; every game and botlib service is borrowed. */
 export class GameAiContext {
   readonly observations = new BotEntityObservations(1024);
@@ -65,7 +85,7 @@ export class GameAiContext {
   cvar(name: string): VmCvar {
     let cell = this.vmCvars.get(name);
     if (cell === undefined) {
-      cell = this.game.options.cvars.createVm();
+      cell = new BotCvar(this.game.options.cvars);
       this.vmCvars.set(name, cell);
     }
     return cell;
@@ -76,14 +96,14 @@ export class GameAiContext {
   }
 
   getClientState(client: number): PlayerState | null {
-    const entity = this.game.pool.at(client);
-    return !entity.inuse || entity.client === null ? null : entity.client.ps.copy();
+    const entity = this.game.entity(client);
+    return !entity.present || entity.player === null ? null : entity.player.state.copy();
   }
 
   getEntityState(entityNum: number): EntityState | null {
-    const entity = this.game.pool.at(entityNum);
-    if (!entity.inuse || this.game.world.linkState(entityNum)?.linked !== true || (entity.r.svFlags & ServerEntityFlags.NOCLIENT) !== 0) return null;
-    return entity.s.copy();
+    const entity = this.game.entity(entityNum);
+    if (!entity.present || !entity.linked || entity.hidden) return null;
+    return entity.state.copy();
   }
 
   getSnapshotEntity(client: number, sequence: number): BotSnapshotEntity {

@@ -66,8 +66,8 @@ export function botEntityInfo(context: GameAiContext, entity: number): AasEntity
 
 export function entityIsDead(context: GameAiContext, info: AasEntityInfo): boolean {
   if (info.number < 0 || info.number >= 64) return false;
-  const client = context.game.pool.at(info.number).client;
-  return client !== null && client.ps.pmType !== MoveType.PM_NORMAL;
+  const client = context.game.entity(info.number).player;
+  return client !== null && client.state.pmType !== MoveType.PM_NORMAL;
 }
 
 export function entityCarriesFlag(context: GameAiContext, info: AasEntityInfo): boolean {
@@ -84,12 +84,12 @@ export function entityIsChatting(info: AasEntityInfo): boolean { return (info.fl
 export function entityHasQuad(info: AasEntityInfo): boolean { return (info.powerups & (1 << Powerup.PW_QUAD)) !== 0; }
 export function entityHasKamikaze(info: AasEntityInfo): boolean { return (info.flags & EF_KAMIKAZE) !== 0; }
 export function entityCarriesCubes(context: GameAiContext, info: AasEntityInfo): boolean {
-  return context.deathmatch.gametype === GameType.GT_HARVESTER && context.game.pool.at(info.number).s.generic1 > 0;
+  return context.deathmatch.gametype === GameType.GT_HARVESTER && context.game.entity(info.number).state.generic1 > 0;
 }
 
 export function botChooseWeapon(context: GameAiContext, state: BotState): void {
   if (state.curPs.weaponState !== WeaponState.WEAPON_RAISING && state.curPs.weaponState !== WeaponState.WEAPON_DROPPING) {
-    const weapon = context.library.weapons.chooseBestFightWeapon(state.ws, state.inventory);
+    const weapon = context.game.knowledge.chooseWeapon(context.library, state);
     if (state.weaponNum !== weapon) state.weaponChangeTime = context.time;
     state.weaponNum = weapon;
   }
@@ -171,8 +171,8 @@ const persistentInventory: readonly (readonly [BotInventory, BotModelIndex])[] =
   [BotInventory.DOUBLER, BotModelIndex.DOUBLER], [BotInventory.AMMOREGEN, BotModelIndex.AMMOREGEN],
 ];
 
-export function botUpdateInventory(context: GameAiContext, state: BotState): void {
-  const oldInventory = state.inventory.slice(), ps = state.curPs, schema = statSchema(state.product);
+export function updateQ3BotInventory(state: BotState): void {
+  const ps = state.curPs, schema = statSchema(state.product);
   state.inventory[BotInventory.ARMOR] = ps.stats.get(schema.armor);
   const weapons = ps.stats.get(schema.weapons);
   for (const [index, weapon] of weaponInventory) {
@@ -194,10 +194,15 @@ export function botUpdateInventory(context: GameAiContext, state: BotState): voi
   }
   if (schema.product === "missionpack") {
     for (const [index, model] of persistentInventory) state.inventory[index] = Number(ps.stats.get(schema.persistentPowerup) === model);
-    const red = botTeam(context, state) === Team.TEAM_RED;
+    const red = ps.persistant.get(3) === Team.TEAM_RED;
     state.inventory[BotInventory.REDCUBE] = red ? ps.generic1 : 0;
     state.inventory[BotInventory.BLUECUBE] = red ? 0 : ps.generic1;
   }
+}
+
+export function botUpdateInventory(context: GameAiContext, state: BotState): void {
+  const oldInventory = state.inventory.slice();
+  context.game.knowledge.updateInventory(state);
   botCheckItemPickup(context, state, oldInventory);
 }
 
@@ -281,31 +286,18 @@ export function botIsObserver(context: GameAiContext, state: BotState): boolean 
   return gameAtoi(infoValueForKey(context.game.options.configstrings.get(544 + state.client).slice(0, 1023), "t")) === Team.TEAM_SPECTATOR;
 }
 export function botIntermission(context: GameAiContext, state: BotState): boolean {
-  return context.game.level.intermissionTime !== 0 || state.curPs.pmType === MoveType.PM_FREEZE || state.curPs.pmType === MoveType.PM_INTERMISSION;
+  return context.game.clock.intermissionTime !== 0 || state.curPs.pmType === MoveType.PM_FREEZE || state.curPs.pmType === MoveType.PM_INTERMISSION;
 }
 export function botInLavaOrSlime(context: GameAiContext, state: BotState): boolean {
   return (context.game.world.pointContents(add3(state.origin, vec3(0, 0, -23)), -1) & (LAVA | SLIME)) !== 0;
 }
 
-export function botAggression(_context: GameAiContext, state: BotState): number {
-  const inventory = (index: BotInventory) => botInventoryValue(state, index);
-  if (inventory(BotInventory.QUAD) !== 0 && (state.weaponNum !== Weapon.WP_GAUNTLET || inventory(BotInventory.ENEMY_HORIZONTAL_DIST) < 80)) return 70;
-  if (inventory(BotInventory.ENEMY_HEIGHT) > 200 || inventory(BotInventory.HEALTH) < 60) return 0;
-  if (inventory(BotInventory.HEALTH) < 80 && inventory(BotInventory.ARMOR) < 40) return 0;
-  for (const [weapon, ammo, minimum, aggression] of [
-    [BotInventory.BFG10K, BotInventory.BFGAMMO, 7, 100], [BotInventory.RAILGUN, BotInventory.SLUGS, 5, 95],
-    [BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO, 50, 90], [BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS, 5, 90],
-    [BotInventory.PLASMAGUN, BotInventory.CELLS, 40, 85], [BotInventory.GRENADELAUNCHER, BotInventory.GRENADES, 10, 80],
-    [BotInventory.SHOTGUN, BotInventory.SHELLS, 10, 50],
-  ] satisfies readonly (readonly [BotInventory, BotInventory, number, number])[]) {
-    if (inventory(weapon) > 0 && inventory(ammo) > minimum) return aggression;
-  }
-  return 0;
-}
+export function botAggression(context: GameAiContext, state: BotState): number { return context.game.knowledge.aggression(state); }
 
-export function botFeelingBad(_context: GameAiContext, state: BotState): number {
-  if (state.weaponNum === Weapon.WP_GAUNTLET || botInventoryValue(state, BotInventory.HEALTH) < 40) return 100;
-  if (state.weaponNum === Weapon.WP_MACHINEGUN) return 90;
+export function botFeelingBad(context: GameAiContext, state: BotState): number {
+  if (context.game.knowledge.tactics(state.weaponNum).melee || botInventoryValue(state, BotInventory.HEALTH) < 40) return 100;
+  const weakness = context.game.knowledge.tactics(state.weaponNum).weakness;
+  if (weakness > 0) return weakness;
   if (botInventoryValue(state, BotInventory.HEALTH) < 60) return 80;
   return 0;
 }
@@ -506,7 +498,7 @@ export function botFindEnemy(context: GameAiContext, state: BotState, currentEne
 }
 
 function weaponInfo(context: GameAiContext, state: BotState): WeaponInfo {
-  const info = context.library.weapons.getWeaponInfo(state.ws, state.weaponNum);
+  const info = context.game.knowledge.weaponInfo(context.library, state.ws, state.weaponNum);
   if (info === undefined) throw new Error(`Bot weapon ${state.weaponNum} has no loaded weapon information`);
   return info;
 }
@@ -527,19 +519,9 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
     if (state.enemySightTime > f(context.time - reactionTime) || state.teleportTime > f(context.time - reactionTime)) return;
   }
   const weapon = weaponInfo(context, state);
-  const accuracyIndex = weapon.number === Weapon.WP_MACHINEGUN ? BotCharacteristic.AIM_ACCURACY_MACHINEGUN
-    : weapon.number === Weapon.WP_SHOTGUN ? BotCharacteristic.AIM_ACCURACY_SHOTGUN
-    : weapon.number === Weapon.WP_GRENADE_LAUNCHER ? BotCharacteristic.AIM_ACCURACY_GRENADELAUNCHER
-    : weapon.number === Weapon.WP_ROCKET_LAUNCHER ? BotCharacteristic.AIM_ACCURACY_ROCKETLAUNCHER
-    : weapon.number === Weapon.WP_LIGHTNING ? BotCharacteristic.AIM_ACCURACY_LIGHTNING
-    : weapon.number === Weapon.WP_RAILGUN ? BotCharacteristic.AIM_ACCURACY_RAILGUN
-    : weapon.number === Weapon.WP_PLASMAGUN ? BotCharacteristic.AIM_ACCURACY_PLASMAGUN
-    : weapon.number === Weapon.WP_BFG ? BotCharacteristic.AIM_ACCURACY_BFG10K : null;
+  const tactics = context.game.knowledge.tactics(state.weaponNum), accuracyIndex = tactics.aimAccuracy;
   if (accuracyIndex !== null) aimAccuracy = characteristic(context, state, accuracyIndex);
-  const skillIndex = weapon.number === Weapon.WP_GRENADE_LAUNCHER ? BotCharacteristic.AIM_SKILL_GRENADELAUNCHER
-    : weapon.number === Weapon.WP_ROCKET_LAUNCHER ? BotCharacteristic.AIM_SKILL_ROCKETLAUNCHER
-    : weapon.number === Weapon.WP_PLASMAGUN ? BotCharacteristic.AIM_SKILL_PLASMAGUN
-    : weapon.number === Weapon.WP_BFG ? BotCharacteristic.AIM_SKILL_BFG10K : null;
+  const skillIndex = tactics.aimSkill;
   if (skillIndex !== null) aimSkill = characteristic(context, state, skillIndex);
   if (aimAccuracy <= 0) aimAccuracy = f(0.0001);
   info = botEntityInfo(context, state.enemy);
@@ -592,7 +574,7 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
       bestOrigin.y + f(f(20 * context.game.random.crandom()) * f(1 - aimAccuracy)), bestOrigin.z + f(f(10 * context.game.random.crandom()) * f(1 - aimAccuracy)));
   } else {
     bestOrigin = add3(state.lastEnemyOrigin, vec3(0, 0, 8));
-    if (aimSkill > 0.5 && (weapon.number === Weapon.WP_BFG || weapon.number === Weapon.WP_ROCKET_LAUNCHER || weapon.number === Weapon.WP_GRENADE_LAUNCHER)) {
+    if (aimSkill > 0.5 && context.game.knowledge.tactics(state.weaponNum).predictOccludedSplash) {
       const goal = new BotGoalState(); goal.entity = state.client; goal.area = state.areaNum;
       Object.assign(goal.origin, state.eye);
       goal.mins = vec3(-8, -8, -8); goal.maxs = vec3(8, 8, 8);
@@ -606,7 +588,7 @@ export function botAimAtEnemy(context: GameAiContext, state: BotState): void {
   }
   Object.assign(state.aimTarget, visible ? botAITrace(context, state.eye, bestOrigin, state.entityNum, MASK_SHOT).end : bestOrigin);
   let direction = sub3(bestOrigin, state.eye);
-  if (weapon.number === Weapon.WP_MACHINEGUN || weapon.number === Weapon.WP_SHOTGUN || weapon.number === Weapon.WP_LIGHTNING || weapon.number === Weapon.WP_RAILGUN) {
+  if (weapon.speed === 0 && !context.game.knowledge.tactics(state.weaponNum).melee) {
     aimAccuracy = f(aimAccuracy * f(f(0.6) + f(f(Math.min(length3(direction), 150) / 150) * f(0.4))));
   }
   if (aimAccuracy < f(0.8)) {
@@ -628,7 +610,7 @@ export function botCheckAttack(context: GameAiContext, state: BotState): void {
   const attackEntity = state.enemy, info = botEntityInfo(context, attackEntity);
   if (attackEntity >= 64 && state.product === "missionpack"
     && (info.number === context.deathmatch.redObelisk.entity || info.number === context.deathmatch.blueObelisk.entity)
-    && context.game.pool.at(info.number).activator?.s.frame === 2) return;
+    && context.game.entity(info.number).activatorFrame === 2) return;
   const reactionTime = characteristic(context, state, BotCharacteristic.REACTIONTIME);
   if (state.enemySightTime > f(context.time - reactionTime) || state.teleportTime > f(context.time - reactionTime)) return;
   if (state.weaponChangeTime > f(context.time - f(0.1)) || state.fireThrottleWaitTime > context.time) return;
@@ -638,7 +620,8 @@ export function botCheckAttack(context: GameAiContext, state: BotState): void {
     else { state.fireThrottleShootTime = f(f(context.time + 1) - throttle); state.fireThrottleWaitTime = 0; }
   }
   const direction = sub3(state.aimTarget, state.eye), distance = dot3(direction, direction);
-  if (state.weaponNum === Weapon.WP_GAUNTLET && distance > 60 * 60) return;
+  const maximumRange = context.game.knowledge.tactics(state.weaponNum).maximumRange;
+  if (maximumRange !== null && distance > maximumRange * maximumRange) return;
   if (!inFieldOfVision(state.viewangles, distance < 100 * 100 ? 120 : 50, vectorToAngles(direction))) return;
   const sightTrace = botAITrace(context, state.eye, state.aimTarget, state.client, SOLID | PLAYERCLIP);
   if (sightTrace.fraction < 1 && sightTrace.entityNum !== attackEntity) return;
@@ -717,7 +700,7 @@ export function botCheckForKamikazeBody(_context: GameAiContext, state: BotState
 export function botCheckEvents(context: GameAiContext, state: BotState, entity: EntityState): void {
   const lastTime = state.entityEventTime[entity.number];
   if (lastTime === undefined) throw new RangeError(`Bot event entity ${entity.number} outside its allocation`);
-  const currentTime = context.game.pool.at(entity.number).eventTime;
+  const currentTime = context.game.entity(entity.number).eventTime;
   if (lastTime === currentTime) return;
   state.entityEventTime[entity.number] = currentTime;
   const event = (entity.eType > EntityType.ET_EVENTS ? entity.eType - EntityType.ET_EVENTS : entity.event) & ~EV_EVENT_BITS;

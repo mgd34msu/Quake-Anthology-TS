@@ -151,11 +151,17 @@ export class Application {
   }
 
   private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
-    clients: readonly ApplicationBotClient[] = [], restart = false): Promise<ApplicationBots | null> {
-    if (simulation.q3Source() === null) return null;
-    const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+    clients: readonly ApplicationBotClient[] = [], restart = false, requested = false): Promise<ApplicationBots | null> {
+    if (simulation.q3Source() === null && simulation.q2Source() === null) return null;
+    if (simulation.q3Source() === null) {
+      if (clients.length === 0 && !requested) return null;
+      if (simulation.options.mode !== "deathmatch" || simulation.q2Source()?.product.match.selection.kind !== "standard") throw new Error("Shared bot observations currently support Q2 deathmatch; co-op and team objectives are not yet bound");
+    }
+    const definitions = simulation.q3Source() === null ? content.catalog.product("q3-baseq3").id : content.recipe.map.entities.content;
+    const files = await loadMountedBotAssetFiles(await content.forContent(definitions), content.catalog);
     const navigation = await createApplicationBotNavigation({ content, simulation });
     return new ApplicationBots({ session: this.session, simulation, files, navigation, clients, restart, automaticFrame: true,
+      ...(this.q2Console === null ? {} : { configuration: this.q2Console.cvars }),
       leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
       insertConsoleCommand: text => {
         if (this.sourceCommands === null) throw new Error("Bot console has no source command buffer");
@@ -193,7 +199,7 @@ export class Application {
     const commands = new CommandBuffer({ dialect: this.sourceDialect(),
       context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
     commands.register("quit", () => this.requestQuit());
-    for (const name of ["save", "load", "map", "say"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+    for (const name of ["save", "load", "map", "say", "addbot", "removebot", "botlist"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
     this.dedicatedCommands = commands;
     this.dedicatedConsole = new DedicatedConsole();
   }
@@ -241,6 +247,7 @@ export class Application {
       if (this.q2Console === null) {
         this.q2Console = new ApplicationQ2Console({ simulation: () => this.simulation, content: () => this.content,
           print: text => { this.host.print(text); return undefined; }, execute: (name, args) => this.queueCommand(name, args, null) });
+        for (const name of ["addbot", "removebot", "botlist", "kick"]) this.q2Console.commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
         await this.q2Console.initialize();
       } else await this.q2Console.bindCurrent();
       this.sourceCommands = this.q2Console.commands;
@@ -270,6 +277,7 @@ export class Application {
     });
     commands.register("map_restart", invocation => this.requestRestart(invocation.args));
     commands.register("kick", invocation => this.kickClients(invocation.args));
+    commands.register("removebot", invocation => this.queueCommand("removebot", invocation.args, null));
     commands.register("centerview", () => {
       for (const local of this.graphical?.input.locals ?? []) local.builder.setViewAngles({ ...local.builder.viewAngles, x: 0 });
       return undefined;
@@ -280,19 +288,23 @@ export class Application {
 
   private kickClients(args: readonly string[]): undefined {
     const source = this.simulation.q3Source(), target = args[0];
-    if (source === null || target === undefined) throw new Error("Usage: kick <player name|slot|all|allbots>");
+    if (target === undefined) throw new Error("Usage: kick <player name|slot|all|allbots>");
     const selected = this.simulation.players().filter(actor => {
       const player = this.simulation.movementPlayer(actor);
       if (player === null || this.localSeats.has(player.client)) return false;
       if (target.toLowerCase() === "all") return true;
       if (target.toLowerCase() === "allbots") return this.bots !== null && this.bots.actor(player.client) !== null;
-      const client = source.pool.clientAt(player.client.slot);
-      return String(player.client.slot) === target || client.pers.netname.replace(/\^[0-9]/g, "").toLowerCase() === target.toLowerCase();
+      const name = source?.pool.clientAt(player.client.slot).pers.netname ?? this.simulation.q2Source()?.players.states.get(actor)?.name ?? "";
+      return String(player.client.slot) === target || name.replace(/\^[0-9]/g, "").toLowerCase() === target.toLowerCase();
     });
     if (selected.length === 0) throw new Error(`Player ${target} is not on the server`);
     for (const actor of selected) {
       const player = this.simulation.movementPlayer(actor);
-      if (player !== null) source.host.engine.dropClient(player.client.slot, "was kicked");
+      if (player === null) continue;
+      if (source !== null) source.host.engine.dropClient(player.client.slot, "was kicked");
+      else if (!this.bots?.disconnect(player.client.slot) && !this.network?.server.disconnectClient(player.client, "was kicked")) {
+        this.simulation.disconnectPlayer(actor); this.session.closeClient(player.client);
+      }
     }
     return undefined;
   }
@@ -630,6 +642,7 @@ export class Application {
 
   async saveGame(path: string): Promise<void> {
     if (this.closed) throw new Error("Application is closed");
+    if (this.botClients.length !== 0 && this.simulation.q3Source() === null) throw new Error("Saving bot decision state is not yet supported");
     await writeSaveImage(path, this.simulation.checkpoint());
   }
 
@@ -712,7 +725,16 @@ export class Application {
       try {
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
         if (sourceClient !== undefined && await sourceClient.client.command([command.name, ...command.arguments_])) continue;
-        if (command.name === "save") {
+        if (command.name === "addbot" || command.name === "botlist") {
+          if (this.bots === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);
+          if (this.bots === null) throw new Error("Bot observations are unavailable for this world");
+          this.bots.consoleCommand([command.name, ...command.arguments_]);
+        } else if (command.name === "kick") { this.kickClients(command.arguments_);
+        } else if (command.name === "removebot") {
+          const argument = command.arguments_[0];
+          const bot = this.botClients.find(bot => argument === undefined || String(bot.client.id.slot) === argument);
+          if (bot !== undefined) this.bots?.disconnect(bot.client.id.slot);
+        } else if (command.name === "save") {
           const path = command.arguments_[0];
           if (path === undefined || path.length === 0) throw new Error("Usage: save <path>");
           await this.saveGame(path);
@@ -723,7 +745,6 @@ export class Application {
           if (this.simulation.q2Source() === null && this.simulation.q3Source() === null) throw new Error("Selected Quake source chat commands are not yet joined");
           this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         }
-        else if (command.name === "kick") this.kickClients(command.arguments_);
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
@@ -760,6 +781,8 @@ export class Application {
         this.dedicatedConsole?.drain(this.dedicatedCommands);
         this.dedicatedCommands.execute();
       }
+      if (this.bots === null && this.simulation.q2Source() !== null && (this.q2Console?.cvars.variableValue("bot_minplayers") ?? 0) > 0)
+        this.bots = await this.createBots(this.content, this.simulation, [], false, true);
       this.elapsed += elapsedMilliseconds;
       const remote = await this.network?.server.poll(performance.now()) ?? [];
       for (const [seat, source] of this.graphical?.q3 ?? []) {

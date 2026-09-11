@@ -250,12 +250,12 @@ export function botSetMovedir(angles: Vec3, movedir: Vec3): void {
 }
 
 export function botModelMinsMaxs(context: GameAiContext, modelIndex: number, entityType: number, contents: number, mins: Vec3 | null, maxs: Vec3 | null): number {
-  for (let index = 0; index < context.game.pool.numEntities; index++) {
-    const entity = context.game.pool.at(index);
-    if (!entity.inuse || (entityType !== 0 && entity.s.eType !== entityType) || (contents !== 0 && entity.r.contents !== contents)) continue;
-    if (entity.s.modelindex !== modelIndex) continue;
-    if (mins !== null) copyVector(mins, add3(entity.r.currentOrigin, entity.r.mins));
-    if (maxs !== null) copyVector(maxs, add3(entity.r.currentOrigin, entity.r.maxs));
+  for (let index = 0; index < context.game.entityCount; index++) {
+    const entity = context.game.entity(index);
+    if (!entity.present || (entityType !== 0 && entity.state.eType !== entityType) || (contents !== 0 && entity.contents !== contents)) continue;
+    if (entity.state.modelindex !== modelIndex) continue;
+    if (mins !== null) copyVector(mins, add3(entity.origin, entity.bounds.min));
+    if (maxs !== null) copyVector(maxs, add3(entity.origin, entity.bounds.max));
     return index;
   }
   if (mins !== null) copyVector(mins, vec3(0, 0, 0));
@@ -687,21 +687,21 @@ export function botSetupAlternativeRouteGoals(context: GameAiContext): void {
 }
 
 export function botSetEntityNumForGoalWithModel(context: GameAiContext, goal: BotGoalState, entityType: number, modelName: string): void {
-  const model = context.game.config.modelIndex(modelName);
-  for (let index = 0; index < context.game.pool.numEntities; index++) {
-    const entity = context.game.pool.at(index);
-    if (!entity.inuse || (entityType !== 0 && entity.s.eType !== entityType) || entity.s.modelindex !== model) continue;
-    const direction = sub3(goal.origin, entity.s.origin);
+  const model = context.game.modelIndex(modelName);
+  for (let index = 0; index < context.game.entityCount; index++) {
+    const entity = context.game.entity(index);
+    if (!entity.present || (entityType !== 0 && entity.state.eType !== entityType) || entity.state.modelindex !== model) continue;
+    const direction = sub3(goal.origin, entity.state.origin);
     if (dot3(direction, direction) < 100) { goal.entity = index; return; }
   }
 }
 
 export function botSetEntityNumForGoal(context: GameAiContext, goal: BotGoalState, classname: string): void {
-  for (let index = 0; index < context.game.pool.numEntities; index++) {
-    const entity = context.game.pool.at(index);
-    if (!entity.inuse) continue;
+  for (let index = 0; index < context.game.entityCount; index++) {
+    const entity = context.game.entity(index);
+    if (!entity.present) continue;
     if (entity.classname !== null && sameName(entity.classname, classname)) continue;
-    const direction = sub3(goal.origin, entity.s.origin);
+    const direction = sub3(goal.origin, entity.state.origin);
     if (dot3(direction, direction) < 100) { goal.entity = index; return; }
   }
 }

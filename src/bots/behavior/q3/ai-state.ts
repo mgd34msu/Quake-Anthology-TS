@@ -1,3 +1,4 @@
+import type { BotOrderState } from "../orders.ts";
 // Ported from id Software's game/ai_main.h, g_local.h, q_shared.h and ai_main.c state operations.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -178,6 +179,7 @@ export class BotActivateGoal {
 
 /** bot_state_t data uses source storage; function and object pointers retain typed identities. */
 export class BotState {
+  scriptedOrder: BotOrderState | null = null;
   inuse = false;
   botThinkResidual = 0;
   client = 0;
@@ -523,6 +525,7 @@ export class BotState {
 
   /** BotResetState's memset/restore portion; its caller frees waypoints first and resets botlib after. */
   resetDecisionState(): void {
+    this.scriptedOrder = null;
     // BotResetState's memset/restore leaves inuse/client/entitynum, cur_ps, settings,
     // entergame_time and character/ms/gs/cs/ws unchanged, including their raw bits.
     this.#bytes.fill(0, 4, 8);

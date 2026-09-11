@@ -619,7 +619,12 @@ export class SharedSimulation implements Simulation {
 
   prepareBotClient(client: ClientId): OwnedActor {
     this.assertOpen();
-    if (this.source.kind !== "q3") throw new Error("Source bot admission requires a Q3 source runtime");
+    if (this.source.kind === "q2") {
+      const admitted = this.admitPlayer(client), entity = this.source.game.entity(admitted.actor);
+      if (entity === null) throw new Error("Bot admission lost its shared source entity");
+      entity.serverFlags |= 16; return entity.actor;
+    }
+    if (this.source.kind !== "q3") throw new Error("Bot admission requires a supported source observation binding");
     if (!this.options.identity.owns(client) || client.slot >= this.options.maxClients || [...this.playerStates.values()].some(player => player.client.slot === client.slot)) throw new Error("Bot client is not an available session slot");
     const actor = this.prepareQ3Client(client, this.source.game); this.source.game.prepareClient(actor, client.slot); return actor;
   }
@@ -1061,7 +1066,7 @@ export class SharedSimulation implements Simulation {
         emitQ2ShadowLights(this.source.game);
         return { snapshot: this.snapshot(), events: this.events.take() };
       }
-      const botCommands = run && this.source.kind === "q3" ? this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000) : [];
+      const botCommands = run ? this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000) : [];
       for (const received of [...input.commands, ...botCommands]) {
         const command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
         const player = this.player(command.actor);
@@ -1267,6 +1272,8 @@ export class SharedSimulation implements Simulation {
     return player.character !== "q2" || source === undefined ? view
       : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), viewHeight: source.offset.z };
   }
+  get sourceEntityText(): string { return this.options.world.entities; }
+
   q2Source(): Extract<SourceRuntime, { readonly kind: "q2" }> | null { return this.source.kind === "q2" ? this.source : null; }
   q1Source() { return this.source.kind === "q1" ? this.source : null; }
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }

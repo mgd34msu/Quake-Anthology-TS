@@ -6,7 +6,6 @@ import type { BotGoal } from "../library/goals.ts";
 import { TravelFlags } from "./navigation-types.ts";
 import { infoValueForKey } from "../../../core/info-string.ts";
 import { GameType, Team } from "../../../content/q3/base/shared/definitions.ts";
-import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared.ts";
 import { botInitialChat } from "./ai-chat.ts";
 import type { GameAiContext } from "./ai-context.ts";
 import { BotCtfStrategy, BotTeamTaskPreference } from "./ai-definitions.ts";
@@ -385,8 +384,8 @@ export function botHarvesterOrders(context: GameAiContext, state: BotState): voi
 
 export function findHumanTeamLeader(context: GameAiContext, state: BotState): boolean {
   for (let i = 0; i < MAX_CLIENTS; i++) {
-    const entity = context.game.pool.at(i);
-    if (entity.inuse && (entity.r.svFlags & ServerEntityFlags.BOT) === 0 && !element(context.command.notLeader, i) && botSameTeam(context, state, i)) {
+    const entity = context.game.entity(i);
+    if (entity.present && !entity.bot && !element(context.command.notLeader, i) && botSameTeam(context, state, i)) {
       copyClientNameToTeamLeader(context, state, i);
       if (!botSetLastOrderedTask(context, state)) botVoiceChatDefend(context, state, i, 2);
       return true;

@@ -10,11 +10,10 @@ import type { BotLibrary } from "./library.ts";
 import { CvarFlag } from "../../../core/cvars/index.ts";
 import type { Vec3 } from "../../../core/math.ts";
 import { EntityType, GameType, Team, Weapon } from "../../../content/q3/base/shared/definitions.ts";
-import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared.ts";
 import { BotInventory, BotLongTermGoal } from "./ai-definitions.ts";
 import { botChatExitGame, botChatTest } from "./ai-chat.ts";
 import { botDeathmatchAI } from "./ai-combat.ts";
-import { GameAiContext } from "./ai-context.ts";
+import { BotCvar, GameAiContext } from "./ai-context.ts";
 import type { GameAiHost } from "./ai-context.ts";
 import { botAddDeltaAngles, botSubtractDeltaAngles, botUpdateInput } from "./ai-input.ts";
 import { botClearActivateGoalStack, botFreeWaypoints, botPointAreaNum, botSetupDeathmatchAI } from "./ai-navigation.ts";
@@ -26,7 +25,7 @@ import { clientInfoValue } from "../../../content/q3/team-arena/client-admission
 import { gameFormat } from "../../../content/q3/base/game/format.ts";
 import { gameAtoi, scanGameFloat } from "../../../content/q3/base/game/numeric.ts";
 import type { SourceBotGame } from "./game-host.ts";
-import { ConnectionState, MAX_CLIENTS, MAX_GENTITIES } from "../../../content/q3/base/game/state.ts";
+import { MAX_CLIENTS, MAX_GENTITIES } from "../../../content/q3/base/game/state.ts";
 
 const f = Math.fround;
 const CS_PLAYERS = 544;
@@ -256,7 +255,8 @@ export class GameAi {
   loadMap(restart: boolean): boolean {
     const context = this.context;
     if (!restart) {
-      const mapName = context.game.options.cvars.registerVm("mapname", "", CvarFlag.ServerInfo | CvarFlag.ReadOnly);
+      const mapName = new BotCvar(context.game.options.cvars);
+      mapName.register("mapname", "", CvarFlag.ServerInfo | CvarFlag.ReadOnly);
       context.host.loadMap(mapName.value);
     }
     for (let index = 0; index < MAX_CLIENTS; index++) {
@@ -387,8 +387,8 @@ export class GameAi {
     library.actions.resetInput(client);
     const state = context.states.get(client);
     if (state === null || !state.inuse) { context.game.options.engine.print(`^1Fatal: BotAI: client ${client} is not setup\n`); return false; }
-    const entity = context.game.pool.at(client);
-    if (entity.inuse && entity.client !== null) copyBotPlayerState(state.curPs, entity.client.ps);
+    const entity = context.game.entity(client);
+    if (entity.present && entity.player !== null) copyBotPlayerState(state.curPs, entity.player.state);
     while (true) {
       const command = context.host.getConsoleMessage(client);
       if (command === null) break;
@@ -477,20 +477,20 @@ export class GameAi {
   }
 
   private connected(client: number): boolean {
-    const gameClient = this.context.game.pool.at(client).client;
+    const gameClient = this.context.game.entity(client).player;
     if (gameClient === null) throw new Error("BotAIStartFrame reads a null game client");
-    return gameClient.pers.connected === ConnectionState.CONNECTED;
+    return gameClient.connected;
   }
 
   private entityObservation(index: number): BotEntityUpdate | null {
-    const game = this.context.game, entity = game.pool.at(index), source = entity.s, shared = entity.r;
-    if (!entity.inuse || game.world.linkState(index)?.linked !== true || (shared.svFlags & ServerEntityFlags.NOCLIENT) !== 0) return null;
+    const game = this.context.game, entity = game.entity(index), source = entity.state;
+    if (!entity.present || !entity.linked || entity.hidden) return null;
     if (source.eType === EntityType.ET_MISSILE && source.weapon !== Weapon.WP_GRAPPLING_HOOK) return null;
     if (source.eType > EntityType.ET_EVENTS) return null;
-    if (game.options.product === "missionpack" && shared.contents === 0x40000000 && game.missiles.isProximityTrigger(entity)) return null;
-    return { type: source.eType, flags: source.eFlags, origin: shared.currentOrigin, angles: index < MAX_CLIENTS ? source.apos.base : shared.currentAngles,
-      oldOrigin: source.origin2, mins: shared.mins, maxs: shared.maxs, groundEntity: source.groundEntityNum,
-      solid: shared.model.kind === "inline" ? 3 : 2, modelIndex: source.modelindex, modelIndex2: source.modelindex2, frame: source.frame,
+    if (game.options.product === "missionpack" && entity.contents === 0x40000000 && entity.proximityTrigger) return null;
+    return { generation: entity.generation, type: source.eType, flags: source.eFlags, origin: entity.origin, angles: index < MAX_CLIENTS ? source.apos.base : entity.angles,
+      oldOrigin: source.origin2, mins: entity.bounds.min, maxs: entity.bounds.max, groundEntity: source.groundEntityNum,
+      solid: entity.inlineModel !== null ? 3 : 2, modelIndex: source.modelindex, modelIndex2: source.modelindex2, frame: source.frame,
       event: source.event, eventParameter: source.eventParm, powerups: source.powerups, weapon: source.weapon,
       legsAnimation: source.legsAnim, torsoAnimation: source.torsoAnim };
   }
@@ -501,7 +501,7 @@ export class GameAi {
     if (variable.value.length === 0) return;
     if (context.gameType !== GameType.GT_TOURNAMENT) {
       context.game.options.cvars.set("g_gametype", String(GameType.GT_TOURNAMENT), true);
-      context.game.match.exitLevel();
+      context.game.exitLevel();
       return;
     }
     for (let index = 0; index < MAX_CLIENTS; index++) {

@@ -28,7 +28,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     mode: "singleplayer", skill: 3, seed: 7, maxClients: 4 });
   const session = new EngineSession(identity, { kind: "headless" });
   session.attachWorld(simulation);
-  const human = simulation.admitPlayer(session.createClient(0).id);
+  const humanClient = session.createClient(0), human = simulation.admitPlayer(humanClient.id);
   const game = simulation.q3Source();
   if (game === null) throw new Error("Real map did not create the Q3 source provider");
   const archive = await openArchive(resolve(corpus, "q3a/baseq3/pak0.pk3"));
@@ -101,10 +101,12 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       targetPlayer.ps.origin = end; game.world.link(target); placed = true; break;
     }
     expect(placed).toBe(true);
+    let frameTime = 42 * 50;
     target.health = 100;
     let moves = 0, shots = 0, ammoConsumed = 0;
     for (let frame = 1; frame <= 80; frame++) {
-      const commands = bots.frame((frame + 42) * 50, 50);
+      frameTime += 50;
+      const commands = bots.frame(frameTime, 50);
       for (const input of commands) { expect(input.actor).toBe(botActor); if (input.command.kind !== "q3") throw new Error("Native source bot command changed dialect");
         if (input.command.forwardMove !== 0 || input.command.rightMove !== 0) moves++;
         if ((input.command.buttons & 1) !== 0) shots++;
@@ -120,5 +122,50 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     expect(ammoConsumed).toBeGreaterThan(0);
     expect(simulation.playerUi(human.actor).health).toBeLessThan(100);
     expect(bots.director.roster()).toHaveLength(1);
+    const orderOrigin = { ...player.ps.origin };
+    let orderPoint: typeof orderOrigin | null = null;
+    for (const displacement of [{ x: 64, y: 0 }, { x: -64, y: 0 }, { x: 0, y: 64 }, { x: 0, y: -64 }]) {
+      const end = { x: orderOrigin.x + displacement.x, y: orderOrigin.y + displacement.y, z: orderOrigin.z };
+      const trace = game.world.trace({ start: orderOrigin, end, shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, passEntityNum: 1, mask: 0x2010001 });
+      if (trace.fraction === 1 && trace.solidity === "clear" && forClient(1).route({ start: orderOrigin, goal: end }).kind === "route") { orderPoint = end; break; }
+    }
+    if (orderPoint === null) throw new Error("Retail arena has no clear local scripted goal");
+    expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(2);
+    let orderedMoves = 0;
+    for (let frame = 0; frame < 24 && bots.population.goalStatus(botActor) === 2; frame++) {
+      expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(2);
+      frameTime += 50;
+      const commands = bots.frame(frameTime, 50);
+      orderedMoves += commands.filter(input => input.command.kind === "q3" && (input.command.forwardMove !== 0 || input.command.rightMove !== 0)).length;
+      session.step({ elapsedMilliseconds: 50, commands });
+      bots.receive(simulation.drainPresentationEvents());
+    }
+    expect(orderedMoves).toBeGreaterThan(0);
+    expect(bots.population.goalStatus(botActor)).toBe(1);
+    expect(Math.hypot(player.ps.origin.x - orderPoint.x, player.ps.origin.y - orderPoint.y)).toBeLessThanOrEqual(30);
+    expect(bots.population.requestMoveToPoint(botActor, orderPoint)).toBe(1);
+    bots.population.clearGoal(botActor);
+    expect(bots.population.goalStatus(botActor)).toBe(0);
+    expect(bots.population.requestFollowEntity(botActor, 0)).toBe(2);
+    bots.population.clearGoal(botActor);
+    expect(bots.population.goalStatus(botActor)).toBe(0);
+    expect(bots.population.requestFollowEntity(botActor, 0)).toBe(2);
+    let followMoves = 0;
+    for (let frame = 0; frame < 4; frame++) {
+      frameTime += 50;
+      const commands = bots.frame(frameTime, 50);
+      followMoves += commands.filter(input => input.command.kind === "q3" && (input.command.forwardMove !== 0 || input.command.rightMove !== 0)).length;
+      session.step({ elapsedMilliseconds: 50, commands });
+      bots.receive(simulation.drainPresentationEvents());
+    }
+    const followStatus = bots.population.goalStatus(botActor);
+    expect(followStatus).not.toBe(0);
+    expect(followStatus === 1 || followMoves > 0).toBe(true);
+    const followedGeneration = bots.director.options.host.game.entity(0).generation;
+    simulation.disconnectPlayer(human.actor);
+    const replacement = simulation.admitPlayer(humanClient.id);
+    expect(replacement.actor.equals(human.actor)).toBe(false);
+    expect(bots.director.options.host.game.entity(0).generation).not.toBe(followedGeneration);
+    expect(bots.population.goalStatus(botActor)).toBe(0);
   } finally { bots?.close(); session.close(); archive.close(); await content.close(); }
 }, 30000);

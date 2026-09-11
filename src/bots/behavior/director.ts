@@ -1,3 +1,7 @@
+import { botClearActivateGoalStack } from "./q3/ai-navigation.ts";
+import { botOrderActive, botOrderStatus, sameBotOrder } from "./orders.ts";
+import type { BotGoalStatus, BotOrder } from "./orders.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 import type { OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { UserCommand } from "../../content/q3/base/shared/player-state.ts";
@@ -115,11 +119,55 @@ export class SourceBotDirector {
   interbreedEndMatch(): void { this.ai.interbreedEndMatch(); }
   roster(): readonly SourceBotRosterEntry[] {
     const result: SourceBotRosterEntry[] = [];
-    for (let client = 0; client < this.options.host.game.pool.maxClients; client++) {
+    for (let client = 0; client < this.options.host.game.maxClients; client++) {
       const state = this.ai.context.states.get(client), actor = this.options.host.actor(client);
       if (state !== null && state.inuse && actor !== null) result.push({ actor, sourceClient: client, settings: { ...state.settings }, state });
     }
     return result;
+  }
+  requestMoveToPoint(client: number, point: Vec3): BotGoalStatus {
+    if (![point.x, point.y, point.z].every(Number.isFinite)) return 0;
+    return this.setOrder(client, { kind: "point", point: { ...point } });
+  }
+  requestFollowEntity(client: number, number: number): BotGoalStatus {
+    if (!Number.isInteger(number) || number < 0 || number >= this.options.host.game.entityCount) return 0;
+    const entity = this.options.host.game.entity(number);
+    if (!entity.present) return 0;
+    return this.setOrder(client, { kind: "follow", entity: { number, generation: entity.generation } });
+  }
+  clearGoal(client: number): void {
+    const state = this.orderState(client);
+    if (state === null || state.scriptedOrder === null) return;
+    if (botOrderActive(state.scriptedOrder)) {
+      botClearActivateGoalStack(this.ai.context, state);
+      if (state.aiNode === "seek-activate-entity") state.aiNode = "seek-ltg";
+    }
+    state.scriptedOrder = null;
+    this.library.moveStates.resetAvoidReach(state.ms);
+  }
+  goalStatus(client: number): BotGoalStatus {
+    const state = this.orderState(client), order = state?.scriptedOrder;
+    if (state === null || order === undefined || order === null) return 0;
+    if (order.order.kind === "follow") {
+      const reference = order.order.entity, entity = this.options.host.game.entity(reference.number);
+      if (!entity.present || entity.generation !== reference.generation) state.scriptedOrder = { ...order, progress: "error" };
+    }
+    return botOrderStatus(state.scriptedOrder);
+  }
+  private orderState(client: number): BotState | null {
+    if (!this.loaded || this.closed || !Number.isInteger(client) || client < 0 || client >= this.options.host.game.maxClients) return null;
+    const state = this.ai.context.states.get(client);
+    return state !== null && state.inuse && this.options.host.actor(client) !== null ? state : null;
+  }
+  private setOrder(client: number, order: BotOrder): BotGoalStatus {
+    const state = this.orderState(client);
+    if (state === null) return 0;
+    if (state.scriptedOrder !== null && sameBotOrder(state.scriptedOrder.order, order)) return this.goalStatus(client);
+    botClearActivateGoalStack(this.ai.context, state);
+    if (state.aiNode === "seek-activate-entity") state.aiNode = "seek-ltg";
+    state.scriptedOrder = { order, progress: "in-progress" };
+    this.library.moveStates.resetAvoidReach(state.ms);
+    return 2;
   }
   arenaRoster(map: string): readonly { readonly name: string; readonly info: string }[] {
     const info = this.catalog.getArenaInfoByMap(map);

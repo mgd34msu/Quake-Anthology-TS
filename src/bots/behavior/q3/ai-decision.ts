@@ -1,3 +1,4 @@
+import { botOrderActive } from "../orders.ts";
 /*
  * Deathmatch decision network translated from id Software's game/ai_dmnet.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -880,24 +881,62 @@ function objectiveNearbyRange(context: GameAiContext, state: BotState, range: nu
   return range;
 }
 
+function scriptedCombat(context: GameAiContext, state: BotState): void {
+  if (state.enemy < 0) return;
+  botUpdateBattleInventory(context, state, state.enemy); botChooseWeapon(context, state);
+  botAimAtEnemy(context, state); botCheckAttack(context, state);
+}
+
+function scriptedGoal(context: GameAiContext, state: BotState, goal: BotGoalState): boolean {
+  const current = state.scriptedOrder;
+  if (current === null) return false;
+  const self = context.game.entity(state.entityNum), order = current.order;
+  const target = order.kind === "follow" ? context.game.entity(order.entity.number) : null;
+  if (order.kind === "follow" && (target === null || !target.present || target.generation !== order.entity.generation)) {
+    state.scriptedOrder = { ...current, progress: "error" }; return false;
+  }
+  const origin = order.kind === "point" ? order.point : target?.origin;
+  if (origin === undefined) return false;
+  const radius = Math.max(Math.abs(self.bounds.min.x), Math.abs(self.bounds.min.y), self.bounds.max.x, self.bounds.max.y);
+  const targetRadius = target === null ? 0 : Math.max(Math.abs(target.bounds.min.x), Math.abs(target.bounds.min.y), target.bounds.max.x, target.bounds.max.y);
+  const clearance = target === null ? 0 : Math.SQRT2 * (radius + targetRadius);
+  if (length3(sub3(origin, state.origin)) <= (target === null ? radius * 2 : clearance + radius)) {
+    state.scriptedOrder = { ...current, progress: "success" }; return false;
+  }
+  const towardBot = sub3(state.origin, origin), horizontal = Math.hypot(towardBot.x, towardBot.y);
+  const standOff = target === null || horizontal === 0 ? 0 : (clearance + radius * 0.5) / horizontal;
+  const destination = vec3(origin.x + towardBot.x * standOff, origin.y + towardBot.y * standOff, origin.z);
+  const area = botPointAreaNum(context, destination);
+  if (area === 0) { state.scriptedOrder = { ...current, progress: "error" }; return false; }
+  state.scriptedOrder = { ...current, progress: "in-progress" };
+  goal.origin = destination; goal.area = area;
+  goal.mins = vec3(-radius, -radius, -radius); goal.maxs = vec3(radius, radius, radius);
+  goal.entity = order.kind === "follow" ? order.entity.number : -1;
+  return true;
+}
+
 export function aiNodeSeekLtg(context: GameAiContext, state: BotState): boolean {
   if (checkLifecycle(context, state, "seek ltg")) return false;
-  if (botChatRandom(context, state)) {
+  const scripted = botOrderActive(state.scriptedOrder);
+  if (!scripted && botChatRandom(context, state)) {
     state.standTime = f(context.time + botChatTime(context, state)); aiEnterStand(context, state, "seek ltg: random chat"); return false;
   }
   setTravelFlags(context, state, true);
   botMapScripts(context, state);
   state.enemy = -1;
   if (state.killedEnemyTime > f(context.time - 2) && context.random() < state.thinkTime) context.library.actions.gesture(state.client);
-  if (botFindEnemy(context, state, -1)) {
+  if (botFindEnemy(context, state, -1) && !scripted) {
     if (botWantsToRetreat(context, state)) { aiEnterBattleRetreat(context, state, "seek ltg: found enemy"); return false; }
     context.library.moveStates.resetLastAvoidReach(state.ms); context.library.goals.emptyGoalStack(state.gs);
     aiEnterBattleFight(context, state, "seek ltg: found enemy"); return false;
   }
-  botTeamGoals(context, state, false);
+  if (!scripted) botTeamGoals(context, state, false);
   const goal = new BotGoalState();
-  if (!botLongTermGoal(context, state, state.tfl, false, goal)) return true;
-  if (state.checkTime < context.time) {
+  if (scripted ? !scriptedGoal(context, state, goal) : !botLongTermGoal(context, state, state.tfl, false, goal)) {
+    if (scripted) scriptedCombat(context, state);
+    return true;
+  }
+  if (!scripted && state.checkTime < context.time) {
     state.checkTime = f(context.time + 0.5);
     botWantsToCamp(context, state);
     const range = objectiveNearbyRange(context, state, state.ltgType === BotLongTermGoal.DEFENDKEYAREA ? 400 : 150);
@@ -911,7 +950,10 @@ export function aiNodeSeekLtg(context: GameAiContext, state: BotState): boolean 
   botSetupForMovement(context, state);
   const result = new BotMoveResult();
   context.navigation.moveToGoal(result, state.ms, goal, state.tfl);
-  if (result.failure) { context.library.moveStates.resetAvoidReach(state.ms); state.ltgTime = 0; }
+  if (result.failure) {
+    context.library.moveStates.resetAvoidReach(state.ms); state.ltgTime = 0;
+    if (scripted && state.scriptedOrder !== null) state.scriptedOrder = { ...state.scriptedOrder, progress: "error" };
+  }
   botAIBlocked(context, state, result, true);
   botClearPath(context, state, result);
   if ((result.flags & MOVEMENT_VIEW) !== 0) state.idealViewangles = vec3(result.idealViewAngles.x, result.idealViewAngles.y, result.idealViewAngles.z);
@@ -925,6 +967,7 @@ export function aiNodeSeekLtg(context: GameAiContext, state: BotState): boolean 
     halfRoll(state);
   }
   if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) !== 0) state.weaponNum = result.weapon;
+  if (scripted && (result.flags & (MOVEMENT_VIEW | BotMoveResultFlag.MOVEMENTWEAPON)) === 0) scriptedCombat(context, state);
   return true;
 }
 
@@ -1129,6 +1172,9 @@ export function aiNodeBattleNbg(context: GameAiContext, state: BotState): boolea
 
 /** Source ainode function-pointer dispatch; false runs the next node in the same think. */
 export function runAiNode(context: GameAiContext, state: BotState): boolean {
+  if (botOrderActive(state.scriptedOrder) && state.aiNode !== "seek-ltg" && state.aiNode !== "seek-activate-entity"
+    && state.aiNode !== "respawn" && state.aiNode !== "observer" && state.aiNode !== "intermission")
+    aiEnterSeekLtg(context, state, "scripted order");
   switch (state.aiNode) {
     case "intermission": return aiNodeIntermission(context, state);
     case "observer": return aiNodeObserver(context, state);

@@ -1038,6 +1038,18 @@ export class WeaponAi {
     return freezeWeapon(weapon, weapon.projectileInfo, weapon.valid);
   }
 
+  /** Evaluate the loaded personality's existing fuzzy tree for one weapon profile. */
+  evaluateFightWeapon(handle: number, weaponNumber: number, inventory: WeightInventory): number | null {
+    const state = this.state(handle), config = this.currentConfig;
+    if (state === undefined || config === undefined || state.config === undefined || state.indexes === undefined) return null;
+    const weapon = config.weapons[weaponNumber];
+    if (weapon === undefined || !weapon.valid || weaponNumber < 0 || !Number.isInteger(weaponNumber)) return null;
+    const bytes = state.indexes.bytes;
+    if (weaponNumber * 4 >= bytes.byteLength) return null;
+    const index = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(weaponNumber * 4, true);
+    return index < 0 ? null : state.config.evaluate(index, inventory);
+  }
+
   chooseBestFightWeapon(handle: number, inventory: WeightInventory): number {
     const state = this.state(handle);
     const config = this.currentConfig;
@@ -1053,16 +1065,8 @@ export class WeaponAi {
       }
       const indexes = state.indexes;
       if (indexes === undefined) return bestWeapon;
-      const bytes = indexes.bytes;
-      // Retain the managed bound for a setup that grows the weapon table.
-      if (index * 4 >= bytes.byteLength) continue;
-      const weightIndex = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(index * 4, true);
-      if (weightIndex < 0) {
-        continue;
-      }
-      const weights = state.config;
-      if (weights === undefined) return bestWeapon;
-      const weight = weights.evaluate(weightIndex, inventory);
+      const weight = this.evaluateFightWeapon(handle, index, inventory);
+      if (weight === null) continue;
       if (weight > bestWeight) {
         bestWeight = weight;
         bestWeapon = index;

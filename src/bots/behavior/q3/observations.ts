@@ -1,6 +1,7 @@
 /* Source aas_entityinfo_t observations; actor ownership stays in the shared registry. GPL-2.0-or-later. */
 import type { Vec3 } from "../../../contracts/math.ts";
 export interface BotEntityUpdate {
+  readonly generation?: number;
   readonly type: number;
   readonly flags: number;
   readonly origin: Vec3;
@@ -49,9 +50,10 @@ export class BotEntityObservations {
     for (const [index, value] of this.records.entries()) this.records[index] = { ...value, valid: false };
   }
   update(number: number, source: BotEntityUpdate | null, time: number): void {
-    const previous = this.records[number];
+    let previous = this.records[number];
     if (previous === undefined) throw new RangeError(`Bot observation ${number} exceeds source capacity ${this.capacity}`);
     if (source === null) return;
+    if (previous.generation !== source.generation) previous = emptyInfo(number);
     this.records[number] = { ...source, number, valid: true,
       origin: vector(source.origin), angles: vector(source.angles), oldOrigin: vector(source.oldOrigin),
       mins: vector(source.mins), maxs: vector(source.maxs), lastVisibleOrigin: previous.origin,

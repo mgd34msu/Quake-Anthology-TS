@@ -12,6 +12,8 @@ export type { BotNavigation, BotMovementPrediction } from "./q3/navigation-types
 export { BotLibrary } from "./q3/library.ts";
 export type { SourceBotLibraryOptions } from "./q3/library.ts";
 export { SharedBotPopulation } from "./population.ts";
-export type { BotFrame, RereleaseBotBinding, RereleaseBotCheckpoint } from "./population.ts";
+export type { BotFrame } from "./population.ts";
 export { projectBotMovement } from "./prediction.ts";
 export type { BotMovementProjection } from "./prediction.ts";
+
+export type { BotGoalStatus, BotOrder, BotOrderEntity, BotOrderState } from "./orders.ts";

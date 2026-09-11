@@ -1,3 +1,4 @@
+import { BotCvar } from "./ai-context.ts";
 /*
  * Ported from id Software's code/game/g_bot.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -11,15 +12,12 @@ import { infoValueForKey } from "../../../core/info-string.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { sourceCommandText } from "../../../core/commands/text.ts";
 import { GameType, Team } from "../../../content/q3/base/shared/definitions.ts";
-import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared.ts";
 import { BOT_SETTINGS_PATH_LENGTH } from "./ai-definitions.ts";
 import type { BotSettings } from "./ai-state.ts";
 import { gameFormat } from "../../../content/q3/base/game/format.ts";
 import type { GameMemory, GameMemoryAllocation } from "../../../content/q3/base/game/memory.ts";
 import { gameAtof, gameAtoi } from "../../../content/q3/base/game/numeric.ts";
 import type { SourceBotGame } from "./game-host.ts";
-import { pickTeam } from "../../../content/q3/team-arena/session.ts";
-import { ConnectionState } from "../../../content/q3/base/game/state.ts";
 
 const MAX_INFOS = 1024, MAX_TEXT = 8192, MAX_INFO = 1024;
 const BOT_BEGIN_DELAY_BASE = 2000, BOT_BEGIN_DELAY_INCREMENT = 1500;
@@ -122,7 +120,8 @@ export class GameBotCatalog {
 
   private loadCatalog(kind: "bots" | "arenas", destination: GameInfoCatalog): void {
     destination.count = 0;
-    const variable = this.game.options.cvars.registerVm(kind === "bots" ? "g_botsFile" : "g_arenasFile", "", CvarFlag.Init | CvarFlag.ReadOnly);
+    const variable = new BotCvar(this.game.options.cvars);
+    variable.register(kind === "bots" ? "g_botsFile" : "g_arenasFile", "", CvarFlag.Init | CvarFlag.ReadOnly);
     this.loadFile(variable.value || `scripts/${kind}.txt`, destination);
     for (const name of this.files.list("scripts", kind === "bots" ? ".bot" : ".arena")) {
       const filename = `scripts/${name}`;
@@ -158,7 +157,8 @@ export class GameBotCatalog {
       const allocation = catalogInfo(this.arenas, index);
       allocation.writeString(this.setInfo(allocation.readString(), "num", String(index)));
     }
-    this.minimumPlayers = this.game.options.cvars.registerVm("bot_minplayers", "0", CvarFlag.ServerInfo);
+    this.minimumPlayers = new BotCvar(this.game.options.cvars);
+    this.minimumPlayers.register("bot_minplayers", "0", CvarFlag.ServerInfo);
     if (this.game.gameType !== GameType.GT_SINGLE_PLAYER) return;
     const serverinfo = this.game.options.cvars.infoString(CvarFlag.ServerInfo);
     const arena = this.getArenaInfoByMap(infoValueForKey(serverinfo, "mapname").slice(0, 63));
@@ -173,7 +173,7 @@ export class GameBotCatalog {
   }
 
   private spawnBots(botList: string, baseDelay: number): void {
-    this.game.arenas.resetPodiumPlayers();
+    this.game.resetPodiumPlayers();
     let skill = this.cvarValue("g_spSkill");
     if (skill < 1) { this.setCvar("g_spSkill", "1"); skill = 1; }
     else if (skill > 5) { this.setCvar("g_spSkill", "5"); skill = 5; }
@@ -234,14 +234,12 @@ export class GameBotCatalog {
     let team = requestedTeam;
     if (!team) {
       team = this.game.gameType >= GameType.GT_TEAM
-        ? pickTeam({ clients: this.game.pool.clients, maxClients: this.game.pool.maxClients, teamScores: this.game.level.teamScores }, clientNum) === Team.TEAM_RED ? "red" : "blue"
+        ? this.game.chooseTeam(clientNum) === Team.TEAM_RED ? "red" : "blue"
         : "red";
     }
     set("characterfile", infoValueForKey(info, "aifile"));
     set("skill", gameFormat("%5.2f", [skill])); set("team", team);
-    const bot = this.game.pool.at(clientNum);
-    bot.r.svFlags |= ServerEntityFlags.BOT;
-    this.game.pool.activateClient(clientNum);
+    this.game.activateBot(clientNum);
     this.game.options.engine.setUserinfo(clientNum, userinfo);
     if (this.game.clientConnect(clientNum, true, true) !== null) return;
     if (delay === 0) { this.game.clientBegin(clientNum); return; }
@@ -257,7 +255,7 @@ export class GameBotCatalog {
     if (!name) { this.print("Usage: Addbot <botname> [skill 1-5] [team] [msec delay] [altname]\n"); return; }
     const skill = argument(2), delay = argument(4);
     this.addBot(name, skill ? gameAtof(skill) : 4, argument(3), delay ? gameAtoi(delay) : 0, argument(5));
-    if (((this.game.level.time - this.game.level.startTime) | 0) > 1000 && this.cvarInteger("cl_running") !== 0) {
+    if (((this.game.clock.time - this.game.clock.startTime) | 0) > 1000 && this.cvarInteger("cl_running") !== 0) {
       this.game.options.engine.sendServerCommand(-1, "loaddefered\n");
     }
   }
@@ -275,7 +273,7 @@ export class GameBotCatalog {
 
   private addToSpawnQueue(clientNum: number, delay: number): void {
     for (const slot of this.queue) if (slot.spawnTime === 0) {
-      slot.spawnTime = (this.game.level.time + delay) | 0;
+      slot.spawnTime = (this.game.clock.time + delay) | 0;
       slot.clientNum = clientNum;
       return;
     }
@@ -290,7 +288,7 @@ export class GameBotCatalog {
   checkSpawn(): void {
     this.checkMinimumPlayers();
     for (const slot of this.queue) {
-      if (slot.spawnTime === 0 || slot.spawnTime > this.game.level.time) continue;
+      if (slot.spawnTime === 0 || slot.spawnTime > this.game.clock.time) continue;
       this.game.clientBegin(slot.clientNum);
       slot.spawnTime = 0;
       if (this.game.gameType === GameType.GT_SINGLE_PLAYER) {
@@ -305,28 +303,26 @@ export class GameBotCatalog {
   }
 
   private eligibleClient(number: number, team: number, bot: boolean): boolean {
-    const client = this.game.pool.clientAt(number);
-    return client.pers.connected === ConnectionState.CONNECTED
-      && ((this.game.pool.at(client.ps.clientNum).r.svFlags & ServerEntityFlags.BOT) !== 0) === bot
-      && (team < 0 || client.sess.sessionTeam === team);
+    const entity = this.game.entity(number), client = entity.player;
+    return client !== null && client.connected && entity.bot === bot && (team < 0 || client.team === team);
   }
 
   countHumanPlayers(team: number): number {
     let count = 0;
-    for (let i = 0; i < this.game.pool.maxClients; i++) if (this.eligibleClient(i, team, false)) count++;
+    for (let i = 0; i < this.game.maxClients; i++) if (this.eligibleClient(i, team, false)) count++;
     return count;
   }
   countBotPlayers(team: number): number {
     let count = 0;
-    for (let i = 0; i < this.game.pool.maxClients; i++) if (this.eligibleClient(i, team, true)) count++;
+    for (let i = 0; i < this.game.maxClients; i++) if (this.eligibleClient(i, team, true)) count++;
     // Source counts due queued begins for every team, and excludes future begins.
-    for (const slot of this.queue) if (slot.spawnTime !== 0 && slot.spawnTime <= this.game.level.time) count++;
+    for (const slot of this.queue) if (slot.spawnTime !== 0 && slot.spawnTime <= this.game.clock.time) count++;
     return count;
   }
 
   private nameInUse(name: string, team: number): boolean {
-    for (let i = 0; i < this.game.pool.maxClients; i++) {
-      if (this.eligibleClient(i, team, true) && equal(name, this.game.pool.clientAt(i).pers.netname)) return true;
+    for (let i = 0; i < this.game.maxClients; i++) {
+      if (this.eligibleClient(i, team, true) && equal(name, (this.game.entity(i).player?.name ?? ""))) return true;
     }
     return false;
   }
@@ -350,9 +346,9 @@ export class GameBotCatalog {
   }
 
   removeRandomBot(team: number): boolean {
-    for (let i = 0; i < this.game.pool.maxClients; i++) {
+    for (let i = 0; i < this.game.maxClients; i++) {
       if (!this.eligibleClient(i, team, true)) continue;
-      const name = this.game.pool.clientAt(i).pers.netname;
+      const name = (this.game.entity(i).player?.name ?? "");
       if (name.length >= 36) throw new RangeError("Bot netname exceeds source 36-byte storage");
       this.game.options.engine.insertConsoleCommand(gameFormat("kick %s\n", [clean(name)]));
       return true;
@@ -361,15 +357,15 @@ export class GameBotCatalog {
   }
 
   checkMinimumPlayers(): void {
-    if (this.game.level.intermissionTime !== 0) return;
-    const time = this.game.level.time;
+    if (this.game.clock.intermissionTime !== 0) return;
+    const time = this.game.clock.time;
     if (this.checkMinimumTime > ((time - 10000) | 0)) return;
     this.checkMinimumTime = time;
     if (this.minimumPlayers === null) throw new Error("G_CheckMinimumPlayers requires G_InitBots");
     this.minimumPlayers.update();
     let minimum = this.minimumPlayers.integerValue;
     if (minimum <= 0) return;
-    const maxClients = this.game.pool.maxClients;
+    const maxClients = this.game.maxClients;
     const check = (countTeam: number, addTeam: number, removeTeam: number, tournament: boolean): void => {
       const humans = this.countHumanPlayers(countTeam), bots = this.countBotPlayers(countTeam);
       if (humans + bots < minimum) this.addRandomBot(addTeam);

@@ -1,13 +1,14 @@
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { GameRandom } from "../../../core/game-numeric.ts";
-import type { EntityPool } from "../../../content/q3/base/game/entities.ts";
-import type { GameLevel } from "../../../content/q3/base/game/level.ts";
+import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { GameMemory } from "../../../content/q3/base/game/memory.ts";
-import type { MissileRuntime } from "../../../content/q3/base/game/missile.ts";
-import type { ConfigStringRegistry, ConfigStringStore } from "../../../content/q3/base/game/utilities.ts";
-import type { ServerWorld } from "../../../content/q3/base/world.ts";
-import type { ArenaRuntime } from "../../../content/q3/team-arena/arenas.ts";
-import type { MatchRuntime } from "../../../content/q3/team-arena/match.ts";
+import type { ConfigStringStore } from "../../../content/q3/base/game/utilities.ts";
+import type { ServerTraceQuery, ServerTraceResult } from "../../../content/q3/base/world.ts";
+import type { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
+import type { PlayerState } from "../../../content/q3/base/shared/player-state.ts";
+import type { BotState } from "./ai-state.ts";
+import type { BotLibrary } from "./library.ts";
+import type { WeaponInfo } from "../library/weapons.ts";
 
 export interface SourceBotEngine {
   print(text: string): void;
@@ -19,7 +20,61 @@ export interface SourceBotEngine {
   appendConsoleCommand(command: string): void;
 }
 
-/** Source AI observes the admitted shared actors through the selected game bindings. */
+/** Detached decision input. The player-state cell belongs to the brain, never to gameplay. */
+export interface BotObservedPlayer {
+  readonly state: PlayerState;
+  readonly connected: boolean;
+  readonly team: number;
+  readonly name: string;
+  readonly lastHurtClient: number;
+  readonly lastHurtMod: number;
+}
+export interface BotObservedEntity {
+  readonly generation: number;
+  readonly present: boolean;
+  readonly linked: boolean;
+  readonly hidden: boolean;
+  readonly bot: boolean;
+  readonly state: EntityState;
+  readonly origin: Vec3;
+  readonly angles: Vec3;
+  readonly bounds: Bounds;
+  readonly contents: number;
+  readonly inlineModel: number | null;
+  readonly classname: string | null;
+  readonly eventTime: number;
+  readonly activatorFrame: number | null;
+  readonly proximityTrigger: boolean;
+  readonly player: BotObservedPlayer | null;
+}
+
+/** The selected arsenal supplies inventory and ballistics to the same decision controller. */
+export interface BotWeaponKnowledge {
+  readonly info: WeaponInfo;
+  readonly maximumRange: number | null;
+  readonly melee: boolean;
+  readonly personalityRole: number | null;
+}
+export interface BotArsenalData {
+  updateInventory(state: BotState): void;
+  candidates(library: BotLibrary, handle: number): readonly BotWeaponKnowledge[];
+}
+export interface BotWeaponTactics {
+  readonly melee: boolean;
+  readonly maximumRange: number | null;
+  readonly aimAccuracy: number | null;
+  readonly aimSkill: number | null;
+  readonly weakness: number;
+  readonly predictOccludedSplash: boolean;
+}
+export interface BotArsenalKnowledge {
+  chooseWeapon(library: BotLibrary, state: BotState): number;
+  tactics(weapon: number): BotWeaponTactics;
+  aggression(state: BotState): number;
+  updateInventory(state: BotState): void;
+  weaponInfo(library: BotLibrary, handle: number, weapon: number): WeaponInfo | undefined;
+}
+
 export interface SourceBotGame {
   readonly options: {
     readonly product: "baseq3" | "missionpack";
@@ -28,15 +83,22 @@ export interface SourceBotGame {
     readonly engine: SourceBotEngine;
   };
   readonly gameType: number;
-  readonly pool: EntityPool;
-  readonly world: ServerWorld;
-  readonly random: GameRandom;
-  readonly level: GameLevel;
+  readonly maxClients: number;
+  readonly entityCount: number;
+  readonly world: {
+    trace(query: ServerTraceQuery): ServerTraceResult;
+    pointContents(point: Vec3, passEntity: number): number;
+  };
+  readonly random: Pick<GameRandom, "random" | "crandom">;
+  readonly clock: { readonly time: number; readonly startTime: number; readonly intermissionTime: number };
   readonly memory: GameMemory;
-  readonly config: ConfigStringRegistry;
-  readonly missiles: Pick<MissileRuntime, "isProximityTrigger">;
-  readonly match: Pick<MatchRuntime, "exitLevel">;
-  readonly arenas: Pick<ArenaRuntime, "resetPodiumPlayers">;
+  readonly knowledge: BotArsenalKnowledge;
+  entity(number: number): BotObservedEntity;
+  modelIndex(name: string): number;
+  chooseTeam(client: number): number;
+  activateBot(client: number): void;
+  exitLevel(): void;
+  resetPodiumPlayers(): void;
   clientUserinfoChanged(client: number): void;
   clientConnect(client: number, firstTime: boolean, isBot: boolean): string | null;
   clientBegin(client: number): void;

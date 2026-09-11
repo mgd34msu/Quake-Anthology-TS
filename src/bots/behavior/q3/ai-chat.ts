@@ -310,7 +310,7 @@ export function botChatEnemySuicide(context: GameAiContext, state: BotState): bo
 
 export function botChatHitTalking(context: GameAiContext, state: BotState): boolean {
   if (unavailable(context, state) || botNumActivePlayers(context) <= 1) return false;
-  const client = context.game.pool.at(state.client).client;
+  const client = context.game.entity(state.client).player;
   if (client === null) throw new Error("BotChat_HitTalking requires a client");
   const attacker = client.lastHurtClient;
   if (attacker === 0 || attacker === state.client || attacker < 0 || attacker >= MAX_CLIENTS) return false;
@@ -323,7 +323,7 @@ export function botChatHitTalking(context: GameAiContext, state: BotState): bool
 }
 
 export function botChatHitNoDeath(context: GameAiContext, state: BotState): boolean {
-  const client = context.game.pool.at(state.client).client;
+  const client = context.game.entity(state.client).player;
   if (client === null) throw new Error("BotChat_HitNoDeath requires a client");
   const attacker = client.lastHurtClient;
   if (attacker === 0 || attacker === state.client || attacker < 0 || attacker >= MAX_CLIENTS) return false;
@@ -340,7 +340,7 @@ export function botChatHitNoKill(context: GameAiContext, state: BotState): boole
   const chance = characteristic(context, state, BotCharacteristic.CHAT_HITNOKILL);
   if (context.gameType >= GameType.GT_TEAM || context.gameType === GameType.GT_TOURNAMENT || randomRefused(context, chance * 0.5)) return false;
   if (!botValidChatPosition(context, state) || botVisibleEnemies(context, state) || entityIsShooting(botEntityInfo(context, state.enemy))) return false;
-  const enemy = context.game.pool.at(state.enemy).client;
+  const enemy = context.game.entity(state.enemy).player;
   if (enemy === null) throw new Error("BotChat_HitNoKill requires an enemy client");
   botInitialChat(context, state, "hit_nokill", clientName(context, state.enemy, 32), botWeaponNameForMeansOfDeath(context, enemy.lastHurtMod));
   return allChat(context, state);
@@ -381,7 +381,7 @@ export function botChatTest(context: GameAiContext, state: BotState): void {
   for (const type of ["death_gauntlet", "death_rail", "death_bfg", "death_insult", "death_praise"]) emit(type, () => [name, botWeaponNameForMeansOfDeath(context, state.botDeathType), null, null, null, null, null, null]);
   name = easyClientName(context, state.lastKilledPlayer, 32);
   for (const type of ["kill_gauntlet", "kill_rail", "kill_telefrag", "kill_insult", "kill_praise", "enemy_suicide"]) emit(type, () => [name, null, null, null, null, null, null, null]);
-  const client = context.game.pool.at(state.client).client;
+  const client = context.game.entity(state.client).player;
   if (client === null) throw new Error("BotChatTest requires a client");
   name = clientName(context, client.lastHurtClient, 32);
   const weapon = botWeaponNameForMeansOfDeath(context, client.lastHurtClient);
