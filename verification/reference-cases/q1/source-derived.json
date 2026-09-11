@@ -1,0 +1,1455 @@
+{
+  "schemaVersion": 1,
+  "game": "q1",
+  "oracle": {
+    "kind": "source-derived",
+    "measuredOriginalExecution": false,
+    "method": "Independently transcribed original-source equations evaluated in TypeScript, compared with fixed hand-derived expected steps."
+  },
+  "capturedAt": "2026-09-11T05:41:14.011Z",
+  "command": [
+    "/home/buzzkill/.bun/bin/bun",
+    "run",
+    "tools/reference/q1/capture.ts",
+    "/home/buzzkill/Projects/qsrc"
+  ],
+  "runtime": {
+    "path": "/home/buzzkill/.bun/bin/bun",
+    "size": 92752752,
+    "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+  },
+  "bunVersion": "1.3.14",
+  "platform": "linux",
+  "architecture": "x64",
+  "environment": {
+    "LANG": "en_US.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "TZ": null
+  },
+  "arithmetic": {
+    "floatStorage": "IEEE-754 binary32 round-to-nearest ties-to-even",
+    "hostClock": "IEEE-754 binary64",
+    "integerConversion": "signed int32 truncation within representable range",
+    "randomSeed": null,
+    "clockSchedule": "explicit per-case inputs"
+  },
+  "captureProgram": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q1/capture.ts",
+      "size": 5742,
+      "sha256": "2e64304ce5f1a49dfdcab0515a12c493a085fe1e0bad49b760bff4f559c9ce06"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q1/oracle.ts",
+      "size": 9677,
+      "sha256": "3171b707e1ae55b91e1b5b9d42a0ac50aaec7acf774a25d3d57250464bde44dd"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q1/cases.ts",
+      "size": 11527,
+      "sha256": "f77714c15050919e153e92a3c05d813ad0ef7178666b98157bca7eb6211d56ed"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q1/sources.ts",
+      "size": 5704,
+      "sha256": "44e320066b5b05578f4745dca623e4154df315c3ad01ca8ff0b11ea5812e4621"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
+      "size": 14481,
+      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
+      "size": 2876,
+      "sha256": "64c22a0901739fdaa711cdcedf1d824ab1ea5d279421d1a8cf4143ebb255edf4"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/verify/hash.ts",
+      "size": 1247,
+      "sha256": "c9932d3d0d4806b79c84487364ee88597b2b308395c61b3c5d5e0b064a569a3e"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/package.json",
+      "size": 1132,
+      "sha256": "024802203c7a039732a7083474d2850e89b7329658997e2ab7f2e35365af9788"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/bun.lock",
+      "size": 1175,
+      "sha256": "abac5f91ed70920d8959005d04024292b1b0c7566307e4aa41633c086f635435"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tsconfig.json",
+      "size": 776,
+      "sha256": "4fa17905f5bad6879f0400dd69c2500e91a6d0c5cef4f4ad88a38b04044746fd"
+    }
+  ],
+  "sources": [
+    {
+      "id": "quake-sv-phys",
+      "relativePath": "quake/WinQuake/sv_phys.c",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/sv_phys.c",
+        "size": 37342,
+        "sha256": "4c65e087e2a86fa6fb1883e0ec050ce0469cb31242f4c2243ac28d974826952e"
+      },
+      "excerpts": [
+        {
+          "firstLine": 126,
+          "lastLine": 144,
+          "purpose": "SV_RunThink scheduling, callback entry and removal return",
+          "code": "qboolean SV_RunThink (edict_t *ent)\n{\n\tfloat\tthinktime;\n\n\tthinktime = ent->v.nextthink;\n\tif (thinktime <= 0 || thinktime > sv.time + host_frametime)\n\t\treturn true;\n\t\t\n\tif (thinktime < sv.time)\n\t\tthinktime = sv.time;\t// don't let things stay in the past.\n\t\t\t\t\t\t\t\t// it is possible to start that way\n\t\t\t\t\t\t\t\t// by a trigger with a local time.\n\tent->v.nextthink = 0;\n\tpr_global_struct->time = thinktime;\n\tpr_global_struct->self = EDICT_TO_PROG(ent);\n\tpr_global_struct->other = EDICT_TO_PROG(sv.edicts);\n\tPR_ExecuteProgram (ent->v.think);\n\treturn !ent->free;\n}",
+          "sha256": "4e07cc8d196baca995307d5671e29a72aa325075031b60bdd0977ec47129b06a"
+        }
+      ]
+    },
+    {
+      "id": "quake-remove-builtin",
+      "relativePath": "quake/WinQuake/pr_cmds.c",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/pr_cmds.c",
+        "size": 37281,
+        "sha256": "24be89ddb3a27ba2bcc90868f6bb884b069490d97d2c84c631844d63bd38b075"
+      },
+      "excerpts": [
+        {
+          "firstLine": 965,
+          "lastLine": 971,
+          "purpose": "PF_Remove delegates entity removal to ED_Free",
+          "code": "void PF_Remove (void)\n{\n\tedict_t\t*ed;\n\t\n\ted = G_EDICT(OFS_PARM0);\n\tED_Free (ed);\n}",
+          "sha256": "e10597dd5f1f3fdb5b6759ed21dc6434a01b40ac4a9a08d990f72255f4db8e73"
+        }
+      ]
+    },
+    {
+      "id": "quake-free-edict",
+      "relativePath": "quake/WinQuake/pr_edict.c",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/pr_edict.c",
+        "size": 22014,
+        "sha256": "90467fdbc99ffb557afae0a828e82c6d2e3d38e7509707fe4a6842578798f28c"
+      },
+      "excerpts": [
+        {
+          "firstLine": 122,
+          "lastLine": 139,
+          "purpose": "ED_Free marks free, clears entity fields and stores nextthink=-1",
+          "code": "void ED_Free (edict_t *ed)\n{\n\tSV_UnlinkEdict (ed);\t\t// unlink from world bsp\n\n\ted->free = true;\n\ted->v.model = 0;\n\ted->v.takedamage = 0;\n\ted->v.modelindex = 0;\n\ted->v.colormap = 0;\n\ted->v.skin = 0;\n\ted->v.frame = 0;\n\tVectorCopy (vec3_origin, ed->v.origin);\n\tVectorCopy (vec3_origin, ed->v.angles);\n\ted->v.nextthink = -1;\n\ted->v.solid = 0;\n\t\n\ted->freetime = sv.time;\n}",
+          "sha256": "9132e323420b3aef25e1a6d7f5d80afd38f2ee14768444a2b0229fef0083945a"
+        }
+      ]
+    },
+    {
+      "id": "quake-pr-exec",
+      "relativePath": "quake/WinQuake/pr_exec.c",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/pr_exec.c",
+        "size": 12378,
+        "sha256": "43cc7181ee0a74f43e32045fb77f05767041fa1d94ef69f4cc8532d933340b8b"
+      },
+      "excerpts": [
+        {
+          "firstLine": 410,
+          "lastLine": 412,
+          "purpose": "OP_ADD_F stores a float after addition",
+          "code": "\tcase OP_ADD_F:\n\t\tc->_float = a->_float + b->_float;\n\t\tbreak;",
+          "sha256": "2a7fd7b5c35e1d20e7224fa0ffe4405f0a6b335542971ef050de07ba327f2646"
+        },
+        {
+          "firstLine": 419,
+          "lastLine": 421,
+          "purpose": "OP_SUB_F stores a float after subtraction",
+          "code": "\tcase OP_SUB_F:\n\t\tc->_float = a->_float - b->_float;\n\t\tbreak;",
+          "sha256": "fe6eef1466d27e1633f45d0b4f5a9f6e8e7f43c065c6517c7f6c188810f33cab"
+        },
+        {
+          "firstLine": 428,
+          "lastLine": 430,
+          "purpose": "OP_MUL_F stores a float after multiplication",
+          "code": "\tcase OP_MUL_F:\n\t\tc->_float = a->_float * b->_float;\n\t\tbreak;",
+          "sha256": "db979ce0c6ae5ff7cf0ded02f57de734abd3a44931951db39d3a6a0143d9654a"
+        },
+        {
+          "firstLine": 447,
+          "lastLine": 457,
+          "purpose": "OP_DIV_F and signed int conversions for OP_BITAND and OP_BITOR",
+          "code": "\tcase OP_DIV_F:\n\t\tc->_float = a->_float / b->_float;\n\t\tbreak;\n\t\n\tcase OP_BITAND:\n\t\tc->_float = (int)a->_float & (int)b->_float;\n\t\tbreak;\n\t\n\tcase OP_BITOR:\n\t\tc->_float = (int)a->_float | (int)b->_float;\n\t\tbreak;",
+          "sha256": "ac4de28ab9aa6817c049aca50b4d55b105e071cda45786bb9b4e67eba7bd1674"
+        }
+      ]
+    },
+    {
+      "id": "quake-eval-type",
+      "relativePath": "quake/WinQuake/progs.h",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/progs.h",
+        "size": 3821,
+        "sha256": "2ba22bcae0bf4915970876e902064448c4191653968b3a2a2c5bdfade8005596"
+      },
+      "excerpts": [
+        {
+          "firstLine": 24,
+          "lastLine": 33,
+          "purpose": "eval_t float storage",
+          "code": "typedef union eval_s\n{\n\tstring_t\t\tstring;\n\tfloat\t\t\t_float;\n\tfloat\t\t\tvector[3];\n\tfunc_t\t\t\tfunction;\n\tint\t\t\t\t_int;\n\tint\t\t\t\tedict;\n} eval_t;\t\n",
+          "sha256": "8b599975f3c7650fd7cb20cd7562c0df0936415046c28be52165f47bd67d828f"
+        }
+      ]
+    },
+    {
+      "id": "quake-prog-fields",
+      "relativePath": "quake/WinQuake/progdefs.q1",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/progdefs.q1",
+        "size": 2455,
+        "sha256": "e81793ac2f78dc2a461d5de78c65937060ebb272c876bdf12250aec2b673d30c"
+      },
+      "excerpts": [
+        {
+          "firstLine": 3,
+          "lastLine": 11,
+          "purpose": "QC globals and time storage",
+          "code": "\ntypedef struct\n{\tint\tpad[28];\n\tint\tself;\n\tint\tother;\n\tint\tworld;\n\tfloat\ttime;\n\tfloat\tframetime;\n\tfloat\tforce_retouch;",
+          "sha256": "a3829f658decd5bd85b4303cf422a53e22fa1f42c0513f34aa75c58280fde9af"
+        },
+        {
+          "firstLine": 85,
+          "lastLine": 89,
+          "purpose": "think callback and nextthink float field",
+          "code": "\tfunc_t\tuse;\n\tfunc_t\tthink;\n\tfunc_t\tblocked;\n\tfloat\tnextthink;\n\tint\tgroundentity;",
+          "sha256": "21f828c2416e6f3ea8457a5413037072e64c076aca4599e9e2352e9a38be506e"
+        }
+      ]
+    },
+    {
+      "id": "quake-host-clock",
+      "relativePath": "quake/WinQuake/host.c",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/host.c",
+        "size": 20002,
+        "sha256": "5f16220fdd2b34e4d6c1d60a9542a951c9a379b53e030af4a19811533498b5f1"
+      },
+      "excerpts": [
+        {
+          "firstLine": 40,
+          "lastLine": 43,
+          "purpose": "host_frametime is double",
+          "code": "double\t\thost_frametime;\ndouble\t\thost_time;\ndouble\t\trealtime;\t\t\t\t// without any filtering or bounding\ndouble\t\toldrealtime;\t\t\t// last frame run",
+          "sha256": "7d7eb9f7d785191e974298649d95c011d8e6e06b555a8595c7c4982d8e117938"
+        }
+      ]
+    },
+    {
+      "id": "quake-server-clock",
+      "relativePath": "quake/WinQuake/server.h",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake/WinQuake/server.h",
+        "size": 7113,
+        "sha256": "a408184fe7a6261953d3b40f53df7020e43702abece1746206d736bc1ca59a5d"
+      },
+      "excerpts": [
+        {
+          "firstLine": 38,
+          "lastLine": 44,
+          "purpose": "sv.time is double",
+          "code": "\n\tqboolean\tpaused;\n\tqboolean\tloadgame;\t\t\t// handle connections specially\n\n\tdouble\t\ttime;\n\t\n\tint\t\t\tlastcheck;\t\t\t// used by PF_checkclient",
+          "sha256": "31b5ca7af9571212242c67b82d03c4f20a516896738fcd2812b6e55c78780dd3"
+        }
+      ]
+    },
+    {
+      "id": "mg1-hub",
+      "relativePath": "quake-rerelease-qc/quakec_mg1/map_specific/hub.qc",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake-rerelease-qc/quakec_mg1/map_specific/hub.qc",
+        "size": 972,
+        "sha256": "d105dbb02675b2216ff3bc5d68f04667a73a6832b7ccd13f7f6e58e5640be24a"
+      },
+      "excerpts": [
+        {
+          "firstLine": 21,
+          "lastLine": 30,
+          "purpose": "hub exit removes itself unless the complete mask is present",
+          "code": "void hub_trigger_changelevel()\n{\n    if((serverflags & SIGIL_ALL) !=SIGIL_ALL)\n    {\n        remove(self);\n        return;\n    }\n\n    trigger_changelevel();\n}",
+          "sha256": "766ac1c6cb53d248bb3a3002d0caf7a5cf73cf95f20dd12605d4fd58b4159bc0"
+        }
+      ]
+    },
+    {
+      "id": "mg1-sigils",
+      "relativePath": "quake-rerelease-qc/quakec_mg1/items_runes.qc",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake-rerelease-qc/quakec_mg1/items_runes.qc",
+        "size": 5363,
+        "sha256": "c53b931a1b787cc546f51e15052e0c20aca2991f58e8a5444c724e053ee4d177"
+      },
+      "excerpts": [
+        {
+          "firstLine": 28,
+          "lastLine": 37,
+          "purpose": "SIGIL_ALL includes five sigils, value 31; sixth sigil is excluded",
+          "code": "float SIGIL_E1 = 1;\nfloat SIGIL_E2 = 2;\nfloat SIGIL_E3 = 4;\nfloat SIGIL_E4 = 8;\nfloat SIGIL_E5 = 16;\nfloat SIGIL_E6 = 32;\nfloat SIGIL_NUMBITS = 6;\n\nfloat SIGIL_ALL = SIGIL_E1 | SIGIL_E2 | SIGIL_E3 | SIGIL_E4 | SIGIL_E5;\nfloat SIGIL_ALL_ALL_ALLLL = SIGIL_E1 | SIGIL_E2 | SIGIL_E3 | SIGIL_E4 | SIGIL_E5 | SIGIL_E6;",
+          "sha256": "d1aaf14ea95da8ec2659b629bac281b470fb6ef38fbb7a7b3afcb9aa7878e1c4"
+        }
+      ]
+    },
+    {
+      "id": "mg3-counter",
+      "relativePath": "quake-rerelease-qc/quakec_mg3/mg3_triggers.qc",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake-rerelease-qc/quakec_mg3/mg3_triggers.qc",
+        "size": 10742,
+        "sha256": "9be9cf40aabd8fc7e4995462f35b7d647531d0ac765e58022d035951543ebf63"
+      },
+      "excerpts": [
+        {
+          "firstLine": 66,
+          "lastLine": 81,
+          "purpose": "Count only E1 through E4 and invoke SUB_UseTargets at threshold",
+          "code": "void() rune_counter_use =\n{\n\tlocal float runes;\n\trunes = 0;\n\tif (serverflags & SIGIL_E1)\n\t\trunes++;\n\tif (serverflags & SIGIL_E2)\n\t\trunes++;\n\tif (serverflags & SIGIL_E3)\n\t\trunes++;\n\tif (serverflags & SIGIL_E4)\n\t\trunes++;\n\n\tif (runes >= self.count)\n\t\tSUB_UseTargets();\n};",
+          "sha256": "c65d59243714a01c4a55968228f203d531a13c4a543b9012bdb152dac17ae2fb"
+        },
+        {
+          "firstLine": 125,
+          "lastLine": 134,
+          "purpose": "Cooperative inhibition, zero-count default and use callback installation",
+          "code": "void() trigger_rune_counter =\n{\n\tINHIBIT_COOP\n\tif (RemovedOutsideCoop()) return;\n\t\n\tif (!self.count)\n\t\tself.count = 2;\n\n\tself.use = rune_counter_use;\n};",
+          "sha256": "4da75bf96b0ec69845b3cac7172084f90fbdbfeb36c9767aba9dab6bfe9973f9"
+        }
+      ]
+    },
+    {
+      "id": "mg3-defs",
+      "relativePath": "quake-rerelease-qc/quakec_mg3/defs.qc",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake-rerelease-qc/quakec_mg3/defs.qc",
+        "size": 25648,
+        "sha256": "6e6571276449d31a1cf62624e3ba9b11b8341034d9d1c8db20843f1d698c4632"
+      },
+      "excerpts": [
+        {
+          "firstLine": 838,
+          "lastLine": 842,
+          "purpose": "COOP_ONLY and NOT_IN_COOP masks, inhibition macro",
+          "code": "const float COOP_ONLY = 32768; // yoder add, Jan 16 2021; Only spawn in coop. Used by items and monsters\nconst float COOP_SPAWN_ACTIVE = 73;\n\nconst float NOT_IN_COOP = 131072;\n#define INHIBIT_COOP if(coop && self.spawnflags & NOT_IN_COOP) {remove(self); return;}",
+          "sha256": "e66d13f314a1264f5e17f430271688d25ff080345b4895f0709218c43db3d40f"
+        },
+        {
+          "firstLine": 860,
+          "lastLine": 864,
+          "purpose": "Sigil bit definitions",
+          "code": "const float SIGIL_E1 = 1;\nconst float SIGIL_E2 = 2;\nconst float SIGIL_E3 = 4;\nconst float SIGIL_E4 = 8;\nconst float SIGIL_E5 = 16;",
+          "sha256": "c893206975aa73185d1c49fe08a6bd32f5f8e2b7fb38d32426f34d98aacfb743"
+        }
+      ]
+    },
+    {
+      "id": "mg3-subs",
+      "relativePath": "quake-rerelease-qc/quakec_mg3/subs.qc",
+      "identity": {
+        "path": "/home/buzzkill/Projects/qsrc/quake-rerelease-qc/quakec_mg3/subs.qc",
+        "size": 11089,
+        "sha256": "9bf015c15ce74eff887e5f2546bc3bc055d9c868589dedbac26aa6f6b1fd854d"
+      },
+      "excerpts": [
+        {
+          "firstLine": 61,
+          "lastLine": 69,
+          "purpose": "RemovedOutsideCoop",
+          "code": "float RemovedOutsideCoop()\n{\n\tif (!coop && (self.spawnflags & COOP_ONLY))\n\t{\n\t\tremove(self);\n\t\treturn TRUE;\n\t}\n\treturn FALSE;\n}",
+          "sha256": "e797f165d5ffd6914f3c45fa2990a9ff7b8a420b2b68a021e7e745a87db9fc96"
+        },
+        {
+          "firstLine": 311,
+          "lastLine": 335,
+          "purpose": "SUB_UseTargets can defer actual target callbacks; oracle stops at its invocation",
+          "code": "void() SUB_UseTargets =\n{\n\tlocal entity t, stemp, otemp, act;\n\n\t//\n\t// check for a delay\n\t//\n\tif (self.delay)\n\t{\n\t// create a temp object to fire at a later time\n\t\tt = spawn();\n\t\tt.classname = \"DelayedUse\";\n\t\tt.nextthink = time + self.delay;\n\t\tt.think = DelayThink;\n\t\tt.enemy = activator;\n\t\tt.message = self.message;\n\t\tt.killtarget = self.killtarget;\n\t\tt.target = self.target;\n\t\tt.spawnflags = self.spawnflags & MESSAGE_ALL_PLAYERS;\n#ifdef ALLOW_DELAYED_THINK_CANCEL\n\t\tt.targetname = self.targetname;\n\t\tt.use = SUB_Null;\n#endif\n\t\treturn;\n\t}",
+          "sha256": "083c6031b98bd43e38501f36dac61ece5a5bf723f68e86827f95c6263340bd45"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "q1.scalar.store-after-each-op",
+      "sources": [
+        "quake-pr-exec",
+        "quake-eval-type"
+      ],
+      "derivation": "At 2^24 binary32 spacing is 2. 2^24+1 is halfway and rounds to even 2^24 at the OP_ADD_F store; subtracting 2^24 then stores zero. Keeping a binary64 intermediate would incorrectly produce one.",
+      "input": {
+        "kind": "scalar-program",
+        "initial": 16777216,
+        "operations": [
+          {
+            "operator": "add",
+            "operand": 1
+          },
+          {
+            "operator": "subtract",
+            "operand": 16777216
+          }
+        ]
+      },
+      "expected": {
+        "kind": "scalar-program",
+        "values": [
+          16777216,
+          16777216,
+          0
+        ],
+        "bits": [
+          "4b800000",
+          "4b800000",
+          "00000000"
+        ]
+      },
+      "observed": {
+        "kind": "scalar-program",
+        "values": [
+          16777216,
+          16777216,
+          0
+        ],
+        "bits": [
+          "4b800000",
+          "4b800000",
+          "00000000"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "75bc87ca2bd897844f33d1f11a62d1327ab7257c2b33df77bc71770e3a6adde4",
+      "expectedSha256": "bafabffeafd087b63b4e734df07016e6e0bc06b6818a4923eecdbeece33487b6"
+    },
+    {
+      "id": "q1.scalar.ties-round-up-to-even",
+      "sources": [
+        "quake-pr-exec",
+        "quake-eval-type"
+      ],
+      "derivation": "16777218 has an odd low significand bit. Adding one reaches the midpoint and rounds to the even 16777220.",
+      "input": {
+        "kind": "scalar-program",
+        "initial": 16777218,
+        "operations": [
+          {
+            "operator": "add",
+            "operand": 1
+          }
+        ]
+      },
+      "expected": {
+        "kind": "scalar-program",
+        "values": [
+          16777218,
+          16777220
+        ],
+        "bits": [
+          "4b800001",
+          "4b800002"
+        ]
+      },
+      "observed": {
+        "kind": "scalar-program",
+        "values": [
+          16777218,
+          16777220
+        ],
+        "bits": [
+          "4b800001",
+          "4b800002"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "5ebe941ec88a6acf8aaf6729b43ba401bfd62ed51e933992536d34fb0202df51",
+      "expectedSha256": "1c889d27b0c0061446b1f144f496e0745421cd17575600b0c3946794267a653f"
+    },
+    {
+      "id": "q1.scalar.divide-multiply-stores",
+      "sources": [
+        "quake-pr-exec",
+        "quake-eval-type"
+      ],
+      "derivation": "1/10 stores binary32 bits 0x3dcccccd, exactly 0.10000000149011612. Multiplying the stored value by 10 gives 1.0000000149011612, which rounds to 1 at the next store.",
+      "input": {
+        "kind": "scalar-program",
+        "initial": 1,
+        "operations": [
+          {
+            "operator": "divide",
+            "operand": 10
+          },
+          {
+            "operator": "multiply",
+            "operand": 10
+          }
+        ]
+      },
+      "expected": {
+        "kind": "scalar-program",
+        "values": [
+          1,
+          0.10000000149011612,
+          1
+        ],
+        "bits": [
+          "3f800000",
+          "3dcccccd",
+          "3f800000"
+        ]
+      },
+      "observed": {
+        "kind": "scalar-program",
+        "values": [
+          1,
+          0.10000000149011612,
+          1
+        ],
+        "bits": [
+          "3f800000",
+          "3dcccccd",
+          "3f800000"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "0243fbb1dc735ba84521d6fbf3eaf66f4708f6f8cdd07664bfc289444bd45cd9",
+      "expectedSha256": "79c1be8f0479d8b13214d698788594e51a8d2ad3a06c9605d721c642e4adcef5"
+    },
+    {
+      "id": "q1.scalar.bitwise-truncates-fractions",
+      "sources": [
+        "quake-pr-exec",
+        "quake-eval-type"
+      ],
+      "derivation": "C conversion truncates 15.75 to signed integer 15. 15 & 31 is 15; 15 | 16 is 31. Each result is stored as float.",
+      "input": {
+        "kind": "scalar-program",
+        "initial": 15.75,
+        "operations": [
+          {
+            "operator": "bit-and",
+            "operand": 31
+          },
+          {
+            "operator": "bit-or",
+            "operand": 16
+          }
+        ]
+      },
+      "expected": {
+        "kind": "scalar-program",
+        "values": [
+          15.75,
+          15,
+          31
+        ],
+        "bits": [
+          "417c0000",
+          "41700000",
+          "41f80000"
+        ]
+      },
+      "observed": {
+        "kind": "scalar-program",
+        "values": [
+          15.75,
+          15,
+          31
+        ],
+        "bits": [
+          "417c0000",
+          "41700000",
+          "41f80000"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "8e9419593f43d621afdc13cc5fcc2163bb52f3c277a6072959699c202a63a449",
+      "expectedSha256": "074ce835adc4954cc31847654faa277927793e68358af24e398590b104db1572"
+    },
+    {
+      "id": "q1.think.zero-is-disabled",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "The thinktime <= 0 guard returns true without clearing state or executing a callback.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": 0,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "remove"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "passed": true,
+      "inputSha256": "7286514820a282e535367bfed919ac6c794f46f7445cc89e155ebbf3a0f13ffb",
+      "expectedSha256": "f779948bfeb0e471ca55e51bdee1ab06ac5685b8cc29061a8ff935d876126cd5"
+    },
+    {
+      "id": "q1.think.negative-is-disabled",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "A negative nextthink also satisfies the disabled guard and leaves callback globals unchanged.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": -1,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "remove"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": -1,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": -1,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "passed": true,
+      "inputSha256": "c5e74f1c23a67617d0ff597bdd2d499ccc79b5002e839a38c8a01daca8440ad2",
+      "expectedSha256": "31a5c1f1e711010feb7e468286fb90c77ceeda07054cf072a50acdaf350656eb"
+    },
+    {
+      "id": "q1.think.inclusive-frame-end",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "10.125 equals the double frame endpoint 10+0.125. Only greater times are skipped. The callback sees nextthink zero, its entity as self, world as other and the due time.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": 10.125,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "retain"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 10.125,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10.125,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 10.125,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10.125,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "passed": true,
+      "inputSha256": "3b204c1d1f81f2a4e1dec10986fbb90105f324ade749bfc0061816195e3a8be7",
+      "expectedSha256": "c139aa6dd080e48bf95553edc089354ecbe05361ece1b13ae49d99a0d77f6bdd"
+    },
+    {
+      "id": "q1.think.next-float-after-end",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "The next binary32 value after 10.125 is 10.125000953674316. It is greater than the frame endpoint and must remain pending.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": 10.125000953674316,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "remove"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 10.125000953674316,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 10.125000953674316,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "passed": true,
+      "inputSha256": "d8cab4c661dd45135627d3142b2f74c7e7e4b703d79f69276135a36f570ba8d0",
+      "expectedSha256": "880104c8816d008896fcb5aa2c83cf7f611d40d5a81e809ee5fb5ae994886a7e"
+    },
+    {
+      "id": "q1.think.double-endpoint",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "The stored binary32 nextthink for decimal 0.1 is 0.10000000149011612. It exceeds the binary64 endpoint 0+0.1, so it is not due. Rounding the endpoint to binary32 would change this branch.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 0,
+        "frameTime": 0.1,
+        "nextThink": 0.1,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "retain"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 0.10000000149011612,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": false,
+        "continuePhysics": true,
+        "nextThink": 0.10000000149011612,
+        "free": false,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "callbackEntry": null
+      },
+      "passed": true,
+      "inputSha256": "1c3c02ed49c5c14ba9b01991881a97da2586c939699024282e015134cd44463b",
+      "expectedSha256": "f0a699f1567b5b3b53ae285804fa2e2d357c00a6b2aaef0df1aea8a62fd240aa"
+    },
+    {
+      "id": "q1.think.overdue-clamps-through-float",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "The overdue value 9 is clamped by assigning double sv.time=10.1 to float thinktime, yielding exactly 10.100000381469727. Callback globals remain installed after return.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10.1,
+        "frameTime": 0.01,
+        "nextThink": 9,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "retain"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 10.100000381469727,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10.100000381469727,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 0,
+        "free": false,
+        "globals": {
+          "time": 10.100000381469727,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10.100000381469727,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "passed": true,
+      "inputSha256": "1cd963440cdeb74a5245ccea3beff2b125268dfc6b32a1ec7564c44b0a47401b",
+      "expectedSha256": "3a3344626519737346b10ce6be49599c2e9de240ec16dbe200dcf2949b92a78c"
+    },
+    {
+      "id": "q1.think.removal-stops-physics",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock",
+        "quake-remove-builtin",
+        "quake-free-edict"
+      ],
+      "derivation": "The callback sees nextthink zero. Its remove(self) calls PF_Remove then ED_Free, setting free and nextthink=-1. SV_RunThink returns !free, therefore false.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": 10,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "remove"
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": false,
+        "nextThink": -1,
+        "free": true,
+        "globals": {
+          "time": 10,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": false,
+        "nextThink": -1,
+        "free": true,
+        "globals": {
+          "time": 10,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "passed": true,
+      "inputSha256": "d45168ed57fcd755abcc42a90f68bb25cad12d58313616471879d8c5c1ed6207",
+      "expectedSha256": "e040fd5dc093c11779d31d9f340f3eb8136aae2f789819f983f92917fd34109f"
+    },
+    {
+      "id": "q1.think.reschedule-runs-once",
+      "sources": [
+        "quake-sv-phys",
+        "quake-prog-fields",
+        "quake-server-clock",
+        "quake-host-clock"
+      ],
+      "derivation": "The callback sees nextthink cleared, then reschedules to 10.0625 inside the same frame. SV_RunThink has no loop, so it returns after one invocation and retains the new schedule.",
+      "input": {
+        "kind": "run-think",
+        "serverTime": 10,
+        "frameTime": 0.125,
+        "nextThink": 10,
+        "entity": 3,
+        "globals": {
+          "time": 7,
+          "self": 99,
+          "other": 98
+        },
+        "effect": {
+          "kind": "reschedule",
+          "nextThink": 10.0625
+        }
+      },
+      "expected": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 10.0625,
+        "free": false,
+        "globals": {
+          "time": 10,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "observed": {
+        "kind": "run-think",
+        "ran": true,
+        "continuePhysics": true,
+        "nextThink": 10.0625,
+        "free": false,
+        "globals": {
+          "time": 10,
+          "self": 3,
+          "other": 0
+        },
+        "callbackEntry": {
+          "time": 10,
+          "self": 3,
+          "other": 0,
+          "nextThink": 0
+        }
+      },
+      "passed": true,
+      "inputSha256": "617d33bddbc049e4c828aa4da53e75184148348ce46f520a8800db9fea8f6762",
+      "expectedSha256": "7fc92a4eb83aaea14d690431a5e04a1ee6cfce1cdb24fa6a8e10374436ec23d6"
+    },
+    {
+      "id": "q1.mg1.four-sigils-blocked",
+      "sources": [
+        "mg1-hub",
+        "mg1-sigils"
+      ],
+      "derivation": "SIGIL_ALL=1|2|4|8|16=31. Flags 15 omit E5, so the entity removes itself and never calls trigger_changelevel.",
+      "input": {
+        "kind": "mg1-hub",
+        "serverFlags": 15
+      },
+      "expected": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 15,
+        "calls": [
+          "remove(self)"
+        ]
+      },
+      "observed": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 15,
+        "calls": [
+          "remove(self)"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "c35cc42b9d444fabf1a3ea5f795f6ba94f5e9939c5ce5dca3e259981d7889988",
+      "expectedSha256": "6ef02dc12daaf15e959380a1d3bb0295f0c144c9ff90d5f45741ff47115283c4"
+    },
+    {
+      "id": "q1.mg1.five-sigils-open",
+      "sources": [
+        "mg1-hub",
+        "mg1-sigils"
+      ],
+      "derivation": "31 & 31 equals 31, so the wrapper invokes trigger_changelevel once.",
+      "input": {
+        "kind": "mg1-hub",
+        "serverFlags": 31
+      },
+      "expected": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 31,
+        "calls": [
+          "trigger_changelevel()"
+        ]
+      },
+      "observed": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 31,
+        "calls": [
+          "trigger_changelevel()"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "332ef7dcaac7924efd536297bee1775b61f08dc9fe639b463a2bfe9e3772692b",
+      "expectedSha256": "e41824e65344007e656ff7105a6cb2a8cdd500bbf0d03d5401b992490a13248d"
+    },
+    {
+      "id": "q1.mg1.sixth-bit-does-not-fill-missing-fifth",
+      "sources": [
+        "mg1-hub",
+        "mg1-sigils"
+      ],
+      "derivation": "Flags 47 contain E1..E4 and E6. E6 is absent from SIGIL_ALL, so 47 & 31=15 and the gate stays closed.",
+      "input": {
+        "kind": "mg1-hub",
+        "serverFlags": 47
+      },
+      "expected": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 15,
+        "calls": [
+          "remove(self)"
+        ]
+      },
+      "observed": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 15,
+        "calls": [
+          "remove(self)"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "9475990f40ebb80b24a64ab8786ad3bff6d27e5c2a7ab013ff4831831b302353",
+      "expectedSha256": "6ef02dc12daaf15e959380a1d3bb0295f0c144c9ff90d5f45741ff47115283c4"
+    },
+    {
+      "id": "q1.mg1.extra-flags-preserve-open-gate",
+      "sources": [
+        "mg1-hub",
+        "mg1-sigils"
+      ],
+      "derivation": "63 includes all five required bits and the unrelated sixth bit. Masking gives 31 and opens the gate.",
+      "input": {
+        "kind": "mg1-hub",
+        "serverFlags": 63
+      },
+      "expected": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 31,
+        "calls": [
+          "trigger_changelevel()"
+        ]
+      },
+      "observed": {
+        "kind": "mg1-hub",
+        "requiredMask": 31,
+        "presentMask": 31,
+        "calls": [
+          "trigger_changelevel()"
+        ]
+      },
+      "passed": true,
+      "inputSha256": "2bdec19d12e034c2971be71d0c545f178b21595e0393f303fe726413f2c49b9c",
+      "expectedSha256": "e41824e65344007e656ff7105a6cb2a8cdd500bbf0d03d5401b992490a13248d"
+    },
+    {
+      "id": "q1.mg3.default-count-below-threshold",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "Spawn count zero is replaced by 2. Flags 1 contain one counted rune, so use leaves SUB_UseTargets uncalled.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 1,
+        "count": 0,
+        "coop": false,
+        "spawnFlags": 0,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 1,
+        "callback": null
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 1,
+        "callback": null
+      },
+      "passed": true,
+      "inputSha256": "82316eb8a3f7716d86c975f5b0c42035eceef9cd2dcbc6b2d6ffd42692b5e79d",
+      "expectedSha256": "77d709465ac5bfbabcf76f2f841b0737269b85cf15b41b977f0969c0d7e9daea"
+    },
+    {
+      "id": "q1.mg3.exact-threshold-calls-targets",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "Flags 5 contain E1 and E3, exactly two runes. 2>=2 invokes SUB_UseTargets with the same self and activator.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 5,
+        "count": 2,
+        "coop": false,
+        "spawnFlags": 0,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 2,
+        "callback": {
+          "name": "SUB_UseTargets",
+          "self": 40,
+          "activator": 2
+        }
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 2,
+        "callback": {
+          "name": "SUB_UseTargets",
+          "self": 40,
+          "activator": 2
+        }
+      },
+      "passed": true,
+      "inputSha256": "2b56dddf577fed1d1b4eaef64bb346441fed2e7108d2e3b5f6874a04390cd350",
+      "expectedSha256": "9b21ad6621fad2aa56aa4f53361e4760a587764142791aa8af1b7107bea88612"
+    },
+    {
+      "id": "q1.mg3.fifth-sigil-is-not-counted",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "Flags 17 contain E1 and E5. The four source conditions count only E1, so the two-rune threshold is not reached.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 17,
+        "count": 2,
+        "coop": false,
+        "spawnFlags": 0,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 1,
+        "callback": null
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2,
+        "use": "rune_counter_use",
+        "runes": 1,
+        "callback": null
+      },
+      "passed": true,
+      "inputSha256": "e3e4f0b98547fb0bbdc5f8ccab523cc8e9fc3657b23858d68dd5afb1ece35688",
+      "expectedSha256": "77d709465ac5bfbabcf76f2f841b0737269b85cf15b41b977f0969c0d7e9daea"
+    },
+    {
+      "id": "q1.mg3.fractional-threshold-is-preserved",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "Count 2.5 is nonzero and stays fractional. Two runes do not satisfy 2>=2.5.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 3,
+        "count": 2.5,
+        "coop": false,
+        "spawnFlags": 0,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2.5,
+        "use": "rune_counter_use",
+        "runes": 2,
+        "callback": null
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": 2.5,
+        "use": "rune_counter_use",
+        "runes": 2,
+        "callback": null
+      },
+      "passed": true,
+      "inputSha256": "b4e8e1d7d740fea9b34dd529789a3eec0d807c0a793425b460d08b39b7e0d2e2",
+      "expectedSha256": "82e69e749030ea1a63409e08454f624b8ca29ee415961177ff2d576afc648ca6"
+    },
+    {
+      "id": "q1.mg3.negative-count-is-not-defaulted",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "Only a zero count selects the default. Count -1 is retained and zero runes satisfy 0>=-1.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 0,
+        "count": -1,
+        "coop": false,
+        "spawnFlags": 0,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": -1,
+        "use": "rune_counter_use",
+        "runes": 0,
+        "callback": {
+          "name": "SUB_UseTargets",
+          "self": 40,
+          "activator": 2
+        }
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": false,
+        "count": -1,
+        "use": "rune_counter_use",
+        "runes": 0,
+        "callback": {
+          "name": "SUB_UseTargets",
+          "self": 40,
+          "activator": 2
+        }
+      },
+      "passed": true,
+      "inputSha256": "91e6c9d6a8d80436c08e50dbc45485a70894754984a709cfaff93bd53a342ace",
+      "expectedSha256": "f40dd81868c79ec5f4f660a909f3a3cb495592336eaefa76d361ab7b39d248b5"
+    },
+    {
+      "id": "q1.mg3.inhibited-in-coop",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "NOT_IN_COOP is 131072. In coop its macro removes self and returns before count default or callback installation.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 15,
+        "count": 0,
+        "coop": true,
+        "spawnFlags": 131072,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": true,
+        "count": 0,
+        "use": null,
+        "runes": null,
+        "callback": null
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": true,
+        "count": 0,
+        "use": null,
+        "runes": null,
+        "callback": null
+      },
+      "passed": true,
+      "inputSha256": "320f1afa9daa67a59c1cd55307bc49cea909a3e050765fe39133fe1498d53172",
+      "expectedSha256": "8fd091b8e6f335bdefa721214b49858fbd2e7b7ecf14f3b459945a09a035effa"
+    },
+    {
+      "id": "q1.mg3.coop-only-inhibited-outside-coop",
+      "sources": [
+        "mg3-counter",
+        "mg3-defs",
+        "mg3-subs"
+      ],
+      "derivation": "COOP_ONLY is 32768. RemovedOutsideCoop removes self and returns before count default or callback installation.",
+      "input": {
+        "kind": "mg3-counter",
+        "serverFlags": 15,
+        "count": 0,
+        "coop": false,
+        "spawnFlags": 32768,
+        "entity": 40,
+        "activator": 2
+      },
+      "expected": {
+        "kind": "mg3-counter",
+        "removed": true,
+        "count": 0,
+        "use": null,
+        "runes": null,
+        "callback": null
+      },
+      "observed": {
+        "kind": "mg3-counter",
+        "removed": true,
+        "count": 0,
+        "use": null,
+        "runes": null,
+        "callback": null
+      },
+      "passed": true,
+      "inputSha256": "4edd34ca16591fe236d55a63f817fddd6491fb5f5e8db70c35c3494e1432c0d3",
+      "expectedSha256": "8fd091b8e6f335bdefa721214b49858fbd2e7b7ecf14f3b459945a09a035effa"
+    }
+  ],
+  "caseCount": 23,
+  "limits": [
+    "These are evaluations of source-derived equations in strict TypeScript under Bun, not measured native or retail traces.",
+    "No original C engine, retail executable, QuakeC compiler, VM or commercial asset is executed by this capture.",
+    "Scalar stores assume IEEE-754 binary32 round-to-nearest ties-to-even and signed 32-bit int conversions within range. Native compiler excess precision, undefined conversions, NaN, infinity, overflow, division by zero, vector reductions and FMA are outside this oracle.",
+    "SV_RunThink models one invocation on a live entity. Entity identifiers are symbolic and zero is world. Callback effects are prescribed retain, remove or reschedule operations. Remove follows PF_Remove and ED_Free for free and nextthink; other cleared edict fields, arbitrary QuakeC execution and movement are outside scope.",
+    "The mg1 oracle stops at remove(self) or trigger_changelevel() invocation. It does not evaluate trigger initialization or complete a retail hub.",
+    "The mg3 oracle models trigger_rune_counter spawn filtering followed by one use call. It records SUB_UseTargets invocation with self and activator; target resolution, delay, messages, killtargets and downstream callbacks remain outside scope.",
+    "Rerelease mission code is pinned to the locally available source file hashes. Historical retail builds may differ, including the mg1 fifth-sigil definition."
+  ]
+}

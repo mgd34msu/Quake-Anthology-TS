@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 1,
+  "id": "mandatory-engine-behavior-v1",
+  "cases": [
+    {
+      "id": "mandatory/mandatory-seat-isolation",
+      "configurationId": "mandatory/mandatory-seat-isolation",
+      "suiteId": "mandatory-seat-isolation",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "mandatory-seat-isolation",
+          "description": "Two local players and a remote peer independently own inventory, layouts, controls, private effects and shared effects through CPU and OpenGL.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 6,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/mandatory-timing-prediction",
+      "configurationId": "mandatory/mandatory-timing-prediction",
+      "suiteId": "mandatory-timing-prediction",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "mandatory-timing-prediction",
+          "description": "Native source clocks, mixed tie ordering, RNG ownership and prediction replay preserve weapons, ammo and effects exactly once.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 5,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/mandatory-guest-ownership",
+      "configurationId": "mandatory/mandatory-guest-ownership",
+      "suiteId": "mandatory-guest-ownership",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "mandatory-guest-ownership",
+          "description": "Two sessions exercise aliased guest writes, nested damage/touch callbacks, actor deletion/reuse and fresh-process restoration.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 7,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/campaign-progression",
+      "configurationId": "mandatory/campaign-progression",
+      "suiteId": "campaign-progression",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "campaign-progression",
+          "description": "Every required campaign reaches its ending through actual objectives and exits, including retries and cooperative joins.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 3,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/independent-wire-peers",
+      "configurationId": "mandatory/independent-wire-peers",
+      "suiteId": "independent-wire-peers",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "independent-wire-peers",
+          "description": "Independent reference peers or source-derived packet oracles establish wire behavior under deterministic network faults.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 3,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/linux-cpu-opengl",
+      "configurationId": "mandatory/linux-cpu-opengl",
+      "suiteId": "linux-cpu-opengl",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "linux-cpu-opengl",
+          "description": "The exact compiled Linux executable presents real gameplay through CPU and OpenGL with native input, device and recovery paths.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 4,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/native-guest-gameplay",
+      "configurationId": "mandatory/native-guest-gameplay",
+      "suiteId": "native-guest-gameplay",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "native-guest-gameplay",
+          "description": "Required PE and ELF modules execute guest instructions in TypeScript through complete gameplay and measured source cadence.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 4,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    },
+    {
+      "id": "mandatory/full-declared-compositions",
+      "configurationId": "mandatory/full-declared-compositions",
+      "suiteId": "full-declared-compositions",
+      "evidenceKind": "gameplay",
+      "configuration": {
+        "domain": "required-engine-behavior"
+      },
+      "profiles": [
+        "integration",
+        "full",
+        "release"
+      ],
+      "requirements": [
+        {
+          "id": "verification-contract",
+          "kind": "source",
+          "path": "docs/verification-plan.md",
+          "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+        }
+      ],
+      "contracts": [
+        {
+          "id": "full-declared-compositions",
+          "description": "The full independently declared finite configuration product executes with loading, spawning, control and gameplay expectations.",
+          "oracle": {
+            "kind": "project",
+            "identity": "docs/verification-plan.md",
+            "sha256": "2e89a161457c6f1351852f64423a5cd24d0975fa7a93b0bb21eba5de8f5f63ad"
+          },
+          "minimumAssertions": 4,
+          "tolerances": []
+        }
+      ],
+      "seed": 1,
+      "clockScheduleSha256": null,
+      "networkScheduleSha256": null,
+      "sourcePaths": [],
+      "command": null
+    }
+  ]
+}

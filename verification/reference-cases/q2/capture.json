@@ -1,0 +1,2397 @@
+{
+  "schemaVersion": 1,
+  "id": "q2-initial-source-derived-contracts",
+  "oracleKind": "source-derived",
+  "capturedAt": "2026-09-11T05:42:09.443Z",
+  "captureCommand": [
+    "bun",
+    "run",
+    "tools/reference/q2/capture.ts"
+  ],
+  "checkCommand": [
+    "bun",
+    "run",
+    "tools/reference/q2/capture.ts",
+    "--check"
+  ],
+  "cwd": "/home/buzzkill/Projects/quake-typescript",
+  "runtime": {
+    "bunVersion": "1.3.14",
+    "platform": "linux",
+    "architecture": "x64",
+    "executable": {
+      "path": "/home/buzzkill/.bun/bin/bun",
+      "size": 92752752,
+      "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+    }
+  },
+  "originalSources": [
+    {
+      "id": "classicLocal",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/game/g_local.h",
+      "size": 28552,
+      "sha256": "eb04d914a532f0baa87a12e00bc2e39a3d3a8ee1576bcdf87ea5af419919e095"
+    },
+    {
+      "id": "classicMain",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/game/g_main.c",
+      "size": 8283,
+      "sha256": "558f05adc5adac93bdc6151f5157b009ac87c255f788240a2a9f41755e3c8fd4"
+    },
+    {
+      "id": "classicPhys",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/game/g_phys.c",
+      "size": 21442,
+      "sha256": "31e3b813814c249734550d262d2b4766184849563960c0d9715005a6e5743481"
+    },
+    {
+      "id": "classicItems",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/game/g_items.c",
+      "size": 46311,
+      "sha256": "4d55d1d1c83ff7552326efabc520ca07b1107ef37cd7a877af409eddcd6cdc77"
+    },
+    {
+      "id": "classicCombat",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/game/g_combat.c",
+      "size": 14553,
+      "sha256": "ee8badcf891215ae3e627a987dadde2e4bf11eb19095e3fca9e1b60c0c658f38"
+    },
+    {
+      "id": "classicMove",
+      "path": "/home/buzzkill/Projects/qsrc/quake-2/qcommon/pmove.c",
+      "size": 27381,
+      "sha256": "8861daaeff7efd7bc6d3c5e65ef99801567f3e06eb14020787206d39dd0038a8"
+    },
+    {
+      "id": "rereleaseReadme",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/README.md",
+      "size": 70369,
+      "sha256": "5767fe06b561ee01ee2817e82331577bc6b44e4e7b794c87f275d0c165095c9b"
+    },
+    {
+      "id": "rereleaseLocal",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_local.h",
+      "size": 110951,
+      "sha256": "3257c79f07d9e8ef333342b9a0be0bde7dd514d9de1b9b36173aad157601aecf"
+    },
+    {
+      "id": "rereleaseMain",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_main.cpp",
+      "size": 27683,
+      "sha256": "438e2dcb631b94ff4501e74230237ea739e210da331dfce6e456c6154338d1b5"
+    },
+    {
+      "id": "rereleasePhys",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_phys.cpp",
+      "size": 24280,
+      "sha256": "c09d96106cee08d30bfca282159a487d91a93c852870b3f1ed6b21a4df6b4737"
+    },
+    {
+      "id": "rereleaseTarget",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_target.cpp",
+      "size": 56017,
+      "sha256": "7a620d794956f4dc1bef050cc621984ab51bd7cd4f7a4ce5a0693777e3be4cd9"
+    },
+    {
+      "id": "rereleaseSave",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_save.cpp",
+      "size": 70657,
+      "sha256": "ec2a980c3dd9412a31754e478b33b400b08e30f7cbdfcd964ec516cdda3597c4"
+    },
+    {
+      "id": "rereleaseSpawn",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/g_spawn.cpp",
+      "size": 48879,
+      "sha256": "9b78e2a1c8e2a739a450add01006e4cf39f0aabc1441b55c30be2f425fcb3742"
+    },
+    {
+      "id": "rereleaseClient",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/p_client.cpp",
+      "size": 96663,
+      "sha256": "b47a44e43573c1e471ae29b392cd9f603d16310eedecdc84ac09b927aa3cbacf"
+    },
+    {
+      "id": "rereleaseMove",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/p_move.cpp",
+      "size": 37414,
+      "sha256": "0bed089782386fa1d9a4872a0bcfdae97f5d967a7d8bc3e6dc3fa3dd23dc2cc5"
+    },
+    {
+      "id": "rereleaseGame",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/game.h",
+      "size": 84018,
+      "sha256": "66defbd069c38c4a1740c5087a3f6f2343d603b956ca0d6e1d89e8ad46d0843f"
+    },
+    {
+      "id": "rereleaseShared",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/bg_local.h",
+      "size": 7150,
+      "sha256": "0a66fff4539f15603a8563c150b56b4be64bdd36144053730a3eb1301feaad79"
+    },
+    {
+      "id": "rereleaseCgame",
+      "path": "/home/buzzkill/Projects/qsrc/quake2-rerelease-dll/rerelease/cg_main.cpp",
+      "size": 3379,
+      "sha256": "a673f0092f5fffa968fd3affc3d0cb57b02a535ff7c14a04326578bcd8371c90"
+    }
+  ],
+  "modelIdentities": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2/capture.ts",
+      "size": 4951,
+      "sha256": "c11f9be25609d4b39fd6a389d7701fc05c68ccb5ade855055d551228d62ab662"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2/oracle.ts",
+      "size": 9810,
+      "sha256": "23f040e229fbe73326971afc548f12ebb1a6fa14b048e8f0d783c5df8ce00836"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2/sources.ts",
+      "size": 4412,
+      "sha256": "f111d20a9ce3ab81e6d6c4a72009308bdfb52a5892e0268ff8790399e3bd92f0"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/verification/reference-cases/q2/cases.ts",
+      "size": 23486,
+      "sha256": "b783abe920bf4f16c90ab1762d12e4c6703cdf279585b00f71b0da9595168551"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2/oracle.test.ts",
+      "size": 4567,
+      "sha256": "324319d0e884d4bc38dc7f90373794ba930fbb5b4e2b4d2271f69c88d1959240"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
+      "size": 14481,
+      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
+      "size": 4271,
+      "sha256": "608515418999e1eb604ca209b32a31c080faf2ba854bf775c297c1ab09e48835"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/verification/schema/contracts.ts",
+      "size": 6243,
+      "sha256": "b72b5f75f588f54de146dbb299d96d901577ac4ed4cecb8f01ba515a5d8c7519"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tsconfig.json",
+      "size": 776,
+      "sha256": "4fa17905f5bad6879f0400dd69c2500e91a6d0c5cef4f4ad88a38b04044746fd"
+    }
+  ],
+  "auditContext": {
+    "path": "/home/buzzkill/Projects/quake-typescript/docs/research/q2-interoperability.md",
+    "size": 30009,
+    "sha256": "0866cc1cae8a999b69f131544d58e4d8146a601a339420bcf80c0829c23e804f"
+  },
+  "numericContract": "Explicit binary32 stores/products for selected classic expressions; binary64 unsuffixed FRAMETIME evaluation; exact bounded integer RR milliseconds. Native compiler excess-precision behavior is not measured.",
+  "nativeEngineExecution": {
+    "status": "NOT_RUN",
+    "reason": "No original Q2 engine or DLL executable was invoked. These are independent source-derived TypeScript evaluations."
+  },
+  "limits": [
+    "The checks compare a bounded independent equation/control-flow transcription to reviewed literal expectations and pinned original source. They do not prove a complete TS port or original binary equivalent.",
+    "Save cases project FIELD_AUTO declarations from original source. They do not run a save codec, reference relocation, file I/O lifecycle, or fresh-process restore.",
+    "Pickup feedback is represented by an ordered semantic marker; individual image/sound network bytes are not captured.",
+    "Frame actor mutations are authored test actions. Allocator reuse, arbitrary nested damage, physics, and mixed-family scheduling require further cases.",
+    "Native command predicates establish classic upmove and rerelease button meanings only. LegacyKEX conversion magnitudes, both-buttons precedence, 4038 wire encoding, and LMCTF prediction agreement remain project adapter obligations without independent original authority here.",
+    "Q64 cases cover the original configuration block and input predicates, not movement trajectories or server/client runtime agreement.",
+    "Retail assets, render/audio outputs, network packets, performance, and gameplay sessions were not exercised."
+  ],
+  "assertionCount": 32,
+  "passed": true,
+  "cases": [
+    {
+      "id": "q2.clock.classic10hz-rerelease40hz",
+      "contract": "Classic stores frame*double(0.1) in binary32 seconds; rerelease accumulates the supplied integer millisecond frame time. The documented 40 Hz setting supplies 25 ms.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 73,
+          "lastLine": 73,
+          "symbol": "FRAMETIME"
+        },
+        {
+          "source": "classicLocal",
+          "firstLine": 301,
+          "lastLine": 304,
+          "symbol": "level_locals_t.time"
+        },
+        {
+          "source": "classicMain",
+          "firstLine": 353,
+          "lastLine": 359,
+          "symbol": "G_RunFrame"
+        },
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 288,
+          "lastLine": 309,
+          "symbol": "gtime_t"
+        },
+        {
+          "source": "rereleaseMain",
+          "firstLine": 415,
+          "lastLine": 415,
+          "symbol": "FRAME_TIME_MS initialization"
+        },
+        {
+          "source": "rereleaseMain",
+          "firstLine": 823,
+          "lastLine": 831,
+          "symbol": "G_RunFrame_"
+        },
+        {
+          "source": "rereleaseReadme",
+          "firstLine": 46,
+          "lastLine": 48,
+          "symbol": "40hz Tickrate Support"
+        }
+      ],
+      "preconditions": [
+        "Normal frame path, level starts at zero; binary32 storage with binary64 evaluation of the unsuffixed classic literal; no claim about x87 excess precision; wire codec is outside this clock."
+      ],
+      "input": {
+        "kind": "clock",
+        "classicFrames": [
+          1,
+          2,
+          3,
+          10
+        ],
+        "rereleaseStepMs": 25,
+        "rereleaseFrames": 4
+      },
+      "expected": {
+        "classicTimesSeconds": [
+          0.10000000149011612,
+          0.20000000298023224,
+          0.30000001192092896,
+          1
+        ],
+        "rereleaseTimesMs": [
+          25,
+          50,
+          75,
+          100
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "classicTimesSeconds": [
+          0.10000000149011612,
+          0.20000000298023224,
+          0.30000001192092896,
+          1
+        ],
+        "rereleaseTimesMs": [
+          25,
+          50,
+          75,
+          100
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.think.classic-lookahead-due",
+      "contract": "A nextthink less than level.time+0.001 fires early; it is zero inside the callback, callback rescheduling survives, and SV_RunThink returns false.",
+      "sources": [
+        {
+          "source": "classicPhys",
+          "firstLine": 95,
+          "lastLine": 111,
+          "symbol": "SV_RunThink"
+        }
+      ],
+      "preconditions": [
+        "Valid synchronous think callback; values use seconds."
+      ],
+      "input": {
+        "kind": "think",
+        "family": "classic",
+        "now": 0.1,
+        "nextthink": 0.1009,
+        "reschedule": 0.2
+      },
+      "expected": {
+        "now": 0.10000000149011612,
+        "nextthink": 0.20000000298023224,
+        "mayContinuePhysics": false,
+        "trace": [
+          {
+            "event": "think.enter",
+            "nextthink": 0
+          },
+          {
+            "event": "think.return",
+            "nextthink": 0.20000000298023224
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "now": 0.10000000149011612,
+        "nextthink": 0.20000000298023224,
+        "mayContinuePhysics": false,
+        "trace": [
+          {
+            "event": "think.enter",
+            "nextthink": 0
+          },
+          {
+            "event": "think.return",
+            "nextthink": 0.20000000298023224
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.think.classic-lookahead-future",
+      "contract": "A deadline beyond the classic epsilon remains pending and returns true.",
+      "sources": [
+        {
+          "source": "classicPhys",
+          "firstLine": 95,
+          "lastLine": 111,
+          "symbol": "SV_RunThink"
+        }
+      ],
+      "preconditions": [
+        "Values use seconds."
+      ],
+      "input": {
+        "kind": "think",
+        "family": "classic",
+        "now": 0.1,
+        "nextthink": 0.102,
+        "reschedule": 0.2
+      },
+      "expected": {
+        "now": 0.10000000149011612,
+        "nextthink": 0.10199999809265137,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "now": 0.10000000149011612,
+        "nextthink": 0.10199999809265137,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.think.classic-disabled",
+      "contract": "A zero deadline disables think even after level time has advanced.",
+      "sources": [
+        {
+          "source": "classicPhys",
+          "firstLine": 95,
+          "lastLine": 111,
+          "symbol": "SV_RunThink"
+        }
+      ],
+      "preconditions": [
+        "Values use seconds."
+      ],
+      "input": {
+        "kind": "think",
+        "family": "classic",
+        "now": 1,
+        "nextthink": 0,
+        "reschedule": 2
+      },
+      "expected": {
+        "now": 1,
+        "nextthink": 0,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "now": 1,
+        "nextthink": 0,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.think.rerelease-one-ms-future",
+      "contract": "Rerelease does not apply the classic 1 ms lookahead.",
+      "sources": [
+        {
+          "source": "rereleasePhys",
+          "firstLine": 99,
+          "lastLine": 113,
+          "symbol": "SV_RunThink"
+        }
+      ],
+      "preconditions": [
+        "Values use integer milliseconds."
+      ],
+      "input": {
+        "kind": "think",
+        "family": "rerelease",
+        "now": 100,
+        "nextthink": 101,
+        "reschedule": 200
+      },
+      "expected": {
+        "now": 100,
+        "nextthink": 101,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "now": 100,
+        "nextthink": 101,
+        "mayContinuePhysics": true,
+        "trace": []
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.think.rerelease-equal-deadline",
+      "contract": "An equal rerelease deadline runs synchronously, clears nextthink first, preserves rescheduling, and returns false.",
+      "sources": [
+        {
+          "source": "rereleasePhys",
+          "firstLine": 99,
+          "lastLine": 113,
+          "symbol": "SV_RunThink"
+        }
+      ],
+      "preconditions": [
+        "Valid synchronous think callback; integer milliseconds."
+      ],
+      "input": {
+        "kind": "think",
+        "family": "rerelease",
+        "now": 100,
+        "nextthink": 100,
+        "reschedule": 125
+      },
+      "expected": {
+        "now": 100,
+        "nextthink": 125,
+        "mayContinuePhysics": false,
+        "trace": [
+          {
+            "event": "think.enter",
+            "nextthink": 0
+          },
+          {
+            "event": "think.return",
+            "nextthink": 125
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "now": 100,
+        "nextthink": 125,
+        "mayContinuePhysics": false,
+        "trace": [
+          {
+            "event": "think.enter",
+            "nextthink": 0
+          },
+          {
+            "event": "think.return",
+            "nextthink": 125
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.frame.classic-world-client-order",
+      "contract": "The world runs first, the client takes ClientBeginServerFrame, later edicts run in slot order, then rules and final client frames run.",
+      "sources": [
+        {
+          "source": "classicMain",
+          "firstLine": 353,
+          "lastLine": 410,
+          "symbol": "G_RunFrame"
+        }
+      ],
+      "preconditions": [
+        "No intermission, ground changes, or entity callback mutations. Slots 0,1,2,3 in use; maxclients=1; entity callback order is recorded, not complete physics."
+      ],
+      "input": {
+        "kind": "frame-order",
+        "deleteLaterActor": false,
+        "spawnActor": false
+      },
+      "expected": {
+        "trace": [
+          "level.framenum++",
+          "level.time=frame*0.1",
+          "AI_SetSightClient",
+          {
+            "event": "current_entity+old_origin",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 0
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 1
+          },
+          {
+            "event": "ClientBeginServerFrame",
+            "actor": 1
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 2
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 3
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 3
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 3
+          },
+          "CheckDMRules",
+          "ClientEndServerFrames"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "trace": [
+          "level.framenum++",
+          "level.time=frame*0.1",
+          "AI_SetSightClient",
+          {
+            "event": "current_entity+old_origin",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 0
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 1
+          },
+          {
+            "event": "ClientBeginServerFrame",
+            "actor": 1
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 2
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 3
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 3
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 3
+          },
+          "CheckDMRules",
+          "ClientEndServerFrames"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.frame.classic-live-edict-loop",
+      "contract": "The loop reads current num_edicts and inuse each iteration: an authored append is visible in the same frame and a deleted later slot is skipped.",
+      "sources": [
+        {
+          "source": "classicMain",
+          "firstLine": 376,
+          "lastLine": 410,
+          "symbol": "G_RunFrame live edict loop"
+        }
+      ],
+      "preconditions": [
+        "No intermission or ground changes; maxclients=1. Callback at slot 2 explicitly clears slot 3 inuse, appends active slot 4, and sets num_edicts=5. This fixture does not model G_Spawn allocator policy."
+      ],
+      "input": {
+        "kind": "frame-order",
+        "deleteLaterActor": true,
+        "spawnActor": true
+      },
+      "expected": {
+        "trace": [
+          "level.framenum++",
+          "level.time=frame*0.1",
+          "AI_SetSightClient",
+          {
+            "event": "current_entity+old_origin",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 0
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 1
+          },
+          {
+            "event": "ClientBeginServerFrame",
+            "actor": 1
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 2
+          },
+          {
+            "event": "authored.delete",
+            "actor": 3
+          },
+          {
+            "event": "authored.append",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 2
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 4
+          },
+          "CheckDMRules",
+          "ClientEndServerFrames"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "trace": [
+          "level.framenum++",
+          "level.time=frame*0.1",
+          "AI_SetSightClient",
+          {
+            "event": "current_entity+old_origin",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 0
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 0
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 1
+          },
+          {
+            "event": "ClientBeginServerFrame",
+            "actor": 1
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 2
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 2
+          },
+          {
+            "event": "authored.delete",
+            "actor": 3
+          },
+          {
+            "event": "authored.append",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 2
+          },
+          {
+            "event": "current_entity+old_origin",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.enter",
+            "actor": 4
+          },
+          {
+            "event": "G_RunEntity.return",
+            "actor": 4
+          },
+          "CheckDMRules",
+          "ClientEndServerFrames"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.pickup.full-ammo-still-uses-targets",
+      "contract": "False pickup return suppresses feedback/freeing, but targets fire before the failed-pickup early return and before ITEM_TARGETS_USED is set.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 234,
+          "lastLine": 240,
+          "symbol": "gitem_t.pickup"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 447,
+          "lastLine": 510,
+          "symbol": "Add_Ammo/Pickup_Ammo"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 761,
+          "lastLine": 821,
+          "symbol": "Touch_Item"
+        }
+      ],
+      "preconditions": [
+        "Alive client; ordinary supported ammo; positive quantity; no weapon flag; singleplayer; no stay-coop or respawn flags; target callback observes without deleting the item."
+      ],
+      "input": {
+        "kind": "pickup",
+        "inventory": 200,
+        "capacity": 200,
+        "quantity": 50,
+        "targetsUsed": false
+      },
+      "expected": {
+        "taken": false,
+        "targetsUsed": true,
+        "freed": false,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 200
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": false,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": false
+          },
+          {
+            "event": "G_UseTargets.enter",
+            "inventory": 200,
+            "targetsUsed": false
+          },
+          "G_UseTargets.return",
+          "ITEM_TARGETS_USED=set"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "taken": false,
+        "targetsUsed": true,
+        "freed": false,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 200
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": false,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": false
+          },
+          {
+            "event": "G_UseTargets.enter",
+            "inventory": 200,
+            "targetsUsed": false
+          },
+          "G_UseTargets.return",
+          "ITEM_TARGETS_USED=set"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.pickup.targets-once",
+      "contract": "ITEM_TARGETS_USED suppresses a repeat target callback when the pickup still fails.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 234,
+          "lastLine": 240,
+          "symbol": "gitem_t.pickup"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 447,
+          "lastLine": 510,
+          "symbol": "Add_Ammo/Pickup_Ammo"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 761,
+          "lastLine": 821,
+          "symbol": "Touch_Item"
+        }
+      ],
+      "preconditions": [
+        "Alive client; ordinary supported ammo; positive quantity; no weapon flag; singleplayer; no stay-coop or respawn flags; target callback observes without deleting the item."
+      ],
+      "input": {
+        "kind": "pickup",
+        "inventory": 200,
+        "capacity": 200,
+        "quantity": 50,
+        "targetsUsed": true
+      },
+      "expected": {
+        "taken": false,
+        "targetsUsed": true,
+        "freed": false,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 200
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": false,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": false
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "taken": false,
+        "targetsUsed": true,
+        "freed": false,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 200
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": false,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": false
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.pickup.partial-ammo-synchronous-return",
+      "contract": "Clamped partial pickup returns true; targets synchronously observe the updated inventory before the item is freed.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 234,
+          "lastLine": 240,
+          "symbol": "gitem_t.pickup"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 447,
+          "lastLine": 510,
+          "symbol": "Add_Ammo/Pickup_Ammo"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 761,
+          "lastLine": 821,
+          "symbol": "Touch_Item"
+        }
+      ],
+      "preconditions": [
+        "Alive client; ordinary supported ammo; positive quantity; no weapon flag; singleplayer; no stay-coop or respawn flags; target callback observes without deleting the item."
+      ],
+      "input": {
+        "kind": "pickup",
+        "inventory": 199,
+        "capacity": 200,
+        "quantity": 50,
+        "targetsUsed": false
+      },
+      "expected": {
+        "taken": true,
+        "targetsUsed": true,
+        "freed": true,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 199
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": true,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": true
+          },
+          "pickup.feedback",
+          {
+            "event": "G_UseTargets.enter",
+            "inventory": 200,
+            "targetsUsed": false
+          },
+          "G_UseTargets.return",
+          "ITEM_TARGETS_USED=set",
+          "G_FreeEdict"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "taken": true,
+        "targetsUsed": true,
+        "freed": true,
+        "inventory": 200,
+        "trace": [
+          {
+            "event": "Pickup_Ammo.enter",
+            "inventory": 199
+          },
+          {
+            "event": "Pickup_Ammo.return",
+            "taken": true,
+            "inventory": 200
+          },
+          {
+            "event": "Touch_Item.observes-return",
+            "taken": true
+          },
+          "pickup.feedback",
+          {
+            "event": "G_UseTargets.enter",
+            "inventory": 200,
+            "targetsUsed": false
+          },
+          "G_UseTargets.return",
+          "ITEM_TARGETS_USED=set",
+          "G_FreeEdict"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.armor.round-up-one-damage",
+      "contract": "Armor saves ceil(binary32(protection*damage)), so jacket armor absorbs one normal damage entirely.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 202,
+          "lastLine": 210,
+          "symbol": "gitem_armor_t"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 39,
+          "lastLine": 41,
+          "symbol": "armor_info"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 255,
+          "lastLine": 292,
+          "symbol": "CheckArmor"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 474,
+          "lastLine": 477,
+          "symbol": "T_Damage remaining take"
+        }
+      ],
+      "preconditions": [
+        "Client with selected armor, positive damage entering CheckArmor; no preceding damage modifiers modeled."
+      ],
+      "input": {
+        "kind": "armor",
+        "damage": 1,
+        "inventory": 50,
+        "armor": "jacket",
+        "energy": false,
+        "bypass": false
+      },
+      "expected": {
+        "absorbed": 1,
+        "remainingArmor": 49,
+        "remainingDamage": 0,
+        "effect": "SpawnDamage"
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "absorbed": 1,
+        "remainingArmor": 49,
+        "remainingDamage": 0,
+        "effect": "SpawnDamage"
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.armor.binary32-before-ceil",
+      "contract": "The binary32 product of stored 0.3f and 10 is 3, so ceil saves 3. Promoting stored 0.3f directly to binary64 multiplication would incorrectly save 4 in this model.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 202,
+          "lastLine": 210,
+          "symbol": "gitem_armor_t"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 39,
+          "lastLine": 41,
+          "symbol": "armor_info"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 255,
+          "lastLine": 292,
+          "symbol": "CheckArmor"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 474,
+          "lastLine": 477,
+          "symbol": "T_Damage remaining take"
+        }
+      ],
+      "preconditions": [
+        "Binary32 multiplication without x87 excess precision; client with jacket armor; normal damage."
+      ],
+      "input": {
+        "kind": "armor",
+        "damage": 10,
+        "inventory": 50,
+        "armor": "jacket",
+        "energy": false,
+        "bypass": false
+      },
+      "expected": {
+        "absorbed": 3,
+        "remainingArmor": 47,
+        "remainingDamage": 7,
+        "effect": "SpawnDamage"
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "absorbed": 3,
+        "remainingArmor": 47,
+        "remainingDamage": 7,
+        "effect": "SpawnDamage"
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.armor.energy-jacket",
+      "contract": "Jacket energy protection is zero and emits no armor spark event.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 202,
+          "lastLine": 210,
+          "symbol": "gitem_armor_t"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 39,
+          "lastLine": 41,
+          "symbol": "armor_info"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 255,
+          "lastLine": 292,
+          "symbol": "CheckArmor"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 474,
+          "lastLine": 477,
+          "symbol": "T_Damage remaining take"
+        }
+      ],
+      "preconditions": [
+        "Client with jacket armor; no preceding damage modifiers modeled."
+      ],
+      "input": {
+        "kind": "armor",
+        "damage": 10,
+        "inventory": 50,
+        "armor": "jacket",
+        "energy": true,
+        "bypass": false
+      },
+      "expected": {
+        "absorbed": 0,
+        "remainingArmor": 50,
+        "remainingDamage": 10,
+        "effect": null
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "absorbed": 0,
+        "remainingArmor": 50,
+        "remainingDamage": 10,
+        "effect": null
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.armor.clamp-inventory",
+      "contract": "Absorption cannot exceed remaining armor inventory.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 202,
+          "lastLine": 210,
+          "symbol": "gitem_armor_t"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 39,
+          "lastLine": 41,
+          "symbol": "armor_info"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 255,
+          "lastLine": 292,
+          "symbol": "CheckArmor"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 474,
+          "lastLine": 477,
+          "symbol": "T_Damage remaining take"
+        }
+      ],
+      "preconditions": [
+        "Client with body armor; no preceding damage modifiers modeled."
+      ],
+      "input": {
+        "kind": "armor",
+        "damage": 10,
+        "inventory": 2,
+        "armor": "body",
+        "energy": false,
+        "bypass": false
+      },
+      "expected": {
+        "absorbed": 2,
+        "remainingArmor": 0,
+        "remainingDamage": 8,
+        "effect": "SpawnDamage"
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "absorbed": 2,
+        "remainingArmor": 0,
+        "remainingDamage": 8,
+        "effect": "SpawnDamage"
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.armor.no-armor-flag",
+      "contract": "DAMAGE_NO_ARMOR returns zero before inventory mutation or effects.",
+      "sources": [
+        {
+          "source": "classicLocal",
+          "firstLine": 202,
+          "lastLine": 210,
+          "symbol": "gitem_armor_t"
+        },
+        {
+          "source": "classicItems",
+          "firstLine": 39,
+          "lastLine": 41,
+          "symbol": "armor_info"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 255,
+          "lastLine": 292,
+          "symbol": "CheckArmor"
+        },
+        {
+          "source": "classicCombat",
+          "firstLine": 474,
+          "lastLine": 477,
+          "symbol": "T_Damage remaining take"
+        }
+      ],
+      "preconditions": [
+        "Client with body armor; no preceding damage modifiers modeled."
+      ],
+      "input": {
+        "kind": "armor",
+        "damage": 10,
+        "inventory": 100,
+        "armor": "body",
+        "energy": false,
+        "bypass": true
+      },
+      "expected": {
+        "absorbed": 0,
+        "remainingArmor": 100,
+        "remainingDamage": 10,
+        "effect": null
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "absorbed": 0,
+        "remainingArmor": 100,
+        "remainingDamage": 10,
+        "effect": null
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.cross-unit.all-required",
+      "contract": "A trigger ORs its bits into unit flags; the target requires every requested non-editor bit before using targets and freeing itself.",
+      "sources": [
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 251,
+          "lastLine": 262,
+          "symbol": "SPAWNFLAG_EDITOR_MASK"
+        },
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 733,
+          "lastLine": 733,
+          "symbol": "SFL_CROSS_TRIGGER_MASK"
+        },
+        {
+          "source": "rereleaseTarget",
+          "firstLine": 1985,
+          "lastLine": 2031,
+          "symbol": "trigger_crossunit_trigger_use/target_crossunit_target_think"
+        }
+      ],
+      "preconditions": [
+        "Non-deathmatch target think invoked; synchronous G_UseTargets callback returns without mutation."
+      ],
+      "input": {
+        "kind": "cross-unit",
+        "flags": 1,
+        "trigger": 2,
+        "required": 3
+      },
+      "expected": {
+        "flags": 3,
+        "satisfied": true,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)",
+          "G_UseTargets(target,target)",
+          "G_FreeEdict(target)"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "flags": 3,
+        "satisfied": true,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)",
+          "G_UseTargets(target,target)",
+          "G_FreeEdict(target)"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.cross-unit.missing-required",
+      "contract": "One missing required bit prevents progression.",
+      "sources": [
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 251,
+          "lastLine": 262,
+          "symbol": "SPAWNFLAG_EDITOR_MASK"
+        },
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 733,
+          "lastLine": 733,
+          "symbol": "SFL_CROSS_TRIGGER_MASK"
+        },
+        {
+          "source": "rereleaseTarget",
+          "firstLine": 1985,
+          "lastLine": 2031,
+          "symbol": "trigger_crossunit_trigger_use/target_crossunit_target_think"
+        }
+      ],
+      "preconditions": [
+        "Non-deathmatch target think invoked."
+      ],
+      "input": {
+        "kind": "cross-unit",
+        "flags": 1,
+        "trigger": 4,
+        "required": 3
+      },
+      "expected": {
+        "flags": 5,
+        "satisfied": false,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "flags": 5,
+        "satisfied": false,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.cross-unit.high-bit-unsigned",
+      "contract": "The uint32 comparison supports high trigger bits without signed JavaScript comparison loss.",
+      "sources": [
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 251,
+          "lastLine": 262,
+          "symbol": "SPAWNFLAG_EDITOR_MASK"
+        },
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 733,
+          "lastLine": 733,
+          "symbol": "SFL_CROSS_TRIGGER_MASK"
+        },
+        {
+          "source": "rereleaseTarget",
+          "firstLine": 1985,
+          "lastLine": 2031,
+          "symbol": "trigger_crossunit_trigger_use/target_crossunit_target_think"
+        }
+      ],
+      "preconditions": [
+        "Non-deathmatch target think invoked."
+      ],
+      "input": {
+        "kind": "cross-unit",
+        "flags": 0,
+        "trigger": 2147483648,
+        "required": 2147483648
+      },
+      "expected": {
+        "flags": 2147483648,
+        "satisfied": true,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)",
+          "G_UseTargets(target,target)",
+          "G_FreeEdict(target)"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "flags": 2147483648,
+        "satisfied": true,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)",
+          "G_UseTargets(target,target)",
+          "G_FreeEdict(target)"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.cross-unit.editor-bits-excluded",
+      "contract": "The cross-trigger mask excludes bits 8 through 15, including an authored required editor bit.",
+      "sources": [
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 251,
+          "lastLine": 262,
+          "symbol": "SPAWNFLAG_EDITOR_MASK"
+        },
+        {
+          "source": "rereleaseLocal",
+          "firstLine": 733,
+          "lastLine": 733,
+          "symbol": "SFL_CROSS_TRIGGER_MASK"
+        },
+        {
+          "source": "rereleaseTarget",
+          "firstLine": 1985,
+          "lastLine": 2031,
+          "symbol": "trigger_crossunit_trigger_use/target_crossunit_target_think"
+        }
+      ],
+      "preconditions": [
+        "Direct target-think input; spawn parsing/inhibition is outside this malformed-requirement boundary case."
+      ],
+      "input": {
+        "kind": "cross-unit",
+        "flags": 0,
+        "trigger": 256,
+        "required": 256
+      },
+      "expected": {
+        "flags": 256,
+        "satisfied": false,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "flags": 256,
+        "satisfied": false,
+        "trace": [
+          "flags|=trigger",
+          "G_FreeEdict(trigger)"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.save.poi-story-fields",
+      "contract": "Original FIELD_AUTO declarations retain these POI, health bar, and story fields. This is a field-selection projection, not a save codec round trip.",
+      "sources": [
+        {
+          "source": "rereleaseSave",
+          "firstLine": 728,
+          "lastLine": 740,
+          "symbol": "level_locals_t save fields"
+        }
+      ],
+      "preconditions": [
+        "Entity references are represented symbolically; JSON encoding, pointer remapping, and load hooks are not evaluated."
+      ],
+      "input": {
+        "kind": "save-fields",
+        "struct": "level_locals_t",
+        "fields": {
+          "current_poi_stage": 9,
+          "valid_poi": true,
+          "current_poi_image": 7,
+          "current_dynamic_poi": "edict:17",
+          "health_bar_entities": [
+            "edict:18"
+          ],
+          "story_active": true,
+          "not_a_save_field": 999
+        }
+      },
+      "expected": {
+        "retained": {
+          "current_poi_stage": 9,
+          "valid_poi": true,
+          "current_poi_image": 7,
+          "current_dynamic_poi": "edict:17",
+          "health_bar_entities": [
+            "edict:18"
+          ],
+          "story_active": true
+        },
+        "omitted": [
+          "not_a_save_field"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "retained": {
+          "current_poi_stage": 9,
+          "valid_poi": true,
+          "current_poi_image": 7,
+          "current_dynamic_poi": "edict:17",
+          "health_bar_entities": [
+            "edict:18"
+          ],
+          "story_active": true
+        },
+        "omitted": [
+          "not_a_save_field"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.save.fog-brush-animation-fields",
+      "contract": "The source declares entity fog and all sampled brush animation fields, including enabled and next_tick.",
+      "sources": [
+        {
+          "source": "rereleaseSave",
+          "firstLine": 1262,
+          "lastLine": 1301,
+          "symbol": "edict_t fog/bmodel_anim fields"
+        }
+      ],
+      "preconditions": [
+        "Field selection only; supplied density is the binary32 value of authored 0.35; next_tick is represented in integer milliseconds."
+      ],
+      "input": {
+        "kind": "save-fields",
+        "struct": "edict_t",
+        "fields": {
+          "fog.density": 0.3499999940395355,
+          "fog.sky_factor": 0.5,
+          "bmodel_anim.enabled": true,
+          "bmodel_anim.start": 5,
+          "bmodel_anim.end": 12,
+          "bmodel_anim.alternate": true,
+          "bmodel_anim.currently_alternate": false,
+          "bmodel_anim.next_tick": 125
+        }
+      },
+      "expected": {
+        "retained": {
+          "fog.density": 0.3499999940395355,
+          "fog.sky_factor": 0.5,
+          "bmodel_anim.enabled": true,
+          "bmodel_anim.start": 5,
+          "bmodel_anim.end": 12,
+          "bmodel_anim.alternate": true,
+          "bmodel_anim.currently_alternate": false,
+          "bmodel_anim.next_tick": 125
+        },
+        "omitted": []
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "retained": {
+          "fog.density": 0.3499999940395355,
+          "fog.sky_factor": 0.5,
+          "bmodel_anim.enabled": true,
+          "bmodel_anim.start": 5,
+          "bmodel_anim.end": 12,
+          "bmodel_anim.alternate": true,
+          "bmodel_anim.currently_alternate": false,
+          "bmodel_anim.next_tick": 125
+        },
+        "omitted": []
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.save.max-ammo-array",
+      "contract": "Rerelease saves the max_ammo array, whose index 8 stores flechette capacity. A TS-only max_flechettes field name is not the original representation.",
+      "sources": [
+        {
+          "source": "rereleaseSave",
+          "firstLine": 484,
+          "lastLine": 497,
+          "symbol": "std::array save type"
+        },
+        {
+          "source": "rereleaseSave",
+          "firstLine": 788,
+          "lastLine": 802,
+          "symbol": "client_persistant_t.max_ammo"
+        },
+        {
+          "source": "rereleaseShared",
+          "firstLine": 79,
+          "lastLine": 98,
+          "symbol": "ammo_t"
+        }
+      ],
+      "preconditions": [
+        "Field-selection projection; valid int16 capacities in original enum order; no byte codec claimed."
+      ],
+      "input": {
+        "kind": "save-fields",
+        "struct": "client_persistant_t",
+        "fields": {
+          "max_ammo": [
+            200,
+            100,
+            50,
+            50,
+            200,
+            50,
+            50,
+            5,
+            200,
+            5,
+            12,
+            50
+          ],
+          "max_flechettes": 200
+        }
+      },
+      "expected": {
+        "retained": {
+          "max_ammo": [
+            200,
+            100,
+            50,
+            50,
+            200,
+            50,
+            50,
+            5,
+            200,
+            5,
+            12,
+            50
+          ]
+        },
+        "omitted": [
+          "max_flechettes"
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "retained": {
+          "max_ammo": [
+            200,
+            100,
+            50,
+            50,
+            200,
+            50,
+            50,
+            5,
+            200,
+            5,
+            12,
+            50
+          ]
+        },
+        "omitted": [
+          "max_flechettes"
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.save.cross-unit-fields",
+      "contract": "Game-level serialization has separate cross-level and cross-unit flag fields.",
+      "sources": [
+        {
+          "source": "rereleaseSave",
+          "firstLine": 661,
+          "lastLine": 680,
+          "symbol": "game_locals_t save fields"
+        }
+      ],
+      "preconditions": [
+        "Field selection only."
+      ],
+      "input": {
+        "kind": "save-fields",
+        "struct": "game_locals_t",
+        "fields": {
+          "cross_level_flags": 3,
+          "cross_unit_flags": 65537
+        }
+      },
+      "expected": {
+        "retained": {
+          "cross_level_flags": 3,
+          "cross_unit_flags": 65537
+        },
+        "omitted": []
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "retained": {
+          "cross_level_flags": 3,
+          "cross_unit_flags": 65537
+        },
+        "omitted": []
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.flechette.source-default",
+      "contract": "Extract the original ammo enum index and initialized flechette capacity directly from raw source.",
+      "sources": [
+        {
+          "source": "rereleaseShared",
+          "firstLine": 79,
+          "lastLine": 98,
+          "symbol": "ammo_t"
+        },
+        {
+          "source": "rereleaseClient",
+          "firstLine": 844,
+          "lastLine": 858,
+          "symbol": "InitClientPersistant default ammo capacities"
+        }
+      ],
+      "preconditions": [
+        "The !taken_loadout initialization branch is selected; capacity upgrades and custom loadouts are outside this case."
+      ],
+      "input": {
+        "kind": "flechette-default"
+      },
+      "expected": {
+        "arrayIndex": 8,
+        "arrayLength": 12,
+        "defaultCapacity": 200,
+        "savedField": "max_ammo"
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "arrayIndex": 8,
+        "arrayLength": 12,
+        "defaultCapacity": 200,
+        "savedField": "max_ammo"
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.q64.publishes-and-sets-server-config",
+      "contract": "Q64 non-deathmatch worldspawn publishes CONFIG_N64_PHYSICS and immediately sets server pm_config, then publishes and stores air acceleration.",
+      "sources": [
+        {
+          "source": "rereleaseSpawn",
+          "firstLine": 1517,
+          "lastLine": 1529,
+          "symbol": "SP_worldspawn Q64 and air acceleration"
+        },
+        {
+          "source": "rereleaseCgame",
+          "firstLine": 19,
+          "lastLine": 26,
+          "symbol": "InitCGame configuration consumption"
+        }
+      ],
+      "preconditions": [
+        "Start at the displayed worldspawn block with integer cvar air acceleration; this does not run prediction."
+      ],
+      "input": {
+        "kind": "q64-config",
+        "isN64": true,
+        "deathmatch": false,
+        "initialN64Physics": false,
+        "airacceleration": 1
+      },
+      "expected": {
+        "serverN64Physics": true,
+        "serverAiracceleration": 1,
+        "trace": [
+          {
+            "event": "configstring",
+            "name": "CONFIG_N64_PHYSICS",
+            "value": "1"
+          },
+          {
+            "event": "server.pm_config.n64_physics",
+            "value": true
+          },
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "1"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 1
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "serverN64Physics": true,
+        "serverAiracceleration": 1,
+        "trace": [
+          {
+            "event": "configstring",
+            "name": "CONFIG_N64_PHYSICS",
+            "value": "1"
+          },
+          {
+            "event": "server.pm_config.n64_physics",
+            "value": true
+          },
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "1"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 1
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.q64.deathmatch-does-not-enable",
+      "contract": "Q64 deathmatch skips the N64 physics enable block; air acceleration still propagates.",
+      "sources": [
+        {
+          "source": "rereleaseSpawn",
+          "firstLine": 1517,
+          "lastLine": 1529,
+          "symbol": "SP_worldspawn Q64 and air acceleration"
+        },
+        {
+          "source": "rereleaseCgame",
+          "firstLine": 19,
+          "lastLine": 26,
+          "symbol": "InitCGame configuration consumption"
+        }
+      ],
+      "preconditions": [
+        "Initial server n64_physics=false; surrounding worldspawn reset and cgame update callbacks are outside this block."
+      ],
+      "input": {
+        "kind": "q64-config",
+        "isN64": true,
+        "deathmatch": true,
+        "initialN64Physics": false,
+        "airacceleration": 0
+      },
+      "expected": {
+        "serverN64Physics": false,
+        "serverAiracceleration": 0,
+        "trace": [
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "0"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 0
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "serverN64Physics": false,
+        "serverAiracceleration": 0,
+        "trace": [
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "0"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 0
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.q64.block-does-not-clear-prior-state",
+      "contract": "This source block contains no else clearing n64_physics; prior state is retained when its condition is false.",
+      "sources": [
+        {
+          "source": "rereleaseSpawn",
+          "firstLine": 1517,
+          "lastLine": 1529,
+          "symbol": "SP_worldspawn Q64 and air acceleration"
+        },
+        {
+          "source": "rereleaseCgame",
+          "firstLine": 19,
+          "lastLine": 26,
+          "symbol": "InitCGame configuration consumption"
+        }
+      ],
+      "preconditions": [
+        "Deliberately supplied pre-block true state; this does not imply that full worldspawn fails to reset configuration."
+      ],
+      "input": {
+        "kind": "q64-config",
+        "isN64": false,
+        "deathmatch": false,
+        "initialN64Physics": true,
+        "airacceleration": 0
+      },
+      "expected": {
+        "serverN64Physics": true,
+        "serverAiracceleration": 0,
+        "trace": [
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "0"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 0
+          }
+        ]
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "serverN64Physics": true,
+        "serverAiracceleration": 0,
+        "trace": [
+          "G_InitStatusbar",
+          {
+            "event": "configstring",
+            "name": "CS_AIRACCEL",
+            "value": "0"
+          },
+          {
+            "event": "server.pm_config.airaccel",
+            "value": 0
+          }
+        ]
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.commands.classic-jump-threshold-below",
+      "contract": "upmove=9 does not hold classic jump; the rerelease jump button does hold rerelease jump.",
+      "sources": [
+        {
+          "source": "classicMove",
+          "firstLine": 779,
+          "lastLine": 822,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "classicMove",
+          "firstLine": 994,
+          "lastLine": 1003,
+          "symbol": "PM_CheckDuck"
+        },
+        {
+          "source": "rereleaseGame",
+          "firstLine": 417,
+          "lastLine": 425,
+          "symbol": "button_t"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1065,
+          "lastLine": 1102,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1372,
+          "lastLine": 1391,
+          "symbol": "PM_CheckDuck"
+        }
+      ],
+      "preconditions": [
+        "Only command predicates are evaluated. Alive grounded client; landing timer and jump-held clear; no ladder; standing transition trace clear. Full movement is outside this case."
+      ],
+      "input": {
+        "kind": "command-predicates",
+        "upmove": 9,
+        "buttons": 8,
+        "n64Physics": false
+      },
+      "expected": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": false,
+        "rereleaseHoldingJump": true,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": false,
+        "rereleaseHoldingJump": true,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.commands.classic-jump-threshold-equal",
+      "contract": "upmove=10 holds classic jump independently of rerelease button bits.",
+      "sources": [
+        {
+          "source": "classicMove",
+          "firstLine": 779,
+          "lastLine": 822,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "classicMove",
+          "firstLine": 994,
+          "lastLine": 1003,
+          "symbol": "PM_CheckDuck"
+        },
+        {
+          "source": "rereleaseGame",
+          "firstLine": 417,
+          "lastLine": 425,
+          "symbol": "button_t"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1065,
+          "lastLine": 1102,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1372,
+          "lastLine": 1391,
+          "symbol": "PM_CheckDuck"
+        }
+      ],
+      "preconditions": [
+        "Only command predicates are evaluated. Alive grounded client; landing timer and jump-held clear; no ladder; standing transition trace clear. Full movement is outside this case."
+      ],
+      "input": {
+        "kind": "command-predicates",
+        "upmove": 10,
+        "buttons": 0,
+        "n64Physics": false
+      },
+      "expected": {
+        "classicHoldingJump": true,
+        "classicGroundedDuckBranch": false,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "classicHoldingJump": true,
+        "classicGroundedDuckBranch": false,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.commands.crouch-native-predicates",
+      "contract": "Negative classic upmove and rerelease BUTTON_CROUCH request their grounded duck branches.",
+      "sources": [
+        {
+          "source": "classicMove",
+          "firstLine": 779,
+          "lastLine": 822,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "classicMove",
+          "firstLine": 994,
+          "lastLine": 1003,
+          "symbol": "PM_CheckDuck"
+        },
+        {
+          "source": "rereleaseGame",
+          "firstLine": 417,
+          "lastLine": 425,
+          "symbol": "button_t"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1065,
+          "lastLine": 1102,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1372,
+          "lastLine": 1391,
+          "symbol": "PM_CheckDuck"
+        }
+      ],
+      "preconditions": [
+        "Only command predicates are evaluated. Alive grounded client; landing timer and jump-held clear; no ladder; standing transition trace clear. Full movement is outside this case."
+      ],
+      "input": {
+        "kind": "command-predicates",
+        "upmove": -400,
+        "buttons": 16,
+        "n64Physics": false
+      },
+      "expected": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": true,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": true
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": true,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": true
+      },
+      "passed": true
+    },
+    {
+      "id": "q2.commands.q64-disables-duck",
+      "contract": "Q64 configuration prevents the rerelease duck branch even with BUTTON_CROUCH set.",
+      "sources": [
+        {
+          "source": "classicMove",
+          "firstLine": 779,
+          "lastLine": 822,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "classicMove",
+          "firstLine": 994,
+          "lastLine": 1003,
+          "symbol": "PM_CheckDuck"
+        },
+        {
+          "source": "rereleaseGame",
+          "firstLine": 417,
+          "lastLine": 425,
+          "symbol": "button_t"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1065,
+          "lastLine": 1102,
+          "symbol": "PM_CheckJump"
+        },
+        {
+          "source": "rereleaseMove",
+          "firstLine": 1372,
+          "lastLine": 1391,
+          "symbol": "PM_CheckDuck"
+        }
+      ],
+      "preconditions": [
+        "Only command predicates are evaluated. Alive grounded client; landing timer and jump-held clear; no ladder; standing transition trace clear. Full movement is outside this case."
+      ],
+      "input": {
+        "kind": "command-predicates",
+        "upmove": -400,
+        "buttons": 16,
+        "n64Physics": true
+      },
+      "expected": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": true,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "oracleKind": "source-derived",
+      "rng": {
+        "draws": 0,
+        "owner": null
+      },
+      "actual": {
+        "classicHoldingJump": false,
+        "classicGroundedDuckBranch": true,
+        "rereleaseHoldingJump": false,
+        "rereleaseGroundedDuckBranch": false
+      },
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-11T05:44:44.936Z",
+  "classification": "independent-retail-executable-observation",
+  "postCaptureReview": {
+    "qualification": "map-control-save-render-observed-with-manual-prefix-cleanup",
+    "unassistedGameExitEstablished": false,
+    "reason": "The first script's quit command opened the quit menu. The private prefix was terminated after Q1_RETAIL_DONE; the zero Wine exit code does not prove an unassisted game exit.",
+    "manualCleanupCommand": ["/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wineserver", "-k"],
+    "manualCleanupEnvironmentOverrides": {
+      "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/wineprefix",
+      "WINEDEBUG": "-all"
+    },
+    "manualCleanupExitCode": 0,
+    "ownedPidsConfirmedAbsent": [1583758, 1583757, 1583760],
+    "playerOrigins": {
+      "before": "544.000000 288.000000 28.031250",
+      "moved": "544.000000 496.843353 12.031250",
+      "restored": "544.000000 288.000000 28.031250"
+    },
+    "pcxWidth": 400,
+    "pcxHeight": 300,
+    "currentDriverRerun": false
+  },
+  "directory": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z",
+  "provenance": {
+    "executable": {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Quake/Winquake.exe",
+      "size": 553472,
+      "sha256": "e0f12ec4dc4026d7aaa949f96b237fdc773e1546fb99d44be707f01c1f28b3b9"
+    },
+    "stagedExecutable": {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/Winquake.exe",
+      "size": 553472,
+      "sha256": "e0f12ec4dc4026d7aaa949f96b237fdc773e1546fb99d44be707f01c1f28b3b9"
+    },
+    "assets": [
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK",
+        "size": 18689235,
+        "sha256": "35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q1/id1/PAK1.PAK",
+        "size": 34257856,
+        "sha256": "94e355836ec42bc464e4cbe794cfb7b5163c6efa1bcc575622bb36475bf1cf30"
+      }
+    ],
+    "runtime": {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine",
+      "size": 16872,
+      "sha256": "7a6de49c00d8ed2ba55c6967d3643c5ef729f5e562fb51e47e4f41c6cdb5c92a"
+    },
+    "wineserver": {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wineserver",
+      "size": 887624,
+      "sha256": "9d4320795f0a8fb11812549f21601144963d196282132d74210a5e3cef21aa84"
+    },
+    "driver": {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q1-retail/capture.ts",
+      "size": 7471,
+      "sha256": "34c265d32e9eca7f6f5738b43b7a83c776063c4900e9009cc7dfcede43f3a083"
+    }
+  },
+  "config": "echo Q1_RETAIL_BEGIN\nversion\ndeveloper 1\nskill 1\ndeathmatch 0\ncoop 0\nhost_framerate 0.05\nsys_ticrate 0.05\ncl_forwardspeed 200\ncl_backspeed 200\ncl_sidespeed 350\ncl_upspeed 200\ncl_movespeedkey 2\nvid_mode 2\nviewsize 100\nfov 90\ngamma 1\nrecord retail-reference start\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\n\necho Q1_RETAIL_MAP_READY\nstatus\nhost_framerate\nsys_ticrate\ncl_forwardspeed\nsave retail-before\nscreenshot\n+forward\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\n\n-forward\nwait\nwait\n\nsave retail-moved\nscreenshot\nstop\nload retail-before\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\nwait\n\nsave retail-restored\nscreenshot\necho Q1_RETAIL_DONE\nquit\n",
+  "observed": {
+    "command": [
+      "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine",
+      "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/Winquake.exe",
+      "-startwindowed",
+      "-dibonly",
+      "-nocdaudio",
+      "-nosound",
+      "-nojoy",
+      "-nomouse",
+      "-condebug",
+      "+exec",
+      "reference.cfg"
+    ],
+    "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game",
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/home",
+      "LC_ALL": "C",
+      "TZ": "UTC",
+      "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/wineprefix",
+      "WINEDEBUG": "-all",
+      "WINEDLLOVERRIDES": "winemenubuilder.exe=d",
+      "DISPLAY": ":28729",
+      "LIBGL_ALWAYS_SOFTWARE": "1",
+      "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+    },
+    "startedAt": "2026-09-11T05:43:37.387Z",
+    "durationMs": 67530.585719,
+    "pid": 1583758,
+    "exitCode": 0,
+    "timedOut": false,
+    "stdout": "",
+    "stderr": "wineserver: using server-side synchronization.\n"
+  },
+  "cleanup": {
+    "command": [
+      "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wineserver",
+      "-k"
+    ],
+    "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z",
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/home",
+      "LC_ALL": "C",
+      "TZ": "UTC",
+      "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/wineprefix",
+      "WINEDEBUG": "-all",
+      "WINEDLLOVERRIDES": "winemenubuilder.exe=d",
+      "DISPLAY": ":28729",
+      "LIBGL_ALWAYS_SOFTWARE": "1",
+      "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+    },
+    "startedAt": "2026-09-11T05:44:44.918Z",
+    "durationMs": 0.7114440000004834,
+    "pid": 1586232,
+    "exitCode": 1,
+    "timedOut": false,
+    "stdout": "",
+    "stderr": ""
+  },
+  "failure": null,
+  "display": {
+    "command": [
+      "/usr/bin/Xvfb",
+      ":28729",
+      "-screen",
+      "0",
+      "800x600x24",
+      "-nolisten",
+      "tcp",
+      "-noreset"
+    ],
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/home",
+      "LC_ALL": "C",
+      "TZ": "UTC",
+      "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/wineprefix",
+      "WINEDEBUG": "-all",
+      "WINEDLLOVERRIDES": "winemenubuilder.exe=d",
+      "DISPLAY": ":28729",
+      "LIBGL_ALWAYS_SOFTWARE": "1",
+      "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+    },
+    "pid": 1583757,
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": "The XKEYBOARD keymap compiler (xkbcomp) reports:\n> Warning:          Multiple symbols for level 1/group 1 on key <FK23>\n>                   Using F23, ignoring XF86TouchpadOff\n> Warning:          Symbol map for key <FK23> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Symbol map for key <FK24> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOn\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOff\n> Warning:          Could not resolve keysym XF86ActionOnSelection\n> Warning:          Could not resolve keysym XF86ContextualInsert\n> Warning:          Could not resolve keysym XF86ContextualQuery\nErrors from xkbcomp are not fatal to the X server\n"
+  },
+  "consoleText": "Console initialized.\r\nWinsock TCP/IP Initialized\r\nWIPX_Init: Unable to open control socket\r\nExe: 09:30:49 Mar 21 1997\r\n16.0 megabyte heap\r\n\r\nSound Initialization\r\n637k surface cache\r\n640x480\r\nexecing quake.rc\r\nexecing default.cfg\r\nUnknown command \"volume\"\r\nexecing config.cfg\r\nexecing autoexec.cfg\r\nexecing reference.cfg\r\nQ1_RETAIL_BEGIN \r\nVersion 1.09\r\nExe: 09:29:10 Mar 21 1997\r\nSpawnServer: start\r\n764k surface cache\r\n800x600\r\nClearing memory\r\nPrograms occupy 403K.\r\n40 entities inhibited\r\nServer spawned.\r\nCL_EstablishConnection: connected to local\r\nrecording to Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q1-retail\\2026-09-11T05-43-37-305Z\\game/id1/retail-reference.dem.\r\nClient LOCAL connected\r\n\u0002\r\nVERSION 1.09 SERVER (24778 CRC)Serverinfo packet received.\r\n\r\n\r\n\u001d\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001f\r\n\r\n\u0002Introduction\r\nCL_SignonReply: 1\r\nCL_SignonReply: 2\r\nCL_SignonReply: 3\r\n11.8 megabyte data cache\r\nCL_SignonReply: 4\r\nQ1_RETAIL_MAP_READY \r\nhost:    buzz-ai\r\nversion: 1.09\r\ntcp/ip:  INADDR_ANY\r\nmap:     start\r\nplayers: 1 active (1 max)\r\n\r\n#1  player              0   0:00:00\r\n   LOCAL\r\n\"host_framerate\" is \"0.05\"\r\n\"sys_ticrate\" is \"0.05\"\r\n\"cl_forwardspeed\" is \"200\"\r\nSaving game to Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q1-retail\\2026-09-11T05-43-37-305Z\\game/id1/retail-before.sav...\r\ndone.\r\nWrote quake00.pcx\r\nSaving game to Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q1-retail\\2026-09-11T05-43-37-305Z\\game/id1/retail-moved.sav...\r\ndone.\r\nWrote quake01.pcx\r\nCompleted demo\r\nLoading game from Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q1-retail\\2026-09-11T05-43-37-305Z\\game/id1/retail-before.sav...\r\nSending clc_disconnect\r\nSpawnServer: start\r\nClearing memory\r\nPrograms occupy 403K.\r\n40 entities inhibited\r\nServer spawned.\r\nCL_EstablishConnection: connected to local\r\nClient LOCAL connected\r\n\u0002\r\nVERSION 1.09 SERVER (24778 CRC)Serverinfo packet received.\r\n\r\n\r\n\u001d\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001e\u001f\r\n\r\n\u0002Introduction\r\nCL_SignonReply: 1\r\nCL_SignonReply: 2\r\nCL_SignonReply: 3\r\n11.8 megabyte data cache\r\nCL_SignonReply: 4\r\nSaving game to Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q1-retail\\2026-09-11T05-43-37-305Z\\game/id1/retail-restored.sav...\r\ndone.\r\nWrote quake02.pcx\r\nQ1_RETAIL_DONE \r\n3 demo(s) in loop\r\n",
+  "outputs": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/config.cfg",
+      "size": 36,
+      "sha256": "4a93147e301f537734a3a01e799bc3fcf2dace542a3a0505c6528d4b0671625f"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/autoexec.cfg",
+      "size": 36,
+      "sha256": "4a93147e301f537734a3a01e799bc3fcf2dace542a3a0505c6528d4b0671625f"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/reference.cfg",
+      "size": 1059,
+      "sha256": "2b3021af704c8096bbaf9424e086238b6775391e5981b47ba874c5c29002a0e9"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/qconsole.log",
+      "size": 2277,
+      "sha256": "4406219016ff05b5475a8f1d5cc08ebe633f32a4f955885240fb910b6f1432b8"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/retail-reference.dem",
+      "size": 9473,
+      "sha256": "a357f5a34ad65eeb7f61e192300f4820bdd898bd2876c6cc43c64c7782ad0555"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/retail-before.sav",
+      "size": 36236,
+      "sha256": "edeaf44f37eea546455e8e0057cd9c5955824eb2793ef2d2ccbcbfb5a05a979d"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/quake00.pcx",
+      "size": 123922,
+      "sha256": "b6cad3c73e9784babb4f3488fcde4374d0f07562a3d15ddbc35528ee30ff1749"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/retail-moved.sav",
+      "size": 36325,
+      "sha256": "73e88b8dc49176d0d1626962512f91315d3091e94b93f531f0a4776d39146a51"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/quake01.pcx",
+      "size": 124504,
+      "sha256": "3f1255f5a6de92f5c87b449c6d68205f07c7ec5fa36667e5d85a0fd423a5dfb6"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/retail-restored.sav",
+      "size": 36241,
+      "sha256": "bc49e4b4d6267c68938b7df403733f428d7608fec14f8a912af613c1fffea836"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q1-retail/2026-09-11T05-43-37-305Z/game/id1/quake02.pcx",
+      "size": 123913,
+      "sha256": "b4abad1b5c31f94d1eed1059f2dca42c223720a3950def887953b1e2dedfb487"
+    }
+  ],
+  "checks": {
+    "processExitedSuccessfully": true,
+    "mapCheckpointObserved": true,
+    "doneCheckpointObserved": true
+  },
+  "limitations": [
+    "Installed executable identity establishes the observed bytes, not vendor authenticity or equivalence to current source.",
+    "The reference.cfg schedule uses requested host_framerate and wait commands. Simulation and command acceptance must be checked against observed artifacts.",
+    "No TypeScript engine comparison, multiplayer interoperability, mission pack, rerelease, or image tolerance is established."
+  ]
+}

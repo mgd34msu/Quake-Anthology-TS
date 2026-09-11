@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 1,
+  "classification": "independent-retail-executable-observation",
+  "capturedAt": "2026-09-11T05:47:10.172Z",
+  "root": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+  "command": [
+    "/home/buzzkill/.bun/bin/bun",
+    "/home/buzzkill/Projects/quake-typescript/tools/reference/q3-retail/capture.ts"
+  ],
+  "executable": {
+    "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Quake 3 Arena/quake3.exe",
+    "size": 909312,
+    "sha256": "80b0add0e014b863cf47cab6c997e0a54939236219a56910b7a3eb77dc2d44d4"
+  },
+  "copiedExecutable": {
+    "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/bin/quake3.exe",
+    "size": 909312,
+    "sha256": "80b0add0e014b863cf47cab6c997e0a54939236219a56910b7a3eb77dc2d44d4"
+  },
+  "captureProgram": {
+    "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q3-retail/capture.ts",
+    "size": 12548,
+    "sha256": "5c79dbe6d36aad78d584e63f5f0d7e2eb036ba6cc76085b406b28ad1edb60191"
+  },
+  "runtime": [
+    {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine",
+      "size": 16872,
+      "sha256": "7a6de49c00d8ed2ba55c6967d3643c5ef729f5e562fb51e47e4f41c6cdb5c92a"
+    },
+    {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wineserver",
+      "size": 887624,
+      "sha256": "9d4320795f0a8fb11812549f21601144963d196282132d74210a5e3cef21aa84"
+    },
+    {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/i386-windows/ntdll.dll",
+      "size": 1060672,
+      "sha256": "250021701e61a1bb92dfa975ea040141bd22696497d11ed040052351a670190d"
+    },
+    {
+      "path": "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-unix/ntdll.so",
+      "size": 751680,
+      "sha256": "ce8ee142828c937624c1fdcc338c41e37d83adc31a9a7848b955a1d70e712645"
+    },
+    {
+      "path": "/home/buzzkill/.bun/bin/bun",
+      "size": 92752752,
+      "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+    },
+    {
+      "path": "/usr/bin/bwrap",
+      "size": 84464,
+      "sha256": "6ad2138a73d592acb43525432965e3c66f6fad8a2f3d610c6ca0b6855e993cbe"
+    },
+    {
+      "path": "/usr/bin/Xvfb",
+      "size": 1973888,
+      "sha256": "567a9b39284e303522fdc178059fe60d0e9917b811bd5066fb63260fd198a97c"
+    }
+  ],
+  "sourceContext": {
+    "classification": "filesystem-review-only-not-retail-build-provenance",
+    "files": [
+      {
+        "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/qcommon/files.c",
+        "size": 87296,
+        "sha256": "b84cb58a39b2680ac26970a2cc6c6c62a42d95bc53150ea216bf4ac71216d5bc"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/win32/win_main.c",
+        "size": 26994,
+        "sha256": "acafeee72f60058da37cd3207a4fa2d2f3dd02585e7cb2e753b0d4bb755b5dca"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/client/cl_main.c",
+        "size": 77864,
+        "sha256": "afa5f59f90723d4510fc46c34c1cbb5a7e68c4f00fa1af48a19b3ed4bc536942"
+      }
+    ],
+    "review": "FS_FOpenFileWrite/Append and FS_SV_FOpenFileWrite use fs_homepath; fs_copyfiles is disabled. Retail writes are independently restricted by a read-only host mount and owned writable root."
+  },
+  "content": {
+    "archives": [
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3",
+        "size": 479493658,
+        "sha256": "7ce8b3910620cd50a09e4f1100f426e8c6180f68895d589f80e6bd95af54bcae"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak1.pk3",
+        "size": 374405,
+        "sha256": "d4ffd60b4b414c3419499e321b6f5c2e933cf082df85823ad2d6ae2f803e1682"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak2.pk3",
+        "size": 7511182,
+        "sha256": "ccae938a2f13a03b24902d675181d516a431699701ed88023a307f34b5bcd58c"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak3.pk3",
+        "size": 276305,
+        "sha256": "d03c0a0e06b99f9ecca2be7389f57faed406e85f7c09b9c56afdfa53ba25e312"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak4.pk3",
+        "size": 9600350,
+        "sha256": "af5f6d5c82fe4440ae0bb660f0648d1fa1731a9e8305a9eb652aa243428697f1"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak5.pk3",
+        "size": 191872,
+        "sha256": "69f87070ca7719e252a3ba97e6483f6663939c987ede550d1268d4d9a07b45bc"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak6.pk3",
+        "size": 7346884,
+        "sha256": "bb4f0ae2bf603b050fb665436d3178ce7c1c20360e67bacf7c14d93daff38daf"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak7.pk3",
+        "size": 320873,
+        "sha256": "de6283ce23e3486a2622c5dbf73d3721a59f24debd380e90f43a97d952fea283"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak8.pk3",
+        "size": 454478,
+        "sha256": "812c9e97f231e89cefede3848c6110b7bd34245093af6f22c2cacde3e6b15663"
+      },
+      {
+        "path": "/home/buzzkill/Projects/qfiles/q3a/missionpack/pak0.pk3",
+        "size": 351623691,
+        "sha256": "fdb5fe4f15f22bd270628d9b3153b733ca4548207722e768051c08c9dbff9135"
+      }
+    ],
+    "order": "For each game directory pk3 names mount in reverse lexical order, and missionpack precedes baseq3. Actual search paths are retained in each engine log.",
+    "selection": "Only selected pakN.pk3 symlinks; existing external configs, q3key, logs and donor executables are excluded."
+  },
+  "isolation": {
+    "writableRoot": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+    "display": ":23173",
+    "tmp": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/tmp",
+    "policy": "bubblewrap read-only root; only artifact root and owned /tmp writable; private PID namespace dies with each process; no Proton launcher; no host display; loopback engine binding"
+  },
+  "displayObservation": {
+    "command": [
+      "/usr/bin/bwrap",
+      "--ro-bind",
+      "/",
+      "/",
+      "--bind",
+      "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+      "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+      "--bind",
+      "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/tmp",
+      "/tmp",
+      "--dev",
+      "/dev",
+      "--proc",
+      "/proc",
+      "--unshare-pid",
+      "--die-with-parent",
+      "--",
+      "/usr/bin/Xvfb",
+      ":23173",
+      "-screen",
+      "0",
+      "640x480x24",
+      "-nolisten",
+      "tcp",
+      "-noreset",
+      "-extension",
+      "GLX"
+    ],
+    "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "LC_ALL": "C",
+      "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+      "LIBGL_ALWAYS_SOFTWARE": "1",
+      "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json"
+    },
+    "startedAt": "2026-09-11T05:45:49.620Z",
+    "durationMs": 80551.565327,
+    "pid": 1588529,
+    "exitCode": 143,
+    "timeout": false,
+    "stdout": "",
+    "stderr": "_XSERVTransmkdir: Owner of /tmp/.X11-unix should be set to root\nThe XKEYBOARD keymap compiler (xkbcomp) reports:\n> Warning:          Multiple symbols for level 1/group 1 on key <FK23>\n>                   Using F23, ignoring XF86TouchpadOff\n> Warning:          Symbol map for key <FK23> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Symbol map for key <FK24> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOn\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOff\n> Warning:          Could not resolve keysym XF86ActionOnSelection\n> Warning:          Could not resolve keysym XF86ContextualInsert\n> Warning:          Could not resolve keysym XF86ContextualQuery\nErrors from xkbcomp are not fatal to the X server\n"
+  },
+  "cases": [
+    {
+      "edition": "baseq3",
+      "mode": "dedicated",
+      "map": "q3dm1",
+      "directory": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated",
+      "requestedSettings": {
+        "fs_basepath": "Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q3-retail\\capture-dHpkgG\\content",
+        "fs_homepath": "Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q3-retail\\capture-dHpkgG\\baseq3-dedicated\\profile",
+        "fs_cdpath": "",
+        "fs_copyfiles": "0",
+        "fs_game": "",
+        "dedicated": "1",
+        "net_ip": "127.0.0.1",
+        "net_port": "38068",
+        "sv_master1": "",
+        "sv_pure": "0",
+        "sv_maxclients": "4",
+        "sv_hostname": "q3-retail-baseq3",
+        "cl_motd": "0",
+        "cl_allowDownload": "0",
+        "sv_allowDownload": "0",
+        "rconPassword": "reference-private",
+        "logfile": "2",
+        "developer": "1",
+        "bot_enable": "0",
+        "com_hunkMegs": "128",
+        "com_zoneMegs": "32",
+        "com_maxfps": "60",
+        "r_mode": "3",
+        "r_fullscreen": "0",
+        "r_allowSoftwareGL": "1",
+        "r_colorbits": "24",
+        "r_depthbits": "24",
+        "r_stencilbits": "8",
+        "r_swapInterval": "0",
+        "s_initsound": "0",
+        "in_mouse": "0",
+        "g_gametype": "0",
+        "g_doWarmup": "0",
+        "g_log": "games.log",
+        "g_logSync": "1",
+        "vm_game": "1",
+        "vm_cgame": "1",
+        "vm_ui": "1",
+        "com_introplayed": "1"
+      },
+      "input": "map q3dm1\nstatus\nserverinfo\nfs_homepath\nfs_basepath\nprotocol\nsv_fps\necho Q3_RETAIL_READY\n",
+      "observation": {
+        "command": [
+          "/usr/bin/bwrap",
+          "--ro-bind",
+          "/",
+          "/",
+          "--bind",
+          "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+          "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+          "--bind",
+          "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/tmp",
+          "/tmp",
+          "--dev",
+          "/dev",
+          "--proc",
+          "/proc",
+          "--unshare-pid",
+          "--die-with-parent",
+          "--",
+          "/home/buzzkill/.local/share/Steam/steamapps/common/Proton - Experimental/files/bin/wine",
+          "Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q3-retail\\capture-dHpkgG\\bin\\quake3.exe",
+          "+set",
+          "fs_basepath",
+          "Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q3-retail\\capture-dHpkgG\\content",
+          "+set",
+          "fs_homepath",
+          "Z:\\home\\buzzkill\\Projects\\quake-typescript\\.artifacts\\q3-retail\\capture-dHpkgG\\baseq3-dedicated\\profile",
+          "+set",
+          "fs_cdpath",
+          "",
+          "+set",
+          "fs_copyfiles",
+          "0",
+          "+set",
+          "fs_game",
+          "",
+          "+set",
+          "dedicated",
+          "1",
+          "+set",
+          "net_ip",
+          "127.0.0.1",
+          "+set",
+          "net_port",
+          "38068",
+          "+set",
+          "sv_master1",
+          "",
+          "+set",
+          "sv_pure",
+          "0",
+          "+set",
+          "sv_maxclients",
+          "4",
+          "+set",
+          "sv_hostname",
+          "q3-retail-baseq3",
+          "+set",
+          "cl_motd",
+          "0",
+          "+set",
+          "cl_allowDownload",
+          "0",
+          "+set",
+          "sv_allowDownload",
+          "0",
+          "+set",
+          "rconPassword",
+          "reference-private",
+          "+set",
+          "logfile",
+          "2",
+          "+set",
+          "developer",
+          "1",
+          "+set",
+          "bot_enable",
+          "0",
+          "+set",
+          "com_hunkMegs",
+          "128",
+          "+set",
+          "com_zoneMegs",
+          "32",
+          "+set",
+          "com_maxfps",
+          "60",
+          "+set",
+          "r_mode",
+          "3",
+          "+set",
+          "r_fullscreen",
+          "0",
+          "+set",
+          "r_allowSoftwareGL",
+          "1",
+          "+set",
+          "r_colorbits",
+          "24",
+          "+set",
+          "r_depthbits",
+          "24",
+          "+set",
+          "r_stencilbits",
+          "8",
+          "+set",
+          "r_swapInterval",
+          "0",
+          "+set",
+          "s_initsound",
+          "0",
+          "+set",
+          "in_mouse",
+          "0",
+          "+set",
+          "g_gametype",
+          "0",
+          "+set",
+          "g_doWarmup",
+          "0",
+          "+set",
+          "g_log",
+          "games.log",
+          "+set",
+          "g_logSync",
+          "1",
+          "+set",
+          "vm_game",
+          "1",
+          "+set",
+          "vm_cgame",
+          "1",
+          "+set",
+          "vm_ui",
+          "1",
+          "+set",
+          "com_introplayed",
+          "1",
+          "+exec",
+          "reference.cfg"
+        ],
+        "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated",
+        "environment": {
+          "PATH": "/usr/bin:/bin",
+          "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/wine-home",
+          "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/wine-prefix",
+          "WINEDEBUG": "-all",
+          "WINEDLLOVERRIDES": "mscoree,mshtml=",
+          "DISPLAY": ":23173",
+          "LC_ALL": "C",
+          "TZ": "UTC",
+          "LIBGL_ALWAYS_SOFTWARE": "1",
+          "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe",
+          "XDG_CACHE_HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/cache"
+        },
+        "startedAt": "2026-09-11T05:45:50.125Z",
+        "durationMs": 80043.165748,
+        "pid": 1588533,
+        "exitCode": 143,
+        "timeout": false,
+        "stdout": "",
+        "stderr": "wine: created the configuration directory '/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/wine-prefix'\nwineserver: using server-side synchronization.\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\nXlib:  extension \"GLX\" missing on display \":23173\".\n"
+      },
+      "qualification": {
+        "mapInitialized": false,
+        "vmExecuted": false,
+        "protocolReplies": 0,
+        "demoRecorded": false,
+        "renderFrames": 0
+      },
+      "failure": "Missing Q3_RETAIL_READY: ",
+      "queries": [],
+      "outputs": [
+        {
+          "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/profile/baseq3/q3config.cfg",
+          "size": 33,
+          "sha256": "e92a72a909918639ee186f918f8a3868c8aab1722f3a2c2a76d0670134ac3631"
+        },
+        {
+          "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/profile/baseq3/reference.cfg",
+          "size": 89,
+          "sha256": "d885e11e1d5b572ae0697414d37d90367ce14748867b34335ef940cb76005a90"
+        }
+      ],
+      "log": "",
+      "home": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/profile",
+      "environment": {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/wine-home",
+        "WINEPREFIX": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/wine-prefix",
+        "WINEDEBUG": "-all",
+        "WINEDLLOVERRIDES": "mscoree,mshtml=",
+        "DISPLAY": ":23173",
+        "LC_ALL": "C",
+        "TZ": "UTC",
+        "LIBGL_ALWAYS_SOFTWARE": "1",
+        "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe",
+        "XDG_CACHE_HOME": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/baseq3-dedicated/cache"
+      }
+    }
+  ],
+  "failure": null,
+  "limits": [
+    "No retail build source provenance is asserted. Source hashes describe only the filesystem safety review.",
+    "This bounded independent capture does not establish a TypeScript implementation comparison, campaign completion, multi-seat behavior, audio, or performance acceptance.",
+    "Requested cvars and input schedules are retained alongside actual logs and output identities; wall-clock timing is environment-specific."
+  ]
+}

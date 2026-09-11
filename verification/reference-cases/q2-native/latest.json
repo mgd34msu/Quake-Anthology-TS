@@ -1,0 +1,1754 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-11T05:40:34.746Z",
+  "command": [
+    "/home/buzzkill/.bun/bin/bun",
+    "/home/buzzkill/Projects/quake-typescript/tools/reference/q2-native/capture.ts"
+  ],
+  "artifactDirectory": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z",
+  "runtime": {
+    "path": "/home/buzzkill/.bun/bin/bun",
+    "size": 92752752,
+    "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+  },
+  "tools": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2-native/capture.ts",
+      "size": 16308,
+      "sha256": "998ba8af9d31cd19f30d8736066ddef34f2c8101cf929f459bac109a2f889aab"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2-native/content.ts",
+      "size": 2352,
+      "sha256": "f3210d93dcb0f39ef5ac418ce31b6b175021281d4d4aa0d37aae2c63c7c46af3"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2-native/process.ts",
+      "size": 3147,
+      "sha256": "6ae81d09a7961d131fcb7f33f3c15bab58757edba8b469309442c815298578c3"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q2-native/udp.ts",
+      "size": 1111,
+      "sha256": "fad292dbae8201a4b1720a28160a19885f80ed0b9af6cdeb2acf7a5bad5b28fb"
+    }
+  ],
+  "provenance": {
+    "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/provenance.json",
+    "size": 102608,
+    "sha256": "3c1bf050ed37dd11b820c11014d16bd0c42a2c57a99e103f14957eeebc21786d"
+  },
+  "sourceAttribution": "Existing binaries were not rebuilt. Build records, current compilation inputs and source inventory do not prove that current source bytes produced these binaries. Header dependencies are represented by the existing Ninja dependency record, not a reconstructed source closure. No current-HEAD build equivalence is claimed.",
+  "content": [
+    {
+      "id": "classic",
+      "archivesLowToHighPriority": [
+        {
+          "path": "/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak",
+          "size": 183997730,
+          "sha256": "1ce99eb11e7e251ccdf690858effba79836dbe5e32a4083ad00a13ecda491679"
+        },
+        {
+          "path": "/home/buzzkill/Projects/qfiles/q2/baseq2/pak1.pak",
+          "size": 12992754,
+          "sha256": "678210ecd1b27dde1c645660333a1a7b139d849425793859657f804d379b62ad"
+        },
+        {
+          "path": "/home/buzzkill/Projects/qfiles/q2/baseq2/pak2.pak",
+          "size": 45055,
+          "sha256": "cb88d584ef939d08e24433a6cf86274737303fac2bbd94415927a75e6b269dd8"
+        }
+      ],
+      "entries": [
+        {
+          "archive": "/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak",
+          "name": "maps/base1.bsp",
+          "offset": 13035430,
+          "size": 1991536,
+          "sha256": "14a77bafa8da58e8aad91f57feb5adbac4c4ed8168b5c251b778793b3b515eef"
+        },
+        {
+          "archive": "/home/buzzkill/Projects/qfiles/q2/baseq2/pak1.pak",
+          "name": "maps/q2dm1.bsp",
+          "offset": 12,
+          "size": 987960,
+          "sha256": "2345b0b4a955adb5f7e549acdd5b604fc25de1d617a6ea19d3a560c01400e5cf"
+        }
+      ],
+      "mount": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data",
+      "selection": "Only explicitly listed archive symlinks; no corpus loose files or user configs."
+    },
+    {
+      "id": "rerelease",
+      "archivesLowToHighPriority": [
+        {
+          "path": "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak",
+          "size": 1709196700,
+          "sha256": "bfc341d7508b275413511bea5fc092ccc7aa5ab1989e657516894bd5f0fc883c"
+        }
+      ],
+      "entries": [
+        {
+          "archive": "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak",
+          "name": "maps/base1.bsp",
+          "offset": 35892776,
+          "size": 9271276,
+          "sha256": "de7354b8b3f19c6370f5198d44a6549a99ddef7dffe95844593411765aa0a55c"
+        },
+        {
+          "archive": "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak",
+          "name": "maps/q2dm1.bsp",
+          "offset": 300413460,
+          "size": 2874472,
+          "sha256": "fdec16c999e6275ffc461e85f273db259804383fd54ffdf3e2d5ec9a89e9818e"
+        }
+      ],
+      "mount": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data",
+      "selection": "Only explicitly listed archive symlinks; no corpus loose files or user configs."
+    }
+  ],
+  "display": {
+    "binary": {
+      "path": "/usr/bin/Xvfb",
+      "size": 1973888,
+      "sha256": "567a9b39284e303522fdc178059fe60d0e9917b811bd5066fb63260fd198a97c"
+    },
+    "command": [
+      "/usr/bin/Xvfb",
+      ":18378",
+      "-screen",
+      "0",
+      "640x480x24",
+      "-nolisten",
+      "tcp",
+      "-noreset"
+    ],
+    "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z",
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "LC_ALL": "C",
+      "TZ": "UTC"
+    },
+    "pid": 1575443,
+    "startedAt": "2026-09-11T05:40:14.189Z",
+    "durationMs": 20556.560209,
+    "exitCode": 0,
+    "timeout": false,
+    "events": [],
+    "stdout": "",
+    "stderr": "The XKEYBOARD keymap compiler (xkbcomp) reports:\n> Warning:          Multiple symbols for level 1/group 1 on key <FK23>\n>                   Using F23, ignoring XF86TouchpadOff\n> Warning:          Symbol map for key <FK23> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Symbol map for key <FK24> redefined\n>                   Using last definition for conflicting fields\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOn\n> Warning:          Could not resolve keysym XF86ElectronicPrivacyScreenOff\n> Warning:          Could not resolve keysym XF86ActionOnSelection\n> Warning:          Could not resolve keysym XF86ContextualInsert\n> Warning:          Could not resolve keysym XF86ContextualQuery\nErrors from xkbcomp are not fatal to the X server\n",
+    "cleanup": "reaped"
+  },
+  "cases": [
+    {
+      "id": "classic-dedicated-network",
+      "classification": "independent-executable-observation",
+      "mode": "dedicated-network",
+      "port": 52625,
+      "failure": null,
+      "checks": {
+        "checkpointSequenceCompleted": true,
+        "screenshots640x480": true,
+        "demoWritten": true,
+        "loopbackReply": true,
+        "nativeClientConnected": true,
+        "softwareRendererObserved": true,
+        "saveAndReloadObserved": true
+      },
+      "observed": true,
+      "queries": [
+        {
+          "destination": "127.0.0.1:52625",
+          "request": "status",
+          "sentHex": "ffffffff7374617475730a",
+          "response": [
+            {
+              "hex": "ffffffff7072696e740a5c6368656174735c305c64656174686d617463685c315c646d666c6167735c31365c667261676c696d69745c305c67616d65646174655c41756720333020323032365c67616d656e616d655c6261736571325c686f73746e616d655c71322d6e61746976652d636c61737369635c6d61706e616d655c7132646d315c6d6178636c69656e74735c345c6d6178737065637461746f72735c345c6e656564706173735c305c706f72745c35323632355c70726f746f636f6c5c313033385c74696d656c696d69745c305c76657273696f6e5c7132726570726f6465642072343631327e6461666130303463204175672033302032303236204c696e7578207838365f36340a",
+              "text": "ÿÿÿÿprint\n\\cheats\\0\\deathmatch\\1\\dmflags\\16\\fraglimit\\0\\gamedate\\Aug 30 2026\\gamename\\baseq2\\hostname\\q2-native-classic\\mapname\\q2dm1\\maxclients\\4\\maxspectators\\4\\needpass\\0\\port\\52625\\protocol\\1038\\timelimit\\0\\version\\q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\n",
+              "from": "127.0.0.1",
+              "port": 52625,
+              "elapsedMs": 0.20010400000001027
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:52625",
+          "request": "info 34",
+          "sentHex": "ffffffff696e666f2033340a",
+          "response": [
+            {
+              "hex": "ffffffff696e666f0a71322d6e61746976652d636c6173736963202020207132646d312020302f20340a",
+              "text": "ÿÿÿÿinfo\nq2-native-classic    q2dm1  0/ 4\n",
+              "from": "127.0.0.1",
+              "port": 52625,
+              "elapsedMs": 0.08763199999998506
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:52625",
+          "request": "getchallenge",
+          "sentHex": "ffffffff6765746368616c6c656e67650a",
+          "response": [
+            {
+              "hex": "ffffffff6368616c6c656e6765203132333739353833393420703d31303338",
+              "text": "ÿÿÿÿchallenge 1237958394 p=1038",
+              "from": "127.0.0.1",
+              "port": 52625,
+              "elapsedMs": 0.376577999999995
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:52625",
+          "request": "status",
+          "sentHex": "ffffffff7374617475730a",
+          "response": [
+            {
+              "hex": "ffffffff7072696e740a5c6368656174735c305c64656174686d617463685c315c646d666c6167735c31365c667261676c696d69745c305c67616d65646174655c41756720333020323032365c67616d656e616d655c6261736571325c686f73746e616d655c71322d6e61746976652d636c61737369635c6d61706e616d655c7132646d315c6d6178636c69656e74735c345c6d6178737065637461746f72735c345c6e656564706173735c305c706f72745c35323632355c70726f746f636f6c5c313033385c74696d656c696d69745c305c76657273696f6e5c7132726570726f6465642072343631327e6461666130303463204175672033302032303236204c696e7578207838365f36340a30203420226e61746976652d7265666572656e63220a",
+              "text": "ÿÿÿÿprint\n\\cheats\\0\\deathmatch\\1\\dmflags\\16\\fraglimit\\0\\gamedate\\Aug 30 2026\\gamename\\baseq2\\hostname\\q2-native-classic\\mapname\\q2dm1\\maxclients\\4\\maxspectators\\4\\needpass\\0\\port\\52625\\protocol\\1038\\timelimit\\0\\version\\q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\n0 4 \"native-referenc\"\n",
+              "from": "127.0.0.1",
+              "port": 52625,
+              "elapsedMs": 0.15523300000040763
+            }
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "name": "client",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2repro",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "52625",
+            "+set",
+            "hostname",
+            "q2-native-classic",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client",
+            "+set",
+            "deathmatch",
+            "0",
+            "+set",
+            "s_enable",
+            "0",
+            "+set",
+            "cl_autopause",
+            "0",
+            "+set",
+            "cl_maxfps",
+            "60",
+            "+set",
+            "cl_async",
+            "0",
+            "+set",
+            "vid_driver",
+            "x11",
+            "+set",
+            "vid_geometry",
+            "640x480",
+            "+set",
+            "vid_fullscreen",
+            "0",
+            "+set",
+            "r_screenshot_async",
+            "0",
+            "+set",
+            "r_screenshot_format",
+            "png",
+            "+set",
+            "con_notifytime",
+            "0",
+            "+set",
+            "name",
+            "native-reference",
+            "+set",
+            "cl_protocol",
+            "0",
+            "+connect",
+            "127.0.0.1:52625",
+            "+echo",
+            "NATIVE_CLIENT_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575458,
+          "startedAt": "2026-09-11T05:40:14.410Z",
+          "durationMs": 4141.9526399999995,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 101.18225700000005,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_READY"
+            },
+            {
+              "elapsedMs": 2601.938974,
+              "kind": "stdin",
+              "text": "strings\nviewpos\nrecord native-reference\necho NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 2627.406215,
+              "kind": "checkpoint",
+              "text": "NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 2927.640029,
+              "kind": "stdin",
+              "text": "screenshot png\n+forward\necho NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 2953.028708,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3353.327047,
+              "kind": "stdin",
+              "text": "-forward\nviewpos\nscreenshot png\necho NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3378.8622490000002,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3715.3741240000004,
+              "kind": "stdin",
+              "text": "stop\necho NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 3740.705662,
+              "kind": "checkpoint",
+              "text": "NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 3941.0504260000002,
+              "kind": "stdin",
+              "text": "quit"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nFailed to load/parse mapdb.json[unknown location]: Couldn't load file \"mapdb.json\"\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak2.pak (2 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak1.pak (279 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak0.pak (3307 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2\nbuiltin (1 files)\n3588 files in PAK files\n-----------------------\nExecing default.cfg\nExecing autoexec.cfg\n------- R_Init -------\nUsing video driver: x11\nGLX_EXT_swap_control not found\nUsing GLSL rendering backend.\n----------------------\nUnknown keyword 'b'\nMenu entry without 'end' terminator\nCouldn't load pics/damage_indicator.pcx: No such file or directory\nSound initialization disabled.\nXInput2 mouse initialized\nRequesting challenge... 1\nNATIVE_CLIENT_READY\n====== Q2REPRO initialized ======\n\nq2repro r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\nRequesting connection... 2\nConnected to 127.0.0.1:52625 (protocol 1038).\nThe Edge\nCouldn't load pics/carousel/selected.pcx: No such file or directory\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\nnative-referenc entered the game\nGL_VENDOR: Mesa\nGL_RENDERER: llvmpipe (LLVM 22.1.8, 256 bits)\nGL_VERSION: 4.6 (Compatibility Profile) Mesa 26.2.1-arch1.1\nGL_SHADING_LANGUAGE_VERSION: 4.60\nGL_MAX_TEXTURE_SIZE: 16384\nGL_MAX_TEXTURE_UNITS: 8\nGL_MAX_TEXTURE_MAX_ANISOTROPY: 16\nGL_PFD: color(24-bit) Z(24-bit) stencil(8-bit)\n(1552 600 382) : 135\nRecording client demo to demos/native-reference.dm2.\nNATIVE_RECORD_REQUESTED\nNATIVE_FORWARD_START\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/screenshots/quake000.png\n(1500 649 382) : 135\nNATIVE_FORWARD_STOP\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/screenshots/quake001.png\nStopped demo (7 kB).\nNATIVE_CAPTURE_DONE\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        },
+        {
+          "name": "dedicated",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2reproded",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "52625",
+            "+set",
+            "hostname",
+            "q2-native-classic",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/server",
+            "+set",
+            "deathmatch",
+            "1",
+            "+set",
+            "maxclients",
+            "4",
+            "+map",
+            "q2dm1",
+            "+status",
+            "+serverinfo",
+            "+echo",
+            "NATIVE_SERVER_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575457,
+          "startedAt": "2026-09-11T05:40:14.353Z",
+          "durationMs": 4200.590689,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 25.931849999999997,
+              "kind": "checkpoint",
+              "text": "NATIVE_SERVER_READY"
+            },
+            {
+              "elapsedMs": 3736.2582820000002,
+              "kind": "stdin",
+              "text": "status\nstatus p\nstatus t\nsv_fps\necho NATIVE_CLIENT_STATUS"
+            },
+            {
+              "elapsedMs": 3761.8572660000004,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_STATUS"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nFailed to load/parse mapdb.json[unknown location]: Couldn't load file \"mapdb.json\"\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/server/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak2.pak (2 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak1.pak (279 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak0.pak (3307 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2\n3588 files in PAK files\n-----------------------\nExecing default.cfg\nExecing autoexec.cfg\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so\n==== InitGame ====\n------- Server Initialization -------\nSpawnServer: q2dm1\n0 entities inhibited\n0 teams with 0 entities\n-------------------------------------\nCurrent map: q2dm1\n\nNo UDP clients.\n\nNo TCP clients.\n\nServer info settings:\ncheats               0\ndeathmatch           1\ndmflags              16\nfraglimit            0\ngamedate             Aug 30 2026\ngamename             baseq2\nhostname             q2-native-classic\nmapname              q2dm1\nmaxclients           4\nmaxspectators        4\nneedpass             0\nport                 52625\nprotocol             1038\ntimelimit            0\nversion              q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\nNATIVE_SERVER_READY\n====== Q2REPRO initialized ======\n\nq2reproded r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\nnative-referenc connected\nnative-referenc[127.0.0.1:34110]: q2repro r4612~dafa004c Aug 30 2026 Linux x86_64\nnative-referenc entered the game\nCurrent map: q2dm1\n\nnum score ping name            lastmsg address                rate pr fps\n--- ----- ---- --------------- ------- --------------------- ----- -- ---\n  0     0    4 native-referenc       0 127.0.0.1:34110       15000 1038   0\n\nNo TCP clients.\n\nCurrent map: q2dm1\n\nnum name            major minor msglen zlib chan\n--- --------------- ----- ----- ------ ---- ----\n  0 native-referenc  1038     0   1390  yes  new\n\nNo TCP clients.\n\nCurrent map: q2dm1\n\nnum name            idle time\n--- --------------- ---- --------\n  0 native-referenc    0 00.04\n\nNo TCP clients.\n\n\"sv_fps\" is \"40\"\nNATIVE_CLIENT_STATUS\nnative-referenc[127.0.0.1:34110] disconnected\nnative-referenc disconnected\nTerminated\n==== ShutdownGame ====\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/server/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/server/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/server/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/.conhistory",
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/demos/native-reference.dm2",
+            "size": 7752,
+            "sha256": "1540b638da1bb3fccd17da4e0a6ba41973c536b39ae487fec6a48f24f1113c0d"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/q2reproconfig.cfg",
+            "size": 2880,
+            "sha256": "279067c8a08cf7e249aa96076a19ec728feaf6f8b94c08c2d0461dd1929ebb89"
+          }
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/screenshots/quake000.png",
+            "size": 136105,
+            "sha256": "fa605e1bd22076fb8b8fcf6ac7d082c51e5cb89942e187c273fbb5cefde0dbc3"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/dedicated-network/client/baseq2/screenshots/quake001.png",
+            "size": 139113,
+            "sha256": "9ebd8abafaf0ded5b6de8e3e1562bc50a13ccb74244f891b485f1e06e31d2012"
+          },
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "limitations": [
+        "Input durations and checkpoints use wall-clock scheduling; they are not a deterministic simulation clock.",
+        "Screenshots are native llvmpipe observations; no TypeScript renderer comparison or image tolerance is established.",
+        "Demo files contain native server messages; this lane records their bytes without claiming complete protocol decoding.",
+        "A save/load request is accepted only when its console and files show success; unsupported game save formats remain unsupported."
+      ]
+    },
+    {
+      "id": "classic-singleplayer-save",
+      "classification": "independent-executable-observation",
+      "mode": "singleplayer-save",
+      "port": 40648,
+      "failure": null,
+      "checks": {
+        "checkpointSequenceCompleted": true,
+        "screenshots640x480": true,
+        "demoWritten": true,
+        "loopbackReply": true,
+        "nativeClientConnected": true,
+        "softwareRendererObserved": true,
+        "saveAndReloadObserved": true
+      },
+      "observed": true,
+      "queries": [],
+      "processes": [
+        {
+          "name": "client",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2repro",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "40648",
+            "+set",
+            "hostname",
+            "q2-native-classic",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client",
+            "+set",
+            "deathmatch",
+            "0",
+            "+set",
+            "s_enable",
+            "0",
+            "+set",
+            "cl_autopause",
+            "0",
+            "+set",
+            "cl_maxfps",
+            "60",
+            "+set",
+            "cl_async",
+            "0",
+            "+set",
+            "vid_driver",
+            "x11",
+            "+set",
+            "vid_geometry",
+            "640x480",
+            "+set",
+            "vid_fullscreen",
+            "0",
+            "+set",
+            "r_screenshot_async",
+            "0",
+            "+set",
+            "r_screenshot_format",
+            "png",
+            "+set",
+            "con_notifytime",
+            "0",
+            "+set",
+            "name",
+            "native-reference",
+            "+set",
+            "cl_protocol",
+            "0",
+            "+map",
+            "base1",
+            "+echo",
+            "NATIVE_CLIENT_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575582,
+          "startedAt": "2026-09-11T05:40:18.562Z",
+          "durationMs": 5285.677185,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 303.81927799999994,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_READY"
+            },
+            {
+              "elapsedMs": 2804.377826,
+              "kind": "stdin",
+              "text": "strings\nviewpos\nrecord native-reference\necho NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 2829.909038,
+              "kind": "checkpoint",
+              "text": "NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 3130.180963,
+              "kind": "stdin",
+              "text": "screenshot png\n+forward\necho NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3155.765246,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3555.9653829999997,
+              "kind": "stdin",
+              "text": "-forward\nviewpos\nscreenshot png\necho NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3581.5750359999993,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3881.6936190000006,
+              "kind": "stdin",
+              "text": "save native-reference\necho NATIVE_SAVE_REQUESTED"
+            },
+            {
+              "elapsedMs": 3907.246371,
+              "kind": "checkpoint",
+              "text": "NATIVE_SAVE_REQUESTED"
+            },
+            {
+              "elapsedMs": 4207.381563,
+              "kind": "stdin",
+              "text": "load native-reference\necho NATIVE_LOAD_REQUESTED"
+            },
+            {
+              "elapsedMs": 4333.575732,
+              "kind": "checkpoint",
+              "text": "NATIVE_LOAD_REQUESTED"
+            },
+            {
+              "elapsedMs": 4834.051667000001,
+              "kind": "stdin",
+              "text": "viewpos\nstatus\nscreenshot png\necho NATIVE_RELOAD_OBSERVED"
+            },
+            {
+              "elapsedMs": 4859.680431,
+              "kind": "checkpoint",
+              "text": "NATIVE_RELOAD_OBSERVED"
+            },
+            {
+              "elapsedMs": 4859.694042,
+              "kind": "stdin",
+              "text": "stop\necho NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 4885.120361,
+              "kind": "checkpoint",
+              "text": "NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 5085.213159,
+              "kind": "stdin",
+              "text": "quit"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nFailed to load/parse mapdb.json[unknown location]: Couldn't load file \"mapdb.json\"\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak2.pak (2 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak1.pak (279 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2/pak0.pak (3307 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/data/baseq2\nbuiltin (1 files)\n3588 files in PAK files\n-----------------------\nExecing default.cfg\nExecing autoexec.cfg\n------- R_Init -------\nUsing video driver: x11\nGLX_EXT_swap_control not found\nUsing GLSL rendering backend.\n----------------------\nUnknown keyword 'b'\nMenu entry without 'end' terminator\nCouldn't load pics/damage_indicator.pcx: No such file or directory\nSound initialization disabled.\nXInput2 mouse initialized\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so\n==== InitGame ====\nGame supports Q2PRO enhanced savegames.\n------- Server Initialization -------\nSpawnServer: base1\n28 entities inhibited\n1 teams with 2 entities\n-------------------------------------\n====== Q2REPRO initialized ======\n\nq2repro r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\nRequesting connection... 1\nConnected to loopback (protocol 1038).\nOuter Base\nCouldn't load pics/carousel/selected.pcx: No such file or directory\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\nNATIVE_CLIENT_READY\nGL_VENDOR: Mesa\nGL_RENDERER: llvmpipe (LLVM 22.1.8, 256 bits)\nGL_VERSION: 4.6 (Compatibility Profile) Mesa 26.2.1-arch1.1\nGL_SHADING_LANGUAGE_VERSION: 4.60\nGL_MAX_TEXTURE_SIZE: 16384\nGL_MAX_TEXTURE_UNITS: 8\nGL_MAX_TEXTURE_MAX_ANISOTROPY: 16\nGL_PFD: color(24-bit) Z(24-bit) stencil(8-bit)\n(128 -320 46) : 135\nRecording client demo to demos/native-reference.dm2.\nNATIVE_RECORD_REQUESTED\nNATIVE_FORWARD_START\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake000.png\n(74 -266 47) : 135\nNATIVE_FORWARD_STOP\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake001.png\nGame saved.\nNATIVE_SAVE_REQUESTED\n==== ShutdownGame ====\nStopped demo (8 kB).\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/gamex86_64.so\n==== InitGame ====\nGame supports Q2PRO enhanced savegames.\n------- Server Initialization -------\nSpawnServer: base1\n28 entities inhibited\n1 teams with 2 entities\n-------------------------------------\nRequesting connection... 1\nConnected to loopback (protocol 1038).\nOuter Base\nCouldn't load pics/carousel/selected.pcx: No such file or directory\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\nNATIVE_LOAD_REQUESTED\n(58 -249 46) : 135\nCurrent map: base1\n\nnum score ping name            lastmsg address                rate pr fps\n--- ----- ---- --------------- ------- --------------------- ----- -- ---\n  0     0    0 native-referenc       0 loopback                  0 1038   0\n\nNo TCP clients.\n\nNATIVE_RELOAD_OBSERVED\nNot recording a demo.\nNATIVE_CAPTURE_DONE\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake002.png\n==== ShutdownGame ====\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/server/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/server/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/server/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/.conhistory",
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/demos/native-reference.dm2",
+            "size": 8759,
+            "sha256": "ba34d60e0f10ed47747115b504544962bcf0420228b4cc66fcc15a54da1de8b7"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/q2reproconfig.cfg",
+            "size": 2904,
+            "sha256": "523319006df08daa803537e1c4710bf85ee2ea199913811ecd87fb0df918548c"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/.current/base1.sav",
+            "size": 24298,
+            "sha256": "b706c65a63293fa588cd5251ddbfefa7643c2dbea7a8deac1fdef024b654f481"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/.current/base1.sv2",
+            "size": 5321,
+            "sha256": "ec429476174daf83a8d65ec14b078b23077ab7ac812b8fa83499dda1a178cb32"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/.current/game.ssv",
+            "size": 458,
+            "sha256": "64a1401bffb81e8e435c7cfb0cab2a4d87938ece77960ca7762ed40a89638d7a"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/.current/server.ssv",
+            "size": 710,
+            "sha256": "e90f406ef76b3da6c982b8c3abc6e17fe14df57249efd56c4451aa76589250be"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/native-reference/base1.sav",
+            "size": 24298,
+            "sha256": "b706c65a63293fa588cd5251ddbfefa7643c2dbea7a8deac1fdef024b654f481"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/native-reference/base1.sv2",
+            "size": 5321,
+            "sha256": "ec429476174daf83a8d65ec14b078b23077ab7ac812b8fa83499dda1a178cb32"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/native-reference/game.ssv",
+            "size": 458,
+            "sha256": "64a1401bffb81e8e435c7cfb0cab2a4d87938ece77960ca7762ed40a89638d7a"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/save/native-reference/server.ssv",
+            "size": 710,
+            "sha256": "e90f406ef76b3da6c982b8c3abc6e17fe14df57249efd56c4451aa76589250be"
+          }
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake000.png",
+            "size": 374640,
+            "sha256": "5faf2ffb8d36b2d994fd2dc5f5518fb197cfb5103918066400c2ba586da6c249"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake001.png",
+            "size": 342424,
+            "sha256": "1245bab319ededf51df293c03ad0915b45cf7348a0cabede6044cfd26746ae41"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/classic/singleplayer-save/client/baseq2/screenshots/quake002.png",
+            "size": 260990,
+            "sha256": "98cfd956b541810828f63a9e3319a982da77857fde9c46474f05006c649fa595"
+          },
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "limitations": [
+        "Input durations and checkpoints use wall-clock scheduling; they are not a deterministic simulation clock.",
+        "Screenshots are native llvmpipe observations; no TypeScript renderer comparison or image tolerance is established.",
+        "Demo files contain native server messages; this lane records their bytes without claiming complete protocol decoding.",
+        "A save/load request is accepted only when its console and files show success; unsupported game save formats remain unsupported."
+      ]
+    },
+    {
+      "id": "rerelease-dedicated-network",
+      "classification": "independent-executable-observation",
+      "mode": "dedicated-network",
+      "port": 54874,
+      "failure": null,
+      "checks": {
+        "checkpointSequenceCompleted": true,
+        "screenshots640x480": true,
+        "demoWritten": true,
+        "loopbackReply": true,
+        "nativeClientConnected": true,
+        "softwareRendererObserved": true,
+        "saveAndReloadObserved": true
+      },
+      "observed": true,
+      "queries": [
+        {
+          "destination": "127.0.0.1:54874",
+          "request": "status",
+          "sentHex": "ffffffff7374617475730a",
+          "response": [
+            {
+              "hex": "ffffffff7072696e740a5c636170747572656c696d69745c305c6368656174735c305c636f6d7065746974696f6e5c305c6374665c305c64656174686d617463685c315c646d666c6167735c31365c667261676c696d69745c305c67616d656e616d655c6261736571325c686f73746e616d655c71322d6e61746976652d726572656c656173655c68756e74657263616d5c315c6d61706e616d655c7132646d315c6d617463686c6f636b5c315c6d6174636874696d655c32305c6d6178636c69656e74735c345c6d6178737065637461746f72735c345c6e656564706173735c305c706f72745c35343837345c70726f746f636f6c5c313033385c74696d656c696d69745c305c76657273696f6e5c7132726570726f6465642072343631327e6461666130303463204175672033302032303236204c696e7578207838365f36340a",
+              "text": "ÿÿÿÿprint\n\\capturelimit\\0\\cheats\\0\\competition\\0\\ctf\\0\\deathmatch\\1\\dmflags\\16\\fraglimit\\0\\gamename\\baseq2\\hostname\\q2-native-rerelease\\huntercam\\1\\mapname\\q2dm1\\matchlock\\1\\matchtime\\20\\maxclients\\4\\maxspectators\\4\\needpass\\0\\port\\54874\\protocol\\1038\\timelimit\\0\\version\\q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\n",
+              "from": "127.0.0.1",
+              "port": 54874,
+              "elapsedMs": 0.19454399999995076
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:54874",
+          "request": "info 34",
+          "sentHex": "ffffffff696e666f2033340a",
+          "response": [
+            {
+              "hex": "ffffffff696e666f0a71322d6e61746976652d726572656c65617365202020207132646d312020302f20340a",
+              "text": "ÿÿÿÿinfo\nq2-native-rerelease    q2dm1  0/ 4\n",
+              "from": "127.0.0.1",
+              "port": 54874,
+              "elapsedMs": 0.12410199999976612
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:54874",
+          "request": "getchallenge",
+          "sentHex": "ffffffff6765746368616c6c656e67650a",
+          "response": [
+            {
+              "hex": "ffffffff6368616c6c656e6765203132373033373134323020703d31303338",
+              "text": "ÿÿÿÿchallenge 1270371420 p=1038",
+              "from": "127.0.0.1",
+              "port": 54874,
+              "elapsedMs": 0.09337200000118173
+            }
+          ]
+        },
+        {
+          "destination": "127.0.0.1:54874",
+          "request": "status",
+          "sentHex": "ffffffff7374617475730a",
+          "response": [
+            {
+              "hex": "ffffffff7072696e740a5c636170747572656c696d69745c305c6368656174735c305c636f6d7065746974696f6e5c305c6374665c305c64656174686d617463685c315c646d666c6167735c31365c667261676c696d69745c305c67616d656e616d655c6261736571325c686f73746e616d655c71322d6e61746976652d726572656c656173655c68756e74657263616d5c315c6d61706e616d655c7132646d315c6d617463686c6f636b5c315c6d6174636874696d655c32305c6d6178636c69656e74735c345c6d6178737065637461746f72735c345c6e656564706173735c305c706f72745c35343837345c70726f746f636f6c5c313033385c74696d656c696d69745c305c76657273696f6e5c7132726570726f6465642072343631327e6461666130303463204175672033302032303236204c696e7578207838365f36340a30203220226e61746976652d7265666572656e63220a",
+              "text": "ÿÿÿÿprint\n\\capturelimit\\0\\cheats\\0\\competition\\0\\ctf\\0\\deathmatch\\1\\dmflags\\16\\fraglimit\\0\\gamename\\baseq2\\hostname\\q2-native-rerelease\\huntercam\\1\\mapname\\q2dm1\\matchlock\\1\\matchtime\\20\\maxclients\\4\\maxspectators\\4\\needpass\\0\\port\\54874\\protocol\\1038\\timelimit\\0\\version\\q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\n0 2 \"native-referenc\"\n",
+              "from": "127.0.0.1",
+              "port": 54874,
+              "elapsedMs": 0.16892399999960617
+            }
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "name": "client",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2repro",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "54874",
+            "+set",
+            "hostname",
+            "q2-native-rerelease",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client",
+            "+set",
+            "deathmatch",
+            "0",
+            "+set",
+            "s_enable",
+            "0",
+            "+set",
+            "cl_autopause",
+            "0",
+            "+set",
+            "cl_maxfps",
+            "60",
+            "+set",
+            "cl_async",
+            "0",
+            "+set",
+            "vid_driver",
+            "x11",
+            "+set",
+            "vid_geometry",
+            "640x480",
+            "+set",
+            "vid_fullscreen",
+            "0",
+            "+set",
+            "r_screenshot_async",
+            "0",
+            "+set",
+            "r_screenshot_format",
+            "png",
+            "+set",
+            "con_notifytime",
+            "0",
+            "+set",
+            "name",
+            "native-reference",
+            "+set",
+            "cl_protocol",
+            "0",
+            "+connect",
+            "127.0.0.1:54874",
+            "+echo",
+            "NATIVE_CLIENT_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575789,
+          "startedAt": "2026-09-11T05:40:24.897Z",
+          "durationMs": 4141.852067,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 101.56371500000023,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_READY"
+            },
+            {
+              "elapsedMs": 2602.305700000001,
+              "kind": "stdin",
+              "text": "strings\nviewpos\nrecord native-reference\necho NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 2627.912813000001,
+              "kind": "checkpoint",
+              "text": "NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 2928.169218000001,
+              "kind": "stdin",
+              "text": "screenshot png\n+forward\necho NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 2953.583157000001,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3353.8117650000004,
+              "kind": "stdin",
+              "text": "-forward\nviewpos\nscreenshot png\necho NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3379.330376,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3715.558486,
+              "kind": "stdin",
+              "text": "stop\necho NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 3740.9517450000003,
+              "kind": "checkpoint",
+              "text": "NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 3941.3757800000003,
+              "kind": "stdin",
+              "text": "quit"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2/pak0.pak (14663 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2\nbuiltin (1 files)\n14663 files in PAK files\n-----------------------\nExecing default.cfg\n\"left_trigger\" isn't a valid key\n\"right_trigger\" isn't a valid key\n\"x_button\" isn't a valid key\n\"a_button\" isn't a valid key\n\"b_button\" isn't a valid key\n\"left_stick\" isn't a valid key\n\"right_stick\" isn't a valid key\n\"right_shoulder\" isn't a valid key\n\"left_shoulder\" isn't a valid key\n\"DPAD_LEFT\" isn't a valid key\n\"DPAD_RIGHT\" isn't a valid key\n\"DPAD_UP\" isn't a valid key\nExecing autoexec.cfg\n------- R_Init -------\nUsing video driver: x11\nGLX_EXT_swap_control not found\nUsing GLSL rendering backend.\n----------------------\nUnknown keyword 'b'\nMenu entry without 'end' terminator\nSound initialization disabled.\nXInput2 mouse initialized\nRequesting challenge... 1\nNATIVE_CLIENT_READY\n====== Q2REPRO initialized ======\n\nq2repro r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\nRequesting connection... 2\nConnected to 127.0.0.1:54874 (protocol 1038).\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so\nThe Edge\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\ng_entered_gameGL_VENDOR: Mesa\nGL_RENDERER: llvmpipe (LLVM 22.1.8, 256 bits)\nGL_VERSION: 4.6 (Compatibility Profile) Mesa 26.2.1-arch1.1\nGL_SHADING_LANGUAGE_VERSION: 4.60\nGL_MAX_TEXTURE_SIZE: 16384\nGL_MAX_TEXTURE_UNITS: 8\nGL_MAX_TEXTURE_MAX_ANISOTROPY: 16\nGL_PFD: color(24-bit) Z(24-bit) stencil(8-bit)\n(832 1744 822) : -90\nRecording client demo to demos/native-reference.dm2.\nNATIVE_RECORD_REQUESTED\nNATIVE_FORWARD_START\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/screenshots/quake000.png\n(832 1636 815) : -90\nNATIVE_FORWARD_STOP\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/screenshots/quake001.png\nStopped demo (8 kB).\nNATIVE_CAPTURE_DONE\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        },
+        {
+          "name": "dedicated",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2reproded",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "54874",
+            "+set",
+            "hostname",
+            "q2-native-rerelease",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/server",
+            "+set",
+            "deathmatch",
+            "1",
+            "+set",
+            "maxclients",
+            "4",
+            "+map",
+            "q2dm1",
+            "+status",
+            "+serverinfo",
+            "+echo",
+            "NATIVE_SERVER_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575788,
+          "startedAt": "2026-09-11T05:40:24.841Z",
+          "durationMs": 4201.680679000001,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 25.373908999999912,
+              "kind": "checkpoint",
+              "text": "NATIVE_SERVER_READY"
+            },
+            {
+              "elapsedMs": 3736.117276000001,
+              "kind": "stdin",
+              "text": "status\nstatus p\nstatus t\nsv_fps\necho NATIVE_CLIENT_STATUS"
+            },
+            {
+              "elapsedMs": 3761.6846480000004,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_STATUS"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/server/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2/pak0.pak (14663 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2\n14663 files in PAK files\n-----------------------\nExecing default.cfg\nExecing autoexec.cfg\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so\n==== InitGame ====\n------- Server Initialization -------\nSpawnServer: q2dm1\n0 entities inhibited\n0 teams repaired\n0 teams with 0 entities\n-------------------------------------\nCurrent map: q2dm1\n\nNo UDP clients.\n\nNo TCP clients.\n\nServer info settings:\ncapturelimit         0\ncheats               0\ncompetition          0\nctf                  0\ndeathmatch           1\ndmflags              16\nfraglimit            0\ngamename             baseq2\nhostname             q2-native-rerelease\nhuntercam            1\nmapname              q2dm1\nmatchlock            1\nmatchtime            20\nmaxclients           4\nmaxspectators        4\nneedpass             0\nport                 54874\nprotocol             1038\ntimelimit            0\nversion              q2reproded r4612~dafa004c Aug 30 2026 Linux x86_64\nNATIVE_SERVER_READY\n====== Q2REPRO initialized ======\n\nq2reproded r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\ng_player_connectednative-referenc[127.0.0.1:59304]: q2repro r4612~dafa004c Aug 30 2026 Linux x86_64\ng_entered_gameCurrent map: q2dm1\n\nnum score ping name            lastmsg address                rate pr fps\n--- ----- ---- --------------- ------- --------------------- ----- -- ---\n  0     0    2 native-referenc       3 127.0.0.1:59304       15000 1038   0\n\nNo TCP clients.\n\nCurrent map: q2dm1\n\nnum name            major minor msglen zlib chan\n--- --------------- ----- ----- ------ ---- ----\n  0 native-referenc  1038     0   1390  yes  new\n\nNo TCP clients.\n\nCurrent map: q2dm1\n\nnum name            idle time\n--- --------------- ---- --------\n  0 native-referenc    0 00.03\n\nNo TCP clients.\n\n\"sv_fps\" is \"40\"\nNATIVE_CLIENT_STATUS\nnative-referenc[127.0.0.1:59304] disconnected\nTerminated\n==== ShutdownGame ====\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/server/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/server/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/server/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/.conhistory",
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/demos/native-reference.dm2",
+            "size": 8343,
+            "sha256": "c4e7a3e5e92d8e1478ad97689999d03596cf31004dc6143b13d3683bb04342e2"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/q2reproconfig.cfg",
+            "size": 2445,
+            "sha256": "7bc495703092454b6abc6235f84476787ab7f999e62a4c7a69e158be3132e56b"
+          }
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/screenshots/quake000.png",
+            "size": 408867,
+            "sha256": "e955adba5c6a8feb918c863167d621187eab88a64c59df7736149ec65398b810"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/dedicated-network/client/baseq2/screenshots/quake001.png",
+            "size": 390594,
+            "sha256": "6c7614a3bc73ab61d6bf78588fd5f3f796090a02a840c28e6d067d105f0b28d4"
+          },
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "limitations": [
+        "Input durations and checkpoints use wall-clock scheduling; they are not a deterministic simulation clock.",
+        "Screenshots are native llvmpipe observations; no TypeScript renderer comparison or image tolerance is established.",
+        "Demo files contain native server messages; this lane records their bytes without claiming complete protocol decoding.",
+        "A save/load request is accepted only when its console and files show success; unsupported game save formats remain unsupported."
+      ]
+    },
+    {
+      "id": "rerelease-singleplayer-save",
+      "classification": "independent-executable-observation",
+      "mode": "singleplayer-save",
+      "port": 51167,
+      "failure": null,
+      "checks": {
+        "checkpointSequenceCompleted": true,
+        "screenshots640x480": true,
+        "demoWritten": true,
+        "loopbackReply": true,
+        "nativeClientConnected": true,
+        "softwareRendererObserved": true,
+        "saveAndReloadObserved": true
+      },
+      "observed": true,
+      "queries": [],
+      "processes": [
+        {
+          "name": "client",
+          "command": [
+            "/home/buzzkill/Projects/qsrc/q2repro/build/q2repro",
+            "+set",
+            "basedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data",
+            "+set",
+            "libdir",
+            "/home/buzzkill/Projects/qsrc/q2repro/build",
+            "+set",
+            "sys_forcegamelib",
+            "/home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so",
+            "+set",
+            "public",
+            "0",
+            "+set",
+            "net_ip",
+            "127.0.0.1",
+            "+set",
+            "net_enable_ipv6",
+            "0",
+            "+set",
+            "net_port",
+            "51167",
+            "+set",
+            "hostname",
+            "q2-native-rerelease",
+            "+set",
+            "allow_download",
+            "0",
+            "+set",
+            "logfile",
+            "0",
+            "+set",
+            "sys_console",
+            "1",
+            "+set",
+            "homedir",
+            "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client",
+            "+set",
+            "deathmatch",
+            "0",
+            "+set",
+            "s_enable",
+            "0",
+            "+set",
+            "cl_autopause",
+            "0",
+            "+set",
+            "cl_maxfps",
+            "60",
+            "+set",
+            "cl_async",
+            "0",
+            "+set",
+            "vid_driver",
+            "x11",
+            "+set",
+            "vid_geometry",
+            "640x480",
+            "+set",
+            "vid_fullscreen",
+            "0",
+            "+set",
+            "r_screenshot_async",
+            "0",
+            "+set",
+            "r_screenshot_format",
+            "png",
+            "+set",
+            "con_notifytime",
+            "0",
+            "+set",
+            "name",
+            "native-reference",
+            "+set",
+            "cl_protocol",
+            "0",
+            "+map",
+            "base1",
+            "+echo",
+            "NATIVE_CLIENT_READY"
+          ],
+          "cwd": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save",
+          "environment": {
+            "PATH": "/usr/bin:/bin",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "DISPLAY": ":18378",
+            "SDL_VIDEODRIVER": "x11",
+            "SDL_AUDIODRIVER": "dummy",
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "MESA_LOADER_DRIVER_OVERRIDE": "llvmpipe"
+          },
+          "pid": 1575971,
+          "startedAt": "2026-09-11T05:40:29.047Z",
+          "durationMs": 5688.356251000001,
+          "exitCode": 0,
+          "timeout": false,
+          "events": [
+            {
+              "elapsedMs": 706.1494569999995,
+              "kind": "checkpoint",
+              "text": "NATIVE_CLIENT_READY"
+            },
+            {
+              "elapsedMs": 3206.610585999999,
+              "kind": "stdin",
+              "text": "strings\nviewpos\nrecord native-reference\necho NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 3232.256809999999,
+              "kind": "checkpoint",
+              "text": "NATIVE_RECORD_REQUESTED"
+            },
+            {
+              "elapsedMs": 3532.504054000001,
+              "kind": "stdin",
+              "text": "screenshot png\n+forward\necho NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3558.3510029999998,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_START"
+            },
+            {
+              "elapsedMs": 3958.882136,
+              "kind": "stdin",
+              "text": "-forward\nviewpos\nscreenshot png\necho NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 3984.4422379999996,
+              "kind": "checkpoint",
+              "text": "NATIVE_FORWARD_STOP"
+            },
+            {
+              "elapsedMs": 4284.585010999999,
+              "kind": "stdin",
+              "text": "save native-reference\necho NATIVE_SAVE_REQUESTED"
+            },
+            {
+              "elapsedMs": 4309.692844000001,
+              "kind": "checkpoint",
+              "text": "NATIVE_SAVE_REQUESTED"
+            },
+            {
+              "elapsedMs": 4609.918168,
+              "kind": "stdin",
+              "text": "load native-reference\necho NATIVE_LOAD_REQUESTED"
+            },
+            {
+              "elapsedMs": 4736.740919,
+              "kind": "checkpoint",
+              "text": "NATIVE_LOAD_REQUESTED"
+            },
+            {
+              "elapsedMs": 5237.091852000001,
+              "kind": "stdin",
+              "text": "viewpos\nstatus\nscreenshot png\necho NATIVE_RELOAD_OBSERVED"
+            },
+            {
+              "elapsedMs": 5262.732806,
+              "kind": "checkpoint",
+              "text": "NATIVE_RELOAD_OBSERVED"
+            },
+            {
+              "elapsedMs": 5262.754335999998,
+              "kind": "stdin",
+              "text": "stop\necho NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 5287.842808999998,
+              "kind": "checkpoint",
+              "text": "NATIVE_CAPTURE_DONE"
+            },
+            {
+              "elapsedMs": 5487.923106999999,
+              "kind": "stdin",
+              "text": "quit"
+            }
+          ],
+          "stdout": "------- FS_Init -------\nCurrent search path:\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2/pak0.pak (14663 files)\n/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/data/baseq2\nbuiltin (1 files)\n14663 files in PAK files\n-----------------------\nExecing default.cfg\n\"left_trigger\" isn't a valid key\n\"right_trigger\" isn't a valid key\n\"x_button\" isn't a valid key\n\"a_button\" isn't a valid key\n\"b_button\" isn't a valid key\n\"left_stick\" isn't a valid key\n\"right_stick\" isn't a valid key\n\"right_shoulder\" isn't a valid key\n\"left_shoulder\" isn't a valid key\n\"DPAD_LEFT\" isn't a valid key\n\"DPAD_RIGHT\" isn't a valid key\n\"DPAD_UP\" isn't a valid key\nExecing autoexec.cfg\n------- R_Init -------\nUsing video driver: x11\nGLX_EXT_swap_control not found\nUsing GLSL rendering backend.\n----------------------\nUnknown keyword 'b'\nMenu entry without 'end' terminator\nSound initialization disabled.\nXInput2 mouse initialized\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so\n==== InitGame ====\nGame supports Q2PRO enhanced savegames.\n------- Server Initialization -------\nSpawnServer: base1\nfunc_timer @ -1408 1144 306: random >= wait\n41 entities inhibited\n0 teams repaired\n1 teams with 2 entities\n-------------------------------------\n====== Q2REPRO initialized ======\n\nq2repro r4612~dafa004c, Aug 30 2026\nhttps://github.com/Paril/q2pro\n\nforked from https://github.com/skullernet/q2pro\n\nRequesting connection... 1\nConnected to loopback (protocol 1038).\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so\nOuter Base\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\nNATIVE_CLIENT_READY\n\n\n.....................................\n\n      g_primary_mission_objective\n\n\n.....................................\n\n\n\n.....................................\n\n     g_secondary_mission_objective\n\n\n.....................................\n\nGL_VENDOR: Mesa\nGL_RENDERER: llvmpipe (LLVM 22.1.8, 256 bits)\nGL_VERSION: 4.6 (Compatibility Profile) Mesa 26.2.1-arch1.1\nGL_SHADING_LANGUAGE_VERSION: 4.60\nGL_MAX_TEXTURE_SIZE: 16384\nGL_MAX_TEXTURE_UNITS: 8\nGL_MAX_TEXTURE_MAX_ANISOTROPY: 16\nGL_PFD: color(24-bit) Z(24-bit) stencil(8-bit)\n(128 -320 46) : 135\nRecording client demo to demos/native-reference.dm2.\nNATIVE_RECORD_REQUESTED\nNATIVE_FORWARD_START\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake000.png\n(49 -241 47) : 135\nNATIVE_FORWARD_STOP\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake001.png\nGame saved.\nNATIVE_SAVE_REQUESTED\n==== ShutdownGame ====\nStopped demo (10 kB).\nLoaded game library from /home/buzzkill/Projects/qsrc/q2repro/build/baseq2/game_x86_64.so\n==== InitGame ====\nGame supports Q2PRO enhanced savegames.\n------- Server Initialization -------\nSpawnServer: base1\nfunc_timer @ -1408 1144 306: random >= wait\n41 entities inhibited\n0 teams repaired\n1 teams with 2 entities\n-------------------------------------\nRequesting connection... 1\nConnected to loopback (protocol 1038).\nOuter Base\nCouldn't load gfx/weaponwheel.pcx: No such file or directory\nCouldn't load gfx/wheelbutton.pcx: No such file or directory\nNATIVE_LOAD_REQUESTED\n(23 -214 46) : 135\nCurrent map: base1\n\nnum score ping name            lastmsg address                rate pr fps\n--- ----- ---- --------------- ------- --------------------- ----- -- ---\n  0     0   13 native-referenc       0 loopback                  0 1038   0\n\nNo TCP clients.\n\nNATIVE_RELOAD_OBSERVED\nNot recording a demo.\nNATIVE_CAPTURE_DONE\nWrote /home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake002.png\n==== ShutdownGame ====\n",
+          "stderr": "",
+          "cleanup": "reaped"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/server/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/server/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/server/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/.conhistory",
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/autoexec.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/demos/native-reference.dm2",
+            "size": 10749,
+            "sha256": "2f44736d1ab810d8cc17b1ee1ad48f0efcb91a8373d47df5f89f9ad6ceaaf27a"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/q2config.cfg",
+            "size": 29,
+            "sha256": "0c45e5706202e311a87ffa3ddc92635d7e73d11e254a9a1a23b138eb41fe3fdc"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/q2reproconfig.cfg",
+            "size": 2469,
+            "sha256": "7ce7d77141da7e4da7de43686d9c009ca5f7e4454ce7e49fa3057cc257a6d409"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/.current/base1.sav",
+            "size": 220270,
+            "sha256": "f724259efec2edae86c82c8bfe5171d591938f9555b88f6727a0ce6a19aa5b36"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/.current/base1.sv2",
+            "size": 10813,
+            "sha256": "a4ac7157a30482534d0c6a4e2c2dc66f40c297943fcac64a98a88a94354b474c"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/.current/game.ssv",
+            "size": 3159,
+            "sha256": "a336006ea493742e953fbe149dc71b3870ab20783314b92b930d0e649161dbac"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/.current/server.ssv",
+            "size": 1008,
+            "sha256": "351ed84d195c946dd32afbcfa26191056fc2eb3448b552344ea946ffed7198b7"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/native-reference/base1.sav",
+            "size": 220270,
+            "sha256": "f724259efec2edae86c82c8bfe5171d591938f9555b88f6727a0ce6a19aa5b36"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/native-reference/base1.sv2",
+            "size": 10813,
+            "sha256": "a4ac7157a30482534d0c6a4e2c2dc66f40c297943fcac64a98a88a94354b474c"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/native-reference/game.ssv",
+            "size": 3159,
+            "sha256": "a336006ea493742e953fbe149dc71b3870ab20783314b92b930d0e649161dbac"
+          }
+        },
+        {
+          "kind": "file",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/save/native-reference/server.ssv",
+            "size": 1008,
+            "sha256": "351ed84d195c946dd32afbcfa26191056fc2eb3448b552344ea946ffed7198b7"
+          }
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake000.png",
+            "size": 498688,
+            "sha256": "f8cbff800805c6c3d3a28239b65fdc78ee61ed4a515795fdd9fae90766e6daf4"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake001.png",
+            "size": 461129,
+            "sha256": "40b2d99033f64819caab924cac4c8106a5fe1434ed4266032aef06dbebd12e16"
+          },
+          "width": 640,
+          "height": 480
+        },
+        {
+          "kind": "png",
+          "identity": {
+            "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q2-native/2026-09-11T05-40-13-908Z/rerelease/singleplayer-save/client/baseq2/screenshots/quake002.png",
+            "size": 435094,
+            "sha256": "afa1f1d7b55731fcf8cdf4a6601738d43101303c5ed45f7964e9ef903b32ccae"
+          },
+          "width": 640,
+          "height": 480
+        }
+      ],
+      "limitations": [
+        "Input durations and checkpoints use wall-clock scheduling; they are not a deterministic simulation clock.",
+        "Screenshots are native llvmpipe observations; no TypeScript renderer comparison or image tolerance is established.",
+        "Demo files contain native server messages; this lane records their bytes without claiming complete protocol decoding.",
+        "A save/load request is accepted only when its console and files show success; unsupported game save formats remain unsupported."
+      ]
+    }
+  ],
+  "unsupportedReferences": [
+    "Retail Windows quake2.exe and quake2ex_steam.exe were not executed.",
+    "Mission packs, multiplayer interoperability with the TypeScript engine, numerical gameplay equivalence, controlled frame timing, and renderer tolerances are not established."
+  ]
+}

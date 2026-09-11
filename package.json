@@ -1,0 +1,36 @@
+{
+  "name": "quake-typescript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-2.0-or-later",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun run src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "policy": "bun run tools/check-policy.ts",
+    "test": "bun test",
+    "test:policy": "bun test tests/policy",
+    "plan:check": "bun run docs/validate-plan.ts",
+    "plan:test": "bun run docs/test-plan-validator.ts",
+    "inventory:source": "bun tools/inventory/source-census.ts",
+    "inventory:features": "bun tools/inventory/aggregate-features.ts",
+    "reference:environment": "bun tools/reference/environment.ts",
+    "test:reference": "bun test tools/reference",
+    "test:platform": "bun test tests/platform",
+    "verify": "bun tools/verify/cli.ts",
+    "verify:generate": "bun tools/verify/generate.ts",
+    "test:verification": "bun test tests/verification",
+    "check": "bun run typecheck && bun run policy && bun run test && bun run plan:check && bun run plan:test",
+    "build": "bun run tools/build.ts",
+    "build:tools": "bun run tools/build.ts --tools"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "packageManager": "bun@1.3.14"
+}

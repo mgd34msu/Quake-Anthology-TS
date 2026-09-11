@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "title": "Unified Quake engine work packages",
-  "status": "planned",
-  "implementationAuthorized": false,
+  "status": "running",
+  "implementationAuthorized": true,
   "architecture": "One shared TypeScript simulation and actor authority with per-source behavior, geometry, clocks, and execution profiles; private QC/QVM/native guest memory remains authoritative.",
   "authorityDocuments": [
     "docs/project-plan.md",
@@ -11,12 +11,12 @@
     "docs/verification-plan.md"
   ],
   "interpretation": {
-    "edges": "dependsOn lists acceptance prerequisites, not phase barriers. Stage labels only group related work.",
-    "readiness": "Dispatch independent ready tasks immediately after implementation authorization and replace completed workers while useful work remains.",
+    "edges": "dependsOn governs review and acceptance order, not mandatory idle time before writing source. Running packages may use concrete published inputs while prerequisite packages run; stage labels only group related work.",
+    "readiness": "The lead dispatches only ports with concrete usable published inputs and exclusive write paths. Running tasks must not depend on failed or blocked packages. Published-input readiness is a lead judgment, not inferred from graph status; review and acceptance still require accepted dependencies.",
     "scope": "All inherited and requested content/functionality remains required. Missing inputs, adapters, service access, or feasibility do not remove rows.",
-    "evidence": "The graph is a plan. Every task is planned; no implementation, compatibility, performance, or release completion is claimed.",
-    "proofBoundary": "W05/W41 establish ownership, callback, and source-time contracts; W16 proves Q1 solid-space collision. W74 supplies permanent representative behaviors and W73 proves a real mixed-game executable before W42–W49 bulk extraction. Native full execution remains independent until W40 joins the accepted source application.",
-    "schedule": "Any ready batches are illustrative dependency order with no duration, throughput, utilization, or completion estimate.",
+    "evidence": "Implementation is authorized and foundation work is running. Task states record lead decisions; graph validation alone proves no implementation, compatibility, performance, or release result. Evidence, review, source revisions, and commit handoffs are recorded in docs/execution-status.md.",
+    "proofBoundary": "W05 starts from the reviewed source comparison and source census while W01 exhaustive inventory continues. W05/W41 establish usable ownership and source-time contracts; W74 supplies permanent behavior foundations for W42/W45/W49 and their expansions. W73 proves a real mixed-game executable in parallel with bulk imports. Native full execution remains required at W40.",
+    "schedule": "User-directed code-first sequence: import and join the engine, reach live human play, then optimize and finish broad hardening, regression, retail-reference, and release evidence. Existing strict type guards and a basic runner remain practical implementation tools. Illustrative dependency batches contain no time or completion estimate.",
     "earlyPlayable": "W73 is the first actual mixed-game source executable; W66 integrates the full official/source-VM feature union. W40 adds native execution before final full-matrix and compiled release gates."
   },
   "orchestrationPolicy": {
@@ -28,7 +28,7 @@
     "reviewersAndIntegratorsCount": true,
     "subdelegation": "No unbudgeted subdelegation. The lead schedules every worker within the same active-agent budget.",
     "announcement": "Announce Model, Effort, and Task for each dispatch.",
-    "readyOrder": "Ascending numeric work-package ID among tasks whose acceptance dependencies pass; fill available useful slots without artificial work.",
+    "readyOrder": "The lead prioritizes concrete-input-ready source imports with exclusive ownership, using ascending work-package ID where useful. Do not wait for prerequisite acceptance to begin source work against published interfaces; preserve acceptance dependency order.",
     "stateTransitions": [
       "planned",
       "running",
@@ -725,7 +725,7 @@
       "title": "Inventory required features, content, and common code lineage",
       "stage": "foundation",
       "kind": "inventory",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
@@ -733,7 +733,11 @@
         "verification/source-manifest.json",
         "verification/product-manifest.json",
         "verification/feature-ledger.json",
-        "docs/reference-contracts.md"
+        "docs/reference-contracts.md",
+        "tools/inventory/**",
+        "verification/features/**",
+        "verification/additional-fixtures.json",
+        "tests/inventory/**"
       ],
       "sourceInputs": [
         "../quake-1-re-ts",
@@ -760,7 +764,7 @@
       "title": "Capture authoritative behavior and performance baselines",
       "stage": "foundation",
       "kind": "verification",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
@@ -779,14 +783,14 @@
         "../quake-3-ts/tools/verify-render.ts"
       ],
       "deliverables": [
-        "Reusable Bun source-differential capture drivers",
-        "Original behavior traces, render references, protocol records, and fixture hashes",
-        "Named Linux hardware baselines and proposed acceptance tolerances"
+        "Reusable source-differential capture drivers and initial source-derived cases",
+        "Available actual Q2 native reference traces with source/data/runtime identities",
+        "Recorded reference environment and explicit deferred capture requirements"
       ],
       "acceptance": [
-        "Establish reusable reference drivers and initial representative traces for source-defined numeric behavior, frame cadence, callbacks, progression, and observable output, with exact source/data/runtime identities. W63–W65 expand per-feature specimens alongside implementation.",
+        "Deliver the existing initial source-derived cases and actual Q2 native reference traces as implementation inputs, with repeatable commands and exact source/data/runtime identities. Broad retail, renderer, protocol, and performance capture continues at later verification and release gates; it is not a pre-import requirement.",
         "Use independent original engines or source-derived oracles. Agreement among the three TS ports alone does not establish correctness.",
-        "Record per-feature image tolerances and performance targets with their evidence and acceptance status. This planning file does not approve arbitrary FPS or latency targets.",
+        "Record available reference conditions and unresolved tolerances. W67–W71 must finish broad reference capture and adopt evidence-backed image/performance targets after imports, live human play, and optimization; W02 does not require those full campaigns of capture before code proceeds.",
         "Keep retail content external and reference it by local path and hash. Capture commands and raw outputs for reruns."
       ]
     },
@@ -795,7 +799,7 @@
       "title": "Establish strict TypeScript policy and one Bun build entry",
       "stage": "foundation",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
@@ -806,7 +810,9 @@
         "eslint.config.ts",
         "tools/check-policy.ts",
         "tools/build.ts",
-        ".github/workflows/**"
+        ".github/workflows/**",
+        "tests/policy/**",
+        ".gitignore"
       ],
       "sourceInputs": [
         "../quake-3-ts/package.json",
@@ -822,8 +828,9 @@
       "acceptance": [
         "Reject any, type assertions including as const, non-null assertions, unchecked escapes, and suppression directives across application code, tests, and tools.",
         "Use strict TypeScript with checked external boundaries and exhaustive variants. Keep executable project tooling in TypeScript and avoid shell-script proliferation.",
-        "Build a Linux executable from the same source graph used by Bun development. Record compiler and runtime identities.",
-        "Keep all package script, dependency, tsconfig, CI, and build registration edits with this owner. Other packages return concrete registration requests."
+        "Qualify the real Bun Linux compile pipeline using implemented TypeScript tool entries and record compiler and runtime identities. W03 may be accepted before the production runtime entry exists; do not add a placeholder main or wait on W73. W73, W66, and W69 separately qualify the production engine from the same source graph used by Bun development.",
+        "Keep all package script, dependency, tsconfig, CI, and build registration edits with this owner. Other packages return concrete registration requests.",
+        "Keep current strict type guards and the practical build pipeline usable during code imports. Defer additional policy hardening and regression infrastructure until the integrated engine supports live human play and optimization; W67–W71 retain final strictness and regression qualification."
       ]
     },
     {
@@ -831,14 +838,15 @@
       "title": "Build verification interfaces and evidence accounting",
       "stage": "foundation",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
       "owns": [
         "tools/verify/**",
         "verification/schema/**",
-        "verification/suites.json"
+        "verification/suites.json",
+        "tests/verification/**"
       ],
       "sourceInputs": [
         "docs/verification-plan.md",
@@ -848,16 +856,14 @@
       ],
       "deliverables": [
         "Typed case, fixture, execution, and evidence contracts",
-        "Deterministic shard/resume runner",
-        "Dev, integration, full, and release verification profiles",
-        "Early typed full-composition manifest generator and expected-case contracts"
+        "Basic runner with explicit outcomes and retained command output",
+        "Usable development execution profile",
+        "Current product manifest and expected-case interfaces for later full reconciliation"
       ],
       "acceptance": [
-        "Accept expected case manifests before implementation exists, so independent peers can author fixtures alongside feature work.",
-        "Record PASS, FAIL, BLOCKED_MISSING_INPUT, TIMEOUT, and NOT_RUN with fingerprints, assertions, seeds, schedules, commands, and artifact hashes.",
-        "Reject duplicate IDs, zero-assertion success, missing records, silent skips, stale binaries, and resume records with changed fingerprints.",
-        "Keep independent runs isolated by output root, home directory, ports, data mounts, and display. Preserve failed attempts and raw differences.",
-        "Build the expected matrix generator before feature completion. W01 supplies its required product/feature domain; W67 executes and reconciles the complete generated set."
+        "Provide usable typed case and evidence interfaces plus a basic runner for actual imported code and live execution. Existing available manifests are inputs; exhaustive inventory and matrix generation do not block imports.",
+        "Report explicit PASS, FAIL, BLOCKED_MISSING_INPUT, TIMEOUT, and NOT_RUN outcomes with available source/artifact identities and retain failed command output.",
+        "Keep independent run outputs separate. Complete extended isolation, deterministic shards/resume, stale-evidence rejection, and exhaustive regression infrastructure at W67–W71 after imports, live human play, and optimization."
       ]
     },
     {
@@ -865,12 +871,10 @@
       "title": "Freeze shared contracts and explicit game differences",
       "stage": "foundation",
       "kind": "contracts",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
-      "dependsOn": [
-        "W01"
-      ],
+      "dependsOn": [],
       "owns": [
         "src/contracts/**",
         "docs/contracts.md"
@@ -881,7 +885,9 @@
         "../quake-3-ts/docs/ARCHITECTURE.md",
         "../quake-1-re-ts/src/progs/profiles",
         "../quake-2-re-ts/src/kexapi",
-        "../quake-2-re-ts/ARCHITECTURE.md"
+        "../quake-2-re-ts/ARCHITECTURE.md",
+        "docs/reference-contracts.md",
+        "verification/source-manifest.json"
       ],
       "deliverables": [
         "Shared math, identity, resource, world, session, rendering, movement, UI, and execution contracts",
@@ -889,11 +895,11 @@
         "Documented ownership and numeric/time boundaries"
       ],
       "acceptance": [
-        "Select proven shared code by the W01 comparison. Use Q3's stronger typed instance boundaries where supported, and preserve stronger Q1/Q2 VM, media, campaign, ABI, and content contracts.",
+        "Select proven shared code from the existing reviewed docs/reference-contracts.md comparison and verification/source-manifest.json census. W01 exhaustive feature reconciliation continues in parallel and does not block these contracts. Preserve stronger Q1/Q2 VM, media, campaign, ABI, and content contracts alongside Q3 instance ownership.",
         "Separate map, movement, character, weapons, enemies, asset presentation, rules, and mod execution selections. Preserve original defaults and make each requested override explicit.",
         "Define family differences as typed profiles, not appended enum slots, generic untyped records, or parallel whole-engine trees.",
-        "Own all shared interfaces and headers. Freeze concrete worker signatures before dependents start, without runtime stubs or casts.",
-        "Freeze combat-before-mutation, campaign-versus-round authority, source-time ordering/ties, typed callback returns, guest byte views, headless simulation, and per-seat presentation contracts before dependent providers."
+        "Own all shared interfaces and headers. Publish concrete worker signatures so dependents can start while the remaining contracts finish, without runtime stubs or casts.",
+        "Freeze combat-before-mutation, campaign-versus-round authority, source-time ordering/ties, typed callback returns, guest byte views, headless simulation, and per-seat presentation contracts before accepting dependent providers; source imports may use the concrete published interfaces while these proofs finish."
       ]
     },
     {
@@ -901,7 +907,7 @@
       "title": "Reuse and qualify Linux SDL2 and native library bindings",
       "stage": "foundation",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
@@ -2162,7 +2168,7 @@
       ],
       "acceptance": [
         "Run two independent sessions with nested cross-provider touch, damage, death, reaction, knockback, scoring, and entity deletion. Exactly one owner decides each mutation.",
-        "Define damage, armor/resistance, impulses, inventory/ammo, reactions, and scoring policy explicitly before bulk behavior extraction.",
+        "Publish explicit damage, armor/resistance, impulse, inventory/ammo, reaction, and scoring policy for bulk behavior imports; complete the authority proofs before accepting those providers.",
         "Keep guest-owned bytes authoritative when a guest executes. Prove partial/aliased stores, stable addresses/strides, identity, and nested reentry through reviewed views.",
         "Separate headless Simulation.step from per-seat presentation. Preserve source clocks and immediate callbacks without running complete competing family frame loops.",
         "Preserve typed synchronous callback returns, including Q2 ClientConnect acceptance/userinfo mutation and Q3 denial string or null, before any dependent mutation.",
@@ -2183,7 +2189,7 @@
         "W02",
         "W05",
         "W41",
-        "W73"
+        "W74"
       ],
       "owns": [
         "src/content/q1/base/**",
@@ -2218,8 +2224,7 @@
         "W02",
         "W05",
         "W41",
-        "W42",
-        "W73"
+        "W42"
       ],
       "owns": [
         "src/content/q1/missionpacks/**",
@@ -2255,8 +2260,7 @@
         "W05",
         "W27",
         "W41",
-        "W42",
-        "W73"
+        "W42"
       ],
       "owns": [
         "src/content/q1/addons/**",
@@ -2291,7 +2295,7 @@
         "W02",
         "W05",
         "W41",
-        "W73"
+        "W74"
       ],
       "owns": [
         "src/content/q2/base/**",
@@ -2325,8 +2329,7 @@
         "W02",
         "W05",
         "W41",
-        "W45",
-        "W73"
+        "W45"
       ],
       "owns": [
         "src/content/q2/missionpacks/**",
@@ -2361,8 +2364,7 @@
         "W02",
         "W05",
         "W41",
-        "W45",
-        "W73"
+        "W45"
       ],
       "owns": [
         "src/content/q2/ctf/**",
@@ -2398,8 +2400,7 @@
         "W02",
         "W05",
         "W41",
-        "W45",
-        "W73"
+        "W45"
       ],
       "owns": [
         "src/content/q2/rerelease/**",
@@ -2435,7 +2436,7 @@
         "W02",
         "W05",
         "W41",
-        "W73"
+        "W74"
       ],
       "owns": [
         "src/content/q3/base/**",
@@ -2494,7 +2495,8 @@
         "../quake-2-re-ts/src/client/menu_content.ts",
         "../quake-3-ts/src/shared/movement.ts",
         "docs/contracts.md",
-        "verification/feature-ledger.json"
+        "verification/source-manifest.json",
+        "docs/reference-contracts.md"
       ],
       "deliverables": [
         "Validated official composition recipes and complete entity/asset/behavior resolution",
@@ -3175,7 +3177,10 @@
         "Do not remove missing adapters, invalid current implementations, failed launches, or missing fixtures from the expected requested domain.",
         "Execute every required finite product row and mandatory behavioral suite with deterministic shards/resume. Pairwise, boot-only, and sampled runs are development evidence only.",
         "Complete campaigns, matches, bots, save/replay, guest, network, UI, and service journeys against the common engine, retaining precise original/source comparisons.",
-        "Distinguish finite configured evidence from unbounded play histories and future arbitrary mods. Never claim exhaustive proof outside the executed domain."
+        "Distinguish finite configured evidence from unbounded play histories and future arbitrary mods. Never claim exhaustive proof outside the executed domain.",
+        "Finish deferred W04 runner hardening and regression infrastructure through its current path owner: Reject duplicate IDs, zero-assertion success, missing records, silent skips, stale binaries, and resume records with changed fingerprints. Keep independent runs isolated by output root, home directory, ports, data mounts, and display. Preserve failed attempts and raw differences.",
+        "Complete the expected matrix generator and deterministic shard/resume accounting after imports, live human play, and optimization. W04 initial acceptance requires only the practical basic runner; its deferred requirements remain mandatory here.",
+        "Finish broad independent retail/reference capture deferred from W02, including image tolerances and original behavior comparisons needed by all required feature rows."
       ]
     },
     {
@@ -3216,7 +3221,8 @@
         "Use workers only where measurements justify them; keep simulation ordering, numeric behavior, snapshots, FFI/context ownership, and per-seat behavior deterministic.",
         "Compare before/after real gameplay and input/network deadlines. Microbenchmarks alone cannot close playability.",
         "Meet adopted evidence-backed targets and required source cadence. Keep unresolved targets, guest throughput, and backend regressions as release blockers.",
-        "Take the explicit W08/W18 file transfers only after those owners complete. Rebuild and reverify all affected integrated behavior."
+        "Take the explicit W08/W18 file transfers only after those owners complete. Rebuild and reverify all affected integrated behavior.",
+        "Complete broad performance baseline capture deferred from W02 against the imported, playable engine before adopting budgets and claiming optimization results."
       ]
     },
     {
@@ -3326,7 +3332,8 @@
         "Inspect actual combined code, source differences, runtime evidence, full scope accounting, strict TS policy, and the exact compiled artifact.",
         "Try to falsify shared ownership, guest byte/ABI semantics, cross-family behavior, campaign/mode closure, network compatibility, backend completeness, and performance claims.",
         "Report concrete failures with reproduction and responsible work IDs. Return corrections to current file owners; do not edit implementation paths.",
-        "Require changed code/artifacts to invalidate and rerun affected checks. Implementer reports and isolated green suites cannot close this review."
+        "Require changed code/artifacts to invalidate and rerun affected checks. Implementer reports and isolated green suites cannot close this review.",
+        "Confirm deferred policy hardening, regression infrastructure, broad retail/reference capture, and complete runner accounting have been finished after imports, live human play, and optimization. Earlier W02/W03/W04 acceptance does not waive any final requirement."
       ]
     },
     {
@@ -3371,7 +3378,7 @@
     },
     {
       "id": "W73",
-      "title": "Prove the first actual mixed-game executable before bulk content",
+      "title": "Prove the first actual mixed-game executable alongside bulk imports",
       "stage": "integration",
       "kind": "implementation",
       "status": "planned",
@@ -3416,14 +3423,14 @@
       "deliverables": [
         "Permanent native application bootstrap and first real cross-game playable profiles",
         "Bun source CPU/GL singleplayer and coop evidence",
-        "Accepted composition/ownership contracts for dependent full-content extraction"
+        "Actual integration evidence for composition and ownership contracts shared with full-content imports"
       ],
       "acceptance": [
         "Run a pinned Q2 map with Q1 movement and a Q3 character, and Q2 characters through a pinned Q1 rerelease campaign specimen, using all real providers required by each specimen.",
         "Drive actual SDL input, collision, weapons/damage/ammo/events, an authored mission gate, save/fresh load, and map transition through both real CPU and OpenGL backends.",
         "Run actual distinct coop clients, including a local-seat/remote combination, with headless server separation and correct private/shared effects.",
         "Use W74's permanent source-derived providers and real map entities. Stubs, dropped unsupported spawns, UI mockups, and synthetic-only fixtures cannot pass.",
-        "Accept the concrete combat/progression authority, callback return, source clock/prediction, guest-view boundary, and per-seat ownership contracts before W42–W49 bulk content begins.",
+        "Prove the concrete combat/progression authority, callback return, source clock/prediction, guest-view boundary, and per-seat ownership contracts in the real executable. Bulk W42–W49 imports proceed from W74 foundations in parallel and do not wait for W73.",
         "Own initial src/main.ts and transfer it explicitly to W66. Full official content, complete menus, native binaries, and release qualification remain later required work."
       ]
     },

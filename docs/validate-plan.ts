@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const validatorVersion = "1.0.0";
+const validatorVersion = "1.2.0";
 
 function fail(message: string): never {
   throw new Error(message);
@@ -106,6 +106,39 @@ function ownershipPath(value: unknown, location: string): string {
   return localPath(path.endsWith("/**") ? path.slice(0, -3) : path, location);
 }
 
+function taskStatus(value: unknown, location: string) {
+  switch (value) {
+    case "planned": case "running": case "review": case "accepted": case "failed": case "blocked_missing_input":
+      return value;
+    default: return fail(`${location}: unsupported task status`);
+  }
+}
+
+function revision(value: unknown, location: string): string {
+  const result = string(value, location);
+  if (!/^[a-f0-9]{40}$/.test(result)) fail(`${location}: expected a full Git revision`);
+  return result;
+}
+
+function taskExecution(task: Record<string, unknown>, location: string) {
+  const status = taskStatus(task["status"], `${location}.status`);
+  if (status !== "accepted") {
+    if (task["acceptanceRecord"] !== undefined) fail(`${location}: acceptanceRecord requires accepted status`);
+    return { status };
+  }
+  const accepted = record(task["acceptanceRecord"], `${location}.acceptanceRecord`);
+  return {
+    status,
+    acceptanceRecord: {
+      acceptedBy: literal(accepted["acceptedBy"], "lead", `${location}.acceptanceRecord.acceptedBy`),
+      sourceRevision: revision(accepted["sourceRevision"], `${location}.acceptanceRecord.sourceRevision`),
+      commit: revision(accepted["commit"], `${location}.acceptanceRecord.commit`),
+      evidence: nonemptyStrings(accepted["evidence"], `${location}.acceptanceRecord.evidence`),
+      review: nonemptyStrings(accepted["review"], `${location}.acceptanceRecord.review`),
+    },
+  };
+}
+
 function parseTask(value: unknown, location: string) {
   const task = record(value, location);
   const effort = string(task["effort"], `${location}.effort`);
@@ -119,7 +152,7 @@ function parseTask(value: unknown, location: string) {
     title: string(task["title"], `${location}.title`),
     stage: string(task["stage"], `${location}.stage`),
     kind: string(task["kind"], `${location}.kind`),
-    status: literal(task["status"], "planned", `${location}.status`),
+    ...taskExecution(task, location),
     model: literal(task["model"], "gpt-6-astra", `${location}.model`),
     effort,
     dependsOn,
@@ -160,8 +193,11 @@ function parseTransfer(value: unknown, location: string) {
 function parsePlan(value: unknown) {
   const plan = record(value, "plan");
   literal(plan["schemaVersion"], 1, "plan.schemaVersion");
-  literal(plan["status"], "planned", "plan.status");
-  literal(plan["implementationAuthorized"], false, "plan.implementationAuthorized");
+  const status = plan["status"];
+  if (status !== "planned" && status !== "running") fail("plan.status: expected planned or running");
+  const implementationAuthorized = plan["implementationAuthorized"];
+  if (typeof implementationAuthorized !== "boolean") fail("plan.implementationAuthorized: expected a boolean");
+  if (status === "running" && !implementationAuthorized) fail("Running plan requires implementation authorization");
   textFields(plan, ["title", "architecture"], "plan");
   textFields(plan["interpretation"], ["edges", "readiness", "scope", "evidence", "proofBoundary", "schedule"], "plan.interpretation");
   const policy = record(plan["orchestrationPolicy"], "plan.orchestrationPolicy");
@@ -176,6 +212,8 @@ function parsePlan(value: unknown) {
   sameSet(strings(policy["stateTransitions"], "orchestrationPolicy.stateTransitions"),
     ["planned", "running", "review", "accepted", "failed", "blocked_missing_input"], "orchestrationPolicy.stateTransitions");
   return {
+    status,
+    implementationAuthorized,
     maxActiveAgents,
     authorityDocuments: array(plan["authorityDocuments"], "plan.authorityDocuments", localPath),
     stages: nonemptyStrings(plan["stages"], "plan.stages"),
@@ -190,6 +228,25 @@ function parsePlan(value: unknown) {
 
 type Plan = ReturnType<typeof parsePlan>;
 type Task = Plan["tasks"][number];
+
+function execution(plan: Plan, tasks: Map<string, Task>): void {
+  for (const task of plan.tasks) {
+    if (task.status !== "planned" && (!plan.implementationAuthorized || plan.status !== "running")) {
+      fail(`${task.id}: execution state requires an authorized running plan`);
+    }
+    if (task.status === "running") {
+      const blocked = task.dependsOn.filter(id => {
+        const status = tasks.get(id)?.status;
+        return status === "failed" || status === "blocked_missing_input";
+      });
+      if (blocked.length > 0) fail(`${task.id}: running has failed or blocked dependencies: ${blocked.join(", ")}`);
+    }
+    if (task.status === "review" || task.status === "accepted") {
+      const unmet = task.dependsOn.filter(id => tasks.get(id)?.status !== "accepted");
+      if (unmet.length > 0) fail(`${task.id}: ${task.status} requires accepted dependencies: ${unmet.join(", ")}`);
+    }
+  }
+}
 
 function graph(plan: Plan) {
   unique(plan.tasks.map(task => task.id), "task IDs");
@@ -386,18 +443,25 @@ function main(): void {
   const value: unknown = JSON.parse(file(root, "docs/work-packages.json"));
   const plan = parsePlan(value);
   const checked = graph(plan);
+  execution(plan, checked.tasks);
   coverage(plan, checked.tasks, file(root, "docs/feature-coverage.md"));
   diagram(plan, file(root, "docs/dependency-graph.mmd"));
   artifacts(root, plan, checked.ordered);
   const batches = readyBatches(plan);
   const edges = plan.tasks.reduce((count, task) => count + task.dependsOn.length, 0);
   const peak = batches.reduce((count, batch) => Math.max(count, batch.length), 0);
+  const running = plan.tasks.filter(task => task.status === "running").map(task => task.id);
+  const accepted = plan.tasks.filter(task => task.status === "accepted").map(task => task.id);
+  const ready = plan.implementationAuthorized ? plan.tasks.filter(task => task.status === "planned"
+    && task.dependsOn.every(id => checked.tasks.get(id)?.status === "accepted")).map(task => task.id) : [];
   process.stdout.write(`Plan validator v${validatorVersion}: PASS\nRoot: ${relative(process.cwd(), root) || "."}\n`
     + `Tasks: ${plan.tasks.length}; edges: ${edges}; features: ${plan.featureCoverage.length}; source families: ${plan.sourceFeatureIds.length}\n`
     + `Release closure: ${checked.closure}/${plan.tasks.length}; illustrative peak batch: ${peak}/${plan.maxActiveAgents}, lead excluded\n`
-    + "Illustrative dependency batches only. No duration or completion estimate; live dispatch refills available slots as dependencies pass.\n");
+    + `Recorded running: ${running.join(", ") || "none"}; recorded accepted: ${accepted.join(", ") || "none"}\n`
+    + `Planned tasks with recorded accepted prerequisites: ${ready.join(", ") || "none"}\n`
+    + "Illustrative acceptance dependency batches only. The lead dispatches source work against concrete published inputs before prerequisite acceptance; this tool does not assess input readiness or estimate completion.\n");
   for (const [index, batch] of batches.entries()) process.stdout.write(`Batch ${index + 1}: ${batch.join(", ")}\n`);
-  process.stdout.write("Validated planning consistency only; implementation and release acceptance remain unverified.\n");
+  process.stdout.write("Validated graph and recorded state consistency only. Acceptance records are declarations; runtime evidence, review, commits, and release acceptance remain unverified by this tool.\n");
 }
 
 try {

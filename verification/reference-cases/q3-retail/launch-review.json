@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "status": "blocked-before-engine-initialization",
+  "capture": {
+    "path": "verification/reference-cases/q3-retail/latest.json",
+    "size": 17661,
+    "sha256": "42ca628f2c7be5da55201586bb5490ae84c6e210b948dbf266c3ba7d4d1889a5"
+  },
+  "observation": {
+    "kind": "private-display-image-inspected",
+    "dialogText": "Failed to find Steam",
+    "image": {
+      "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/launch.png",
+      "size": 3972,
+      "sha256": "0b6b86a6287d8d98830b75b94bb338bbcab9bb012ec6c73a510d13401165b0ba",
+      "width": 640,
+      "height": 480,
+      "capturedAtFromFileMtime": "2026-09-11T05:46:55.963Z"
+    },
+    "captureCommand": [
+      "env", "DISPLAY=:23173", "/usr/bin/bwrap", "--ro-bind", "/", "/",
+      "--bind", "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG", "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG",
+      "--bind", "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/tmp", "/tmp",
+      "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "--die-with-parent", "--",
+      "/usr/bin/import", "-window", "root", "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-dHpkgG/launch.png"
+    ]
+  },
+  "qualification": {
+    "retailProcessExecuted": true,
+    "baseMapLoaded": false,
+    "teamArenaMapLoaded": false,
+    "protocolObserved": false,
+    "demoObserved": false,
+    "gameRenderObserved": false,
+    "performanceQualified": false
+  },
+  "cleanup": {
+    "method": "Driver terminated its owned bubblewrap namespaces and reaped both direct children. ps found none of the recorded Wine, Xvfb, wrapper, or driver PIDs afterward.",
+    "checkedPids": [1588500, 1588529, 1588530, 1588531, 1588533, 1588534, 1588535, 1588537, 1588541, 1588563, 1588631, 1588638, 1588832, 1588863, 1588872, 1588878],
+    "liveHandles": [],
+    "retainedOwnedFiles": "The ignored artifact directory retains the prefix, executable copy, input configurations, image, and process manifest."
+  },
+  "earlierDisplayFailure": {
+    "path": "/home/buzzkill/Projects/quake-typescript/.artifacts/q3-retail/capture-WFYyn4/manifest.json",
+    "size": 9696,
+    "sha256": "edb91399097f17a9ec1f7f525a4cc420ce20e39a2207b244e5b6c61efd509e1a",
+    "observation": "Xvfb aborted in the host NVIDIA EGL loader before Wine started. The retained final attempt disabled GLX and selected the Mesa EGL vendor."
+  },
+  "scopeDecision": "The user redirected work to engine implementation. Team Arena, rendering, demo, timedemo, Steam launch integration, and further capture variants were deferred."
+}

@@ -1,0 +1,2105 @@
+{
+  "schemaVersion": 1,
+  "oracleKind": "source-derived",
+  "engineFamily": "q3",
+  "command": [
+    "/home/buzzkill/.bun/bin/bun",
+    "tools/reference/q3/capture.ts"
+  ],
+  "cwd": "/home/buzzkill/Projects/quake-typescript",
+  "startedAt": "2026-09-11T05:39:52.713Z",
+  "finishedAt": "2026-09-11T05:39:52.789Z",
+  "durationMs": 75.569444,
+  "sources": [
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/bg_pmove.c",
+      "size": 45440,
+      "sha256": "e4560cbd9e1bb1479e586018433fc4c2b7cc61f9798097944609b1e661aba182"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/bg_misc.c",
+      "size": 36059,
+      "sha256": "6ac561b647882e2e5a45ceb9da86f7ae88ec9714cd54ec29ad78440b3e991bbb"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/bg_public.h",
+      "size": 19049,
+      "sha256": "1a5a1b6c8defbfd3346a924dabc68b34a76f7ab8ced3e847cb8dc01a870c66aa"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/q_shared.h",
+      "size": 40436,
+      "sha256": "9083a35790991b674bc58c3800b068a9a978898508c5fb08123ea52e1dc8597a"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/g_main.c",
+      "size": 45973,
+      "sha256": "fdc9abc73283c57a27e25c15fbcac7cc7b63d0a82d6fe9ce8f8af8252548ee4a"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/game/g_client.c",
+      "size": 33822,
+      "sha256": "2e5d3f526e4e82409bec32a34385cca4cb087fefdd0a5358b7895b71793b4a73"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/server/sv_client.c",
+      "size": 44937,
+      "sha256": "3e9db45857b2fc56e6df573e5faa3b23839e31cd20d3f3c4e008b7262c4edbc9"
+    },
+    {
+      "path": "/home/buzzkill/Projects/qsrc/quake-iii-arena/code/qcommon/vm.c",
+      "size": 18794,
+      "sha256": "36eb85c1ef2e7fb82bd2c79827e9d6a3a52bc867edfc7b5eec57540537169513"
+    }
+  ],
+  "runtime": {
+    "executable": {
+      "path": "/home/buzzkill/.bun/bin/bun",
+      "size": 92752752,
+      "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+    },
+    "bunVersion": "1.3.14",
+    "platform": "linux",
+    "architecture": "x64"
+  },
+  "captureProgram": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q3/capture.ts",
+      "size": 6160,
+      "sha256": "54e48458e10c3732950b96f1ea549c95b8305b48fbcc94797195d74c37e3f195"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q3/semantics.ts",
+      "size": 9088,
+      "sha256": "03f6cfd01afb557f5a4917dd294002f94284678cae48f404a23d1b1e047e31aa"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q3/sources.ts",
+      "size": 925,
+      "sha256": "dec91f4bd7aa0afee381bb0007225dca287746e88a00d0ae48655a31c4e1a27e"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/environment.ts",
+      "size": 14481,
+      "sha256": "7f5b59c224487759d98b8886239566319465e90ec315e717dc1e4d922a5be1de"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/schema.ts",
+      "size": 2876,
+      "sha256": "64c22a0901739fdaa711cdcedf1d824ab1ea5d279421d1a8cf4143ebb255edf4"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tsconfig.json",
+      "size": 776,
+      "sha256": "4fa17905f5bad6879f0400dd69c2500e91a6d0c5cef4f4ad88a38b04044746fd"
+    },
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/bun.lock",
+      "size": 1175,
+      "sha256": "abac5f91ed70920d8959005d04024292b1b0c7566307e4aa41633c086f635435"
+    }
+  ],
+  "fixtureFiles": [
+    {
+      "path": "/home/buzzkill/Projects/quake-typescript/tools/reference/q3/scenarios.ts",
+      "size": 18373,
+      "sha256": "c5030cb88d318c9249c45030f84b773e5a328c234d0628da66e3db72a366e3dc"
+    }
+  ],
+  "environment": {
+    "LC_ALL": "C"
+  },
+  "rng": {
+    "kind": "unused"
+  },
+  "clock": {
+    "kind": "synthetic-input",
+    "schedule": "Exact integer times and call sequence appear in each scenario input; the fixture file is SHA-256 identified."
+  },
+  "network": {
+    "kind": "not-executed"
+  },
+  "content": {
+    "kind": "not-required"
+  },
+  "originalExecutable": {
+    "kind": "not-run",
+    "reason": "This runner evaluates bounded transcriptions of pinned original source operations. It does not invoke a native, retail, donor, or QVM executable."
+  },
+  "numericProfile": "binary32-per-float-operation; binary64-double-literal-promotion; round-to-nearest-ties-to-even; int-conversion-toward-zero; bounded-int32-inputs",
+  "tolerances": [
+    {
+      "metric": "source-derived-values-and-event-order",
+      "absolute": 0,
+      "relative": 0
+    }
+  ],
+  "status": "PASS",
+  "assertionCount": 25,
+  "scenarios": [
+    {
+      "id": "q3-numeric-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:145-162",
+        "code/game/bg_pmove.c:1894-1910",
+        "code/game/q_shared.h:611"
+      ],
+      "assumptions": [
+        "Float arithmetic uses IEEE-754 binary32 round-to-nearest ties-to-even at each float operation, with no excess precision or reassociation.",
+        "The non-unit cancellation normal is an arithmetic probe of PM_ClipVelocity, not a collision-world normal.",
+        "The 0.001 literal promotes multiplication to binary64 before assignment to pml.frametime rounds to binary32."
+      ],
+      "input": {
+        "entering": {
+          "velocity": [
+            -100,
+            2,
+            3
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "overbounce": 1.125
+        },
+        "leaving": {
+          "velocity": [
+            100,
+            2,
+            3
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "overbounce": 1.25
+        },
+        "cancellation": {
+          "velocity": [
+            16777216,
+            1,
+            -16777216
+          ],
+          "normal": [
+            1,
+            1,
+            1
+          ],
+          "overbounce": 1
+        },
+        "clockDeltas": [
+          -1,
+          0,
+          1,
+          125,
+          200,
+          201
+        ]
+      },
+      "output": {
+        "entering": {
+          "backoff": -112.5,
+          "velocity": [
+            12.5,
+            2,
+            3
+          ]
+        },
+        "leaving": {
+          "backoff": 80,
+          "velocity": [
+            20,
+            2,
+            3
+          ]
+        },
+        "cancellation": {
+          "backoff": 0,
+          "velocity": [
+            16777216,
+            1,
+            -16777216
+          ]
+        },
+        "clocks": [
+          {
+            "commandTime": 99,
+            "msec": 1,
+            "frametime": 0.0010000000474974513
+          },
+          {
+            "commandTime": 100,
+            "msec": 1,
+            "frametime": 0.0010000000474974513
+          },
+          {
+            "commandTime": 101,
+            "msec": 1,
+            "frametime": 0.0010000000474974513
+          },
+          {
+            "commandTime": 225,
+            "msec": 125,
+            "frametime": 0.125
+          },
+          {
+            "commandTime": 300,
+            "msec": 200,
+            "frametime": 0.20000000298023224
+          },
+          {
+            "commandTime": 301,
+            "msec": 200,
+            "frametime": 0.20000000298023224
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "id": "entering",
+          "derivation": "Negative dot -100 is multiplied by 9/8 to -112.5; x minus backoff is 12.5. All values are exactly binary-representable.",
+          "expected": {
+            "backoff": -112.5,
+            "velocity": [
+              12.5,
+              2,
+              3
+            ]
+          },
+          "actual": {
+            "backoff": -112.5,
+            "velocity": [
+              12.5,
+              2,
+              3
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "leaving",
+          "derivation": "Positive dot 100 is divided by 5/4 to 80; x minus backoff is 20. All values are exactly representable.",
+          "expected": {
+            "backoff": 80,
+            "velocity": [
+              20,
+              2,
+              3
+            ]
+          },
+          "actual": {
+            "backoff": 80,
+            "velocity": [
+              20,
+              2,
+              3
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "binary32-dot-staging",
+          "derivation": "At 2^24 the binary32 spacing is two; ties-to-even rounds 2^24+1 to 2^24 before subtracting 2^24, yielding zero.",
+          "expected": {
+            "backoff": 0,
+            "velocity": [
+              16777216,
+              1,
+              -16777216
+            ]
+          },
+          "actual": {
+            "backoff": 0,
+            "velocity": [
+              16777216,
+              1,
+              -16777216
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "single-clock-clamps",
+          "derivation": "PmoveSingle clamps local duration to [1,200] while assigning commandTime the original serverTime. 1/1000 and 1/5 round to the listed binary32 values; 1/8 is exact.",
+          "expected": [
+            {
+              "commandTime": 99,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 100,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 101,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 225,
+              "msec": 125,
+              "frametime": 0.125
+            },
+            {
+              "commandTime": 300,
+              "msec": 200,
+              "frametime": 0.20000000298023224
+            },
+            {
+              "commandTime": 301,
+              "msec": 200,
+              "frametime": 0.20000000298023224
+            }
+          ],
+          "actual": [
+            {
+              "commandTime": 99,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 100,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 101,
+              "msec": 1,
+              "frametime": 0.0010000000474974513
+            },
+            {
+              "commandTime": 225,
+              "msec": 125,
+              "frametime": 0.125
+            },
+            {
+              "commandTime": 300,
+              "msec": 200,
+              "frametime": 0.20000000298023224
+            },
+            {
+              "commandTime": 301,
+              "msec": 200,
+              "frametime": 0.20000000298023224
+            }
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-pmove-subdivision-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:2026-2081",
+        "code/game/q_shared.h:1136"
+      ],
+      "assumptions": [
+        "Signed time arithmetic stays within int32 range.",
+        "PmoveSingle is reduced to its clock writes; PMF_JUMP_HELD is held at the stated value throughout. Movement and collision are outside this specimen."
+      ],
+      "input": {
+        "variable": {
+          "commandTime": 0,
+          "serverTime": 133,
+          "framecount": 63,
+          "subdivision": {
+            "kind": "variable"
+          },
+          "jumpHeld": true,
+          "upmove": 127
+        },
+        "fixed": {
+          "commandTime": 100,
+          "serverTime": 125,
+          "framecount": 7,
+          "subdivision": {
+            "kind": "fixed",
+            "msec": 8
+          },
+          "jumpHeld": false,
+          "upmove": 0
+        },
+        "catchup": {
+          "commandTime": 0,
+          "serverTime": 1500,
+          "framecount": 63,
+          "subdivision": {
+            "kind": "variable"
+          },
+          "jumpHeld": false,
+          "upmove": 127
+        },
+        "equal": {
+          "commandTime": 0,
+          "serverTime": 0,
+          "framecount": 63,
+          "subdivision": {
+            "kind": "variable"
+          },
+          "jumpHeld": true,
+          "upmove": 127
+        },
+        "backwards": {
+          "commandTime": 0,
+          "serverTime": -1,
+          "framecount": 63,
+          "subdivision": {
+            "kind": "variable"
+          },
+          "jumpHeld": true,
+          "upmove": 127
+        },
+        "boundaryServerTimes": [
+          65,
+          66,
+          67
+        ]
+      },
+      "output": {
+        "variable": {
+          "commandTime": 133,
+          "framecount": 0,
+          "upmove": 20,
+          "steps": [
+            {
+              "commandTime": 66,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 132,
+              "msec": 66,
+              "upmove": 20
+            },
+            {
+              "commandTime": 133,
+              "msec": 1,
+              "upmove": 20
+            }
+          ]
+        },
+        "fixed": {
+          "commandTime": 125,
+          "framecount": 8,
+          "upmove": 0,
+          "steps": [
+            {
+              "commandTime": 108,
+              "msec": 8,
+              "upmove": 0
+            },
+            {
+              "commandTime": 116,
+              "msec": 8,
+              "upmove": 0
+            },
+            {
+              "commandTime": 124,
+              "msec": 8,
+              "upmove": 0
+            },
+            {
+              "commandTime": 125,
+              "msec": 1,
+              "upmove": 0
+            }
+          ]
+        },
+        "catchup": {
+          "commandTime": 1500,
+          "framecount": 0,
+          "upmove": 127,
+          "steps": [
+            {
+              "commandTime": 566,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 632,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 698,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 764,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 830,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 896,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 962,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1028,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1094,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1160,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1226,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1292,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1358,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1424,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1490,
+              "msec": 66,
+              "upmove": 127
+            },
+            {
+              "commandTime": 1500,
+              "msec": 10,
+              "upmove": 127
+            }
+          ]
+        },
+        "equal": {
+          "commandTime": 0,
+          "framecount": 0,
+          "upmove": 127,
+          "steps": []
+        },
+        "backwards": {
+          "commandTime": 0,
+          "framecount": 63,
+          "upmove": 127,
+          "steps": []
+        },
+        "boundaryLengths": [
+          [
+            65
+          ],
+          [
+            66
+          ],
+          [
+            66,
+            1
+          ]
+        ]
+      },
+      "assertions": [
+        {
+          "id": "variable",
+          "derivation": "133=66+66+1; the six-bit frame count wraps 63 to 0; upmove becomes 20 only after the first PmoveSingle returns.",
+          "expected": {
+            "commandTime": 133,
+            "framecount": 0,
+            "upmove": 20,
+            "steps": [
+              {
+                "commandTime": 66,
+                "msec": 66,
+                "upmove": 127
+              },
+              {
+                "commandTime": 132,
+                "msec": 66,
+                "upmove": 20
+              },
+              {
+                "commandTime": 133,
+                "msec": 1,
+                "upmove": 20
+              }
+            ]
+          },
+          "actual": {
+            "commandTime": 133,
+            "framecount": 0,
+            "upmove": 20,
+            "steps": [
+              {
+                "commandTime": 66,
+                "msec": 66,
+                "upmove": 127
+              },
+              {
+                "commandTime": 132,
+                "msec": 66,
+                "upmove": 20
+              },
+              {
+                "commandTime": 133,
+                "msec": 1,
+                "upmove": 20
+              }
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "fixed",
+          "derivation": "25=8+8+8+1; frame count increments once per Pmove, not once per subdivision.",
+          "expected": {
+            "commandTime": 125,
+            "framecount": 8,
+            "upmove": 0,
+            "steps": [
+              {
+                "commandTime": 108,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 116,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 124,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 125,
+                "msec": 1,
+                "upmove": 0
+              }
+            ]
+          },
+          "actual": {
+            "commandTime": 125,
+            "framecount": 8,
+            "upmove": 0,
+            "steps": [
+              {
+                "commandTime": 108,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 116,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 124,
+                "msec": 8,
+                "upmove": 0
+              },
+              {
+                "commandTime": 125,
+                "msec": 1,
+                "upmove": 0
+              }
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "catchup-times",
+          "derivation": "The 1500 ms gap resets commandTime to 500. The remaining 1000 ms consists of fifteen 66 ms steps and one 10 ms step.",
+          "expected": [
+            566,
+            632,
+            698,
+            764,
+            830,
+            896,
+            962,
+            1028,
+            1094,
+            1160,
+            1226,
+            1292,
+            1358,
+            1424,
+            1490,
+            1500
+          ],
+          "actual": [
+            566,
+            632,
+            698,
+            764,
+            830,
+            896,
+            962,
+            1028,
+            1094,
+            1160,
+            1226,
+            1292,
+            1358,
+            1424,
+            1490,
+            1500
+          ],
+          "passed": true
+        },
+        {
+          "id": "equal",
+          "derivation": "Equal time skips the loop but still increments and masks pmove_framecount.",
+          "expected": {
+            "commandTime": 0,
+            "framecount": 0,
+            "upmove": 127,
+            "steps": []
+          },
+          "actual": {
+            "commandTime": 0,
+            "framecount": 0,
+            "upmove": 127,
+            "steps": []
+          },
+          "passed": true
+        },
+        {
+          "id": "backwards",
+          "derivation": "The backward-time return precedes both catch-up and frame-count mutation.",
+          "expected": {
+            "commandTime": 0,
+            "framecount": 63,
+            "upmove": 127,
+            "steps": []
+          },
+          "actual": {
+            "commandTime": 0,
+            "framecount": 63,
+            "upmove": 127,
+            "steps": []
+          },
+          "passed": true
+        },
+        {
+          "id": "subdivision-boundary",
+          "derivation": "The variable branch caps only durations greater than 66.",
+          "expected": [
+            [
+              65
+            ],
+            [
+              66
+            ],
+            [
+              66,
+              1
+            ]
+          ],
+          "actual": [
+            [
+              65
+            ],
+            [
+              66
+            ],
+            [
+              66,
+              1
+            ]
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-timer-expiry-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:1762-1787",
+        "code/game/bg_public.h:142-157"
+      ],
+      "assumptions": [
+        "The input flags are DUCKED|JUMP_HELD|TIME_LAND|TIME_KNOCKBACK|TIME_WATERJUMP, numerically 355."
+      ],
+      "input": {
+        "pmTime": 66,
+        "flags": 355,
+        "legsTimer": 66,
+        "torsoTimer": 67,
+        "durations": [
+          65,
+          66,
+          67
+        ]
+      },
+      "output": [
+        {
+          "pmTime": 1,
+          "flags": 355,
+          "legsTimer": 1,
+          "torsoTimer": 2
+        },
+        {
+          "pmTime": 0,
+          "flags": 3,
+          "legsTimer": 0,
+          "torsoTimer": 1
+        },
+        {
+          "pmTime": 0,
+          "flags": 3,
+          "legsTimer": 0,
+          "torsoTimer": 0
+        }
+      ],
+      "assertions": [
+        {
+          "id": "expiry-minus-exact-plus",
+          "derivation": "PM_DropTimers clears all three time flags at msec>=pm_time and preserves DUCKED|JUMP_HELD=3. Animation timers independently clamp at zero.",
+          "expected": [
+            {
+              "pmTime": 1,
+              "flags": 355,
+              "legsTimer": 1,
+              "torsoTimer": 2
+            },
+            {
+              "pmTime": 0,
+              "flags": 3,
+              "legsTimer": 0,
+              "torsoTimer": 1
+            },
+            {
+              "pmTime": 0,
+              "flags": 3,
+              "legsTimer": 0,
+              "torsoTimer": 0
+            }
+          ],
+          "actual": [
+            {
+              "pmTime": 1,
+              "flags": 355,
+              "legsTimer": 1,
+              "torsoTimer": 2
+            },
+            {
+              "pmTime": 0,
+              "flags": 3,
+              "legsTimer": 0,
+              "torsoTimer": 1
+            },
+            {
+              "pmTime": 0,
+              "flags": 3,
+              "legsTimer": 0,
+              "torsoTimer": 0
+            }
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-weapon-ammo-events-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:58-60",
+        "code/game/bg_pmove.c:1538-1706",
+        "code/game/bg_misc.c:1390-1408",
+        "code/game/bg_public.h:347-378",
+        "code/game/q_shared.h:1134"
+      ],
+      "assumptions": [
+        "Live non-spectator player, no respawn flag or holdable use, owned machinegun, no mission pack; fixture steps are direct PM_Weapon durations.",
+        "No unrelated events occur. The initial two-slot event ring and event parameters are zero."
+      ],
+      "input": {
+        "weapon": "machinegun",
+        "weaponState": "firing",
+        "weaponTime": 30,
+        "torsoAnim": 0,
+        "ammo": {
+          "machinegun": 2,
+          "rocket": 4,
+          "lightning": -1
+        },
+        "eventSequence": 0,
+        "steps": [
+          {
+            "msec": 66,
+            "weapon": "machinegun",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 66,
+            "weapon": "machinegun",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 100,
+            "weapon": "machinegun",
+            "attack": true,
+            "haste": false
+          }
+        ]
+      },
+      "output": {
+        "states": [
+          {
+            "weapon": "machinegun",
+            "weaponState": "firing",
+            "weaponTime": 64,
+            "torsoAnim": 135,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "machinegun",
+            "weaponState": "firing",
+            "weaponTime": 98,
+            "torsoAnim": 7,
+            "ammo": {
+              "machinegun": 0,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 2
+          },
+          {
+            "weapon": "machinegun",
+            "weaponState": "firing",
+            "weaponTime": 498,
+            "torsoAnim": 135,
+            "ammo": {
+              "machinegun": 0,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 3
+          }
+        ],
+        "events": [
+          {
+            "event": 23,
+            "parm": 0,
+            "index": 0,
+            "state": {
+              "weapon": "machinegun",
+              "weaponState": "firing",
+              "weaponTime": -36,
+              "torsoAnim": 135,
+              "ammo": {
+                "machinegun": 1,
+                "rocket": 4,
+                "lightning": -1
+              },
+              "eventSequence": 0
+            }
+          },
+          {
+            "event": 23,
+            "parm": 0,
+            "index": 1,
+            "state": {
+              "weapon": "machinegun",
+              "weaponState": "firing",
+              "weaponTime": -2,
+              "torsoAnim": 7,
+              "ammo": {
+                "machinegun": 0,
+                "rocket": 4,
+                "lightning": -1
+              },
+              "eventSequence": 1
+            }
+          },
+          {
+            "event": 21,
+            "parm": 0,
+            "index": 0,
+            "state": {
+              "weapon": "machinegun",
+              "weaponState": "firing",
+              "weaponTime": -2,
+              "torsoAnim": 135,
+              "ammo": {
+                "machinegun": 0,
+                "rocket": 4,
+                "lightning": -1
+              },
+              "eventSequence": 2
+            }
+          }
+        ],
+        "ring": [
+          21,
+          23
+        ],
+        "trace": [
+          "step:0",
+          "animation:135",
+          "ammo:machinegun:1",
+          "event:23:sequence:0",
+          "step:1",
+          "animation:7",
+          "ammo:machinegun:0",
+          "event:23:sequence:1",
+          "step:2",
+          "animation:135",
+          "event:21:sequence:2"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "overshoot-ammo-state",
+          "derivation": "30-66+100=64, then 64-66+100=98, then 98-100+500=498. Ammo falls 2 to 1 to 0, and the third attempt emits NOAMMO while remaining FIRING.",
+          "expected": [
+            [
+              64,
+              1,
+              "firing",
+              135
+            ],
+            [
+              98,
+              0,
+              "firing",
+              7
+            ],
+            [
+              498,
+              0,
+              "firing",
+              135
+            ]
+          ],
+          "actual": [
+            [
+              64,
+              1,
+              "firing",
+              135
+            ],
+            [
+              98,
+              0,
+              "firing",
+              7
+            ],
+            [
+              498,
+              0,
+              "firing",
+              135
+            ]
+          ],
+          "passed": true
+        },
+        {
+          "id": "event-observation",
+          "derivation": "Animation and FIRING state precede ammo consumption. FIRE_WEAPON is appended after consumption and before cooldown addition; NOAMMO precedes +500. Sequences use index sequence&1.",
+          "expected": [
+            [
+              23,
+              0,
+              0,
+              1,
+              -36
+            ],
+            [
+              23,
+              1,
+              1,
+              0,
+              -2
+            ],
+            [
+              21,
+              0,
+              2,
+              0,
+              -2
+            ]
+          ],
+          "actual": [
+            [
+              23,
+              0,
+              0,
+              1,
+              -36
+            ],
+            [
+              23,
+              1,
+              1,
+              0,
+              -2
+            ],
+            [
+              21,
+              0,
+              2,
+              0,
+              -2
+            ]
+          ],
+          "passed": true
+        },
+        {
+          "id": "event-ring-wrap",
+          "derivation": "The third event replaces ring slot zero, while sequence grows to three.",
+          "expected": {
+            "ring": [
+              21,
+              23
+            ],
+            "sequence": 3
+          },
+          "actual": {
+            "ring": [
+              21,
+              23
+            ],
+            "sequence": 3
+          },
+          "passed": true
+        },
+        {
+          "id": "event-parameters",
+          "derivation": "PM_AddEvent passes zero as the event parameter to BG_AddPredictableEventToPlayerstate for both FIRE_WEAPON and NOAMMO.",
+          "expected": [
+            0,
+            0,
+            0
+          ],
+          "actual": [
+            0,
+            0,
+            0
+          ],
+          "passed": true
+        },
+        {
+          "id": "causal-order",
+          "derivation": "Each shot restarts TORSO_ATTACK=7 by flipping ANIM_TOGGLEBIT=128. Ammo consumption is visible before the corresponding predictable event.",
+          "expected": [
+            "step:0",
+            "animation:135",
+            "ammo:machinegun:1",
+            "event:23:sequence:0",
+            "step:1",
+            "animation:7",
+            "ammo:machinegun:0",
+            "event:23:sequence:1",
+            "step:2",
+            "animation:135",
+            "event:21:sequence:2"
+          ],
+          "actual": [
+            "step:0",
+            "animation:135",
+            "ammo:machinegun:1",
+            "event:23:sequence:0",
+            "step:1",
+            "animation:7",
+            "ammo:machinegun:0",
+            "event:23:sequence:1",
+            "step:2",
+            "animation:135",
+            "event:21:sequence:2"
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-weapon-switch-boundaries-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:1469-1510",
+        "code/game/bg_pmove.c:1586-1688",
+        "code/game/bg_pmove.c:95-101"
+      ],
+      "assumptions": [
+        "Live normal player; both weapons are owned. Attack remains held. Each input is a direct PM_Weapon call, so the 199/249 ms intervals are intentionally unsplit."
+      ],
+      "input": {
+        "weapon": "machinegun",
+        "weaponState": "ready",
+        "weaponTime": 0,
+        "torsoAnim": 0,
+        "ammo": {
+          "machinegun": 1,
+          "rocket": 4,
+          "lightning": -1
+        },
+        "eventSequence": 0,
+        "steps": [
+          {
+            "msec": 1,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 199,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 1,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 249,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 1,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          },
+          {
+            "msec": 1,
+            "weapon": "rocket",
+            "attack": true,
+            "haste": false
+          }
+        ]
+      },
+      "output": {
+        "states": [
+          {
+            "weapon": "machinegun",
+            "weaponState": "dropping",
+            "weaponTime": 200,
+            "torsoAnim": 137,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "machinegun",
+            "weaponState": "dropping",
+            "weaponTime": 1,
+            "torsoAnim": 137,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "rocket",
+            "weaponState": "raising",
+            "weaponTime": 250,
+            "torsoAnim": 10,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "rocket",
+            "weaponState": "raising",
+            "weaponTime": 1,
+            "torsoAnim": 10,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "rocket",
+            "weaponState": "ready",
+            "weaponTime": 0,
+            "torsoAnim": 139,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 4,
+              "lightning": -1
+            },
+            "eventSequence": 1
+          },
+          {
+            "weapon": "rocket",
+            "weaponState": "firing",
+            "weaponTime": 800,
+            "torsoAnim": 7,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 3,
+              "lightning": -1
+            },
+            "eventSequence": 2
+          }
+        ],
+        "events": [
+          {
+            "event": 22,
+            "parm": 0,
+            "index": 0,
+            "state": {
+              "weapon": "machinegun",
+              "weaponState": "ready",
+              "weaponTime": 0,
+              "torsoAnim": 0,
+              "ammo": {
+                "machinegun": 1,
+                "rocket": 4,
+                "lightning": -1
+              },
+              "eventSequence": 0
+            }
+          },
+          {
+            "event": 23,
+            "parm": 0,
+            "index": 1,
+            "state": {
+              "weapon": "rocket",
+              "weaponState": "firing",
+              "weaponTime": 0,
+              "torsoAnim": 7,
+              "ammo": {
+                "machinegun": 1,
+                "rocket": 3,
+                "lightning": -1
+              },
+              "eventSequence": 1
+            }
+          }
+        ],
+        "ring": [
+          22,
+          23
+        ],
+        "trace": [
+          "step:0",
+          "event:22:sequence:0",
+          "animation:137",
+          "step:1",
+          "step:2",
+          "animation:10",
+          "step:3",
+          "step:4",
+          "animation:139",
+          "step:5",
+          "animation:7",
+          "ammo:rocket:3",
+          "event:23:sequence:1"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "switch-state-boundaries",
+          "derivation": "Begin adds 200; the exact dropping deadline changes weapon and adds 250; the exact raising deadline returns READY without firing. Attack fires only on the following call.",
+          "expected": [
+            [
+              "machinegun",
+              "dropping",
+              200,
+              4,
+              137
+            ],
+            [
+              "machinegun",
+              "dropping",
+              1,
+              4,
+              137
+            ],
+            [
+              "rocket",
+              "raising",
+              250,
+              4,
+              10
+            ],
+            [
+              "rocket",
+              "raising",
+              1,
+              4,
+              10
+            ],
+            [
+              "rocket",
+              "ready",
+              0,
+              4,
+              139
+            ],
+            [
+              "rocket",
+              "firing",
+              800,
+              3,
+              7
+            ]
+          ],
+          "actual": [
+            [
+              "machinegun",
+              "dropping",
+              200,
+              4,
+              137
+            ],
+            [
+              "machinegun",
+              "dropping",
+              1,
+              4,
+              137
+            ],
+            [
+              "rocket",
+              "raising",
+              250,
+              4,
+              10
+            ],
+            [
+              "rocket",
+              "raising",
+              1,
+              4,
+              10
+            ],
+            [
+              "rocket",
+              "ready",
+              0,
+              4,
+              139
+            ],
+            [
+              "rocket",
+              "firing",
+              800,
+              3,
+              7
+            ]
+          ],
+          "passed": true
+        },
+        {
+          "id": "switch-event-order",
+          "derivation": "CHANGE_WEAPON is emitted while weaponstate is still READY and before the drop timer/animation writes; the next event is FIRE_WEAPON after rocket ammo is consumed.",
+          "expected": [
+            [
+              22,
+              "machinegun",
+              "ready",
+              0,
+              4
+            ],
+            [
+              23,
+              "rocket",
+              "firing",
+              0,
+              3
+            ]
+          ],
+          "actual": [
+            [
+              22,
+              "machinegun",
+              "ready",
+              0,
+              4
+            ],
+            [
+              23,
+              "rocket",
+              "firing",
+              0,
+              3
+            ]
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-haste-infinite-ammo-source",
+      "sourceLocations": [
+        "code/game/bg_pmove.c:1628-1706"
+      ],
+      "assumptions": [
+        "Base-game haste is active; weapon is lightning; -1 denotes infinite ammunition; no holdable or respawn guard."
+      ],
+      "input": {
+        "weapon": "lightning",
+        "weaponState": "ready",
+        "weaponTime": 0,
+        "torsoAnim": 0,
+        "ammo": {
+          "machinegun": 1,
+          "rocket": 1,
+          "lightning": -1
+        },
+        "eventSequence": 1,
+        "steps": [
+          {
+            "msec": 1,
+            "weapon": "lightning",
+            "attack": true,
+            "haste": true
+          }
+        ]
+      },
+      "output": {
+        "states": [
+          {
+            "weapon": "lightning",
+            "weaponState": "firing",
+            "weaponTime": 38,
+            "torsoAnim": 135,
+            "ammo": {
+              "machinegun": 1,
+              "rocket": 1,
+              "lightning": -1
+            },
+            "eventSequence": 2
+          }
+        ],
+        "events": [
+          {
+            "event": 23,
+            "parm": 0,
+            "index": 1,
+            "state": {
+              "weapon": "lightning",
+              "weaponState": "firing",
+              "weaponTime": 0,
+              "torsoAnim": 135,
+              "ammo": {
+                "machinegun": 1,
+                "rocket": 1,
+                "lightning": -1
+              },
+              "eventSequence": 1
+            }
+          }
+        ],
+        "ring": [
+          0,
+          23
+        ],
+        "trace": [
+          "step:0",
+          "animation:135",
+          "event:23:sequence:1"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "integer-haste-infinite",
+          "derivation": "C compound assignment addTime/=1.3 converts 50/1.3 back to int by truncation, yielding 38. Ammo -1 skips consumption, and sequence one uses slot one.",
+          "expected": {
+            "time": 38,
+            "ammo": -1,
+            "ring": [
+              0,
+              23
+            ],
+            "trace": [
+              "step:0",
+              "animation:135",
+              "event:23:sequence:1"
+            ]
+          },
+          "actual": {
+            "time": 38,
+            "ammo": -1,
+            "ring": [
+              0,
+              23
+            ],
+            "trace": [
+              "step:0",
+              "animation:135",
+              "event:23:sequence:1"
+            ]
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-client-connect-immediate-source",
+      "sourceLocations": [
+        "code/game/g_client.c:903-988",
+        "code/game/g_main.c:203-213",
+        "code/server/sv_client.c:423-440",
+        "code/qcommon/vm.c:625-641",
+        "code/qcommon/vm.c:668-710"
+      ],
+      "assumptions": [
+        "Direct-connect call arguments are firstTime=true and isBot=false. Non-team game; successful imported session/userinfo/rank operations are represented by their call sites.",
+        "Denial string address is represented by synthetic nonzero QVM offset 32 in a 256-byte memory region; this is not an observed original address or a QVM interpreter test.",
+        "G_FilterPacket outcome and userinfo lookup values are fixed inputs. Existing SVF_BOT is distinct from the isBot argument."
+      ],
+      "input": {
+        "password": {
+          "banned": false,
+          "ip": "203.0.113.4",
+          "configuredPassword": "secret",
+          "providedPassword": "bad",
+          "existingBotFlag": false,
+          "priorVm": null
+        },
+        "banned": {
+          "banned": true,
+          "ip": "203.0.113.4",
+          "configuredPassword": "secret",
+          "providedPassword": "bad",
+          "existingBotFlag": false,
+          "priorVm": null
+        },
+        "local": {
+          "banned": false,
+          "ip": "localhost",
+          "configuredPassword": "secret",
+          "providedPassword": "bad",
+          "existingBotFlag": false,
+          "priorVm": "ui"
+        },
+        "nonePassword": {
+          "banned": false,
+          "ip": "203.0.113.4",
+          "configuredPassword": "NoNe",
+          "providedPassword": "bad",
+          "existingBotFlag": false,
+          "priorVm": null
+        },
+        "existingBot": {
+          "banned": false,
+          "ip": "203.0.113.4",
+          "configuredPassword": "secret",
+          "providedPassword": "bad",
+          "existingBotFlag": true,
+          "priorVm": null
+        }
+      },
+      "output": {
+        "password": {
+          "returnValue": 32,
+          "denial": "Invalid password",
+          "serverState": "free",
+          "currentVm": "game",
+          "trace": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "password:check",
+            "ClientConnect:return:32",
+            "vmMain:return:32",
+            "VM_Call:return:32",
+            "VM_ExplicitArgPtr:game:32",
+            "NET_OutOfBandPrint:print\nInvalid password\n",
+            "server:return"
+          ]
+        },
+        "banned": {
+          "returnValue": 32,
+          "denial": "You are banned from this server.",
+          "serverState": "free",
+          "currentVm": "game",
+          "trace": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "ClientConnect:return:32",
+            "vmMain:return:32",
+            "VM_Call:return:32",
+            "VM_ExplicitArgPtr:game:32",
+            "NET_OutOfBandPrint:print\nYou are banned from this server.\n",
+            "server:return"
+          ]
+        },
+        "local": {
+          "returnValue": 0,
+          "denial": null,
+          "serverState": "connected",
+          "currentVm": "ui",
+          "trace": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "client:zero",
+            "connected:CON_CONNECTING",
+            "G_InitSessionData",
+            "G_ReadSessionData",
+            "G_LogPrintf",
+            "ClientUserinfoChanged",
+            "trap_SendServerCommand:connected",
+            "CalculateRanks",
+            "ClientConnect:return:0",
+            "vmMain:return:0",
+            "VM_Call:return:0",
+            "SV_UserinfoChanged",
+            "NET_OutOfBandPrint:connectResponse",
+            "server:CS_CONNECTED"
+          ]
+        },
+        "nonePassword": {
+          "returnValue": 0,
+          "denial": null,
+          "serverState": "connected",
+          "currentVm": "game",
+          "trace": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "password:check",
+            "client:zero",
+            "connected:CON_CONNECTING",
+            "G_InitSessionData",
+            "G_ReadSessionData",
+            "G_LogPrintf",
+            "ClientUserinfoChanged",
+            "trap_SendServerCommand:connected",
+            "CalculateRanks",
+            "ClientConnect:return:0",
+            "vmMain:return:0",
+            "VM_Call:return:0",
+            "SV_UserinfoChanged",
+            "NET_OutOfBandPrint:connectResponse",
+            "server:CS_CONNECTED"
+          ]
+        },
+        "existingBot": {
+          "returnValue": 0,
+          "denial": null,
+          "serverState": "connected",
+          "currentVm": "game",
+          "trace": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "client:zero",
+            "connected:CON_CONNECTING",
+            "G_InitSessionData",
+            "G_ReadSessionData",
+            "G_LogPrintf",
+            "ClientUserinfoChanged",
+            "trap_SendServerCommand:connected",
+            "CalculateRanks",
+            "ClientConnect:return:0",
+            "vmMain:return:0",
+            "VM_Call:return:0",
+            "SV_UserinfoChanged",
+            "NET_OutOfBandPrint:connectResponse",
+            "server:CS_CONNECTED"
+          ]
+        }
+      },
+      "assertions": [
+        {
+          "id": "password-immediate-return",
+          "derivation": "ClientConnect returns Invalid password before initializing a client. vmMain forwards the nonzero return, VM_Call returns it synchronously, then SV_DirectConnect resolves and prints the denial and returns before connectResponse.",
+          "expected": {
+            "returnValue": 32,
+            "denial": "Invalid password",
+            "serverState": "free",
+            "currentVm": "game",
+            "trace": [
+              "VM_Call:game:enter",
+              "vmMain:GAME_CLIENT_CONNECT",
+              "trap_GetUserinfo",
+              "G_FilterPacket",
+              "password:check",
+              "ClientConnect:return:32",
+              "vmMain:return:32",
+              "VM_Call:return:32",
+              "VM_ExplicitArgPtr:game:32",
+              "NET_OutOfBandPrint:print\nInvalid password\n",
+              "server:return"
+            ]
+          },
+          "actual": {
+            "returnValue": 32,
+            "denial": "Invalid password",
+            "serverState": "free",
+            "currentVm": "game",
+            "trace": [
+              "VM_Call:game:enter",
+              "vmMain:GAME_CLIENT_CONNECT",
+              "trap_GetUserinfo",
+              "G_FilterPacket",
+              "password:check",
+              "ClientConnect:return:32",
+              "vmMain:return:32",
+              "VM_Call:return:32",
+              "VM_ExplicitArgPtr:game:32",
+              "NET_OutOfBandPrint:print\nInvalid password\n",
+              "server:return"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "banned-precedes-password",
+          "derivation": "The IP filter denial occurs before the password branch and every accepted-client side effect.",
+          "expected": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "ClientConnect:return:32",
+            "vmMain:return:32",
+            "VM_Call:return:32",
+            "VM_ExplicitArgPtr:game:32",
+            "NET_OutOfBandPrint:print\nYou are banned from this server.\n",
+            "server:return"
+          ],
+          "actual": [
+            "VM_Call:game:enter",
+            "vmMain:GAME_CLIENT_CONNECT",
+            "trap_GetUserinfo",
+            "G_FilterPacket",
+            "ClientConnect:return:32",
+            "vmMain:return:32",
+            "VM_Call:return:32",
+            "VM_ExplicitArgPtr:game:32",
+            "NET_OutOfBandPrint:print\nYou are banned from this server.\n",
+            "server:return"
+          ],
+          "passed": true
+        },
+        {
+          "id": "local-accepted-order",
+          "derivation": "localhost skips password comparison; game initialization and userinfo callbacks finish before null returns and the server sends connectResponse. VM_Call restores the previous ui context.",
+          "expected": {
+            "returnValue": 0,
+            "denial": null,
+            "serverState": "connected",
+            "currentVm": "ui",
+            "trace": [
+              "VM_Call:game:enter",
+              "vmMain:GAME_CLIENT_CONNECT",
+              "trap_GetUserinfo",
+              "G_FilterPacket",
+              "client:zero",
+              "connected:CON_CONNECTING",
+              "G_InitSessionData",
+              "G_ReadSessionData",
+              "G_LogPrintf",
+              "ClientUserinfoChanged",
+              "trap_SendServerCommand:connected",
+              "CalculateRanks",
+              "ClientConnect:return:0",
+              "vmMain:return:0",
+              "VM_Call:return:0",
+              "SV_UserinfoChanged",
+              "NET_OutOfBandPrint:connectResponse",
+              "server:CS_CONNECTED"
+            ]
+          },
+          "actual": {
+            "returnValue": 0,
+            "denial": null,
+            "serverState": "connected",
+            "currentVm": "ui",
+            "trace": [
+              "VM_Call:game:enter",
+              "vmMain:GAME_CLIENT_CONNECT",
+              "trap_GetUserinfo",
+              "G_FilterPacket",
+              "client:zero",
+              "connected:CON_CONNECTING",
+              "G_InitSessionData",
+              "G_ReadSessionData",
+              "G_LogPrintf",
+              "ClientUserinfoChanged",
+              "trap_SendServerCommand:connected",
+              "CalculateRanks",
+              "ClientConnect:return:0",
+              "vmMain:return:0",
+              "VM_Call:return:0",
+              "SV_UserinfoChanged",
+              "NET_OutOfBandPrint:connectResponse",
+              "server:CS_CONNECTED"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "password-exemptions",
+          "derivation": "The configured value none is case-insensitive; an existing SVF_BOT flag bypasses password checks even though the direct-connect isBot argument is false.",
+          "expected": [
+            0,
+            0
+          ],
+          "actual": [
+            0,
+            0
+          ],
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "q3-nested-vm-callback-source",
+      "sourceLocations": [
+        "code/qcommon/vm.c:668-710"
+      ],
+      "assumptions": [
+        "Synthetic entry callbacks exercise only VM_Call save/restore and synchronous integer return flow. They do not execute QVM opcodes, host syscalls, or real gameplay."
+      ],
+      "input": {
+        "priorContexts": [
+          null,
+          "ui"
+        ],
+        "nestedReturn": 7
+      },
+      "output": {
+        "outermost": {
+          "result": 8,
+          "currentVm": "game",
+          "trace": [
+            "enter:game:current:game",
+            "host:before:current:game",
+            "enter:cgame:current:cgame",
+            "return:cgame:7:current:game",
+            "host:after:7:current:game",
+            "return:game:8:current:game"
+          ]
+        },
+        "nested": {
+          "result": 8,
+          "currentVm": "ui",
+          "trace": [
+            "enter:game:current:game",
+            "host:before:current:game",
+            "enter:cgame:current:cgame",
+            "return:cgame:7:current:game",
+            "host:after:7:current:game",
+            "return:game:8:current:ui"
+          ]
+        }
+      },
+      "assertions": [
+        {
+          "id": "outermost-context-retained",
+          "derivation": "A nested call restores game before its caller resumes. At the outermost return oldVM is null, so the guarded restoration leaves currentVM=game.",
+          "expected": {
+            "result": 8,
+            "currentVm": "game",
+            "trace": [
+              "enter:game:current:game",
+              "host:before:current:game",
+              "enter:cgame:current:cgame",
+              "return:cgame:7:current:game",
+              "host:after:7:current:game",
+              "return:game:8:current:game"
+            ]
+          },
+          "actual": {
+            "result": 8,
+            "currentVm": "game",
+            "trace": [
+              "enter:game:current:game",
+              "host:before:current:game",
+              "enter:cgame:current:cgame",
+              "return:cgame:7:current:game",
+              "host:after:7:current:game",
+              "return:game:8:current:game"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "id": "nested-context-restored",
+          "derivation": "A non-null prior VM is restored only after the game entry returns, while the host callback observes game immediately after cgame returns.",
+          "expected": {
+            "result": 8,
+            "currentVm": "ui",
+            "trace": [
+              "enter:game:current:game",
+              "host:before:current:game",
+              "enter:cgame:current:cgame",
+              "return:cgame:7:current:game",
+              "host:after:7:current:game",
+              "return:game:8:current:ui"
+            ]
+          },
+          "actual": {
+            "result": 8,
+            "currentVm": "ui",
+            "trace": [
+              "enter:game:current:game",
+              "host:before:current:game",
+              "enter:cgame:current:cgame",
+              "return:cgame:7:current:game",
+              "host:after:7:current:game",
+              "return:game:8:current:ui"
+            ]
+          },
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "PASS establishes agreement between the source-derived evaluator and separately written literal expectations, not parity of the TypeScript engine or a measured original executable.",
+    "The evaluator imports no code from the Quake III TypeScript donor. Expected values come from the listed original C operations, fixed arithmetic examples, and explicit fixture assumptions.",
+    "This bounded set omits complete movement/collision, active game entities, actual QVM instructions, server sockets, rendering, audio, campaigns, and performance.",
+    "C compiler floating-point behavior can differ with excess precision, reassociation, or a different runtime profile. These records pin an explicit numeric profile rather than inferring all native builds behave identically.",
+    "ClientConnect import results and string offset are synthetic fixture inputs. Observable calls and immediate return ordering are source-derived, not packet captures or measured retail traces."
+  ]
+}

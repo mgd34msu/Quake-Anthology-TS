@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "status": "awaiting-reference-workloads",
+  "acceptanceAuthority": "No performance number or image tolerance is adopted by this record. Adoption requires measured evidence and an explicit project acceptance decision.",
+  "environment": "verification/reference-environment.json",
+  "sourceSemantics": "Source-defined numeric and timing obligations are recorded separately in verification/reference-cases. They are correctness contracts, not measured throughput promises.",
+  "performance": [
+    {
+      "id": "cpu-rendering",
+      "backends": ["cpu"],
+      "workload": "Fixed camera paths through classic and rerelease BSPs, animated models, transparency, dynamic lights, and 1/2/4 local views; use actual mounted assets and explicit viewport dimensions.",
+      "metrics": ["frame-time-p50-ms", "frame-time-p95-ms", "frame-time-p99-ms", "maximum-frame-time-ms", "resident-memory-bytes", "load-time-ms"],
+      "target": {"kind": "unmeasured", "reason": "The unified CPU renderer is not implemented; source rendering references and controlled workload captures are not yet established."},
+      "acceptance": {"kind": "not-adopted"}
+    },
+    {
+      "id": "gl-rendering",
+      "backends": ["gl"],
+      "workload": "The same recorded paths, cvars, dimensions, clocks and asset identities as CPU, with actual GL vendor/renderer/version and private-display details recorded.",
+      "metrics": ["frame-time-p50-ms", "frame-time-p95-ms", "frame-time-p99-ms", "maximum-frame-time-ms", "resident-memory-bytes", "load-time-ms"],
+      "target": {"kind": "unmeasured", "reason": "GPU inventory is not a renderer measurement. Neither source-reference camera frames nor unified GL frames have been captured."},
+      "acceptance": {"kind": "not-adopted"}
+    },
+    {
+      "id": "simulation-and-network",
+      "backends": ["dedicated"],
+      "workload": "Repeat pinned singleplayer, coop and competitive command schedules with representative expansion AI, mixed actors and local/remote clients; retain source frame deadlines and command subdivisions.",
+      "metrics": ["simulation-step-p50-ms", "simulation-step-p95-ms", "simulation-step-p99-ms", "missed-source-deadlines", "snapshot-encode-time-ms", "resident-memory-bytes"],
+      "target": {"kind": "unmeasured", "reason": "Native q2repro and q2reproded binaries were discovered and can support a bounded independent capture; no controlled simulation-throughput capture is recorded here."},
+      "acceptance": {"kind": "not-adopted"}
+    },
+    {
+      "id": "guest-execution",
+      "backends": ["qc", "qvm", "native-guest"],
+      "workload": "Execute pinned real programs and modules through controlled initialization, callbacks, nested host calls and gameplay frames; retain original clock obligations and host-call counts.",
+      "metrics": ["guest-frame-p50-ms", "guest-frame-p95-ms", "guest-frame-p99-ms", "host-call-time-ms", "initialization-time-ms", "resident-memory-bytes"],
+      "target": {"kind": "unmeasured", "reason": "Source-derived arithmetic and ABI observations do not measure the future unified guest implementations."},
+      "acceptance": {"kind": "not-adopted"}
+    }
+  ],
+  "imageTolerances": [
+    {
+      "id": "geometry-and-visibility",
+      "features": ["BSP solids and submodels", "Q3 patches", "sky and portal visibility", "model and sprite silhouettes"],
+      "comparison": "Compare independently identified reference camera frames and inspect edge/coverage mismatches before assigning per-feature limits.",
+      "tolerance": {"kind": "unmeasured", "reason": "No original-reference images have been captured for these pinned workloads."},
+      "acceptance": {"kind": "not-adopted"}
+    },
+    {
+      "id": "lighting-and-materials",
+      "features": ["palettes and gamma", "lightstyles and dynamic lighting", "BSPX lighting", "Q3 shader stages", "fog", "water and alpha composition"],
+      "comparison": "Record cvars, color conversion and clocks; compare per-channel errors and affected pixel regions against independent source renders.",
+      "tolerance": {"kind": "unmeasured", "reason": "Available renderer source and donor images have not established independent per-feature tolerance distributions."},
+      "acceptance": {"kind": "not-adopted"}
+    },
+    {
+      "id": "animation-and-seats",
+      "features": ["alias and skeletal animation", "per-seat HUD and inventory", "private effects", "cinematics and subtitles", "menu art and text"],
+      "comparison": "Use identified animation times and separate local-player views with a remote peer; retain expected shared effects exactly once and private effects only for the owning view.",
+      "tolerance": {"kind": "unmeasured", "reason": "The required mixed local/remote two-backend workload has not been executed."},
+      "acceptance": {"kind": "not-adopted"}
+    }
+  ],
+  "measurementProtocol": [
+    "Pin source and executable identities, compiler/build configuration, archive hashes, mount order, map/entry identity, command schedule, seed and camera path before execution.",
+    "Use an isolated writable profile and an owned private display for graphical references. Record actual driver and renderer identity; a software GL driver is a distinct environment.",
+    "Record cold load separately from warmed steady-state operation; retain per-frame raw samples and timestamps rather than only average FPS.",
+    "Record CPU governor, available memory, GPU power/temperature and unrelated load observations. Do not change the user's system power settings to manufacture a result.",
+    "Propose a target only after the named workload has measurements; retain evidence, uncertainty and the acceptance decision beside the numeric proposal. Missing measurements or unadopted targets block performance closure."
+  ]
+}

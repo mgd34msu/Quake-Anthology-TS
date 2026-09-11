@@ -1,0 +1,22 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  source-and-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check
+      - run: bun run build:tools
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tools
+          path: dist/
+          if-no-files-found: error
