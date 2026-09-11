@@ -4,6 +4,8 @@ import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { BodyState } from "../../../../contracts/world.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1AddonContext } from "../context.ts";
+import { createGrapple } from "./grapple.ts";
+import type { ThreewaveGrapple } from "../../equipment/threewave-grapple.ts";
 import { CTF_RUNES } from "./types.ts";
 import type { CtfRune, CtfTeam, Q1CtfServices } from "./types.ts";
 
@@ -13,7 +15,8 @@ export const opposite = (team: CtfTeam): CtfTeam => team === "red" ? "blue" : "r
 export const runeItem = (rune: CtfRune): ItemId => `q1:ctf/rune/${rune}`;
 
 export class CtfState {
-  constructor(readonly context: Q1AddonContext, readonly services: Q1CtfServices) {}
+  readonly grapple: ThreewaveGrapple;
+  constructor(readonly context: Q1AddonContext, readonly services: Q1CtfServices) { this.grapple = createGrapple(this); }
   get game() { return this.context.game; }
   get teamplay(): number { return this.context.services.cvar("teamplay"); }
   get startMap(): boolean { return this.game.mapName === "start"; }
@@ -28,7 +31,7 @@ export class CtfState {
   flag(team: CtfTeam): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname === (team === "red" ? "item_flag_team1" : "item_flag_team2")) ?? null; }
   flagTeam(flag: Q1Actor): CtfTeam { return flag.classname === "item_flag_team1" ? "red" : "blue"; }
   carried(actor: ActorId): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname.startsWith("item_flag_team") && entity.count === 1 && entity.owner !== null && sameActor(entity.owner, actor)) ?? null; }
-  hook(actor: ActorId): Q1Actor | null { return [...this.game.entities.values()].find(entity => entity.classname === "ctf_hook" && entity.owner !== null && sameActor(entity.owner, actor)) ?? null; }
+  hook(actor: ActorId): Q1Actor | null { return this.grapple.hook(actor); }
   rune(actor: ActorId): CtfRune | null { return CTF_RUNES.find(rune => this.game.host.inventory.count(actor, runeItem(rune)) > 0) ?? null; }
   grant(actor: ActorId, item: ItemId, count: number, capacity = 1): undefined {
     this.game.host.inventory.configure(this.owner(actor), { item, count, capacity }); return undefined;

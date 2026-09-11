@@ -13,7 +13,7 @@ export function registerCombat(state: CtfState): undefined {
   game.registerDamageSourceEffects("ctf:team_damage", {
     beforeQuad: (request, amount) => {
       const cause = request.attack.cause, falling = cause.kind === "q1" && cause.deathType === "falling" || cause.kind === "environment" && cause.hazard === "fall";
-      return falling && state.number(request.target, "hookPulling") !== 0 ? { kind: "cancel" } : { kind: "continue", amount };
+      return falling && state.grapple.pulling(request.target) ? { kind: "cancel" } : { kind: "continue", amount };
     },
     armorAllowed: request => state.teamplay < 0 || state.startMap || !(state.teamplay & CTF_FLAGS.armorProtect) || !friendly(state, request.target, request.attack.attacker),
     protectionApplies: request => state.team(request.target) === state.lastTeam(request.target),

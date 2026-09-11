@@ -99,7 +99,7 @@ test("foreign character captures, returns dropped flags and pulls an actual grap
   state.inputs.set(red.id, { ...state.services.input(red.id), attack: true, grappleSelected: true }); expect(fireHook(state.ctf, red.id)).toBe(true);
   const hook = state.ctf.hook(red.id), worldEntity = state.game.world; if (hook === null || worldEntity === null) throw new Error("Missing CTF hook/world");
   expect(hook.movement).toBe("fly"); state.game.setOrigin(hook, vadd(state.ctf.body(red.id).origin, { x: 250, y: 0, z: 16 })); hookTouch(state.ctf, hook, worldEntity.actor.id);
-  state.advance(40.4); expect(state.ctf.body(red.id).velocity.x).toBeGreaterThan(900); expect(state.ctf.number(red.id, "hookPulling")).toBe(1);
+  state.advance(40.4); expect(state.ctf.body(red.id).velocity.x).toBeGreaterThan(900); expect(state.ctf.grapple.pulling(red.id)).toBe(true);
   state.inputs.set(red.id, { ...state.services.input(red.id), attack: false }); state.advance(40.6); expect(state.ctf.hook(red.id)).toBeNull(); state.actors.close();
 });
 

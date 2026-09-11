@@ -83,6 +83,7 @@ export class Q2Ctf implements Q2SpawnModule {
   };
   afterSpawn(game: Q2GameServices): undefined { this.match.afterSpawn(game); return this.techs.setup(game); }
   admitted(entity: Q2Entity, game: Q2GameServices): undefined {
+    this.grapple.equipment.bind(game);
     if (this.states.has(entity.actor.id)) return undefined;
     const common = this.context.hooks.player(entity.actor.id); if (common === null) throw new Error("CTF admission requires the shared player state");
     const state = new Q2CtfPlayerState(); this.states.set(entity.actor.id, state);
@@ -164,7 +165,7 @@ export class Q2Ctf implements Q2SpawnModule {
     const state = this.states.get(entity.actor.id), ghost = state?.ghostCode === null || state?.ghostCode === undefined ? undefined : this.context.match.ghosts.get(state.ghostCode);
     if (ghost !== undefined) ghost.actor = null;
     if (this.context.match.election?.target === entity.actor.id) this.context.match.election = null;
-    this.states.delete(entity.actor.id); return undefined;
+    this.states.delete(entity.actor.id); this.grapple.states.delete(entity.actor.id); return undefined;
   }
   beforePlayer(entity: Q2Entity, game: Q2GameServices): undefined {
     const state = this.states.get(entity.actor.id); if (state === undefined) return undefined;
@@ -263,6 +264,6 @@ export class Q2Ctf implements Q2SpawnModule {
     }
     return undefined;
   }
-  capture(): Q2CtfCheckpoint { return captureQ2Ctf(this.context); }
-  restore(checkpoint: Q2CtfCheckpoint, game: Q2GameServices): undefined { return restoreQ2Ctf(this.context, game, checkpoint); }
+  capture(): Q2CtfCheckpoint { return captureQ2Ctf(this.context, this.grapple.equipment); }
+  restore(checkpoint: Q2CtfCheckpoint, game: Q2GameServices): undefined { return restoreQ2Ctf(this.context, game, checkpoint, this.grapple.equipment); }
 }

@@ -5,6 +5,7 @@ import { add, normalize, scale, subtract, zero } from "../fields.ts";
 import type { Q2Entity, Q2GameServices } from "../host.ts";
 import { Q2Ballistics } from "./ballistics.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
+import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
 import { angleVectors } from "./vectors.ts";
 import { MOD, PLAYER_CONTENTS, Q2WeaponState } from "./types.ts";
 import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponName } from "./types.ts";
@@ -159,7 +160,7 @@ export class Q2Weapons extends Q2Ballistics {
     state.latchedAttack ||= input.latchedAttack;
     if (input.spectator) return undefined;
     if ((game.host.combat.read(self.actor.id)?.health ?? 0) < 1) {
-      if (state.grenadeTime !== 0 && (state.weapon === "grenades" || game.options.edition === "rerelease")) {
+      if (state.grenadeTime !== 0 && (state.weapon === "grenades" ? state.handReservation.kind !== "none" : game.options.edition === "rerelease")) {
         const context = this.context(self, game, state, input);
         if (context !== null) {
           if (!context.rerelease) state.grenadeTime = now;
@@ -227,6 +228,32 @@ export class Q2Weapons extends Q2Ballistics {
     return this.hooks.ammoChanged(self.actor.id, definition.ammo);
   }
 
+  private reserveHandGrenade(context: Q2WeaponContext): boolean {
+    const { state, self, game } = context;
+    if (state.handReservation.kind !== "none") return false;
+    if (context.rerelease ? context.input.infiniteAmmo : (game.options.deathmatchFlags & 8192) !== 0) {
+      state.handReservation = { kind: "infinite" }; return true;
+    }
+    const before = this.ammo(context);
+    if (!game.host.inventory.consume(self.actor, "q2:ammo_grenades", 1)) return false;
+    state.handReservation = { kind: "finite" };
+    if (context.rerelease && before > context.definition.warning && this.ammo(context) <= context.definition.warning) game.sound(self, "weapons/lowammo.wav", 0);
+    this.hooks.ammoChanged(self.actor.id, "q2:ammo_grenades");
+    return true;
+  }
+
+  private cancelHandPreparation(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState): undefined {
+    const reservation = state.handReservation;
+    state.handReservation = { kind: "none" };
+    if (reservation.kind === "finite" && state.grenadeTime === 0 && game.host.actors.isLive(self.actor.id)) {
+      const entry = game.host.inventory.entries(self.actor.id).find(candidate => candidate.item === "q2:ammo_grenades");
+      if (entry === undefined) throw new Error("Reserved hand grenade lost its canonical inventory entry");
+      game.host.inventory.configure(self.actor, { ...entry, count: entry.count + 1 });
+      this.hooks.ammoChanged(self.actor.id, "q2:ammo_grenades");
+    }
+    return undefined;
+  }
+
   noAmmo(context: Q2WeaponContext, sound = true): undefined {
     const { self, game, state, now, rerelease } = context;
     if (sound && now >= state.emptySoundTime) { game.sound(self, "weapons/noammo.wav", rerelease ? 1 : 2); state.emptySoundTime = now + 1; }
@@ -257,10 +284,11 @@ export class Q2Weapons extends Q2Ballistics {
 
   changeWeapon(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput): undefined {
     if (game.options.edition === "rerelease" && (game.host.combat.read(self.actor.id)?.health ?? 0) > 0 && !input.instantSwitch && input.holster) return undefined;
-    if (state.grenadeTime !== 0 && (state.weapon === "grenades" || game.options.edition === "rerelease")) {
+    if (state.grenadeTime !== 0 && (state.weapon === "grenades" ? state.handReservation.kind !== "none" : game.options.edition === "rerelease")) {
       const old = this.context(self, game, state, input);
       if (old !== null) { if (!old.rerelease) state.grenadeTime = game.host.now(); this.fireHeld(old, false); }
     }
+    this.cancelHandPreparation(self, game, state);
     state.grenadeTime = 0;
     if (state.weapon !== null && state.pending !== null && state.pending !== state.weapon && game.options.edition === "rerelease") game.sound(self, "weapons/change.wav", 1);
     state.lastWeapon = state.weapon; state.weapon = state.pending; state.pending = null; state.machinegunShots = 0; state.viewModel = null; state.viewSkin = 0;
@@ -649,16 +677,16 @@ export class Q2Weapons extends Q2Ballistics {
 
   private throwGrenade(context: Q2WeaponContext, held: boolean): undefined {
     const { self, game, state, input, now, rerelease } = context;
-    const angles = rerelease ? { ...input.angles, x: Math.max(-62.5, input.angles.x) } : input.angles;
-    const projection = this.project(context, rerelease ? { x: 2, y: 0, z: -14 } : { x: 8, y: 8, z: -8 }, angles);
-    const timer = state.grenadeTime - now;
-    const chargedSpeed = 400 + (3 - timer) * (400 / 3);
-    const speed = Math.trunc(rerelease ? (game.host.combat.read(self.actor.id)?.health ?? 0) <= 0 ? 400 : Math.min(800, chargedSpeed) : chargedSpeed);
-    if (rerelease) state.grenadeTime = 0;
-    this.fireGrenade(self, game, projection.start, projection.direction, 125 * this.multiplier(context), speed, timer, 165, true, held);
-    this.consume(context, 1);
+    if (context.definition.name === "grenades" && state.handReservation.kind === "none") return undefined;
+    const spec = calculateHandThrow({ edition: game.options.edition, angles: input.angles,
+      alive: (game.host.combat.read(self.actor.id)?.health ?? 0) > 0, now, fuseDeadline: state.grenadeTime,
+      damageMultiplier: this.multiplier(context), gravity: input.gravity, held,
+      project: (angles, offset) => this.project(context, offset, angles) });
+    if (context.definition.name === "grenades") state.handReservation = { kind: "none" };
+    state.grenadeTime = rerelease ? 0 : now + 1;
+    this.fireGrenade(self, game, spec.start, spec.direction, spec.damage, spec.speed, spec.fuse, spec.radius, true, spec.held);
+    if (context.definition.name !== "grenades") this.consume(context, 1);
     if (!rerelease) {
-      state.grenadeTime = now + 1;
       if ((game.host.combat.read(self.actor.id)?.health ?? 0) > 0) this.animation(context, input.ducked ? "attack" : "reverse", input.ducked ? 159 : 119, input.ducked ? 162 : 112);
     }
     return undefined;
@@ -672,7 +700,7 @@ export class Q2Weapons extends Q2Ballistics {
     if (state.phase === "ready") {
       if (state.latchedAttack || input.attack) {
         state.latchedAttack = false;
-        if (this.ammo(context) > 0) { state.frame = 1; state.phase = "firing"; state.grenadeTime = 0; }
+        if (throwing === undefined ? this.reserveHandGrenade(context) : this.ammo(context) > 0) { state.frame = 1; state.phase = "firing"; state.grenadeTime = 0; }
         else this.noAmmo(context);
         return undefined;
       }
@@ -684,10 +712,11 @@ export class Q2Weapons extends Q2Ballistics {
     if (state.phase !== "firing") return undefined;
     if (state.frame === (throwing?.soundFrame ?? 5)) game.sound(self, throwing?.cockSound ?? "weapons/hgrena1b.wav", 1);
     if (state.frame === (throwing?.holdFrame ?? 11)) {
-      if (state.grenadeTime === 0) { state.grenadeTime = now + 3.2; this.setLoop(self, game, state, throwing?.holdSound ?? "weapons/hgrenc1b.wav"); }
+      if (state.grenadeTime === 0) { state.grenadeTime = handFuseDeadline(now, "classic"); this.setLoop(self, game, state, throwing?.holdSound ?? "weapons/hgrenc1b.wav"); }
       if ((throwing?.explode ?? true) && !state.grenadeBlewUp && now >= state.grenadeTime) {
         this.setLoop(self, game, state, "");
         if (throwing === undefined) this.throwGrenade(context, true); else throwing.fire(context, true);
+        if (throwing === undefined && (state.weapon !== definition.name || !game.host.actors.isLive(self.actor.id))) return undefined;
         state.grenadeBlewUp = true;
       }
       if (input.attack) return undefined;
@@ -699,6 +728,7 @@ export class Q2Weapons extends Q2Ballistics {
     if (state.frame === (throwing?.fireFrame ?? 12)) {
       this.setLoop(self, game, state, "");
       if (throwing === undefined) this.throwGrenade(context, false); else throwing.fire(context, throwing.releaseHeld);
+      if (throwing === undefined && (state.weapon !== definition.name || !game.host.actors.isLive(self.actor.id))) return undefined;
     }
     if (state.frame === definition.fireLast && now < state.grenadeTime) return undefined;
     state.frame++;
@@ -728,7 +758,7 @@ export class Q2Weapons extends Q2Ballistics {
     if (state.phase === "ready") {
       if ((state.fireBuffered || state.latchedAttack || input.attack) && state.fireFinished <= now) {
         state.latchedAttack = false;
-        if (this.ammo(context) > 0) { state.frame = throwing === undefined ? 2 : 1; state.phase = "firing"; state.grenadeTime = 0; state.thinkTime = millisecondSum(now, this.animationTime(context)); }
+        if (throwing === undefined ? this.reserveHandGrenade(context) : this.ammo(context) > 0) { state.frame = throwing === undefined ? 2 : 1; state.phase = "firing"; state.grenadeTime = 0; state.thinkTime = millisecondSum(now, this.animationTime(context)); }
         else this.noAmmo(context);
       } else if (state.thinkTime <= now) {
         state.thinkTime = millisecondSum(now, this.animationTime(context));
@@ -741,12 +771,14 @@ export class Q2Weapons extends Q2Ballistics {
     state.lastFiringTime = millisecondSum(now, 2.5);
     if (state.thinkTime > now) return undefined;
     if (state.frame === soundFrame && cockSound !== "") game.sound(self, cockSound, 1);
-    const wait = (input.haste ? 0.5 : 1) * (input.quadFireUntil > now ? 0.5 : 1);
+    const wait = handRecoverySeconds({ edition: "rerelease", haste: input.haste, quadFire: input.quadFireUntil > now });
     if (state.frame === holdFrame) {
-      if (state.grenadeTime === 0 && state.grenadeFinished === 0) state.grenadeTime = millisecondSum(now, 3.2);
+      if (state.grenadeTime === 0 && state.grenadeFinished === 0) state.grenadeTime = handFuseDeadline(now, "rerelease");
       if (!state.grenadeBlewUp && holdSound !== "") this.setLoop(self, game, state, holdSound);
       if (explodes && !state.grenadeBlewUp && now >= state.grenadeTime) {
-        this.powerupSound(context); this.setLoop(self, game, state, ""); fire(true); state.grenadeBlewUp = true; state.grenadeFinished = millisecondSum(now, wait);
+        this.powerupSound(context); this.setLoop(self, game, state, ""); fire(true);
+        if (throwing === undefined && (state.weapon !== definition.name || !game.host.actors.isLive(self.actor.id))) return undefined;
+        state.grenadeBlewUp = true; state.grenadeFinished = millisecondSum(now, wait);
       }
       if (input.attack) { state.thinkTime = millisecondSum(now, 0.001); return undefined; }
       if (state.grenadeBlewUp) {
@@ -754,6 +786,7 @@ export class Q2Weapons extends Q2Ballistics {
         else return undefined;
       } else {
         state.frame++; this.powerupSound(context); this.setLoop(self, game, state, ""); fire(false);
+        if (throwing === undefined && (state.weapon !== definition.name || !game.host.actors.isLive(self.actor.id))) return undefined;
         state.grenadeFinished = millisecondSum(now, wait);
         this.animation(context, input.ducked ? "attack" : "reverse", input.ducked ? 159 : 119, input.ducked ? 162 : 112);
       }

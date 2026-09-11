@@ -74,6 +74,8 @@ export interface Q2WeaponInput {
   readonly weaponThunk: boolean;
 }
 
+export type Q2HandReservation = { readonly kind: "none" } | { readonly kind: "finite" } | { readonly kind: "infinite" };
+
 export class Q2WeaponState {
   weapon: Q2WeaponName | null;
   lastWeapon: Q2WeaponName | null = null;
@@ -87,6 +89,7 @@ export class Q2WeaponState {
   machinegunShots = 0;
   silencerShots = 0;
   emptySoundTime = 0;
+  handReservation: Q2HandReservation = { kind: "none" };
   grenadeTime = 0;
   grenadeFinished = 0;
   grenadeBlewUp = false;

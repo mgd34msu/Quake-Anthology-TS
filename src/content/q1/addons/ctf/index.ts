@@ -5,7 +5,7 @@ import { CtfState } from "./state.ts";
 import { CTF_FLAGS } from "./types.ts";
 import type { Q1CtfServices } from "./types.ts";
 import { registerFlags, dropFlag } from "./flags.ts";
-import { registerGrapple, unhook, grappleTrail } from "./grapple.ts";
+import { unhook, grappleTrail } from "./grapple.ts";
 import { registerArsenal, grappleAttack, spawnArsenal, characterPose } from "./arsenal.ts";
 import { captureTravel, restoreTravel } from "./travel.ts";
 import { registerRunes, dropRune, regenerate } from "./runes.ts";
@@ -20,7 +20,7 @@ export class Q1Ctf extends CtfState {
   constructor(context: Q1AddonContext, services: Q1CtfServices) {
     super(context, services);
     if (context.program !== "ctf") throw new Error("CTF requires the selected CTF source program");
-    registerFlags(this); registerGrapple(this); registerRunes(this); registerCombat(this); registerDrops(this); registerArsenal(this); registerMaps(this);
+    registerFlags(this); registerRunes(this); registerCombat(this); registerDrops(this); registerArsenal(this); registerMaps(this);
     this.game.registerPlayerExtension({ id: "ctf:spawn_parameters", captureTravel: (_runtime, player) => captureTravel(this, player.actor.id),
       restoreTravel: (_runtime, player, bytes) => restoreTravel(this, player.actor.id, bytes) });
   }
@@ -39,7 +39,7 @@ export class Q1Ctf extends CtfState {
   }
   selectSpawn(actor: ActorId) { return spawnPoint(this, actor); }
   characterPose(actor: ActorId) { return characterPose(this, actor); }
-  fallDamageAllowed(actor: ActorId): boolean { return this.number(actor, "hookPulling") === 0; }
+  fallDamageAllowed(actor: ActorId): boolean { return !this.grapple.pulling(actor); }
   captureTravel(actor: ActorId): Uint8Array { return captureTravel(this, actor); }
   restoreTravel(actor: ActorId, bytes: Uint8Array): undefined { return restoreTravel(this, actor, bytes); }
   /** Source prethink, called once per player by the shared session even with foreign characters. */

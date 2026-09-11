@@ -11,6 +11,9 @@ import type { Q2Edition, Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest }
 import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponName } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 
+import { encodeQ2WeaponsCheckpoint, decodeQ2WeaponsCheckpoint, readQ2WeaponState } from "../../../../../src/persistence/q2-weapons.ts";
+import { SaveReader } from "../../../../../src/persistence/value.ts";
+
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const forward: Vec3 = { x: 1, y: 0, z: 0 };
 const plane = { normal: { x: -1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 1 };
@@ -24,7 +27,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1) {
+function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false) {
   let now = 0;
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-weapons-${edition}-${name}`));
   const callbacks = new ActorCallbackTable(actors);
@@ -63,7 +66,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     keyConsumed: () => undefined, prepareLevelChange: () => undefined,
     emit: event => { presentation.push(event); return undefined; }, transition: () => undefined, diagnostic: message => { throw new Error(message); },
   };
-  const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1,
+  const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: infiniteAmmo ? 8192 : 0, maxClients: 1,
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
   const self = game.attachPlayer(player);
   const weapons = new Q2Weapons({ emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
@@ -85,6 +88,93 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
 }
 
 describe("Q2 base weapons on shared state", () => {
+  test("native hand preparation reserves the last unit and cancellation refunds only before cooking", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const refill of [false, true]) {
+      const scene = fixture(edition, "grenades");
+      scene.inventory.consume(scene.player, "q2:ammo_grenades", 199);
+      scene.step(0);
+      expect(scene.state.handReservation.kind).toBe("finite");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(0);
+      if (refill) scene.inventory.give(scene.player, "q2:ammo_grenades", 200);
+      scene.state.pending = "blaster";
+      scene.weapons.changeWeapon(scene.self, scene.game, scene.state, { ...input, attack: false });
+      expect(scene.state.handReservation.kind).toBe("none");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(refill ? 201 : 1);
+      expect([...scene.game.entities.values()].some(entity => (entity.classname === "hgrenade" || entity.classname === "hand_grenade"))).toBe(false);
+      scene.weapons.changeWeapon(scene.self, scene.game, scene.state, { ...input, attack: false });
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(refill ? 201 : 1);
+    }
+  });
+
+  test("primed native weapon change and death each resolve one reserved grenade", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const dead of [false, true]) {
+      const scene = fixture(edition, "grenades");
+      scene.inventory.consume(scene.player, "q2:ammo_grenades", 199);
+      for (let frame = 0; frame <= 11; frame++) scene.step(frame / 10);
+      expect(scene.state.grenadeTime).toBeGreaterThan(1.1);
+      if (dead) { scene.combat.setHealth(scene.player, 0); scene.step(1.2); }
+      else { scene.state.pending = "blaster"; scene.weapons.changeWeapon(scene.self, scene.game, scene.state, { ...input, attack: false }); }
+      expect(scene.state.handReservation.kind).toBe("none");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(0);
+      const emitted = () => [...scene.game.entities.values()].filter(entity => (entity.classname === "hgrenade" || entity.classname === "hand_grenade")).length
+        + scene.presentation.filter(event => event.kind === "effect" && event.effect.includes("explosion")).length;
+      expect(emitted()).toBe(1);
+      scene.step(1.3, { ...input, attack: false });
+      expect(emitted()).toBe(1);
+    }
+  });
+
+  test("overcook commits native reservation before lethal damage reenters weapon processing", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const scene = fixture(edition, "grenades");
+      scene.inventory.consume(scene.player, "q2:ammo_grenades", 199);
+      scene.combat.setHealth(scene.player, 1);
+      let reactions = 0;
+      scene.self.die = () => { reactions++; scene.weapons.tick(scene.self, scene.game, input); return undefined; };
+      for (let frame = 0; frame <= 11; frame++) scene.step(frame / 10);
+      scene.step(scene.state.grenadeTime + 0.1);
+      expect(reactions).toBe(1);
+      expect(scene.state.handReservation.kind).toBe("none");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(0);
+      expect(scene.presentation.filter(event => event.kind === "effect" && event.effect.includes("explosion"))).toHaveLength(1);
+      expect([...scene.game.entities.values()].filter(entity => (entity.classname === "hgrenade" || entity.classname === "hand_grenade"))).toHaveLength(0);
+      expect(scene.state.weapon).toBeNull();
+      expect(scene.state.grenadeBlewUp).toBe(false);
+    }
+  });
+
+  test("native hand save restores the reservation without another debit and validates legacy ownership", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const scene = fixture(edition, "grenades");
+      scene.inventory.consume(scene.player, "q2:ammo_grenades", 199);
+      for (let frame = 0; frame <= 11; frame++) scene.step(frame / 10);
+      const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(scene.weapons.capture(scene.game)));
+      scene.weapons.restore(scene.game, saved);
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(0);
+      expect(scene.weapons.states.get(scene.player.id)?.handReservation.kind).toBe("finite");
+      scene.step(1.2, { ...input, attack: false }); scene.step(1.3, { ...input, attack: false });
+      expect([...scene.game.entities.values()].filter(entity => (entity.classname === "hgrenade" || entity.classname === "hand_grenade"))).toHaveLength(1);
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(0);
+      const { handReservation, ...legacy } = scene.state;
+      expect(handReservation.kind).toBe("finite");
+      expect(() => readQ2WeaponState(new SaveReader(legacy))).toThrow("legacy active hand grenade");
+      expect(readQ2WeaponState(new SaveReader({ ...legacy, phase: "ready" })).handReservation.kind).toBe("none");
+      expect(() => readQ2WeaponState(new SaveReader({ ...legacy, handReservation: { kind: "invalid" } }))).toThrow();
+    }
+  });
+
+  test("native infinite hand reservation keeps its admission policy through release", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const scene = fixture(edition, "grenades", 0.1, true);
+      for (let frame = 0; frame <= 11; frame++) scene.step(frame / 10, { ...input, infiniteAmmo: true });
+      expect(scene.state.handReservation.kind).toBe("infinite");
+      scene.step(1.2, { ...input, attack: false }); scene.step(1.3, { ...input, attack: false });
+      expect(scene.state.handReservation.kind).toBe("none");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(200);
+      expect([...scene.game.entities.values()].filter(entity => (entity.classname === "hgrenade" || entity.classname === "hand_grenade"))).toHaveLength(1);
+    }
+  });
+
   test("classic and rerelease fire real blaster actors at their own cadence for a Q3 character", () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
       const scene = fixture(edition, "blaster", 0.025);

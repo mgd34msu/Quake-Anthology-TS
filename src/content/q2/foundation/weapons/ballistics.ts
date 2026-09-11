@@ -38,6 +38,18 @@ function weaponForMod(mod: number): ItemId | null {
   }
 }
 
+export interface Q2HandGrenadeLaunch {
+  readonly start: Vec3;
+  readonly direction: Vec3;
+  readonly damage: number;
+  readonly speed: number;
+  readonly timer: number;
+  readonly radius: number;
+  readonly held: boolean;
+  readonly gravity: number;
+  readonly playersCollide: boolean;
+}
+
 export class Q2Ballistics {
   readonly blasterCauses = new Map<ActorId, number>();
   private readonly releaseRegistries = new WeakSet<Q2GameServices["host"]["actors"]>();
@@ -51,29 +63,36 @@ export class Q2Ballistics {
   constructor(readonly hooks: Q2WeaponHooks) {}
 
   protected shotMask(self: Q2Entity, game: Q2GameServices): number {
+    return this.actorShotMask(game, this.inputs.get(self.actor.id)?.playersCollide !== false);
+  }
+
+  private actorShotMask(game: Q2GameServices, playersCollide: boolean): number {
     if (game.options.edition === "classic") return SHOT_MASK;
-    return this.inputs.get(self.actor.id)?.playersCollide === false ? PROJECTILE_MASK & ~PLAYER_CONTENTS : PROJECTILE_MASK;
+    return playersCollide ? PROJECTILE_MASK : PROJECTILE_MASK & ~PLAYER_CONTENTS;
   }
 
   playerNoise(self: Q2Entity, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
-    if (!game.host.isPlayer(self.actor.id)) return undefined;
-    const state = this.states.get(self.actor.id);
+    return this.playerNoiseForActor(self.actor.id, game, origin, kind);
+  }
+
+  playerNoiseForActor(owner: ActorId, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
+    if (!game.host.isPlayer(owner)) return undefined;
+    const state = this.states.get(owner);
     if (kind === "weapon") {
-      if (game.options.edition === "rerelease") this.hooks.emit({ kind: "invisibility-reveal", actor: self.actor.id, until: game.host.now() + (state !== undefined && state.silencerShots > 0 ? 0.4 : 2) });
+      if (game.options.edition === "rerelease") this.hooks.emit({ kind: "invisibility-reveal", actor: owner, until: game.host.now() + (state !== undefined && state.silencerShots > 0 ? 0.4 : 2) });
       if (state !== undefined && state.silencerShots > 0) { state.silencerShots--; return undefined; }
     }
-    if (game.options.mode === "deathmatch" || this.inputs.get(self.actor.id)?.notarget === true) return undefined;
-    const record: Q2NoiseRecord = { actor: self.actor.id, origin, time: game.host.now(), secondary: kind === "impact" };
-    const records = this.noises.get(self.actor.id) ?? { primary: null, secondary: null };
+    if (game.options.mode === "deathmatch" || this.inputs.get(owner)?.notarget === true) return undefined;
+    const record: Q2NoiseRecord = { actor: owner, origin, time: game.host.now(), secondary: kind === "impact" };
+    const records = this.noises.get(owner) ?? { primary: null, secondary: null };
     if (kind === "impact") { records.secondary = record; this.sound2Entity = record; }
     else { records.primary = record; this.soundEntity = record; }
-    this.noises.set(self.actor.id, records);
-    return this.hooks.noise(self.actor.id, origin, kind === "impact");
+    this.noises.set(owner, records);
+    return this.hooks.noise(owner, origin, kind === "impact");
   }
 
   private impactNoise(projectile: Q2Entity, game: Q2GameServices): undefined {
-    const owner = game.entity(projectile.owner);
-    return owner === null ? undefined : this.playerNoise(owner, game, game.body(projectile).origin, "impact");
+    return projectile.owner === null ? undefined : this.playerNoiseForActor(projectile.owner, game, game.body(projectile).origin, "impact");
   }
 
   checkDodge(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, speed: number): undefined {
@@ -217,14 +236,18 @@ export class Q2Ballistics {
   }
 
   private projectile(self: Q2Entity, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number): Q2Entity {
+    return this.projectileForActor(self.actor.id, game, classname, start, direction, speed, model, effects, this.shotMask(self, game));
+  }
+
+  private projectileForActor(owner: ActorId, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number, clipMask: number): Q2Entity {
     game.sourceCallbacks.register(this.callbacks);
     if (!this.releaseRegistries.has(game.host.actors)) {
       this.releaseRegistries.add(game.host.actors);
       game.host.actors.onRelease(actor => { this.blasterCauses.delete(actor.id); return undefined; });
     }
     const projectile = game.create(classname);
-    projectile.owner = self.actor.id; projectile.model = model; projectile.effects = effects;
-    projectile.clipMask = this.shotMask(self, game); projectile.projectile = true;
+    projectile.owner = owner; projectile.model = model; projectile.effects = effects;
+    projectile.clipMask = clipMask; projectile.projectile = true;
     projectile.dodgeable = game.options.edition === "rerelease";
     projectile.movedir = direction;
     game.move(projectile, { origin: start, angles: vectorAngles(direction), velocity: scale(direction, speed), bounds: { min: zero, max: zero } }, false);
@@ -251,11 +274,19 @@ export class Q2Ballistics {
   }
 
   fireGrenade(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, hand = false, held = false, monster = false, adjustment?: Q2GrenadeAdjustment): Q2Entity {
+    return this.launchGrenade(self.actor.id, game, start, direction, damage, speed, timer, radius, hand, held, monster, adjustment?.gravity ?? this.inputs.get(self.actor.id)?.gravity ?? 800, this.shotMask(self, game), adjustment);
+  }
+
+  fireHandGrenade(owner: ActorId, game: Q2GameServices, spec: Q2HandGrenadeLaunch): Q2Entity {
+    return this.launchGrenade(owner, game, spec.start, spec.direction, spec.damage, spec.speed, spec.timer, spec.radius, true, spec.held, false, spec.gravity, this.actorShotMask(game, spec.playersCollide));
+  }
+
+  private launchGrenade(owner: ActorId, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, hand: boolean, held: boolean, monster: boolean, ownerGravity: number, clipMask: number, adjustment?: Q2GrenadeAdjustment): Q2Entity {
     const rerelease = game.options.edition === "rerelease", axes = angleVectors(vectorAngles(direction));
     const model = hand ? rerelease ? "grenade3" : "grenade2" : rerelease && !monster ? "grenade4" : "grenade";
-    const grenade = this.projectile(self, game, hand ? rerelease ? "hand_grenade" : "hgrenade" : "grenade", start, direction, speed, `models/objects/${model}/tris.md2`, 32 + (rerelease && monster && !hand ? 2 ** 37 : 0));
+    const grenade = this.projectileForActor(owner, game, hand ? rerelease ? "hand_grenade" : "hgrenade" : "grenade", start, direction, speed, `models/objects/${model}/tris.md2`, 32 + (rerelease && monster && !hand ? 2 ** 37 : 0), clipMask);
     grenade.damageRadius = radius; grenade.damage = damage; grenade.speed = speed; grenade.spawnflags = hand ? held ? 3 : 1 : 0;
-    const gravity = rerelease ? (adjustment?.gravity ?? this.inputs.get(self.actor.id)?.gravity ?? 800) / 800 : 1;
+    const gravity = rerelease ? ownerGravity / 800 : 1;
     const up = (adjustment?.up ?? 200 + (game.host.random() * 2 - 1) * 10) * gravity, right = adjustment?.right ?? (game.host.random() * 2 - 1) * 10;
     game.move(grenade, { velocity: add(add(scale(direction, speed), scale(axes.up, up)), scale(axes.right, right)) }, false);
     grenade.angularVelocity = rerelease ? hand || monster ? { x: (game.host.random() * 2 - 1) * 360, y: (game.host.random() * 2 - 1) * 360, z: (game.host.random() * 2 - 1) * 360 } : zero : { x: 300, y: 300, z: 300 };
@@ -270,7 +301,11 @@ export class Q2Ballistics {
     if (hand) this.loop(grenade, game, "weapons/hgrenc1b.wav", true);
     if (hand && timer <= 0) this.grenadeExplode(grenade, game);
     else {
-      if (hand) game.sound(self, "weapons/hgrent1a.wav", 1);
+      if (hand) {
+        const body = game.host.bodies.read(owner);
+        if (body === null) throw new Error("Q2 grenade thrower has no shared body");
+        game.host.emit({ kind: "sound", actor: owner, origin: body.origin, path: "weapons/hgrent1a.wav", channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "once" });
+      }
       game.solid(grenade, "box"); game.motion(grenade, "bounce"); game.show(grenade);
     }
     return grenade;

@@ -1,3 +1,6 @@
+import type { Q2CtfGrappleEquipment } from "../../equipment/ctf-grapple.ts";
+import { captureCtfGrapple, restoreCtfGrapple } from "../../equipment/grapple-services.ts";
+import type { CtfGrappleState } from "../../equipment/grapple-services.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import { readSavedActor } from "../../../../persistence/save-image.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../../../persistence/value.ts";
@@ -5,7 +8,7 @@ import type { Q2GameServices } from "../../foundation/host.ts";
 import { Q2CtfPlayerState, saveCtfActor } from "./types.ts";
 import type { Q2CtfContext, Q2CtfElection, Q2CtfGhost, Q2CtfMatchState, Q2CtfRules } from "./types.ts";
 
-type PlayerCheckpoint = Omit<Q2CtfPlayerState, "grapple"> & { readonly grapple: SavedActorId | null };
+type PlayerCheckpoint = Q2CtfPlayerState & Omit<CtfGrappleState, "grapple"> & { readonly grapple: SavedActorId | null };
 type GhostCheckpoint = Omit<Q2CtfGhost, "actor"> & { readonly actor: SavedActorId | null };
 type ElectionCheckpoint = Omit<Q2CtfElection, "target"> & { readonly target: SavedActorId };
 export interface Q2CtfCheckpoint {
@@ -15,31 +18,34 @@ export interface Q2CtfCheckpoint {
   readonly players: readonly { readonly actor: SavedActorId; readonly state: PlayerCheckpoint }[];
 }
 
-export function captureQ2Ctf(context: Q2CtfContext): Q2CtfCheckpoint {
+export function captureQ2Ctf(context: Q2CtfContext, equipment: Q2CtfGrappleEquipment): Q2CtfCheckpoint {
   const { adminPassword: _password, warpList: _mapPermissions, ...rules } = context.rules;
   const { ghosts, election, ...match } = context.match;
   return { version: 1, rules, match: { ...match, ghosts: [...ghosts.values()].map(ghost => ({ ...ghost, actor: ghost.actor === null ? null : saveCtfActor(ghost.actor) })),
     election: election === null ? null : { ...election, target: saveCtfActor(election.target) } },
-    players: [...context.states].map(([actor, state]) => ({ actor: saveCtfActor(actor), state: { ...state, grapple: state.grapple === null ? null : saveCtfActor(state.grapple) } })) };
+    players: [...context.states].map(([actor, state]) => ({ actor: saveCtfActor(actor), state: { ...state, ...captureCtfGrapple(equipment.state(actor)) } })) };
 }
 
 /** Shared actors, player records, inventory and the foundation restore first. */
-export function restoreQ2Ctf(context: Q2CtfContext, game: Q2GameServices, checkpoint: Q2CtfCheckpoint): undefined {
+export function restoreQ2Ctf(context: Q2CtfContext, game: Q2GameServices, checkpoint: Q2CtfCheckpoint, equipment: Q2CtfGrappleEquipment): undefined {
+  equipment.bind(game);
   const players = checkpoint.players.map(entry => {
     const actor = game.host.actors.resolveSaved(entry.actor);
     if (actor === null || game.entity(actor.id) === null || context.hooks.player(actor.id) === null) throw new Error("CTF restore requires the existing shared player and source entity");
     const state = new Q2CtfPlayerState();
-    Object.assign(state, entry.state, { grapple: entry.state.grapple === null ? null : game.host.actors.referenceSaved(entry.state.grapple) });
-    return { actor: actor.id, state };
+    const { grapple, grappleState, grappleReleaseTime, ...matchState } = entry.state;
+    Object.assign(state, matchState);
+    const hook = restoreCtfGrapple({ grapple, grappleState, grappleReleaseTime }, game);
+    return { actor: actor.id, state, hook };
   });
-  context.states.clear();
-  for (const entry of players) context.states.set(entry.actor, entry.state);
+  context.states.clear(); equipment.states.clear();
+  for (const entry of players) { context.states.set(entry.actor, entry.state); equipment.states.set(entry.actor, entry.hook); }
   const { ghosts, election, ...match } = checkpoint.match;
   Object.assign(context.rules, checkpoint.rules); Object.assign(context.match, match);
   context.match.ghosts.clear();
   for (const ghost of ghosts) context.match.ghosts.set(ghost.code, { ...ghost, actor: ghost.actor === null ? null : game.host.actors.referenceSaved(ghost.actor) });
   context.match.election = election === null ? null : { ...election, target: game.host.actors.referenceSaved(election.target) };
-  for (const [actor, state] of context.states) context.hooks.setGrapplePrediction(actor, state.grapple !== null && state.grappleState === "hang");
+  for (const [actor, state] of equipment.states) context.hooks.setGrapplePrediction(actor, state.grapple !== null && state.grappleState === "hang");
   return undefined;
 }
 

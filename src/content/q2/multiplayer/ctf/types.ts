@@ -54,9 +54,6 @@ export class Q2CtfPlayerState {
   admin = false;
   idView = true;
   ghostCode: number | null = null;
-  grapple: ActorId | null = null;
-  grappleState: "fly" | "pull" | "hang" = "fly";
-  grappleReleaseTime = 0;
   regenTime = 0;
   techSoundTime = 0;
   lastTechMessage = 0;

@@ -41,10 +41,6 @@ export class LmctfPlayerState {
   team: LmctfTeam = 0;
   observerTeam: LmctfTeam = 0;
   rune: ActorId | null = null;
-  hook: ActorId | null = null;
-  hookState: 0 | 1 | 2 = 0;
-  hookLength = 0;
-  hookHeld = false;
   regenFrame = 0;
   killCarrierTime = 0;
   hitCarrierTime = 0;

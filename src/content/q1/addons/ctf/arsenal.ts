@@ -13,7 +13,7 @@ export interface CtfCharacterPose { readonly axePose: boolean; readonly frame: n
 export function characterPose(state: CtfState, actor: ActorId): CtfCharacterPose {
   const selected = state.services.input(actor).grappleSelected;
   if (!selected) return { axePose: state.services.selectedWeapon(actor) === "q1:weapon/axe", frame: null };
-  const frame = state.number(actor, "hookWeaponFrame"), hook = state.hook(actor);
+  const frame = state.grapple.state(actor).weaponFrame, hook = state.hook(actor);
   return { axePose: true, frame: frame === 2 ? 137 : frame === 3 ? hook !== null && state.game.time < hook.number("ctf.fired") + 0.1 ? 138 : 139 : frame === 4 ? 73 : frame === 5 ? 140 : null };
 }
 
@@ -31,7 +31,7 @@ export function spawnArsenal(state: CtfState, actor: ActorId): undefined {
 }
 
 function weaponFrame(state: CtfState, actor: ActorId, frame: number): undefined {
-  state.set(actor, "hookWeaponFrame", frame);
+  state.grapple.state(actor).weaponFrame = frame;
   const player = state.game.player(actor); if (player !== null) player.weaponFrame = frame;
   return state.game.host.emit({ kind: "weapon", player: actor, weapon: "ctf:grapple", viewModel: "progs/v_star.mdl", frame, punch: 0 });
 }
@@ -42,13 +42,13 @@ function hasteSound(state: CtfState, actor: ActorId): undefined {
 export function grappleAttack(state: CtfState, actor: ActorId): boolean {
   if (state.teamplay & CTF_FLAGS.disableGrapple) return false;
   const { game } = state;
-  if (state.number(actor, "hookAttackFinished") > game.time) return false;
-  state.set(actor, "hookAttackFinished", game.time + 0.1);
+  if (state.grapple.state(actor).attackFinished > game.time) return false;
+  state.grapple.state(actor).attackFinished = Math.fround(game.time + 0.1);
   const player = game.player(actor); if (player !== null) player.attackFinished = Math.fround(game.time + 0.1);
   if (state.hook(actor) !== null) { weaponFrame(state, actor, length(state.body(actor).velocity) >= 750 ? 4 : 3); return true; }
-  if (state.context.playerReference(actor, "ctf.hookAnimation") !== null) return true;
+  if (state.grapple.state(actor).animation !== null) return true;
   const timer = game.create("ctf_hook_animation"); timer.owner = actor;
-  state.context.setPlayerReference(actor, "ctf.hookAnimation", timer.actor.id); weaponFrame(state, actor, 2);
+  state.grapple.state(actor).animation = timer.actor.id; weaponFrame(state, actor, 2);
   game.schedule(timer, 0.1, game.named.action(timer, "ctf:hook_launch_frame")); return true;
 }
 export function registerArsenal(state: CtfState): undefined {
@@ -56,7 +56,7 @@ export function registerArsenal(state: CtfState): undefined {
   game.named.register("ctf:hook_launch_frame", { action: (_runtime, timer) => {
     const actor = timer.owner;
     if (actor !== null && game.host.actors.isLive(actor)) {
-      state.context.setPlayerReference(actor, "ctf.hookAnimation", null);
+      state.grapple.state(actor).animation = null;
       if (game.health(actor) > 0 && state.services.input(actor).grappleSelected) { weaponFrame(state, actor, 3); fireHook(state, actor); }
     }
     return game.remove(timer);
@@ -65,11 +65,11 @@ export function registerArsenal(state: CtfState): undefined {
     available: () => (state.teamplay & CTF_FLAGS.disableGrapple) === 0, bestAvailable: () => false,
     fire: (_runtime, player) => grappleAttack(state, player.actor.id),
     animate: (_runtime, player) => {
-      const hook = state.hook(player.actor.id), current = state.number(player.actor.id, "hookWeaponFrame");
+      const hook = state.hook(player.actor.id), current = state.grapple.state(player.actor.id).weaponFrame;
       if (hook !== null) { const next = length(state.body(player.actor.id).velocity) >= 750 ? 4 : 3; if (current !== next) weaponFrame(state, player.actor.id, next); }
-      else if (state.context.playerReference(player.actor.id, "ctf.hookAnimation") === null && current !== 0) {
-        if (current !== 5) { weaponFrame(state, player.actor.id, 5); state.set(player.actor.id, "hookReleaseTime", game.time + 0.1); }
-        else if (game.time >= state.number(player.actor.id, "hookReleaseTime")) weaponFrame(state, player.actor.id, 0);
+      else if (state.grapple.state(player.actor.id).animation === null && current !== 0) {
+        if (current !== 5) { weaponFrame(state, player.actor.id, 5); state.grapple.state(player.actor.id).releaseTime = Math.fround(game.time + 0.1); }
+        else if (game.time >= state.grapple.state(player.actor.id).releaseTime) weaponFrame(state, player.actor.id, 0);
       }
       return undefined;
     },
