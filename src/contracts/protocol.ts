@@ -7,7 +7,9 @@ export type Q1ProtocolIdentity =
   | { readonly kind: "q1-netquake"; readonly version: 15 }
   | { readonly kind: "q1-fitzquake"; readonly version: 666 }
   | { readonly kind: "q1-rmq"; readonly version: 999; readonly flags: number };
-export interface QwProtocolIdentity { readonly kind: "q1-quakeworld"; readonly version: 28; }
+export type QwProtocolIdentity =
+  | { readonly kind: "q1-quakeworld"; readonly version: 28 }
+  | { readonly kind: "q1-quakeworld-donor-wide"; readonly version: 29; readonly flags: number };
 export type Q2ProRevision = 1015 | 1016 | 1017 | 1018 | 1019 | 1020 | 1021 | 1022 | 1023 | 1024 | 1025 | 1026;
 export type Q2ProtocolIdentity =
   | { readonly kind: "q2-classic"; readonly version: 34 }

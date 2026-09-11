@@ -60,6 +60,22 @@ test("loose reads stay within their root and reject changed retained bytes", asy
 });
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
+const q3Archive = join(corpus, "q3a/baseq3/pak0.pk3");
+
+test.skipIf(!existsSync(q3Archive))("parallel Sarge asset reads match sequential reads from one retained archive", async () => {
+  const archive = await openArchive(q3Archive);
+  try {
+    const entries = ["lower.md3", "upper.md3", "head.md3", "animation.cfg"].map(name => {
+      const entry = archive.findEntries(`models/players/sarge/${name}`)[0];
+      if (entry === undefined) throw new Error(`Missing Sarge asset ${name}`);
+      return entry;
+    });
+    const sequential: Uint8Array[] = [];
+    for (const entry of entries) sequential.push(await archive.readEntry(entry));
+    expect(await Promise.all(entries.map(entry => archive.readEntry(entry)))).toEqual(sequential);
+  } finally { archive.close(); }
+});
+
 const witnesses = [
   { file: "q1/id1/PAK0.PAK", member: "quake.rc", ordinal: 268, byteLength: 293, entries: 339 },
   { file: "q2/rerelease/baseq2/pak0.pak", member: "default.cfg", ordinal: 0, byteLength: 3213, entries: 14663 },

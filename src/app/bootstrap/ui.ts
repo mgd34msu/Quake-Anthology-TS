@@ -1,0 +1,114 @@
+import type { RenderCommand, SceneCamera } from "../../contracts/render.ts";
+import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
+import { KeyCode } from "../../input/key-codes.ts";
+import type { SeatInputSample } from "../../input/seat.ts";
+import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
+import type { NativeUiArt } from "../../ui/common/index.ts";
+import { SeatHudMessages, SeatWeaponWheel, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
+import { SeatUiPreferences, bindInputSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
+import { registerBindingMenus } from "../../ui/settings/bindings.ts";
+import { bindWindowResolution } from "../../ui/settings/services.ts";
+import type { SettingBinding, SettingsMenus } from "../../ui/settings/index.ts";
+import { UiTextRenderer } from "../../text/ui.ts";
+import type { TextFontSelection } from "../../text/atlas.ts";
+import type { MaterialTextDraw } from "../../text/draw2d.ts";
+import type { ApplicationAudio } from "./audio.ts";
+import type { ApplicationInput, ApplicationInputUi, LocalInput } from "./input.ts";
+import type { SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
+
+export class ApplicationSeatUi implements ApplicationInputUi {
+  readonly controller: NativeUiController;
+  readonly preferences: SeatUiPreferences;
+  readonly messages: SeatHudMessages;
+  readonly weaponWheel: SeatWeaponWheel;
+  readonly text: UiTextRenderer;
+  private readonly settings: SettingsMenus;
+  private readonly bindings: ReturnType<typeof registerBindingMenus>;
+  private readonly disposeInput: () => void;
+  private readonly disposeMenu: () => void;
+  private readonly now: () => number;
+
+  constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
+    private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
+    command: (name: string, args: readonly string[]) => undefined) {
+    const seat = local.player.seat.id;
+    this.now = input.now;
+    this.preferences = new SeatUiPreferences(seat);
+    this.messages = new SeatHudMessages(seat);
+    this.text = new UiTextRenderer(seat);
+    this.text.bind(art.skin.font, font);
+    this.controller = new NativeUiController({ seat, skin: () => art.skin, now: input.now,
+      bindings: () => local.input.bindings, appearance: () => this.preferences.values,
+      focus: (focus, time) => { local.input.setFocus(focus, time); input.router.updateCapture(); },
+      sound: (sound, owner) => audio.uiSound(sound, owner),
+      executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
+    this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
+      items: mode => simulation.playerUi(local.player.actor).items.filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
+        .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: null, selectedIcon: null })),
+      activeItem: () => simulation.playerUi(local.player.actor).activeWeapon,
+      select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
+    const keys: readonly (readonly [string, string])[] = [["Move forward", "+forward"], ["Move back", "+back"], ["Strafe left", "+moveleft"],
+      ["Strafe right", "+moveright"], ["Jump", local.builder.dialect.startsWith("q1") ? "+jump" : "+moveup"], ["Attack", "+attack"], ["Weapon wheel", "+weaponwheel"]];
+    this.bindings = registerBindingMenus(this.controller, local.input,
+      keys.map(([label, text], index) => ({ id: String(index), label, target: { kind: "command", text } })));
+    const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
+      activate: () => { this.controller.openMenu(this.bindings.root); } };
+    const volume: SettingBinding = { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
+      minimum: 0, maximum: 1, step: 0.05, read: () => audio.effectsVolume, write: value => { audio.effectsVolume = value; } };
+    const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), volume, ...this.preferences.bindings()]);
+    const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
+      rect: menuRow(row), enabled: true, visible: true, activate });
+    this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Quake TypeScript", fullScreen: true,
+      controls: [button("resume", "Resume game", 1, () => { this.controller.closeAll(); return undefined; }),
+        button("settings", "Settings", 3, () => this.controller.openMenu(this.settings.root)),
+        button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
+        button("quit", "Quit", 8, quit)], open: () => undefined, close: () => undefined }));
+    this.disposeInput = input.attachUi(seat, this);
+  }
+
+  input(event: SeatInputEvent, focus: SeatInputFocus): boolean {
+    if (focus.kind === "console" || focus.kind === "chat") return false;
+    if (this.controller.activeMenu !== null) return this.controller.input(event);
+    const menu = event.kind === "key" && event.code === KeyCode.Escape && event.down && !event.repeat
+      || event.kind === "controller-button" && event.button === 6 && event.down;
+    if (menu) { this.weaponWheel.close(false); this.controller.openMenu("menu:application:game"); return true; }
+    return this.weaponWheel.input(event);
+  }
+
+  sample(input: SeatInputSample): SeatInputSample {
+    this.weaponWheel.update(input.nowMilliseconds);
+    const wheel = this.weaponWheel.command(input.buttons.some(button => button.action === "attack" && (button.active || button.pressed)), input.nowMilliseconds);
+    if (!wheel.holster && !wheel.consumeAttack && input.nowMilliseconds >= this.weaponWheel.weaponLockUntil) return input;
+    return { ...input, buttons: input.buttons.map(button => button.action === "attack" ? { ...button, active: false, pressed: false, fraction: 0 } : button) };
+  }
+
+  wheel(mode: "weapons" | "powerups", down: boolean): void { if (down) this.weaponWheel.open(mode); else this.weaponWheel.close(true); }
+  closeMenus(): void { this.weaponWheel.close(false); this.controller.closeAll(); }
+
+  receive(events: readonly SimulationPresentationEvent[]): void {
+    for (const source of events) {
+      const duration = { kind: "seconds", value: 3 } satisfies { readonly kind: "seconds"; readonly value: number };
+      const starts = { kind: "seconds", value: source.seconds } satisfies { readonly kind: "seconds"; readonly value: number };
+      if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) {
+        if (source.event.center) this.messages.centerPrint(this.local.player.seat.id, source.event.text, starts, duration);
+        else this.messages.notify(this.local.player.seat.id, source.event.text, false, starts, duration);
+      } else if (source.kind === "q2" && source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))
+        this.messages.centerPrint(this.local.player.seat.id, source.event.text, starts, duration);
+    }
+  }
+
+  draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
+    material: (draw: MaterialTextDraw) => void): void {
+    const player = this.simulation.playerUi(this.local.player.actor);
+    const armor = player.armor.kind === "none" ? 0 : player.armor.points;
+    const hud = { ...emptyHudData(this.local.player.seat.id), ...this.weaponWheel.drawState(), visible: this.local.input.focus.kind === "game",
+      vitals: [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false },
+        ...(player.ammo === null ? [] : [{ label: "Ammo", value: player.ammo.count, icon: null, warning: player.ammo.count <= 5 }])] };
+    const commands = [...drawCommonHud(context, hud, { skin: this.art.skin, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
+      ...this.controller.draw({ ...context, timeMilliseconds: this.now() })];
+    renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
+  }
+
+  close(): void { this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.messages.clear(); }
+}

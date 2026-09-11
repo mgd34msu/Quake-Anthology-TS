@@ -14,7 +14,7 @@
     "edges": "dependsOn governs review and acceptance order, not mandatory idle time before writing source. Running packages may use concrete published inputs while prerequisite packages run; stage labels only group related work.",
     "readiness": "The lead dispatches only ports with concrete usable published inputs and exclusive write paths. Running tasks must not depend on failed or blocked packages. Published-input readiness is a lead judgment, not inferred from graph status; review and acceptance still require accepted dependencies.",
     "scope": "All inherited and requested content/functionality remains required. Missing inputs, adapters, service access, or feasibility do not remove rows.",
-    "evidence": "Implementation is authorized and foundation work is running. Task states record lead decisions; graph validation alone proves no implementation, compatibility, performance, or release result. Evidence, review, source revisions, and commit handoffs are recorded in docs/execution-status.md.",
+    "evidence": "Implementation is authorized. Core and loaders are committed at 393833a821230bef2b2420f98b22e56a8f1b840e; further source imports and runtime joins are in the working tree. W73 has lead-reported bounded live CPU/GL, mixed-provider, input, local-seat, dedicated-startup and native-menu results. Running states record coding and integration, not package acceptance. Exact evidence and remaining limits are recorded in docs/execution-status.md; graph validation proves no runtime or release result.",
     "proofBoundary": "W05 starts from the reviewed source comparison and source census while W01 exhaustive inventory continues. W05/W41 establish usable ownership and source-time contracts; W74 supplies permanent behavior foundations for W42/W45/W49 and their expansions. W73 proves a real mixed-game executable in parallel with bulk imports. Native full execution remains required at W40.",
     "schedule": "User-directed code-first sequence: import and join the engine, reach live human play, then optimize and finish broad hardening, regression, retail-reference, and release evidence. Existing strict type guards and a basic runner remain practical implementation tools. Illustrative dependency batches contain no time or completion estimate.",
     "earlyPlayable": "W73 is the first actual mixed-game source executable; W66 integrates the full official/source-VM feature union. W40 adds native execution before final full-matrix and compiled release gates."
@@ -799,7 +799,7 @@
       "title": "Establish strict TypeScript policy and one Bun build entry",
       "stage": "foundation",
       "kind": "implementation",
-      "status": "running",
+      "status": "accepted",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [],
@@ -831,7 +831,21 @@
         "Qualify the real Bun Linux compile pipeline using implemented TypeScript tool entries and record compiler and runtime identities. W03 may be accepted before the production runtime entry exists; do not add a placeholder main or wait on W73. W73, W66, and W69 separately qualify the production engine from the same source graph used by Bun development.",
         "Keep all package script, dependency, tsconfig, CI, and build registration edits with this owner. Other packages return concrete registration requests.",
         "Keep current strict type guards and the practical build pipeline usable during code imports. Defer additional policy hardening and regression infrastructure until the integrated engine supports live human play and optimization; W67–W71 retain final strictness and regression qualification."
-      ]
+      ],
+      "acceptanceRecord": {
+        "acceptedBy": "lead",
+        "sourceRevision": "e291921df44b5778a9dd5189c1f383e5752a8b02",
+        "commit": "e291921df44b5778a9dd5189c1f383e5752a8b02",
+        "evidence": [
+          "EARLY_TOOLING scope under the current W03 acceptance criteria; production engine acceptance remains W73/W66/W69.",
+          "Lead ran live typecheck, policy, and 32 combined tests on the foundation checkpoint.",
+          "Lead executed the actual compiled validator; the W03 owner verified compiled tool relocation."
+        ],
+        "review": [
+          "review_w03_policy closed its tooling review.",
+          "Lead independently ran the compiled artifact and accepted the bounded early tooling scope."
+        ]
+      }
     },
     {
       "id": "W04",
@@ -967,7 +981,7 @@
       "title": "Consolidate common engine services and session lifetimes",
       "stage": "foundation",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1005,7 +1019,7 @@
       "title": "Load archives and resolve independent content profiles",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1042,7 +1056,7 @@
       "title": "Read Quake 1 maps and extended collision data",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1074,7 +1088,7 @@
       "title": "Read Quake 2 classic and rerelease maps",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1106,7 +1120,7 @@
       "title": "Read Quake 3 maps and patch surfaces",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1138,7 +1152,7 @@
       "title": "Read Quake 1 and Quake 2 models and sprites",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1171,7 +1185,7 @@
       "title": "Read Quake 3 and skeletal model formats",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1204,7 +1218,7 @@
       "title": "Consolidate images, palettes, lighting, and material scripts",
       "stage": "formats",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1241,7 +1255,7 @@
       "title": "Prove shared collision and Q1 solid-space construction",
       "stage": "world",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1280,7 +1294,7 @@
       "title": "Consolidate scene preparation and render commands",
       "stage": "render-media",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1319,7 +1333,7 @@
       "title": "Implement the complete CPU rasterizer",
       "stage": "render-media",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1356,7 +1370,7 @@
       "title": "Implement the complete OpenGL renderer",
       "stage": "render-media",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1393,7 +1407,7 @@
       "title": "Consolidate audio decoding, mixing, and spatial playback",
       "stage": "render-media",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1429,7 +1443,7 @@
       "title": "Preserve cinematics, typography, localization, and captions",
       "stage": "render-media",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1468,7 +1482,7 @@
       "title": "Consolidate per-seat input, controls, console, and capture",
       "stage": "runtime-ui",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1509,7 +1523,7 @@
       "title": "Save complete shared worlds and original profile state",
       "stage": "runtime-ui",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1544,7 +1558,7 @@
       "title": "Extract Quake 1 movement and source timing profiles",
       "stage": "movement",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1579,7 +1593,7 @@
       "title": "Extract Quake 2 movement with matching prediction",
       "stage": "movement",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1615,7 +1629,7 @@
       "title": "Separate Quake 3 movement from weapon and animation choices",
       "stage": "movement",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1650,7 +1664,7 @@
       "title": "Host QuakeC with private authoritative guest memory",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1722,7 +1736,7 @@
       "title": "Host all Quake 3 QVM roles and legacy scripted interfaces",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1757,7 +1771,7 @@
       "title": "Define TypeScript guest memory and CPU execution contracts",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1791,7 +1805,7 @@
       "title": "Load PE32 and PE32+ modules in TypeScript",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1822,7 +1836,7 @@
       "title": "Load ELF32 and ELF64 modules in TypeScript",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1853,7 +1867,7 @@
       "title": "Execute i386 integer and control-flow instructions",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1884,7 +1898,7 @@
       "title": "Execute x86-64 integer and control-flow instructions",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1915,7 +1929,7 @@
       "title": "Execute x87 and SSE floating-point behavior",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -1946,7 +1960,7 @@
       "title": "Implement Windows and System V guest calls and callbacks",
       "stage": "execution",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2141,7 +2155,7 @@
       "title": "Prove single actor, combat, and callback authority",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2182,7 +2196,7 @@
       "title": "Extract Quake 1 base gameplay into typed behavior providers",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2217,7 +2231,7 @@
       "title": "Extract Quake 1 mission-pack behaviors",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2252,7 +2266,7 @@
       "title": "Extract Quake 1 rerelease additions, CTF, and horde",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2288,7 +2302,7 @@
       "title": "Extract Quake 2 base gameplay and source behavior",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2322,7 +2336,7 @@
       "title": "Extract Quake 2 Xatrix and Rogue expansions",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2393,7 +2407,7 @@
       "title": "Extract the complete Quake 2 rerelease feature set",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2429,7 +2443,7 @@
       "title": "Extract Quake 3 and Team Arena gameplay providers",
       "stage": "gameplay",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2558,7 +2572,7 @@
       "title": "Consolidate transport, sessions, discovery, and service workflows",
       "stage": "network",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2598,7 +2612,7 @@
       "title": "Preserve NetQuake and QuakeWorld wire behavior",
       "stage": "network",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2633,7 +2647,7 @@
       "title": "Preserve Quake 2 classic, wide, and rerelease protocols",
       "stage": "network",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2666,7 +2680,7 @@
       "title": "Preserve Quake 3 and Team Arena protocols",
       "stage": "network",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2811,7 +2825,7 @@
       "title": "Build the common SDL menu, HUD, and settings system",
       "stage": "runtime-ui",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -2930,7 +2944,7 @@
       "title": "Generate and review reusable native-menu raster art",
       "stage": "runtime-ui",
       "kind": "art",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "high",
       "dependsOn": [
@@ -3381,7 +3395,7 @@
       "title": "Prove the first actual mixed-game executable alongside bulk imports",
       "stage": "integration",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [
@@ -3439,7 +3453,7 @@
       "title": "Extract permanent behaviors for the two early playable specimens",
       "stage": "integration",
       "kind": "implementation",
-      "status": "planned",
+      "status": "running",
       "model": "gpt-6-astra",
       "effort": "xhigh",
       "dependsOn": [

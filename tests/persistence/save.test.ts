@@ -1,0 +1,101 @@
+import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference } from "../../src/contracts/content.ts";
+import { createContentDigest, createResourceId } from "../../src/contracts/content.ts";
+import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import type { SaveImage } from "../../src/contracts/session.ts";
+import { SessionActorRegistry } from "../../src/world/actors/index.ts";
+import { decodeSaveImage, encodeSaveImage, readSaveImage, sourceActorsCheckpoint, writeSaveImage } from "../../src/persistence/save-image.ts";
+import { decodeCheckpointValue, encodeCheckpointValue } from "../../src/persistence/value.ts";
+import { decodeQ2ClassicLevel, encodeQ2ClassicLevel, restoreQ2ClassicRecord } from "../../src/persistence/q2-classic.ts";
+import type { Q2ClassicSaveLayout } from "../../src/persistence/q2-classic.ts";
+import { decodeQ3ClientSession, encodeQ3ClientSession } from "../../src/persistence/q3.ts";
+
+function recipe(): ExecutableRecipe {
+  const content = "q1:classic:id1:fixture";
+  const provider = (role: string): ProviderReference => ({ provider: `q1:${role}`, content });
+  const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
+    digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
+  const geometry = { ...raw, id: createResourceId(raw) };
+  return { schemaVersion: 1, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
+    movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], enemies: { kind: "map-defined" },
+    presentation: { assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
+    execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
+    mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
+    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
+}
+
+test("unified save reconstructs actors, bytes, source clocks and callback identities in a fresh Bun process", async () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("before-save"));
+  const actor = actors.allocateAtSource("q1:game", 7, "q1:player");
+  const module = { id: "q3:fixture", artifactPath: "vm/qagame.qvm", digest: createContentDigest("1".repeat(64)), revision: "1" } satisfies Q2ClassicSaveLayout["module"];
+  const image: SaveImage = { schemaVersion: 1, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
+    clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2.5 } }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1234, draws: 17 } }], actors: actors.checkpoint(),
+    bodies: [{ actor: actor.id, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
+    combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
+    inventories: [], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
+    providers: [sourceActorsCheckpoint(actors.sourceCheckpoint()), { provider: "fixture:private", schema: "fixture:bytes", version: 7, bytes: new Uint8Array([0, 255, 17]) }],
+    guests: [{ kind: "qvm", module, api: { kind: "q3-qagame", version: 8 }, data: new Uint8Array([255, 0, 1, 128]), instructionIndex: 0, programStack: 4, operandStack: [], random: [], callbacks: [{ id: "q3:callback", reference: { kind: "native-guest", module, byteOffset: 0xffffffffffffffffn, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } }, parameters: [], result: "void" }], hostState: { module, format: "fixture:host", bytes: new Uint8Array([9, 8, 7]) } }] };
+  // A structural SavedActorId must be encoded as fields, never as a live identity class.
+  const body = image.bodies[0]; if (body === undefined) throw new Error("missing body");
+  const saved: SaveImage = { ...image, bodies: [{ ...body, actor: { slot: actor.id.slot, generation: actor.id.generation } }] };
+  expect(() => encodeSaveImage(image)).toThrow("live objects");
+  const decoded = decodeSaveImage(encodeSaveImage(saved));
+  expect(decoded).toEqual(saved);
+  expect(Object.is(decoded.bodies[0]?.body.origin.z, -0)).toBe(true);
+  const directory = await mkdtemp(join(tmpdir(), "quake-save-"));
+  try {
+    const path = join(directory, "session.qts"); await writeSaveImage(path, saved);
+    expect((await readSaveImage(path)).combat[0]?.state.health).toBe(73);
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { readSaveImage,readSourceActorsCheckpoint } from './src/persistence/save-image.ts';
+      import { SessionActorRegistry } from './src/world/actors/index.ts';
+      import { SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from './src/world/actors/index.ts';
+      import { GameplayAuthority, SharedInventoryTable } from './src/world/gameplay/index.ts';
+      import { restoreSharedWorldState } from './src/persistence/world-state.ts';
+      import { createIdentityOwner } from './src/contracts/identity.ts';
+      const save=await readSaveImage(process.argv[1]);
+      const source=save.providers.find(p=>p.provider==='world:actors');
+      if(!source) throw new Error('missing source slots');
+      const registry=SessionActorRegistry.restore(createIdentityOwner('fresh'),save.actors,readSourceActorsCheckpoint(source));
+      const bodies=new SharedBodyTable(registry,{absoluteBounds:translatedBodyBounds,onLink:()=>{},onUnlink:()=>{}});
+      const combat=new GameplayAuthority(registry,new ActorCallbackTable(registry),{impulse:()=>{},beforeReaction:()=>{},confirmed:()=>{}});
+      const inventory=new SharedInventoryTable(registry);
+      restoreSharedWorldState(save,{actors:registry,bodies,combat,inventory,storage:()=> 'typescript'});
+      const actor=registry.atSource('q1:game',7);
+      if(actor===null||combat.read(actor.id)?.health!==73||combat.read(actor.id)?.noKnockback!==true||bodies.read(actor.id)?.origin.x!==12||save.guests[0]?.kind!=='qvm'||save.guests[0].data[3]!==128) throw new Error('restore failed');
+      process.stdout.write('restored');
+    `, path], { cwd: join(import.meta.dir, "../.."), stdout: "pipe", stderr: "pipe" });
+    const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect({ status, stdout, stderr }).toEqual({ status: 0, stdout: "restored", stderr: "" });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("provider checkpoint values retain 64-bit bytes and reject live Maps", () => {
+  const value = { flags: 18446744069414584320n, bytes: new Uint8Array([255, 0, 3]), number: NaN };
+  expect(decodeCheckpointValue(encodeCheckpointValue(value))).toEqual(value);
+  expect(() => encodeCheckpointValue(new Map([["live", 1]]))).toThrow("live objects");
+});
+
+test("classic native records preserve private bytes and relocate typed saved pointer fields", () => {
+  const module = { id: "q2:fixture", artifactPath: "game.so", digest: createContentDigest("2".repeat(64)), revision: "fixture" } satisfies Q2ClassicSaveLayout["module"];
+  const layout: Q2ClassicSaveLayout = { module, pointerBytes: 4, gameBytes: 4, clientCountOffset: 0, client: { byteLength: 4, fields: [] }, level: { byteLength: 4, fields: [] },
+    entity: { byteLength: 12, fields: [{ name: "classname", offset: 0, kind: "string" }, { name: "enemy", offset: 4, kind: "entity" }] } };
+  const body = new Uint8Array(12); body[11] = 231;
+  const record = { bytes: body, strings: [{ field: "classname", bytes: new Uint8Array([111, 103, 114, 101, 0]) }], references: [{ field: "enemy", index: 7 }] };
+  const original = encodeQ2ClassicLevel({ functionBase: 0x12345678n, level: { bytes: new Uint8Array(4), strings: [], references: [] }, entities: [{ slot: 3, record }] }, layout);
+  const decoded = decodeQ2ClassicLevel(original, layout);
+  expect(encodeQ2ClassicLevel(decoded, layout)).toEqual(original);
+  const saved = decoded.entities[0]?.record; if (saved === undefined) throw new Error("missing entity");
+  const restored = restoreQ2ClassicRecord(saved, layout.entity, { pointerBytes: 4, string: () => 0x10000n, reference: (_field, index) => 0x20000n + BigInt(index * 12) });
+  expect(new DataView(restored.buffer).getUint32(4, true)).toBe(0x20000 + 7 * 12);
+  expect(restored[11]).toBe(231);
+});
+
+test("Q3 session cvars use original seven signed integer fields", () => {
+  const text = "2 1200 3 -1 15 7 1";
+  expect(encodeQ3ClientSession(decodeQ3ClientSession(text))).toBe(text);
+  expect(decodeQ3ClientSession("4294967298 0 0 0 0 0 0").team).toBe(2);
+});

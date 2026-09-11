@@ -98,6 +98,7 @@ export function loadGl(window: Pick<SdlRenderContext, "getGlProcAddress" | "reta
     glTexEnvi: { args: ["u32", "u32", "i32"], returns: "void", ptr: window.getGlProcAddress("glTexEnvi") },
     glTexEnvf: { args: ["u32", "u32", "f32"], returns: "void", ptr: window.getGlProcAddress("glTexEnvf") },
     glTexImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "buffer"], returns: "void", ptr: window.getGlProcAddress("glTexImage2D") },
+    glCopyTexImage2D: { args: ["u32", "i32", "u32", "i32", "i32", "i32", "i32", "i32"], returns: "void", ptr: window.getGlProcAddress("glCopyTexImage2D") },
     glTexSubImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "buffer"], returns: "void", ptr: window.getGlProcAddress("glTexSubImage2D") },
     glFinish: { args: [], returns: "void", ptr: window.getGlProcAddress("glFinish") },
     glPixelStorei: { args: ["u32", "i32"], returns: "void", ptr: window.getGlProcAddress("glPixelStorei") },

@@ -153,8 +153,13 @@ export class CommandBuffer {
   }
   aliasNames(): readonly string[] { return Object.freeze(this.aliases.map(alias => alias.name)); }
 
-  append(text: string): void { this.appendFor(text, this.frame?.source ?? this.context); }
-  insert(text: string): void { this.insertFor(text, this.frame?.source ?? this.context); }
+  append(text: string, source?: CommandContext): void { this.appendFor(text, this.inputContext(source)); }
+  insert(text: string, source?: CommandContext): void { this.insertFor(text, this.inputContext(source)); }
+  private inputContext(source: CommandContext | undefined): CommandContext {
+    if (source === undefined) return this.frame?.source ?? this.context;
+    if (source.session !== this.context.session) throw new RangeError("Command input belongs to another session");
+    return Object.freeze({ session: source.session, origin: copyOrigin(source.origin, source) });
+  }
   private appendFor(input: string, source: CommandContext): void {
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }

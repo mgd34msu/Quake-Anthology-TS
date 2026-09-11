@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ClockProfile, FrameContext, FrameOrdering } from "../../src/contracts/time.ts";
-import { compareInvocationOrder, thinkCallbackTime } from "../../src/world/scheduler.ts";
+import { FrameScheduler, compareInvocationOrder, thinkCallbackTime } from "../../src/world/scheduler.ts";
+import { SessionActorRegistry } from "../../src/world/actors/index.ts";
 
 test("think deadlines retain NetQuake, classic Q2 and rerelease timing", () => {
   const frame: FrameContext = { frame: 10, phase: "entity-physics",
@@ -28,4 +29,29 @@ test("native traversal uses source slots and mixed ties use explicit provider or
     clock: { kind: "q3", serverFrameMilliseconds: 50, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 } };
   expect(compareInvocationOrder(native, lowSlot, highSlot)).toBeLessThan(0);
   expect(compareInvocationOrder(mixed, lowSlot, { ...lowSlot, sequence: 5 })).toBeLessThan(0);
+});
+
+test("real source bindings order thinks and release/reentry cannot run stale callbacks", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("actual scheduler"));
+  const later = actors.allocateAtSource("q1:game", 9, "q1:late");
+  const first = actors.allocateAtSource("q1:game", 2, "q1:first");
+  const calls: number[] = [];
+  const frame: FrameContext = { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } };
+  const scheduler = new FrameScheduler({ actors, ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } }, clocks: [],
+    sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
+    resolve: () => (actor, callbackFrame) => {
+      calls.push(actors.sourceOf(actor.id)?.slot ?? -1);
+      expect(scheduler.pending(actor.id)).toBeNull();
+      if (actor === first && calls.length === 1) {
+        scheduler.schedule(first, "q1:think", { due: callbackFrame.time, boundary: "during-physics", order: { provider: first.owner, actor: first.id, sequence: 2 } });
+      } else if (actor === first) actors.release(later);
+      return undefined;
+    } });
+  actors.onRelease(actor => scheduler.cancel(actor));
+  for (const actor of [later, first]) scheduler.schedule(actor, "q1:think", { due: { kind: "seconds", value: 1.01 }, boundary: "during-physics", order: { provider: actor.owner, actor: actor.id, sequence: 1 } });
+  scheduler.advance([{ provider: "q1:game", frame }], "during-physics");
+  expect(calls).toEqual([2, 2]);
+  expect(scheduler.pending(later.id)).toBeNull();
+  actors.close();
+  scheduler.close();
 });

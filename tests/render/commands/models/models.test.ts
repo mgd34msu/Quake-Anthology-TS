@@ -1,0 +1,169 @@
+import { expect, test } from "bun:test";
+import { openArchive } from "../../../../src/content/archive/index.ts";
+import { createContentDigest, createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../../../src/contracts/content.ts";
+import type { ResolvedResourceReference } from "../../../../src/contracts/content.ts";
+import type { DecodedModel, SceneEntity } from "../../../../src/contracts/scene.ts";
+import type { SceneCamera } from "../../../../src/contracts/render.ts";
+import { identityMat4 } from "../../../../src/core/math.ts";
+import { GameRandom, gameAtof, gameAtoi } from "../../../../src/core/game-numeric.ts";
+import { parseMdl, parseMd2, parseSpr } from "../../../../src/formats/q12-model/index.ts";
+import { parseMd3, toSceneMd3 } from "../../../../src/formats/q3-model/index.ts";
+import { prepareSceneEntity, q2ShellColor } from "../../../../src/render/scene/models/index.ts";
+import { ParticleSystem, loadParticleAnimations, prepareParticleGeometry, q2BeamGeometry, sampleQ2Particle } from "../../../../src/render/scene/particles/index.ts";
+import type { ParticleClientState } from "../../../../src/render/scene/particles/index.ts";
+import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
+import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
+import { parseEntities } from "../../../../src/formats/q3-map/index.ts";
+import { parseSkin } from "../../../../src/formats/q3-model/md3.ts";
+import { decodePcx } from "../../../../src/formats/images/index.ts";
+import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene, perspectiveProjection } from "../../../../src/render/scene/index.ts";
+import { SceneModelRenderer } from "../../../../src/render/scene/models/index.ts";
+
+const identityAxis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] satisfies SceneCamera["axis"];
+const camera: SceneCamera = { origin: { x: -100, y: 0, z: 0 }, axis: identityAxis, projection: identityMat4(),
+  viewport: { x: 0, y: 0, width: 640, height: 480 }, clip: { kind: "none" } };
+
+async function asset(archivePath: string, path: string, family: "q1" | "q2" | "q3"): Promise<{ bytes: Uint8Array; resource: ResolvedResourceReference }> {
+  const archive = await openArchive(archivePath);
+  try {
+    const entry = archive.findEntries(path)[0];
+    if (entry === undefined) throw new Error(`Missing ${path}`);
+    const bytes = await archive.readEntry(entry);
+    const digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
+    const mount = { kind: "loose", identity: createMountIdentity(createMountId("scene", family), createContentId({ family, edition: "classic", package: "base", revision: "retail" }), 0), rootPath: "/" } satisfies Extract<ResolvedResourceReference["provenance"], { kind: "loose" }>["mount"];
+    const resource: Omit<ResolvedResourceReference, "id"> = { requestedPath: path, provenance: { kind: "loose", mount, memberPath: path }, digest,
+      byteLength: bytes.length, resolution: { kind: "default-order", plan: createMountPlanId("scene", "test"), rank: 0 } };
+    return { bytes, resource: { ...resource, id: createResourceId(resource) } };
+  } finally { archive.close(); }
+}
+
+function entity(model: DecodedModel, resource: ResolvedResourceReference, family: "q1" | "q2" | "q3"): SceneEntity {
+  return { actor: null, resource, model, transform: { origin: { x: 20, y: 30, z: 40 }, axis: identityAxis, scale: { x: 1, y: 1, z: 1 } },
+    previousOrigin: { x: 20, y: 30, z: 40 }, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp: 0.5 },
+    skin: 0, color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 },
+    flags: { kind: family, bits: 0 }, lightingOrigin: { x: 20, y: 30, z: 40 }, shadowPlane: 0, attachments: [] };
+}
+
+test("retail Q1 MDL and SPR prepare transformed geometry and real embedded skins", async () => {
+  const mdl = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/player.mdl", "q1");
+  const prepared = prepareSceneEntity(entity(parseMdl(mdl.bytes), mdl.resource, "q1"), { camera, timeSeconds: 0.25 });
+  expect(prepared.surfaces[0]?.geometry.indices.length).toBe(408 * 3);
+  const surface = prepared.surfaces[0];
+  if (surface === undefined) throw new Error("Missing MDL surface");
+  expect(surface.image.kind).toBe("indexed");
+  const local = surface.localGeometry.vertices[0], world = surface.geometry.vertices[0];
+  if (local === undefined || world === undefined) throw new Error("Missing geometry");
+  expect(world.position.x).toBeCloseTo(local.position.x + 20);
+  const spr = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/s_explod.spr", "q1");
+  const sprite = prepareSceneEntity(entity(parseSpr(spr.bytes), spr.resource, "q1"), { camera, timeSeconds: 0.25 });
+  expect(sprite.surfaces[0]?.geometry.vertices).toHaveLength(4);
+  expect(sprite.surfaces[0]?.alphaTest).toBe("gt0");
+});
+
+test("retail Q2 shell geometry retains old-origin interpolation and shell color", async () => {
+  const mdl = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const source = entity(parseMd2(mdl.bytes), mdl.resource, "q2");
+  const normal = prepareSceneEntity(source, { camera, timeSeconds: 1 });
+  const shell = prepareSceneEntity({ ...source, flags: { kind: "q2", bits: 1024 | 4096 } }, { camera, timeSeconds: 1 });
+  expect(shell.surfaces[0]?.geometry.indices.length).toBe(434 * 3);
+  expect(shell.surfaces[0]?.image.kind).toBe("white");
+  expect(q2ShellColor(1024 | 4096)).toEqual({ x: 1, y: 0, z: 1 });
+  expect(shell.surfaces[0]?.geometry.vertices[0]?.position).not.toEqual(normal.surfaces[0]?.geometry.vertices[0]?.position);
+});
+
+test("retail Q3 lower model interpolates actual torso tag and applies custom skin", async () => {
+  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const source = entity(toSceneMd3(parseMd3(mdl.bytes)), mdl.resource, "q3");
+  const child = { ...source, attachments: [], transform: { ...source.transform, origin: { x: 0, y: 0, z: 0 } } };
+  const prepared = prepareSceneEntity({ ...source, attachments: [{ tag: "tag_torso", entity: child }, { tag: "invented", entity: child }] },
+    { camera, timeSeconds: 1, options: () => ({ customShader: "models/players/sarge/lower" }) });
+  expect(prepared.surfaces.length).toBeGreaterThan(0);
+  expect(prepared.attachments).toHaveLength(1);
+  expect(prepared.missingAttachments).toEqual(["invented"]);
+  expect(prepared.attachments[0]?.entity.transform.origin.z).toBeGreaterThan(source.transform.origin.z);
+  expect(prepared.surfaces[0]?.image).toEqual({ kind: "external", name: "models/players/sarge/lower" });
+});
+
+test("legacy particle triangle, instant particle, beam and QVM parsers preserve source inputs", () => {
+  expect(gameAtoi("4294967297")).toBe(1);
+  expect(gameAtof("1.5e2")).toBe(1.5);
+  const particle = sampleQ2Particle({ spawnMilliseconds: 0, origin: { x: 10, y: 0, z: 0 }, velocity: { x: 100, y: 0, z: 0 },
+    acceleration: { x: 0, y: 0, z: 0 }, color: 5, alpha: 1, alphaVelocity: -10000 }, 1000);
+  if (particle === null) throw new Error("Instant particle vanished");
+  expect(particle.origin.x).toBe(10);
+  const geometry = prepareParticleGeometry([particle], { camera, indexedProfile: "q2", paletteColor: () => ({ x: 12, y: 34, z: 56 }) });
+  expect(geometry.indices).toEqual([0, 1, 2]);
+  expect(geometry.vertices[0]?.texCoord).toEqual({ x: 0.0625, y: 0.0625 });
+  expect(q2BeamGeometry({ x: 10, y: 0, z: 0 }, { x: 110, y: 0, z: 0 }, 4, { x: 255, y: 0, z: 0, w: 255 }).vertices).toHaveLength(12);
+});
+
+test("Q3 particle pool submits registered animation geometry and retires expired explosions", async () => {
+  const animations = await loadParticleAnimations({ registerShader: async name => ({ name }) });
+  const state: ParticleClientState = { time: 0, refdef: { viewAxis: identityAxis }, snap: { playerState: { origin: { x: -100, y: 0, z: 0 } } } };
+  let milliseconds = 0;
+  const system = new ParticleSystem({ ...state, get time() { return milliseconds; } }, { animations,
+    media: { tracerShader: null, smokePuffShader: null, waterBubbleShader: null }, random: new GameRandom(7), hardwareType: "generic",
+    prediction: { trace: (_start, end) => ({ end, fraction: 1, solidity: "clear", entityNum: 1022 }) }, configString: () => "", print: () => undefined });
+  system.explosion({ animation: "explode1", origin: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, duration: 1000, sizeStart: 4, sizeEnd: 16 });
+  milliseconds = 250;
+  const polys = system.addParticles();
+  expect(polys).toHaveLength(1);
+  expect(polys[0]?.vertices).toHaveLength(4);
+  expect(polys[0]?.shader?.name).toBe("explode16");
+  milliseconds = 1001;
+  expect(system.addParticles()).toHaveLength(0);
+  expect(system.activeCount).toBe(0);
+});
+
+test("retained Q2 and Q3 model resources draw with the actual Q2 map light sample", async () => {
+  const q2 = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
+  const q3 = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
+  const identity = createIdentityOwner("model-render-cache");
+  const images = new SceneImageRegistry({ identity: Symbol("models"), session: identity.session, generation: 0 });
+  let world: WorldScene | null = null;
+  try {
+    const paletteAsset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "pics/colormap.pcx", "q2");
+    const colors = decodePcx(paletteAsset.bytes).palette;
+    if (colors === null) throw new Error("Missing Q2 palette");
+    const palette = { colors, source: paletteAsset.resource };
+    const reader = (archive: typeof q2) => ({ read: async (name: string) => {
+      const entry = archive.findEntries(name)[0];
+      return entry === undefined ? null : { bytes: await archive.readEntry(entry), source: { kind: "generated", name } satisfies Parameters<SceneImageRegistry["register"]>[3] };
+    } });
+    const textures2 = new SceneTextureLoader(images, reader(q2), palette), shaders2 = new SceneShaderRegistry(textures2);
+    const textures3 = new SceneTextureLoader(images, reader(q3)), shaders3 = new SceneShaderRegistry(textures3);
+    const mapAsset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "maps/base1.bsp", "q2");
+    const map = decodeQ2Map(mapAsset.bytes);
+    world = await WorldScene.load(map, shaders2);
+    const start = parseEntities(map.entities).find(item => item.get("classname") === "info_player_start");
+    const coordinates = (start?.get("origin") ?? "0 0 0").split(/\s+/).map(Number);
+    const origin = { x: coordinates[0] ?? 0, y: coordinates[1] ?? 0, z: (coordinates[2] ?? 0) + 24 };
+    const view: SceneCamera = { ...camera, origin: { ...origin, x: origin.x - 100 }, projection: perspectiveProjection(90, 74, 4096) };
+    const input = { camera: view, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
+    const q2Asset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+    const q3Asset = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+    const q2Entity = entity(parseMd2(q2Asset.bytes), q2Asset.resource, "q2");
+    const q3Entity = entity(toSceneMd3(parseMd3(q3Asset.bytes)), q3Asset.resource, "q3");
+    const body2 = { ...q2Entity, transform: { ...q2Entity.transform, origin }, previousOrigin: origin, lightingOrigin: origin };
+    const body3 = { ...q3Entity, transform: { ...q3Entity.transform, origin }, previousOrigin: origin, lightingOrigin: origin };
+    const skinAsset = await reader(q3).read("models/players/sarge/lower_default.skin");
+    if (skinAsset === null) throw new Error("Missing Sarge skin");
+    const options = () => ({ customSkin: parseSkin(new TextDecoder().decode(skinAsset.bytes)) });
+    const cache2 = new SceneModelRenderer({ family: "q2", textures: textures2, shaders: shaders2, palette }, world);
+    const cache3 = new SceneModelRenderer({ family: "q3", textures: textures3, shaders: shaders3, palette: null }, world);
+    await Promise.all([cache2.preload([body2]), cache3.preload([body3], options)]);
+    const batches2 = cache2.prepare([body2], input), batches3 = cache3.prepare([body3], input, options);
+    expect(batches2.some(batch => batch.indices.length > 0)).toBe(true);
+    expect(batches3.some(batch => batch.indices.length > 0)).toBe(true);
+    expect(batches2.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
+      && batch.texture.image.source.name.startsWith("models/monsters/soldier/"))).toBe(true);
+    expect(batches3.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
+      && batch.texture.image.source.name.startsWith("models/players/sarge/"))).toBe(true);
+    expect(cache2.lighting.sample(origin, input).floor).not.toBeNull();
+    expect(batches3.flatMap(batch => batch.vertices).some(vertex => vertex.color.x > 0)).toBe(true);
+    const uploads = images.drainOperations().length;
+    expect(uploads).toBeGreaterThan(0);
+    cache2.prepare([body2], input); cache3.prepare([body3], input, options);
+    expect(images.drainOperations()).toHaveLength(0);
+  } finally { world?.close(); images.close(); q2.close(); q3.close(); }
+}, 60000);

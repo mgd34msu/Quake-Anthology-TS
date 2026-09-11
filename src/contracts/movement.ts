@@ -3,7 +3,7 @@
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { InventoryEntry, ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "./identity.ts";
-import type { Bounds, Vec3 } from "./math.ts";
+import type { Bounds, Vec3, Vec4 } from "./math.ts";
 import type { NumericOperations, NumericProfile } from "./numeric.ts";
 import type { Q1UserCommand, QwUserCommand, Q2UserCommand, Q2RereleaseUserCommand,
   Q3UserCommand, Q2MovementState, Q2RereleaseMovementState, Q3PlayerState, UserCommand } from "./protocol.ts";
@@ -152,6 +152,9 @@ export interface Q2MovementInput extends MovementInputFields {
 export interface Q2RereleaseMovementInput extends MovementInputFields {
   readonly kind: "q2-rerelease"; readonly command: Q2RereleaseUserCommand;
   readonly state: Q2RereleaseMovementState; readonly profile: Q2RereleaseMovementProfile;
+  /** Game/cgame snapshots supply the same previous camera offset and external-state snap flag. */
+  readonly viewOffset: Vec3;
+  readonly snapInitial: boolean;
 }
 export interface Q3MovementInput extends MovementInputFields {
   readonly kind: "q3"; readonly command: Q3UserCommand;
@@ -203,7 +206,13 @@ export type MovementOutcome<TState extends MovementState> = { readonly kind: TSt
 export type Q1MovementResult = MovementOutcome<Q1MovementState>;
 export type QwMovementResult = MovementOutcome<QwMovementState>;
 export type Q2MovementResult = MovementOutcome<Q2MovementState>;
-export type Q2RereleaseMovementResult = MovementOutcome<Q2RereleaseMovementState>;
+export interface Q2RereleaseMovementPresentation {
+  readonly screenBlend: Vec4; readonly renderFlags: number; readonly jumpSound: boolean;
+  readonly stepClip: boolean; readonly impactDelta: number;
+}
+export type Q2RereleaseMovementResult =
+  (Extract<MovementOutcome<Q2RereleaseMovementState>, { readonly status: "active" }> & Q2RereleaseMovementPresentation)
+  | Extract<MovementOutcome<Q2RereleaseMovementState>, { readonly status: "actor-removed" }>;
 export type Q3MovementResult = MovementOutcome<Q3MovementState>;
 export type MovementResult = Q1MovementResult | QwMovementResult | Q2MovementResult | Q2RereleaseMovementResult | Q3MovementResult;
 

@@ -80,7 +80,7 @@ test.skipIf(!existsSync(q1Archive))("retail Q1 armor MD5 retains its two animati
     if (selection.kind !== "q1-mdl-replacement") throw new Error("Wrong skin selection");
     expect(selection.meshSkinGroups[0]?.[0]).toEqual({ kind: "group", frames: [{ intervalSeconds: 0.1, frame: `progs/${surface.shader}_00_00` }, { intervalSeconds: 0.3, frame: `progs/${surface.shader}_00_01` }] });
     expect(selection.flags).toBe(8);
-    expect(selection.timing).toEqual({ kind: "elapsed-time", frameRate: animation.frameRate });
+    expect(selection.timing).toEqual({ kind: "elapsed-time", frameRate: 2 });
   } finally { archive.close(); }
 });
 

@@ -1,0 +1,311 @@
+import type { GameFamily } from "../../../contracts/content.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
+import type { DrawBatch, Palette } from "../../../contracts/render.ts";
+import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
+import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
+import { decodePcx, indexedRenderImage, q1PlayerTranslation } from "../../../formats/images/index.ts";
+import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/index.ts";
+import type { CompiledMaterial } from "../../../materials/compile.ts";
+import type { FogVolume } from "../../../materials/fog.ts";
+import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
+import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
+import type { SceneShaderRegistry } from "../shaders.ts";
+import type { SceneTexture, SceneTextureLoader } from "../textures.ts";
+import { cameraFrustum, createViewProjector } from "../view.ts";
+import type { WorldScene, WorldViewInput } from "../world.ts";
+import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts";
+import { shadowCaster, shadowMesh } from "../shadows.ts";
+import type { ShadowCaster, ShadowMesh } from "../shadows.ts";
+import { ModelLightSampler } from "./light-sampler.ts";
+import { Q2_SHELL_MASK, q2AliasLight, q2ShellColor } from "./lighting.ts";
+import { prepareSceneEntity, preparedModelBatches } from "./prepare.ts";
+import { r_avertexnormal_dots } from "./shadedots.ts";
+import { attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldPoint } from "./transform.ts";
+import { byteColor, modelImage } from "./types.ts";
+import type { ModelImageSelection, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
+
+export interface ModelRenderProvider {
+  readonly family: GameFamily;
+  readonly palette: Palette | null;
+  readonly textures: SceneTextureLoader;
+  readonly shaders: SceneShaderRegistry;
+}
+type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
+type Material = { readonly kind: "q3"; readonly name: string; readonly compiled: CompiledMaterial; readonly timeOffset: number }
+  | { readonly kind: "legacy"; readonly texture: SceneTexture };
+const unit: Vec3 = { x: 1, y: 1, z: 1 };
+const normalIndices = new Map(ALIAS_NORMALS.map((normal, index) => [`${normal.x},${normal.y},${normal.z}`, index]));
+
+function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
+function materialKey(entity: SceneEntity, image: ModelImageSelection, options: ModelSourceOptions): string {
+  const translation = image.kind === "indexed" && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
+  return `${entity.resource.id}\0${image.kind}\0${"name" in image ? image.name : image.kind === "default" ? image.reason : ""}\0${translation}`;
+}
+
+/** GL_FloodFillSkin replaces the connected skin background before mipmapping. */
+function floodSkin(indices: Uint8Array, width: number, height: number, palette: Palette): Uint8Array {
+  const result = indices.slice(), fill = result[0];
+  let black = 0;
+  for (let index = 0; index < 256; index++) if (palette.colors[index * 3] === 0 && palette.colors[index * 3 + 1] === 0 && palette.colors[index * 3 + 2] === 0) { black = index; break; }
+  if (fill === undefined || fill === black || fill === 255) return result;
+  const queue = [0]; result[0] = 255;
+  for (let head = 0; head < queue.length; head++) {
+    const pixel = queue[head];
+    if (pixel === undefined) throw new Error("Skin flood queue lost a pixel");
+    const x = pixel % width, y = Math.trunc(pixel / width);
+    let color = black;
+    for (const next of [x > 0 ? pixel - 1 : -1, x + 1 < width ? pixel + 1 : -1, y > 0 ? pixel - width : -1, y + 1 < height ? pixel + width : -1]) {
+      if (next < 0) continue;
+      const value = result[next];
+      if (value === fill) { result[next] = 255; queue.push(next); }
+      else if (value !== undefined && value !== 255) color = value;
+    }
+    result[pixel] = color;
+  }
+  return result;
+}
+
+/** One cache per selected content provider. No asset IO occurs during prepare. */
+export class SceneModelRenderer {
+  readonly lighting: ModelLightSampler;
+  private readonly materials = new Map<string, Material>();
+  private readonly pending = new Map<string, Promise<void>>();
+  private readonly fogs: readonly FogVolume[];
+
+  constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
+    this.lighting = new ModelLightSampler(world);
+    const volumes = new Map<number, FogVolume>();
+    if (world.map.kind === "q3-bsp") for (const surface of world.surfaces) {
+      const source = world.map.surfaces[surface.index];
+      if (surface.kind === "q3" && surface.fog !== null && source !== undefined) volumes.set(source.fog, surface.fog);
+    }
+    this.fogs = [...volumes].sort(([a], [b]) => a - b).map(([, volume]) => volume);
+  }
+
+  async refreshShaderRemaps(): Promise<void> {
+    await Promise.all([...this.materials].map(async ([key, material]) => {
+      if (material.kind !== "q3") return;
+      const remap = this.provider.shaders.resolveRemap(material.name);
+      this.materials.set(key, { ...material, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset });
+    }));
+  }
+
+  async preload(entities: readonly SceneEntity[], options: SourceOptions = () => ({})): Promise<void> {
+    const work: Promise<void>[] = [];
+    const visit = (entity: SceneEntity): void => {
+      const source = options(entity), selections = this.selections(entity, source);
+      for (const selection of selections) work.push(this.load(entity, selection, source));
+      for (const attachment of entity.attachments) visit(attachment.entity);
+    };
+    for (const entity of entities) visit(entity);
+    await Promise.all(work);
+  }
+
+  private selections(entity: SceneEntity, options: ModelSourceOptions): readonly ModelImageSelection[] {
+    const result: ModelImageSelection[] = [{ kind: "white" }, { kind: "default", reason: "missing-skin-surface" }, { kind: "default", reason: "no-skin" }];
+    const external = (name: string): void => { result.push({ kind: "external", name }); };
+    if (options.customShader != null) external(options.customShader);
+    for (const skin of options.customSkin ?? []) external(skin.shader);
+    const model = entity.model;
+    switch (model.kind) {
+      case "q1-mdl":
+        for (const [skin, group] of model.skins.entries()) for (const [frame, pixels] of frames(group).entries()) result.push({ kind: "indexed",
+          name: `${entity.resource.id}:skin:${skin}:${frame}`, width: model.skinWidth, height: model.skinHeight, pixels, transparentIndex: null, fullbright: true });
+        break;
+      case "q1-spr":
+        for (const [frame, group] of model.frames.entries()) for (const [subframe, sprite] of frames(group).entries()) result.push({ kind: "indexed",
+          name: `${entity.resource.id}:frame:${frame}:${subframe}`, width: sprite.width, height: sprite.height, pixels: sprite.pixels, transparentIndex: 255, fullbright: true });
+        break;
+      case "q2-md2": for (const skin of model.skins) external(skin); break;
+      case "q2-sp2": for (const frame of model.frames) external(frame.image); break;
+      case "q3-md3": for (const lod of options.q3Lods ?? [model]) if (lod !== null) for (const surface of lod.surfaces) for (const shader of surface.shaders) external(shader); break;
+      case "q3-md4": for (const lod of model.lods) for (const surface of lod.surfaces) external(surface.shader); break;
+      case "md5":
+        if (model.skinSelection.kind === "q1-mdl-replacement") for (const mesh of model.skinSelection.meshSkinGroups) for (const group of mesh) for (const name of frames(group)) external(name);
+        else if (model.skinSelection.kind === "q2-md2-replacement") for (const name of model.skinSelection.skins) external(name);
+        else for (const mesh of model.meshes) external(mesh.shader);
+        break;
+      case "brush-model": break;
+    }
+    return result;
+  }
+
+  private load(entity: SceneEntity, selection: ModelImageSelection, options: ModelSourceOptions): Promise<void> {
+    const key = materialKey(entity, selection, options), old = this.pending.get(key);
+    if (old !== undefined) return old;
+    const pending = (async (): Promise<void> => {
+      if (this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
+        const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
+        this.materials.set(key, { kind: "q3", name, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
+      }
+      const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
+        : selection.kind === "indexed" ? this.indexedTexture(selection, options) : await this.externalTexture(entity, selection.name);
+      this.materials.set(key, { kind: "legacy", texture });
+    })();
+    this.pending.set(key, pending);
+    return pending;
+  }
+
+  private indexedTexture(selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
+    if (this.provider.palette === null) throw new Error(`Indexed model ${selection.name} has no content palette`);
+    const colors = options.playerColors, translation = colors === undefined ? null : q1PlayerTranslation(colors.top, colors.bottom);
+    return this.provider.textures.register(colors === undefined ? selection.name : `${selection.name}:${colors.top}:${colors.bottom}`, modelImage(selection, this.provider.palette, translation),
+      { wrap: "repeat", filter: "linear" });
+  }
+
+  private async externalTexture(entity: SceneEntity, name: string): Promise<SceneTexture> {
+    const sprite = entity.model.kind === "q2-sp2";
+    if (this.provider.family === "q2" && name.toLowerCase().endsWith(".pcx")) {
+      const base = name.slice(0, -4);
+      for (const suffix of [".png", ".tga", ".jpg"]) {
+        if (await this.provider.textures.reader.read(base + suffix) !== null) {
+          const replacement = await this.provider.textures.load(base + suffix, { family: "q2", mipmap: !sprite });
+          if (replacement !== null) return replacement;
+        }
+      }
+      const asset = await this.provider.textures.reader.read(name), palette = this.provider.palette;
+      if (asset !== null && palette !== null) {
+        const pcx = decodePcx(asset.bytes, name), pixels = sprite ? pcx.indices : floodSkin(pcx.indices, pcx.width, pcx.height, palette);
+        return this.provider.textures.register(`${entity.resource.id}:${name}`, indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], palette,
+          { kind: "index", index: 255 }), { wrap: "repeat", filter: "linear" }, asset.source);
+      }
+    }
+    return await this.provider.textures.load(name, { family: this.provider.family, mipmap: !sprite }) ?? this.provider.textures.missing;
+  }
+
+  prepare(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({})): readonly DrawBatch[] {
+    const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+    const lightCache = new Map<SceneEntity, Vec3>();
+    const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number): Vec3 => {
+      if (this.provider.family === "q3") return unit;
+      const source = options(entity);
+      let light = lightCache.get(entity);
+      if (light === undefined) {
+        const sampled = this.lighting.sample(entity.transform.origin, input, this.provider.family !== "q1").color;
+        if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
+        else {
+          const channel = (value: number): number => {
+            let ambient = value * 255, shade = ambient;
+            if (source.viewModel === true && ambient < 24) ambient = shade = 24;
+            for (const dynamic of input.lights ?? []) {
+              const difference = sub3(entity.transform.origin, dynamic.origin), amount = dynamic.radius - Math.hypot(difference.x, difference.y, difference.z);
+              if (amount > 0) { ambient += amount; shade += amount; }
+            }
+            ambient = Math.min(128, ambient); shade = Math.min(shade, 192 - ambient);
+            if ((source.player === true || entity.resource.requestedPath === "progs/player.mdl") && ambient < 8) shade = 8;
+            if (["progs/flame.mdl", "progs/flame2.mdl"].includes(entity.resource.requestedPath)) shade = 256;
+            return shade / 200 * (source.overbrightModels === false ? 1 : 2);
+          };
+          light = { x: channel(sampled.x), y: channel(sampled.y), z: channel(sampled.z) };
+        }
+        lightCache.set(entity, light);
+      }
+      if (entity.flags.kind === "q2" && q2ShellColor(entity.flags.bits) !== null) return light;
+      const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
+      const index = normalIndices.get(`${normal.x},${normal.y},${normal.z}`);
+      let shade = index === undefined ? null : r_avertexnormal_dots[row * 256 + index] ?? null;
+      if (this.provider.family === "q1" && entity.model.kind === "q1-mdl" && entity.pose.kind === "frame") {
+        const triangle = entity.model.triangles[Math.trunc(corner / 3)], vertex = triangle?.vertices[corner % 3];
+        const oldFrames = entity.model.frames[entity.pose.previousFrame];
+        if (vertex !== undefined && oldFrames !== undefined && shade !== null) {
+          const old = sampleTimedFrame(oldFrames, time, source.syncBase ?? 0).compressedVertices[vertex];
+          const oldShade = old === undefined ? shade : r_avertexnormal_dots[row * 256 + old.normalIndex] ?? shade;
+          shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
+        }
+      }
+      if (shade === null) {
+        const direction = normalize3({ x: Math.cos(-yaw), y: Math.sin(-yaw), z: 1 }), d = dot3(normal, direction);
+        shade = 1 + (d < 0 ? d * 0.3 : d);
+      }
+      return scale3(light, shade);
+    };
+    return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
+      frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
+    { draw: surface => this.draw(surface, input, options(surface.entity)) }));
+  }
+
+  /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
+  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({})): readonly ShadowCaster[] {
+    const result: ShadowCaster[] = [], time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+    const visit = (entity: SceneEntity, original: SceneEntity): void => {
+      const source = options(original);
+      if (!entityCastsShadow(entity, source.viewModel)) return;
+      const body: SceneEntity = { ...entity, attachments: [],
+        flags: entity.flags.kind === "q2" ? { kind: "q2", bits: entity.flags.bits & ~Q2_SHELL_MASK } : entity.flags,
+        pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose };
+      const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, options: () => source });
+      const meshes: ShadowMesh[] = [];
+      for (const surface of prepared.surfaces) {
+        const material = this.materials.get(materialKey(surface.entity, surface.image, source));
+        if (material === undefined) throw new Error(`Shadow material was not preloaded: ${entity.resource.requestedPath}/${surface.name}`);
+        if (material.kind === "legacy") { meshes.push(shadowMesh(surface.geometry)); continue; }
+        const axis = surface.transform.axis;
+        const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
+        const base = this.world.materialContext(input, transform);
+        const context = { ...base, entityRGBA: byteColor(entity.color),
+          localViewOrigin: modelLocalDelta(surface.transform, sub3(input.camera.origin, surface.transform.origin)),
+          timeOffset: (entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000) + material.timeOffset,
+          deformView: { ...base.deformView, nonNormalizedAxis: source.nonNormalizedAxes === true ? transform.axis[0] : null } };
+        const geometry = shadowMaterialGeometry(material.compiled, surface.localGeometry, context);
+        if (geometry !== null) meshes.push({ positions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)), indices: geometry.indices });
+      }
+      if (meshes.length !== 0) result.push(shadowCaster(entity.transform.origin, meshes));
+      const parent = { ...body, pose: body.pose.kind === "frame" ? { ...body.pose, frame: prepared.frame, previousFrame: prepared.previousFrame } : body.pose };
+      for (const attachment of entity.attachments) {
+        const tag = modelAttachmentTag(parent, attachment.tag);
+        if (tag !== null) visit(attachSceneEntity(parent, attachment.entity, tag), attachment.entity);
+      }
+    };
+    for (const entity of entities) visit(entity, entity);
+    return result;
+  }
+
+  private paletteColor(index: number): Vec3 {
+    const palette = this.provider.palette;
+    if (palette === null) throw new Error("Indexed model effects require a source palette");
+    return { x: palette.colors[index * 3] ?? 0, y: palette.colors[index * 3 + 1] ?? 0, z: palette.colors[index * 3 + 2] ?? 0 };
+  }
+
+  private fogFor(entity: SceneEntity): FogVolume | null {
+    const model = entity.model, frame = entity.pose.kind === "frame" ? entity.pose.frame : 0;
+    let center = entity.transform.origin, radius = 0;
+    if (model.kind === "q3-md3" || model.kind === "q3-md4") {
+      const pose = model.frames[frame] ?? model.frames[0];
+      if (pose !== undefined) { center = add3(center, pose.localOrigin); radius = pose.radius; }
+    } else if (model.kind === "md5") {
+      const pose = model.frames[frame] ?? model.frames[0];
+      if (pose !== undefined) radius = radiusFromBounds(pose.bounds);
+    } else if (model.kind !== "brush-model") radius = radiusFromBounds(model.bounds);
+    return this.fogs.find(fog => center.x - radius < fog.bounds.max.x && center.x + radius > fog.bounds.min.x
+      && center.y - radius < fog.bounds.max.y && center.y + radius > fog.bounds.min.y
+      && center.z - radius < fog.bounds.max.z && center.z + radius > fog.bounds.min.z) ?? null;
+  }
+
+  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions): readonly DrawBatch[] {
+    const material = this.materials.get(materialKey(surface.entity, surface.image, options));
+    if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
+    const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+    if (material.kind === "q3") {
+      const axis = surface.transform.axis;
+      const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
+      const base = this.world.materialContext(input, transform, this.fogFor(surface.entity));
+      const project = createViewProjector(input.camera);
+      const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input),
+        localViewOrigin: modelLocalDelta(surface.transform, sub3(input.camera.origin, surface.transform.origin)), depthRange: surface.depthRange,
+        timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
+        deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
+        project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
+      return prepareMaterialBatches(material.compiled, surface.localGeometry, context);
+    }
+    const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;
+    const lighting = { kind: "vertex" } satisfies Parameters<typeof createQ1Material>[2];
+    const definition = this.provider.family === "q1" ? createQ1Material(texture.name, texture.image, lighting, { alpha })
+      : { ...createQ2Material(texture.name, [texture.image], lighting), alpha };
+    const project = createViewProjector(input.camera);
+    const batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
+      fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
+      project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
+    return batches.map(batch => ({ ...batch, state: { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
+      cull: surface.mirrorWeapon ? "front" : batch.state.cull } }));
+  }
+}

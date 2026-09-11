@@ -69,6 +69,7 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
       const result = await Bun.build({
         entrypoints: [join(snapshotPath, entry.source)],
         target: "bun",
+        loader: { ".png": "file" },
         compile: { outfile: join(candidate, entry.executable), autoloadDotenv: false, autoloadBunfig: false },
         sourcemap: "inline",
       });

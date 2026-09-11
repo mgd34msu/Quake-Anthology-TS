@@ -1,0 +1,307 @@
+import type { ContentId, GameFamily } from "../../contracts/content.ts";
+import type { ActorId, SeatId } from "../../contracts/identity.ts";
+import type { Vec3 } from "../../contracts/math.ts";
+import type { WorldSnapshot } from "../../contracts/session.ts";
+import { SoundBank, UnifiedAudio } from "../../audio/index.ts";
+import type { AudioAudience, AudioListener, LoopSound, SoundAsset } from "../../audio/index.ts";
+import { GameRandom } from "../../core/game-numeric.ts";
+import { EntityEvent } from "../../movement/q3/constants.ts";
+import { findQ1Leaf } from "../../formats/q1-map/queries.ts";
+import { parseEntities } from "../../formats/q3-map/index.ts";
+import { parsePlayerAnimationConfig } from "../../content/q3/foundation/animation-config.ts";
+import type { PlayerFootsteps } from "../../content/q3/foundation/animation-config.ts";
+import type { Q3CharacterEvent } from "../../content/q3/foundation/character.ts";
+import type { LoadedApplicationContent } from "./content.ts";
+import type { SimulationPresentationEvent } from "./simulation/types.ts";
+import type { UiSound } from "../../ui/common/controller.ts";
+import { ApplicationMusic } from "./audio/music.ts";
+import { q2EntitySound, q2MuzzleSounds } from "./audio/q2-events.ts";
+
+interface ActorAudio {
+  readonly actor: ActorId;
+  model: string;
+  underwater: boolean | null;
+  chase: ActorId | null;
+  painTime: number;
+}
+interface StaticAudio {
+  readonly sound: SoundAsset;
+  readonly origin: Vec3;
+  readonly volume: number;
+  readonly attenuation: number;
+  readonly seats: SeatId[];
+}
+export interface ApplicationEffectSound {
+  readonly content: ContentId;
+  readonly path: string;
+  readonly origin: Vec3;
+  readonly channel: number;
+  readonly volume: number;
+  readonly seconds: number;
+}
+
+/** The output device mixes independent local listeners without advancing the game. */
+export class ApplicationAudio {
+  readonly engine: UnifiedAudio;
+  private readonly banks = new Map<ContentId, Promise<SoundBank>>();
+  private readonly music: ApplicationMusic;
+  private readonly random: GameRandom;
+  private readonly actorAudio: ActorAudio[] = [];
+  private readonly statics: StaticAudio[] = [];
+  private readonly loops: LoopSound[] = [];
+  private readonly sounds = new Map<string, Promise<SoundAsset | null>>();
+  private readonly footsteps = new Map<ContentId, Promise<PlayerFootsteps>>();
+  private readonly warned = new Set<string>();
+  private readonly uiSounds: { readonly seat: SeatId; readonly sound: UiSound }[] = [];
+  private readonly effectSounds: ApplicationEffectSound[] = [];
+  private listeners: readonly AudioListener[] = [];
+  private snapshot: WorldSnapshot | null = null;
+  private volume = 0.7;
+  private closed = false;
+
+  constructor(private readonly content: LoadedApplicationContent, now: () => number, seed: number,
+    private readonly characterModel: string, private readonly print: (text: string) => undefined) {
+    this.random = new GameRandom(seed);
+    this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
+    this.music = new ApplicationMusic(this.engine, print);
+    this.engine.openDevice();
+  }
+
+  get effectsVolume(): number { return this.volume; }
+  set effectsVolume(value: number) { this.engine.setEffectsVolume(value); this.volume = value; }
+  get musicVolume(): number { return this.music.volume; }
+  set musicVolume(value: number) { this.music.volume = value; }
+  pauseMusic(paused: boolean): void { this.music.pause(paused); }
+  uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
+  receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
+
+  private bank(content: ContentId): Promise<SoundBank> {
+    const existing = this.banks.get(content);
+    if (existing !== undefined) return existing;
+    const pending = this.content.forContent(content).then(mounts => new SoundBank(mounts));
+    this.banks.set(content, pending);
+    return pending;
+  }
+
+  private actor(actor: ActorId): ActorAudio {
+    const existing = this.actorAudio.find(value => value.actor.equals(actor));
+    if (existing !== undefined) return existing;
+    const state: ActorAudio = { actor, model: "male", underwater: null, chase: null, painTime: 0 };
+    this.actorAudio.push(state);
+    return state;
+  }
+
+  private sound(content: ContentId, path: string, family: GameFamily, actor: ActorId | null = null): Promise<SoundAsset | null> {
+    const model = family === "q2" ? actor === null ? "male" : this.actor(actor).model : this.characterModel;
+    const key = `${content}/${family}/${path}/${path.startsWith("*") ? model : ""}`;
+    const prior = this.sounds.get(key);
+    if (prior !== undefined) return prior;
+    const pending = this.loadSound(content, path, family, model);
+    this.sounds.set(key, pending);
+    return pending;
+  }
+
+  private async loadSound(content: ContentId, path: string, family: GameFamily, model: string): Promise<SoundAsset | null> {
+    const bank = await this.bank(content);
+    const sound = !path.startsWith("*") ? await bank.register(path, family)
+      : family === "q2" ? await bank.registerSexedSound(path, model)
+      : family === "q3" ? await bank.register(`player/${model}/${path.slice(1)}`, "q3")
+        ?? await bank.register(`player/sarge/${path.slice(1)}`, "q3") : null;
+    if (sound === null && !this.warned.has(`${content}/${path}`)) {
+      this.warned.add(`${content}/${path}`);
+      this.print(`Sound unavailable: ${content}/${path}\n`);
+    }
+    return sound;
+  }
+
+  private async play(content: ContentId, family: GameFamily, path: string, actor: ActorId | null, origin: Vec3 | null,
+    channel: number, volume: number, attenuation: number, delaySeconds = 0, audience: AudioAudience = { kind: "world" }): Promise<void> {
+    const sound = await this.sound(content, path, family, actor);
+    if (sound === null || this.closed) return;
+    this.engine.play({ sound, family, actor, origin: origin !== null ? { kind: "fixed", position: origin }
+      : actor === null ? { kind: "local" } : { kind: "actor", actor }, audience, channel, volume, attenuation, delaySeconds });
+  }
+
+  async playMusic(content: ContentId, track: string): Promise<void> {
+    const bank = await this.bank(content), product = this.content.catalog.product(content).expectation;
+    if (!this.closed) await this.music.play(content, product.family, product.campaign, bank, track);
+  }
+
+  async startWorldMusic(): Promise<void> {
+    const world = parseEntities(this.content.world.entities).find(entity => entity.get("classname") === "worldspawn");
+    const track = world?.get(this.content.world.kind === "q3-bsp" ? "music" : "sounds") ?? "";
+    await this.playMusic(this.content.recipe.map.entities.content, track);
+  }
+
+  private async q3Footsteps(content: ContentId): Promise<PlayerFootsteps> {
+    const prior = this.footsteps.get(content);
+    if (prior !== undefined) return prior;
+    const pending = (async (): Promise<PlayerFootsteps> => {
+      const mounts = await this.content.forContent(content);
+      const file = await mounts.open(`models/players/${this.characterModel}/animation.cfg`)
+        ?? await mounts.open("models/players/sarge/animation.cfg");
+      return file === null ? "normal" : parsePlayerAnimationConfig(new TextDecoder().decode(file.bytes), file.reference.requestedPath).footsteps;
+    })();
+    this.footsteps.set(content, pending);
+    return pending;
+  }
+
+  private async characterSound(content: ContentId, event: Q3CharacterEvent): Promise<void> {
+    const actor = event.actor.id, state = this.actor(actor);
+    const play = (path: string, channel: number): Promise<void> => this.play(content, "q3", path, actor, null, channel, 1, 1);
+    switch (event.event & ~0x300) {
+      case EntityEvent.EV_PAIN: {
+        if (((event.timeMilliseconds - state.painTime) | 0) < 500) return;
+        state.painTime = event.timeMilliseconds;
+        const health = event.parameter;
+        await play(`*pain${health < 25 ? 25 : health < 50 ? 50 : health < 75 ? 75 : 100}_1.wav`, 3);
+        break;
+      }
+      case EntityEvent.EV_DEATH1: case EntityEvent.EV_DEATH2: case EntityEvent.EV_DEATH3:
+        await play(`*death${(event.event & ~0x300) - EntityEvent.EV_DEATH1 + 1}.wav`, 3); break;
+      case EntityEvent.EV_JUMP_PAD: {
+        const origin = this.snapshot?.bodies.find(body => body.actor.equals(actor))?.body.origin;
+        if (origin !== undefined) await this.play(content, "q3", "world/jumppad.wav", null, origin, 3, 1, 1);
+        await play("*jump1.wav", 3); break;
+      }
+      case EntityEvent.EV_JUMP: await play("*jump1.wav", 3); break;
+      case EntityEvent.EV_TAUNT: await play("*taunt.wav", 3); break;
+      case EntityEvent.EV_FALL_SHORT: await play("player/land1.wav", 0); break;
+      case EntityEvent.EV_FALL_MEDIUM: await play("*pain100_1.wav", 3); break;
+      case EntityEvent.EV_FALL_FAR: state.painTime = event.timeMilliseconds; await play("*fall1.wav", 0); break;
+      case EntityEvent.EV_WATER_TOUCH: await play("player/watr_in.wav", 0); break;
+      case EntityEvent.EV_WATER_LEAVE: await play("player/watr_out.wav", 0); break;
+      case EntityEvent.EV_WATER_UNDER: await play("player/watr_un.wav", 0); break;
+      case EntityEvent.EV_WATER_CLEAR: await play("*gasp.wav", 0); break;
+      case EntityEvent.EV_FOOTSTEP: case EntityEvent.EV_FOOTSTEP_METAL:
+      case EntityEvent.EV_FOOTSPLASH: case EntityEvent.EV_FOOTWADE: case EntityEvent.EV_SWIM: {
+        const kind = (event.event & ~0x300) === EntityEvent.EV_FOOTSTEP ? await this.q3Footsteps(content) : (event.event & ~0x300) === EntityEvent.EV_FOOTSTEP_METAL ? "metal" : "splash";
+        const name = kind === "normal" ? "step" : kind === "metal" ? "clank" : kind;
+        await play(`player/footsteps/${name}${(this.random.rand() & 3) + 1}.wav`, 5); break;
+      }
+      case EntityEvent.EV_PLAYER_TELEPORT_IN: await play("world/telein.wav", 0); break;
+      case EntityEvent.EV_PLAYER_TELEPORT_OUT: await play("world/teleout.wav", 0); break;
+      case EntityEvent.EV_GIB_PLAYER: await play("player/gibsplt1.wav", 5); break;
+      case EntityEvent.EV_ITEM_POP: case EntityEvent.EV_ITEM_RESPAWN: await play("items/respawn1.wav", 0); break;
+      case EntityEvent.EV_CHANGE_WEAPON: await play("weapons/change.wav", 0); break;
+      case EntityEvent.EV_STOPLOOPINGSOUND: this.stopLoop(actor); break;
+    }
+  }
+
+  private stopLoop(actor: ActorId): void {
+    for (let index = this.loops.length - 1; index >= 0; index--) if (this.loops[index]?.actor.equals(actor)) this.loops.splice(index, 1);
+    this.engine.stopLoop(actor);
+  }
+
+  private async chat(content: ContentId, family: GameFamily, target: ActorId | null): Promise<void> {
+    for (const listener of this.listeners) {
+      if (target !== null && !listener.actor?.equals(target)) continue;
+      await this.play(content, family, family === "q3" ? "player/talk.wav" : "misc/talk.wav", null, null, 0, 1, 0, 0,
+        { kind: "seat", seat: listener.seat });
+    }
+  }
+
+  async receive(events: readonly SimulationPresentationEvent[]): Promise<void> {
+    for (const source of events) {
+      if (source.kind === "q1") {
+        const event = source.event;
+        if (event.kind === "sound") {
+          const channel = event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
+          await this.play(source.content, "q1", event.path, event.actor, null, channel, event.volume, event.attenuation);
+        } else if (event.kind === "ambient") {
+          const sound = await this.sound(source.content, event.path, "q1");
+          if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ sound, origin: event.origin,
+            volume: Math.trunc(event.volume * 255), attenuation: Math.trunc(event.attenuation * 64), seats: [] });
+        }
+      } else if (source.kind === "q2") {
+        const event = source.event;
+        if (event.kind === "music") await this.playMusic(source.content, event.track);
+        else if (event.kind === "sound") {
+          if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor);
+          else if (event.loop === "start" && event.actor !== null) {
+            const sound = await this.sound(source.content, event.path, "q2", event.actor);
+            this.stopLoop(event.actor);
+            this.engine.updateActor(event.actor, event.origin);
+            if (sound !== null) this.loops.push({ sound, family: "q2", actor: event.actor, origin: { kind: "actor", actor: event.actor },
+              audience: { kind: "world" }, volume: event.volume, attenuation: event.attenuation, velocity: { x: 0, y: 0, z: 0 },
+              frameNumber: 0, lifetime: "frame" });
+          } else {
+            const live = event.actor !== null && this.snapshot?.actors.some(actor => event.actor?.equals(actor.id));
+            await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation);
+          }
+        } else if (event.kind === "entity-event") {
+          const sound = q2EntitySound(event.event, () => this.random.rand());
+          if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation);
+        } else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.actor);
+      } else if (source.kind === "q2-player") {
+        const event = source.event;
+        if (event.kind === "userinfo") { this.actor(event.actor).model = event.skin.split("/")[0] || "male"; if (event.name === "") this.stopLoop(event.actor); }
+        else if (event.kind === "view") this.actor(event.actor).underwater = event.view.underwater;
+        else if (event.kind === "chase") this.actor(event.actor).chase = event.target;
+        else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.target);
+      } else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
+        for (const sound of q2MuzzleSounds(source.event.flash, source.event.silenced, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease"))
+          await this.play(source.content, "q2", sound.path, source.event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds);
+      } else if (source.kind === "q3-character") await this.characterSound(source.content, source.event);
+    }
+  }
+
+  async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[]): Promise<void> {
+    this.snapshot = snapshot;
+    this.listeners = listeners;
+    for (const body of snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
+    this.engine.setListeners(listeners);
+    this.engine.beginLoopFrame();
+    for (const event of this.uiSounds.splice(0)) {
+      const content = this.content.recipe.presentation.audio.content, family = this.content.catalog.product(content).expectation.family;
+      const index = event.sound === "open" ? 1 : event.sound === "close" ? 3 : event.sound === "reject" && family === "q3" ? 4 : 2;
+      const sound = await this.sound(content, `misc/menu${index}.wav`, family);
+      if (sound !== null) this.engine.play({ sound, family, actor: null, origin: { kind: "local" }, audience: { kind: "seat", seat: event.seat },
+        channel: 0, volume: 1, attenuation: 0 });
+    }
+    await this.receive(events);
+    for (const sound of this.effectSounds.splice(0)) await this.play(sound.content, this.content.catalog.product(sound.content).expectation.family,
+      sound.path, null, sound.origin, sound.channel, sound.volume, 1);
+    if (this.closed) return;
+    this.engine.setListeners(listeners.map(listener => {
+      if (listener.actor === null) return listener;
+      const state = this.actor(listener.actor), followed = state.chase === null ? state : this.actor(state.chase);
+      return { ...listener, underwater: followed.underwater ?? listener.underwater };
+    }));
+    for (const loop of [...this.loops]) {
+      if (!snapshot.actors.some(actor => actor.id.equals(loop.actor))) { this.stopLoop(loop.actor); continue; }
+      this.engine.loop({ ...loop, frameNumber: snapshot.frame.frame });
+    }
+    for (const sound of this.statics) {
+      for (let index = sound.seats.length - 1; index >= 0; index--) {
+        const seat = sound.seats[index];
+        if (seat !== undefined && !listeners.some(listener => listener.seat.equals(seat))) sound.seats.splice(index, 1);
+      }
+      for (const listener of listeners) if (!sound.seats.some(seat => seat.equals(listener.seat))) {
+        this.engine.addStaticSound(listener.seat, sound.sound, sound.origin, sound.volume, sound.attenuation);
+        sound.seats.push(listener.seat);
+      }
+    }
+    if (this.content.world.kind === "q1-bsp") {
+      const content = this.content.recipe.map.entities.content;
+      const water = await this.sound(content, "ambience/water1.wav", "q1"), wind = await this.sound(content, "ambience/wind2.wav", "q1");
+      if (water !== null && wind !== null) for (const listener of listeners) {
+        const leaf = this.content.world.leaves[findQ1Leaf(this.content.world, listener.origin)];
+        const elapsed = snapshot.frame.elapsed;
+        this.engine.updateAmbient(listener.seat, [water, wind], leaf?.ambientSound ?? [0, 0], elapsed.value / (elapsed.kind === "milliseconds" ? 1000 : 1));
+      }
+    }
+    this.engine.endLoopFrame();
+    this.engine.updateMusic();
+    this.engine.pump();
+  }
+
+  close(): undefined {
+    if (this.closed) return undefined;
+    this.closed = true;
+    this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
+    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0;
+    this.listeners = []; this.snapshot = null;
+    return undefined;
+  }
+}

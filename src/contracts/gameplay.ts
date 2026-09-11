@@ -5,6 +5,11 @@ import type { SourceTime } from "./time.ts";
 export type ItemId = `${string}:${string}`;
 export type ObjectiveId = `${string}:${string}`;
 
+/** Original mod encodings differ between classic game DLLs and the rerelease mod_t. */
+export type Q2NativeCause =
+  | { readonly edition: "classic"; readonly game: "base" | "xatrix" | "rogue" | "ctf"; readonly value: number }
+  | { readonly edition: "rerelease"; readonly id: number; readonly friendlyFire: boolean; readonly noPointLoss: boolean };
+
 /** Captured before any combat mutation, including source flags and selected decision owners. */
 export interface AttackProvenance {
   readonly sequence: number;
@@ -18,7 +23,8 @@ export interface AttackProvenance {
   readonly movementProvider: ProviderId;
   readonly cause:
     | { readonly kind: "q1"; readonly deathType: string }
-    | { readonly kind: "q2"; readonly meansOfDeath: number; readonly damageFlags: number }
+    /** meansOfDeath is the canonical engine cause ID, never an unconverted native ordinal. */
+    | { readonly kind: "q2"; readonly meansOfDeath: number; readonly damageFlags: number; readonly native?: Q2NativeCause }
     | { readonly kind: "q3"; readonly meansOfDeath: number; readonly damageFlags: number }
     | { readonly kind: "environment"; readonly hazard: "fall" | "drown" | "lava" | "slime" | "crush" | "trigger" };
 }
@@ -46,6 +52,8 @@ export interface CombatState {
   readonly mass: number;
   readonly canTakeDamage: boolean;
   readonly invulnerable: boolean;
+  /** Source entity immunity to damage momentum, independent of its physical mass. */
+  readonly noKnockback?: boolean;
   readonly team: string | null;
 }
 
@@ -60,6 +68,8 @@ export interface DamageDecision {
   readonly mutations: readonly DamageMutation[];
   readonly appliedDamage: number;
   readonly reaction: "none" | "pain" | "death";
+  /** Source savings, including protection credited as armor; never infer these from spent inventory. */
+  readonly feedback?: { readonly kind: "q2"; readonly powerArmor: number; readonly armor: number; readonly blood: number; readonly knockback: number };
 }
 
 export interface CombatPolicy {

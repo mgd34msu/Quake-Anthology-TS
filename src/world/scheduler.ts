@@ -10,6 +10,7 @@ export interface SchedulerOptions {
   readonly actors: ActorRegistry;
   readonly ordering: FrameOrdering;
   readonly clocks: readonly { readonly provider: ProviderId; readonly profile: ClockProfile }[];
+  readonly sourceSlot?: (actor: ActorId) => number | null;
   readonly resolve: (provider: ProviderId, callback: CallbackId) => ThinkCallback | null;
 }
 
@@ -18,17 +19,18 @@ export type ThinkResult =
   | { readonly kind: "not-run"; readonly reason: "unscheduled" | "boundary" | "not-due" | "stale" }
   | { readonly kind: "ran"; readonly invocations: number; readonly alive: boolean };
 
-interface PendingThink extends ScheduledThink { readonly owned: OwnedActor; }
+interface PendingThink extends ScheduledThink { readonly owned: OwnedActor; readonly sourceSlot: number; }
 
 /** Deadlines select eligibility; source traversal, rather than deadline sorting, selects execution order. */
-export function compareInvocationOrder(ordering: FrameOrdering, left: InvocationOrder, right: InvocationOrder): number {
+export function compareInvocationOrder(ordering: FrameOrdering, left: InvocationOrder, right: InvocationOrder,
+  sourceSlot: (actor: ActorId) => number = actor => actor.slot): number {
   if (ordering.kind === "mixed") {
     const leftProvider = ordering.providers.indexOf(left.provider);
     const rightProvider = ordering.providers.indexOf(right.provider);
     if (leftProvider < 0 || rightProvider < 0) throw new RangeError("Provider is absent from mixed frame ordering");
     if (leftProvider !== rightProvider) return leftProvider - rightProvider;
   }
-  return left.actor.slot - right.actor.slot || left.sequence - right.sequence;
+  return sourceSlot(left.actor) - sourceSlot(right.actor) || left.sequence - right.sequence;
 }
 
 /** null means not due; the returned time is the time visible inside the callback. */
@@ -86,16 +88,20 @@ export class FrameScheduler implements ActorSchedule {
     if (!sameActor(actor.id, timing.order.actor) || actor.owner !== timing.order.provider) throw new RangeError("Think order must name its owning actor and provider");
     if (!Number.isSafeInteger(timing.order.sequence) || timing.order.sequence < 0) throw new RangeError("Think invocation sequence must be a nonnegative safe integer");
     if (this.ordering.kind === "mixed" && !this.ordering.providers.includes(actor.owner)) throw new RangeError("Provider is absent from mixed frame ordering");
-    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback,
+    const sourceSlot = this.options.sourceSlot?.(actor.id) ?? actor.id.slot;
+    if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new RangeError("Source slot must be a nonnegative safe integer");
+    this.scheduled.set(actor.id.slot, Object.freeze({ actor: actor.id, owned: actor, callback, sourceSlot,
       timing: Object.freeze({ ...timing, due: copyTime(timing.due), order: Object.freeze({ ...timing.order }) }) }));
     return undefined;
   }
 
   cancel(actor: OwnedActor): undefined {
     this.assertOpen();
-    this.assertOwned(actor);
     const pending = this.scheduled.get(actor.id.slot);
-    if (pending !== undefined && sameActor(pending.actor, actor.id)) this.scheduled.delete(actor.id.slot);
+    if (pending !== undefined && sameActor(pending.actor, actor.id)) {
+      if (pending.owned.owner !== actor.owner) throw new RangeError("Cannot cancel another provider's think");
+      this.scheduled.delete(actor.id.slot);
+    }
     return undefined;
   }
 
@@ -144,18 +150,18 @@ export class FrameScheduler implements ActorSchedule {
       contexts.set(provider, copyFrame(frame));
     }
     const results: { readonly actor: ActorId; readonly result: ThinkResult }[] = [];
-    let cursor: InvocationOrder | null = null;
+    let cursor: PendingThink | null = null;
     this.advancing = true;
     try {
       while (!this.closed) {
         let next: PendingThink | null = null;
         for (const pending of this.scheduled.values()) {
           if (!this.options.actors.isLive(pending.actor)) { this.scheduled.delete(pending.actor.slot); continue; }
-          if (cursor !== null && this.compareSlot(pending.timing.order, cursor) <= 0) continue;
-          if (next === null || compareInvocationOrder(this.ordering, pending.timing.order, next.timing.order) < 0) next = pending;
+          if (cursor !== null && this.comparePending(pending, cursor, false) <= 0) continue;
+          if (next === null || this.comparePending(pending, next, true) < 0) next = pending;
         }
         if (next === null) break;
-        cursor = next.timing.order;
+        cursor = next;
         const frame = contexts.get(next.owned.owner);
         if (frame === undefined) throw new Error(`Missing source frame for provider: ${next.owned.owner}`);
         results.push({ actor: next.actor, result: this.run(next.actor, frame, boundary) });
@@ -166,8 +172,10 @@ export class FrameScheduler implements ActorSchedule {
 
   close(): undefined { this.closed = true; this.scheduled.clear(); return undefined; }
 
-  private compareSlot(left: InvocationOrder, right: InvocationOrder): number {
-    return compareInvocationOrder(this.ordering, { ...left, sequence: 0 }, { ...right, sequence: 0 });
+  private comparePending(left: PendingThink, right: PendingThink, invocations: boolean): number {
+    const provider = this.ordering.kind === "native" ? 0
+      : this.ordering.providers.indexOf(left.owned.owner) - this.ordering.providers.indexOf(right.owned.owner);
+    return provider || left.sourceSlot - right.sourceSlot || (invocations ? left.timing.order.sequence - right.timing.order.sequence : 0);
   }
 
   private result(invocations: number, actor: ActorId, reason: Extract<ThinkResult, { readonly kind: "not-run" }>["reason"]): ThinkResult {

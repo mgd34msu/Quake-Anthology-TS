@@ -1,0 +1,140 @@
+import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import type { CommandContext } from "../../../src/contracts/common.ts";
+import type { ResourceId } from "../../../src/contracts/content.ts";
+import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+import type { IdentityOwner, SeatId } from "../../../src/contracts/identity.ts";
+import type { RendererResourceOwner } from "../../../src/contracts/render.ts";
+import type { UiDrawContext } from "../../../src/contracts/ui.ts";
+import { CommandBuffer } from "../../../src/core/commands/index.ts";
+import { CvarRegistry } from "../../../src/core/cvars/index.ts";
+import { KeyCode } from "../../../src/input/key-codes.ts";
+import { SeatInput } from "../../../src/input/seat.ts";
+import { InputCommandBuilder } from "../../../src/input/user-command.ts";
+import { NativeUiController, defaultUiSkin, loadNativeUiArt, renderUiCommands, uiSkinFont } from "../../../src/ui/common/index.ts";
+import { bindCvarSetting, bindInputSettings, registerSettingsMenus, SeatUiPreferences } from "../../../src/ui/settings/index.ts";
+import { drawCommonHud, emptyHudData, SeatHudMessages, SeatWeaponWheel } from "../../../src/ui/hud/index.ts";
+import type { WheelItem } from "../../../src/ui/hud/wheel.ts";
+import { openArchive } from "../../../src/content/archive/index.ts";
+import { SdlWindow } from "../../../src/platform/sdl.ts";
+import { CpuRenderTarget, SoftwareRenderer } from "../../../src/render/cpu/index.ts";
+import { SceneFrameBuilder } from "../../../src/render/commands/frame.ts";
+import { SceneImageRegistry } from "../../../src/render/scene/resources.ts";
+import { classicCharset, TextFontRegistry } from "../../../src/text/atlas.ts";
+import type { TextFontSelection } from "../../../src/text/atlas.ts";
+import { UiTextRenderer } from "../../../src/text/ui.ts";
+import { encodePng } from "../../../src/formats/images/png.ts";
+
+const fontId: ResourceId = "resource:test:menu-font";
+function drawContext(owner: IdentityOwner, seat: SeatId, x = 0): UiDrawContext {
+  const provider = { provider: "ui:test", content: "q1:rerelease:id1:retail" } satisfies { readonly provider: "ui:test"; readonly content: "q1:rerelease:id1:retail" };
+  return { binding: { seat, client: owner.client(seat.index, 0), viewport: { x, y: 0, width: 640, height: 480 },
+    safeArea: { x, y: 0, width: 640, height: 480 }, hudScale: 1,
+    presentation: { assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 1000 };
+}
+
+test("native settings alter real command input and remain isolated per seat", () => {
+  const owner = createIdentityOwner("native-ui-input"), context: CommandContext = { session: owner.session, origin: { kind: "local-console" } };
+  const commands = new CommandBuffer({ dialect: "q3", context });
+  const make = (seat: SeatId) => {
+    let ui: NativeUiController | null = null;
+    const input = new SeatInput({ seat, dialect: "q3", context: { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(seat.index, 0) } },
+      commands, uiEvent: event => ui?.input(event) ?? false });
+    const builder = new InputCommandBuilder("q3");
+    const controller = new NativeUiController({ seat, skin: () => defaultUiSkin(fontId), bindings: () => input.bindings, now: () => 1000,
+      focus: (focus, time) => input.setFocus(focus, time), sound: () => undefined, executeScript: () => undefined });
+    ui = controller;
+    const menus = registerSettingsMenus(controller, bindInputSettings(input, builder));
+    controller.openMenu(menus.root);
+    return { input, builder, controller, menus };
+  };
+  const a = make(owner.seat(0)), b = make(owner.seat(1));
+  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1000, kind: "key", code: KeyCode.Enter, down: true, repeat: false });
+  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1001, kind: "key", code: KeyCode.Right, down: true, repeat: false });
+  expect(a.builder.mouse.tuning.sensitivity).toBeCloseTo(3.1);
+  expect(b.builder.mouse.tuning.sensitivity).toBe(3);
+  a.controller.closeAll();
+  a.input.input({ seat: owner.seat(0), timeMilliseconds: 1002, kind: "mouse-motion", position: { x: 100, y: 100 }, delta: { x: 10, y: 0 } });
+  const command = a.builder.build(a.input.sample(1016, 16), { kind: "q3", serverTimeMilliseconds: 16, weapon: 2, sensitivity: 1 });
+  expect(command.kind).toBe("q3");
+  expect(a.builder.viewAngles.y).toBeCloseTo(-0.682, 4);
+  expect(b.controller.activeMenu).toBe("menu:settings:root");
+  a.menus.dispose(); b.menus.dispose();
+});
+
+test("Unicode fields, list navigation and live cvar callbacks use the focused control", () => {
+  const owner = createIdentityOwner("native-ui-fields"), seat = owner.seat(2), context: CommandContext = { session: owner.session, origin: { kind: "local-console" } };
+  const cvars = new CvarRegistry({ dialect: "q3", context }); cvars.register("rate", "25000");
+  const setting = bindCvarSetting(cvars, { name: "rate", label: "Rate", category: "network", restart: null, kind: "slider", minimum: 1000, maximum: 100000, step: 1000 }, null);
+  if (setting.kind !== "slider") throw new Error("Expected numeric binding"); setting.write(30000); expect(cvars.variableValue("rate")).toBe(30000);
+  let value = "A😀B", selected = "a";
+  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin(fontId), bindings: () => [], focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  ui.register("menu:test:field", () => ({ id: "menu:test:field", title: "Fields", fullScreen: false, open: () => undefined, close: () => undefined, controls: [
+    { kind: "text-entry", id: "ui:test:name", label: "Name", rect: { x: 40, y: 80, width: 560, height: 28 }, visible: true, enabled: true, text: value,
+      maximumLength: 8, change: (_seat, text) => { value = text; return undefined; }, submit: () => undefined },
+    { kind: "list", id: "ui:test:list", label: "Items", rect: { x: 40, y: 128, width: 560, height: 60 }, visible: true, enabled: true,
+      selected, rows: ["a", "b", "c"].map(id => ({ id, cells: [id], enabled: true, image: null })), select: (_seat, id) => { selected = id; return undefined; } },
+  ] }));
+  ui.openMenu("menu:test:field");
+  const key = (code: number): void => { ui.input({ kind: "key", seat, code, down: true, repeat: false, timeMilliseconds: 0 }); };
+  key(KeyCode.Left); key(KeyCode.Backspace); ui.input({ kind: "text", seat, timeMilliseconds: 0, text: "Ж" });
+  expect(value).toBe("AЖB"); key(KeyCode.Tab); key(KeyCode.Down); expect(selected).toBe("b");
+  expect(() => ui.input({ kind: "text", seat: owner.seat(3), timeMilliseconds: 0, text: "wrong" })).toThrow("another seat");
+});
+
+test("private HUD messages, keyed POIs and real wheel selection keep source recipients", () => {
+  const owner = createIdentityOwner("native-ui-hud"), seat = owner.seat(1), messages = new SeatHudMessages(seat), other = new SeatHudMessages(owner.seat(0));
+  messages.notify(seat, "Private objective", false, { kind: "seconds", value: 1 }, { kind: "seconds", value: 3 });
+  expect(messages.active(1000).notifications).toHaveLength(1); expect(other.active(1000).notifications).toHaveLength(0);
+  messages.addPoint(seat, { id: 5, origin: { x: 1, y: 2, z: 3 }, image: "resource:test:poi", width: 16, height: 16,
+    color: { x: 1, y: 1, z: 1, w: 1 }, hideOnAim: false, expiresMilliseconds: 2000 }, 0);
+  messages.removePoint(5); expect(messages.active(1000).points).toHaveLength(0);
+  const items: readonly WheelItem[] = [0, 1, 2].map(index => ({ id: `weapon:${index}`, sourceOrdinal: index, sortOrder: index,
+    label: `Weapon ${index}`, owned: true, hasAmmo: index !== 1, count: 10, warningCount: 2, icon: null, selectedIcon: null }));
+  const selected: string[] = [];
+  const wheel = new SeatWeaponWheel({ seat, items: () => items, activeItem: () => "weapon:0", now: () => 1000, changed: () => undefined,
+    select: (id, _mode, recipient) => { expect(recipient.equals(seat)).toBe(true); selected.push(id); } });
+  wheel.cycle(1); expect(wheel.drawState().carousel?.selected).toBe("weapon:2");
+  expect(wheel.command(true, 1001)).toEqual({ holster: true, consumeAttack: true }); expect(selected).toEqual(["weapon:2"]);
+  wheel.open("weapons"); wheel.input({ kind: "mouse-motion", seat, timeMilliseconds: 1001, delta: { x: 0, y: -170 }, position: { x: 0, y: 0 } });
+  wheel.update(1100); expect(wheel.drawState().wheel?.selected).toBe("weapon:0"); wheel.close(true); expect(selected).toEqual(["weapon:2", "weapon:0"]);
+  const preferences = new SeatUiPreferences(seat); preferences.values = { ...preferences.values, hudScale: 1.5 };
+  const commands = drawCommonHud(drawContext(owner, seat, 640), { ...emptyHudData(seat), vitals: [{ label: "Health", value: 100, warning: false, icon: null }] },
+    { skin: defaultUiSkin(fontId), preferences: preferences.values, messages, camera: null, localize: text => text });
+  const health = commands.find(command => command.kind === "text" && command.text === "Health 100");
+  expect(health?.kind === "text" ? health.origin.y : -1).toBeLessThan(480);
+  expect(health?.kind === "text" ? health.origin.x : -1).toBeGreaterThan(640);
+});
+
+const archivePath = "/home/buzzkill/Projects/qfiles/q1/rerelease/QuakeEX.kpf";
+test.skipIf(!existsSync(archivePath))("real generated menu art and rerelease glyphs render through native CPU commands", async () => {
+  const owner = createIdentityOwner("native-ui-pixels"), seat = owner.seat(1), context = drawContext(owner, seat, 640);
+  const renderOwner: RendererResourceOwner = { identity: Symbol("ui"), session: owner.session, generation: 0 };
+  const images = new SceneImageRegistry(renderOwner), archive = await openArchive(archivePath);
+  const fonts = new TextFontRegistry({ async read(path) { const entry = archive.findEntries(path)[0]; return entry === undefined ? null : archive.readEntry(entry); },
+    async registerImage(name, content) { return images.register(name, content, { wrap: "clamp", filter: "linear" }); }, releaseImage(image) { images.release(image); } });
+  const art = await loadNativeUiArt(fontId, images, async path => new Uint8Array(await Bun.file(new URL(`../../../${path}`, import.meta.url)).arrayBuffer()));
+  const window = process.env["QUAKE_UI_NATIVE_SMOKE"] === "1" ? SdlWindow.open({ title: "Native menu smoke", width: 1280, height: 480, backend: "cpu", hidden: true }) : null;
+  const renderer = new SoftwareRenderer(1280, 480, renderOwner), target = new CpuRenderTarget(renderer, window);
+  try {
+    const font = await fonts.loadKfont("fonts/confont.kfont"); if (font === null) throw new Error("Missing retail font");
+    const selection: TextFontSelection = { kind: "atlas", font, classic: classicCharset(font.picture.image, "conchars", "tinted") };
+    const text = new UiTextRenderer(seat); text.bind(fontId, selection);
+    const ui = new NativeUiController({ seat, now: () => 1000, bindings: () => [], skin: () => uiSkinFont(art.skin, selection), focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+    ui.register("menu:test:native", () => ({ id: "menu:test:native", title: "QUAKE", fullScreen: true, open: () => undefined, close: () => undefined,
+      controls: [{ id: "ui:test:continue", kind: "button", label: "Continue", rect: { x: 64, y: 92, width: 512, height: 28 }, visible: true, enabled: true, activate: () => ui.closeMenu() }] }));
+    ui.openMenu("menu:test:native");
+    const frame = new SceneFrameBuilder(images); frame.begin("back", false);
+    renderUiCommands(context, ui.draw(context), { text, white: art.white, picture: resource => art.picture(resource), emit: command => frame.command(command),
+      material: () => { throw new Error("Image menu unexpectedly requested material draw"); } });
+    target.execute(frame.finish(window !== null));
+    let firstSeat = 0, secondSeat = 0;
+    for (let y = 0; y < 480; y++) for (let x = 0; x < 1280; x++) {
+      const offset = (y * 1280 + x) * 4;
+      const lit = (renderer.pixels[offset] ?? 0) + (renderer.pixels[offset + 1] ?? 0) + (renderer.pixels[offset + 2] ?? 0);
+      if (x < 640) firstSeat += lit; else secondSeat += lit;
+    }
+    expect(firstSeat).toBe(0); expect(secondSeat).toBeGreaterThan(100000);
+    if (process.env["QUAKE_UI_NATIVE_SMOKE"] === "1") await Bun.write(".artifacts/w59-native-menu.png", encodePng(1280, 480, renderer.pixels));
+  } finally { art.close(); fonts.close(); archive.close(); target.close(); window?.close(); images.close(); }
+}, 20000);

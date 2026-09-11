@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync } from "node:fs";
+import { closeSync, fstatSync, openSync, read } from "node:fs";
 import { ArchiveError, checkRange } from "./types.ts";
 
 export class MemorySource {
@@ -27,7 +27,6 @@ export class FileSource {
   readonly kind = "file";
   readonly byteLength: number;
   private readonly descriptor: number;
-  private readonly file: Bun.BunFile;
   private readonly modified: bigint;
   private readonly changed: bigint;
   private closed = false;
@@ -43,7 +42,6 @@ export class FileSource {
       this.modified = info.mtimeNs;
       this.changed = info.ctimeNs;
       this.descriptor = descriptor;
-      this.file = Bun.file(descriptor);
     } catch (error) {
       closeSync(descriptor);
       throw error;
@@ -63,9 +61,21 @@ export class FileSource {
     this.verifyUnchanged(offset);
     this.activeReads++;
     try {
-      const bytes = new Uint8Array(await this.file.slice(offset, offset + length).arrayBuffer());
+      const bytes = new Uint8Array(length);
+      let total = 0;
+      // Bun.file(fd).slice() shares the descriptor cursor. Explicit positions
+      // keep simultaneous entry reads independent while retaining this file.
+      while (total < length) {
+        const count = await new Promise<number>((resolve, reject) => {
+          read(this.descriptor, bytes, total, length - total, offset + total, (error, bytesRead) => {
+            if (error !== null) reject(error);
+            else resolve(bytesRead);
+          });
+        });
+        if (count === 0) throw new ArchiveError(this.source, offset, `short read: expected ${length}, got ${total}`);
+        total += count;
+      }
       this.verifyUnchanged(offset);
-      if (bytes.byteLength !== length) throw new ArchiveError(this.source, offset, `short read: expected ${length}, got ${bytes.byteLength}`);
       return bytes;
     } finally {
       this.activeReads--;

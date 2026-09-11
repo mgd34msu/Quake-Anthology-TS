@@ -1,0 +1,147 @@
+/* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
+import type { ItemId } from "../../../contracts/gameplay.ts";
+import type { Q1Actor } from "./entity.ts";
+import type { Q1Foundation } from "./runtime.ts";
+import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "./types.ts";
+import { vadd, ZERO, WEAPONS, weaponItem } from "./types.ts";
+import { ammoItem } from "./runtime.ts";
+
+interface Pickup {
+  readonly model: string;
+  readonly sound: string;
+  readonly bounds: "box" | "weapon" | "artifact";
+  readonly skin: number;
+  readonly respawn: number;
+  readonly take: (game: Q1Foundation, entity: Q1Actor, player: Q1PlayerState) => "refused" | "taken" | "leave";
+}
+function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
+  const name = entity.classname, big = (entity.spawnflags & (name === "item_weapon" ? 8 : 1)) !== 0;
+  if (name === "item_health") {
+    const mega = !big && (entity.spawnflags & 2) !== 0, amount = big ? 15 : mega ? 100 : 25;
+    return { model: `maps/b_bh${big ? 10 : mega ? 100 : 25}.bsp`, sound: big ? "items/r_item1.wav" : mega ? "items/r_item2.wav" : "items/health1.wav", bounds: "box", skin: 0,
+      respawn: mega ? 120 : 20, take: (runtime, _item, player) => {
+        const health = runtime.health(player.actor.id); if (health <= 0 || health >= (mega ? 250 : player.maxHealth)) return "refused";
+        runtime.host.combat.setHealth(player.actor, Math.min(mega ? 250 : player.maxHealth, health + amount));
+        if (mega && runtime.options.edition === "rerelease") player.megaRotAt = runtime.time + 5; return "taken";
+      } };
+  }
+  if (name === "item_armor1" || name === "item_armor2" || name === "item_armorInv") {
+    const absorption = name === "item_armor1" ? 0.3 : name === "item_armor2" ? 0.6 : 0.8;
+    const points = name === "item_armor1" ? 100 : name === "item_armor2" ? 150 : 200;
+    const item: ItemId = `q1:${name}`;
+    return { model: "progs/armor.mdl", sound: "items/armor1.wav", bounds: "weapon", skin: name === "item_armor1" ? 0 : name === "item_armor2" ? 1 : 2, respawn: 20,
+      take: (runtime, _entity, player) => {
+        const armor = runtime.host.combat.read(player.actor.id)?.armor;
+        const current = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
+        if (current >= absorption * points) return "refused";
+        runtime.host.combat.setArmor(player.actor, { kind: "q1", points, absorption, item }); return "taken";
+      } };
+  }
+  const weapon = WEAPONS.find(candidate => name === `weapon_${candidate}`);
+  if (weapon !== undefined && weapon !== "axe" && weapon !== "shotgun") {
+    const model = weapon === "supershotgun" ? "g_shot" : weapon === "nailgun" ? "g_nail" : weapon === "supernailgun" ? "g_nail2" : weapon === "grenadelauncher" ? "g_rock" : weapon === "rocketlauncher" ? "g_rock2" : "g_light";
+    return { model: `progs/${model}.mdl`, sound: "weapons/pkup.wav", bounds: "weapon", skin: 0, respawn: 30,
+      take: (runtime, _entity, player) => takeWeapon(runtime, player, weapon) };
+  }
+  const ammo: { readonly item: ItemId; readonly model: string; readonly amount: number } | null =
+    name === "item_weapon" && (entity.spawnflags & 2) !== 0 ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
+    name === "item_weapon" && (entity.spawnflags & 4) !== 0 ? { item: "q1:ammo/nails", model: "nail", amount: big ? 40 : 20 } :
+    name === "item_weapon" && (entity.spawnflags & 1) !== 0 ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 } :
+    name === "item_shells" ? { item: "q1:ammo/shells", model: "shell", amount: big ? 40 : 20 } :
+    name === "item_spikes" ? { item: "q1:ammo/nails", model: "nail", amount: big ? 50 : 25 } :
+    name === "item_rockets" ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
+    name === "item_cells" ? { item: "q1:ammo/cells", model: "batt", amount: big ? 12 : 6 } : null;
+  if (ammo !== null) return { model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
+    respawn: game.options.deathmatch === 3 || game.options.deathmatch === 5 ? 15 : 30,
+    take: (runtime, _entity, player) => {
+      const best = runtime.chooseBest(player.actor);
+      if (runtime.host.inventory.give(player.actor, ammo.item, ammo.amount) === 0) return "refused";
+      if (player.weapon === best && player.autoSwitch !== "never") runtime.selectWeapon(player.actor, runtime.chooseBest(player.actor)); return "taken";
+    } };
+  if (name === "item_key1" || name === "item_key2") {
+    const item: ItemId = name === "item_key1" ? "q1:key/silver" : "q1:key/gold";
+    const prefix = game.worldType === 0 ? "w" : game.worldType === 1 ? "m" : "b";
+    return { model: `progs/${prefix}_${name === "item_key1" ? "silver" : "gold"}.mdl`, sound: game.worldType === 2 ? "misc/basekey.wav" : game.worldType === 1 ? "misc/runekey.wav" : "misc/medkey.wav", bounds: "weapon", skin: 0, respawn: -1,
+      take: (runtime, _entity, player) => {
+        if (runtime.host.inventory.give(player.actor, item, 1) === 0) return "refused"; return runtime.options.coop ? "leave" : "taken";
+      } };
+  }
+  const powerup: { readonly kind: Q1Powerup; readonly model: string; readonly sound: string } | null =
+    name === "item_artifact_invulnerability" ? { kind: "invulnerability", model: "invulner", sound: "protect" } :
+    name === "item_artifact_invisibility" ? { kind: "invisibility", model: "invisibl", sound: "inv1" } :
+    name === "item_artifact_envirosuit" ? { kind: "suit", model: "suit", sound: "suit" } :
+    name === "item_artifact_super_damage" ? { kind: "quad", model: "quaddama", sound: "damage" } : null;
+  if (powerup !== null) return { model: `progs/${powerup.model}.mdl`, sound: `items/${powerup.sound}.wav`, bounds: "artifact", skin: 0,
+    respawn: powerup.kind === "invulnerability" || powerup.kind === "invisibility" ? 300 : 60,
+    take: (runtime, _entity, player) => { runtime.givePowerup(player, powerup.kind); return "taken"; } };
+  if (name === "item_backpack") return { model: "progs/backpack.mdl", sound: "weapons/lock4.wav", bounds: "artifact", skin: 0, respawn: -1,
+    take: (runtime, item, player) => { runtime.host.inventory.give(player.actor, "q1:ammo/shells", item.number("shells")); return "taken"; } };
+  return null;
+}
+function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
+  const leave = game.options.coop || [2, 3, 5].includes(game.options.deathmatch);
+  const owned = game.host.inventory.count(player.actor.id, weaponItem(weapon)) > 0;
+  if (leave && owned) return "refused";
+  game.host.inventory.give(player.actor, weaponItem(weapon), 1);
+  const ammo = ammoItem(weapon);
+  if (ammo !== null) game.host.inventory.give(player.actor, ammo, weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5);
+  if (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned) {
+    if (game.options.deathmatch === 0) game.selectWeapon(player.actor, weapon);
+    else if (rank(weapon) < rank(player.weapon)) game.selectWeapon(player.actor, weapon);
+  }
+  return leave ? "leave" : "taken";
+}
+function rank(weapon: Q1Weapon): number {
+  return ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun", "shotgun", "axe"].indexOf(weapon);
+}
+export function spawnPickup(game: Q1Foundation, entity: Q1Actor): boolean {
+  const definition = pickupDefinition(game, entity); if (definition === null) return false;
+  entity.model = definition.model; entity.originalModel = entity.model; entity.skin = definition.skin;
+  entity.solid = "none"; entity.movement = "none";
+  game.setBounds(entity, definition.bounds === "box" ? { min: ZERO, max: { x: 32, y: 32, z: 56 } } : definition.bounds === "weapon" ? { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } } : { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
+  entity.touch = game.named.touch(entity, "item_touch");
+  if (entity.classname === "item_backpack") {
+    entity.solid = "trigger"; entity.movement = "toss"; entity.movementFlags = 256;
+    game.setBounds(entity, { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } });
+    game.setBody(entity, { velocity: { x: -100 + game.host.random() * 200, y: -100 + game.host.random() * 200, z: 300 } }); game.link(entity); return true;
+  }
+  // PlaceItem waits until all brush entities exist, lifts six units, then drops 256 units.
+  game.schedule(entity, 0.2, game.named.action(entity, "PlaceItem"));
+  return true;
+}
+
+function pickupTouch(game: Q1Foundation, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
+    const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
+    if (entity.solid !== "trigger" || game.health(other) <= 0) return undefined;
+    const player = game.player(other); if (player === null) return undefined;
+    const result = definition.take(game, entity, player); if (result === "refused") return undefined;
+    game.sound(player.actor, definition.sound, "item"); game.effect("pickup", game.body(entity).origin, player.actor.id);
+    if (result === "leave") { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return undefined; }
+    entity.solid = "none"; entity.model = ""; game.link(entity);
+    const respawns = game.options.deathmatch !== 0 && definition.respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
+    if (game.options.edition === "classic" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
+      entity.owner = player.actor.id;
+      game.schedule(entity, 5, game.named.action(entity, "health_rot"));
+    } else if (respawns) game.schedule(entity, definition.respawn, game.named.action(entity, "SUB_regen"));
+    else game.cancel(entity);
+    game.useTargets(entity, other); return undefined;
+}
+
+function placeItem(game: Q1Foundation, entity: Q1Actor): undefined {
+    const body = game.body(entity); const start = vadd(body.origin, { x: 0, y: 0, z: 6 });
+    const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
+    if (trace.allSolid || trace.fraction === 1) return game.remove(entity);
+    entity.solid = "trigger"; entity.movement = "toss"; entity.movementFlags = 256 | 512;
+    game.setBody(entity, { origin: trace.end, velocity: ZERO, ground: trace.actor }); game.link(entity); return undefined;
+}
+export function registerPickupCallbacks(game: Q1Foundation): undefined {
+  game.named.register("item_touch", { touch: pickupTouch });
+  game.named.register("PlaceItem", { action: placeItem });
+  game.named.register("SUB_regen", { action: (runtime, entity) => { entity.solid = "trigger"; entity.model = entity.originalModel; runtime.sound(entity, "items/itembk2.wav"); return runtime.link(entity); } });
+  game.named.register("health_rot", { action: (runtime, entity) => {
+    const player = entity.owner === null ? null : runtime.player(entity.owner);
+    if (player !== null && runtime.health(player.actor.id) > player.maxHealth) { runtime.host.combat.setHealth(player.actor, runtime.health(player.actor.id) - 1); return runtime.schedule(entity, 1, runtime.named.action(entity, "health_rot")); }
+    if (runtime.options.deathmatch === 1) return runtime.schedule(entity, 20, runtime.named.action(entity, "SUB_regen")); return undefined;
+  } });
+  return undefined;
+}

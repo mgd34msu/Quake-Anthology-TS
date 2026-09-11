@@ -40,7 +40,7 @@ export type ReplacementAnimationTiming = { readonly kind: "entity-frame" }
   | { readonly kind: "elapsed-time"; readonly frameRate: number };
 
 export function q1Md5AnimationTiming(aliasFrameCount: number, model: Md5Model): ReplacementAnimationTiming {
-  return aliasFrameCount === model.frames.length ? { kind: "entity-frame" } : { kind: "elapsed-time", frameRate: model.frameRate };
+  return aliasFrameCount === model.frames.length ? { kind: "entity-frame" } : { kind: "elapsed-time", frameRate: 2 };
 }
 
 export function q1ReplacementSkinSelection(model: Md5Model, alias: Pick<Q1AliasModel, "skins" | "frames" | "flags">): Md5Model["skinSelection"] {

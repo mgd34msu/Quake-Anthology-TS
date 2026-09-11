@@ -213,7 +213,18 @@ export interface DepthAtlasPass {
   readonly clearDepth: number | null;
   readonly draws: readonly DepthAtlasDraw[];
 }
+/** Q2 rerelease fog runs once after scene lighting and transparency, before screen blends.
+ * The camera uses the source symmetric perspective projection. Far depth includes
+ * the source 1e-6 sky threshold; skyDrawn distinguishes a sky view from an empty view. */
+export interface Q2FogOperation {
+  readonly kind: "q2-fog";
+  readonly camera: SceneCamera;
+  readonly fog: Extract<SceneFog, { readonly kind: "q2" }>;
+  readonly farDepth: number;
+  readonly skyDrawn: boolean;
+}
 export type RenderOperation = { readonly kind: "draw"; readonly batches: readonly DrawBatch[] }
+  | Q2FogOperation
   /** Binds a depth32f image, executes the passes, then restores the previous target and viewport. */
   | { readonly kind: "depth-atlas"; readonly image: RendererImage; readonly passes: readonly DepthAtlasPass[] }
   | { readonly kind: "depth-range"; readonly range: readonly [number, number] }

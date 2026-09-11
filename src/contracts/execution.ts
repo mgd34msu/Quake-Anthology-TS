@@ -14,7 +14,7 @@ export interface Q2CgameApiIdentity { readonly kind: "q2-rerelease-cgame"; reado
 export type Q3ApiIdentity =
   | { readonly kind: "q3-qagame"; readonly version: 8 }
   | { readonly kind: "q3-cgame"; readonly version: 4 }
-  | { readonly kind: "q3-ui"; readonly version: 6 };
+  | { readonly kind: "q3-ui"; readonly version: 4 | 6 };
 export type GameApiIdentity = QuakeCApiIdentity | Q2GameApiIdentity | Q2CgameApiIdentity | Q3ApiIdentity;
 
 /** Source callback entry points dispatched by the shared scheduler. */

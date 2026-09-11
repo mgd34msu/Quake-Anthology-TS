@@ -23,6 +23,9 @@ export function loadGlPrograms(context: Pick<SdlRenderContext, "getGlProcAddress
     glGetUniformLocation: { args: ["u32", "buffer"], returns: "i32", ptr: context.getGlProcAddress("glGetUniformLocation") },
     glUniform1i: { args: ["i32", "i32"], returns: "void", ptr: context.getGlProcAddress("glUniform1i") },
     glUniform1f: { args: ["i32", "f32"], returns: "void", ptr: context.getGlProcAddress("glUniform1f") },
+    glUniform3f: { args: ["i32", "f32", "f32", "f32"], returns: "void", ptr: context.getGlProcAddress("glUniform3f") },
+    glUniform4f: { args: ["i32", "f32", "f32", "f32", "f32"], returns: "void", ptr: context.getGlProcAddress("glUniform4f") },
+    glUniformMatrix4fv: { args: ["i32", "i32", "u8", "buffer"], returns: "void", ptr: context.getGlProcAddress("glUniformMatrix4fv") },
   });
   let release: () => void;
   try { release = context.retainProcedures(); }
