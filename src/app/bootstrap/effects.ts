@@ -86,7 +86,7 @@ export class ApplicationEffects {
   private time: number | null = null;
   private sequence = -1;
   private closed = false;
-  constructor(readonly assets: ApplicationAssets, readonly queries: SceneQueries, seed = 1) { this.random = new SourceRandom(seed); }
+  constructor(readonly assets: ApplicationAssets, readonly queries: SceneQueries, readonly isPlayer: (actor: ActorId) => boolean, seed = 1) { this.random = new SourceRandom(seed); }
   receive(events: readonly SimulationPresentationEvent[]): void {
     if (this.closed) throw new Error("Effect world is closed");
     for (const event of events) {
@@ -224,7 +224,7 @@ export class ApplicationEffects {
     if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level") return;
     if (source.kind === "q3-ballistics") {
       let effects = this.q3Weapons.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content); this.q3Weapons.set(source.content, effects); }
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer); this.q3Weapons.set(source.content, effects); }
       await effects.ballistic(source.event);
       return;
     }
@@ -266,7 +266,7 @@ export class ApplicationEffects {
       const pose = this.pose(source.event.actor.id);
       if (pose === undefined) { this.reject(source, "Q3 character event has no captured actor pose"); return; }
       let effects = this.q3.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content); this.q3.set(source.content, effects); }
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer); this.q3.set(source.content, effects); }
       if (!effects.event(source.event, pose.origin)) this.reject(source, "Q3 event requires the full cgame snapshot payload");
       return;
     }

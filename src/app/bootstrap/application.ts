@@ -448,7 +448,8 @@ export class Application {
       const fontSource = font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, assets.images, readMenuArt);
-      effects = new ApplicationEffects(assets, this.simulation.scene, this.options.seed);
+      const effectSimulation = this.simulation;
+      effects = new ApplicationEffects(assets, effectSimulation.scene, actor => effectSimulation.players().some(player => player.equals(actor)), this.options.seed);
       const native = renderer;
       const inputOwner = input, audioOwner = audio, menuArt = art, worldEffects = effects;
       const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor })));
@@ -592,7 +593,7 @@ export class Application {
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text));
         nextAudio = audio;
-        const effects = new ApplicationEffects(assets, simulation.scene, options.seed);
+        const effects = new ApplicationEffects(assets, nextSimulation.scene, actor => nextSimulation.players().some(player => player.equals(actor)), options.seed);
         nextEffects = effects;
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;

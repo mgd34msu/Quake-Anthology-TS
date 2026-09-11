@@ -91,6 +91,13 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     get sourceRecords(): readonly Q2ServerRecord[] { return this.lastRecords; }
     get nativeLayout(): string { return this.layoutText; }
     get scene(): SceneQueries { return this.collision; }
+    isPlayer(actor: ActorId): boolean {
+        if (this.currentPlayer?.actor.equals(actor)) return true;
+        if (this.current === null) return false;
+        const maximum = Number(this.configs.get(this.layout.maxClients));
+        if (!Number.isInteger(maximum) || maximum < 1 || maximum > 256) throw new Error('Remote Q2 frame has no valid advertised client range');
+        return this.current.entities.some(entity => entity.number >= 1 && entity.number <= maximum && this.actors.get(entity.number)?.equals(actor) === true);
+    }
     private actor(number: number): ActorId {
         const current = this.actors.get(number);
         if (current !== undefined)

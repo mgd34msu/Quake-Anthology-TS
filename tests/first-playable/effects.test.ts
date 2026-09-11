@@ -27,7 +27,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
   const assets = new ApplicationAssets(content, owner);
   try {
     await assets.loadWorld();
-    const effects = new ApplicationEffects(assets, createSceneQueries(content.world));
+    const effects = new ApplicationEffects(assets, createSceneQueries(content.world), id => id.equals(actor.id));
     const q1 = content.catalog.require("q1-classic-id1").id, q2 = content.catalog.require("q2-classic-baseq2").id, q3 = content.catalog.require("q3-baseq3").id;
     const actors = new SessionActorRegistry(identity), actor = actors.allocate("q3:character", "q3:character/sarge");
     const rocketActor = actors.allocate("q2:weapons", "q2:projectile/rocket");

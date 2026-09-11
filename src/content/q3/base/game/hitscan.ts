@@ -4,7 +4,7 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import { add3, dot3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ActorTraceResult } from "../world.ts";
-import { q3BulletEndpoint } from "./ballistics-math.ts";
+import { q3BulletEndpoint, q3ShotgunEndpoints } from "./ballistics-math.ts";
 import { snapVector, snapVectorTowards } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
 
@@ -144,5 +144,48 @@ export function q3LightningFire(host: Q3ContactHost, shooter: ActorId, attack: Q
       if (after.accuracyEligible) host.creditAccuracyHit();
     } else if (!(trace.surfaceFlags & 0x10)) host.emit({ kind: "miss", point: trace.end, normal: traceNormal(trace) });
     break;
+  }
+}
+
+
+export interface Q3ShotgunEvent { readonly muzzle: Vec3; readonly direction: Vec3; readonly seed: number; }
+export type Q3ShotgunHost = Omit<ContactServices, "emit"> & ({ readonly product: "baseq3" } | {
+  readonly product: "missionpack";
+  invulnerabilityImpact: Extract<Q3ContactHost, { readonly product: "missionpack" }>["invulnerabilityImpact"];
+}) & {
+  readonly random: Pick<GameRandom, "rand">;
+  begin(muzzle: Vec3, direction: Vec3): (seed: number) => void;
+  alive(): boolean;
+};
+
+function shotgunPellet(host: Q3ShotgunHost, shooter: ActorId, attack: Q3BulletAttack, start: Vec3, end: Vec3): boolean {
+  let pass: ActorId | null = shooter;
+  for (let count = 0; count < 10; count++) {
+    const trace = host.trace(start, end, pass);
+    if (trace.surfaceFlags & 0x10 || trace.hit.kind !== "actor") return false;
+    const actor = trace.hit.actor, target = host.target(actor);
+    if (target?.damageable !== true) return false;
+    if (host.product === "missionpack" && target.player && target.invulnerable) {
+      const impact = host.invulnerabilityImpact(actor, attack.forward, trace.end);
+      if (impact.kind === "hit") { end = reflectedEnd(start, impact.impactPoint, impact.bounceDirection); start = impact.impactPoint; pass = null; }
+      else { start = trace.end; pass = actor; }
+      continue;
+    }
+    host.damage(actor, attack.forward, trace.end, scaledDamage(10, attack));
+    return host.target(actor)?.accuracyEligible === true;
+  }
+  return false;
+}
+
+export function q3ShotgunFire(host: Q3ShotgunHost, shooter: ActorId, attack: Q3BulletAttack): void {
+  const muzzle = attack.muzzle, direction = snapVector(scale3(attack.forward, 4096));
+  const publish = host.begin(muzzle, direction), seed = host.random.rand() & 255;
+  publish(seed);
+  let hitClient = false;
+  for (const end of q3ShotgunEndpoints(muzzle, direction, seed)) {
+    if (!host.alive()) break;
+    if (shotgunPellet(host, shooter, attack, muzzle, end) && !hitClient) {
+      hitClient = true; host.creditAccuracyHit();
+    }
   }
 }

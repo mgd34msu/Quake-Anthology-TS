@@ -18,7 +18,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf"
   const assets = new ApplicationAssets(content, { identity: Symbol("shadow-light"), session: identity.session, generation: 0 });
   const world = { ...content.world, entities: (content.world.entities.split("\0")[0] ?? "") + '\n{ "classname" "dynamic_light" "targetname" "proof_light" "target" "proof_aim" "spawnflags" "1" "origin" "0 0 64" "rgba" "1 0.5 0 1" "shadowlightradius" "192" "shadowlightintensity" "2" "shadowlightresolution" "128" "shadowlightconeangle" "45" "shadowlightstartfadedistance" "100" "shadowlightendfadedistance" "200" }\n{ "classname" "info_notnull" "targetname" "proof_aim" "origin" "0 0 0" }\n{ "classname" "trigger_always" "target" "proof_light" "delay" "0.2" }\n{ "classname" "trigger_always" "target" "proof_light" "delay" "0.4" }\n' };
   const simulation = createSimulation({ identity, recipe: content.recipe, world, mounts: content.mounts, skill: 1, mode: "singleplayer", seed: 1, maxClients: 1, playerIdentity: client => ({ seat: client.slot, socialId: "" }) });
-  const effects = new ApplicationEffects(assets, createSceneQueries(world));
+  const effects = new ApplicationEffects(assets, createSceneQueries(world), actor => simulation.players().some(player => player.equals(actor)));
   const camera: SceneCamera = { origin: { x: 0, y: 0, z: 64 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }), viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 74, 4096), clip: { kind: "none" } };
   try {
     simulation.admitPlayer(identity.client(0, 0));

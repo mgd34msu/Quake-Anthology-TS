@@ -51,6 +51,21 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
             throw new Error(`No actual network player: ${prints.join('')}`);
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);
+        expect(remote.isPlayer(player.actor)).toBe(true);
+        const secondClient = server.session.createClient(1), second = server.simulation.admitPlayer(secondClient.id);
+        const secondOwner = server.simulation.movementPlayer(second.actor), secondBody = server.simulation.bodies.read(second.actor), firstBody = server.simulation.bodies.read(admitted.actor);
+        if (secondOwner === null || secondBody === null || firstBody === null) throw new Error('Second admitted native player has no shared body');
+        server.simulation.bodies.write(secondOwner.actor, { ...secondBody, origin: { ...firstBody.origin, x: firstBody.origin.x + 48 } });
+        server.simulation.bodies.link(secondOwner.actor);
+        await exchange(); await exchange();
+        const remoteOther = remote.output?.snapshot.actors.find(actor => !actor.id.equals(player.actor) && remote.isPlayer(actor.id));
+        if (remoteOther === undefined) throw new Error('Remote observation lost the other admitted native player');
+        expect(remote.isPlayer(remoteOther.id)).toBe(true);
+        expect(remote.output?.snapshot.actors.some(actor => !remote.isPlayer(actor.id))).toBe(true);
+        server.simulation.disconnectPlayer(second.actor); server.session.closeClient(secondClient.id);
+        await exchange(); await exchange();
+        expect(remote.isPlayer(remoteOther.id)).toBe(false);
+
         const before = server.simulation.bodies.read(admitted.actor)?.origin;
         if (before === undefined)
             throw new Error('Admitted source actor has no body');
@@ -76,6 +91,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         expect(server.networkClients[0]?.client.equals(admitted.client)).toBe(true);
         expect(remote.player?.client.equals(player.client)).toBe(true);
         expect(remote.player?.actor.equals(player.actor)).toBe(false);
+        expect(remote.isPlayer(player.actor)).toBe(false);
         client.close();
         await Bun.sleep(1);
         await server.step(100);

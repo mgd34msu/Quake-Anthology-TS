@@ -1,10 +1,9 @@
-import { q3ShotgunEndpoints } from "./ballistics-math.ts";
 // Ported from id Software's game/g_weapon.c and g_combat.c ray/invulnerability helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
-import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire } from "./hitscan.ts";
+import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire, q3ShotgunFire } from "./hitscan.ts";
 import type { Q3AccuracySubject, Q3BulletAttack, Q3BulletHost, Q3ContactHost } from "./hitscan.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
@@ -208,37 +207,12 @@ export class WeaponRuntime {
     q3BulletFire(host, entity.actor.id, attack, spread, amount);
   }
 
-  private pellet(entity: GameEntity, attack: Attack, start: Vec3, end: Vec3): boolean {
-    const combat = this.host.missiles.host.combat, pool = combat.entities;
-    let pass = entity.s.number;
-    for (let count = 0; count < 10; count++) {
-      const trace = this.trace(entity, start, end, pass), target = pool.at(trace.entityNum);
-      if (trace.surfaceFlags & SURF_NOIMPACT) return false;
-      if (target.takedamage) {
-        if (combat.product === "missionpack" && target.client !== null && target.client.invulnerabilityTime > combat.time) {
-          const impact = invulnerabilityEffect(pool, target, attack.forward, trace.end);
-          if (impact.kind === "hit") { end = bounceProjectile(start, impact.impactPoint, impact.bounceDirection); start = impact.impactPoint; pass = ENTITYNUM_NONE; }
-          else { start = trace.end; pass = target.s.number; }
-          continue;
-        }
-        damage(combat, target, entity, entity, attack.forward, trace.end, this.scaled(10, attack), 0, 1);
-        return logAccuracyHit(combat.gameType, target, entity);
-      }
-      return false;
-    }
-    return false;
-  }
-
   private shotgun(entity: GameEntity, attack: Attack): void {
-    const combat = this.host.missiles.host.combat, event = combat.entities.tempEntity(attack.muzzle, EntityEvent.EV_SHOTGUN);
-    event.s.origin2 = snapVector(scale3(attack.forward, 4096)); event.s.eventParm = this.host.random.rand() & 255;
-    event.s.otherEntityNum = entity.s.number;
-    let hitClient = false;
-    for (const end of q3ShotgunEndpoints(event.s.pos.base, event.s.origin2, event.s.eventParm)) {
-      if (this.pellet(entity, attack, event.s.pos.base, end) && !hitClient) {
-        hitClient = true; clientOf(entity).accuracyHits = (clientOf(entity).accuracyHits + 1) | 0;
-      }
-    }
+    const pool = this.host.missiles.host.combat.entities, shooter = entity.actor.id, sourceNumber = entity.s.number;
+    q3ShotgunFire({ ...this.contactHost(entity, 1), random: this.host.random, alive: () => pool.options.records.nativeByActor(shooter) === entity, begin: (muzzle, direction) => {
+      const event = pool.tempEntity(muzzle, EntityEvent.EV_SHOTGUN); event.s.origin2 = direction;
+      return seed => { event.s.eventParm = seed; event.s.otherEntityNum = sourceNumber; };
+    } }, shooter, attack);
   }
 
   private railTrail(entity: GameEntity, attack: Attack, point: Vec3, parameter: number): void {

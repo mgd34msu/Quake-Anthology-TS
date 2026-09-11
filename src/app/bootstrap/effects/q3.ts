@@ -1,3 +1,4 @@
+import type { Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
 /* Source cgame effect producers joined to shared assets, collision and drawing. */
 import type { ContentId } from "../../../contracts/content.ts";
 import type { Axis, Vec3 } from "../../../contracts/math.ts";
@@ -11,7 +12,7 @@ import type { CompiledMaterial } from "../../../materials/compile.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import type { DynamicLight } from "../../../materials/q3-lighting.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
-import { cross3, length3, normalize3OrZero, perpendicularVector, sub3, vec3 } from "../../../core/math.ts";
+import { cross3, length3, vec4, normalize3OrZero, perpendicularVector, sub3, vec3 } from "../../../core/math.ts";
 import { ClientEffects } from "../../../content/q3/presentation/effects.ts";
 import type { EffectMedia } from "../../../content/q3/presentation/effects.ts";
 import { LocalEntityPool, LocalEntitySystem } from "../../../content/q3/presentation/local-entities.ts";
@@ -24,7 +25,7 @@ import { PlayerStateRecord } from "../../../content/q3/base/shared/player-state.
 import type { Product } from "../../../content/q3/base/shared/definitions.ts";
 import { Weapon } from "../../../content/q3/base/shared/definitions.ts";
 import { evaluateTrajectory, evaluateTrajectoryDelta, TrajectoryType } from "../../../content/q3/base/shared/trajectory.ts";
-import { ClientWeaponMediaRegistry, emitWeaponImpact, emitRailTrail, emitPlasmaTrail, ImpactSound } from "../../../content/q3/presentation/weapons.ts";
+import { ClientWeaponMediaRegistry, emitShotgunPresentation, emitWeaponImpact, emitRailTrail, emitPlasmaTrail, ImpactSound } from "../../../content/q3/presentation/weapons.ts";
 import type { Q3CharacterEvent } from "../../../content/q3/foundation/character.ts";
 import { EntityEvent } from "../../../movement/q3/constants.ts";
 import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
@@ -53,6 +54,7 @@ interface WeaponEffects {
   sound(pcm: PcmSound | null, origin: Vec3, channel: number, volume: number): void;
   loop(pcm: PcmSound | null, actor: ActorId, origin: Vec3, velocity: Vec3): void;
   contents(point: Vec3): number;
+  shotgun(shot: Q3ShotgunEvent, shooter: ActorId): void;
 }
 const numeric: NumericProfile = { id: "q3:effect", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32" };
 interface CapturedRef { readonly ref: RefEntity; readonly cullRadius: number; readonly hiddenFor?: ActorId; }
@@ -64,7 +66,7 @@ export class Q3ApplicationEffects {
   private readonly models: SceneEntity[] = [];
   private readonly options = new Map<SceneEntity, ModelSourceOptions>();
   private readonly hiddenModels = new Map<SceneEntity, ActorId>();
-  private readonly bloodOwners = new WeakMap<RefEntity, ActorId>();
+  private readonly bloodOwners: WeakMap<RefEntity, ActorId>;
   private weaponEffects: Promise<WeaponEffects> | null = null;
   private readyWeapons: WeaponEffects | null = null;
   private readonly projectiles = new Map<ActorId, { readonly event: Extract<Q3SharedBallisticEvent, { readonly kind: "projectile" }>; readonly time: number }>();
@@ -74,9 +76,9 @@ export class Q3ApplicationEffects {
   private constructor(readonly content: ContentId, readonly assets: ApplicationAssets,
     readonly state: { time: number; readonly product: Product }, readonly effects: ClientEffects,
     readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, CompiledMaterial>,
-    readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>) {}
+    readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
 
-  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId): Promise<Q3ApplicationEffects> {
+  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean): Promise<Q3ApplicationEffects> {
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
     const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, CompiledMaterial>();
     const sound = async (path: string): Promise<PcmSound | null> => { const loaded = await bank.register(path, "q3"); if (loaded === null) return null; names.set(loaded.pcm, path); return loaded.pcm; };
@@ -128,6 +130,7 @@ export class Q3ApplicationEffects {
     } }, clientNum: -1, random, marks };
     const system = new LocalEntitySystem(effects, product === "baseq3" ? { ...shared, product, media: localMedia } : { ...shared, product,
       media: { ...localMedia, kamikazeShockWave: await model("models/weaphits/kamwave.md3"), kamikazeExplodeSound: await sound("sound/items/kam_explode.wav"), kamikazeImplodeSound: await sound("sound/items/kam_implode.wav") } });
+    const bloodOwners = new WeakMap<RefEntity, ActorId>();
     const loadWeapons = async (): Promise<WeaponEffects> => {
       const registry = new ClientWeaponMediaRegistry(product, {
         registerModel: async path => path === null || await provider.mounts.open(path) === null ? DEFAULT_MODEL : model(path),
@@ -155,17 +158,35 @@ export class Q3ApplicationEffects {
         clientInfo: () => ({ color1: vec3(1, 1, 1), color2: vec3(1, 1, 1) }),
         startSound: (origin, _entity, channel, pcm) => { if (origin !== null) sourceSound(pcm, origin, channel, 1); },
       };
+      const shotgunSmoke = await shader("shotgunSmokePuff");
       return { registry, host, particles, view, plasma: await shader("sprites/plasma1"), smoke: await shader("smokePuff"), nailSmoke: product === "missionpack" ? await shader("nailtrail") : null,
         quad: await sound("sound/items/damage3.wav"),
         bounce: [await sound("sound/weapons/grenade/hgrenb1a.wav"), await sound("sound/weapons/grenade/hgrenb2a.wav")],
         sound: sourceSound, contents: shared.collision.pointContents,
+        shotgun: (shot, shooter) => emitShotgunPresentation({ smokeEnabled: true,
+          trace: (start, end) => {
+            const trace = queries.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" }, passActor: shooter,
+              policy: { kind: "q3", contentsMask: 0x6000001, curves: true, playerCurveClip: true }, numeric });
+            if (trace.kind !== "q3") throw new Error("Selected shotgun presentation requires Q3 trace policy");
+            return { end: trace.end, normal: trace.contact.kind === "plane" ? trace.contact.plane.normal : vec3(0, 0, 0),
+              surfaceFlags: trace.surfaceFlags, target: trace.hit.kind === "actor" ? trace.hit.actor : null };
+          },
+          water: (start, end) => queries.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" }, passActor: null,
+            policy: { kind: "q3", contentsMask: 32, curves: true, playerCurveClip: true }, numeric }).end,
+          contents: shared.collision.pointContents, isPlayer,
+          blood: (point, _normal, target) => { const blood = effects.bleedAt(point, false); if (blood !== null) bloodOwners.set(blood, target); },
+          wall: (point, normal, sound) => emitWeaponImpact(product, registry, host, Weapon.WP_SHOTGUN, 0, point, normal, sound),
+          bubbles: (start, end) => { effects.bubbleTrail(start, end, 32); },
+          smoke: origin => { effects.smokePuff({ origin, velocity: vec3(0, 0, 8), radius: 32, color: vec4(1, 1, 1, 0.33), duration: 900,
+            startTime: state.time, fadeInTime: 0, flags: 1, shader: shotgunSmoke }); },
+        }, shot),
         loop: (pcm, actor, origin, velocity) => {
           if (pcm === null) return;
           const path = names.get(pcm); if (path === undefined) throw new Error("Q3 loop sound lacks source registration");
           sounds.push({ content, path, origin, channel: 0, volume: 1, seconds: state.time / 1000, playback: { kind: "loop", actor, velocity } });
         } };
     };
-    return new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, new SceneModelRenderer(provider, assets.world), sounds, loadWeapons);
+    return new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, new SceneModelRenderer(provider, assets.world), sounds, loadWeapons, bloodOwners);
   }
   async ballistic(event: Q3SharedBallisticEvent): Promise<void> {
     this.state.time = event.timeMilliseconds;
@@ -205,6 +226,7 @@ export class Q3ApplicationEffects {
         }
         return;
       }
+      case "shotgun": media.shotgun(event.shot, event.actor); return;
       case "contact": {
         const contact = event.contact;
         switch (contact.kind) {

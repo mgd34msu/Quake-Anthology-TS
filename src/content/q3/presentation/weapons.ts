@@ -1,12 +1,14 @@
+import { q3ShotgunEndpoints } from "../base/game/ballistics-math.ts";
+import type { Q3ShotgunEvent } from "../base/game/hitscan.ts";
 // Weapon registration and presentation from id Software's code/cgame/cg_weapons.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import { modelBounds } from "./model-access.ts";
-import { add3, cross3, dot3, length3, normalize3, normalize3OrZero, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
+import { add3, dot3, length3, normalize3, perpendicularVector, scale3, sub3, vec3, vec4 } from "../../../core/math.ts";
 import { qvmAngleMod as angleMod, qvmAngleVectors as angleVectors, qvmAnglesToAxis as anglesToAxis, qvmRotatePointAroundVector as rotatePointAroundVector } from "../../../core/qvm-math.ts";
 import type { Axis, Vec3, Vec4 } from "../../../core/math.ts";
-import { qCrandom, qvmFloatToInt } from "../../../core/numeric.ts";
+import { qvmFloatToInt } from "../../../core/numeric.ts";
 import type { GameRandom } from "../base/game/numeric.ts";
 import { DEFAULT_MODEL, createModelEntity, createSpriteEntity, createLightningEntity, createRailCoreEntity, RF_DEPTHHACK, RF_FIRST_PERSON, RF_MINLIGHT } from "./ref-entity.ts";
 import type { RefModelEntity, RefPoly, SceneModel, SceneShader } from "./ref-entity.ts";
@@ -31,6 +33,31 @@ import type { ParticleSystem } from "../../../render/scene/particles/q3-system.t
 
 const f = Math.fround;
 export enum ImpactSound { DEFAULT = 0, METAL = 1, FLESH = 2 }
+export interface ShotgunPresentationHost<Target> {
+  readonly smokeEnabled: boolean;
+  trace(start: Vec3, end: Vec3): { readonly end: Vec3; readonly normal: Vec3; readonly surfaceFlags: number; readonly target: Target | null };
+  water(start: Vec3, end: Vec3): Vec3;
+  contents(point: Vec3): number;
+  isPlayer(target: Target): boolean;
+  blood(point: Vec3, normal: Vec3, target: Target): void;
+  wall(point: Vec3, normal: Vec3, sound: ImpactSound): void;
+  bubbles(start: Vec3, end: Vec3): void;
+  smoke(origin: Vec3): void;
+}
+export function emitShotgunPresentation<Target>(host: ShotgunPresentationHost<Target>, shot: Q3ShotgunEvent): void {
+  if (host.smokeEnabled && (host.contents(shot.muzzle) & CONTENTS_WATER) === 0)
+    host.smoke(ma(shot.muzzle, 32, normalize3(sub3(shot.direction, shot.muzzle))));
+  for (const end of q3ShotgunEndpoints(shot.muzzle, shot.direction, shot.seed)) {
+    const trace = host.trace(shot.muzzle, end), sourceContents = host.contents(shot.muzzle), destinationContents = host.contents(trace.end);
+    if (sourceContents === destinationContents) {
+      if ((sourceContents & CONTENTS_WATER) !== 0) host.bubbles(shot.muzzle, trace.end);
+    } else if ((sourceContents & CONTENTS_WATER) !== 0) host.bubbles(shot.muzzle, host.water(end, shot.muzzle));
+    else if ((destinationContents & CONTENTS_WATER) !== 0) host.bubbles(trace.end, host.water(shot.muzzle, end));
+    if ((trace.surfaceFlags & SURF_NOIMPACT) !== 0) continue;
+    if (trace.target !== null && host.isPlayer(trace.target)) host.blood(trace.end, trace.normal, trace.target);
+    else host.wall(trace.end, trace.normal, (trace.surfaceFlags & SURF_METALSTEPS) !== 0 ? ImpactSound.METAL : ImpactSound.DEFAULT);
+  }
+}
 export type BulletHit = { readonly kind: "wall"; readonly normal: Vec3 } | { readonly kind: "flesh"; readonly entityNum: number };
 export interface MutableVec3 { x: number; y: number; z: number }
 export interface ClientWeaponInfo extends PacketWeaponInfo {
@@ -223,35 +250,20 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
       this.missileHitWall(weapon, 0, origin, direction, ImpactSound.FLESH);
     }
   }
-  private shotgunPellet(start: Vec3, end: Vec3, skipNumber: number): void {
-    const prediction = this.host.prediction, trace = prediction.trace(start, end, POINT_BOUNDS, skipNumber, MASK_SHOT);
-    const sourceContents = prediction.collision.pointContents(start), destContents = prediction.collision.pointContents(trace.end);
-    if (sourceContents === destContents) {
-      if ((sourceContents & CONTENTS_WATER) !== 0) this.host.effects.bubbleTrail(start, trace.end, 32);
-    } else if ((sourceContents & CONTENTS_WATER) !== 0) {
-      const water = prediction.collision.trace({ start: end, end: start, shape: { kind: "point" }, mask: CONTENTS_WATER });
-      this.host.effects.bubbleTrail(start, water.end, 32);
-    } else if ((destContents & CONTENTS_WATER) !== 0) {
-      const water = prediction.collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER });
-      this.host.effects.bubbleTrail(trace.end, water.end, 32);
-    }
-    if ((trace.surfaceFlags & SURF_NOIMPACT) !== 0) return;
-    const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : ZERO;
-    if (this.state.entityAt(trace.entityNum).currentState.eType === EntityType.ET_PLAYER) this.missileHitPlayer(Weapon.WP_SHOTGUN, trace.end, normal, trace.entityNum);
-    else this.missileHitWall(Weapon.WP_SHOTGUN, 0, trace.end, normal, (trace.surfaceFlags & SURF_METALSTEPS) !== 0 ? ImpactSound.METAL : ImpactSound.DEFAULT);
-  }
   shotgunFire(es: import("../base/shared/entity-state.ts").EntityState): void {
-    const origin = ma(es.pos.base, 32, normalize3(sub3(es.origin2, es.pos.base)));
-    if (this.host.settings().hardware !== "ragepro" && (this.host.prediction.collision.pointContents(es.pos.base) & CONTENTS_WATER) === 0) {
-      this.host.effects.smokePuff({ origin, velocity: vec3(0, 0, 8), radius: 32, color: vec4(1, 1, 1, 0.33), duration: 900,
-        startTime: this.state.time, fadeInTime: 0, flags: LocalEntityFlags.PUFF_DONT_SCALE, shader: this.host.media.shaders.shotgunSmokePuff });
-    }
-    const forward = normalize3OrZero(es.origin2), right = perpendicularVector(forward), up = cross3(forward, right);
-    let seed = es.eventParm;
-    for (let i = 0; i < 11; i++) {
-      const r = qCrandom(seed); seed = r.seed; const u = qCrandom(seed); seed = u.seed;
-      this.shotgunPellet(es.pos.base, ma(ma(ma(es.pos.base, 8192 * 16, forward), f(f(r.value * 700) * 16), right), f(f(u.value * 700) * 16), up), es.otherEntityNum);
-    }
+    const prediction = this.host.prediction;
+    emitShotgunPresentation({ smokeEnabled: this.host.settings().hardware !== "ragepro",
+      trace: (start, end) => { const trace = prediction.trace(start, end, POINT_BOUNDS, es.otherEntityNum, MASK_SHOT);
+        return { end: trace.end, normal: trace.contact.kind === "plane" ? trace.contact.plane.normal : ZERO, surfaceFlags: trace.surfaceFlags, target: trace.entityNum }; },
+      water: (start, end) => prediction.collision.trace({ start, end, shape: { kind: "point" }, mask: CONTENTS_WATER }).end,
+      contents: point => prediction.collision.pointContents(point),
+      isPlayer: target => this.state.entityAt(target).currentState.eType === EntityType.ET_PLAYER,
+      blood: (point, normal, target) => this.missileHitPlayer(Weapon.WP_SHOTGUN, point, normal, target),
+      wall: (point, normal, sound) => this.missileHitWall(Weapon.WP_SHOTGUN, 0, point, normal, sound),
+      bubbles: (start, end) => { this.host.effects.bubbleTrail(start, end, 32); },
+      smoke: origin => { this.host.effects.smokePuff({ origin, velocity: vec3(0, 0, 8), radius: 32, color: vec4(1, 1, 1, 0.33), duration: 900,
+        startTime: this.state.time, fadeInTime: 0, flags: LocalEntityFlags.PUFF_DONT_SCALE, shader: this.host.media.shaders.shotgunSmokePuff }); },
+    }, { muzzle: es.pos.base, direction: es.origin2, seed: es.eventParm });
   }
   private muzzlePoint(entityNum: number): Vec3 | null {
     const snap = this.state.snap;

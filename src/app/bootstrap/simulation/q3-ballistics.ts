@@ -13,9 +13,9 @@ import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import { add3, length3, normalize3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import { qvmAngleVectors } from "../../../core/qvm-math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import { q3ShotgunEndpoints, q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "../../../content/q3/base/game/ballistics-math.ts";
-import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire } from "../../../content/q3/base/game/hitscan.ts";
-import type { Q3BulletAttack, Q3ContactHost, Q3ContactEvent } from "../../../content/q3/base/game/hitscan.ts";
+import { q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "../../../content/q3/base/game/ballistics-math.ts";
+import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire, q3ShotgunFire } from "../../../content/q3/base/game/hitscan.ts";
+import type { Q3BulletAttack, Q3ContactHost, Q3ContactEvent, Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
 import { snapVector, snapVectorTowards } from "../../../content/q3/base/game/missile.ts";
 import { evaluateTrajectory, evaluateTrajectoryDelta, TrajectoryType } from "../../../content/q3/base/shared/trajectory.ts";
 import type { Trajectory } from "../../../content/q3/base/shared/trajectory.ts";
@@ -28,6 +28,7 @@ type Q3BallisticEventPayload = Q3BallisticEventFields & (
   | { readonly kind: "projectile"; readonly trajectory: Trajectory }
   | { readonly kind: "impact"; readonly hitKind: "wall" | "flesh" }
   | { readonly kind: "contact"; readonly contact: Q3ContactEvent }
+  | { readonly kind: "shotgun"; readonly shot: Q3ShotgunEvent }
 );
 
 export type Q3SharedBallisticEvent = Q3BallisticEventPayload & { readonly timeMilliseconds: number };
@@ -147,18 +148,14 @@ export class Q3SharedBallistics {
     }
     const attack = this.attack(actor);
     this.event({ kind: "fire", actor: actor.id, weapon, origin: attack.muzzle, end: add3(attack.muzzle, attack.forward), normal: zero, target: null, surfaceFlags: 0 });
-    const shoot = (end: Vec3, amount: number, method: number): void => {
-      const trace = this.trace(attack.muzzle, end, actor.id);
-      if (weapon === 6) this.event({ kind: "trail", actor: actor.id, weapon, origin: attack.muzzle, end: trace.end,
-        normal: normal(trace), target: trace.hit.kind === "actor" ? trace.hit.actor : null, surfaceFlags: trace.kind === "q3" ? trace.surfaceFlags : 0 });
-      if (noImpact(trace)) return;
-      this.impact(actor, weapon, attack.muzzle, trace);
-      if (trace.hit.kind === "actor") this.hit(actor, actor, weapon, trace.hit.actor, trace.end, attack.forward, qvmFloatToInt(Math.fround(amount * attack.quad)), method);
-    };
     switch (weapon) {
       case 0: case 1: return undefined;
       case 2: this.bullet(actor, weapon, attack, 200, this.host.teamDeathmatch() ? 5 : 7); return undefined;
-      case 3: for (const end of q3ShotgunEndpoints(attack.muzzle, snapVector(scale3(attack.forward, 4096)), this.host.random.rand() & 255)) shoot(end, 10, 1); return undefined;
+      case 3:
+        q3ShotgunFire({ ...this.contactHost(actor, weapon, attack, 1), random: this.host.random, alive: () => this.host.actors.isLive(actor.id), begin: (muzzle, direction) => seed => {
+          const shot = { muzzle, direction, seed };
+          this.event({ kind: "shotgun", actor: actor.id, weapon, origin: shot.muzzle, end: shot.direction, normal: zero, target: null, surfaceFlags: 0, shot });
+        } }, actor.id, { ...attack, forward: { ...attack.forward } }); return undefined;
       case 6: {
         q3LightningFire(this.contactHost(actor, weapon, attack, 11), actor.id, { ...attack, forward: { ...attack.forward } }); return undefined;
       }

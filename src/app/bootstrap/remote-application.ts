@@ -129,7 +129,7 @@ export class RemoteApplication {
         areasConnected: (first, second) => this.remote.scene.areasConnected(first, second),
         clusterVisible: (from, to, kind) => this.remote.scene.clusterVisible(from, to, kind),
       };
-      effects = new ApplicationEffects(assets, scene, this.options.seed);
+      effects = new ApplicationEffects(assets, scene, actor => this.remote.isPlayer(actor), this.options.seed);
       return { assets, font, art, audio, effects, scene };
     } catch (error) { effects?.close(); audio?.close(); art?.close(); assets.close(); throw error; }
   }
