@@ -1,3 +1,4 @@
+import type { ApplicationMonsterNavigation } from "./monster-navigation.ts";
 import type { Q2RereleaseCampaignState } from "../../../content/q2/rerelease/campaign.ts";
 import type { ContentId, ExecutableRecipe, GameFamily, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { ActorId, ClientId, IdentityOwner } from "../../../contracts/identity.ts";
@@ -36,6 +37,7 @@ export interface SimulationOptions {
   readonly q3Session?: Q3SourceSessionCarry;
   readonly q3Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialSourceMilliseconds?: number;
+  readonly monsterNavigation?: ApplicationMonsterNavigation;
   readonly restore?: SaveImage;
   readonly restoredClients?: readonly ClientId[];
 }

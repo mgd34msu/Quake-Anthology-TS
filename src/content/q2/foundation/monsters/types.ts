@@ -48,6 +48,10 @@ export interface MonsterState extends Q2AlternateFlyState {
   nextMoveTime: number;
   scale: number;
   gibHealth: number;
+  initialPowerArmorType: "none" | "screen" | "shield";
+  maxPowerArmorPower: number;
+  baseHealth: number;
+  healthScaling: number;
   canTakeDamage: boolean;
   dead: boolean;
   corpse: boolean;

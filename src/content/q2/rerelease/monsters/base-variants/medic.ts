@@ -2,6 +2,7 @@
 import { throwGib } from "../../../foundation/monsters/gibs.ts";
 import { numberField } from "../../../foundation/fields.ts";
 import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../spawn-placement.ts";
+import { monsterPowerArmor } from "../../../missionpacks/monsters/power-armor.ts";
 import { pickRogueCoopTarget } from "../../../missionpacks/monsters/medic.ts";
 import type { Bounds, Vec3 } from "../../../../../contracts/math.ts";
 import type { Q2Entity, Q2Think } from "../../../foundation/host.ts";
@@ -177,7 +178,16 @@ export function createRereleaseMedicDefinitions(monsters: Q2Monsters, weapons: Q
       const maxHealth = target.maxHealth, gibHealth = previous?.state.gibHealth ?? 0;
       const slots = previous?.state.monsterSlots ?? 0, used = previous?.state.monsterUsed ?? 0;
       const spawnedBy = previous?.state.spawnedBy ?? "none", commander = previous?.state.commander ?? null;
+      const initialPowerArmorType = previous?.state.initialPowerArmorType ?? "none";
+      const maxPowerArmorPower = previous?.state.maxPowerArmorPower ?? 0;
+      const baseHealth = previous?.state.baseHealth ?? maxHealth, healthScaling = previous?.state.healthScaling ?? 1;
       const revived = monsters.respawn(target, game);
+      if (initialPowerArmorType === "none") {
+        game.host.combat.setArmor(target.actor, { kind: "none" });
+        if (game.host.inventory.has(target.actor.id)) game.host.inventory.configure(target.actor, { item: "q2:monster-power", count: maxPowerArmorPower, capacity: maxPowerArmorPower });
+      } else monsterPowerArmor(revived, initialPowerArmorType, maxPowerArmorPower);
+      revived.state.initialPowerArmorType = initialPowerArmorType; revived.state.maxPowerArmorPower = maxPowerArmorPower;
+      revived.state.baseHealth = baseHealth; revived.state.healthScaling = healthScaling;
       target.maxHealth = maxHealth; game.host.combat.setHealth(target.actor, maxHealth);
       revived.state.gibHealth = Math.trunc(gibHealth / 2); revived.state.monsterSlots = slots; revived.state.monsterUsed = used;
       revived.state.spawnedBy = spawnedBy; revived.state.commander = commander;

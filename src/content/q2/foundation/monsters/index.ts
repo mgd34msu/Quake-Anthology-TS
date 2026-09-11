@@ -341,6 +341,7 @@ export class Q2Monsters implements Q2SpawnModule {
     const previous = reviving ? this.contexts.get(entity.actor.id)?.state : undefined;
     const state: MonsterState = {
       ...createAlternateFlyState(),
+      initialPowerArmorType: "none", maxPowerArmorPower: 0, baseHealth: 0, healthScaling: 1,
       kind: definition.kind, weapon: entity.classname === "monster_soldier_light" ? "blaster" : entity.classname === "monster_soldier" ? "shotgun" : "machinegun",
       locomotion: definition.locomotion ?? "walk", hasMelee: definition.melee !== undefined, hasRangedAttack: definition.hasRangedAttack !== false,
       hasIdle: definition.idle !== undefined, hasSearch: definition.search !== undefined, blindFire: definition.blindFire === true,
@@ -380,6 +381,15 @@ export class Q2Monsters implements Q2SpawnModule {
     entity.pain = this.sourcePain; entity.die = this.sourceDie; entity.use = this.sourceUse;
     definition.initialize?.(context);
     if (!game.host.actors.isLive(entity.actor.id)) return true;
+    const initialCombat = game.host.combat.read(entity.actor.id);
+    if (initialCombat === null) throw new Error(`Missing initialized Q2 monster combat state ${entity.classname}`);
+    if (initialCombat.armor.kind === "q2" && initialCombat.armor.powerArmor.kind !== "none") {
+      state.initialPowerArmorType = initialCombat.armor.powerArmor.kind;
+      state.maxPowerArmorPower = initialCombat.armor.powerArmor.cells;
+    } else {
+      state.maxPowerArmorPower = game.host.inventory.count(entity.actor.id, "q2:monster-power");
+    }
+    state.baseHealth = initialCombat.health;
     if (game.options.edition === "rerelease" && (entity.spawnflags & 524288) !== 0) state.goodGuy = true;
     if (!state.goodGuy && (entity.spawnflags & 4) !== 0) entity.spawnflags = (entity.spawnflags & ~4) | 1;
     if ((!reviving || game.options.edition === "classic") && !state.goodGuy && !state.doNotCount && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.totalMonsters++;

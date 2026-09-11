@@ -18,10 +18,12 @@ export const LMCTF_RUNES: readonly LmctfRuneDefinition[] = [
 ];
 export interface LmctfRules {
   ctfFlags: number; refFlags: number; runes: number; skinSet: number; flagInit: boolean; disabledWeapons: number;
+  timeLimitMinutes: number; fragLimit: number; mapList: readonly string[]; rconPassword: string;
   fastSwitch: boolean; refPassword: string; autoLock: boolean; countdownSeconds: number; quadSeconds: number;
 }
 export function createLmctfRules(changes: Partial<LmctfRules> = {}): LmctfRules {
   return { ctfFlags: 0, refFlags: 0, runes: 15, skinSet: 0, flagInit: false, disabledWeapons: 0,
+    timeLimitMinutes: 0, fragLimit: 0, mapList: [], rconPassword: "",
     fastSwitch: false, refPassword: "", autoLock: false, countdownSeconds: 15, quadSeconds: 30, ...changes };
 }
 export interface LmctfScoreRow { readonly actor: ActorId; readonly slot: number; readonly name: string; readonly team: LmctfTeam; readonly score: number; readonly ping: number; }
@@ -35,6 +37,7 @@ export interface LmctfHooks extends Omit<Q2CtfHooks, "emit"> { emit(event: Lmctf
 
 /** Source-private fields; player score, health, armor and item counts remain shared. */
 export class LmctfPlayerState {
+  plasmaMode = false;
   team: LmctfTeam = 0;
   observerTeam: LmctfTeam = 0;
   rune: ActorId | null = null;
@@ -52,6 +55,7 @@ export class LmctfPlayerState {
   readonly statistics = new Map<string, number>();
 }
 export interface LmctfContext {
+  plasmaQuad: boolean;
   readonly hooks: LmctfHooks;
   readonly rules: LmctfRules;
   readonly states: Map<ActorId, LmctfPlayerState>;

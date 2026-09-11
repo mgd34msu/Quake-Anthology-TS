@@ -1,3 +1,5 @@
+import { monsterPowerArmor } from "../../../../src/content/q2/missionpacks/monsters/power-armor.ts";
+import { decodeQ2MonstersCheckpoint, encodeQ2MonstersCheckpoint } from "../../../../src/persistence/q2-monsters.ts";
 import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../../../../src/content/q2/rerelease/monsters/spawn-placement.ts";
 import { Q2MissionPackMonsterState } from "../../../../src/content/q2/missionpacks/monsters/state.ts";
 import { medicFrame } from "../../../../src/content/q2/rerelease/monsters/tables/medic.ts";
@@ -347,12 +349,25 @@ describe("rerelease species on the shared Q2 controller", () => {
 });
 
 test("Rerelease medic revives the same actor and preserves health and commander accounting", () => {
-  const scene = fixture(), medic = scene.spawn("monster_medic"), patient = scene.spawn("monster_medic", new Map([["origin", "200 0 24"]]));
+  const scene = fixture();
+  let medic = scene.spawn("monster_medic"), patient = scene.spawn("monster_medic", new Map([["origin", "200 0 24"]]));
   try {
     const actor = patient.entity.actor.id;
     patient.entity.healthTarget = "old_health"; patient.entity.itemTarget = "old_item";
     patient.entity.maxHealth = 740; patient.state.gibHealth = -130;
     patient.state.monsterSlots = 9; patient.state.monsterUsed = 3;
+    monsterPowerArmor(patient, "shield", 480);
+    patient.state.initialPowerArmorType = "shield"; patient.state.maxPowerArmorPower = 480;
+    patient.state.baseHealth = 370; patient.state.healthScaling = 2;
+    scene.inventory.configure(patient.entity.actor, { item: "q2:monster-power", count: 5, capacity: 480 });
+    const checkpoint = decodeQ2MonstersCheckpoint(encodeQ2MonstersCheckpoint(scene.monsters.capture()));
+    const saved = checkpoint.actors.find(entry => entry.actor.slot === actor.slot);
+    expect(saved?.state.initialPowerArmorType).toBe("shield"); expect(saved?.state.maxPowerArmorPower).toBe(480);
+    expect(saved?.state.baseHealth).toBe(370); expect(saved?.state.healthScaling).toBe(2);
+    scene.monsters.restore(scene.game, checkpoint);
+    const restoredMedic = scene.monsters.context(medic.entity.actor.id), restoredPatient = scene.monsters.context(actor);
+    if (restoredMedic === null || restoredPatient === null) throw new Error("Medic controller metadata did not restore");
+    medic = restoredMedic; patient = restoredPatient;
     scene.combat.setHealth(patient.entity.actor, -10); patient.state.dead = true;
     patient.dispatch("medic_dead");
     medic.entity.enemy = actor; medic.state.oldEnemy = scene.player.id; medic.state.medic = true;
@@ -368,6 +383,11 @@ test("Rerelease medic revives the same actor and preserves health and commander 
     expect(revived?.state.gibHealth).toBe(-65);
     expect(revived?.state.monsterSlots).toBe(9);
     expect(revived?.state.monsterUsed).toBe(3);
+    expect(revived?.state.initialPowerArmorType).toBe("shield"); expect(revived?.state.maxPowerArmorPower).toBe(480);
+    expect(revived?.state.baseHealth).toBe(370); expect(revived?.state.healthScaling).toBe(2);
+    expect(scene.inventory.count(actor, "q2:monster-power")).toBe(480);
+    const armor = scene.combat.read(actor)?.armor;
+    expect(armor?.kind === "q2" ? armor.powerArmor : null).toEqual({ kind: "shield", cells: 480 });
     expect(revived?.entity.enemy).toBe(scene.player.id);
     expect(scene.source.get(patient.entity).healer).toBeNull();
     expect(medic.entity.enemy).toBe(scene.player.id);

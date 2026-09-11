@@ -42,6 +42,7 @@ export class BaseMonster {
     this.state = entity.monster ?? { species: spec.species, mode: "stand", frameIndex: 0, sequence: [], firstFrame: 0, enemy: null, oldEnemy: null,
       path: entity.target, pauseUntil: 0, attackFinished: 0, painFinished: 0, searchUntil: 0, deathDrop: false, refired: false };
     entity.monster = this.state;
+    entity.fields.set("source.monsterCallbackPrefix", source?.callbackPrefix ?? "base");
   }
   capture() { return { currentFrame: this.currentFrame, nextFrame: this.nextFrame, inPain: this.inPain, counter: this.counter, idleUntil: this.idleUntil, lefty: this.lefty, sliding: this.sliding, lightningCount: this.lightningCount, countedDeath: this.countedDeath }; }
   restore(reader: SaveReader): undefined {

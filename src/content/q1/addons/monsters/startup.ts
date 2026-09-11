@@ -45,7 +45,10 @@ export function startMg3Monster(monster: BaseMonster, context: Q1AddonContext): 
   if ((entity.spawnflags & 32) !== 0 && entity.target !== "") {
     const alive = targets.filter(target => target.damageable), chosen = alive[Math.floor(game.host.random() * alive.length)]; if (chosen !== undefined) return monster.found(chosen.actor.id);
   }
-  const target = targets[0]; if (target !== undefined) entity.idealYaw = yawFor(vsub(game.body(target).origin, monster.origin));
+  const target = targets[0];
+  entity.references.set("movetarget", target?.actor.id ?? null); entity.references.set("goalentity", target?.actor.id ?? null);
+  monster.state.path = target === undefined ? "" : entity.target;
+  if (target !== undefined) entity.idealYaw = yawFor(vsub(game.body(target).origin, monster.origin));
   if (target?.classname === "path_corner" && (entity.spawnflags & 4096) === 0) monster.play(spec.walk);
   else { monster.state.pauseUntil = 99999999; monster.play(spec.stand); if (target?.classname === "path_corner") entity.use = game.named.use(entity, `${name}:walk`); }
   if ((entity.spawnflags & 4) === 0) return monster.delay(entity.nextThink - game.time + game.host.random() * 0.5);

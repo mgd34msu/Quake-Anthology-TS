@@ -15,6 +15,7 @@ import { registerMg3Demodog } from "./monsters/demodog.ts";
 import { registerMg3Infected } from "./monsters/infected/index.ts";
 import { registerMg3Heavy } from "./monsters/heavy/index.ts";
 import { spawnMapActor } from "../foundation/spawns.ts";
+import { registerMg3PathTargets } from "./monsters/ai/targets.ts";
 import { registerOrdinaryAddonMonsters } from "./monsters/ordinary/index.ts";
 
 import { registerFinalBoss } from "./monsters/bosses/final.ts";
@@ -48,7 +49,7 @@ export function registerQ1CampaignAddons(base: Q1Base, program: "dopa" | "mg1" |
   registerAddonEffects(context); registerAddonFog(context); registerAddonLights(context);
   registerAddonCorpses(context);
   registerOrdinaryAddonMonsters(context);
-  if (program === "mg3") { registerAddonRopes(context); registerMg3Items(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context);
+  if (program === "mg3") { registerMg3PathTargets(context); registerAddonRopes(context); registerMg3Items(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context);
     registerSacrifice(context); registerGhost(context); registerOrb(context); registerShubZombie(context); registerOldnew(context); registerFinalBoss(context);
   }
   return context;

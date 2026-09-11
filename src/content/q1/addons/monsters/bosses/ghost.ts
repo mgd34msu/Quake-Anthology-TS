@@ -26,7 +26,7 @@ export class Q1Ghost extends BaseMonster {
     if (context.removedForRunes(entity) || context.removedOutsideCoop(entity)) return undefined;
     const choice = game.host.random() * 5; entity.fields.set("ghost.death", choice < 1 ? "ghost_diea1" : choice < 2 ? "ghost_dieb1" : choice < 3 ? "ghost_diec1" : choice < 4 ? "ghost_died1" : "ghost_diee1");
     entity.wait ||= 128; game.host.combat.setHealth(entity.actor, 10); entity.maxHealth = 10; entity.solid = "slidebox"; entity.model = "progs/player.mdl"; entity.damageable = true; entity.aimedDamage = false;
-    entity.touch = game.named.touch(entity, `${prefix}:touch`); entity.die = game.named.die(entity, `${prefix}:monster_die`); entity.movement = "fly"; game.setBounds(entity, spec.bounds);
+    entity.pathEnd = game.named.action(entity, `${prefix}:monster_stand`); entity.touch = game.named.touch(entity, `${prefix}:touch`); entity.die = game.named.die(entity, `${prefix}:monster_die`); entity.movement = "fly"; game.setBounds(entity, spec.bounds);
     entity.dest1 = this.origin; entity.dest2 = vadd(entity.dest1, vscale(game.makeVectors({ x: 0, y: game.host.random() * 360, z: 0 }).forward, entity.wait));
     this.play(spec.stand); entity.count = Math.floor(game.host.random() * 5 + 0.5) + 3; return undefined;
   }

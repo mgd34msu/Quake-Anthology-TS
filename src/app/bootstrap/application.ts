@@ -1,3 +1,4 @@
+import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
 import { ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
 import type { ApplicationBotClient } from "./simulation/bots.ts";
 import { createApplicationBotNavigation } from "./simulation/navigation.ts";
@@ -106,7 +107,8 @@ export class Application {
     const localSeats = new Map<ClientId, SessionSeat>();
     let application: Application | null = null;
     try {
-      const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+      const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+      const simulation = createSimulation({ ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed,
         maxClients: options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
         playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
@@ -461,7 +463,8 @@ export class Application {
       }).filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
       if (settings !== null && (settings.clientSlots.length !== clients.length || settings.clientSlots.some(slot => !clients.some(client => client.slot === slot))))
         throw new Error("Saved players do not match the connected session client slots");
-      simulation = createSimulation({ identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+      const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+      simulation = createSimulation({ ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? this.simulation.options.maxClients,
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
         ...(save === undefined ? { ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),

@@ -233,3 +233,34 @@ test("rerelease additive wind and shelter portals act on a foreign character bod
   touch(hurt); expect(game.health(player.id)).toBe(health); hurt.use?.(null, player.id); touch(hurt); expect(game.health(player.id)).toBe(health - 7); expect(hurt.solid).toBe("none");
   think(hurt, 1.2); expect(hurt.solid).toBe("trigger"); state.actors.close();
 });
+
+
+test("MG3 path visitation, pause cancellation and switching use saved actor bindings", () => {
+  const state = world("mg3"), { game, spawn } = state;
+  const next = spawn("path_corner", { targetname: "next" });
+  const alternate = spawn("path_corner", { targetname: "alternate", origin: "0 100 0" });
+  const corner = spawn("path_corner", { targetname: "corner", target: "next", wait: "2" });
+  const mover = spawn("monster_ogre", { targetname: "walker" });
+  mover.references.set("movetarget", corner.actor.id); mover.movementFlags |= 32;
+  corner.touch?.(mover.actor.id, null);
+  expect(mover.references.get("movetarget")).toEqual(next.actor.id);
+  expect(corner.owner).toEqual(mover.actor.id);
+  expect(mover.references.get("dmg_inflictor")).toEqual(corner.actor.id);
+  expect(mover.monster?.pauseUntil).toBe(game.time + 2);
+  const switcher = spawn("target_switchpath", { targetname: "switch", target: "corner", netname: "alternate" });
+  switcher.use?.(null, null);
+  expect(corner.target).toBe("alternate");
+  expect(mover.references.get("movetarget")).toEqual(alternate.actor.id);
+  expect(mover.monster?.path).toBe("alternate");
+  const cancel = spawn("target_cancelpause", { targetname: "cancel", target: "walker" });
+  cancel.use?.(null, null);
+  expect(mover.monster?.pauseUntil).toBe(0);
+  const boss = spawn("monster_boss_final", { targetname: "walker" });
+  expect(boss.pathEnd).toBeNull();
+  cancel.use?.(null, null);
+  expect(boss.use).not.toBeNull();
+  expect(() => game.capture()).not.toThrow();
+  expect(() => spawn("target_cancelpause", { targetname: "invalid" })).toThrow();
+  expect(spawn("path_corner", { targetname: "forever", wait: "-1" }).wait).toBe(999999);
+  state.actors.close();
+});

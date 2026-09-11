@@ -14,6 +14,7 @@ import { ConnectionState } from "../../../src/content/q3/base/game/state.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
 import { tokenizeCommand } from "../../../src/core/commands/text.ts";
 import { navigationWorld, profile } from "../navigation/prediction.ts";
+import { BotCharacteristic } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 import { arenaPrediction } from "./arena-prediction.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
@@ -51,6 +52,8 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       clientNavigation.set(client, runtime);
       return runtime;
     };
+    // Ranger must be skilled enough to aim while retreating with his starting machinegun.
+    game.host.cvars.set("g_spSkill", "3", true);
     game.host.cvars.set("bot_nochat", "1", true);
     game.host.cvars.set("bot_challenge", "1", true);
     bots = new ApplicationBots({ session, simulation, files, leafCount: content.world.leaves.length,
@@ -62,7 +65,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
         travelWeapon: (_client, mode) => mode === "rocket-jump" ? 5 : mode === "bfg-jump" ? 9 : 10 } });
     const roster = bots.director.arenaRoster("q3dm1");
     expect(roster.map(bot => bot.name)).toEqual(["ranger"]);
-    expect(consoleCommands.some(command => command.startsWith("addbot ranger 2.000000 free 2000"))).toBe(true);
+    expect(consoleCommands.some(command => command.startsWith("addbot ranger 3.000000 free 2000"))).toBe(true);
     for (const command of consoleCommands.splice(0)) bots.consoleCommand(tokenizeCommand(command, "q3").argv);
     const botClient = bots.clients()[0];
     if (botClient === undefined) throw new Error("Authored arena bot did not allocate a real session client");
@@ -70,6 +73,9 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     if (botActor === null) throw new Error("Authored bot has no canonical actor");
     const entity = game.pool.at(1), player = entity.client;
     if (player === null) throw new Error("Bot actor source player state missing");
+    const brain = bots.director.roster()[0]?.state;
+    if (brain === undefined) throw new Error("Authored bot has no source brain");
+    expect(bots.director.library.characters.boundedFloat(brain.character, BotCharacteristic.ATTACK_SKILL, 0, 1)).toBeGreaterThan(0.3);
     expect(player.pers.connected).toBe(ConnectionState.CONNECTING);
     expect(game.world.linkState(1)).toBeUndefined();
     for (let frame = 1; frame <= 42; frame++) {
@@ -96,20 +102,22 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     }
     expect(placed).toBe(true);
     target.health = 100;
-    let moves = 0, shots = 0;
+    let moves = 0, shots = 0, ammoConsumed = 0;
     for (let frame = 1; frame <= 80; frame++) {
       const commands = bots.frame((frame + 42) * 50, 50);
       for (const input of commands) { expect(input.actor).toBe(botActor); if (input.command.kind !== "q3") throw new Error("Native source bot command changed dialect");
         if (input.command.forwardMove !== 0 || input.command.rightMove !== 0) moves++;
         if ((input.command.buttons & 1) !== 0) shots++;
       }
+      const previousAmmo = player.ps.ammo.get(2);
       session.step({ elapsedMilliseconds: 50, commands });
+      ammoConsumed += Math.max(0, previousAmmo - player.ps.ammo.get(2));
       bots.receive(simulation.drainPresentationEvents());
     }
     expect(moves).toBeGreaterThan(0);
     expect(shots).toBeGreaterThan(0);
     expect(Math.hypot(player.ps.origin.x - initial.x, player.ps.origin.y - initial.y)).toBeGreaterThan(8);
-    expect(player.ps.ammo.get(2)).toBeLessThan(100);
+    expect(ammoConsumed).toBeGreaterThan(0);
     expect(simulation.playerUi(human.actor).health).toBeLessThan(100);
     expect(bots.director.roster()).toHaveLength(1);
   } finally { bots?.close(); session.close(); archive.close(); await content.close(); }

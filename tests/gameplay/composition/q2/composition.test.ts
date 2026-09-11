@@ -240,3 +240,59 @@ test("CTF competition setup gates shared item pickups and resumes them in play",
   active.items.touch(health, active.game, active.first.actor.id);
   expect(active.combat.read(active.first.actor.id)?.health).toBe(52);
 });
+
+test("LMCTF referee countdown and team lock survive the shared checkpoint", () => {
+  const active = compose(true, ctfMap, { kind: "lmctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  mode.rules.refPassword = "match-ref"; mode.rules.countdownSeconds = 1; mode.rules.timeLimitMinutes = 1; mode.rules.autoLock = true;
+  mode.command(active.first, active.game, "startmatch", []);
+  expect(mode.match.phase).toBe("none");
+  mode.command(active.first, active.game, "referee", ["match-ref"]);
+  mode.command(active.first, active.game, "startmatch", []);
+  expect(mode.match.phase).toBe("countdown"); expect(mode.context.canScore()).toBe(false);
+  expect(mode.context.flagsTouchable()).toBe(false); expect(mode.match.teamsLocked).toBe(true);
+  mode.join(active.second, active.game, 1);
+  expect(mode.states.get(active.second.actor.id)?.team).toBe(2);
+  active.advance(1); mode.playerFrame(active.first, active.game);
+  const checkpoint = captureQ2Product(active.composition);
+  const restored = compose(false, ctfMap, { kind: "lmctf" }); restoreQ2Product(restored.composition, checkpoint);
+  const restoredMode = restored.composition.match.source;
+  if (!(restoredMode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  expect(restoredMode.match.capture()).toEqual(mode.match.capture());
+  expect(restoredMode.rules.refPassword).toBe("");
+  restored.advance(2); restoredMode.playerFrame(restored.first, restored.game);
+  expect(restoredMode.match.phase).toBe("inplay"); expect(restoredMode.match.remaining).toBe(59);
+  expect(restoredMode.context.canScore()).toBe(true);
+  restoredMode.command(restored.first, restored.game, "stopmatch", []);
+  expect(restoredMode.match.phase).toBe("none"); expect(restoredMode.match.teamsLocked).toBe(false);
+});
+
+import { readInventoryEntry } from "../../../../src/persistence/save-image.ts";
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../../src/persistence/value.ts";
+
+test("LMCTF plasma retains signed native cell debits and infinite-ammo counters through saves", () => {
+  for (const scenario of [{ cells: 1, infinite: false, expected: -9 }, { cells: 1, infinite: true, expected: -8 }, { cells: 10, infinite: false, expected: 0 }, { cells: 10, infinite: true, expected: 1 }]) {
+    const active = compose(true, ctfMap, { kind: "lmctf" }), weapons = active.composition.weapons;
+    active.composition.setDeathmatchFlags(scenario.infinite ? 8192 : 0);
+    active.inventory.configure(active.first.actor, { item: "q2:ammo_cells", count: scenario.cells, capacity: 200 });
+    const state = weapons.bind(active.first, active.game);
+    state.weapon = "lmctf:plasma"; state.phase = "firing"; state.frame = 4;
+    const input = { attack: true, latchedAttack: false, holster: false, angles: { x: 0, y: 0, z: 0 }, ducked: false, spectator: false, notarget: false,
+      hand: "right", animatePlayer: false, quadUntil: 0, doubleUntil: 0, quadFireUntil: 0, haste: false, noStackDouble: false, instantSwitch: false,
+      quickSwitch: false, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false } satisfies import("../../../../src/content/q2/foundation/weapons/types.ts").Q2WeaponInput;
+    weapons.tick(active.first, active.game, input);
+    expect(active.inventory.count(active.first.actor.id, "q2:ammo_cells")).toBe(scenario.expected);
+    expect(state.frame).toBe(5);
+    expect([...active.game.entities.values()].filter(entity => entity.classname === "goop")).toHaveLength(3);
+    const entry = active.inventory.entries(active.first.actor.id).find(value => value.item === "q2:ammo_cells");
+    expect(entry?.capacity).toBe(200); expect(entry?.countPolicy).toEqual({ kind: "source-counter", arithmetic: "int32" });
+    const restoredEntry = readInventoryEntry(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(entry))));
+    active.inventory.configure(active.first.actor, { item: "q2:ammo_cells", count: 100, capacity: 200 });
+    active.inventory.configure(active.first.actor, restoredEntry);
+    expect(active.inventory.count(active.first.actor.id, "q2:ammo_cells")).toBe(scenario.expected);
+    expect(restoredEntry.countPolicy).toEqual(entry?.countPolicy);
+    active.advance(0.1); weapons.tick(active.first, active.game, input);
+    expect(active.inventory.count(active.first.actor.id, "q2:ammo_cells")).toBe(scenario.expected);
+    expect([...active.game.entities.values()].filter(entity => entity.classname === "goop")).toHaveLength(3);
+  }
+});

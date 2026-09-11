@@ -4,6 +4,7 @@ import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../
 import type { Q1Actor } from "../../../foundation/entity.ts";
 import { BaseMonster, registerMonsterCallbacks } from "../../../base/monsters.ts";
 import { Mg3Monster } from "../ai/index.ts";
+import { rocketOgreFrames, rocketOgreFrame, registerRocketOgre } from "./rocket-ogre.ts";
 import { mg3OrdinaryAttack } from "./attack.ts";
 import { baseSpecies } from "../../../base/species.ts";
 import type { MonsterSpecies } from "../../../base/species.ts";
@@ -20,11 +21,12 @@ const extraFrames: ReadonlyMap<string, MonsterFrame> = new Map([["zombie_hang1",
 
 function sourceSpec(context: Q1AddonContext, entity: Q1Actor): MonsterSpecies {
   const classname = entity.text("addon.monsterClass") || entity.classname;
-  const spec = baseSpecies.find(value => value.classnames.includes(classname)); if (spec === undefined) throw new Error(`Missing native addon monster ${classname}`);
+  const rocket = context.program === "mg3" && classname === "monster_ogre_rocket";
+  const spec = baseSpecies.find(value => value.classnames.includes(rocket ? "monster_ogre" : classname)); if (spec === undefined) throw new Error(`Missing native addon monster ${classname}`);
   const bounds = spec.species === "demon" || spec.species === "ogre" || spec.species === "shambler" || spec.species === "shalrath" ? large : small;
   if (spec.species === "zombie" && context.program === "mg3" && (entity.spawnflags & 128) !== 0) return { ...spec, bounds, missile: null, melee: true };
   if (spec.species === "zombie" && context.program === "mg3") return { ...spec, bounds, missile: "zombie_missile" };
-  return { ...spec, bounds };
+  return rocket ? { ...spec, bounds, model: "ogre_rocket", sight: "armagon/sight.wav" } : { ...spec, bounds };
 }
 
 export class Q1OrdinaryMonster extends BaseMonster {
@@ -58,13 +60,36 @@ function spawnOrdinary(monster: BaseMonster, context: Q1AddonContext): undefined
 
 class Q1Mg3OrdinaryMonster extends Mg3Monster {
   constructor(readonly context: Q1AddonContext, entity: Q1Actor) {
-    super(context.game, entity, sourceSpec(context, entity), context.base, { callbackPrefix: `${context.program}:ordinary`, frames: extraFrames });
+    super(context.game, entity, sourceSpec(context, entity), context.base, { callbackPrefix: `${context.program}:ordinary`, frames: entity.text("addon.monsterClass") === "monster_ogre_rocket" ? new Map([...extraFrames, ...rocketOgreFrames]) : extraFrames });
   }
-  override spawn(): undefined { return spawnOrdinary(this, this.context); }
+  override spawn(): undefined {
+    if (this.spec.model === "ogre_rocket") {
+      this.entity.classname = "monster_ogre"; this.entity.fields.set("aflag", "1");
+      this.entity.fields.set("projectiles_max", "2"); this.entity.fields.set("projectiles", "2");
+    }
+    return spawnOrdinary(this, this.context);
+  }
+  override pain(attacker: ActorId | null, damage: number): undefined {
+    if (this.spec.model !== "ogre_rocket") return super.pain(attacker, damage);
+    if (this.state.painFinished > this.game.time || this.game.host.random() * 200 > damage) return undefined;
+    this.game.sound(this.entity, "armagon/pain.wav"); const r = this.game.host.random();
+    this.state.painFinished = this.game.time + (r < 0.75 ? 3 : 4);
+    return this.play(r < 0.25 ? "ogre_pain1" : r < 0.5 ? "ogre_painb1" : r < 0.75 ? "ogre_painc1" : r < 0.88 ? "ogre_paind1" : "ogre_paine1");
+  }
+  override die(attacker: ActorId | null): undefined {
+    if (this.spec.model !== "ogre_rocket" || this.game.health(this.entity.actor.id) < -80) return super.die(attacker);
+    if (this.countedDeath) return undefined;
+    this.enemy = attacker; this.entity.damageable = false; this.entity.touch = null; this.countKill();
+    this.game.sound(this.entity, "armagon/sight2.wav"); return this.play(this.game.host.random() < 0.5 ? "ogre_die1" : "ogre_bdie1");
+  }
   override start(): undefined { return startMg3Monster(this, this.context); }
   override use(activator: ActorId | null): undefined { return super.use(mg3MonsterActivator(this.game, activator)); }
   override tryAttack(): boolean { return mg3OrdinaryAttack(this); }
-  override play(name: string): undefined { return name === "zombie_missile" ? this.meleeAttack() : super.play(name); }
+  override play(name: string): undefined {
+    if (name === "zombie_missile") return this.meleeAttack();
+    if (this.spec.model === "ogre_rocket" && name === "ogre_stand5") rocketOgreFrame(this, name);
+    super.play(name); if (this.spec.model === "ogre_rocket" && name !== "ogre_stand5") rocketOgreFrame(this, name); return undefined;
+  }
   override meleeAttack(): undefined {
     if (this.spec.species !== "zombie") return super.meleeAttack();
     const r = this.game.host.random(); return this.play(r < 0.3 ? "zombie_atta1" : r < 0.6 ? "zombie_attb1" : "zombie_attc1");
@@ -86,6 +111,12 @@ export function registerOrdinaryAddonMonsters(context: Q1AddonContext): Readonly
     if (spec.species === "boss" || spec.species === "oldone") continue;
     for (const classname of spec.classnames) game.replaceSpawn(classname, (_game, entity) => {
       entity.fields.set("addon.monsterClass", classname); const value = createOrdinary(context, entity); monsters.set(entity.actor, value); return value.spawn();
+    });
+  }
+  if (context.program === "mg3") {
+    registerRocketOgre(context);
+    game.registerSpawn("monster_ogre_rocket", (_game, entity) => {
+      entity.fields.set("addon.monsterClass", "monster_ogre_rocket"); const value = createOrdinary(context, entity); monsters.set(entity.actor, value); return value.spawn();
     });
   }
   game.host.actors.onRelease(actor => { monsters.delete(actor); return undefined; });
