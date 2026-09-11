@@ -14,7 +14,7 @@ function preset(content: ContentId): LaunchPreset {
   const clock: LaunchPreset["ordering"] = { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } };
   return { id: "recipe:campaign:1", map: { geometry: { content, path: "maps/start.bsp" }, entities: provider("entities") },
     campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("gamecode") }, movement: provider("movement"),
-    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], enemies: { kind: "map-defined" },
+    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("rerelease"),
     combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
     execution: [{ kind: "quakec", owner: provider("gamecode"), role: "server-game", artifact: { content, path: "progs.dat" }, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
@@ -55,7 +55,7 @@ describe("installed content catalog", () => {
   });
 
   test.skipIf(!existsSync(corpusRoot))("discovers the supplied 24 products and reads campaign progs under selected classic behavior", async () => {
-    const catalog = await discoverInstalledContent({ corpusRoot });
+    const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
     expect(catalog.products).toHaveLength(25);
     expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(24);
     expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("unresolved");

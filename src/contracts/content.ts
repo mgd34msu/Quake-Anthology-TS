@@ -186,6 +186,25 @@ export type EnemySelection =
   | { readonly kind: "map-defined" }
   | { readonly kind: "replace"; readonly definitions: readonly ProviderReference[] };
 
+export type GrappleSelection =
+  | { readonly kind: "disabled" }
+  | ({ readonly kind: "enabled"; readonly source: ProviderReference; readonly binding: "slot" | "offhand" } & (
+    | { readonly mechanic: "q1-threewave"; readonly edition: "rerelease" }
+    | { readonly mechanic: "q2-ctf"; readonly edition: "classic" | "rerelease" }
+    | { readonly mechanic: "q2-lmctf"; readonly edition: "classic" }
+  ));
+
+export type HandGrenadeSelection =
+  | { readonly kind: "disabled" }
+  | { readonly kind: "enabled"; readonly source: ProviderReference; readonly edition: "classic" | "rerelease";
+      readonly binding: "offhand"; readonly initialAmmo: number; readonly capacity: number };
+
+/** Equipment selection never changes map mechanisms, campaign gamecode or the primary arsenal. */
+export interface EquipmentSelection {
+  readonly grapple: GrappleSelection;
+  readonly handGrenades: HandGrenadeSelection;
+}
+
 export interface PresentationSelection {
   readonly assets: ContentId;
   readonly hud: ProviderReference;
@@ -226,6 +245,7 @@ export interface LaunchChoice {
   readonly movement: LaunchSelection<ProviderReference>;
   readonly character: LaunchSelection<CharacterSelection>;
   readonly weapons: LaunchSelection<readonly ProviderReference[]>;
+  readonly equipment: LaunchSelection<EquipmentSelection>;
   readonly enemies: LaunchSelection<EnemySelection>;
   readonly presentation: LaunchSelection<PresentationSelection>;
   readonly engineBehavior: LaunchSelection<ProviderReference>;
@@ -257,6 +277,7 @@ export interface ExecutableRecipe {
   readonly movement: ProviderReference;
   readonly character: CharacterSelection;
   readonly weapons: readonly ProviderReference[];
+  readonly equipment: EquipmentSelection;
   readonly enemies: EnemySelection;
   readonly presentation: PresentationSelection;
   readonly engineBehavior: ProviderReference;

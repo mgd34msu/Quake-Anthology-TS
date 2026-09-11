@@ -1,4 +1,4 @@
-import type { ArchiveMount, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, ExecutableRecipe, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
+import type { ArchiveMount, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
 import { readApi, readNativeAbi } from "./execution.ts";
 import { readClock, readDigest, readNumeric, readOrdering } from "./shared.ts";
@@ -116,11 +116,32 @@ function readExecution(reader: SaveReader): ResolvedExecutionModule {
     default: return reader.fail("native game module cannot use a QuakeC API");
   }
 }
+function readGrapple(reader: SaveReader): GrappleSelection {
+  const kind = reader.field("kind").choice("disabled", "enabled");
+  if (kind === "disabled") return { kind };
+  const source = readProvider(reader.field("source")), binding = reader.field("binding").choice("slot", "offhand");
+  switch (reader.field("mechanic").choice("q1-threewave", "q2-ctf", "q2-lmctf")) {
+    case "q1-threewave": return { kind, source, binding, mechanic: "q1-threewave", edition: reader.field("edition").literal("rerelease") };
+    case "q2-ctf": return { kind, source, binding, mechanic: "q2-ctf", edition: reader.field("edition").choice("classic", "rerelease") };
+    case "q2-lmctf": return { kind, source, binding, mechanic: "q2-lmctf", edition: reader.field("edition").literal("classic") };
+  }
+}
+function readHandGrenades(reader: SaveReader): HandGrenadeSelection {
+  const kind = reader.field("kind").choice("disabled", "enabled");
+  if (kind === "disabled") return { kind };
+  const initialAmmo = reader.field("initialAmmo").integer(0), capacity = reader.field("capacity").integer(0);
+  if (initialAmmo > capacity) return reader.fail("hand grenade allowance exceeds capacity");
+  return { kind, source: readProvider(reader.field("source")), binding: reader.field("binding").literal("offhand"),
+    edition: reader.field("edition").choice("classic", "rerelease"), initialAmmo, capacity };
+}
+export function readEquipment(reader: SaveReader): EquipmentSelection {
+  return { grapple: readGrapple(reader.field("grapple")), handGrenades: readHandGrenades(reader.field("handGrenades")) };
+}
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
   return { schemaVersion: reader.field("schemaVersion").literal(1), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
     map: { geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
     campaign: readCampaign(reader.field("campaign")), movement: readProvider(reader.field("movement")), character: readCharacter(reader.field("character")),
-    weapons: reader.field("weapons").list(readProvider), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),
+    weapons: reader.field("weapons").list(readProvider), equipment: readEquipment(reader.field("equipment")), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),
     engineBehavior: readProvider(reader.field("engineBehavior")), combat: readProvider(reader.field("combat")), inventory: readProvider(reader.field("inventory")), match: readProvider(reader.field("match")), transition: readProvider(reader.field("transition")),
     execution: reader.field("execution").list(readExecution), mounts: readMountPlan(reader.field("mounts")), resources: reader.field("resources").list(readResource),
     timing: reader.field("timing").list(timing => ({ provider: namespaced(timing.field("provider")), clock: readClock(timing.field("clock")), numeric: readNumeric(timing.field("numeric")) })), ordering: readOrdering(reader.field("ordering")) };

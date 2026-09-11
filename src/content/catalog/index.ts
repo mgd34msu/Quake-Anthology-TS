@@ -12,6 +12,7 @@ export { expectedProducts } from "./products.ts";
 export type { ProductExpectation } from "./products.ts";
 export { resolveLaunch, selectLaunch, presetChoice } from "./launch.ts";
 export type { LaunchPreset, SelectedLaunch, ResolveLaunchOptions } from "./launch.ts";
+export { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "./equipment.ts";
 
 export interface CatalogArchive {
   readonly path: string;

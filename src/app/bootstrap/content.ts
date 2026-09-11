@@ -1,7 +1,7 @@
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, ProviderTiming } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
-import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import { discoverInstalledContent, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { InstalledCatalog, LaunchPreset } from "../../content/catalog/index.ts";
 import { openMountPlan } from "../../content/mounts/index.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
@@ -53,7 +53,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
     map: { geometry: { content: product.id, path: options.map }, entities: provider },
     campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
-    character: { definition: character, appearance }, weapons: [provider], enemies: { kind: "map-defined" },
+    character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, provider, match), enemies: { kind: "map-defined" },
     presentation: { assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
     execution: [execution(provider, family, rerelease)],

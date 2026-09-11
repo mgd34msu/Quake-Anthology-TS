@@ -31,7 +31,7 @@ function sourceRecipe(byteLength: number): ExecutableRecipe {
   const geometry = { ...raw, id: createResourceId(raw) };
   return { schemaVersion: 1, id: "recipe:q3:smoke", preset: "recipe:q3:smoke", map: { geometry, entities: provider("game") },
     campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") }, movement: provider("movement"),
-    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], enemies: { kind: "map-defined" },
+    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"),
     inventory: provider("inventory"), match: provider("match"), transition: provider("transition"), execution: [],
     mounts: { id: "mount-plan:q3:smoke", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry],

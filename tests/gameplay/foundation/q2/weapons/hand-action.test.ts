@@ -168,3 +168,97 @@ test("pre-removal cancels and refunds unprimed preparation while the actor still
   expect(f.ammo()).toBe(1);
   expect(f.committed()).toBe(0);
 });
+
+test("preparation and fuse deadlines stay fixed across 100, 25, 30 and 16 millisecond world steps", () => {
+  const policies = [
+    { edition: "classic", haste: false, quadFire: false, cookAt: 1.1 },
+    { edition: "rerelease", haste: false, quadFire: false, cookAt: 1 },
+    { edition: "rerelease", haste: true, quadFire: true, cookAt: 0.25 },
+  ] satisfies readonly { edition: HandActionInput["edition"]; haste: boolean; quadFire: boolean; cookAt: number }[];
+  for (const policy of policies) for (const worldMilliseconds of [100, 25, 30, 16]) {
+    const f = fixture(policy.edition), boundary = Math.ceil(policy.cookAt * 1000 / worldMilliseconds);
+    f.step(0, { ...policy, pressed: true });
+    for (let turn = 1; turn <= boundary; turn++) f.step(turn * worldMilliseconds / 1000, policy);
+    const cooking = f.state();
+    expect(cooking.kind).toBe("cooking");
+    if (cooking.kind !== "cooking") throw new Error("Expected cooking on first world boundary after hold frame");
+    expect(cooking.expiresAt).toBeCloseTo(policy.cookAt + 3.2, 10);
+    expect(f.sounds).toEqual(["cock", "cook-start"]);
+    expect(f.emitted).toHaveLength(0);
+    const expiryBoundary = Math.ceil(cooking.expiresAt * 1000 / worldMilliseconds) * worldMilliseconds / 1000;
+    f.step(expiryBoundary, policy);
+    expect(f.emitted).toHaveLength(1);
+    expect(f.emitted[0]?.held).toBe(true);
+    expect(f.emitted[0]?.fuse).toBeCloseTo(cooking.expiresAt - expiryBoundary, 10);
+    expect(f.committed()).toBe(1);
+  }
+});
+
+test("queued taps use logical throw deadlines and the current emission pose on uneven world steps", () => {
+  for (const edition of ["classic", "rerelease"] satisfies readonly HandActionInput["edition"][]) {
+    for (const worldMilliseconds of [100, 25, 30, 16]) {
+      const f = fixture(edition), throwAt = edition === "classic" ? 1.2 : 1;
+      const boundary = Math.ceil(throwAt * 1000 / worldMilliseconds);
+      f.step(0, { pressed: true });
+      for (let turn = 1; turn < boundary; turn++) f.step(turn * worldMilliseconds / 1000, { held: false, released: turn === 1 });
+      expect(f.emitted).toHaveLength(0);
+      const now = boundary * worldMilliseconds / 1000;
+      f.step(now, { held: false, throw: { ...throwInput, project: () => ({ start: { x: now, y: 7, z: 9 }, direction: { x: 1, y: 0, z: 0 } }) } });
+      expect(f.emitted).toHaveLength(1);
+      expect(f.emitted[0]?.start).toEqual({ x: now, y: 7, z: 9 });
+      expect(f.emitted[0]?.fuse).toBeCloseTo((edition === "classic" ? 4.3 : 4.2) - now, 10);
+      expect(f.emitted[0]?.held).toBe(false);
+      expect(f.sounds).toEqual(["cock", "cook-start", "cook-stop"]);
+    }
+  }
+});
+
+test("coarse preparation catches up once, distinguishing a queued tap from a newly observed release", () => {
+  for (const queued of [true, false]) {
+    const f = fixture("classic");
+    f.step(0, { pressed: true });
+    if (queued) f.step(0.05, { held: false, released: true });
+    f.step(1.5, { held: false, released: true });
+    if (!queued) {
+      expect(f.emitted).toHaveLength(0);
+      expect(f.state()).toEqual({ kind: "releasing", expiresAt: 1.1 + 3.2, throwAt: 1.6 });
+      f.step(1.6, { held: false });
+    }
+    expect(f.emitted).toHaveLength(1);
+    expect(f.emitted[0]?.fuse).toBeCloseTo(4.3 - (queued ? 1.5 : 1.6));
+    expect(f.committed()).toBe(1);
+    expect(f.ammo()).toBe(0);
+    expect(f.sounds).toEqual(["cock", "cook-start", "cook-stop"]);
+  }
+  for (const queued of [true, false]) {
+    const f = fixture("classic");
+    f.step(0, { pressed: true });
+    if (queued) f.step(0.05, { held: false, released: true });
+    f.step(5, { held: !queued });
+    expect(f.emitted).toHaveLength(1);
+    expect(f.emitted[0]?.held).toBe(!queued);
+    expect(f.emitted[0]?.fuse).toBeCloseTo(-0.7);
+    expect(f.committed()).toBe(1);
+    expect(f.sounds).toEqual(["cock", "cook-start", "cook-stop"]);
+    f.step(5);
+    expect(f.emitted).toHaveLength(1);
+  }
+});
+
+test("a restored preparation deadline catches up without resetting its fuse or reserving ammunition again", () => {
+  const saved: HandAction = { kind: "preparing", frame: 5, nextAt: 0.5, releaseQueued: true };
+  const emitted: HandProjectileSpec[] = [], sounds: string[] = [];
+  let consumed = 0;
+  const restored = structuredClone(saved);
+  const result = stepHandAction(restored, { now: 1.25, edition: "classic", pressed: false, held: false, released: false,
+    lifecycle: "alive", enabled: true, haste: false, quadFire: false, throw: throwInput }, {
+    reserve: () => { throw new Error("Restore repeated ammunition admission"); },
+    consume: () => { consumed++; return undefined; }, refund: () => { throw new Error("Restore canceled a valid grenade"); },
+    sound: event => { sounds.push(event); return undefined; }, emit: spec => { emitted.push(spec); return undefined; },
+  });
+  expect(result).toEqual({ kind: "recovering", readyAt: 2.25, requireRelease: false });
+  expect(emitted).toHaveLength(1);
+  expect(emitted[0]?.fuse).toBeCloseTo(3.05);
+  expect(consumed).toBe(1);
+  expect(sounds).toEqual(["cock", "cook-start", "cook-stop"]);
+});

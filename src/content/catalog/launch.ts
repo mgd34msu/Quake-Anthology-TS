@@ -1,9 +1,10 @@
-import type { CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, ExecutableRecipe, ExecutionSelection, LaunchChoice, LaunchSelection, MapSelection, MountId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceRequest } from "../../contracts/content.ts";
+import type { CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, EquipmentSelection, ExecutableRecipe, ExecutionSelection, LaunchChoice, LaunchSelection, MapSelection, MountId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceRequest } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import { openMountPlan } from "../mounts/index.ts";
 import type { OpenMountOptions } from "../mounts/index.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import type { InstalledCatalog } from "./index.ts";
+import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
 
 export interface LaunchPreset extends Omit<ExecutableRecipe, "schemaVersion" | "preset" | "map" | "execution" | "mounts" | "resources"> {
   readonly map: MapSelection;
@@ -24,7 +25,7 @@ function selection<T>(choice: LaunchSelection<T>, preset: T): T { return choice.
 
 export function presetChoice(preset: RecipeId): LaunchChoice {
   return { preset, map: { kind: "preset" }, campaign: { kind: "preset" }, movement: { kind: "preset" }, character: { kind: "preset" },
-    weapons: { kind: "preset" }, enemies: { kind: "preset" }, presentation: { kind: "preset" }, engineBehavior: { kind: "preset" },
+    weapons: { kind: "preset" }, equipment: { kind: "preset" }, enemies: { kind: "preset" }, presentation: { kind: "preset" }, engineBehavior: { kind: "preset" },
     combat: { kind: "preset" }, inventory: { kind: "preset" }, match: { kind: "preset" }, transition: { kind: "preset" }, execution: { kind: "preset" } };
 }
 
@@ -34,6 +35,7 @@ export function selectLaunch(choice: LaunchChoice, preset: LaunchPreset, id: Rec
   return { ...preset, id, preset: preset.id, map: selection<MapSelection>(choice.map, preset.map), campaign: selection<CampaignSelection>(choice.campaign, preset.campaign),
     movement: selection<ProviderReference>(choice.movement, preset.movement), character: selection<CharacterSelection>(choice.character, preset.character),
     weapons: selection<readonly ProviderReference[]>(choice.weapons, preset.weapons), enemies: selection<EnemySelection>(choice.enemies, preset.enemies),
+    equipment: selection<EquipmentSelection>(choice.equipment, preset.equipment),
     presentation: selection<PresentationSelection>(choice.presentation, preset.presentation), engineBehavior: selection<ProviderReference>(choice.engineBehavior, preset.engineBehavior),
     combat: selection<ProviderReference>(choice.combat, preset.combat), inventory: selection<ProviderReference>(choice.inventory, preset.inventory),
     match: selection<ProviderReference>(choice.match, preset.match), transition: selection<ProviderReference>(choice.transition, preset.transition),
@@ -42,7 +44,7 @@ export function selectLaunch(choice: LaunchChoice, preset: LaunchPreset, id: Rec
 
 function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
   const references: ProviderReference[] = [launch.map.entities, launch.movement, launch.character.definition, launch.character.appearance,
-    ...launch.weapons, launch.engineBehavior, launch.combat, launch.inventory, launch.match, launch.transition,
+    ...launch.weapons, ...equipmentProviders(launch.equipment), launch.engineBehavior, launch.combat, launch.inventory, launch.match, launch.transition,
     launch.presentation.hud, launch.presentation.effects, launch.presentation.audio, ...launch.execution.map(module => module.owner)];
   if (launch.campaign.kind === "campaign") references.push(launch.campaign.mission, launch.campaign.gamecode);
   if (launch.enemies.kind === "replace") references.push(...launch.enemies.definitions);
@@ -66,6 +68,7 @@ async function orderForContent(catalog: InstalledCatalog, plan: ResolvedMountPla
 
 export async function resolveLaunch(options: ResolveLaunchOptions): Promise<ExecutableRecipe> {
   const selected = selectLaunch(options.choice, options.preset, options.id);
+  validateEquipment(selected.equipment, options.catalog);
   const required = requiredContent(selected);
   for (const content of required) options.catalog.require(content);
   const executionRoles = new Set<string>();
@@ -103,6 +106,20 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
     return resolved;
   };
   const geometry = await resolveResource(selected.map.geometry);
+  const equipmentRequests = equipmentResources(selected.equipment);
+  for (const content of new Set(equipmentRequests.map(request => request.content))) {
+    const order = await orderForContent(options.catalog, mounted.plan, content);
+    const allowed = await options.catalog.mountsFor(content);
+    using equipmentMounts = await openMountPlan({ ...mounted.plan, id: createMountPlanId("equipment", Buffer.from(content).toString("hex")),
+      defaultOrder: order, prefixOrders: [] }, options.mounts);
+    for (const request of equipmentRequests.filter(request => request.content === content)) {
+      const resource = await equipmentMounts.resolve(request.path);
+      if (resource === null || !allowed.some(mount => mountPath(mount) === mountPath(resource.provenance.mount))) {
+        throw new Error(`Required equipment resource is absent from its selected content and base: ${content}/${request.path}`);
+      }
+      resources.set(resource.id, resource);
+    }
+  }
   const execution: ResolvedExecutionModule[] = [];
   for (const module of selected.execution) {
     switch (module.kind) {
@@ -112,6 +129,12 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, true) }); break;
     }
   }
-  return { ...selected, schemaVersion: 1, map: { geometry, entities: selected.map.entities }, execution,
+  const equipmentIds = new Set<string>(Object.values(EQUIPMENT_PROVIDERS));
+  const timing = [...selected.timing.filter(entry => !equipmentIds.has(entry.provider)), ...equipmentTiming(selected.equipment)];
+  const equipmentOrder = equipmentProviders(selected.equipment).map(source => source.provider);
+  const ordering = selected.ordering.kind === "mixed"
+    ? { ...selected.ordering, providers: [...selected.ordering.providers.filter(provider => !equipmentIds.has(provider)), ...equipmentOrder] }
+    : selected.ordering;
+  return { ...selected, schemaVersion: 1, map: { geometry, entities: selected.map.entities }, execution, timing, ordering,
     mounts: mounted.plan, resources: [...resources.values()] };
 }

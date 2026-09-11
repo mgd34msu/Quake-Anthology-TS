@@ -41,10 +41,21 @@ function emit(state: { readonly expiresAt: number }, input: HandActionInput, hos
   return { kind: "recovering", readyAt: handDeadline(input.now, handRecoverySeconds(input), input.edition), requireRelease: held && input.held };
 }
 
-function handFrameDeadline(input: HandActionInput): number {
+function handFrameDeadline(input: HandActionInput, from = input.now): number {
   // Source frames land on the simulation clock. Round frame deadlines to milliseconds
   // so binary64 0.2 + 0.1 does not skip the classic turn at 0.3.
-  return (Math.round(input.now * 1000) + Math.round(handFrameSeconds(input) * 1000)) / 1000;
+  return (Math.round(from * 1000) + Math.round(handFrameSeconds(input) * 1000)) / 1000;
+}
+
+function release(state: { readonly expiresAt: number }, input: HandActionInput, host: HandActionHost, releasedAt: number): HandAction {
+  if (input.edition === "rerelease") return emit(state, input, host, false);
+  const throwAt = handFrameDeadline(input, releasedAt);
+  return input.now < throwAt ? { kind: "releasing", expiresAt: state.expiresAt, throwAt } : emit(state, input, host, false);
+}
+
+function cook(state: Extract<HandAction, { readonly kind: "cooking" }>, input: HandActionInput, host: HandActionHost): HandAction {
+  if (input.now >= state.expiresAt) return emit(state, input, host, true);
+  return !input.released && input.held ? state : release(state, input, host, input.now);
 }
 
 /** Advance once per source simulation turn. The host owns the actor and reservation.
@@ -67,22 +78,21 @@ export function stepHandAction(state: HandAction, input: HandActionInput, host: 
       return { kind: "preparing", frame: input.edition === "classic" ? 1 : 2,
         nextAt: handFrameDeadline(input), releaseQueued: input.released || !input.held };
     case "preparing": {
-      const releaseQueued = state.releaseQueued || input.released || !input.held;
-      if (input.now < state.nextAt) return { ...state, releaseQueued };
-      if (state.frame === 5) host.sound("cock");
-      if (state.frame < 11) return { kind: "preparing", frame: state.frame + 1,
-        nextAt: handFrameDeadline(input), releaseQueued };
+      let frame = state.frame, nextAt = state.nextAt;
+      while (input.now >= nextAt && frame < 11) {
+        if (frame === 5) host.sound("cock");
+        frame++;
+        nextAt = handFrameDeadline(input, nextAt);
+      }
+      if (input.now < nextAt) return { kind: "preparing", frame, nextAt,
+        releaseQueued: state.releaseQueued || input.released || !input.held };
       host.sound("cook-start");
-      const cooking: HandAction = { kind: "cooking", expiresAt: handFuseDeadline(input.now, input.edition) };
-      if (!releaseQueued) return cooking;
-      return input.edition === "rerelease" ? emit(cooking, input, host, false)
-        : { kind: "releasing", expiresAt: cooking.expiresAt, throwAt: handFrameDeadline(input) };
+      const cooking: Extract<HandAction, { readonly kind: "cooking" }> = { kind: "cooking", expiresAt: handFuseDeadline(nextAt, input.edition) };
+      // A previously observed tap can complete its throw animation during catch-up.
+      // A release first observed on this turn belongs to now, not the earlier hold frame.
+      return state.releaseQueued ? release(cooking, input, host, nextAt) : cook(cooking, input, host);
     }
-    case "cooking":
-      if (input.now >= state.expiresAt) return emit(state, input, host, true);
-      if (!input.released && input.held) return state;
-      return input.edition === "rerelease" ? emit(state, input, host, false)
-        : { kind: "releasing", expiresAt: state.expiresAt, throwAt: handFrameDeadline(input) };
+    case "cooking": return cook(state, input, host);
     case "releasing": return input.now < state.throwAt ? state : emit(state, input, host, false);
     case "recovering": {
       const requireRelease = state.requireRelease && input.held && !input.released;
