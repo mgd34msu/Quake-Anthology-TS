@@ -350,7 +350,7 @@ export class WorldScene {
         cull: batch.state.cull === "none" ? "none" : batch.state.cull === "front" ? "back" : "front" } })) : batches }];
     }
     const material = surface.material;
-    if (material.kind === "q2" && (material.surfaceFlags & 128) !== 0) return [];
+    if (material.kind === "q2" && (material.surfaceFlags & 128) !== 0 && (material.surfaceFlags & 4) === 0) return [];
     if (surface.plane !== null && dot3(context.localViewOrigin, surface.plane.normal) - surface.plane.distance < -0.01) return [];
     if (surface.q1Sky !== null) return [{ kind: "draw", batches: this.q1SkyBatches(surface, surface.q1Sky, input, context) }];
     if (material.kind === "q2" && (material.surfaceFlags & 4) !== 0) return this.q2SkyOperations(surface.geometry, input, context);
