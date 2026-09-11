@@ -52,7 +52,12 @@ function readCampaign(reader: SaveReader): CampaignSelection {
 }
 export function readCharacter(reader: SaveReader): CharacterSelection { return { definition: readProvider(reader.field("definition")), appearance: readProvider(reader.field("appearance")) }; }
 function readEnemies(reader: SaveReader): EnemySelection {
-  return reader.field("kind").choice("map-defined", "replace") === "map-defined" ? { kind: "map-defined" } : { kind: "replace", definitions: reader.field("definitions").list(readProvider) };
+  if (reader.field("kind").choice("map-defined", "replace") === "map-defined") return { kind: "map-defined" };
+  const definition = (value: SaveReader) => ({ source: readProvider(value.field("source")), classname: value.field("classname").string() });
+  const overrides = reader.field("byClassname");
+  if (overrides.value === null || typeof overrides.value !== "object" || Array.isArray(overrides.value) || overrides.value instanceof Uint8Array) return overrides.fail("expected authored classname replacements");
+  return { kind: "replace", default: definition(reader.field("default")),
+    byClassname: Object.fromEntries(Object.keys(overrides.value).map(name => [name, definition(overrides.field(name))])) };
 }
 function readPresentation(reader: SaveReader): PresentationSelection {
   return { assets: readContentId(reader.field("assets")), hud: readProvider(reader.field("hud")), effects: readProvider(reader.field("effects")), audio: readProvider(reader.field("audio")) };
@@ -138,7 +143,7 @@ export function readEquipment(reader: SaveReader): EquipmentSelection {
   return { grapple: readGrapple(reader.field("grapple")), handGrenades: readHandGrenades(reader.field("handGrenades")) };
 }
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
-  return { schemaVersion: reader.field("schemaVersion").literal(2), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
+  return { schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
     map: { geometryContent: readContentId(reader.field("map").field("geometryContent")), geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
     campaign: readCampaign(reader.field("campaign")), movement: readProvider(reader.field("movement")), character: readCharacter(reader.field("character")),
     weapons: reader.field("weapons").list(readProvider), equipment: readEquipment(reader.field("equipment")), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),

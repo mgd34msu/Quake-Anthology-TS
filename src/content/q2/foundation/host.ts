@@ -11,6 +11,7 @@ import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 import type { Q2CallbackDefinitions, Q2SourceCallbacks } from "./callbacks.ts";
 import type { Q2EntityServices } from "./entity-services.ts";
+import type { AuthoredTarget } from "../../monsters/authored.ts";
 
 export type Q2Edition = "classic" | "rerelease";
 export interface Q2GameOptions {
@@ -81,6 +82,7 @@ export interface Q2LandmarkCarry {
 }
 
 export interface Q2FoundationHost {
+  monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;
   registerEntity?(entity: Q2Entity, services: Q2EntityServices): undefined;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
@@ -243,7 +245,8 @@ export interface Q2GameServices {
   motion(entity: Q2Entity, kind: Q2Motion["kind"]): undefined;
   schedule(entity: Q2Entity, delaySeconds: number, think: Q2Think): undefined;
   cancel(entity: Q2Entity): undefined;
-  useTargets(entity: Q2Entity, activator: ActorId | null, ignoreDelay?: boolean): undefined;
+  useTargets(entity: AuthoredTarget, activator: ActorId | null, ignoreDelay?: boolean): undefined;
+  monsterTarget(actor: ActorId | null): import("../../monsters/target.ts").MonsterTargetObservation | null;
   targets(name: string): readonly Q2Entity[];
   pickTarget(name: string): Q2Entity | null;
   show(entity: Q2Entity): undefined;

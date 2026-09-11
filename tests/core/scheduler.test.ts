@@ -4,6 +4,31 @@ import type { ClockProfile, FrameContext, FrameOrdering } from "../../src/contra
 import { FrameScheduler, compareInvocationOrder, thinkCallbackTime } from "../../src/world/scheduler.ts";
 import { SessionActorRegistry } from "../../src/world/actors/index.ts";
 
+test("map-owned actors require their registered execution clock without changing source order", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("selected monster scheduler"));
+  const creature = actors.allocateAtSource("q1:game", 2, "q1:encounter");
+  const later = actors.allocateAtSource("q1:game", 9, "q1:door");
+  const calls: string[] = [];
+  const scheduler = new FrameScheduler({ actors,
+    ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } },
+    clocks: [{ provider: "q2:monsters/rerelease/baseq2", profile: { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" } }],
+    sourceSlot: actor => actors.sourceOf(actor)?.slot ?? null,
+    executionProvider: actor => actor.equals(creature.id) ? "q2:monsters/rerelease/baseq2" : null,
+    resolve: provider => (actor, frame) => { calls.push(`${provider}/${actors.sourceOf(actor.id)?.slot}/${frame.time.kind}`); return undefined; },
+  });
+  const timing = { due: { kind: "milliseconds", value: 1000 }, boundary: "during-physics", order: { actor: creature.id, provider: creature.owner, sequence: 0 } } satisfies Parameters<typeof scheduler.schedule>[2];
+  expect(() => scheduler.schedule(creature, "world:think", timing)).toThrow("registered continuation");
+  scheduler.schedule(creature, "world:think", { ...timing, executionProvider: "q2:monsters/rerelease/baseq2" });
+  scheduler.schedule(later, "world:think", { due: { kind: "seconds", value: 1 }, boundary: "during-physics", order: { actor: later.id, provider: later.owner, sequence: 0 } });
+  scheduler.advance([
+    { provider: "q1:game", frame: { frame: 1, phase: "entity-physics", time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.025 } } },
+    { provider: "q2:monsters/rerelease/baseq2", frame: { frame: 1, phase: "entity-physics", time: { kind: "milliseconds", value: 1000 }, elapsed: { kind: "milliseconds", value: 25 } } },
+  ], "during-physics");
+  expect(calls).toEqual(["q2:monsters/rerelease/baseq2/2/milliseconds", "q1:game/9/seconds"]);
+  expect(actors.sourceOf(creature.id)).toEqual({ provider: "q1:game", slot: 2 });
+  scheduler.close(); actors.close();
+});
+
 test("think deadlines retain NetQuake, classic Q2 and rerelease timing", () => {
   const frame: FrameContext = { frame: 10, phase: "entity-physics",
     time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.05 } };

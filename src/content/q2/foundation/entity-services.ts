@@ -9,6 +9,7 @@ import { freeQ2Entity, Q2SourceCallbacks } from "./callbacks.ts";
 import { restoreQ2Actor, saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "./checkpoint.ts";
 import type { Q2EntityCheckpoint, Q2FoundationCheckpoint } from "./checkpoint.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
+import type { AuthoredTarget } from "../../monsters/authored.ts";
 
 const MASK_SOLID = 3;
 const delayedUse: Q2Think = (entity, game) => { game.useTargets(entity, entity.activator); game.remove(entity); return undefined; };
@@ -16,6 +17,7 @@ const delayedUse: Q2Think = (entity, game) => { game.useTargets(entity, entity.a
 /** One provider's actors and source callbacks; the session still owns the frame and all mutation authorities. */
 export class Q2EntityServices implements Q2GameServices {
   readonly entities = new Map<ActorId, Q2Entity>();
+  readonly authoredTargets = new Map<ActorId, AuthoredTarget>();
   readonly sourceCallbacks = new Q2SourceCallbacks();
   readonly counters = { totalSecrets: 0, foundSecrets: 0, totalGoals: 0, foundGoals: 0, totalMonsters: 0, killedMonsters: 0, serverFlags: 0 };
   private nextSourceSlot: number;
@@ -34,7 +36,7 @@ export class Q2EntityServices implements Q2GameServices {
       if (entity !== undefined) this.unsupported.delete(entity);
       const slot = this.sourceSlots.get(actor.id);
       if (slot !== undefined && slot > options.maxClients) this.freedSlots.set(slot, host.now());
-      this.sourceSlots.delete(actor.id); this.entities.delete(actor.id);
+      this.sourceSlots.delete(actor.id); this.entities.delete(actor.id); this.authoredTargets.delete(actor.id);
       return undefined;
     });
   }
@@ -101,9 +103,13 @@ export class Q2EntityServices implements Q2GameServices {
 
   spawn(fields: Q2SpawnFields): Q2Entity {
     const entity = this.allocate(fields);
+    return this.spawnEntity(entity);
+  }
+
+  spawnEntity(entity: Q2Entity): Q2Entity {
     for (const module of this.modules) if (module.spawn(entity, this)) return entity;
     this.unsupported.add(entity);
-    this.host.diagnostic(`Q2 spawn handler not yet imported: ${fields.classname} at authored entity ${fields.ordinal}`);
+    this.host.diagnostic(`Q2 spawn handler not yet imported: ${entity.classname} at authored entity ${entity.spawn.ordinal}`);
     return entity;
   }
 
@@ -129,14 +135,18 @@ export class Q2EntityServices implements Q2GameServices {
   }
 
   private allocate(fields: Q2SpawnFields): Q2Entity {
+    return this.attach(this.allocateActor(fields), fields);
+  }
+
+  protected allocateActor(fields: Q2SpawnFields, definition: `${string}:${string}` = `q2:${fields.classname}`): OwnedActor {
     const reusable = [...this.freedSlots].sort(([a], [b]) => a - b).find(([, freed]) => freed < 2 || this.host.now() - freed > 0.5);
     const slot = fields.classname === "worldspawn" ? 0 : reusable?.[0] ?? this.nextSourceSlot++;
     this.freedSlots.delete(slot);
-    const actor = this.host.actors.allocateAtSource(this.options.provider, slot, `q2:${fields.classname}`);
+    const actor = this.host.actors.allocateAtSource(this.options.provider, slot, definition);
     this.sourceSlots.set(actor.id, slot);
     const angles = fields.values.has("angles") ? vectorField(fields, "angles") : { x: 0, y: numberField(fields, "angle"), z: 0 };
     this.host.bodies.create(actor, { origin: vectorField(fields, "origin"), angles, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-    return this.attach(actor, fields);
+    return actor;
   }
 
   /** Register a continuation around an existing shared actor and body, without spawning or resetting authority state. */
@@ -206,6 +216,14 @@ export class Q2EntityServices implements Q2GameServices {
     const owner = actor === null ? null : this.host.actors.resolveOwned(actor);
     return owner === null ? null : this.entities.get(owner.id) ?? null;
   }
+  monsterTarget(actor: ActorId | null) {
+    if (actor === null) return null;
+    if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);
+    const entity = this.entity(actor);
+    return entity === null ? null : { viewHeight: entity.viewHeight,
+      notarget: (entity.flags & (32 | (this.options.edition === "rerelease" ? 0x1008000 : 0))) !== 0,
+      invisible: false, lightLevel: entity.lightLevel, hostileUntil: null };
+  }
 
   body(entity: Q2Entity): BodyState {
     const body = this.host.bodies.read(entity.actor.id);
@@ -263,7 +281,14 @@ export class Q2EntityServices implements Q2GameServices {
     return targets[Math.floor(this.host.random() * targets.length)] ?? null;
   }
 
-  useTargets(entity: Q2Entity, activator: ActorId | null, ignoreDelay = false): undefined {
+  private targetActors(name: string): readonly AuthoredTarget[] {
+    if (name === "") return [];
+    return [...this.entities.values(), ...this.authoredTargets.values()]
+      .filter(entity => entity.targetname === name && this.host.actors.isLive(entity.actor.id))
+      .sort((a, b) => (this.host.actors.sourceOf(a.actor.id)?.slot ?? a.actor.id.slot) - (this.host.actors.sourceOf(b.actor.id)?.slot ?? b.actor.id.slot));
+  }
+
+  useTargets(entity: AuthoredTarget, activator: ActorId | null, ignoreDelay = false): undefined {
     if (entity.delay !== 0 && !ignoreDelay) {
       const delayed = this.create("DelayedUse");
       delayed.activator = activator; delayed.message = entity.message; delayed.target = entity.target; delayed.killtarget = entity.killtarget;
@@ -274,17 +299,18 @@ export class Q2EntityServices implements Q2GameServices {
       const body = this.host.bodies.read(activator);
       if (body !== null) this.host.emit({ kind: "sound", actor: activator, origin: body.origin, path: "misc/talk1.wav", channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" });
     }
-    for (const target of this.targets(entity.killtarget)) {
-      this.remove(target);
+    for (const target of this.targetActors(entity.killtarget)) {
+      const native = this.entity(target.actor.id);
+      if (native === null) { if (this.host.actors.isLive(target.actor.id)) this.host.actors.release(target.actor); } else this.remove(native);
       if (!this.host.actors.isLive(entity.actor.id)) return undefined;
     }
     // Resolve each next slot after callbacks: nested spawns and removals retain G_Find traversal behavior.
     let after = -1;
     for (;;) {
-      const target = this.targets(entity.target).find(candidate => (this.host.actors.sourceOf(candidate.actor.id)?.slot ?? candidate.actor.id.slot) > after);
+      const target = this.targetActors(entity.target).find(candidate => (this.host.actors.sourceOf(candidate.actor.id)?.slot ?? candidate.actor.id.slot) > after);
       if (target === undefined) break;
       after = this.host.actors.sourceOf(target.actor.id)?.slot ?? target.actor.id.slot;
-      if (target === entity) this.host.diagnostic(`Q2 ${entity.classname} targets itself`);
+      if (target.actor.id.equals(entity.actor.id)) this.host.diagnostic(`Q2 ${entity.classname} targets itself`);
       else if (!(target.classname === "func_areaportal" && (entity.classname === "func_door" || entity.classname === "func_door_rotating"))) {
         this.host.callbacks.use(target.actor, entity.actor.id, activator);
       }

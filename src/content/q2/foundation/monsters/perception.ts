@@ -91,7 +91,7 @@ export class MonsterPerception {
   private sourceCombatRules: "base" | "rogue" = "base";
   private sourceCombatHooks: Q2MonsterSourceCombatHooks | null = null;
   private hintHooks: Q2MonsterHintHooks | null = null;
-  constructor(private readonly contexts: ReadonlyMap<ActorId, MonsterContext>) {}
+  constructor(private readonly contexts: ReadonlyMap<ActorId, MonsterContext>, private readonly mission: (actor: ActorId) => MonsterMission | null = () => null) {}
   setSourceCombatRules(rules: "base" | "rogue", hooks: Q2MonsterSourceCombatHooks | null): undefined {
     this.sourceCombatRules = rules; this.sourceCombatHooks = hooks; return undefined;
   }
@@ -152,7 +152,8 @@ export class MonsterPerception {
       if (body === null || health(game, player) <= 0) continue;
       const trail = this.trails.get(player) ?? [];
       const previous = trail.at(-1);
-      const playerEye = { ...body.origin, z: body.origin.z + (game.entity(player)?.viewHeight ?? 22) };
+      const observed = game.monsterTarget(player); if (observed === null) continue;
+      const playerEye = { ...body.origin, z: body.origin.z + observed.viewHeight };
       if (previous === undefined || game.host.trace({ start: playerEye, end: previous.origin, bounds: null, ignore: player, mask: MASK_OPAQUE }).fraction !== 1) {
         const oldOrigin = this.playerOrigins.get(player) ?? body.origin;
         trail.push({ origin: oldOrigin, time: game.host.now(), yaw: previous === undefined ? body.angles.y : vectorAngles(subtract(oldOrigin, previous.origin)).y });
@@ -185,7 +186,10 @@ export class MonsterPerception {
     return undefined;
   }
 
-  private targetable(game: Q2GameServices, actor: ActorId): boolean { return game.host.actors.isLive(actor) && health(game, actor) > 0 && ((game.entity(actor)?.flags ?? 0) & (FL_NOTARGET | (game.options.edition === "rerelease" ? 0x1008000 : 0))) === 0; }
+  private targetable(game: Q2GameServices, actor: ActorId): boolean {
+    const observed = game.monsterTarget(actor);
+    return game.host.actors.isLive(actor) && health(game, actor) > 0 && observed !== null && !observed.notarget;
+  }
 
   private visualCandidate(context: MonsterContext, actor: ActorId): boolean {
     const { game, state, entity } = context;
@@ -197,7 +201,8 @@ export class MonsterPerception {
       if (distance > 940) return false;
       return distance <= 440 && (this.hostile.get(actor) ?? -1) >= game.host.now() && (entity.spawnflags & 1) === 0 || visible(context, actor) && (distance <= 20 || inFront(context, actor));
     }
-    if (distance >= 1000 || (game.entity(actor)?.lightLevel ?? 128) <= 5 || !visible(context, actor)) return false;
+    const observed = game.monsterTarget(actor);
+    if (observed === null || distance >= 1000 || observed.lightLevel !== null && observed.lightLevel <= 5 || !visible(context, actor)) return false;
     if (distance >= 80 && distance < 500 && (this.contexts.get(actor)?.state.showHostile ?? this.hostile.get(actor) ?? -1) < game.host.now() && !inFront(context, actor)) return false;
     if (distance >= 500 && !inFront(context, actor)) return false;
     return !state.goodGuy;
@@ -289,6 +294,12 @@ export class MonsterPerception {
     }
     state.lastSighting = enemy.origin; state.trailTime = game.host.now();
     if (this.sourceCombatRules === "rogue" && game.options.edition === "classic") state.blindFireTarget = enemy.origin;
+    const mission = this.mission(entity.actor.id);
+    if (mission !== null) {
+      mission.foundTarget();
+      const route = mission.combatRoute();
+      if (route.goal !== null) { state.combatPoint = true; state.moveTarget = entity.goal = route.goal; state.pauseTime = 0; return context.run(); }
+    }
     if (state.combatPoint) return undefined;
     if (state.combatTarget.length === 0) return this.huntTarget(context);
     const target = game.pickTarget(state.combatTarget);
@@ -468,3 +479,4 @@ export class MonsterPerception {
     return state.lastSighting;
   }
 }
+import type { MonsterMission } from "../../../monsters/authored.ts";

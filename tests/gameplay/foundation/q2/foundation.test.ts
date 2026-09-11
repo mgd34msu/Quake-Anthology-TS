@@ -11,7 +11,7 @@ import { createQ2MoverModule } from "../../../../src/content/q2/foundation/mover
 import { encodeQ2FoundationCheckpoint, decodeQ2FoundationCheckpoint } from "../../../../src/persistence/q2-foundation.ts";
 import { encodeQ2ItemsCheckpoint, decodeQ2ItemsCheckpoint } from "../../../../src/persistence/q2-items.ts";
 import { encodeQ2MoversCheckpoint, decodeQ2MoversCheckpoint } from "../../../../src/persistence/q2-movers.ts";
-import { Q2Monsters } from "../../../../src/content/q2/foundation/monsters/index.ts";
+import { Q2Monsters, placeTriggeredMonster } from "../../../../src/content/q2/foundation/monsters/index.ts";
 import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.ts";
 import { checkBottom, walkMove } from "../../../../src/content/q2/foundation/monsters/ai.ts";
 import type { TraceResult } from "../../../../src/contracts/scene.ts";
@@ -74,6 +74,43 @@ function targetGame(selected: Q2GameOptions = options) {
 }
 
 describe("Q2 permanent gameplay foundation", () => {
+  test("triggered monster placement clears multiple foreign collision lifetimes", () => {
+    const { game, host, player } = targetGame(options), victims: OwnedActor[] = [];
+    const body = host.bodies.read(player.id); if (body === null) throw new Error("player body");
+    for (let i = 0; i < 2; i++) {
+      const victim = host.actors.allocate("q1:monsters/classic/id1", "q1:monster_army"); victims.push(victim);
+      host.bodies.create(victim, body);
+      host.combat.create(victim, { health: 10, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+      host.callbacks.bind(victim, { think: null, touch: null, use: null, pain: null, die: () => host.actors.release(victim) });
+      expect(game.entity(victim.id)).toBeNull();
+    }
+    let traces = 0;
+    host.trace = request => {
+      traces++; const victim = victims.find(candidate => host.actors.isLive(candidate.id));
+      return { kind: "q2", fraction: victim === undefined ? 1 : 0, startSolid: victim !== undefined, allSolid: victim !== undefined, end: request.end,
+        hit: victim === undefined ? { kind: "none" } : { kind: "actor", actor: victim.id }, contact: { kind: "none" }, contents: victim === undefined ? 0 : 0x02000000, surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null };
+    };
+    placeTriggeredMonster(game, player);
+    expect(victims.map(victim => host.actors.isLive(victim.id))).toEqual([false, false]);
+    expect(traces).toBe(5);
+    expect(host.bodies.read(player.id)?.origin.z).toBe(1);
+  });
+  test("authored monster drops use the real owner body and source toss continuation", () => {
+    const { game, host, items, advance } = targetGame(options);
+    const actor = host.actors.allocate("q1:monsters", "q1:monster_army");
+    host.bodies.create(actor, { origin: { x: 40, y: 20, z: 24 }, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
+    expect(game.entity(actor.id)).toBeNull();
+    const dropped = items.dropMonster(actor, game, "Shells");
+    if (dropped === null) throw new Error("Missing source FindItem drop");
+    expect(dropped.classname).toBe("ammo_shells"); expect(dropped.owner).toBe(actor.id);
+    expect(game.body(dropped).origin).toEqual({ x: 40, y: 20, z: 24 });
+    expect(game.body(dropped).velocity).toEqual({ x: 100, y: 0, z: 300 });
+    expect(dropped.count).toBe(0); expect(dropped.motion).toBe("toss"); expect(dropped.nextThink).toBe(1);
+    const saved = () => game.capture().entities.find(entry => entry.actor.slot === dropped.actor.id.slot);
+    expect(saved()?.callbacks.touch).toBe("drop_temp_touch");
+    advance(1);
+    expect(dropped.owner).toBe(actor.id); expect(saved()?.callbacks.touch).toBe("Touch_Item");
+  });
   test("selected Q3 supply consumes retail base1 weapons and preserves Q2 refusal, drops and respawn", async () => {
     const archive = await openArchive(`${import.meta.dir}/../../../../../qfiles/q2/baseq2/pak0.pak`);
     try {

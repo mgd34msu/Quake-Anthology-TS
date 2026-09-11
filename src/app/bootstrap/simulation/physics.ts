@@ -142,6 +142,7 @@ export class SharedPhysics {
     });
     reader.field("flags").list(value => {
       this.flags.set(owner(value.field("actor")), {
+        ...(value.field("teamSlave").value === undefined ? {} : { teamSlave: value.field("teamSlave").boolean() }),
         ...(value.field("alwaysTouch").value === undefined ? {} : { alwaysTouch: value.field("alwaysTouch").boolean() }),
         ...(value.field("fly").value === undefined ? {} : { fly: value.field("fly").boolean() }), ...(value.field("swim").value === undefined ? {} : { swim: value.field("swim").boolean() }),
         ...(value.field("partialGround").value === undefined ? {} : { partialGround: value.field("partialGround").boolean() }), ...(value.field("dead").value === undefined ? {} : { dead: value.field("dead").boolean() }),

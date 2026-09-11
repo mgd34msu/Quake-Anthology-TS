@@ -3,7 +3,7 @@ import { sameActor } from '../../contracts/identity.ts';
 import type { Bounds, Vec3 } from '../../contracts/math.ts';
 import type { BodyState, LinkedBody } from '../../contracts/world.ts';
 import type { DecodedWorld, LeafQueryResult, PointContentsQuery, PointContentsResult, SceneQueries, TraceQuery, TraceResult } from '../../contracts/scene.ts';
-import { adaptPointContents, adaptTraceResult, blocksQ1Contents, contentsBlock, convertContents } from './contents.ts';
+import { adaptPointContents, adaptTraceResult, blocksQ1Contents, actorContents } from './contents.ts';
 import { createQ1Collision } from './q1/index.ts';
 import type { Q1Collision } from './q1/index.ts';
 import { Q2Collision } from './q2.ts';
@@ -119,7 +119,7 @@ export class SharedSceneQueries implements SceneQueries {
                 continue;
             if (query.policy.kind === 'q1' && query.policy.move === 'no-monsters' && collision.shape.kind !== 'model')
                 continue;
-            if (!contentsBlock(collision.contents, collision.family, query.policy))
+            if (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0)
                 continue;
             const actor = this.#currentActor(linked);
             if (actor === null) continue;
@@ -160,7 +160,7 @@ export class SharedSceneQueries implements SceneQueries {
                 const p = { x: query.point.x - state.origin.x, y: query.point.y - state.origin.y, z: query.point.z - state.origin.z }, b = state.bounds;
                 if (p.x < b.min.x || p.y < b.min.y || p.z < b.min.z || p.x > b.max.x || p.y > b.max.y || p.z > b.max.z)
                     continue;
-                added = convertContents(collision.contents, collision.family, query.policy.kind);
+                added = actorContents(collision, query.policy.kind);
             }
             if (result.kind === 'q1') {
                 if (added === -2)

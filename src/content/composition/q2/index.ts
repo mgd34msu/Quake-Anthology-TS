@@ -61,7 +61,7 @@ export class Q2ProductRuntime {
     if (configuration.match !== undefined && configuration.match.kind !== "standard" && configuration.options.mode !== "deathmatch")
       throw new Error("Q2 Tag and DeathBall require deathmatch admission");
     this.weapons = configuration.weapons;
-    this.monsters = new Q2Monsters(this.weapons, { platformState: actor => {
+    this.monsters = new Q2Monsters(this.weapons, { dropItem: (actor, game, classname) => { this.items.dropMonster(actor, game, classname); return undefined; }, platformState: actor => {
       const entity = this.game.entity(actor);
       if (entity === null) return null;
       for (const expansion of this.expansions) {

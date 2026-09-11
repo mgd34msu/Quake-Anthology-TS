@@ -1,7 +1,7 @@
 import type { Bounds, Vec3 } from '../../contracts/math.ts';
 import type { BspPlane, Q1ClipNode, Q1Hull, TraceQuery, TraceResult } from '../../contracts/scene.ts';
 import { createNumericOperations } from '../../core/numeric.ts';
-import { adaptTraceResult, convertContents } from './contents.ts';
+import { adaptTraceResult, actorContents } from './contents.ts';
 import type { SpatialActor } from '../spatial/index.ts';
 import { traceQ1Hull } from './q1/index.ts';
 import { createBoxModel, createCapsuleModel } from './q3/model.ts';
@@ -33,7 +33,7 @@ export function traceActorBody(query: TraceQuery, actor: SpatialActor): TraceRes
     const result = model.transformedTraceSource({ start: query.start, end: query.end, mask: 0x02000000, shape: query.shape.kind === 'point' ? query.shape : { kind: query.shape.kind, mins: query.shape.bounds.min, maxs: query.shape.bounds.max } }, body.state.origin, zero);
     const view = sourceTraceView(result);
     return adaptTraceResult({ kind: 'q3', fraction: result.fraction, end: result.end, startSolid: result.startSolid, allSolid: result.allSolid, sourcePlane: result.plane, contact: view.contact,
-        hit: result.fraction < 1 || result.startSolid ? { kind: 'actor', actor: body.actor } : { kind: 'none' }, contents: convertContents(collision.contents, collision.family, 'q3'), surfaceFlags: 0 }, query.policy);
+        hit: result.fraction < 1 || result.startSolid ? { kind: 'actor', actor: body.actor } : { kind: 'none' }, contents: actorContents(collision, 'q3'), surfaceFlags: 0 }, query.policy);
 }
 function traceQ2Box(query: TraceQuery, actor: SpatialActor): TraceResult {
     const n = createNumericOperations(query.numeric), origin = actor.body.state.origin, bounds = actor.body.state.bounds;
@@ -74,7 +74,7 @@ function traceQ2Box(query: TraceQuery, actor: SpatialActor): TraceResult {
     }
     const startSolid = !misses && !startOut, allSolid = startSolid && !getOut;
     const fraction = misses ? 1 : allSolid && (stationary || query.policy.kind === 'q2' && query.policy.leafContents === 'merged') ? 0 : startSolid ? 1 : enter < leave && enter >= 0 ? enter : 1;
-    const contents = fraction < 1 ? convertContents(actor.collision.contents, actor.collision.family, 'q2') : 0;
+    const contents = fraction < 1 ? actorContents(actor.collision, 'q2') : 0;
     const selectedPlane: BspPlane = misses || startSolid || fraction === 1 ? { normal: zero, distance: 0, type: 0, signbits: 0 } : plane;
     return { kind: 'q2', fraction, end: { x: n.add(query.start.x, n.multiply(fraction, n.subtract(query.end.x, query.start.x))), y: n.add(query.start.y, n.multiply(fraction, n.subtract(query.end.y, query.start.y))), z: n.add(query.start.z, n.multiply(fraction, n.subtract(query.end.z, query.start.z))) }, startSolid, allSolid,
         contact: fraction < 1 && !allSolid ? { kind: 'plane', plane: selectedPlane } : { kind: 'none' }, sourcePlane: selectedPlane, hit: fraction < 1 || startSolid ? { kind: 'actor', actor: actor.body.actor } : { kind: 'none' }, contents, surface: null,

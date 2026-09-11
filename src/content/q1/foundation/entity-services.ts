@@ -23,6 +23,7 @@ import { registerMoverCallbacks } from "./movers.ts";
 import { registerSpawnCallbacks } from "./spawns.ts";
 import { registerMonsterCallbacks } from "./monsters.ts";
 import { registerWeaponCallbacks } from "./weapons.ts";
+import type { AuthoredTarget, MonsterMission } from "../../monsters/authored.ts";
 
 /** Q1 source entity continuations use the session's authoritative bodies, combat and scheduling. */
 export class Q1EntityServices {
@@ -61,6 +62,9 @@ export class Q1EntityServices {
   private weaponOrderOwner: string | null = null;
   readonly stateExtensions = new Map<string, Q1StateExtension>();
   readonly entities = new Map<OwnedActor, Q1Actor>();
+  readonly authoredTargets = new Map<ActorId, AuthoredTarget>();
+  readonly monsterMissions = new Map<ActorId, MonsterMission>();
+  authoredPathFollower: ((mover: ActorId) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null): undefined } | null) | null = null;
   readonly players = new Map<OwnedActor, Q1PlayerState>();
   time = 0;
   frameSeconds = 0;
@@ -91,7 +95,7 @@ export class Q1EntityServices {
     this.named.register("SUB_Null", { action: () => undefined });
     this.named.register("DelayThink", { action: (game, entity) => { game.useTargets(entity, entity.activator); return game.remove(entity); } });
     registerMoverCallbacks(this); registerSpawnCallbacks(this); registerPickupCallbacks(this); registerWeaponCallbacks(this); registerMonsterCallbacks(this);
-    host.actors.onRelease(actor => { this.entities.delete(actor); this.players.delete(actor); host.cancelThink(actor); return undefined; });
+    host.actors.onRelease(actor => { this.entities.delete(actor); this.authoredTargets.delete(actor.id); this.monsterMissions.delete(actor.id); this.players.delete(actor); host.cancelThink(actor); return undefined; });
   }
 
   registerDamageSourceEffects(id: string, effects: Q1DamageSourceEffects): undefined {
@@ -334,16 +338,22 @@ export class Q1EntityServices {
     return this.host.emit({ kind: "effect", effect, origin, actor, amount });
   }
   find(targetname: string): readonly Q1Actor[] { return targetname === "" ? [] : [...this.entities.values()].filter(entity => entity.targetname === targetname); }
-  useTargets(entity: Q1Actor, activator: ActorId | null): undefined {
+  private targetActors(name: string): readonly AuthoredTarget[] {
+    if (name === "") return [];
+    return [...this.entities.values(), ...this.authoredTargets.values()]
+      .filter(entity => entity.targetname === name && this.host.actors.isLive(entity.actor.id))
+      .sort((a, b) => (this.host.actors.sourceOf(a.actor.id)?.slot ?? a.actor.id.slot) - (this.host.actors.sourceOf(b.actor.id)?.slot ?? b.actor.id.slot));
+  }
+  useTargets(entity: AuthoredTarget, activator: ActorId | null): undefined {
     if (entity.delay !== 0) {
       const delayed = this.create("DelayedUse"); delayed.target = entity.target; delayed.killtarget = entity.killtarget; delayed.message = entity.message;
       delayed.activator = activator;
       return this.schedule(delayed, entity.delay, this.named.action(delayed, "DelayThink"));
     }
     this.message(activator, entity.message);
-    for (const victim of this.find(entity.killtarget)) this.remove(victim);
+    for (const victim of this.targetActors(entity.killtarget)) if (this.host.actors.isLive(victim.actor.id)) this.host.actors.release(victim.actor);
     // Each use executes synchronously; targets removed by a nested call are not invoked afterward.
-    for (const target of this.find(entity.target)) if (this.live(target)) this.host.callbacks.use(target.actor, entity.actor.id, activator);
+    for (const target of this.targetActors(entity.target)) if (this.host.actors.isLive(target.actor.id)) this.host.callbacks.use(target.actor, entity.actor.id, activator);
     return undefined;
   }
 
@@ -368,6 +378,13 @@ export class Q1EntityServices {
     if (observed !== undefined) return observed;
     const entity = this.entity(actor);
     return { aimedDamage: entity?.aimedDamage ?? false, push: entity?.movement === "push", player: this.isPlayer(actor) };
+  }
+  monsterTarget(actor: ActorId) {
+    if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);
+    const entity = this.entity(actor), player = this.player(actor);
+    if (entity === null && player === null) return null;
+    return { viewHeight: player === null ? 25 : 22, notarget: ((entity?.movementFlags ?? 0) & 128) !== 0,
+      invisible: (player?.powerups.get("invisibility") ?? 0) > this.time, lightLevel: null, hostileUntil: player?.hostileUntil ?? null };
   }
   canDamage(target: ActorId, inflictor: ActorId): boolean {
     const targetBody = this.host.bodies.read(target), source = this.host.bodies.read(inflictor); if (targetBody === null || source === null) return false;

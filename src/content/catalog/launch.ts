@@ -5,6 +5,7 @@ import type { OpenMountOptions } from "../mounts/index.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import type { InstalledCatalog } from "./index.ts";
 import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
+import { monsterResources, monsterSources, selectedMonsterTiming, validateMonsters } from "./monsters.ts";
 
 export interface LaunchPreset extends Omit<ExecutableRecipe, "schemaVersion" | "preset" | "map" | "execution" | "mounts" | "resources"> {
   readonly map: MapSelection;
@@ -47,7 +48,7 @@ function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
     ...launch.weapons, ...equipmentProviders(launch.equipment), launch.engineBehavior, launch.combat, launch.inventory, launch.match, launch.transition,
     launch.presentation.hud, launch.presentation.effects, launch.presentation.audio, ...launch.execution.map(module => module.owner)];
   if (launch.campaign.kind === "campaign") references.push(launch.campaign.mission, launch.campaign.gamecode);
-  if (launch.enemies.kind === "replace") references.push(...launch.enemies.definitions);
+  if (launch.enemies.kind === "replace") references.push(launch.enemies.default.source, ...Object.values(launch.enemies.byClassname).map(definition => definition.source));
   return [...new Set([launch.map.geometry.content, launch.presentation.assets, ...references.map(reference => reference.content),
     ...launch.execution.flatMap(module => module.kind === "typescript" ? [] : [module.artifact.content])])];
 }
@@ -69,6 +70,7 @@ async function orderForContent(catalog: InstalledCatalog, plan: ResolvedMountPla
 export async function resolveLaunch(options: ResolveLaunchOptions): Promise<ExecutableRecipe> {
   const selected = selectLaunch(options.choice, options.preset, options.id);
   validateEquipment(selected.equipment, options.catalog);
+  validateMonsters(selected.enemies, options.catalog);
   const required = requiredContent(selected);
   for (const content of required) options.catalog.require(content);
   const executionRoles = new Set<string>();
@@ -104,18 +106,23 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
     return resolved;
   };
   const geometry = await resolveResource(selected.map.geometry, "map");
-  const equipmentRequests = equipmentResources(selected.equipment);
-  for (const content of new Set(equipmentRequests.map(request => request.content))) {
-    const order = await orderForContent(options.catalog, mounted.plan, content);
-    const allowed = await options.catalog.mountsFor(content);
-    using equipmentMounts = await openMountPlan({ ...mounted.plan, id: createMountPlanId("equipment", Buffer.from(content).toString("hex")),
-      defaultOrder: order, prefixOrders: [] }, options.mounts);
-    for (const request of equipmentRequests.filter(request => request.content === content)) {
-      const resource = await equipmentMounts.resolve(request.path);
-      if (resource === null || !allowed.some(mount => mountPath(mount) === mountPath(resource.provenance.mount))) {
-        throw new Error(`Required equipment resource is absent from its selected content and base: ${content}/${request.path}`);
+  const sourceResources = [
+    { kind: "equipment", requests: equipmentResources(selected.equipment) },
+    { kind: "monster", requests: monsterResources(selected.enemies) },
+  ];
+  for (const group of sourceResources) {
+    for (const content of new Set(group.requests.map(request => request.content))) {
+      const order = await orderForContent(options.catalog, mounted.plan, content);
+      const allowed = await options.catalog.mountsFor(content);
+      using sourceMounts = await openMountPlan({ ...mounted.plan, id: createMountPlanId(group.kind, Buffer.from(content).toString("hex")),
+        defaultOrder: order, prefixOrders: [] }, options.mounts);
+      for (const request of group.requests.filter(request => request.content === content)) {
+        const resource = await sourceMounts.resolve(request.path);
+        if (resource === null || !allowed.some(mount => mountPath(mount) === mountPath(resource.provenance.mount))) {
+          throw new Error(`Required ${group.kind} resource is absent from its selected content and base: ${content}/${request.path}`);
+        }
+        resources.set(resource.id, resource);
       }
-      resources.set(resource.id, resource);
     }
   }
   const execution: ResolvedExecutionModule[] = [];
@@ -127,12 +134,13 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
     }
   }
-  const equipmentIds = new Set<string>(Object.values(EQUIPMENT_PROVIDERS));
-  const timing = [...selected.timing.filter(entry => !equipmentIds.has(entry.provider)), ...equipmentTiming(selected.equipment)];
-  const equipmentOrder = equipmentProviders(selected.equipment).map(source => source.provider);
+  const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...monsterSources.map(source => source.provider)]);
+  const monsterProfiles = selectedMonsterTiming(selected.enemies);
+  const timing = [...selected.timing.filter(entry => !selectedSourceIds.has(entry.provider)), ...equipmentTiming(selected.equipment), ...monsterProfiles];
+  const selectedSourceOrder = [...equipmentProviders(selected.equipment).map(source => source.provider), ...monsterProfiles.map(source => source.provider)];
   const ordering = selected.ordering.kind === "mixed"
-    ? { ...selected.ordering, providers: [...selected.ordering.providers.filter(provider => !equipmentIds.has(provider)), ...equipmentOrder] }
+    ? { ...selected.ordering, providers: [...selected.ordering.providers.filter(provider => !selectedSourceIds.has(provider)), ...selectedSourceOrder] }
     : selected.ordering;
-  return { ...selected, schemaVersion: 2, map: { geometryContent: selected.map.geometry.content, geometry, entities: selected.map.entities }, execution, timing, ordering,
+  return { ...selected, schemaVersion: 3, map: { geometryContent: selected.map.geometry.content, geometry, entities: selected.map.entities }, execution, timing, ordering,
     mounts: mounted.plan, resources: [...resources.values()] };
 }

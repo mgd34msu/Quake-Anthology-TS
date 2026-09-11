@@ -32,6 +32,7 @@ export interface InvocationOrder {
 }
 
 export interface ThinkTiming {
+  readonly executionProvider?: ProviderId;
   readonly due: SourceTime;
   readonly boundary: "before-physics" | "during-physics" | "after-physics";
   readonly order: InvocationOrder;

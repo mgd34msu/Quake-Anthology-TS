@@ -170,6 +170,11 @@ function changelevelTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorI
 function pathTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
         const actor = game.entity(other), monster = actor?.monster;
         if (actor !== null && game.sourcePathTouch(entity, actor)) return undefined;
+        const follower = game.authoredPathFollower?.(other);
+        if (follower != null) {
+          if (follower.targetname !== entity.targetname || follower.enemy !== null) return undefined;
+          return follower.advance(entity.target, game.find(entity.target)[0]?.actor.id ?? null);
+        }
         if (actor === null || actor === undefined || monster === null || monster === undefined || monster.path !== entity.targetname || monster.enemy !== null) return undefined;
         monster.path = entity.target;
         const target = game.find(monster.path)[0];

@@ -11,6 +11,7 @@ export interface SchedulerOptions {
   readonly ordering: FrameOrdering;
   readonly clocks: readonly { readonly provider: ProviderId; readonly profile: ClockProfile }[];
   readonly sourceSlot?: (actor: ActorId) => number | null;
+  readonly executionProvider?: (actor: ActorId) => ProviderId | null;
   readonly resolve: (provider: ProviderId, callback: CallbackId) => ThinkCallback | null;
 }
 
@@ -83,7 +84,11 @@ export class FrameScheduler implements ActorSchedule {
   schedule(actor: OwnedActor, callback: CallbackId, timing: ThinkTiming): undefined {
     this.assertOpen();
     this.assertOwned(actor);
-    this.profile(actor.owner);
+    const executionProvider = timing.executionProvider ?? actor.owner;
+    const registered = this.options.executionProvider?.(actor.id) ?? actor.owner;
+    if (executionProvider !== registered) throw new RangeError("Think execution provider disagrees with the actor's registered continuation");
+    if (executionProvider !== actor.owner && !this.profiles.has(executionProvider)) throw new RangeError("Selected execution requires its registered source clock");
+    this.profile(executionProvider);
     validateTime(timing.due);
     if (!sameActor(actor.id, timing.order.actor) || actor.owner !== timing.order.provider) throw new RangeError("Think order must name its owning actor and provider");
     if (!Number.isSafeInteger(timing.order.sequence) || timing.order.sequence < 0) throw new RangeError("Think invocation sequence must be a nonnegative safe integer");
@@ -125,11 +130,12 @@ export class FrameScheduler implements ActorSchedule {
         return this.result(invocations, actor, "stale");
       }
       if (pending.timing.boundary !== boundary) return this.result(invocations, actor, "boundary");
-      const profile = this.profile(pending.owned.owner);
+      const executionProvider = pending.timing.executionProvider ?? pending.owned.owner;
+      const profile = this.profile(executionProvider);
       const time = thinkCallbackTime(profile, pending.timing.due, frame);
       if (time === null) return this.result(invocations, actor, "not-due");
       this.scheduled.delete(actor.slot);
-      const callback = this.options.resolve(pending.owned.owner, pending.callback);
+      const callback = this.options.resolve(executionProvider, pending.callback);
       if (callback === null) throw new Error(`Unknown think callback: ${pending.callback}`);
       callback(pending.owned, copyFrame({ ...frame, time, phase: "entity-think" }));
       invocations++;
@@ -162,8 +168,9 @@ export class FrameScheduler implements ActorSchedule {
         }
         if (next === null) break;
         cursor = next;
-        const frame = contexts.get(next.owned.owner);
-        if (frame === undefined) throw new Error(`Missing source frame for provider: ${next.owned.owner}`);
+        const executionProvider = next.timing.executionProvider ?? next.owned.owner;
+        const frame = contexts.get(executionProvider);
+        if (frame === undefined) throw new Error(`Missing source frame for provider: ${executionProvider}`);
         results.push({ actor: next.actor, result: this.run(next.actor, frame, boundary) });
       }
     } finally { this.advancing = false; }

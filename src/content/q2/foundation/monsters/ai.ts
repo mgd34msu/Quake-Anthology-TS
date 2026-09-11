@@ -34,7 +34,8 @@ export function enemyBody(context: MonsterContext) { return context.entity.enemy
 export function enemyEye(context: MonsterContext): Vec3 | null {
   const body = enemyBody(context);
   if (body === null) return null;
-  return { ...body.origin, z: body.origin.z + (context.game.entity(context.entity.enemy)?.viewHeight ?? 22) };
+  const observed = context.game.monsterTarget(context.entity.enemy);
+  return observed === null ? null : { ...body.origin, z: body.origin.z + observed.viewHeight };
 }
 
 export function targetDistance(context: MonsterContext): number {
@@ -54,7 +55,8 @@ export function visible(context: MonsterContext, actor = context.entity.enemy): 
   if (target === null) return false;
   const origin = context.game.body(context.entity).origin;
   const start = { ...origin, z: origin.z + context.entity.viewHeight };
-  const end = { ...target.origin, z: target.origin.z + (context.game.entity(actor)?.viewHeight ?? 22) };
+  const observed = context.game.monsterTarget(actor); if (observed === null) return false;
+  const end = { ...target.origin, z: target.origin.z + observed.viewHeight };
   return context.game.host.trace({ start, end, bounds: null, ignore: context.entity.actor.id, mask: MASK_OPAQUE }).fraction === 1;
 }
 

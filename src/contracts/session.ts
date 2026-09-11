@@ -97,6 +97,7 @@ export interface InventoryCheckpoint { readonly actor: SavedActorId; readonly en
 export interface ActorConfigurationCheckpoint extends Omit<ActorConfiguration, "actor"> { readonly actor: SavedActorId; }
 
 export interface ThinkCheckpoint {
+  readonly executionProvider?: ProviderId;
   readonly actor: SavedActorId;
   readonly callback: CallbackId;
   readonly due: SourceTime;

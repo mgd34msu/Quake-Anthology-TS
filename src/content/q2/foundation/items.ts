@@ -205,17 +205,28 @@ export class Q2ItemModule implements Q2SpawnModule {
     const descriptor = this.lookup(itemId);
     if (item === undefined || descriptor === null || !descriptor.droppable
       || game.options.mode === "coop" && !(this.pickupPolicy?.instancedCoop?.(game) ?? false) && descriptor.stayCoop) return null;
-    const dropped = game.create(item.classname);
-    dropped.model = item.model; dropped.owner = self.actor.id; dropped.spawnflags = options.playerDeath ? 0x20000 : 0x10000;
-    dropped.effects = item.rotate ? 1 : 0; dropped.renderFlags = 512 | 0x8000;
     const count = game.host.inventory.count(self.actor.id, itemId);
-    dropped.count = item.kind === "ammo" ? Math.min(count, item.quantity) : 0;
+    return this.dropSource(self.actor, game, item, options, item.kind === "ammo" ? Math.min(count, item.quantity) : 0);
+  }
+
+  dropMonster(actor: OwnedActor, game: Q2GameServices, classname: string): Q2Entity | null {
+    const descriptor = this.lookup(classname), item = descriptor === null ? undefined : this.catalog.get(descriptor.classname);
+    return item === undefined ? null : this.dropSource(actor, game, item, { playerDeath: false }, 0);
+  }
+
+  private dropSource(actor: OwnedActor, game: Q2GameServices, item: Q2ItemDefinition, options: Q2DropOptions, count: number): Q2Entity {
+    const body = game.host.bodies.read(actor.id);
+    if (body === null) throw new Error("Item drop owner has no shared body");
+    const dropped = game.create(item.classname);
+    dropped.model = item.model; dropped.owner = actor.id; dropped.spawnflags = options.playerDeath ? 0x20000 : 0x10000;
+    dropped.effects = item.rotate ? 1 : 0; dropped.renderFlags = 512 | 0x8000;
+    dropped.count = count;
     this.pickups.set(dropped, { item, targetsUsed: false, retained: false, expiresAt: options.expiresAt ?? null });
-    const body = game.body(self), view = game.host.playerViewState(self.actor.id)?.viewAngles ?? body.angles;
+    const view = game.host.playerViewState(actor.id)?.viewAngles ?? body.angles;
     const forward = movedir({ ...view, y: view.y + (options.yawOffset ?? 0) });
     const bounds = { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } };
-    const origin = game.host.isPlayer(self.actor.id)
-      ? game.host.trace({ start: body.origin, end: add(add(body.origin, scale(forward, 24)), { x: 0, y: 0, z: -16 }), bounds, ignore: self.actor.id, mask: 1 }).end
+    const origin = game.host.isPlayer(actor.id)
+      ? game.host.trace({ start: body.origin, end: add(add(body.origin, scale(forward, 24)), { x: 0, y: 0, z: -16 }), bounds, ignore: actor.id, mask: 1 }).end
       : body.origin;
     game.move(dropped, { origin, bounds, velocity: { ...scale(forward, 100), z: 300 } }, false);
     dropped.touch = this.temporaryTouch;

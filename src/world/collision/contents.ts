@@ -1,3 +1,4 @@
+import type { ActorCollision } from '../spatial/index.ts';
 import type { PointContentsResult, TracePolicy, TraceResult, BspPlane } from '../../contracts/scene.ts';
 export type CollisionFamily = 'q1' | 'q2' | 'q3';
 /** Source flags stay in their geometry; only the selected gameplay boundary maps them. */
@@ -48,6 +49,11 @@ export function convertContents(contents: number, from: CollisionFamily, to: Col
             result |= 0x40000000;
     }
     return result | 0;
+}
+export function actorContents(collision: ActorCollision, to: CollisionFamily): number {
+    if (collision.family === 'q1' && collision.shape.kind !== 'model' && to !== 'q1')
+        return collision.deadMonster ? 0x04000000 : 0x02000000;
+    return convertContents(collision.contents, collision.family, to);
 }
 export function contentsBlock(contents: number, family: CollisionFamily, policy: TracePolicy): boolean {
     if (policy.kind === 'q1')

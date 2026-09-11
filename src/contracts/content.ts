@@ -182,9 +182,15 @@ export interface CharacterSelection {
   readonly appearance: ProviderReference;
 }
 
+export interface MonsterDefinitionReference {
+  readonly source: ProviderReference;
+  readonly classname: string;
+}
+
 export type EnemySelection =
   | { readonly kind: "map-defined" }
-  | { readonly kind: "replace"; readonly definitions: readonly ProviderReference[] };
+  | { readonly kind: "replace"; readonly default: MonsterDefinitionReference;
+      readonly byClassname: Readonly<Record<string, MonsterDefinitionReference>> };
 
 export type GrappleSelection =
   | { readonly kind: "disabled" }
@@ -271,7 +277,7 @@ export interface ProviderTiming {
 
 /** Resolved before session construction; renderer and window settings live elsewhere. */
 export interface ExecutableRecipe {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly id: RecipeId;
   readonly preset: RecipeId;
   readonly map: ResolvedMap;

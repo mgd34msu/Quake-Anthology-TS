@@ -53,7 +53,8 @@ export function parseSaveImage(value: unknown): SaveImage {
     combat: reader.field("combat").list(entry => ({ actor: readSavedActor(entry.field("actor")), state: readCombat(entry.field("state")) })),
     inventories: reader.field("inventories").list(entry => ({ actor: readSavedActor(entry.field("actor")), entries: entry.field("entries").list(readInventoryEntry) })),
     configurations: reader.field("configurations").list(entry => ({ actor: readSavedActor(entry.field("actor")), movement: readProvider(entry.field("movement")), character: readCharacter(entry.field("character")), weapons: entry.field("weapons").list(readProvider), inventory: readProvider(entry.field("inventory")) })),
-    thinks: reader.field("thinks").list(entry => ({ actor: readSavedActor(entry.field("actor")), callback: namespaced(entry.field("callback")), due: readTime(entry.field("due")), boundary: entry.field("boundary").choice("before-physics", "during-physics", "after-physics"), provider: namespaced(entry.field("provider")), sequence: entry.field("sequence").integer(0) })),
+    thinks: reader.field("thinks").list(entry => ({ actor: readSavedActor(entry.field("actor")), callback: namespaced(entry.field("callback")), due: readTime(entry.field("due")), boundary: entry.field("boundary").choice("before-physics", "during-physics", "after-physics"), provider: namespaced(entry.field("provider")), sequence: entry.field("sequence").integer(0),
+      ...(entry.field("executionProvider").value === undefined ? {} : { executionProvider: namespaced(entry.field("executionProvider")) }) })),
     providers: reader.field("providers").list(entry => ({ provider: namespaced(entry.field("provider")), schema: namespaced(entry.field("schema")), version: entry.field("version").integer(0), bytes: entry.field("bytes").bytes() })),
     guests: reader.field("guests").list(readGuest) };
 }

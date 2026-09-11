@@ -61,7 +61,8 @@ function machineGun(context: MonsterContext): undefined {
   const start = projectFlash(context, muzzleOffset(game.options.edition, flash));
   let forward = anglesVectors(game.body(entity).angles).forward;
   if (normal && enemy !== null) {
-    const height = game.entity(entity.enemy)?.viewHeight ?? 22;
+    const observed = game.monsterTarget(entity.enemy); if (observed === null) return undefined;
+    const height = observed.viewHeight;
     if (!rerelease) forward = normalize(subtract(add(add(enemy.origin, scale(enemy.velocity, -0.2)), { x: 0, y: 0, z: height }), start));
     else {
       const eye = add(enemy.origin, { x: 0, y: 0, z: height });
