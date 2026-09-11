@@ -729,8 +729,7 @@ export class SharedSimulation implements Simulation {
         restartSession: (map, flags) => { this.q1Restart = true; this.q1Campaign.flags = flags; this.transitions.push({ kind: "campaign-level", campaign, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }); return undefined; },
         finishCampaign: () => { this.transitions.push({ kind: "campaign-complete", campaign, gates: [] }); return undefined; },
       };
-      const selectedProgram = content.split(":")[2];
-    const program = selectedProgram === "ctf" || selectedProgram === "lmctf" ? "baseq2" : selectedProgram;
+      const program = content.split(":")[2];
       if (program !== "id1" && program !== "hipnotic" && program !== "rogue" && program !== "dopa" && program !== "mg1" && program !== "mg3" && program !== "ctf") throw new Error(`Unsupported Q1 source program ${program}`);
       const composition = createQ1SourceComposition(host, { edition: content.includes(":rerelease:") ? "rerelease" : "classic", skill: this.q1Campaign.skill,
         deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", maxClients: this.options.maxClients,
