@@ -16,6 +16,7 @@ export interface ActorTraceResult extends Omit<ServerTraceResult, "entityNum"> {
 export interface ActorSpatialQueries {
   areaActors(bounds: Bounds, maximum: number): readonly ActorId[];
   traceActor(query: ActorTraceQuery): ActorTraceResult;
+  contactActor(bounds: Bounds, actor: ActorId, capsule?: boolean): boolean;
 }
 export interface LinkState { readonly absbounds: Bounds; readonly linked: boolean; readonly linkcount: number; }
 /** Source-shaped operations over the session collision and body owners. No world storage lives here. */

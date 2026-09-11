@@ -3,14 +3,14 @@
 
 import { add3, sub3, vec3 } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
-import type { ServerWorld } from "../base/world.ts";
+import type { ActorSpatialQueries, ServerWorld } from "../base/world.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 import { EntityType, MoveType, Powerup, Team, Weapon, statSchema } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
 import { itemAt, playerTouchesItem } from "../base/shared/items.ts";
 import type { ClientMovementHost } from "./movement-host.ts";
 import { CommandButtons, MoveFlags } from "../base/shared/player-state.ts";
 import type { UserCommand } from "../base/shared/player-state.ts";
-import type { MovementTrace } from "../base/shared/slide-move.ts";
 import { playerStateToEntityState, playerStateToEntityStateExtraPolate } from "../base/shared/snapshot-state.ts";
 import { clientTimerActions, sendPendingPredictableEvents } from "./client-effects.ts";
 import type { ClientEffectsContext } from "./client-effects.ts";
@@ -48,6 +48,8 @@ export interface ClientThinkSettings {
 export interface ClientThinkHost extends ClientMovementHost {
   readonly pool: EntityPool;
   readonly world: ServerWorld;
+  readonly spatial: ActorSpatialQueries;
+  readonly touches: ClientTouchAccess;
   readonly effects: Pick<ClientEffectsContext, "combat">;
   frame(): ClientThinkFrame;
   settings(): ClientThinkSettings;
@@ -63,15 +65,15 @@ export interface ClientThinkHost extends ClientMovementHost {
   isDoorTrigger(entity: GameEntity): boolean;
   botTestAas(origin: Vec3): void;
 }
+export interface ClientTouchAccess {
+  native(actor: ActorId): GameEntity | null;
+  isTrigger(actor: ActorId): boolean;
+  touch(self: ActorId, other: ActorId): undefined;
+}
 
 function clientFor(entity: GameEntity): GameClient {
   if (entity.client === null) throw new Error("ClientThink requires a game client");
   return entity.client;
-}
-
-function emptyTouchTrace(): MovementTrace {
-  return { fraction: 0, end: vec3(0, 0, 0), solidity: "clear", contact: { kind: "none" },
-    contents: 0, surfaceFlags: 0, entityNum: 0 };
 }
 
 function overlap(first: Bounds, second: Bounds): boolean {
@@ -97,37 +99,36 @@ export class ClientThinkRuntime {
     this.clientThinkReal(entity);
   }
 
-  clientImpacts(entity: GameEntity, contacts: readonly number[]): void {
-    const trace = emptyTouchTrace();
-    const seen = new Set<number>();
-    for (const number of contacts) {
-      if (seen.has(number)) continue;
-      seen.add(number);
-      const other = this.host.pool.at(number);
-      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) entity.touch(entity, other, trace);
-      if (other.touch !== null) other.touch(other, entity, trace);
+  clientImpacts(entity: GameEntity, contacts: readonly ActorId[]): void {
+    const self = entity.actor.id;
+    const seen: ActorId[] = [];
+    for (const actor of contacts) {
+      if (seen.some(previous => previous.equals(actor))) continue;
+      seen.push(actor);
+      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) this.host.touches.touch(self, actor);
+      this.host.touches.touch(actor, self);
     }
   }
 
   touchTriggers(entity: GameEntity): void {
+    const self = entity.actor.id;
     const client = entity.client;
     if (client === null || client.ps.health <= 0) return;
     const ps = client.ps;
     const range = vec3(40, 40, 52);
-    const touches = this.host.world.areaEntities({ min: sub3(ps.origin, range), max: add3(ps.origin, range) }, MAX_GENTITIES);
+    const touches = this.host.spatial.areaActors({ min: sub3(ps.origin, range), max: add3(ps.origin, range) }, MAX_GENTITIES);
     const bounds = { min: add3(ps.origin, entity.r.mins), max: add3(ps.origin, entity.r.maxs) };
-    for (const number of touches) {
-      const hit = this.host.pool.at(number);
-      if (hit.touch === null && entity.touch === null) continue;
-      if (!(hit.r.contents & CONTENTS_TRIGGER)) continue;
-      if (client.sess.sessionTeam === Team.TEAM_SPECTATOR && hit.s.eType !== EntityType.ET_TELEPORT_TRIGGER &&
-        !this.host.isDoorTrigger(hit)) continue;
-      if (hit.s.eType === EntityType.ET_ITEM) {
+    for (const actor of touches) {
+      const hit = this.host.touches.native(actor);
+      if (hit !== null && hit.touch === null && entity.touch === null) continue;
+      if (hit === null ? !this.host.touches.isTrigger(actor) : (hit.r.contents & CONTENTS_TRIGGER) === 0) continue;
+      if (client.sess.sessionTeam === Team.TEAM_SPECTATOR && (hit === null || hit.s.eType !== EntityType.ET_TELEPORT_TRIGGER &&
+        !this.host.isDoorTrigger(hit))) continue;
+      if (hit !== null && hit.s.eType === EntityType.ET_ITEM) {
         if (!playerTouchesItem(ps.origin, hit.s.pos, this.host.frame().time)) continue;
-      } else if (!this.host.world.entityContact(bounds, hit.s.number)) continue;
-      const trace = emptyTouchTrace();
-      if (hit.touch !== null) hit.touch(hit, entity, trace);
-      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) entity.touch(entity, hit, trace);
+      } else if (!this.host.spatial.contactActor(bounds, actor)) continue;
+      this.host.touches.touch(actor, self);
+      if ((entity.r.svFlags & ServerEntityFlags.BOT) && entity.touch !== null) this.host.touches.touch(self, actor);
     }
     if (ps.jumppadFrame !== ps.pmoveFramecount) { ps.jumppadFrame = 0; ps.jumppadEnt = 0; }
   }

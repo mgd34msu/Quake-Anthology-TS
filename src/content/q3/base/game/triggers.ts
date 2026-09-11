@@ -1,4 +1,4 @@
-import { requireUseParticipant, useClient } from "./use-participant.ts";
+import { requireUseParticipant, useActor, useClient } from "./use-participant.ts";
 import type { UseParticipantServices } from "./use-participant.ts";
 import type { UseParticipant } from "./state.ts";
 // Ported from id Software's code/game/g_trigger.c and bg_misc.c:BG_TouchJumpPad.
@@ -17,7 +17,8 @@ import { gameFormat } from "./format.ts";
 import { teleportPlayer } from "./misc.ts";
 import type { GameRandom } from "./numeric.ts";
 import type { SpawnHandler, SpawnVariables } from "./spawn.ts";
-import type { GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
+import type { DamageParticipant } from "./state.ts";
 import { moveDirection, pickTarget, useTargets } from "./utilities.ts";
 import type { TargetSelectionContext } from "./utilities.ts";
 
@@ -165,7 +166,7 @@ function spawnTriggerMultiple(host: TriggerHost, entity: GameEntity, variables: 
     host.warn("trigger_multiple has random >= wait\n");
   }
   entity.touch = (self, other) => {
-    if (other.client !== null) multiTrigger(host, self, other);
+    if (other instanceof GameEntity && other.client !== null) multiTrigger(host, self, other);
   };
   entity.use = (self, _other, activator) => { multiTrigger(host, self, activator); };
   initTrigger(host, entity);
@@ -187,7 +188,7 @@ function spawnTriggerPush(host: TriggerHost, entity: GameEntity): void {
   entity.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
   host.soundIndex("sound/world/jumppad.wav");
   entity.s.eType = EntityType.ET_PUSH_TRIGGER;
-  entity.touch = (self, other) => { if (other.client !== null) touchJumpPad(other.client.ps, self.s); };
+  entity.touch = (self, other) => { if (other instanceof GameEntity && other.client !== null) touchJumpPad(other.client.ps, self.s); };
   entity.think = self => {
     aimAtTarget({ pool: host.entities, randomInt: () => host.random.rand(), gravity: () => host.gravity(),
       warn: message => { host.warn(message); } }, self, scale3(add3(self.r.absmin, self.r.absmax), 0.5));
@@ -204,6 +205,7 @@ function spawnTriggerTeleport(host: TriggerHost, entity: GameEntity): void {
   host.soundIndex("sound/world/jumppad.wav");
   entity.s.eType = EntityType.ET_TELEPORT_TRIGGER;
   entity.touch = (self, other) => {
+    if (!(other instanceof GameEntity)) return;
     const client = other.client;
     if (client === null || client.ps.pmType === MoveType.PM_DEAD) return;
     if ((self.spawnflags & 1) !== 0 && client.sess.sessionTeam !== Team.TEAM_SPECTATOR) return;
@@ -218,8 +220,10 @@ function spawnTriggerTeleport(host: TriggerHost, entity: GameEntity): void {
   host.entities.options.link(entity);
 }
 
-function soundAt(host: TriggerHost, entity: GameEntity, sound: number): void {
-  const event = host.entities.tempEntity(entity.r.currentOrigin, EntityEvent.EV_GENERAL_SOUND);
+function soundAt(host: TriggerHost, entity: DamageParticipant, sound: number): void {
+  const origin = entity instanceof GameEntity ? entity.r.currentOrigin : entity.origin();
+  if (origin === null) return;
+  const event = host.entities.tempEntity(origin, EntityEvent.EV_GENERAL_SOUND);
   event.s.eventParm = sound;
 }
 
@@ -228,7 +232,8 @@ function spawnTriggerHurt(host: TriggerHost, entity: GameEntity): void {
   initTrigger(host, entity);
   entity.noiseIndex = host.soundIndex("sound/world/electro.wav");
   entity.touch = (self, other) => {
-    if (!other.takedamage || self.timestamp > gameTime(host)) return;
+    const damageable = other instanceof GameEntity ? other.takedamage : combatContext(host).authority.read(useActor(other))?.canTakeDamage === true;
+    if (!damageable || self.timestamp > gameTime(host)) return;
     self.timestamp = (gameTime(host) + ((self.spawnflags & 16) !== 0 ? 1_000 : FRAMETIME)) | 0;
     if ((self.spawnflags & 4) === 0) soundAt(host, other, self.noiseIndex);
     const flags = (self.spawnflags & 8) !== 0 ? DamageFlags.NO_PROTECTION : 0;

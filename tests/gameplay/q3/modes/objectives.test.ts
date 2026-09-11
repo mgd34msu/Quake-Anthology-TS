@@ -86,10 +86,9 @@ test("Harvester deposits carried skulls into the opposing obelisk once", () => {
   const destination = game.pool.spawn();
   destination.spawnflags = Team.TEAM_BLUE;
   game.redClient.ps.generic1 = 3;
-  const trace = { fraction: 0, end: { x: 0, y: 0, z: 0 }, entityNum: 0, contents: 0, surfaceFlags: 0,
-    solidity: "clear", contact: { kind: "none" } } satisfies Parameters<typeof game.team.obeliskTouch>[2];
-  game.team.obeliskTouch(destination, game.red, trace);
-  game.team.obeliskTouch(destination, game.red, trace);
+  const contact = { self: destination.actor, other: game.red.actor.id, plane: null, surface: null } satisfies Parameters<typeof game.team.obeliskTouch>[2];
+  game.team.obeliskTouch(destination, game.red, contact);
+  game.team.obeliskTouch(destination, game.red, contact);
   expect(game.teamScores.get(Team.TEAM_RED)).toBe(3);
   expect(game.redClient.ps.persistant.get(PersistentIndex.PERS_SCORE)).toBe(300);
   expect(game.redClient.ps.persistant.get(PersistentIndex.PERS_CAPTURES)).toBe(3);

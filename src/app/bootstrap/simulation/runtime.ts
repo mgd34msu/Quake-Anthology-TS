@@ -31,7 +31,7 @@ import type { ActorExecution } from "./actor-execution.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
 import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
-import { Q3SharedBallistics, readQ3ProjectileStates } from "./q3-ballistics.ts";
+import { Q3SharedBallistics, readQ3ProjectileStates, readQ3BulletStatistics } from "./q3-ballistics.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
 import { emitQ2ShadowLights } from "../../../content/q2/foundation/shadow-lights.ts";
@@ -324,7 +324,16 @@ export class SharedSimulation implements Simulation {
         weaponProvider: this.weaponProvider.provider, numeric: providerTiming(this.recipe, this.weaponProvider.provider).numeric, random: this.selectedRandom,
         time: () => this.selectedMilliseconds,
         // Current foreign match selections do not expose Q3 GT_TEAM; CTF is a distinct mode.
-        teamDeathmatch: () => false,
+        teamDeathmatch: () => false, isPlayer: actor => this.player(actor) !== null,
+        teamGame: () => {
+          if (this.source.kind === "q1") return this.source.composition.selection.program === "ctf" || this.source.cvars.variableValue("teamplay") !== 0;
+          if (this.source.kind === "q3") return this.source.game.gameType >= 3;
+          if (this.source.kind !== "q2") throw new Error("Selected Q3 accuracy requires admitted match rules");
+          const selected = this.source.product.match;
+          if (selected.source instanceof Q2Lmctf) return (selected.source.rules.ctfFlags & 128) === 0;
+          const match = selected.selection.kind;
+          return match === "ctf" || match === "lmctf" || match === "deathball" || this.source.game.options.mode === "deathmatch" && (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0;
+        },
         pose: actor => { const player = this.requirePlayer(actor.id), view = player.view();
           const quad = this.source.kind === "q1" ? (this.source.game.player(actor.id)?.powerups.get("quad") ?? 0) > this.timeSeconds
             : this.source.kind === "q2" && this.source.items.playerPowerups(actor.id).quadUntil > this.timeSeconds;
@@ -1080,7 +1089,8 @@ export class SharedSimulation implements Simulation {
     }
     writeQ3CharacterAnimation(entity, player.animation);
     for (const { effect } of result.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3") client.ps.addEvent(effect.value.event, effect.value.parameter);
-    return { contacts: result.contacts.flatMap(contact => contact.target.kind === "actor" ? [this.actors.sourceOf(contact.target.actor)?.slot ?? 1023] : contact.target.kind === "world" ? [1022] : []),
+    const worldActor = this.source.game.pool.at(1022).actor.id;
+    return { contacts: result.contacts.flatMap(contact => contact.target.kind === "actor" ? [contact.target.actor] : contact.target.kind === "world" ? [worldActor] : []),
       bounds: player.bounds, waterlevel: player.waterLevel, watertype: player.waterType < 0 ? player.waterType === -3 ? 32 : player.waterType === -4 ? 16 : player.waterType === -5 ? 8 : 0 : player.waterType,
       xyspeed: Math.hypot(result.state.kind === "q2-classic" ? result.state.velocityEighths[0] / 8 : result.state.velocity.x,
         result.state.kind === "q2-classic" ? result.state.velocityEighths[1] / 8 : result.state.velocity.y) };
@@ -1886,7 +1896,7 @@ export class SharedSimulation implements Simulation {
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
-    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 3 : 1, bytes });
+    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 4 : 1, bytes });
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else providers.push(...captureQ2Product(source.product));
 
@@ -1899,6 +1909,7 @@ export class SharedSimulation implements Simulation {
       campaign: { flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }, physics: this.physics.capture(), events: this.events.capture(),
       portals: [...this.areaPortals].map(([portal, open]) => ({ portal, open })),
       selectedBallistics: this.selectedBallistics === null ? null : { milliseconds: this.selectedMilliseconds, randomSeed: this.selectedRandom.seed,
+        bulletStatistics: this.selectedBallistics.checkpointBulletStatistics().map(state => ({ ...state, actor: savedActorId(state.actor.id) })),
         projectiles: this.selectedBallistics.checkpoint().map(state => ({ ...state, actor: savedActorId(state.actor.id), owner: savedActorId(state.owner.id) })) },
       handGrenades: this.handGrenades?.capture() ?? null, grapple: this.grapple?.capture() ?? null, weaponSlots: [...this.weaponSlots].map(([actor, slot]) => ({ actor: savedActorId(actor), state: slot.snapshot() })),
       selectedArsenals: this.selectedArsenal === null ? null : this.players().map(actor => ({ actor: savedActorId(actor), state: this.selectedArsenal?.capture(actor) })),
@@ -1957,6 +1968,7 @@ export class SharedSimulation implements Simulation {
       this.selectedMilliseconds = selectedBallistics.field("milliseconds").finite();
       this.selectedRandom.reset(selectedBallistics.field("randomSeed").integer());
       this.selectedBallistics.restore(readQ3ProjectileStates(selectedBallistics.field("projectiles"), owner));
+      this.selectedBallistics.restoreBulletStatistics(readQ3BulletStatistics(selectedBallistics.field("bulletStatistics"), owner));
     } else if (selectedBallistics.value !== undefined && selectedBallistics.value !== null) selectedBallistics.fail("Saved selected ballistics has no matching authority");
     const selected = reader.field("selectedArsenals");
     if (this.selectedArsenal !== null) {

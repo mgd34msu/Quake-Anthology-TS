@@ -15,6 +15,8 @@ import { Q3SourceRuntime, createQ3SourceHost } from "../../../src/app/bootstrap/
 import type { Q3SourceEvent } from "../../../src/app/bootstrap/simulation/q3/index.ts";
 import { Q3CharacterActor, Q3DeathAnimationSequence, q3InitialCombat } from "../../../src/content/q3/foundation/character.ts";
 import { damage } from "../../../src/content/q3/base/game/combat.ts";
+import { ServerEntityFlags } from "../../../src/content/q3/base/shared/entity-shared.ts";
+import { useActor } from "../../../src/content/q3/base/game/use-participant.ts";
 import { Weapon, PersistentIndex } from "../../../src/content/q3/base/shared/definitions.ts";
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -119,6 +121,30 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   expect(physics.bodies.read(actor.id)?.bounds).toEqual(selectedBounds);
   expect(player.s.solid).toBe((64 << 16) | (24 << 8) | 16);
   expect(inventory.count(actor.id, "q2:weapon/blaster")).toBe(1);
+  // Impacts retain first-seen actor identity, including world and released foreign contacts.
+  const bot = runtime.pool.spawn();
+  bot.r.svFlags |= ServerEntityFlags.BOT;
+  const first = actors.allocateAtSource("q2:contact-proof", 1, "q2:foreign-first");
+  const removed = actors.allocateAtSource("q2:contact-proof", 2, "q2:foreign-removed");
+  const order: string[] = [];
+  bot.touch = (_self, other) => {
+    const id = useActor(other);
+    order.push(id.equals(first.id) ? "bot-first" : id.equals(runtime.pool.at(1022).actor.id) ? "bot-world" : "wrong-identity");
+  };
+  callbacks.bind(first, { think: null, use: null, pain: null, die: null, touch: contact => {
+    expect(contact.other.equals(bot.actor.id)).toBe(true);
+    order.push("foreign-first");
+    actors.release(removed);
+    const replacement = actors.allocateAtSource("q2:contact-proof", 2, "q2:replacement");
+    callbacks.bind(replacement, { think: null, use: null, pain: null, die: null, touch: () => { order.push("wrong-replacement"); return undefined; } });
+    return undefined;
+  } });
+  runtime.think.clientImpacts(bot, [first.id, first.id, removed.id, runtime.pool.at(1022).actor.id, first.id]);
+  expect(order).toEqual(["bot-first", "foreign-first", "bot-world"]);
+  runtime.pool.free(bot);
+  actors.release(first);
+  const replacement = actors.atSource("q2:contact-proof", 2);
+  if (replacement !== null) actors.release(replacement);
   const client = runtime.pool.clientAt(0);
   expect(client.ps.stats.get(2)).toBe(0);
   client.ps.weapon = Weapon.WP_GRENADE_LAUNCHER;

@@ -1,4 +1,5 @@
 import type { Bounds } from "../../../contracts/math.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 import type { GameEntity } from "../base/game/state.ts";
 import type { UserCommand } from "../base/shared/player-state.ts";
 
@@ -12,7 +13,7 @@ export interface ClientMovementOptions {
 }
 
 export interface ClientMovementResult {
-  readonly contacts: readonly number[];
+  readonly contacts: readonly ActorId[];
   readonly bounds: Bounds;
   readonly waterlevel: number;
   readonly watertype: number;

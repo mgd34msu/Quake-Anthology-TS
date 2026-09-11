@@ -1,8 +1,11 @@
-import { q3BulletEndpoint, q3ShotgunEndpoints } from "./ballistics-math.ts";
+import { q3ShotgunEndpoints } from "./ballistics-math.ts";
 // Ported from id Software's game/g_weapon.c and g_combat.c ray/invulnerability helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import { qvmAngleVectors } from "../../../../core/qvm-math.ts";
+import type { ActorId } from "../../../../contracts/identity.ts";
+import { q3AccuracyHit, q3BulletFire } from "./hitscan.ts";
+import type { Q3AccuracySubject, Q3BulletAttack, Q3BulletHost } from "./hitscan.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerTraceResult } from "../world.ts";
@@ -17,7 +20,8 @@ import { snapVector, snapVectorTowards } from "./missile.ts";
 import type { MissileDirection, MissileRuntime } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
 import { MAX_CLIENTS } from "./state.ts";
-import type { GameClient, GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
+import type { GameClient } from "./state.ts";
 
 const MASK_SHOT = 0x6000001, SURF_NOIMPACT = 0x10;
 const AWARD_FLAGS = 0x8 | 0x40 | 0x800 | 0x8000 | 0x10000 | 0x20000;
@@ -74,9 +78,14 @@ export function invulnerabilityEffect(pool: EntityPool, target: GameEntity, dire
   return { kind: "hit", impactPoint, bounceDirection: normalize3(offset) };
 }
 
+function accuracySubject(entity: GameEntity): Q3AccuracySubject {
+  return { actor: entity.actor.id, damageable: entity.takedamage, player: entity.client !== null,
+    health: entity.client?.ps.health ?? entity.health, team: entity.client === null ? null : `q3-team:${entity.client.sess.sessionTeam}` };
+}
+
 export function logAccuracyHit(gameType: number, target: GameEntity, attacker: GameEntity): boolean {
-  return target.takedamage && target !== attacker && target.client !== null && attacker.client !== null &&
-    target.client.ps.health > 0 && (gameType < GameType.GT_TEAM || target.client.sess.sessionTeam !== attacker.client.sess.sessionTeam);
+  if (!target.takedamage || target === attacker || target.client === null || attacker.client === null || target.client.ps.health <= 0) return false;
+  return q3AccuracyHit(gameType >= GameType.GT_TEAM, accuracySubject(target), accuracySubject(attacker));
 }
 
 function bounceProjectile(start: Vec3, impact: Vec3, direction: Vec3): Vec3 {
@@ -85,13 +94,7 @@ function bounceProjectile(start: Vec3, impact: Vec3, direction: Vec3): Vec3 {
   return add3(impact, scale3(normalize3(reflection), 8192));
 }
 
-interface Attack {
-  forward: MissileDirection;
-  readonly right: Vec3;
-  readonly up: Vec3;
-  muzzle: Vec3;
-  readonly quad: number;
-}
+type Attack = Q3BulletAttack;
 
 export class WeaponRuntime {
   constructor(readonly host: WeaponHost) {}
@@ -177,29 +180,39 @@ export class WeaponRuntime {
   }
 
   private bullet(entity: GameEntity, attack: Attack, spread: number, amount: number): void {
-    const combat = this.host.missiles.host.combat, pool = combat.entities, random = this.host.random;
-    let end = q3BulletEndpoint(attack, spread, random);
-    let pass = entity.s.number;
-    for (let count = 0; count < 10; count++) {
-      const trace = this.trace(entity, attack.muzzle, end, pass);
-      if (trace.surfaceFlags & SURF_NOIMPACT) return;
-      const target = pool.at(trace.entityNum), point = snapVectorTowards(trace.end, attack.muzzle);
-      const flesh = target.takedamage && target.client !== null;
-      const event = pool.tempEntity(point, flesh ? EntityEvent.EV_BULLET_HIT_FLESH : EntityEvent.EV_BULLET_HIT_WALL);
-      event.s.eventParm = flesh ? target.s.number : directionToByte(normal(trace)); event.s.otherEntityNum = entity.s.number;
-      if (flesh && logAccuracyHit(combat.gameType, target, entity)) clientOf(entity).accuracyHits = (clientOf(entity).accuracyHits + 1) | 0;
-      if (target.takedamage) {
-        if (combat.product === "missionpack" && target.client !== null && target.client.invulnerabilityTime > combat.time) {
-          const impact = invulnerabilityEffect(pool, target, attack.forward, point);
-          if (impact.kind === "hit") {
-            end = bounceProjectile(attack.muzzle, impact.impactPoint, impact.bounceDirection); attack.muzzle = impact.impactPoint; pass = ENTITYNUM_NONE;
-          } else { attack.muzzle = point; pass = target.s.number; }
-          continue;
-        }
-        damage(combat, target, entity, entity, attack.forward, point, this.scaled(amount, attack), 0, 3);
-      }
-      break;
-    }
+    const combat = this.host.missiles.host.combat, pool = combat.entities, attacker = accuracySubject(entity);
+    const services = {
+      random: this.host.random,
+      trace: (start: Vec3, end: Vec3, pass: ActorId | null) => combat.spatial.traceActor({ start, end, shape: { kind: "point" }, passActor: pass, mask: MASK_SHOT }),
+      target: (actor: ActorId) => {
+        const state = combat.authority.read(actor); if (state === null) return null;
+        const target = combat.actors.participant(actor), native = target instanceof GameEntity ? target : null;
+        const observed = native === null ? { actor, damageable: state.canTakeDamage, player: combat.actors.isPlayer(actor), health: state.health, team: state.team } : accuracySubject(native);
+        return { damageable: observed.damageable, player: observed.player, accuracyEligible: q3AccuracyHit(combat.gameType >= GameType.GT_TEAM, observed, attacker),
+          invulnerable: native?.client !== null && native?.client !== undefined && native.client.invulnerabilityTime > combat.time };
+      },
+      emit: (hit: Parameters<Q3BulletHost["emit"]>[0]): void => {
+        const event = pool.tempEntity(hit.point, hit.flesh ? EntityEvent.EV_BULLET_HIT_FLESH : EntityEvent.EV_BULLET_HIT_WALL);
+        if (hit.flesh && hit.target !== null) {
+          const target = combat.actors.participant(hit.target);
+          if (!(target instanceof GameEntity) || target.client === null) throw new Error("Admitted Q3 map player has no native client behavior record");
+          event.s.eventParm = target.s.number;
+        } else event.s.eventParm = directionToByte(hit.normal);
+        event.s.otherEntityNum = entity.s.number;
+      },
+      damage: (target: ActorId, direction: Attack["forward"], point: Vec3, scaled: number): void => {
+        damage(combat, combat.actors.participant(target), entity, entity, direction, point, scaled, 0, 3);
+      },
+      creditAccuracyHit: (): void => { const client = clientOf(entity); client.accuracyHits = (client.accuracyHits + 1) | 0; },
+    };
+    const host: Q3BulletHost = combat.product === "baseq3" ? { ...services, product: "baseq3" } : {
+      ...services, product: "missionpack", invulnerabilityImpact: (actor, direction, point) => {
+        const target = combat.actors.participant(actor);
+        if (!(target instanceof GameEntity)) throw new Error("Q3 invulnerability requires its actual client behavior");
+        return invulnerabilityEffect(pool, target, direction, point);
+      },
+    };
+    q3BulletFire(host, entity.actor.id, attack, spread, amount);
   }
 
   private pellet(entity: GameEntity, attack: Attack, start: Vec3, end: Vec3): boolean {

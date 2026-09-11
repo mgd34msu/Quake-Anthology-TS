@@ -14,7 +14,7 @@ import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { EntityBodyBinding } from "../shared/entity-shared.ts";
 import type { PlayerAuthorityBinding } from "../shared/player-state.ts";
-import type { MovementTrace } from "../shared/slide-move.ts";
+import type { TouchContact } from "../../../../contracts/world.ts";
 
 export const MAX_CLIENTS = 64;
 export const MAX_GENTITIES = 1024;
@@ -128,7 +128,7 @@ export class GameClient {
 
 export type EntityThink = (self: GameEntity) => void;
 export type EntityBlocked = (self: GameEntity, other: DamageParticipant) => void;
-export type EntityTouch = (self: GameEntity, other: GameEntity, trace: MovementTrace) => void;
+export type EntityTouch = (self: GameEntity, other: DamageParticipant, contact: TouchContact) => void;
 export type DamageParticipant = GameEntity | {
   readonly kind: "shared-actor";
   readonly actor: ActorId;

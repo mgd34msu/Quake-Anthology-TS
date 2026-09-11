@@ -13,7 +13,9 @@ import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import { add3, length3, normalize3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import { qvmAngleVectors } from "../../../core/qvm-math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import { q3BulletEndpoint, q3ShotgunEndpoints, q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "../../../content/q3/base/game/ballistics-math.ts";
+import { q3ShotgunEndpoints, q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "../../../content/q3/base/game/ballistics-math.ts";
+import { q3AccuracyHit, q3BulletFire } from "../../../content/q3/base/game/hitscan.ts";
+import type { Q3BulletAttack } from "../../../content/q3/base/game/hitscan.ts";
 import { snapVector, snapVectorTowards } from "../../../content/q3/base/game/missile.ts";
 import { evaluateTrajectory, evaluateTrajectoryDelta, TrajectoryType } from "../../../content/q3/base/shared/trajectory.ts";
 import type { Trajectory } from "../../../content/q3/base/shared/trajectory.ts";
@@ -35,9 +37,13 @@ export interface Q3SharedBallisticsHost {
   pose(actor: OwnedActor): Q3BallisticPose;
   time(): number;
   teamDeathmatch(): boolean;
+  teamGame(): boolean;
+  isPlayer(actor: ActorId): boolean;
   attack(actor: OwnedActor, inflictor: OwnedActor, weapon: number, method: number, flags: number): AttackProvenance;
   event(event: Q3SharedBallisticEvent): undefined;
 }
+export interface Q3BulletStatistics { readonly actor: OwnedActor; readonly shots: number; readonly hits: number; }
+
 export interface Q3ProjectileState {
   readonly actor: OwnedActor; readonly owner: OwnedActor; readonly weapon: number; readonly direct: number; readonly splash: number;
   readonly radius: number; readonly method: number; readonly splashMethod: number; readonly expires: number; readonly bounce: boolean;
@@ -50,11 +56,42 @@ function noImpact(trace: TraceResult): boolean { return trace.kind === "q3" && (
 /** Q3 weapon trajectories and damage over the session's existing actors and collision scene. */
 export class Q3SharedBallistics {
   private readonly projectiles = new Map<OwnedActor, Q3ProjectileState>();
-  constructor(readonly host: Q3SharedBallisticsHost) { host.actors.onRelease(actor => { const projectile = this.projectiles.get(actor); if (projectile !== undefined) { this.event({ kind: "remove", actor: actor.id, weapon: projectile.weapon, origin: projectile.trajectory.base, end: projectile.trajectory.base, normal: zero, target: null, surfaceFlags: 0 }); this.projectiles.delete(actor); } return undefined; }); }
+  private readonly bulletCounters = new Map<OwnedActor, Q3BulletStatistics>();
+  constructor(readonly host: Q3SharedBallisticsHost) { host.actors.onRelease(actor => { this.bulletCounters.delete(actor); const projectile = this.projectiles.get(actor); if (projectile !== undefined) { this.event({ kind: "remove", actor: actor.id, weapon: projectile.weapon, origin: projectile.trajectory.base, end: projectile.trajectory.base, normal: zero, target: null, surfaceFlags: 0 }); this.projectiles.delete(actor); } return undefined; }); }
   private event(payload: Q3BallisticEventPayload): undefined { return this.host.event({ ...payload, timeMilliseconds: this.host.time() }); }
   owns(actor: OwnedActor): boolean { return this.projectiles.has(actor); }
   checkpoint(): readonly Q3ProjectileState[] { return [...this.projectiles.values()].map(value => ({ ...value, trajectory: { ...value.trajectory } })); }
   restore(states: readonly Q3ProjectileState[]): void { this.projectiles.clear(); for (const state of states) { this.host.actors.assertOwned(state.actor); this.projectiles.set(state.actor, { ...state }); } }
+  bulletStatistics(actor: OwnedActor): Q3BulletStatistics { return this.bulletCounters.get(actor) ?? { actor, shots: 0, hits: 0 }; }
+  checkpointBulletStatistics(): readonly Q3BulletStatistics[] { return [...this.bulletCounters.values()]; }
+  restoreBulletStatistics(states: readonly Q3BulletStatistics[]): void {
+    this.bulletCounters.clear();
+    for (const state of states) { this.host.actors.assertOwned(state.actor); this.bulletCounters.set(state.actor, { ...state }); }
+  }
+  private bullet(actor: OwnedActor, weapon: number, attack: Q3BulletAttack, spread: number, amount: number): void {
+    const previous = this.bulletStatistics(actor);
+    this.bulletCounters.set(actor, { ...previous, shots: (previous.shots + 1) | 0 });
+    const state = this.host.combat.read(actor.id), attacker = { actor: actor.id, damageable: state?.canTakeDamage ?? false,
+      player: this.host.isPlayer(actor.id), health: state?.health ?? 0, team: state?.team ?? null };
+    q3BulletFire({ product: "baseq3", random: this.host.random,
+      trace: (start, end, pass) => {
+        const trace = this.trace(start, end, pass);
+        if (trace.kind !== "q3") throw new Error("Q3 bullet trace requires its source collision policy");
+        return { fraction: trace.fraction, end: trace.end, hit: trace.hit, contact: trace.contact, contents: trace.contents, surfaceFlags: trace.surfaceFlags,
+          solidity: trace.allSolid ? "all-solid" : trace.startSolid ? "start-solid" : "clear" };
+      },
+      target: target => {
+        const observed = this.host.combat.read(target); if (observed === null) return null;
+        const subject = { actor: target, damageable: observed.canTakeDamage, player: this.host.isPlayer(target), health: observed.health, team: observed.team };
+        return { damageable: subject.damageable, player: subject.player,
+          accuracyEligible: q3AccuracyHit(this.host.teamGame(), subject, attacker), invulnerable: false };
+      },
+      emit: event => { this.event({ kind: "impact", hitKind: event.flesh ? "flesh" : "wall", actor: actor.id, weapon,
+        origin: attack.muzzle, end: event.point, normal: event.normal, target: event.target, surfaceFlags: 0 }); },
+      damage: (target, direction, point, scaled) => this.hit(actor, actor, weapon, target, point, direction, scaled, 3),
+      creditAccuracyHit: () => { const current = this.bulletStatistics(actor); this.bulletCounters.set(actor, { ...current, hits: (current.hits + 1) | 0 }); },
+    }, actor.id, attack, spread, amount);
+  }
   private attack(actor: OwnedActor) {
     const pose = this.host.pose(actor), vectors = qvmAngleVectors(pose.angles);
     return { ...vectors, muzzle: snapVector(add3(vec3(pose.origin.x, pose.origin.y, Math.fround(pose.origin.z + pose.viewheight)), scale3(vectors.forward, 14))), quad: pose.quad };
@@ -95,7 +132,7 @@ export class Q3SharedBallistics {
     };
     switch (weapon) {
       case 0: case 1: return undefined;
-      case 2: shoot(q3BulletEndpoint(attack, 200, this.host.random), this.host.teamDeathmatch() ? 5 : 7, 3); return undefined;
+      case 2: this.bullet(actor, weapon, attack, 200, this.host.teamDeathmatch() ? 5 : 7); return undefined;
       case 3: for (const end of q3ShotgunEndpoints(attack.muzzle, snapVector(scale3(attack.forward, 4096)), this.host.random.rand() & 255)) shoot(end, 10, 1); return undefined;
       case 6: shoot(add3(attack.muzzle, scale3(attack.forward, 768)), 8, 11); return undefined;
       case 7: {
@@ -114,7 +151,7 @@ export class Q3SharedBallistics {
       }
       case 4: case 5: case 8: case 9: this.launch(actor, weapon, attack); return undefined;
       case 11: for (let index = 0; index < 15; index++) this.launch(actor, weapon, attack); return undefined;
-      case 13: shoot(q3BulletEndpoint(attack, 600, this.host.random), 7, 3); return undefined;
+      case 13: this.bullet(actor, weapon, attack, 600, 7); return undefined;
       default: throw new Error(`Q3 shared ballistics does not yet support weapon ${weapon}`);
     }
   }
@@ -196,4 +233,8 @@ export function readQ3ProjectileStates(reader: SaveReader, actor: (reader: SaveR
       bounce: value.field("bounce").boolean(), trajectory: { type, time: trajectory.field("time").finite(), duration: trajectory.field("duration").finite(),
         base: readVector(trajectory.field("base")), delta: readVector(trajectory.field("delta")) } };
   });
+}
+
+export function readQ3BulletStatistics(reader: SaveReader, actor: (reader: SaveReader) => OwnedActor): readonly Q3BulletStatistics[] {
+  return reader.list(value => ({ actor: actor(value.field("actor")), shots: value.field("shots").integer(), hits: value.field("hits").integer() }));
 }

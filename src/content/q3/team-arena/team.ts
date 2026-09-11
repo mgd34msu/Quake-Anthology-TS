@@ -516,7 +516,7 @@ export class TeamRuntime {
   };
 
   readonly obeliskTouch: EntityTouch = (self, other, _trace) => {
-    if (other.client === null || otherTeam(other.client.sess.sessionTeam) !== self.spawnflags) return;
+    if (!(other instanceof GameEntity) || other.client === null || otherTeam(other.client.sess.sessionTeam) !== self.spawnflags) return;
     const tokens = other.client.ps.generic1;
     if (tokens <= 0) return;
     this.printMessage(null, gameFormat("%s^7 brought in %i skull%s.\n", [other.client.pers.netname, tokens, tokens !== 0 ? "s" : ""]));

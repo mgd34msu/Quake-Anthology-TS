@@ -14,8 +14,9 @@ import { EntityPool, initGameEntity, setOrigin } from "../../../../src/content/q
 import { Q3CombatBridge } from "../../../../src/content/q3/base/combat-bridge.ts";
 import { Q3WorldAdapter } from "../../../../src/content/q3/base/world-adapter.ts";
 import { damage, DamageFlags } from "../../../../src/content/q3/base/game/combat.ts";
+import { logAccuracyHit } from "../../../../src/content/q3/base/game/weapon.ts";
 import { MissileRuntime } from "../../../../src/content/q3/base/game/missile.ts";
-import { GameType, Powerup, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
+import { GameType, Powerup, Team, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 
@@ -64,7 +65,14 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   combat.register(bridge.policy());
   const attacker = pool.activateClient(0), victim = pool.activateClient(1);
   initGameEntity(attacker); initGameEntity(victim);
+  expect(logAccuracyHit(GameType.GT_FFA, pool.at(1023), attacker)).toBe(false);
   attacker.health = victim.health = 100; attacker.takedamage = victim.takedamage = true;
+  pool.clientAt(0).sess.sessionTeam = pool.clientAt(1).sess.sessionTeam = Team.TEAM_RED;
+  expect(logAccuracyHit(GameType.GT_CTF, victim, attacker)).toBe(false);
+  expect(logAccuracyHit(GameType.GT_FFA, victim, attacker)).toBe(true);
+  pool.clientAt(1).sess.sessionTeam = Team.TEAM_BLUE;
+  expect(logAccuracyHit(GameType.GT_CTF, victim, attacker)).toBe(true);
+  pool.clientAt(0).sess.sessionTeam = pool.clientAt(1).sess.sessionTeam = Team.TEAM_FREE;
   pool.clientAt(0).ps.stats.set(statSchema("baseq3").maxHealth, 100);
   pool.clientAt(1).ps.stats.set(statSchema("baseq3").armor, 100);
   damage(bridge.context, victim, attacker, attacker, { x: 2, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, 50, 0, 3);

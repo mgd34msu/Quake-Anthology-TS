@@ -14,7 +14,8 @@ import { canDamage, damage, DamageFlags, radiusDamage } from "./combat.ts";
 import type { CombatContext } from "./combat.ts";
 import { runThink, setOrigin } from "./entities.ts";
 import type { GameRandom } from "./numeric.ts";
-import type { EntityTouch, GameClient, GameEntity } from "./state.ts";
+import type { EntityTouch, GameClient } from "./state.ts";
+import { GameEntity } from "./state.ts";
 
 const MASK_SHOT = 1 | 0x2000000 | 0x4000000;
 const EF_BOUNCE = 0x10, EF_BOUNCE_HALF = 0x20, EF_NODRAW = 0x80, EF_TICKING = 2;
@@ -73,7 +74,7 @@ function center(entity: GameEntity): Vec3 {
 }
 
 export class MissileRuntime {
-  private readonly proximityTouch: EntityTouch = (self, other) => { this.proximityTrigger(self, other); };
+  private readonly proximityTouch: EntityTouch = (self, other) => { if (other instanceof GameEntity) this.proximityTrigger(self, other); };
 
   constructor(readonly host: MissileHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Missile product does not match its entity pool");

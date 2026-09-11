@@ -10,7 +10,6 @@ import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerWorld } from "../world.ts";
 import { EntityEvent, EntityType, MoveType, Powerup, Team } from "../shared/definitions.ts";
 import { ServerEntityFlags } from "../shared/entity-shared.ts";
-import type { MovementTrace } from "../shared/slide-move.ts";
 import { damage, DamageFlags } from "./combat.ts";
 import type { CombatContext } from "./combat.ts";
 import type { EntityPool } from "./entities.ts";
@@ -91,11 +90,6 @@ function dispatchTargets(runtime: TargetRuntime, entity: GameEntity, activator: 
     warn: message => { runtime.warn(message); } }, entity, activator);
 }
 
-function zeroTrace(): MovementTrace {
-  return { fraction: 0, end: vec3(0, 0, 0), solidity: "clear", contact: { kind: "none" },
-    contents: 0, surfaceFlags: 0, entityNum: 0 };
-}
-
 function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
   runtime: TargetRuntime): void {
   const activator = useClient(requireActivator(runtime, activatorValue), runtime.participants);
@@ -104,7 +98,7 @@ function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activa
   let target: GameEntity | null = null;
   while ((target = findEntity(runtime.entities, target, "targetname", entity.target)) !== null) {
     if (target.item === null) continue;
-    touchItem(target, activator, zeroTrace(), runtime.itemLifecycle);
+    touchItem(target, activator, { self: target.actor, other: activator.actor.id, plane: null, surface: null }, runtime.itemLifecycle);
     target.nextthink = 0;
     runtime.entities.options.unlink(target);
   }

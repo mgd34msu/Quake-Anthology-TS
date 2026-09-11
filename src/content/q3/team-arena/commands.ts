@@ -229,7 +229,7 @@ export class GameCommandRuntime {
     temporary.classname = item.className;
     spawnItem(temporary, item, new SpawnVariables([]), () => gameAtoi(this.host.imports.getCvar(`disable_${item.className}`)) !== 0, this.host.items);
     finishSpawningItem(temporary, this.host.items);
-    touchItem(temporary, entity, { fraction: 0, end: vec3(0, 0, 0), solidity: "clear", contact: { kind: "none" }, contents: 0, surfaceFlags: 0, entityNum: 0 }, this.host.items);
+    touchItem(temporary, entity, { self: temporary.actor, other: entity.actor.id, plane: null, surface: null }, this.host.items);
     if (temporary.inuse) this.host.pool.free(temporary);
   }
 

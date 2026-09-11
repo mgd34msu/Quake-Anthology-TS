@@ -13,15 +13,16 @@ import { ServerEntityFlags } from "../shared/entity-shared.ts";
 import { canItemBeGrabbed, findItem, findItemForWeapon, itemList } from "../shared/items.ts";
 import type { ItemDefinition, PlayerInventory } from "../shared/items.ts";
 import { ENTITYNUM_NONE } from "../shared/player-state.ts";
-import type { MovementTrace } from "../shared/slide-move.ts";
+import type { TouchContact } from "../../../../contracts/world.ts";
+import type { DamageParticipant } from "./state.ts";
 import { pickupItem } from "./item-pickup.ts";
 import type { ItemPickupContext } from "./item-pickup.ts";
 import { EntityPool, setOrigin } from "./entities.ts";
 import { gameFormat } from "./format.ts";
 import type { GameRandom } from "./numeric.ts";
 import type { SpawnVariables } from "./spawn.ts";
-import { GameFlags } from "./state.ts";
-import type { GameClient, GameEntity } from "./state.ts";
+import { GameFlags, GameEntity } from "./state.ts";
+import type { GameClient } from "./state.ts";
 
 const CS_ITEMS = 27;
 const CONTENTS_SOLID = 0x1;
@@ -239,9 +240,10 @@ export function respawnItem(entity: GameEntity, context: ItemLifecycleContext): 
 }
 
 /** Touch_Item validates eligibility, applies pickup rules, emits events, and hides or schedules the item. */
-export function touchItem(entity: GameEntity, other: GameEntity, _trace: MovementTrace, context: ItemLifecycleContext): void {
+export function touchItem(entity: GameEntity, other: DamageParticipant, _contact: TouchContact, context: ItemLifecycleContext): void {
   checkContext(context);
   requireOwned(context, entity);
+  if (!(other instanceof GameEntity)) return;
   requireOwned(context, other);
   const client = other.client;
   if (client === null || other.health < 1) return;

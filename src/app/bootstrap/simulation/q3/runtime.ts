@@ -147,7 +147,12 @@ export class Q3SourceRuntime {
       droppedFlagThink: entity => this.team.droppedFlagThink(entity), checkDroppedTeamItem: entity => this.team.checkDroppedItem(entity), random: () => this.random.random() };
     this.team = this.createTeam();
     this.death = this.createDeath();
-    this.think = new ClientThinkRuntime({ pool: this.pool, world: this.world, moveClient: (entity, command, options) => this.host.moveClient(entity, command, options),
+    this.think = new ClientThinkRuntime({ pool: this.pool, world: this.world, spatial: this.world,
+      touches: { native: actor => this.records.nativeByActor(actor),
+        isTrigger: actor => host.scene.spatial.get(actor)?.collision.role === "trigger",
+        touch: (self, other) => { const actor = host.actors.resolveOwned(self);
+          if (actor !== null) host.callbacks.touch({ self: actor, other, plane: null, surface: null }); return undefined; } },
+      moveClient: (entity, command, options) => this.host.moveClient(entity, command, options),
       effects: { combat: this.combat }, frame: () => this.level,
       settings: () => ({ synchronousClients: this.integer("g_synchronousClients") !== 0, pmoveFixed: this.integer("pmove_fixed") !== 0,
         debugMove: this.integer("g_debugMove"),

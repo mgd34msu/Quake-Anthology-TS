@@ -13,7 +13,7 @@ import type { DropItemContext, LaunchItemContext } from "./item-motion.ts";
 import { teleportPlayer } from "./misc.ts";
 import { snapVector } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
-import type { GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
 import { findEntity } from "./utilities.ts";
 import type { ConfigStringRegistry } from "./utilities.ts";
 
@@ -122,7 +122,7 @@ export class PersonalPortalRuntime {
 
   private portalEnable(source: GameEntity): void {
     this.owned(source);
-    source.touch = (self, other) => { this.portalTouch(self, other); };
+    source.touch = (self, other) => { if (other instanceof GameEntity) this.portalTouch(self, other); };
     source.think = self => { this.freePortal(self); };
     source.nextthink = (this.time + PORTAL_LIFETIME) | 0;
   }

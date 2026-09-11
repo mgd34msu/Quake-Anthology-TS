@@ -8,7 +8,8 @@ import { teleportPlayer } from "./misc.ts";
 import type { MoverRuntime } from "./mover.ts";
 import type { SpawnHandler, SpawnVariables } from "./spawn.ts";
 import { GameFlags, MoverState } from "./state.ts";
-import type { GameEntity } from "./state.ts";
+import { GameEntity } from "./state.ts";
+import type { DamageParticipant } from "./state.ts";
 import { findEntity, moveDirection, useTargets } from "./utilities.ts";
 
 export interface MoverSpawnHost {
@@ -37,7 +38,7 @@ function withComponent(value: Vec3, axis: number, amount: number): Vec3 {
 
 /** Callbacks retain only their owning services; their self argument is the stable pool slot. */
 export class MoverSpawnRuntime {
-  private readonly doorTriggerTouch = (entity: GameEntity, other: GameEntity): void => { this.doorTouch(entity, other); };
+  private readonly doorTriggerTouch = (entity: GameEntity, other: DamageParticipant): void => { this.doorTouch(entity, other); };
 
   constructor(readonly host: MoverSpawnHost) {}
 
@@ -59,9 +60,9 @@ export class MoverSpawnRuntime {
     const result = moveDirection(entity.s.angles);
     entity.s.angles = result.angles; entity.movedir = result.direction;
   }
-  private doorTouch(entity: GameEntity, other: GameEntity): void {
+  private doorTouch(entity: GameEntity, other: DamageParticipant): void {
     const parent = this.parent(entity);
-    if (other.client !== null && other.client.sess.sessionTeam === Team.TEAM_SPECTATOR) {
+    if (other instanceof GameEntity && other.client !== null && other.client.sess.sessionTeam === Team.TEAM_SPECTATOR) {
       if (parent.moverState === MoverState.ONE_TO_TWO || parent.moverState === MoverState.POS2) return;
       const axis = entity.count, bounds = this.bounds(entity);
       const min = component(bounds.min, axis), max = component(bounds.max, axis), position = component(other.s.origin, axis);
@@ -119,7 +120,7 @@ export class MoverSpawnRuntime {
     const trigger = this.core.host.combat.entities.spawn(); trigger.classname = "plat_trigger";
     trigger.touch = (self, other) => {
       const parent = this.parent(self);
-      if (other.client !== null && parent.moverState === MoverState.POS1) this.core.useBinary(parent, self, other);
+      if (other instanceof GameEntity && other.client !== null && parent.moverState === MoverState.POS1) this.core.useBinary(parent, self, other);
     };
     trigger.r.contents = CONTENTS_TRIGGER; trigger.parent = entity;
     let min = add3(add3(entity.pos1, entity.r.mins), vec3(33, 33, 0));
@@ -145,7 +146,7 @@ export class MoverSpawnRuntime {
     entity.pos2 = { ...entity.s.origin }; entity.pos1 = vec3(entity.pos2.x, entity.pos2.y, entity.pos2.z - distance);
     this.core.initializeBinary(entity, variables);
     entity.touch = (self, other) => {
-      if (other.client !== null && other.client.ps.health > 0 && self.moverState === MoverState.POS2) self.nextthink = (this.time + 1000) | 0;
+      if (other instanceof GameEntity && other.client !== null && other.client.ps.health > 0 && self.moverState === MoverState.POS2) self.nextthink = (this.time + 1000) | 0;
     };
     entity.blocked = (self, other) => { this.core.blockedDoor(self, other); }; entity.parent = entity;
     if (entity.targetname === null) this.spawnPlatTrigger(entity);
@@ -161,7 +162,7 @@ export class MoverSpawnRuntime {
     entity.pos2 = add3(entity.pos1, scale3(entity.movedir, distance));
     if (entity.health !== 0) entity.takedamage = true;
     else entity.touch = (self, other) => {
-      if (other.client !== null && self.moverState === MoverState.POS1) this.core.useBinary(self, other, other);
+      if (other instanceof GameEntity && other.client !== null && self.moverState === MoverState.POS1) this.core.useBinary(self, other, other);
     };
     this.core.initializeBinary(entity, variables);
   }

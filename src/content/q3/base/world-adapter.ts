@@ -96,13 +96,16 @@ export class Q3WorldAdapter implements ServerWorld, ActorSpatialQueries {
   entityContact(bounds: Bounds, number: number, capsule = false): boolean {
     const entity = this.records.get(number);
     if (entity === undefined || !entity.inuse) return false;
+    return this.contactActor(bounds, entity.actor.id, capsule);
+  }
+
+  contactActor(bounds: Bounds, actor: ActorId, capsule = false): boolean {
+    const spatial = this.host.queries.spatial.get(actor), body = this.host.bodies.read(actor);
+    if (spatial === null || body === null) return false;
     const origin = { x: 0, y: 0, z: 0 };
     const query = this.query({ start: origin, end: origin, shape: { kind: capsule ? "capsule" : "box", mins: bounds.min, maxs: bounds.max }, passActor: null, mask: -1 });
-    if (entity.r.model.kind === "inline") return this.host.queries.geometryTrace({ ...query, target: { kind: "model", model: entity.r.model.index,
-      origin: entity.r.currentOrigin, angles: entity.r.currentAngles } }).startSolid;
-    const linked = this.host.bodies.linked(entity.actor.id), body = this.host.bodies.read(entity.actor.id);
-    if (linked === null || body === null) return false;
-    return traceActorBody(query, { body: { ...linked, state: body }, collision: { family: "q3", shape: entity.r.model,
-      contents: entity.r.contents, owner: this.actor(entity.r.ownerNum), role: "trigger", monster: false, deadMonster: false } }).startSolid;
+    if (spatial.collision.shape.kind === "model") return this.host.queries.geometryTrace({ ...query,
+      target: { kind: "model", model: spatial.collision.shape.model, origin: body.origin, angles: body.angles } }).startSolid;
+    return traceActorBody(query, { body: { ...spatial.body, state: body }, collision: spatial.collision }).startSolid;
   }
 }

@@ -166,11 +166,7 @@ export class Q3EntityRecords {
       touch: contact => {
         if (entity.touch === null) return undefined;
         const native = this.records.find(candidate => candidate.actor?.id.equals(contact.other));
-        // G_TouchTriggers admits clients before dispatching Q3 trigger callbacks.
-        if ((entity.r.contents & 0x40000000) !== 0 && !(native === undefined ? this.host.isPlayer(contact.other) : native.entity.client !== null)) return undefined;
-        const other = native?.entity ?? this.byActor(contact.other); if (other !== null) entity.touch(entity, other,
-        { fraction: 0, end: entity.r.currentOrigin, entityNum: other.s.number, solidity: "clear", contents: other.r.contents,
-          surfaceFlags: contact.surface?.nativeFlags ?? 0, contact: contact.plane === null ? { kind: "none" } : { kind: "plane", plane: contact.plane } }); return undefined; },
+        entity.touch(entity, native?.entity ?? this.damageInflictor(contact.other), contact); return undefined; },
       use: (_self, other, activator) => { entity.use?.(entity, this.useParticipant(other), this.useParticipant(activator)); return undefined; }, pain, die,
     });
   }
