@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 import { add3, length3, sub3, vec3 } from "../../../core/math.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../core/math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
-import type { ServerWorld } from "../base/world.ts";
+import type { ActorSpatialQueries, ServerWorld } from "../base/world.ts";
 import { EntityEvent, GameType, GIB_HEALTH, PersistentIndex, Team, Weapon, WeaponState, statSchema, weaponCount } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
 import { ENTITYNUM_NONE, MoveFlags, PlayerAnimation } from "../base/shared/player-state.ts";
@@ -43,7 +44,8 @@ export interface ClientSpawnFrame {
 /** The source spawn phase uses the selected movement and shared gameplay services. */
 export interface ClientSpawnHost {
   readonly pool: EntityPool;
-  readonly world: ServerWorld;
+  readonly world: ServerWorld & ActorSpatialQueries;
+  isPlayer(actor: ActorId): boolean;
   readonly random: GameRandom;
   readonly think: ClientThinkRuntime;
   frame(): ClientSpawnFrame;
@@ -112,7 +114,7 @@ export class ClientSpawnRuntime {
 
   spotWouldTelefrag(spot: GameEntity): boolean {
     const bounds = { min: add3(spot.s.origin, PLAYER_MINS), max: add3(spot.s.origin, PLAYER_MAXS) };
-    return this.host.world.areaEntities(bounds, MAX_GENTITIES).some(number => this.host.pool.at(number).client !== null);
+    return this.host.world.areaActors(bounds, MAX_GENTITIES).some(actor => this.host.isPlayer(actor));
   }
 
   selectNearestDeathmatchSpawnPoint(from: Vec3): GameEntity | null {

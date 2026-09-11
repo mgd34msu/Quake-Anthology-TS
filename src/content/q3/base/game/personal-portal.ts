@@ -42,7 +42,7 @@ export class PersonalPortalRuntime {
     if (host.combat.entities.options.product !== "missionpack") {
       throw new Error("Personal portals require a missionpack entity pool");
     }
-    if (host.combat.world !== host.world) {
+    if (!Object.is(host.combat.spatial, host.world)) {
       throw new Error("Personal portal combat and collision worlds must match");
     }
   }

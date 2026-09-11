@@ -4,7 +4,9 @@
 
 import { add3, length3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../core/math.ts";
-import type { ServerWorld } from "../world.ts";
+import type { ActorSpatialQueries } from "../world.ts";
+import type { ActorId } from "../../../../contracts/identity.ts";
+import { useActor } from "./use-participant.ts";
 import { ARMOR_PROTECTION, EntityEvent, EntityType, GameType, PersistentIndex, Powerup, statSchema } from "../shared/definitions.ts";
 import { ENTITYNUM_NONE, ENTITYNUM_WORLD } from "../shared/player-state.ts";
 import type { AttackProvenance, DamageDecision, DamageOutcome, ItemId } from "../../../../contracts/gameplay.ts";
@@ -47,7 +49,12 @@ interface CombatServices {
   readonly friendlyFire: boolean;
   readonly knockback: number;
   readonly entities: EntityPool;
-  readonly world: Pick<ServerWorld, "trace" | "areaEntities" | "linkState">;
+  readonly spatial: ActorSpatialQueries;
+  readonly actors: {
+    participant(actor: ActorId): DamageParticipant;
+    linkedBounds(actor: ActorId): Bounds | null;
+    isPlayer(actor: ActorId): boolean;
+  };
   readonly debugDamage: ((diagnostic: DamageDiagnostic) => void) | null;
   checkHurtCarrier(target: GameEntity, attacker: GameEntity): void;
   logAccuracyHit(target: GameEntity, attacker: GameEntity): boolean;
@@ -186,43 +193,41 @@ export function q3DamageFeedback(context: CombatContext, call: Q3DamageCall, dec
   if (decision.reaction === "death" && client !== null) target.flags |= GameFlags.NO_KNOCKBACK;
 }
 
-function absoluteBounds(context: CombatContext, target: GameEntity): Bounds {
-  const link = context.world.linkState(target.s.number);
-  if (link === undefined) throw new Error("Combat visibility requires source absolute bounds from a server link");
-  return link.absbounds;
-}
-
-export function canDamage(context: CombatContext, target: GameEntity, origin: Vec3): boolean {
-  const bounds = absoluteBounds(context, target);
+export function canDamage(context: CombatContext, target: DamageParticipant, origin: Vec3): boolean {
+  const actor = useActor(target), bounds = context.actors.linkedBounds(actor);
+  if (bounds === null) return false;
   const midpoint = scale3(add3(bounds.min, bounds.max), 0.5);
-  const trace = (end: Vec3) => context.world.trace({ start: origin, end, shape: { kind: "point" }, passEntityNum: ENTITYNUM_NONE, mask: 1 });
+  const trace = (end: Vec3) => context.spatial.traceActor({ start: origin, end, shape: { kind: "point" }, passActor: null, mask: 1 });
   const center = trace(midpoint);
-  if (center.fraction === 1 || center.entityNum === target.s.number) return true;
+  if (center.fraction === 1 || center.hit.kind === "actor" && center.hit.actor.equals(actor)) return true;
   for (const [x, y] of [[15, 15], [15, -15], [-15, 15], [-15, -15]] satisfies readonly (readonly [number, number])[]) {
     if (trace(vec3(midpoint.x + x, midpoint.y + y, midpoint.z)).fraction === 1) return true;
   }
   return false;
 }
 
-export function radiusDamage(context: CombatContext, origin: Vec3, attacker: GameEntity,
-  amount: number, radius: number, ignore: GameEntity | null, methodOfDeath: number): boolean {
+export function radiusDamage(context: CombatContext, origin: Vec3, attacker: DamageParticipant,
+  amount: number, radius: number, ignore: DamageParticipant | null, methodOfDeath: number): boolean {
   radius = Math.max(1, Math.fround(radius));
   amount = Math.fround(amount);
   const extent = vec3(radius, radius, radius);
-  const candidates = context.world.areaEntities({ min: sub3(origin, extent), max: add3(origin, extent) });
+  const candidates = context.spatial.areaActors({ min: sub3(origin, extent), max: add3(origin, extent) }, 1024);
   let hitClient = false;
-  for (const number of candidates) {
-    const target = context.entities.at(number);
-    if (target === ignore || !target.takedamage) continue;
-    const bounds = absoluteBounds(context, target);
+  for (const actor of candidates) {
+    if (ignore !== null && actor.equals(useActor(ignore)) || !context.authority.read(actor)?.canTakeDamage) continue;
+    const bounds = context.actors.linkedBounds(actor);
+    if (bounds === null) continue;
+    const target = context.actors.participant(actor);
     const distanceAxis = (value: number, min: number, max: number): number => value < min ? min - value : value > max ? value - max : 0;
     const distance = length3(vec3(distanceAxis(origin.x, bounds.min.x, bounds.max.x),
       distanceAxis(origin.y, bounds.min.y, bounds.max.y), distanceAxis(origin.z, bounds.min.z, bounds.max.z)));
     if (distance >= radius) continue;
     const points = Math.fround(amount * Math.fround(1 - Math.fround(distance / radius)));
     if (!canDamage(context, target, origin)) continue;
-    if (context.logAccuracyHit(target, attacker)) hitClient = true;
-    const direction = add3(sub3(target.r.currentOrigin, origin), vec3(0, 0, 24));
+    if (target instanceof GameEntity && attacker instanceof GameEntity && context.logAccuracyHit(target, attacker)) hitClient = true;
+    const targetOrigin = target instanceof GameEntity ? target.r.currentOrigin : target.origin();
+    if (targetOrigin === null) continue;
+    const direction = add3(sub3(targetOrigin, origin), vec3(0, 0, 24));
     damage(context, target, null, attacker, direction, origin, Math.trunc(points), DamageFlags.RADIUS, methodOfDeath);
   }
   return hitClient;

@@ -23,10 +23,10 @@ const EF_TELEPORT_BIT = 4;
 export function killBox(context: CombatContext, entity: GameEntity): void {
   if (entity.client === null) throw new Error("G_KillBox requires a client entity");
   const origin = entity.client.ps.origin;
-  const contacts = context.world.areaEntities({ min: add3(origin, entity.r.mins), max: add3(origin, entity.r.maxs) });
-  for (const number of contacts) {
-    const hit = context.entities.at(number);
-    if (hit.client === null) continue;
+  const contacts = context.spatial.areaActors({ min: add3(origin, entity.r.mins), max: add3(origin, entity.r.maxs) }, 1024);
+  for (const actor of contacts) {
+    if (context.actors.linkedBounds(actor) === null || !context.actors.isPlayer(actor)) continue;
+    const hit = context.actors.participant(actor);
     damage(context, hit, entity, entity, null, null, 100000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
   }
 }

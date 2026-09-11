@@ -27,4 +27,3 @@ export function useClient(participant: UseParticipant, services?: UseParticipant
   if (entity?.client == null) throw new Error("Admitted Q3 map player has no native client behavior record");
   return entity;
 }
-

@@ -60,7 +60,7 @@ function requireOwned(host: TriggerHost, entity: GameEntity): void {
 
 function combatContext(host: TriggerHost): CombatContext {
   const combat = host.combat();
-  if (combat.entities !== host.entities || combat.world !== host.world) {
+  if (combat.entities !== host.entities || !Object.is(combat.spatial, host.world)) {
     throw new Error("Trigger combat context does not match its entity pool and world");
   }
   if (combat.time !== gameTime(host)) throw new Error("Trigger combat context contains stale game time");

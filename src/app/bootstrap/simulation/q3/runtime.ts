@@ -160,6 +160,7 @@ export class Q3SourceRuntime {
       appendConsoleCommand: host.engine.appendConsoleCommand, isDoorTrigger: entity => this.moverSpawns.isDoorTrigger(entity),
       botTestAas: origin => { if (host.bots.kind === "available") host.bots.testAas(origin); } });
     this.spawns = new ClientSpawnRuntime({ pool: this.pool, world: this.world, random: this.random, think: this.think,
+      isPlayer: actor => this.combat.actors.isPlayer(actor),
       frame: () => ({ time: this.level.time, gameType: this.gameType, inactivitySeconds: this.integer("g_inactivity"), intermissionTime: this.level.intermissionTime }),
       userCommand: host.engine.getUserCommand, handicap: number => this.userinfo(number, "handicap"),
       findIntermissionPoint: () => this.match.findIntermissionPoint(), moveToIntermission: entity => this.match.moveClientToIntermission(entity),

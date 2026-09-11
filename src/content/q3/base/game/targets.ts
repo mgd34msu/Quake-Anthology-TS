@@ -74,7 +74,7 @@ function requireOwned(runtime: TargetRuntime, entity: GameEntity): void {
 
 function combatContext(runtime: TargetRuntime): CombatContext {
   const combat = runtime.combat();
-  if (combat.entities !== runtime.entities || combat.world !== runtime.world) {
+  if (combat.entities !== runtime.entities || !Object.is(combat.spatial, runtime.world)) {
     throw new Error("Target combat context does not match its entity pool and world");
   }
   if (combat.time !== gameTime(runtime)) throw new Error("Target combat context contains stale game time");

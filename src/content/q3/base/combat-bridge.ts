@@ -1,10 +1,10 @@
 import type { AttackProvenance, CombatPolicy, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
-import type { ProviderId } from "../../../contracts/identity.ts";
+import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import { createQ3CombatPolicy, nativeVictimArmor } from "../../../world/gameplay/policies.ts";
 import type { Q3EntityRecords } from "./records.ts";
-import type { ServerWorld } from "./world.ts";
+import type { ActorSpatialQueries, ServerWorld } from "./world.ts";
 import type { EntityPool } from "./game/entities.ts";
 import type { CombatContext, DamageDiagnostic, Q3DamageCall } from "./game/combat.ts";
 import { q3DamageFeedback } from "./game/combat.ts";
@@ -20,7 +20,7 @@ interface CombatBridgeServices {
   readonly authority: GameplayAuthority;
   readonly entities: EntityPool;
   readonly records: Q3EntityRecords;
-  readonly world: ServerWorld;
+  readonly world: ServerWorld & ActorSpatialQueries;
   readonly weaponProvider: ProviderId;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
@@ -48,7 +48,15 @@ export class Q3CombatBridge {
 
   constructor(readonly host: Q3CombatBridgeHost) {
     const shared = {
-      authority: host.authority, entities: host.entities, world: host.world,
+      authority: host.authority, entities: host.entities, spatial: host.world,
+      actors: {
+        participant: (actor: ActorId) => host.records.damageInflictor(actor),
+        linkedBounds: (actor: ActorId) => host.records.host.bodies.linked(actor)?.absoluteBounds ?? null,
+        isPlayer: (actor: ActorId) => {
+          const native = host.records.nativeByActor(actor);
+          return native === null ? host.records.host.isPlayer(actor) : native.client !== null;
+        },
+      },
       get time() { return host.time(); }, get intermissionQueued() { return host.intermissionQueued(); },
       get gameType() { return host.gameType(); }, get friendlyFire() { return host.friendlyFire(); }, get knockback() { return host.knockback(); },
       debugDamage: host.debugDamage,
