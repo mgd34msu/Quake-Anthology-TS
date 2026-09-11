@@ -4,7 +4,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
-import { ammoItem } from "./runtime.ts";
+import { ammoItem } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
 import { POINT, ZERO, vadd, vsub, vscale, normalize, dot, isQ1BaseWeapon } from "./types.ts";
 

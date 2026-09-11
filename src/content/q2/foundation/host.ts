@@ -10,6 +10,7 @@ import type { ActorCallbackTable, SessionActorRegistry, SharedBodyTable } from "
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 import type { Q2CallbackDefinitions, Q2SourceCallbacks } from "./callbacks.ts";
+import type { Q2EntityServices } from "./entity-services.ts";
 
 export type Q2Edition = "classic" | "rerelease";
 export interface Q2GameOptions {
@@ -80,6 +81,7 @@ export interface Q2LandmarkCarry {
 }
 
 export interface Q2FoundationHost {
+  registerEntity?(entity: Q2Entity, services: Q2EntityServices): undefined;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;

@@ -94,6 +94,7 @@ export class Q2EntityServices implements Q2GameServices {
       this.entities.set(actor.id, entity);
       if (saved.sourceSlot !== null) this.sourceSlots.set(actor.id, saved.sourceSlot);
       this.bindCallbacks(entity);
+      this.host.registerEntity?.(entity, this);
     }
     return undefined;
   }
@@ -153,6 +154,7 @@ export class Q2EntityServices implements Q2GameServices {
     entity.random = numberField(fields, "random"); entity.style = integerField(fields, "style");
     this.entities.set(actor.id, entity);
     this.bindCallbacks(entity);
+    this.host.registerEntity?.(entity, this);
     return entity;
   }
 

@@ -232,6 +232,7 @@ export class Q1EntityServices {
     if (this.host.bodies.read(entity.actor.id) === null || this.host.combat.read(entity.actor.id) === null) throw new Error("Attach Q1 behavior after shared body and combat admission");
     this.entities.set(entity.actor, entity);
     this.bindActorCallbacks(entity);
+    this.host.registerEntity?.(entity, this);
     return entity;
   }
   cloneEntity(source: Q1Actor): Q1Actor {

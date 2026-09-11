@@ -4,7 +4,7 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "./types.ts";
 import { vadd, ZERO, WEAPONS, weaponItem } from "./types.ts";
-import { ammoItem } from "./runtime.ts";
+import { ammoItem } from "./entity-services.ts";
 
 interface Pickup {
   readonly model: string;

@@ -1,3 +1,5 @@
+import { actorMotion, actorCollision, actorFlags, writeActorFlags, executeActor } from "./actor-execution.ts";
+import type { ActorExecution } from "./actor-execution.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
 import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
@@ -104,6 +106,7 @@ export class SharedSimulation implements Simulation {
   readonly botServices = new SimulationBotServices();
   readonly clock: SourceClock;
   readonly events: SimulationEvents;
+  private readonly actorExecutions = new Map<ActorId, ActorExecution>();
   private readonly playerStates = new Map<OwnedActor, MovementPlayer>();
   private readonly q2Characters = new Map<OwnedActor, Q2CharacterActor>();
   private readonly characterTicks = new Map<OwnedActor, number>();
@@ -173,7 +176,7 @@ export class SharedSimulation implements Simulation {
     this.scene = new SharedSceneQueries(options.world);
     this.physics = new SharedPhysics({ actors: this.actors, callbacks: this.callbacks, scene: this.scene, numeric: timing.numeric,
       q2Edition: this.recipe.map.entities.content.includes(":rerelease:") ? "rerelease" : "classic",
-      takeKillVelocity: actor => { const entity = this.source.kind === "q2" ? this.source.game.entity(actor.id) : null;
+      takeKillVelocity: actor => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q2" ? entry.entity : null;
         if (entity === null || (entity.flags & 0x800000) === 0) return false; entity.flags &= ~0x800000; return true; },
       stopSpeed: () => this.source.kind === "q2" ? this.source.product.movementStopSpeed ?? 100 : 100,
       sourceOrder: (a, b) => this.sourceOrder(a, b), worldActor: () => this.worldActor(), getCollision: actor => this.collision(actor),
@@ -182,37 +185,37 @@ export class SharedSimulation implements Simulation {
         const player = this.playerStates.get(actor);
         if (player !== undefined) return { actor, velocity: body.velocity, angularVelocity: zero,
           kind: this.q2Characters.get(actor)?.state.dead ? this.q2Characters.get(actor)?.state.gibbed ? "bounce" : "toss" : "step", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null };
-        if (this.source.kind === "q2") { const entity = this.source.game.entity(actor.id); return entity === null ? null : { actor, velocity: body.velocity, angularVelocity: entity.angularVelocity,
-          kind: entity.motion, gravity: entity.gravity, gravityVector: entity.gravityVector, clipMask: entity.clipMask, owner: entity.owner }; }
-        if (this.source.kind === "q1") { const entity = this.source.game.entity(actor.id); return entity === null ? null : { actor, velocity: body.velocity, angularVelocity: entity.angularVelocity,
-          kind: entity.movement === "flymissile" ? "fly-missile" : (entity.movement === "none" || entity.movement === "noclip") ? "stationary" : entity.movement,
-          gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: entity.owner }; }
-        return null;
+        const entry = this.actorExecutions.get(actor.id);
+        return entry === undefined ? null : actorMotion(entry, body);
       },
       getFlags: actor => {
-        const player = this.playerStates.get(actor), entity = this.source.kind === "q1" ? this.source.game.entity(actor.id) : null;
-        const q2 = this.source.kind === "q2" ? this.source.game.entity(actor.id) : null;
-        const monster = this.source.kind === "q2" ? this.source.monsters.context(actor.id)?.state : undefined;
-        return { ...(q2 === null ? {} : { teamSlave: (q2.flags & 1024) !== 0, alwaysTouch: (q2.flags & 0x10000000) !== 0 }), ...(monster === undefined ? {} : { fly: monster.locomotion === "fly", swim: monster.locomotion === "swim", dead: monster.dead, waterLevel: monster.waterLevel, waterType: monster.waterType }), player: player !== undefined, dead: (this.combat?.read(actor.id)?.health ?? 1) <= 0,
-          ...(player === undefined ? {} : { waterLevel: player.waterLevel, waterType: player.waterType }),
-          ...(entity === null ? {} : { fly: (entity.movementFlags & 1) !== 0, swim: (entity.movementFlags & 2) !== 0, partialGround: (entity.movementFlags & 1024) !== 0, waterLevel: entity.waterLevel, waterType: entity.waterType, enemy: entity.monster?.enemy ?? null }) };
+        const player = this.playerStates.get(actor), entry = this.actorExecutions.get(actor.id);
+        return { ...(entry === undefined ? {} : actorFlags(entry)),
+          ...(player === undefined || entry?.kind === "q1" ? {} : { waterLevel: player.waterLevel, waterType: player.waterType }),
+          player: player !== undefined, dead: (this.combat?.read(actor.id)?.health ?? 1) <= 0 };
       },
-      writeFlags: (actor, changes) => { const player = this.playerStates.get(actor);
+      writeFlags: (actor, changes) => {
+        const player = this.playerStates.get(actor);
         if (player !== undefined) { if (changes.waterLevel !== undefined) player.waterLevel = changes.waterLevel; if (changes.waterType !== undefined) player.waterType = changes.waterType; }
-        const entity = this.source.kind === "q1" ? this.source.game.entity(actor.id) : null;
-        if (entity !== null && changes.waterLevel !== undefined) entity.waterLevel = changes.waterLevel;
-        const monster = this.source.kind === "q2" ? this.source.monsters.context(actor.id)?.state : undefined;
-        if (monster !== undefined) { if (changes.waterLevel === 0 || changes.waterLevel === 1 || changes.waterLevel === 2 || changes.waterLevel === 3) monster.waterLevel = changes.waterLevel; if (changes.waterType !== undefined) monster.waterType = changes.waterType; }
-        return undefined; },
-      event: event => this.events.emit(this.recipe.map.entities.content, this.source.kind === "q1" ? { kind: "q1", event: {
-        kind: "sound", actor: event.actor, path: event.kind === "land" ? "demon/dland2.wav" : "misc/h2ohit1.wav", channel: "auto", volume: 1, attenuation: 1 } }
-        : { kind: "q2", event: { kind: "sound", actor: event.actor, origin: event.origin, path: event.kind === "land" ? "world/land.wav" : "misc/h2ohit1.wav",
-          channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" } }),
-      writeAngularVelocity: (actor, velocity) => { const entity = this.source.kind === "q1" ? this.source.game.entity(actor.id) : this.source.kind === "q2" ? this.source.game.entity(actor.id) : null;
-        if (entity !== null) entity.angularVelocity = velocity; return undefined; },
+        const entry = this.actorExecutions.get(actor.id);
+        return entry === undefined ? undefined : writeActorFlags(entry, changes);
+      },
+      event: event => {
+        const entry = this.actorExecutions.get(event.actor), family = entry?.kind ?? providerFamily(this.recipe.map.entities.provider);
+        return this.events.emit(entry?.content ?? this.recipe.map.entities.content, family === "q1" ? { kind: "q1", event: {
+          kind: "sound", actor: event.actor, path: event.kind === "land" ? "demon/dland2.wav" : "misc/h2ohit1.wav", channel: "auto", volume: 1, attenuation: 1 } }
+          : { kind: "q2", event: { kind: "sound", actor: event.actor, origin: event.origin, path: event.kind === "land" ? "world/land.wav" : "misc/h2ohit1.wav",
+            channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" } });
+      },
+      writeAngularVelocity: (actor, velocity) => {
+        const entry = this.actorExecutions.get(actor.id);
+        if (entry !== undefined) entry.entity.angularVelocity = velocity;
+        return undefined;
+      },
       onBlocked: (actor, other) => {
-        if (this.source.kind === "q1") this.source.game.entity(actor.id)?.blocked?.(other);
-        else if (this.source.kind === "q2") { const entity = this.source.game.entity(actor.id); entity?.blocked?.(entity, this.source.game, other); }
+        const entry = this.actorExecutions.get(actor.id);
+        if (entry?.kind === "q1") entry.entity.blocked?.(other);
+        else if (entry?.kind === "q2") entry.entity.blocked?.(entry.entity, entry.services, other);
         return undefined;
       } });
     this.inventory = new SharedInventoryTable(this.actors);
@@ -254,13 +257,14 @@ export class SharedSimulation implements Simulation {
       sourceSlot: actor => this.actors.sourceOf(actor)?.slot ?? null,
       resolve: (_provider, callback) => callback === "world:think" ? (actor, frame) => { this.callbacks.think(actor, frame); return undefined; } : null });
     this.actors.onRelease(actor => {
+      this.actorExecutions.delete(actor.id);
       this.selectedArsenal?.remove(actor.id);
       this.scheduler.cancel(actor); this.playerStates.delete(actor); this.characters.delete(actor); this.characterStarts.delete(actor); this.q3Arsenals.delete(actor); this.q3Commands.delete(actor); this.q1Characters.delete(actor); this.q2Views.delete(actor.id); this.q2Characters.delete(actor); this.characterTicks.delete(actor); this.entryCarry.delete(actor); this.detachedModels.delete(actor); this.sourceModels.delete(actor.id); this.viewModels.delete(actor.id); this.lastAttack.delete(actor);
       return undefined;
     });
     this.q1Movement = createQ1MonsterMovement({ scene: this.scene, numeric: createNumericOperations(timing.numeric), random: this.random,
       read: actor => {
-        const body = this.physics.bodies.read(actor), entity = this.source.kind === "q1" ? this.source.game.entity(actor) : null;
+        const body = this.physics.bodies.read(actor), entry = this.actorExecutions.get(actor), entity = entry?.kind === "q1" ? entry.entity : null;
         if (body === null || entity === null) return null;
         return { origin: body.origin, angles: body.angles, bounds: body.bounds,
           absoluteBounds: this.physics.bodies.linked(actor)?.absoluteBounds ?? { min: add(body.origin, body.bounds.min), max: add(body.origin, body.bounds.max) },
@@ -268,7 +272,7 @@ export class SharedSimulation implements Simulation {
           idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null };
       },
       write: (actor, state) => {
-        const body = this.physics.bodies.read(actor.id), entity = this.source.kind === "q1" ? this.source.game.entity(actor.id) : null;
+        const body = this.physics.bodies.read(actor.id), entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
         if (body === null || entity === null) return undefined;
         this.physics.bodies.write(actor, { ...body, origin: state.origin, angles: state.angles, ground: state.ground.kind === "actor" ? state.ground.actor : state.ground.kind === "world" ? this.worldActor() : null });
         entity.movementFlags = state.flags; entity.idealYaw = state.idealYaw; entity.yawSpeed = state.yawSpeed;
@@ -368,6 +372,7 @@ export class SharedSimulation implements Simulation {
     }
     if (this.options.world.kind === "q1-bsp") {
       const host: Q1FoundationHost = { actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+        registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
         random: () => this.random.nextUnit(),
         trace: request => {
           const trace = this.scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" },
@@ -382,7 +387,7 @@ export class SharedSimulation implements Simulation {
         checkBottom: actor => this.q1Movement.checkBottom(actor),
         moveToGoal: (actor, goal, distance) => this.q1Movement.moveToGoal(actor, goal, distance),
         changeYaw: actor => { this.q1Movement.changeYaw(actor); return undefined; },
-        pushMove: (actor, displacement) => { const entity = this.source.kind === "q1" ? this.source.game.entity(actor.id) : null;
+        pushMove: (actor, displacement) => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
           const angular = entity?.angularVelocity ?? zero, elapsed = seconds(this.sourceFrame.elapsed);
           return this.physics.pushMove(actor, displacement, { x: angular.x * elapsed, y: angular.y * elapsed, z: angular.z * elapsed }); },
         scheduleThink: (actor, due) => this.schedule(actor, due), cancelThink: actor => this.scheduler.cancel(actor),
@@ -475,7 +480,9 @@ export class SharedSimulation implements Simulation {
       emit: event => { if (event.kind === "view") this.q2Views.set(event.actor, event.view); return this.events.emit(content, { kind: "q2-player", event }); },
       noise: (actor, origin) => { if (this.source.kind !== "q2") throw new Error("Q2 noise before source entry"); return this.source.monsters.reportNoise(actor, origin); }, weaponInput: actor => this.q2WeaponInput(this.requirePlayer(actor)), banned: () => false,
     };
+    let owningMonsters: Q2ProductRuntime["monsters"] | null = null;
     const host: Q2FoundationHost = { actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+      registerEntity: (entity, services) => this.registerActorExecution({ kind: "q2", entity, services, content, readMonster: () => owningMonsters?.context(entity.actor.id)?.state }),
       ...(this.random.rerelease === null ? {} : { rereleaseRandom: this.random.rerelease }),
       now: () => this.timeSeconds, frameSeconds: () => {
         const clock = providerTiming(recipe, recipe.map.entities.provider).clock;
@@ -552,6 +559,7 @@ export class SharedSimulation implements Simulation {
       if (program !== "baseq2" && program !== "xatrix" && program !== "rogue") throw new Error(`Unsupported Q2 classic program ${program}`);
       product = createQ2ProductRuntime({ ...common, edition: "classic", program });
     }
+    owningMonsters = product.monsters;
     return { kind: "q2", product, game: product.game, weapons, monsters: product.monsters, movers: product.movers, items: product.items, players: product.players, baseEntities: product.baseEntities };
   }
 
@@ -623,17 +631,16 @@ export class SharedSimulation implements Simulation {
     if (player !== undefined && (player.intermission || player.cutscene !== null)) return { family: providerFamily(player.profile.id), solid: "none", model: null, owner: null };
     if (player !== undefined && this.q2Characters.get(actor)?.state.gibbed) return { family: "q2", solid: "none", model: null, owner: null };
     if (player !== undefined) return { family: providerFamily(player.profile.id), solid: "box", model: null, owner: null };
-    if (this.source.kind === "q1") {
-      const entity = this.source.game.entity(actor.id); if (entity === null) return null;
-      return { family: "q1", solid: entity.solid === "none" ? "none" : entity.solid === "trigger" ? "trigger" : entity.solid === "bsp" ? "brush" : "box",
-        model: sourceModel(entity.model || entity.originalModel), owner: entity.owner, monster: entity.monster !== null, item: (entity.movementFlags & 256) !== 0 };
-    }
-    if (this.source.kind === "q2") {
-      const entity = this.source.game.entity(actor.id); if (entity === null) return null;
-      return { family: "q2", solid: entity.solid, model: sourceModel(entity.model), owner: entity.owner,
-        monster: (entity.serverFlags & 4) !== 0, deadMonster: (entity.serverFlags & 2) !== 0 };
-    }
-    return null;
+    const entry = this.actorExecutions.get(actor.id);
+    return entry === undefined ? null : actorCollision(entry);
+  }
+
+  private registerActorExecution(entry: ActorExecution): undefined {
+    const actor = entry.entity.actor, previous = this.actorExecutions.get(actor.id);
+    this.actors.assertOwned(actor);
+    if (previous !== undefined && previous.services !== entry.services) throw new Error("Actor already has another source execution owner");
+    this.actorExecutions.set(actor.id, entry);
+    return undefined;
   }
 
   private contents(point: Vec3, family: "q1" | "q2"): number {
@@ -1241,72 +1248,23 @@ export class SharedSimulation implements Simulation {
           cursor = next.position;
           visited.add(actor);
           if (this.selectedBallistics?.owns(actor) === true) continue;
+          const execution = this.actorExecutions.get(actor.id);
           if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
             this.bodies.link(actor); this.physics.touchTriggers(actor);
             if (!this.actors.isLive(actor.id)) continue;
+          }
+          if (execution !== undefined && !this.playerStates.has(actor)) {
+            executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+              frame: this.sourceFrame, timeSeconds: this.timeSeconds, elapsed, visited });
+            continue;
           }
           if (this.source.kind === "q3") { this.source.game.runActor(actor); const player = this.playerStates.get(actor); if (player !== undefined) this.syncQ3Player(player); continue; }
           if (this.playerStates.has(actor)) {
             this.q2Characters.get(actor)?.beginFrame();
             this.playerWeapon(this.playerStates.get(actor) ?? this.requirePlayer(actor.id)); continue;
           }
-          if (this.source.kind === "q1") {
-            const entity = this.source.game.entity(actor.id), pusher = entity?.movement === "push", step = entity?.movement === "step";
-            if (!pusher && !step) this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-            if (this.actors.isLive(actor.id)) {
-              if (entity?.movement === "noclip") { const body = this.bodies.read(actor.id);
-                if (body !== null) { this.bodies.write(actor, { ...body, origin: add(body.origin, { x: body.velocity.x * elapsed, y: body.velocity.y * elapsed, z: body.velocity.z * elapsed }),
-                  angles: add(body.angles, { x: entity.angularVelocity.x * elapsed, y: entity.angularVelocity.y * elapsed, z: entity.angularVelocity.z * elapsed }) }); this.bodies.link(actor); }
-              } else if (entity === null || step) {
-                this.physics.step(actor, elapsed);
-                if (entity !== null) entity.movementFlags = (entity.movementFlags & ~512) | (this.bodies.read(actor.id)?.ground == null ? 0 : 512);
-              }
-              else this.source.game.physicsEntity(actor, this.timeSeconds, elapsed);
-            }
-            if ((pusher || step) && this.actors.isLive(actor.id)) this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-            if (step && entity !== null && this.actors.isLive(actor.id)) this.source.game.checkWaterTransition(entity);
-          } else if (this.source.kind === "q2") {
-            const source = this.source;
-            source.game.runActor(actor.id, () => {
-              source.game.prePhysics(actor.id);
-              if (!this.actors.isLive(actor.id)) return undefined;
-              const entity = source.game.entity(actor.id);
-              if (entity?.motion === "push" || entity?.motion === "stop") {
-                const team = source.game.pushTeam(actor.id);
-                const master = team[0];
-                if (master !== undefined && !sameActor(master.id, actor.id)) return undefined;
-                for (const member of team) visited.add(member);
-                const blocked = this.physics.pushTeam(team, elapsed);
-                if (blocked !== null) {
-                  for (const member of team) { const pending = this.scheduler.pending(member.id);
-                    if (pending !== null && this.actors.isLive(member.id)) {
-                      const due = { kind: pending.timing.due.kind, value: pending.timing.due.value + (pending.timing.due.kind === "seconds" ? elapsed : elapsed * 1000) };
-                      this.scheduler.schedule(member, pending.callback, { ...pending.timing, due });
-                      const part = source.game.entity(member.id); if (part !== null) part.nextThink = seconds(due);
-                    } }
-                } else for (const member of team) if (this.actors.isLive(member.id)) this.scheduler.run(member.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-                for (const member of team) if (this.actors.isLive(member.id)) source.game.postPhysics(member.id);
-                return undefined;
-              }
-              const after = entity?.motion === "step";
-              if (!after) this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-              const moved = this.actors.isLive(actor.id) ? this.physics.step(actor, elapsed) : undefined;
-              if (entity !== null && entity !== undefined && this.actors.isLive(actor.id)
-                && (entity.motion === "new-toss" && moved === "moved" || entity.motion === "toss" || entity.motion === "bounce" || entity.motion === "fly" || entity.motion === "fly-missile" || entity.motion === "wall-bounce")) {
-                const body = this.bodies.read(actor.id);
-                for (let next = entity.teamChain; body !== null && next !== null;) {
-                  const follower = source.game.entity(next);
-                  if (follower === null) break;
-                  const current = this.bodies.read(follower.actor.id);
-                  if (current !== null) { this.bodies.write(follower.actor, { ...current, origin: body.origin }); this.bodies.link(follower.actor); }
-                  next = follower.teamChain;
-                }
-              }
-              if (after && this.actors.isLive(actor.id)) this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
-              if (this.actors.isLive(actor.id)) source.game.postPhysics(actor.id);
-              return undefined;
-            });
-          }
+          this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics");
+          if (this.actors.isLive(actor.id)) this.physics.step(actor, elapsed);
         }
       }
       if (run || paused) {

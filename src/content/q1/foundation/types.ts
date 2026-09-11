@@ -6,6 +6,8 @@ import type { ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { SessionActorRegistry, SharedBodyTable, ActorCallbackTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
+import type { Q1Actor } from "./entity.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 
 export type Q1BaseWeapon = "axe" | "shotgun" | "supershotgun" | "nailgun" | "supernailgun" | "grenadelauncher" | "rocketlauncher" | "lightning";
 export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
@@ -64,6 +66,7 @@ export interface Q1PrecacheTables {
 
 /** Engine builtins operate on the same actor/body/combat tables used by every game. */
 export interface Q1FoundationHost {
+  registerEntity?(entity: Q1Actor, services: Q1EntityServices): undefined;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;
