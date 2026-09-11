@@ -5,6 +5,8 @@ import type { InstalledCatalog, LaunchPreset } from "../../../src/content/catalo
 import { readEquipment } from "../../../src/persistence/recipe.ts";
 import { SaveReader } from "../../../src/persistence/value.ts";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
+import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
+import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
 const installed = discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
 function preset(catalog: InstalledCatalog, product: string, map: string): LaunchPreset {
@@ -18,6 +20,26 @@ function preset(catalog: InstalledCatalog, product: string, map: string): Launch
     ordering: { kind: "mixed", providers: [provider.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 function source(provider: ProviderReference["provider"], content: ContentId): ProviderReference { return { provider, content }; }
+
+test("classic Q1 map sidecars cannot resolve from selected Threewave rerelease equipment", async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--mode", "deathmatch"]);
+  if (command.kind !== "run") throw new Error("Expected an application launch");
+  const baseline = await loadApplicationContent(command.options);
+  try {
+    const native = applicationPreset(baseline.catalog, command.options);
+    const equipment: EquipmentSelection = { handGrenades: { kind: "disabled" }, grapple: {
+      kind: "enabled", mechanic: "q1-threewave", edition: "rerelease", binding: "offhand",
+      source: source(EQUIPMENT_PROVIDERS.threewave, baseline.catalog.require("q1-rerelease-ctf").id),
+    } };
+    const recipe = await resolveLaunch({ catalog: baseline.catalog, preset: native,
+      choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: equipment } } });
+    const selected = await loadApplicationContent(command.options, recipe);
+    try {
+      expect(recipe.map.geometryContent).toBe(native.map.geometry.content);
+      expect(selected.world).toEqual(baseline.world);
+    } finally { await selected.close(); }
+  } finally { await baseline.close(); }
+}, 60000);
 
 test("equipment selection and saved discriminants preserve campaign, arsenal and explicit disabled choices", async () => {
   const catalog = await installed;
@@ -39,6 +61,21 @@ test("equipment selection and saved discriminants preserve campaign, arsenal and
   expect(resolved.ordering).toEqual(native.ordering);
   expect(resolved.timing.some(timing => timing.provider === EQUIPMENT_PROVIDERS.lmctf && timing.clock.kind === "q2-classic")).toBe(true);
   expect(resolved.timing.some(timing => timing.provider === EQUIPMENT_PROVIDERS.handGrenades && timing.clock.kind === "q2-rerelease")).toBe(true);
+}, 60000);
+
+test("selected map content rejects a foreign equipment BSP and permits its own base fallback", async () => {
+  const catalog = await installed;
+  const missing = preset(catalog, "q1-classic-id1", "maps/q2ctf1.bsp");
+  const equipment: EquipmentSelection = { handGrenades: { kind: "disabled" }, grapple: {
+    kind: "enabled", mechanic: "q2-ctf", edition: "classic", binding: "offhand",
+    source: source(EQUIPMENT_PROVIDERS.ctf, catalog.require("q2-classic-ctf").id),
+  } };
+  await expect(resolveLaunch({ catalog, preset: missing,
+    choice: { ...presetChoice(missing.id), equipment: { kind: "selected", value: equipment } } })).rejects.toThrow("Required map is absent from its selected content and base");
+  const fallback = preset(catalog, "q1-rerelease-hipnotic", "maps/e1m1.bsp");
+  const resolved = await resolveLaunch({ catalog, preset: fallback, choice: presetChoice(fallback.id) });
+  expect(resolved.map.geometryContent).toBe(catalog.require("q1-rerelease-hipnotic").id);
+  expect(resolved.map.geometry.provenance.mount.identity.content).toBe(catalog.require("q1-rerelease-id1").id);
 }, 60000);
 
 test("native CTF presets declare their grapple bindings while ordinary maps grant no equipment", async () => {

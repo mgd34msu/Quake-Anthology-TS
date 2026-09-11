@@ -8,7 +8,8 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { SaveImage } from "../../src/contracts/session.ts";
 import { SessionActorRegistry } from "../../src/world/actors/index.ts";
 import { decodeSaveImage, encodeSaveImage, readSaveImage, sourceActorsCheckpoint, writeSaveImage } from "../../src/persistence/save-image.ts";
-import { decodeCheckpointValue, encodeCheckpointValue } from "../../src/persistence/value.ts";
+import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../src/persistence/value.ts";
+import { readRecipe } from "../../src/persistence/recipe.ts";
 import { decodeQ2ClassicLevel, encodeQ2ClassicLevel, restoreQ2ClassicRecord } from "../../src/persistence/q2-classic.ts";
 import type { Q2ClassicSaveLayout } from "../../src/persistence/q2-classic.ts";
 import { decodeQ3ClientSession, encodeQ3ClientSession } from "../../src/persistence/q3.ts";
@@ -19,7 +20,7 @@ function recipe(): ExecutableRecipe {
   const raw: Omit<ResolvedResourceReference, "id"> = { requestedPath: "maps/start.bsp", provenance: { kind: "loose", memberPath: "maps/start.bsp", mount: { kind: "loose", identity: { id: "mount:q1:fixture", content, generation: 2 }, rootPath: "/fixture" } },
     digest: createContentDigest("0".repeat(64)), byteLength: 123, resolution: { kind: "default-order", plan: "mount-plan:fixture:1", rank: 0 } };
   const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 1, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
+  return { schemaVersion: 2, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
     movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
     execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
@@ -77,6 +78,14 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
     const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect({ status, stdout, stderr }).toEqual({ status: 0, stdout: "restored", stderr: "" });
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("recipe map product survives base geometry fallback and rejects the old schema", () => {
+  const base = recipe();
+  const selected: ExecutableRecipe = { ...base, map: { ...base.map, geometryContent: "q1:rerelease:hipnotic:fixture" } };
+  expect(readRecipe(new SaveReader(selected, "recipe"))).toEqual(selected);
+  expect(selected.map.geometryContent).not.toBe(selected.map.geometry.provenance.mount.identity.content);
+  expect(() => readRecipe(new SaveReader({ ...selected, schemaVersion: 1 }, "recipe"))).toThrow();
 });
 
 test("provider checkpoint values retain 64-bit bytes and reject live Maps", () => {

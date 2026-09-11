@@ -93,19 +93,17 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   const plan: ResolvedMountPlan = { ...basePlan, prefixOrders: [...artifactOrders, ...basePlan.prefixOrders] };
   using mounted = await openMountPlan(plan, options.mounts);
   const resources = new Map<ResolvedResourceReference["id"], ResolvedResourceReference>();
-  const resolveResource = async (request: ResourceRequest, artifact = false): Promise<ResolvedResourceReference> => {
+  const resolveResource = async (request: ResourceRequest, kind: "map" | "artifact"): Promise<ResolvedResourceReference> => {
     const resolved = await mounted.resolve(request.path);
     if (resolved === null) throw new Error(`Required resource is missing: ${request.content}/${request.path}`);
-    if (artifact) {
-      const allowed = await options.catalog.mountsFor(request.content);
-      if (!allowed.some(mount => mountPath(mount) === mountPath(resolved.provenance.mount))) {
-        throw new Error(`Required artifact is absent from its selected content and base: ${request.content}/${request.path}`);
-      }
+    const allowed = await options.catalog.mountsFor(request.content);
+    if (!allowed.some(mount => mountPath(mount) === mountPath(resolved.provenance.mount))) {
+      throw new Error(`Required ${kind} is absent from its selected content and base: ${request.content}/${request.path}`);
     }
     resources.set(resolved.id, resolved);
     return resolved;
   };
-  const geometry = await resolveResource(selected.map.geometry);
+  const geometry = await resolveResource(selected.map.geometry, "map");
   const equipmentRequests = equipmentResources(selected.equipment);
   for (const content of new Set(equipmentRequests.map(request => request.content))) {
     const order = await orderForContent(options.catalog, mounted.plan, content);
@@ -124,9 +122,9 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   for (const module of selected.execution) {
     switch (module.kind) {
       case "typescript": execution.push(module); break;
-      case "quakec": execution.push({ ...module, artifact: await resolveResource(module.artifact, true) }); break;
-      case "qvm": execution.push({ ...module, artifact: await resolveResource(module.artifact, true) }); break;
-      case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, true) }); break;
+      case "quakec": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
+      case "qvm": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
+      case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
     }
   }
   const equipmentIds = new Set<string>(Object.values(EQUIPMENT_PROVIDERS));
@@ -135,6 +133,6 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   const ordering = selected.ordering.kind === "mixed"
     ? { ...selected.ordering, providers: [...selected.ordering.providers.filter(provider => !equipmentIds.has(provider)), ...equipmentOrder] }
     : selected.ordering;
-  return { ...selected, schemaVersion: 1, map: { geometry, entities: selected.map.entities }, execution, timing, ordering,
+  return { ...selected, schemaVersion: 2, map: { geometryContent: selected.map.geometry.content, geometry, entities: selected.map.entities }, execution, timing, ordering,
     mounts: mounted.plan, resources: [...resources.values()] };
 }

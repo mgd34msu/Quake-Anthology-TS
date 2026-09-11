@@ -29,7 +29,7 @@ function sourceRecipe(byteLength: number): ExecutableRecipe {
     provenance: { kind: "loose", memberPath: "maps/q3dm1.bsp", mount: { kind: "loose", identity: { id: "mount:q3:smoke", content, generation: 0 }, rootPath: "/retail-map-smoke" } },
     digest: createContentDigest("0".repeat(64)), resolution: { kind: "default-order", plan: "mount-plan:q3:smoke", rank: 0 } };
   const geometry = { ...raw, id: createResourceId(raw) };
-  return { schemaVersion: 1, id: "recipe:q3:smoke", preset: "recipe:q3:smoke", map: { geometry, entities: provider("game") },
+  return { schemaVersion: 2, id: "recipe:q3:smoke", preset: "recipe:q3:smoke", map: { geometryContent: content, geometry, entities: provider("game") },
     campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") }, movement: provider("movement"),
     character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"),

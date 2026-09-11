@@ -119,6 +119,12 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
     rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : "standard" };
 }
 
+async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecipe): Promise<MountedContent> {
+  const mounts = await catalog.mountsFor(recipe.map.geometryContent);
+  return openMountPlan({ id: createMountPlanId("map-sidecars", Buffer.from(recipe.map.geometryContent).toString("hex")),
+    mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+}
+
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe): Promise<LoadedApplicationContent> {
   const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, discoverMods: false });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
@@ -133,13 +139,15 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     const map = recipe.map.geometry.requestedPath;
     let world: ApplicationWorld;
     if (family === "q1") {
-      const [entities, lit] = await Promise.all([mounts.open(map.replace(/\.bsp$/, ".ent")), mounts.open(map.replace(/\.bsp$/, ".lit"))]);
+      using mapContent = await openMapContent(catalog, recipe);
+      const [entities, lit] = await Promise.all([mapContent.open(map.replace(/\.bsp$/, ".ent")), mapContent.open(map.replace(/\.bsp$/, ".lit"))]);
       world = readQ1Bsp(bytes, { source: map, ...(entities === null ? {} : { entities: entities.bytes }), ...(lit === null ? {} : { lit: lit.bytes }) });
     } else if (family === "q2") {
+      using mapContent = await openMapContent(catalog, recipe);
       const raw = readQ2Bsp(bytes, map);
       const materials = new Map<string, Uint8Array>();
       await Promise.all([...new Set(raw.textureInfo.map(texture => `textures/${texture.name}.mat`))].map(async path => {
-        const asset = await mounts.open(path);
+        const asset = await mapContent.open(path);
         if (asset !== null) materials.set(path, asset.bytes);
       }));
       world = toQ2WorldGeometry(raw, { readMaterial: path => materials.get(path) ?? null });

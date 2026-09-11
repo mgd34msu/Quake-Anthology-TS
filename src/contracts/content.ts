@@ -257,6 +257,8 @@ export interface LaunchChoice {
 }
 
 export interface ResolvedMap {
+  /** Selected map product, retained when geometry resolves from its base content. */
+  readonly geometryContent: ContentId;
   readonly geometry: ResolvedResourceReference;
   readonly entities: ProviderReference;
 }
@@ -269,7 +271,7 @@ export interface ProviderTiming {
 
 /** Resolved before session construction; renderer and window settings live elsewhere. */
 export interface ExecutableRecipe {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly id: RecipeId;
   readonly preset: RecipeId;
   readonly map: ResolvedMap;

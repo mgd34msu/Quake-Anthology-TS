@@ -160,7 +160,7 @@ test("composition offer and private remote seats retain separate identities", ()
     resolution: { kind: "default-order", plan: "mount-plan:test:1", rank: 0 },
   };
   const recipe: ExecutableRecipe = {
-    schemaVersion: 1, id: "recipe:test:1", preset: "recipe:test:1", map: { geometry: resource, entities: provider }, campaign: { kind: "none" },
+    schemaVersion: 2, id: "recipe:test:1", preset: "recipe:test:1", map: { geometryContent: provider.content, geometry: resource, entities: provider }, campaign: { kind: "none" },
     movement: provider, character: { definition: provider, appearance: provider }, weapons: [provider], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { assets: provider.content, hud: provider, effects: provider, audio: provider }, engineBehavior: provider, combat: provider, inventory: provider,
     match: provider, transition: provider, execution: [], mounts: { id: "mount-plan:test:1", mounts: [resource.provenance.mount], defaultOrder: [resource.provenance.mount.identity.id], prefixOrders: [] },

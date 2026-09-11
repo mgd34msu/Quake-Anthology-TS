@@ -138,8 +138,8 @@ export function readEquipment(reader: SaveReader): EquipmentSelection {
   return { grapple: readGrapple(reader.field("grapple")), handGrenades: readHandGrenades(reader.field("handGrenades")) };
 }
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
-  return { schemaVersion: reader.field("schemaVersion").literal(1), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
-    map: { geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
+  return { schemaVersion: reader.field("schemaVersion").literal(2), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
+    map: { geometryContent: readContentId(reader.field("map").field("geometryContent")), geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
     campaign: readCampaign(reader.field("campaign")), movement: readProvider(reader.field("movement")), character: readCharacter(reader.field("character")),
     weapons: reader.field("weapons").list(readProvider), equipment: readEquipment(reader.field("equipment")), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),
     engineBehavior: readProvider(reader.field("engineBehavior")), combat: readProvider(reader.field("combat")), inventory: readProvider(reader.field("inventory")), match: readProvider(reader.field("match")), transition: readProvider(reader.field("transition")),
