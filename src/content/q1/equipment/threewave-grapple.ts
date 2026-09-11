@@ -2,7 +2,7 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
-import type { BodyState } from "../../../contracts/world.ts";
+import type { BodyState, TouchContact } from "../../../contracts/world.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../../persistence/value.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
@@ -35,7 +35,7 @@ export interface ThreewaveGrappleState {
 export class ThreewaveGrapple {
   private readonly states = new Map<ActorId, ThreewaveGrappleState>();
   constructor(readonly game: Q1EntityServices, readonly host: ThreewaveGrappleHost) {
-    game.named.register("ctf:hook_touch", { touch: (_game, hook, actor) => this.touch(hook, actor) });
+    game.named.register("ctf:hook_touch", { touch: (_game, hook, actor, _normal, surface) => this.touch(hook, actor, surface) });
     game.named.register("ctf:hook_pull", { action: (_game, hook) => this.pull(hook) });
     game.named.register("ctf:hook_flying", { action: (_game, hook) => {
       const owner = hook.owner;
@@ -121,11 +121,11 @@ export class ThreewaveGrapple {
     hook.fields.set("ctf.lastOrigin", `${Math.fround(body.origin.x)} ${Math.fround(body.origin.y)} ${Math.fround(body.origin.z)}`); game.link(hook);
     return game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_pull"));
   }
-  touch(hook: Q1Actor, other: ActorId): undefined {
+  touch(hook: Q1Actor, other: ActorId, surface?: TouchContact["surface"]): undefined {
     const { game, host } = this, owner = hook.owner;
     if (owner === null || !game.host.actors.isLive(owner)) return this.vanish(hook);
     if (sameActor(owner, other)) return undefined;
-    if (game.host.contents(game.body(hook).origin) === "sky") return this.vanish(hook);
+    if (((surface?.nativeFlags ?? 0) & 4) !== 0 || game.host.contents(game.body(hook).origin) === "sky") return this.vanish(hook);
     if (!host.canAttach(owner, other)) return undefined;
     const target = host.anchor(other), combat = game.host.combat.read(other);
     if (combat?.canTakeDamage) {

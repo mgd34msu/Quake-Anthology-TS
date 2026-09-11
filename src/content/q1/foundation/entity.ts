@@ -1,6 +1,7 @@
 /* Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
+import type { TouchContact } from "../../../contracts/world.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
 import { q1EntityValue } from "../../../formats/q1-map/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -57,7 +58,7 @@ export class Q1Actor {
   nextThink = -1;
   think: (() => undefined) | null = null;
   use: ((other: ActorId | null, activator: ActorId | null) => undefined) | null = null;
-  touch: ((other: ActorId, normal: Vec3 | null) => undefined) | null = null;
+  touch: ((other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]) => undefined) | null = null;
   pain: ((attacker: ActorId | null, damage: number) => undefined) | null = null;
   die: ((attacker: ActorId | null) => undefined) | null = null;
   blocked: ((other: ActorId) => undefined) | null = null;

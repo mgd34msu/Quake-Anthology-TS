@@ -1,13 +1,14 @@
 /* Named QC continuations. Only names are saved; handlers are registered by source modules. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
+import type { TouchContact } from "../../../contracts/world.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 
 export interface Q1CallbackHandlers {
   action?(game: Q1EntityServices, entity: Q1Actor): undefined;
   use?(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, activator: ActorId | null): undefined;
-  touch?(game: Q1EntityServices, entity: Q1Actor, other: ActorId, normal: Vec3 | null): undefined;
+  touch?(game: Q1EntityServices, entity: Q1Actor, other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]): undefined;
   pain?(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null, damage: number): undefined;
   die?(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null): undefined;
   blocked?(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined;
@@ -46,7 +47,7 @@ export class Q1CallbackRegistry {
   }
   touch(entity: Q1Actor, name: string): NonNullable<Q1Actor["touch"]> {
     const handler = this.get(name).touch; if (handler === undefined) throw new Error(`Q1 callback is not touch: ${name}`);
-    return Object.assign((other: ActorId, normal: Vec3 | null) => handler(this.game, entity, other, normal), { q1CallbackName: name });
+    return Object.assign((other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]) => handler(this.game, entity, other, normal, surface), { q1CallbackName: name });
   }
   pain(entity: Q1Actor, name: string): NonNullable<Q1Actor["pain"]> {
     const handler = this.get(name).pain; if (handler === undefined) throw new Error(`Q1 callback is not pain: ${name}`);

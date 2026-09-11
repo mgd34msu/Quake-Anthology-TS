@@ -273,7 +273,7 @@ export class SharedPhysics {
     if (otherId === null || !this.live(actor)) return undefined;
     const other = this.options.actors.resolveOwned(otherId);
     const plane = trace.contact.kind === "plane" ? trace.contact.plane : trace.sourcePlane;
-    const surface = trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : null;
+    const surface = trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : trace.kind === "q1" && trace.surfaceFlags !== undefined ? { name: "", nativeFlags: trace.surfaceFlags & 0x86, nativeValue: 0 } : null;
     if (this.family(actor) === "q2" && this.options.q2Edition === "rerelease" && trace.kind === "q2") {
       if (this.solid(actor)?.solid !== "none" || this.actorFlags(actor).alwaysTouch === true)
         this.options.callbacks.touch({ self: actor, other: otherId, plane, surface,

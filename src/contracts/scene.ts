@@ -365,7 +365,7 @@ interface TraceFields {
 }
 export type TraceResult = TraceFields & (
   /** Source ABI fields retain the stored plane even when contact is none. */
-  { readonly kind: "q1"; readonly inOpen: boolean; readonly inWater: boolean; readonly sourcePlane: Plane }
+  { readonly kind: "q1"; readonly inOpen: boolean; readonly inWater: boolean; readonly sourcePlane: Plane; readonly surfaceFlags?: number }
   | { readonly kind: "q2"; readonly contents: number; readonly surface: Q2SurfaceInfo | null; readonly sourcePlane: BspPlane;
       readonly secondary: { readonly plane: BspPlane; readonly surface: Q2SurfaceInfo | null } | null }
   | { readonly kind: "q3"; readonly contents: number; readonly surfaceFlags: number; readonly sourcePlane: BspPlane }

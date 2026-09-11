@@ -273,7 +273,7 @@ export class Q1EntityServices {
         const callback = entity.think; entity.think = null; entity.nextThink = -1;
         if (callback !== null) callback(); return undefined;
       },
-      touch: contact => entity.touch?.(contact.other, contact.plane?.normal ?? null),
+      touch: contact => entity.touch?.(contact.other, contact.plane?.normal ?? null, contact.surface),
       use: (_self, other, activator) => entity.use?.(other, activator),
       pain: reaction => entity.pain?.(reaction.attacker, reaction.damage),
       die: reaction => {

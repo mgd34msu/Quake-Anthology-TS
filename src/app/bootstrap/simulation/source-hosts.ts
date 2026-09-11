@@ -30,7 +30,7 @@ export function createQ1ActorHost(bindings: Omit<Q1FoundationHost, "trace" | "co
       const contents = world.scene.pointContents({ point: trace.end, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: world.numeric, passActor: request.ignore });
       return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal,
         actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? world.worldActor() : null,
-        startSolid: trace.startSolid, allSolid: trace.allSolid, sky: contents.kind === "q1" && contents.contents === -6, inOpen: trace.inOpen, inWater: trace.inWater };
+        startSolid: trace.startSolid, allSolid: trace.allSolid, sky: ((trace.surfaceFlags ?? 0) & 4) !== 0 || contents.kind === "q1" && contents.contents === -6, inOpen: trace.inOpen, inWater: trace.inWater };
     },
     contents: point => {
       const result = world.scene.pointContents({ point, target: { kind: "world" }, passActor: null,

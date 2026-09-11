@@ -38,6 +38,7 @@ function equipment(map: Q1Map, saved?: Saved) {
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [];
+  let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors);
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
@@ -48,7 +49,7 @@ function equipment(map: Q1Map, saved?: Saved) {
       return { fraction: result.fraction, end: result.end, normal: result.sourcePlane.normal, actor: result.hit.kind === "actor" ? result.hit.actor : null,
         startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
     },
-    contents: () => "empty", walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false,
+    contents: () => contents, walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false,
     changeYaw: () => { throw new Error("Equipment does not run monster yaw"); }, pushMove: () => { throw new Error("Equipment does not run map pushers"); },
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => [], checkClient: () => null, classname: () => "", powerup: () => undefined,
@@ -86,6 +87,7 @@ function equipment(map: Q1Map, saved?: Saved) {
     bodies: captureSharedBodies(actors, bodies), combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id);
       return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }) });
   return { actors, bodies, combat, callbacks, game, grapple, events, inventory, pending, sharedActor, advance, capture,
+    contents: (value: ReturnType<Q1FoundationHost["contents"]>) => { contents = value; },
     input: (patch: Partial<ThreewaveGrappleInput>) => { input = { ...input, ...patch }; }, anchor: (value: typeof anchor) => { anchor = value; } };
 }
 function hookFor(state: ReturnType<typeof equipment>, owner: ActorId) {
@@ -138,4 +140,20 @@ test("Threewave flight times out at five seconds and owner release removes its h
   state.advance(5.11); expect(state.grapple.hook(owner.id)).toBeNull();
   state.grapple.fire(owner.id); const hook = hookFor(state, owner.id); state.actors.release(owner);
   expect(state.actors.isLive(hook.actor.id)).toBe(false); expect(state.pending.size).toBe(0); state.actors.close();
+});
+
+test("Threewave named touches reject foreign sky surfaces and retain native point-contents sky", async () => {
+  const state = equipment(await geometry()), owner = state.sharedActor(1), anchor = state.sharedActor(2);
+  state.grapple.fire(owner.id); const foreignSkyHook = hookFor(state, owner.id);
+  expect(state.game.host.contents(state.game.body(foreignSkyHook).origin)).toBe("empty");
+  state.callbacks.touch({ self: foreignSkyHook.actor, other: anchor.id, plane: null, surface: { name: "foreign-sky", nativeFlags: 4, nativeValue: 0 } });
+  expect(state.grapple.hook(owner.id)).toBeNull(); expect(state.pending.size).toBe(0);
+  state.grapple.fire(owner.id); const ordinaryHook = hookFor(state, owner.id);
+  state.callbacks.touch({ self: ordinaryHook.actor, other: anchor.id, plane: null, surface: { name: "foreign-wall", nativeFlags: 2, nativeValue: 0 } });
+  expect(state.grapple.hook(owner.id)).toBe(ordinaryHook); expect(ordinaryHook.references.get("ctf.enemy")).toBe(anchor.id);
+  state.grapple.release(owner.id); state.contents("sky");
+  state.grapple.fire(owner.id); const nativeSkyHook = hookFor(state, owner.id);
+  state.callbacks.touch({ self: nativeSkyHook.actor, other: anchor.id, plane: null, surface: null });
+  expect(state.grapple.hook(owner.id)).toBeNull(); expect(state.pending.size).toBe(0);
+  state.actors.close();
 });
