@@ -1,21 +1,15 @@
-import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
-import type { ContentId } from "../../contracts/content.ts";
+import { ApplicationWorldScene } from "./presentation-scene.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Rect, RendererBackend, RenderFrame, SceneCamera } from "../../contracts/render.ts";
-import type { SceneEntity } from "../../contracts/scene.ts";
 import type { SeatClientState, SeatPresentation, SimulationEvent, WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
-import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
 import { anglesToAxis } from "../../core/math.ts";
 import { tokenizeCommand } from "../../core/commands/index.ts";
 import { drawConsole } from "../../console/draw.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { prepareMaterialText } from "../../render/commands/material2d.ts";
 import { perspectiveProjection } from "../../render/scene/view.ts";
-import type { WorldScene, WorldViewInput } from "../../render/scene/world.ts";
-import type { ModelTransform } from "../../render/scene/view.ts";
-import { SceneModelRenderer } from "../../render/scene/models/index.ts";
-import type { ModelSourceOptions } from "../../render/scene/models/types.ts";
+import type { WorldViewInput } from "../../render/scene/world.ts";
 import { SeatTextPresentation } from "../../text/layout.ts";
 import { Draw2D, TextCommandSink } from "../../text/draw2d.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
@@ -28,19 +22,6 @@ import type { SimulationPresentation, SimulationPresentationAccess, SimulationPr
 import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
-
-interface ModelGroup {
-  readonly renderer: SceneModelRenderer;
-  readonly entities: SceneEntity[];
-  readonly options: Map<SceneEntity, ModelSourceOptions>;
-}
-
-interface BrushPresentation {
-  readonly scene: WorldScene;
-  readonly model: number;
-  readonly transform: ModelTransform;
-  readonly frame: number;
-}
 
 /** Viewport ownership is independent of the simulation actor and renderer. */
 export function seatViewport(index: number, count: number, width: number, height: number): Rect {
@@ -56,20 +37,15 @@ export class WorldSeatPresentation implements SeatPresentation {
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
   private readonly finale: SourceFinale;
-  private readonly groups = new Map<ContentId, ModelGroup>();
-  private readonly characters = new Map<string, Q3CharacterPresenter>();
-  private readonly lightStyles = new Map<number, string>();
-  private inlineModels: NonNullable<WorldViewInput["inlineModels"]> = [];
-  private brushModels: readonly BrushPresentation[] = [];
   private preparedTime = 0;
-  private previousTime = 0;
-  private readonly selectedWeapons = new Map<string, SelectedQ3WeaponPresenter>();
+  private readonly scene: ApplicationWorldScene;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly seatCount: number,
-    font: TextFontSelection, private readonly characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
+    font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null) {
+    this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
     this.text = new SeatTextPresentation(local.player.seat.id, font);
     this.finale = new SourceFinale(assets, this.text);
@@ -106,6 +82,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
       return;
     }
+    this.scene.receive(events);
     this.ui.receive(events);
     this.finale.receive(events);
     const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
@@ -114,14 +91,12 @@ export class WorldSeatPresentation implements SeatPresentation {
         if (owns(source.actor)) this.local.builder.setViewAngles(source.angles);
       } else if (source.kind === "q1") {
         const event = source.event;
-        if (event.kind === "lightstyle") this.lightStyles.set(event.style, event.pattern);
         if (event.kind === "teleport-player" && owns(event.player)) this.local.builder.setViewAngles(event.angles);
         if (event.kind === "message" && owns(event.player)) {
           if (!event.center) this.local.console.print(`${event.text}\n`);
         }
       } else if (source.kind === "q2") {
         const event = source.event;
-        if (event.kind === "lightstyle") this.lightStyles.set(event.style, event.pattern);
         if (event.kind === "help") this.local.console.print(`${event.text}\n`);
         if (event.kind === "pickup" && owns(event.player)) this.local.console.print(`${event.name}\n`);
         if (event.kind === "print" && (event.actor === null || owns(event.actor))) this.local.console.print(event.text);
@@ -136,102 +111,26 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
-    this.previousTime = this.preparedTime;
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }
     await this.finale.prepare();
-    for (const group of this.groups.values()) { group.entities.length = 0; group.options.clear(); }
-    const inlineModels: NonNullable<WorldViewInput["inlineModels"]>[number][] = [];
-    const brushModels: BrushPresentation[] = [];
-    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions): Promise<void> => {
-      let group = this.groups.get(content);
-      if (group === undefined) {
-        group = { renderer: new SceneModelRenderer(await this.assets.provider(content), this.assets.world), entities: [], options: new Map<SceneEntity, ModelSourceOptions>() };
-        this.groups.set(content, group);
-      }
-      const activeGroup = group;
-      activeGroup.entities.push(entity);
-      const addOptions = (current: SceneEntity): void => {
-        if (options !== undefined) activeGroup.options.set(current, options(current));
-        for (const child of current.attachments) addOptions(child.entity);
-      };
-      addOptions(entity);
-    };
-    for (const source of presentations) {
-      if (!source.visible || source.path === "") continue;
-      if (source.viewWeapon ? !source.actor.equals(this.local.player.actor) : source.actor.equals(this.local.player.actor)) continue;
-      if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
-      if (source.q3Weapon !== undefined) {
-        const key = `${source.content}/${source.actor.slot}/${source.actor.generation}`;
-        let presenter = this.selectedWeapons.get(key);
-        if (presenter === undefined) { presenter = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, presenter); }
-        await append(source.content, await presenter.frame(source), () => ({ viewModel: true }));
-        continue;
-      }
-      const asset = await this.assets.model(source.content, source.path);
-      const axis = anglesToAxis(source.angles);
-      if (asset.model.kind === "brush-model") {
-        if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform: { origin: source.origin, axis }, animationFrame: source.frame });
-        else {
-          if (asset.brushScene === null) throw new Error(`Brush model ${source.path} has no prepared scene`);
-          brushModels.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: source.origin, axis }, frame: source.frame });
-        }
-        continue;
-      }
-      const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
-        transform: { origin: source.origin, axis, scale: { x: source.scale, y: source.scale, z: source.scale } }, previousOrigin: source.origin,
-        pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 }, skin: source.skin,
-        color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
-        lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
-      await append(source.content, entity, () => ({ viewModel: source.viewWeapon,
-        player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null }));
-    }
-    if (this.characterAssets !== null) for (const character of characters) {
-      const key = `${character.actor.slot}:${character.actor.generation}`;
-      let presenter = this.characters.get(key);
-      if (presenter === undefined) {
-        presenter = new Q3CharacterPresenter(this.characterAssets);
-        presenter.reset(character, Math.trunc(this.preparedTime * 1000));
-        this.characters.set(key, presenter);
-      }
-      const passes = presenter.frame(character, { timeMilliseconds: Math.trunc(this.preparedTime * 1000),
-        frameMilliseconds: Math.max(0, Math.trunc(this.preparedTime * 1000) - Math.trunc(this.previousTime * 1000)), shaderTime: { kind: "seconds", value: 0 },
-        swingSpeed: 0.3, noPlayerAnimations: false, personalModel: character.actor.equals(this.local.player.actor), shadowPlane: null, weapon: [] });
-      for (const pass of passes) await append(this.assets.content.recipe.character.appearance.content, pass.entity, pass.options);
-    }
-    this.inlineModels = inlineModels;
-    this.brushModels = brushModels;
-    for (const group of this.groups.values()) await group.renderer.preload(group.entities, entity => group.options.get(entity) ?? {});
+    await this.scene.prepare(this.local.player.actor, snapshot, presentations, characters);
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
     const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera, this.local.player.actor);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
-    const style = (index: number, absent: number): number => {
-      const pattern = this.lightStyles.get(index);
-      if (pattern === undefined || pattern.length === 0) return absent;
-      return pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
-    };
-    let input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+    const style = (index: number, absent: number): number => this.scene.style(index, absent);
+    const input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
-      clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false }, inlineModels: this.inlineModels,
+      clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects.lights, q3Lights: effects.q3Lights,
-      q1Styles: Array.from({ length: 256 }, (_, index) => this.lightStyles.has(index) ? style(index, 12) * 22 : 256),
-      q2Styles: Array.from({ length: 256 }, (_, index) => { const value = style(index, 12) / 12; return { rgb: { x: value, y: value, z: value }, white: value * 3 }; }) };
+      ...this.scene.styles() };
     const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera, this.local.player.actor));
     this.frames.begin();
     if (nativeFrame === undefined) {
-      const shadowLights = this.effects.shadowSceneLights(camera, index => style(index, 12) / 12);
-      if (shadowLights.length > 0) {
-        const casters = [...this.groups.values()].flatMap(group => group.renderer.prepareShadowCasters(group.entities, input, entity => group.options.get(entity) ?? {}));
-        const shadows = this.assets.world.prepareShadows([...shadowLights, ...effects.lights.map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: true,
-          profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
-        input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
-      }
-      const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input,
-        entity => ({ ...group.options.get(entity), infrared: playerView.infrared })));
-      const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
-      this.frames.world(this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }, ...effects.operations] }));
+      this.frames.world(this.scene.view(input, effects.operations,
+        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12), playerView.infrared));
     } else for (const command of nativeFrame.commands) {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
       this.frames.command(command);
@@ -268,5 +167,5 @@ export class WorldSeatPresentation implements SeatPresentation {
     return this.native.execute(frame);
   }
 
-  close(): undefined { this.q3Client?.close(); this.ui.close(); this.groups.clear(); this.characters.clear(); return undefined; }
+  close(): undefined { this.q3Client?.close(); this.ui.close(); this.scene.close(); return undefined; }
 }

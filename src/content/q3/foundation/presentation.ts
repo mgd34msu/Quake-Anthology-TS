@@ -1,3 +1,4 @@
+import type { ContentId } from "../../../contracts/content.ts";
 /* CG_Player, CG_PlayerAnimation and player powerup pass selection.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -40,6 +41,7 @@ export interface Q3CharacterRenderOptions {
 }
 
 export interface Q3CharacterPass {
+  readonly content: ContentId | null;
   readonly entity: SceneEntity;
   readonly shader: string | null;
   options(entity: SceneEntity): ModelSourceOptions;
@@ -89,7 +91,7 @@ export class Q3CharacterPresenter {
       const asset = [this.assets.lower, this.assets.upper, this.assets.head].find(part => part.resource.id === entity.resource.id);
       return asset === undefined ? {} : { customSkin: asset.surfaces };
     };
-    const pass = (shader: string | null): Q3CharacterPass => ({ entity: legs, shader,
+    const pass = (shader: string | null): Q3CharacterPass => ({ content: null, entity: legs, shader,
       options: entity => shader === null ? skinOptions(entity) : { ...skinOptions(entity), customShader: shader } });
     const passes = view.powerups & (1 << Powerup.PW_INVIS) ? [pass("powerups/invisibility")] : [pass(null)];
     if (!(view.powerups & (1 << Powerup.PW_INVIS))) {
