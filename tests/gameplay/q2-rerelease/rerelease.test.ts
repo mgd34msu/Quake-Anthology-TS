@@ -100,6 +100,8 @@ test("rerelease named callbacks and player source save restore into a fresh runt
   target.use?.(target, active.game, null, active.first.actor.id);
   active.players.context(active.first, active.game).state.nextDrownTime = 14.5;
   active.players.context(active.first, active.game).state.damagePowerArmor = 3;
+  active.players.extra(active.first.actor.id).invisibilityUntil = 30.25;
+  active.players.extra(active.first.actor.id).invisibilityFadeUntil = 2.4;
   const foundation = active.game.capture(), items = active.items.capture(active.game), player = decodeQ2PlayersCheckpoint(encodeQ2PlayersCheckpoint(active.players.capture()));
   const extras = decodeQ2RereleasePlayersCheckpoint(encodeQ2RereleasePlayersCheckpoint(active.players.captureRerelease()));
   const module = decodeQ2RereleaseModuleCheckpoint(encodeQ2RereleaseModuleCheckpoint(active.module.capture()));
@@ -109,8 +111,22 @@ test("rerelease named callbacks and player source save restore into a fresh runt
   restored.players.restoreRerelease(restored.game, extras); restored.module.restore(restored.game, module);
   expect(restored.players.context(restored.first, restored.game).state.nextDrownTime).toBe(14.5);
   expect(restored.players.context(restored.first, restored.game).state.damagePowerArmor).toBe(3);
+  expect(restored.players.extra(restored.first.actor.id).invisibilityUntil).toBe(30.25);
+  expect(restored.players.extra(restored.first.actor.id).invisibilityFadeUntil).toBe(2.4);
+  expect(restored.players.extra(restored.second.actor.id).invisibilityUntil).toBe(0);
   expect(restored.module.story).toBe("Strogg transmission");
   expect(foundation.entities.find(entity => entity.spawn.classname === "target_story")?.callbacks.use).toBe("rr.use_target_story");
+});
+
+test("rerelease invisibility checkpoint deadlines must be finite", () => {
+  const active = rerelease();
+  for (const field of ["invisibilityUntil", "invisibilityFadeUntil"]) {
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      const checkpoint = active.players.captureRerelease();
+      const malformed = { ...checkpoint, players: checkpoint.players.map(entry => ({ ...entry, state: { ...entry.state, [field]: invalid } })) };
+      expect(() => decodeQ2RereleasePlayersCheckpoint(encodeQ2RereleasePlayersCheckpoint(malformed))).toThrow("expected a finite number");
+    }
+  }
 });
 
 test("rerelease healthbar expiry clears both seats and preserves the source deadline", () => {

@@ -183,7 +183,7 @@ export function createRogueMedicDefinitions(monsters: Q2Monsters, weapons: Q2Mis
     medic_fire_blaster(context) {
       const aim = shot(context, 60); if (aim === null) return undefined;
       const frame = context.entity.frame, effects = frame === medicFrame.attack9 || frame === medicFrame.attack12 ? 8 : frame === medicFrame.attack19 || frame === medicFrame.attack22 || frame === medicFrame.attack25 || frame === medicFrame.attack28 ? 64 : 0;
-      const damage = context.game.entity(context.entity.enemy)?.classname === "tesla" ? 3 : 2, commander = monsterMass(context) > 400;
+      const damage = context.game.entity(context.entity.enemy)?.classname === (context.game.options.edition === "rerelease" ? "tesla_mine" : "tesla") ? 3 : 2, commander = monsterMass(context) > 400;
       if (commander) weapons.fireBlaster2(context.entity, context.game, aim.start, aim.direction, damage, 1000, effects);
       else context.weapons.fireBlaster(context.entity, context.game, aim.start, aim.direction, damage, 1000, effects);
       return monsterFlash(context, commander ? 146 : 60, aim.start, aim.direction);

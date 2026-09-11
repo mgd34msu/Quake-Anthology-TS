@@ -17,6 +17,7 @@ export interface ApplicationOptions {
   readonly skill: 0 | 1 | 2 | 3;
   readonly botSkill?: 1 | 2 | 3 | 4 | 5;
   readonly mode: "singleplayer" | "coop" | "deathmatch";
+  readonly rules?: "standard" | "ctf" | "lmctf";
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
@@ -43,6 +44,7 @@ Usage: bun run src/main.ts [options]
   --width N --height N       Window dimensions (default 960 by 600)
   --seats N                  Local seats, 1 through 4
   --mode singleplayer|coop|deathmatch
+  --rules standard|ctf|lmctf Q2 match rules, independent of map and movement
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
@@ -131,12 +133,16 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (botSkill !== 1 && botSkill !== 2 && botSkill !== 3 && botSkill !== 4 && botSkill !== 5) throw new RangeError("Invalid bot skill");
         options = { ...options, botSkill }; break;
       }
+      case "--rules":
+        if (value !== "standard" && value !== "ctf" && value !== "lmctf") throw new Error(`Unknown match rules: ${value}`);
+        options = { ...options, rules: value }; break;
       case "--mode":
         if (value !== "singleplayer" && value !== "coop" && value !== "deathmatch") throw new Error(`Unknown game mode: ${value}`);
         options = { ...options, mode: value }; break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
   }
+  if (options.rules === "ctf" || options.rules === "lmctf" || options.rules === undefined && (options.product === "q2-classic-ctf" || options.product === "q2-classic-lmctf")) options = { ...options, mode: "deathmatch" };
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };
   if (listen !== null && remote !== null) throw new Error("Choose either --listen-q2 or --connect-q2");
   if (listen !== null) options = { ...options, network: { kind: "q2-server", host: bind, port: listen } };

@@ -23,7 +23,7 @@ export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, mil
 }
 
 /** Source spawn/inactivity frames can supply commands without a new transport packet. */
-export function selectedQ3Command(command: UserCommand, player: MovementPlayer, milliseconds: number): SelectedCommand {
+export function selectedQ3Command(command: UserCommand, player: Pick<MovementPlayer, "profile">, milliseconds: number): SelectedCommand {
   const angles = { x: command.angles.x * 360 / 65536, y: command.angles.y * 360 / 65536, z: command.angles.z * 360 / 65536 };
   const forwardMove = command.forwardmove * 320 / 127, sideMove = command.rightmove * 320 / 127, upMove = command.upmove * 320 / 127;
   switch (player.profile.kind) {

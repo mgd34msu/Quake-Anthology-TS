@@ -243,7 +243,7 @@ export class Q2Players implements Q2SpawnModule {
     state.landmarkFreeFall = placement.fromLandmark;
     this.clearPowerups(entity, game);
     entity.viewHeight = 22; entity.serverFlags &= ~(1 | 2); entity.flags &= ~(1024 | 0x20000); entity.angularVelocity = zero;
-    entity.frame = 0; entity.oldFrame = -1; entity.effects = 0; entity.renderFlags = 0; entity.visible = !state.spectator;
+    entity.frame = 0; entity.oldFrame = -1; entity.effects = 0; entity.renderFlags = game.options.edition === "rerelease" ? 32768 : 0; entity.visible = !state.spectator;
     entity.model = old.movement.animateQ2 ? `players/${state.skin.split("/")[0] || "male"}/tris.md2` : entity.model;
     game.host.combat.setTraits(entity.actor, { canTakeDamage: !state.spectator, mass: 200, invulnerable: state.god });
     game.move(entity, { origin, velocity, angles, bounds: old.movement.standingBounds, ground: null }, false);
@@ -257,7 +257,7 @@ export class Q2Players implements Q2SpawnModule {
     }
     if (old.movement.animateQ2) game.show(entity);
     game.link(entity);
-    return undefined;
+    return this.hooks.playerSpawned?.(entity, game);
   }
 
   respawn(entity: Q2Entity, game: Q2GameServices): undefined {

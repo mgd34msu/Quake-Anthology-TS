@@ -57,6 +57,10 @@ export function q2RandomItem(entity: Q2Entity, item: Q2ItemDefinition, game: Q2G
     return chance < 0.4 ? "item_armor_jacket" : chance < 0.6 ? "item_armor_combat" : chance < 0.8 ? "item_armor_body" : chance < 0.9 ? "item_power_screen" : "item_power_shield";
   }
   // Non-random weapons still use their category when they are the item being replaced.
+  if (item.classname === "item_ancient_head" || item.classname === "item_legacy_head") {
+    const choices = ["item_health_small", "item_health", "item_health_large"];
+    return choices[game.host.rereleaseRandom?.integer(3) ?? Math.floor(game.host.random() * 3)] ?? null;
+  }
   const kind = item.classname === "weapon_blaster" || item.classname === "weapon_grapple" ? "weapon" : category(item.classname, rerelease);
   if (kind === null) return null;
   const choices = rerelease[kind].filter(classname => !(settings.noSpheres && classname.startsWith("item_sphere_") ||

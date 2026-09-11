@@ -36,7 +36,7 @@ export class ApplicationQ3ForeignModels {
       const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
         transform: { origin: source.origin, axis: anglesToAxis(source.angles), scale: { x: source.scale, y: source.scale, z: source.scale } },
         previousOrigin: source.origin, pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 },
-        skin: source.skin, color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
+        skin: source.skin, color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
       group.models.push({ actor: source.actor, source, entity, options: { viewModel: source.viewWeapon,
         player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null } });

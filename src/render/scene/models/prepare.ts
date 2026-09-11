@@ -103,7 +103,7 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
   const personalModel = flags.kind === "q3" && (bits & 2) !== 0 && !portal;
   const invisibleWeapon = (flags.kind === "q3" && (bits & 4) !== 0 && portal)
     || (flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 2);
-  const translucent = flags.kind === "q2" ? (bits & (32 | 128)) !== 0 : entity.color.w < 1;
+  const translucent = entity.color.w < 1 || flags.kind === "q2" && (bits & (32 | 128)) !== 0;
   const alpha = translucent ? entity.color.w : 1;
   const color = byteColor({ ...entity.color, w: alpha });
   let lod = 0;

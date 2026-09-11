@@ -11,9 +11,13 @@ import type { Q2RereleaseCampaignState } from "../../q2/rerelease/entities.ts";
 
 export type Q2ClassicProgram = "baseq2" | "xatrix" | "rogue";
 export type Q2RereleaseProgram = Q2ClassicProgram | "mg2" | "n64";
-export type Q2MatchSelection = { readonly kind: "standard" } | { readonly kind: "tag" }
+export type Q2MatchSelection = { readonly kind: "ctf" } | { readonly kind: "lmctf" } | { readonly kind: "standard" } | { readonly kind: "tag" }
   | { readonly kind: "deathball"; readonly team1Skin: string; readonly team2Skin: string; readonly goalLimit: number };
 export type Q2CompositionEvent =
+  | { readonly kind: "ctf"; readonly event: import("../../q2/multiplayer/ctf/types.ts").Q2CtfEvent }
+  | { readonly kind: "lmctf"; readonly event: import("../../q2/multiplayer/lmctf/types.ts").LmctfEvent }
+  | { readonly kind: "grapple-prediction"; readonly actor: ActorId; readonly suppressed: boolean }
+  | { readonly kind: "kick"; readonly actor: ActorId }
   | { readonly kind: "missionpack-player"; readonly event: Q2MissionPackPlayerEffect }
   | { readonly kind: "missionpack-entity"; readonly event: Q2MissionPackEntityEvent };
 

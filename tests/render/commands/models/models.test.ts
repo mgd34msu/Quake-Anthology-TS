@@ -68,6 +68,9 @@ test("retail Q2 shell geometry retains old-origin interpolation and shell color"
   expect(shell.surfaces[0]?.geometry.indices.length).toBe(434 * 3);
   expect(shell.surfaces[0]?.image.kind).toBe("white");
   expect(q2ShellColor(1024 | 4096)).toEqual({ x: 1, y: 0, z: 1 });
+  const faded = prepareSceneEntity({ ...source, color: { ...source.color, w: 0.25 }, flags: { kind: "q2", bits: 32768 } }, { camera, timeSeconds: 1 });
+  expect(faded.surfaces[0]?.translucent).toBe(true);
+  expect(faded.surfaces[0]?.geometry.vertices[0]?.color.w).toBe(63.75);
   expect(shell.surfaces[0]?.geometry.vertices[0]?.position).not.toEqual(normal.surfaces[0]?.geometry.vertices[0]?.position);
 });
 

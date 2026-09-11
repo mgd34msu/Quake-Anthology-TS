@@ -12,6 +12,8 @@ import { createQ2ProductRuntime, captureQ2Product, restoreQ2Product } from "../.
 import { loadApplicationContent } from "../../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../../src/app/bootstrap/options.ts";
 import type { Q2MatchSelection } from "../../../../src/content/composition/q2/index.ts";
+import { Q2Ctf } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
+import { Q2Lmctf } from "../../../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { Q2Tag } from "../../../../src/content/q2/missionpacks/modes/index.ts";
 function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
@@ -21,9 +23,6 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
   const zero = { x: 0, y: 0, z: 0 }, bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   const movements = new Map<ActorId, Q2PlayerMovement>();
   let now = 0;
-  combat.register(createQ2CombatPolicy({ id: "q2:combat", armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "rerelease", ctf: false, alive: true } })),
-    context: () => ({ arithmetic: "binary64", player: true, monster: false, attackerPlayer: false, hasEnemy: false, easySkill: false,
-      deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false, nuke: false, noKnockback: true, movable: true, rejectTeamDamage: false, suppressPain: false }) }));
   const movement = (actor: ActorId): Q2PlayerMovement => {
     const value = movements.get(actor); if (value === undefined) throw new Error("missing player movement"); return value;
   };
@@ -37,7 +36,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
   const weapons = new Q2Weapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.025, random: () => 0.5,
     schedule: () => undefined, touchTriggers: () => undefined, keyConsumed: () => undefined,
-    trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
+    trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: (match.kind === "ctf" || match.kind === "lmctf") && request.end.z === request.start.z - 128 ? request.start : request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),
     pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [], players: () => ids, isPlayer: actor => ids.includes(actor), isMonster: () => false,
     worldActor: () => { const world = [...game.entities.values()].find(entity => entity.classname === "worldspawn"); if (world === undefined) throw new Error("world missing"); return world.actor.id; },
@@ -51,6 +50,9 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
     entityHooks: { playerPush: () => undefined, setActorGravity: () => undefined, localTime: () => ({hour: 12, minute: 0, second: 0}) },
     services: { gravity: () => 800, emit: () => undefined, hunterCamera: false, strongMines: false,
       foreignPowerups: () => ({quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0}) }, rereleaseHooks: rrHooks });
+  combat.register(createQ2CombatPolicy({ id: "q2:combat", sourceEffects: composition.match.sourceEffects(composition.game), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "rerelease", ctf: false, alive: true } })),
+    context: () => ({ arithmetic: "binary64", player: true, monster: false, attackerPlayer: false, hasEnemy: false, easySkill: false,
+      deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false, nuke: false, noKnockback: true, movable: true, rejectTeamDamage: false, suppressPain: false }) }));
   const { game, items } = composition, module = composition.rerelease?.entities, players = composition.rerelease?.players;
   if (module === undefined || players === undefined) throw new Error("rerelease composition missing");
   const report = game.load(entities);
@@ -59,7 +61,8 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
     const actor = actors.allocateAtSource("q2:players", slot + 1, "q2:male"); ids.push(actor.id);
     bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds, ground: null });
     movements.set(actor.id, { viewAngles: zero, commandAngles: zero, waterLevel: 0, waterType: 0, grounded: true, ducked: false, buttons: 0, standingBounds: bounds, animateQ2: false });
-    const entity = game.attachPlayer(actor); players.attach(entity, game, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false });
+    if (match.kind === "ctf" || match.kind === "lmctf") composition.admit(actor, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false });
+    else { const entity = game.attachPlayer(actor); players.attach(entity, game, { slot, userinfo: `\\name\\Player${slot}`, initializeInventory, useQ2Weapons: false }); }
   }
   const firstId = ids[0], secondId = ids[1];
   if (firstId === undefined || secondId === undefined) throw new Error("players missing");
@@ -122,3 +125,118 @@ test("retail rerelease base1 entities use the composed source registry", async (
     expect(active.players.states.size).toBe(2);
   } finally { await content.close(); }
 }, 30000);
+
+const ctfMap = '{ "classname" "worldspawn" } { "classname" "info_player_start" } { "classname" "info_player_deathmatch" "origin" "400 0 0" } { "classname" "info_player_team1" "origin" "-400 0 0" } { "classname" "info_player_team2" "origin" "400 0 0" } { "classname" "item_flag_team1" "origin" "-500 0 0" } { "classname" "item_flag_team2" "origin" "500 0 0" }';
+
+test("CTF composes shared admission, team commands, source flag capture and checkpoint", () => {
+  const active = compose(true, ctfMap, { kind: "ctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Ctf)) throw new Error("Missing CTF mode");
+  expect(active.report.unsupported).toEqual([]);
+  expect(active.players.states.get(active.first.actor.id)?.spectator).toBe(true);
+  expect(active.players.clientCommand(active.first, active.game, "team", ["red"])).toBe(true);
+  expect(active.players.clientCommand(active.second, active.game, "team", ["blue"])).toBe(true);
+  expect(active.game.body(active.first).origin.x).toBe(-400);
+  const red = [...active.game.entities.values()].find(entity => entity.classname === "item_flag_team1"), blue = [...active.game.entities.values()].find(entity => entity.classname === "item_flag_team2");
+  if (red === undefined || blue === undefined) throw new Error("Missing CTF flags");
+  red.think?.(red, active.game); blue.think?.(blue, active.game);
+  blue.touch?.(blue, active.game, { self: blue.actor, other: active.first.actor.id, plane: null, surface: null });
+  expect(active.inventory.count(active.first.actor.id, "q2:item_flag_team2")).toBe(1);
+  red.touch?.(red, active.game, { self: red.actor, other: active.first.actor.id, plane: null, surface: null });
+  expect(mode.context.match.team1).toBe(1);
+  const checkpoint = captureQ2Product(active.composition);
+  const restored = compose(false, ctfMap, { kind: "ctf" });
+  restoreQ2Product(restored.composition, checkpoint);
+  const restoredMode = restored.composition.match.source;
+  if (!(restoredMode instanceof Q2Ctf)) throw new Error("Missing restored CTF mode");
+  expect(restoredMode.context.match.team1).toBe(1);
+  expect(restoredMode.states.get(restored.first.actor.id)?.team).toBe(1);
+});
+
+test("LMCTF composes team admission, flag capture and checkpoint", () => {
+  const active = compose(true, ctfMap, { kind: "lmctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  expect(active.report.unsupported).toEqual([]);
+  expect(mode.states.get(active.first.actor.id)?.team).toBe(1);
+  expect(mode.states.get(active.second.actor.id)?.team).toBe(2);
+  const red = mode.flags.flag(1, active.game), blue = mode.flags.flag(2, active.game);
+  if (red === null || blue === null) throw new Error("Missing LMCTF flags");
+  mode.flags.pickup(blue, active.game, active.first.actor.id);
+  expect(mode.flags.carried(active.first.actor.id, active.game)).not.toBeNull();
+  mode.flags.pickup(red, active.game, active.first.actor.id);
+  expect(mode.states.get(active.first.actor.id)?.statistics.get("captures")).toBe(1);
+  const checkpoint = captureQ2Product(active.composition);
+  const restored = compose(false, ctfMap, { kind: "lmctf" });
+  restoreQ2Product(restored.composition, checkpoint);
+  const restoredMode = restored.composition.match.source;
+  if (!(restoredMode instanceof Q2Lmctf)) throw new Error("Missing restored LMCTF mode");
+  expect(restoredMode.states.get(restored.first.actor.id)?.statistics.get("captures")).toBe(1);
+  expect(restoredMode.flags.flag(1, restored.game)).not.toBeNull();
+});
+
+test("CTF strength and resistance execute at native shared armor stages", () => {
+  const active = compose(true, ctfMap, { kind: "ctf" });
+  active.players.clientCommand(active.first, active.game, "team", ["red"]);
+  active.players.clientCommand(active.second, active.game, "team", ["blue"]);
+  active.inventory.configure(active.first.actor, { item: "q2:item_tech2", count: 1, capacity: 1 });
+  active.inventory.configure(active.second.actor, { item: "q2:item_tech1", count: 1, capacity: 1 });
+  active.combat.setArmor(active.second.actor, { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body", powerArmor: { kind: "none" } });
+  const zero = { x: 0, y: 0, z: 0 };
+  active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 100, 0, zero, zero, zero, 1, 0);
+  expect(active.combat.read(active.second.actor.id)?.health).toBe(80);
+  const armor = active.combat.read(active.second.actor.id)?.armor;
+  expect(armor?.kind === "q2" ? armor.points : null).toBe(40);
+});
+
+test("LMCTF runes execute between shared armor stages and heal vampire on committed damage", () => {
+  const active = compose(true, ctfMap, { kind: "lmctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Lmctf)) throw new Error("Missing LMCTF mode");
+  const damage = active.game.spawn({ classname: "damage_rune", ordinal: 100, values: new Map<string, string>() });
+  const resist = active.game.spawn({ classname: "resist_rune", ordinal: 101, values: new Map<string, string>() });
+  expect(mode.runes.pickup(damage, active.game, active.first.actor.id)).toBe(true);
+  expect(mode.runes.pickup(resist, active.game, active.second.actor.id)).toBe(true);
+  active.combat.setArmor(active.second.actor, { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body", powerArmor: { kind: "none" } });
+  const zero = { x: 0, y: 0, z: 0 };
+  active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 100, 0, zero, zero, zero, 1, 0);
+  expect(active.combat.read(active.second.actor.id)?.health).toBe(80);
+  const armor = active.combat.read(active.second.actor.id)?.armor;
+  expect(armor?.kind === "q2" ? armor.points : null).toBe(120);
+  mode.runes.drop(active.first.actor.id, active.game); mode.runes.drop(active.second.actor.id, active.game);
+  const vampire = active.game.spawn({ classname: "vampire_rune", ordinal: 102, values: new Map<string, string>() });
+  expect(mode.runes.pickup(vampire, active.game, active.first.actor.id)).toBe(true);
+  active.combat.setHealth(active.first.actor, 200); active.combat.setArmor(active.second.actor, { kind: "none" });
+  active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 40, 0, zero, zero, zero, 1, 0);
+  expect(active.combat.read(active.second.actor.id)?.health).toBe(40);
+  expect(active.combat.read(active.first.actor.id)?.health).toBe(220);
+});
+
+test("CTF menu and admin settings commands validate source actions", () => {
+  const active = compose(true, ctfMap, { kind: "ctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Ctf)) throw new Error("Missing CTF mode");
+  expect(mode.command(active.first, active.game, "ctf-menu", ["invalid-action"])).toBe(false);
+  expect(mode.command(active.first, active.game, "ctf-menu", ["join-red"])).toBe(true);
+  expect(mode.states.get(active.first.actor.id)?.team).toBe(1);
+  expect(mode.command(active.first, active.game, "ctf-settings", ["matchMinutes", "25"])).toBe(false);
+  const state = mode.states.get(active.first.actor.id);
+  if (state === undefined) throw new Error("Missing CTF player");
+  state.admin = true;
+  expect(mode.command(active.first, active.game, "ctf-settings", ["matchMinutes", "Infinity"])).toBe(false);
+  expect(mode.command(active.first, active.game, "ctf-settings", ["matchMinutes", "25"])).toBe(true);
+  expect(mode.rules.matchMinutes).toBe(25);
+  expect(mode.command(active.first, active.game, "ctf-settings", ["weaponsStay", "true"])).toBe(true);
+  expect(active.game.options.deathmatchFlags & 4).toBe(4);
+});
+
+test("CTF competition setup gates shared item pickups and resumes them in play", () => {
+  const active = compose(true, ctfMap, { kind: "ctf" }), mode = active.composition.match.source;
+  if (!(mode instanceof Q2Ctf)) throw new Error("Missing CTF mode");
+  mode.command(active.first, active.game, "ctf-menu", ["join-red"]);
+  active.combat.setHealth(active.first.actor, 50);
+  const health = active.game.spawn({ classname: "item_health_small", ordinal: 110, values: new Map<string, string>() });
+  health.think?.(health, active.game);
+  mode.context.match.phase = "setup";
+  active.items.touch(health, active.game, active.first.actor.id);
+  expect(active.combat.read(active.first.actor.id)?.health).toBe(50);
+  mode.context.match.phase = "none";
+  active.items.touch(health, active.game, active.first.actor.id);
+  expect(active.combat.read(active.first.actor.id)?.health).toBe(52);
+});

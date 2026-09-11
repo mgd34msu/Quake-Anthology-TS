@@ -64,6 +64,11 @@ export class Q1SourceComposition {
         respawnTeammate: actor => this.respawnAt(actor, null, this.newTravel()), restartSession: (map, flags) => services.restartSession(map, flags),
       }) : null;
     } else { this.packs = null; this.addon = null; this.ctf = null; this.horde = null; }
+    if (this.addon?.program === "mg3") {
+      const addon = this.addon;
+      game.registerDamageSourceEffects("q1:mg3:buddha", { lethalHealth: (request, health) => addon.playerNumber(request.target, "buddha") !== 0
+        ? { health: 1, reaction: "none" } : { health, reaction: "death" } });
+    }
     game.registerStateExtension({ id: "q1:source-clients", capture: () => this.clients.capture(), restore: bytes => this.clients.restore(bytes) });
   }
   spawnMap(map: Q1Map) {

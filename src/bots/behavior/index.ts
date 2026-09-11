@@ -1,0 +1,17 @@
+export { BotAssetFiles, loadBotAssetFiles, loadMountedBotAssetFiles } from "./assets.ts";
+export type { BotAssetResources, BotSourceFiles } from "./assets.ts";
+export { SourceBotDirector } from "./director.ts";
+export type { SourceBotDirectorOptions, SourceBotDirectorHost, SourceBotRosterEntry } from "./director.ts";
+export { SourceBotNavigation } from "./q3/navigation.ts";
+export type { SourceBotNavigationHost } from "./q3/navigation.ts";
+export type { SourceBotGame, SourceBotEngine } from "./q3/game-host.ts";
+export { q3BotGame } from "./q3/source-game.ts";
+export { q3BotNavigation } from "./q3/navigation-services.ts";
+export type { SelectedBotNavigation } from "./q3/navigation-services.ts";
+export type { BotNavigation, BotMovementPrediction } from "./q3/navigation-types.ts";
+export { BotLibrary } from "./q3/library.ts";
+export type { SourceBotLibraryOptions } from "./q3/library.ts";
+export { SharedBotPopulation } from "./population.ts";
+export type { BotFrame, RereleaseBotBinding, RereleaseBotCheckpoint } from "./population.ts";
+export { projectBotMovement } from "./prediction.ts";
+export type { BotMovementProjection } from "./prediction.ts";

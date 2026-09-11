@@ -35,5 +35,11 @@ export class Q2EffectViews {
       origin: pose(sphere.sphere)?.origin ?? sphere.origin, axis: anglesToAxis(sphere.angles) };
     return { camera: selected, infrared, blend };
   }
+  retain(actors: ReadonlySet<ActorId>): void {
+    for (const [actor, state] of this.players) {
+      if (!actors.has(actor)) this.players.delete(actor);
+      else if (state.sphere?.sphere !== undefined && state.sphere.sphere !== null && !actors.has(state.sphere.sphere)) state.sphere = null;
+    }
+  }
   clear(): void { this.players.clear(); }
 }

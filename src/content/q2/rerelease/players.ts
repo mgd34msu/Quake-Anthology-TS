@@ -184,6 +184,7 @@ export class Q2RereleasePlayers extends Q2Players {
   override recordDeath(entity: Q2Entity, game: Q2GameServices, reaction: DeathReaction): boolean {
     const carry = this.saveCarry(entity, game), state = this.context(entity, game).state;
     const first = super.recordDeath(entity, game, reaction), options = this.rereleaseOptions;
+    this.extra(entity.actor.id).invisibilityUntil = 0;
     if (!first) return false;
     const extra = this.extra(entity.actor.id);
     extra.animationTime = 0;
@@ -216,6 +217,7 @@ export class Q2RereleasePlayers extends Q2Players {
 
   /** Foreign weapon providers report actual shots to the selected campaign's squad rules. */
   recordWeaponFire(actor: ActorId, now: number): undefined { this.extra(actor).lastFiringUntil = now + 2.5; return undefined; }
+  revealInvisibility(actor: ActorId, until: number): undefined { this.extra(actor).invisibilityFadeUntil = until; return undefined; }
 
   /** Pass the actual selected movement provider's impact result before afterClientThink. */
   movementImpact(actor: ActorId, impactDelta: number, onLadder: boolean): undefined {
@@ -332,6 +334,7 @@ export class Q2RereleasePlayers extends Q2Players {
       if (entering) game.host.emit({ kind: "entity-event", actor, event: 7 });
       state.showHelp = false; state.showScores = game.options.mode === "deathmatch"; state.damageAlpha = 0; state.bonusAlpha = 0; state.loopSound = "";
       this.items.clearPowerups(actor); this.rereleaseHooks.clearExpansionPowerups?.(actor);
+      this.extra(actor).invisibilityUntil = 0;
       game.host.combat.setTraits(entity.actor, { invulnerable: state.god });
       const weapon = this.weapons.states.get(actor);
       if (weapon !== undefined) { weapon.grenadeBlewUp = false; weapon.grenadeTime = 0; weapon.viewModel = null; }
@@ -354,6 +357,10 @@ export class Q2RereleasePlayers extends Q2Players {
     this.extension?.beginPlayerFrame(entity, game);
     super.endFrame(entity, game);
     this.extension?.endPlayerFrame(entity, game);
+    const extra = this.extra(entity.actor.id), now = game.host.now();
+    const alpha = this.intermission.kind === "playing" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0 && extra.invisibilityUntil > now
+      ? Math.max(0.1, Math.min(1, (extra.invisibilityFadeUntil - now) / 2)) : 1;
+    this.rereleaseHooks.emit({ kind: "alpha", actor: entity.actor.id, alpha });
     if (this.intermission.kind === "playing" && game.options.mode === "coop" && this.rereleaseOptions.coopPlayerCollision && (entity.clipMask & 0x40000000) === 0 && game.host.combat.read(entity.actor.id)?.canTakeDamage) {
       const body = game.body(entity), trace = game.host.trace({ start: body.origin, end: body.origin, bounds: body.bounds, ignore: entity.actor.id, mask: 0x40000000 });
       if (!trace.startSolid && !trace.allSolid) { entity.clipMask |= 0x40000000; this.rereleaseHooks.playerCollision?.(entity.actor.id, true); }
@@ -395,6 +402,7 @@ export class Q2RereleasePlayers extends Q2Players {
     super.putInServer(entity, game, restoreLoadout, carry);
     this.rereleaseHooks.playerCollision?.(entity.actor.id, (entity.clipMask & 0x40000000) !== 0);
     extra.slimeDebounce = 0; extra.animationTime = 0; extra.slowViewAngles = zero; extra.coopRespawnState = "none";
+    extra.invisibilityUntil = 0; extra.invisibilityFadeUntil = 0;
     this.extension?.spawned(entity, game);
     if (game.options.mapName.toLowerCase() === "rboss" && game.options.mode !== "deathmatch" && context.state.useQ2Inventory) game.host.inventory.configure(entity.actor, { item: "q2:key_nuke", count: 1, capacity: 1 });
     if (wasWaiting) this.postRespawn(entity, game);

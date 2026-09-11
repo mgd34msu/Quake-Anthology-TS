@@ -11,6 +11,7 @@ import { chooseHordeSquad, hordeSquad } from "./squads.ts";
 import type { HordeMonster, HordeSquadType } from "./squads.ts";
 import type { Q1HordeServices } from "./types.ts";
 import { registerHordeLoot, spawnHordePowerup } from "./loot.ts";
+import { ordinaryAddonMonster } from "../monsters/ordinary/index.ts";
 export type { Q1HordeServices } from "./types.ts";
 
 export class Q1Horde {
@@ -66,7 +67,7 @@ export class Q1Horde {
     } });
     game.registerSpawn("func_door", (_game, entity) => { spawnDoor(game, entity); entity.touch = game.named.touch(entity, "mg1:horde:door_touch"); return undefined; });
     game.named.register("mg1:horde:found", { action: (_game, entity) => {
-      const controller = context.base.monsters.get(entity.actor);
+      const controller = ordinaryAddonMonster(context, entity);
       if (controller !== undefined) return controller.enemy === null ? controller.play(controller.spec.stand) : controller.found(controller.enemy);
       if (entity.monster?.species === "army" || entity.monster?.species === "dog") return game.named.action(entity, "monster_found_target")();
       throw new Error("Horde monster lost its source controller");
@@ -138,9 +139,15 @@ export class Q1Horde {
   spawnMonster(kind: HordeMonster, origin: Vec3, angles: Vec3, owner: Q1Actor): Q1Actor {
     const classname = kind === "grunt" ? "monster_army" : kind === "hellknight" ? "monster_hell_knight" : kind === "demon" ? "monster_demon1" : `monster_${kind}`;
     const entity = this.game.create(classname); this.game.setBody(entity, { origin, angles }); this.game.spawnEntity(entity);
-    const controller = this.context.base.monsters.get(entity.actor), monster = entity.monster;
+    const controller = ordinaryAddonMonster(this.context, entity), monster = entity.monster;
     if (controller === undefined && monster?.species !== "army" && monster?.species !== "dog") throw new Error(`Horde has no native monster controller for ${kind}`);
-    this.game.cancel(entity); const offset = kind === "demon" ? 48 : kind === "ogre" || kind === "shambler" || kind === "shalrath" || kind === "wizard" || kind === "zombie" ? 32 : 24;
+    this.game.cancel(entity);
+    if (controller !== undefined) {
+      entity.model = `progs/${controller.spec.model}.mdl`; entity.solid = "slidebox"; entity.movement = "step"; entity.aimedDamage = true;
+      this.game.setBounds(entity, controller.spec.bounds); this.context.setVector(entity, "view_ofs", { x: 0, y: 0, z: 25 });
+      this.game.host.combat.setTraits(entity.actor, { team: "q1:monsters" }); if (kind === "wizard") entity.movementFlags |= 1;
+    }
+    const offset = kind === "demon" ? 48 : kind === "ogre" || kind === "shambler" || kind === "shalrath" || kind === "wizard" || kind === "zombie" ? 32 : 24;
     let position = vadd(origin, { x: 0, y: 0, z: offset + 1 });
     if (kind !== "wizard") {
       const trace = this.game.host.trace({ start: position, end: vsub(position, { x: 0, y: 0, z: 256 }), bounds: this.game.body(entity).bounds, ignore: entity.actor.id, monsters: true });

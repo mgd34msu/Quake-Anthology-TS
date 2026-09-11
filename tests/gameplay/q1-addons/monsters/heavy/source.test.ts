@@ -132,5 +132,10 @@ test("Rune Knight resumes its saved burst counter and Lava Man retains MG3 awake
   lava.random(0.9); source.pain(lava.player.id, 1); expect(source.entity.count).toBe(1); expect(source.currentFrame).toBe("lavaman_shocka1");
   source.enemy = lava.player.id; source.play("lavaman_fire7"); const ball = [...lava.game.entities.values()].find(entity => entity.classname === "lavaman_ball"); if (ball === undefined) throw new Error("Missing Lava Man missile");
   const up = lava.game.basis.up; expect(lava.game.body(ball).origin.z - origin.z).toBeCloseTo(vscale(up, 90).z, 3); expect(ball.movement).toBe("bounce");
+  const world = lava.game.world; if (world === null) throw new Error("Missing source world");
+  ball.touch?.(world.actor.id, null); expect(ball.model).toBe("progs/s_explod.spr"); expect(ball.frame).toBe(0); expect(ball.movement).toBe("none");
+  expect(lava.events.filter(event => event.kind === "effect" && event.effect === "explosion")).toHaveLength(1);
+  for (let frame = 1; frame <= 5; frame++) lava.tick(ball);
+  expect(ball.frame).toBe(5); expect(lava.game.live(ball)).toBe(true); lava.tick(ball); expect(lava.game.live(ball)).toBe(false);
   source.entity.use?.(null, lava.player.id); expect(lava.game.killedMonsters).toBe(1); expect(source.currentFrame).toBe("lavaman_death1"); expect(() => lava.capture()).not.toThrow(); lava.actors.close();
 });

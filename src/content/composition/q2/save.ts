@@ -8,6 +8,8 @@ import { decodeQ2PlayersCheckpoint, encodeQ2PlayersCheckpoint } from "../../../p
 import { decodeQ2MissionPackItemsCheckpoint, encodeQ2MissionPackItemsCheckpoint, decodeQ2MissionPackMonstersCheckpoint, encodeQ2MissionPackMonstersCheckpoint } from "../../../persistence/q2-missionpacks.ts";
 import { decodeQ2RereleasePlayersCheckpoint, encodeQ2RereleasePlayersCheckpoint, decodeQ2RereleaseModuleCheckpoint, encodeQ2RereleaseModuleCheckpoint } from "../../../persistence/q2-rerelease-state.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
+import { Q2Ctf, decodeQ2CtfCheckpoint } from "../../q2/multiplayer/ctf/index.ts";
+import { Q2Lmctf } from "../../q2/multiplayer/lmctf/runtime.ts";
 import type { Q2ProductRuntime } from "./index.ts";
 import { Q2Tag, Q2DeathBall } from "../../q2/missionpacks/modes/index.ts";
 import { readSavedActor } from "../../../persistence/save-image.ts";
@@ -52,7 +54,7 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
   if (selection.field("edition").choice("classic", "rerelease") !== source.configuration.edition || selection.field("program").choice("baseq2", "xatrix", "rogue", "mg2", "n64") !== source.configuration.program)
     throw new Error("Q2 checkpoint belongs to a different source product");
   const matchSelection = selection.field("match");
-  if (matchSelection.field("kind").choice("standard", "tag", "deathball") !== source.match.selection.kind) throw new Error("Q2 checkpoint belongs to a different source match mode");
+  if (matchSelection.field("kind").choice("standard", "tag", "deathball", "ctf", "lmctf") !== source.match.selection.kind) throw new Error("Q2 checkpoint belongs to a different source match mode");
   if (source.match.selection.kind === "deathball" && (matchSelection.field("team1Skin").string() !== source.match.selection.team1Skin
     || matchSelection.field("team2Skin").string() !== source.match.selection.team2Skin || matchSelection.field("goalLimit").number() !== source.match.selection.goalLimit))
     throw new Error("Q2 checkpoint belongs to different DeathBall rules");
@@ -94,6 +96,8 @@ export function restoreQ2Product(source: Q2ProductRuntime, checkpoints: readonly
     rerelease.module.players.restoreRerelease(source.game, rerelease.players);
     rerelease.module.entities.restore(source.game, rerelease.entities);
   }
+  if (match?.module instanceof Q2Ctf) match.module.restore(decodeQ2CtfCheckpoint(read("q2:match")), source.game);
+  if (match?.module instanceof Q2Lmctf) match.module.restore(match.reader, source.game);
   if (tag !== null) tag.module.restore(source.game, tag.state);
   if (ball !== null) ball.module.restore(source.game, ball.state);
   return undefined;

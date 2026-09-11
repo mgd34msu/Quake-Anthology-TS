@@ -11,7 +11,10 @@ import { Q2MissionPackBolts } from "./bolts.ts";
 import { projectile, projectileMask, publishProjectile, sight } from "./common.ts";
 
 function mineLife(multiplier: number): number { return multiplier === 2 ? 30 : multiplier === 4 ? 15 : multiplier === 8 ? 10 : 45; }
-function playerStart(entity: Q2Entity): boolean { return ["info_player_deathmatch", "info_player_start", "info_player_coop", "misc_teleporter_dest"].includes(entity.classname); }
+function playerStart(entity: Q2Entity, game: Q2GameServices): boolean {
+  return game.options.edition === "rerelease" ? entity.classname.startsWith("info_player_") || entity.classname === "misc_teleporter_dest" || entity.classname.startsWith("item_flag_")
+    : ["info_player_deathmatch", "info_player_start", "info_player_coop", "misc_teleporter_dest"].includes(entity.classname);
+}
 
 export class Q2MissionPackMines extends Q2MissionPackBolts {
   override get callbacks(): Q2CallbackDefinitions {
@@ -95,6 +98,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     if (!game.host.isMonster(contact.other) && !game.host.isPlayer(contact.other)) return undefined;
     const mine = game.entity(field.owner);
     if (mine === null) return game.remove(field);
+    if (game.options.edition === "rerelease" && (!this.hooks.base.hooks.canTarget(mine.teamMaster, contact.other) || game.options.mode !== "deathmatch" && game.host.isPlayer(contact.other))) return undefined;
     if (contact.other === mine.actor.id || mine.think === this.proxExplode) return undefined;
     if (mine.teamChain !== field.actor.id) return game.remove(field);
     game.sound(field, "weapons/proxwarn.wav", 2); return game.schedule(mine, 0.5, this.proxExplode);
@@ -109,14 +113,17 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
   private readonly proxOpen: Q2Think = (entity, game) => {
     if (entity.frame !== 9) {
       if (entity.frame === 0) game.sound(entity, "weapons/proxopen.wav", 2);
-      entity.frame++; game.show(entity); return game.schedule(entity, 0.05, this.proxOpen);
+      entity.frame++; game.show(entity); return game.schedule(entity, game.options.edition === "rerelease" ? 0.1 : 0.05, this.proxOpen);
     }
-    entity.owner = null; game.motion(entity, entity.motion);
+    if (game.options.edition === "classic" || game.options.mode === "deathmatch") entity.owner = null;
+    game.motion(entity, entity.motion);
     const field = game.entity(entity.teamChain); if (field !== null) field.touch = this.proxField;
     for (const actor of game.host.nearby(game.body(entity).origin, 202)) {
       const target = game.entity(actor);
-      const living = (game.host.isPlayer(actor) || game.host.isMonster(actor)) && (game.host.combat.read(actor)?.health ?? 0) > 0;
-      if (!living && !(game.options.mode === "deathmatch" && target !== null && playerStart(target))) continue;
+      const rerelease = game.options.edition === "rerelease";
+      if (rerelease && (actor === entity.actor.id || !this.hooks.base.hooks.canTarget(entity.teamMaster, actor))) continue;
+      const living = (game.host.isMonster(actor) || (game.host.isPlayer(actor) || rerelease && target?.classname === "prox_mine") && (!rerelease || game.options.mode === "deathmatch")) && (game.host.combat.read(actor)?.health ?? 0) > 0;
+      if (!living && !(game.options.mode === "deathmatch" && target !== null && playerStart(target, game))) continue;
       if (target !== null ? !sight(game, target, entity.actor.id) : !sight(game, entity, actor)) continue;
       game.sound(entity, "weapons/proxwarn.wav", 2); return this.proxExplode(entity, game);
     }
@@ -148,7 +155,8 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     game.move(entity, { velocity: zero, angles: { ...angles, x: angles.x + 90 } });
     entity.die = this.proxDie; entity.teamChain = field.actor.id; entity.touch = null;
     game.host.combat.create(entity.actor, { health: 20, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-    game.motion(entity, motion); return game.schedule(entity, 0.05, this.proxOpen);
+    if (game.options.edition === "rerelease") entity.projectile = false;
+    game.motion(entity, motion); return game.schedule(entity, game.options.edition === "rerelease" ? 0 : 0.05, this.proxOpen);
   };
 
   private readonly proxFlight: Q2Think = (entity, game) => {
@@ -212,14 +220,14 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     if ((game.host.pointContents(game.body(entity).origin) & 56) !== 0) return this.removeTesla(entity, game, true);
     if (game.options.mode === "deathmatch") for (const actor of game.host.nearby(game.body(entity).origin, 192)) {
       const other = game.entity(actor);
-      if (other !== null && playerStart(other) && sight(game, other, entity.actor.id)) return this.removeTesla(entity, game);
+      if (other !== null && playerStart(other, game) && sight(game, other, entity.actor.id)) return this.removeTesla(entity, game);
     }
     const field = game.create("tesla trigger"); field.owner = entity.actor.id;
     game.move(field, { origin: game.body(entity).origin, bounds: { min: { x: -128, y: -128, z: game.body(entity).bounds.min.z }, max: { x: 128, y: 128, z: 128 } } });
     game.solid(field, "trigger"); game.motion(field, "stationary"); game.move(entity, { angles: zero });
     if (game.options.mode === "deathmatch") { entity.owner = null; game.motion(entity, entity.motion); }
     entity.teamChain = field.actor.id; entity.timestamp = game.host.now() + 30;
-    return game.schedule(entity, game.host.frameSeconds(), this.teslaActive);
+    return game.schedule(entity, game.options.edition === "rerelease" ? 0.1 : game.host.frameSeconds(), this.teslaActive);
   };
 
   private readonly teslaActive: Q2Think = (entity, game) => {
@@ -248,7 +256,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
         subtract(body.origin, start), trace.end, trace.contact.kind === "plane" ? trace.contact.plane.normal : zero, mod.tesla);
       this.hooks.base.hooks.emit({ kind: "beam", effect: "bfg-lightning", actor: entity.actor.id, start, end: trace.end, duration: game.host.frameSeconds() });
     }
-    return game.schedule(entity, game.host.frameSeconds(), this.teslaActive);
+    return game.schedule(entity, game.options.edition === "rerelease" ? 0.1 : game.host.frameSeconds(), this.teslaActive);
   };
 
   fireTesla(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, multiplier: number, speed: number): Q2Entity {

@@ -128,7 +128,7 @@ export function q2ClientAnimation(context: Q2CharacterContext): undefined {
 export function q2ClientEffects(context: Q2CharacterContext): undefined {
   const { entity, state, game } = context, now = game.host.now();
   const powers = context.powerups(), combat = game.host.combat.read(entity.actor.id);
-  entity.effects = 0; entity.renderFlags = 0;
+  entity.effects = 0; entity.renderFlags = game.options.edition === "rerelease" ? 32768 : 0;
   const flashing = (until: number): boolean => until > now && (until - now > 3 || (Math.round((until - now) * 10) & 4) !== 0);
   if ((combat?.health ?? 0) > 0) {
     if (state.powerArmorTime > now && combat?.armor.kind === "q2") {

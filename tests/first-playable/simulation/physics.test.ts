@@ -4,6 +4,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../src/contracts/math.ts";
 import type { Q1WorldGeometry } from "../../../src/contracts/scene.ts";
+import type { TouchContact } from "../../../src/contracts/world.ts";
 import type { Q2Motion } from "../../../src/content/q2/foundation/host.ts";
 import { Q1_DONOR_PROFILE, Q2_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { SessionActorRegistry, ActorCallbackTable } from "../../../src/world/actors/index.ts";
@@ -22,12 +23,12 @@ function emptyWorld(): Q1WorldGeometry {
     leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: zero, headnodes: [-2, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
     clipnodes: [], visibility: new Uint8Array(), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] };
 }
-function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pusher: OwnedActor, other: ActorId) => undefined = () => undefined) {
+function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pusher: OwnedActor, other: ActorId) => undefined = () => undefined, q2Edition: "classic" | "rerelease" = "classic") {
   const actors = new SessionActorRegistry(createIdentityOwner("physics-test"));
   const callbacks = new ActorCallbackTable(actors), world = actors.allocate("world:scene", "world:world");
   const scene = createSceneQueries(map);
   const physics = new SharedPhysics({ actors, callbacks, scene, numeric: family === "q1" ? Q1_DONOR_PROFILE : Q2_DONOR_PROFILE,
-    sourceOrder: (a, b) => a.slot - b.slot, worldActor: () => world.id, onBlocked: blocked });
+    sourceOrder: (a, b) => a.slot - b.slot, worldActor: () => world.id, onBlocked: blocked, q2Edition });
   const actor = (name: `${string}:${string}`, origin: Vec3, kind: Q2Motion["kind"], bounds = unitBounds): OwnedActor => {
     const actor = actors.allocate("test:actors", name);
     physics.bodies.create(actor, { origin, angles: zero, velocity: zero, bounds, ground: null });
@@ -38,6 +39,43 @@ function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pushe
   };
   return { actors, callbacks, world, scene, physics, actor };
 }
+
+test("rerelease G_Impact preserves its trace and calls the inverted contact after mover removal", () => {
+  const s = setup("q2", emptyWorld(), () => undefined, "rerelease");
+  const mover = s.actor("test:missile", zero, "fly-missile");
+  const obstacle = s.actor("test:obstacle", { x: 5, y: 0, z: 0 }, "stationary");
+  const contacts: TouchContact[] = [];
+  s.physics.setSolid(mover, "none", null, "q2");
+  s.physics.setFlags(mover, { alwaysTouch: true });
+  s.callbacks.bind(mover, { think: null, use: null, pain: null, die: null, touch: contact => {
+    contacts.push(contact);
+    s.physics.setSolid(obstacle, "none", null, "q2");
+    s.physics.setFlags(obstacle, { alwaysTouch: true });
+    s.actors.release(mover);
+    return undefined;
+  } });
+  s.callbacks.bind(obstacle, { think: null, use: null, pain: null, die: null, touch: contact => { contacts.push(contact); return undefined; } });
+  s.physics.setMotion({ actor: mover, kind: "fly-missile", velocity: { x: 100, y: 0, z: 0 }, angularVelocity: zero,
+    gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+  s.physics.step(mover, 0.1);
+  expect(contacts.length).toBe(2);
+  const first = contacts[0], second = contacts[1];
+  if (first?.sourceTrace === undefined || second?.sourceTrace === undefined) throw new Error("Missing rerelease impact metadata");
+  expect(first.self).toBe(mover);
+  expect(second.self).toBe(obstacle);
+  expect(second.other).toBe(mover.id);
+  expect(first.sourceTrace.inverted).toBe(false);
+  expect(second.sourceTrace.inverted).toBe(true);
+  expect(first.sourceTrace.ent).toBe(obstacle.id);
+  expect(second.sourceTrace.ent).toBe(obstacle.id);
+  expect(second.sourceTrace.trace).toBe(first.sourceTrace.trace);
+  expect(second.plane).toBe(first.plane);
+  expect(second.surface).toBe(first.surface);
+  expect(first.sourceTrace.trace.hit).toEqual({ kind: "actor", actor: obstacle.id });
+  expect(first.sourceTrace.trace.contents).toBe(0x2000000);
+  expect(first.sourceTrace.trace.sourcePlane.normal).toEqual({ x: -1, y: 0, z: 0 });
+  expect(first.sourceTrace.trace.fraction).toBeLessThan(1);
+});
 
 test("Q2 push retries after an impact removes the obstacle and triggers observe linked position", () => {
   const s = setup(), mover = s.actor("test:missile", zero, "fly-missile"), obstacle = s.actor("test:obstacle", { x: 5, y: 0, z: 0 }, "stationary");

@@ -31,6 +31,7 @@ export interface SharedSolid {
   readonly item?: boolean;
 }
 export interface SharedPhysicsFlags {
+  readonly alwaysTouch?: boolean;
   readonly fly?: boolean;
   readonly swim?: boolean;
   readonly partialGround?: boolean;
@@ -141,6 +142,7 @@ export class SharedPhysics {
     });
     reader.field("flags").list(value => {
       this.flags.set(owner(value.field("actor")), {
+        ...(value.field("alwaysTouch").value === undefined ? {} : { alwaysTouch: value.field("alwaysTouch").boolean() }),
         ...(value.field("fly").value === undefined ? {} : { fly: value.field("fly").boolean() }), ...(value.field("swim").value === undefined ? {} : { swim: value.field("swim").boolean() }),
         ...(value.field("partialGround").value === undefined ? {} : { partialGround: value.field("partialGround").boolean() }), ...(value.field("dead").value === undefined ? {} : { dead: value.field("dead").boolean() }),
         ...(value.field("player").value === undefined ? {} : { player: value.field("player").boolean() }), ...(value.field("waterLevel").value === undefined ? {} : { waterLevel: value.field("waterLevel").number() }),
@@ -272,6 +274,15 @@ export class SharedPhysics {
     const other = this.options.actors.resolveOwned(otherId);
     const plane = trace.contact.kind === "plane" ? trace.contact.plane : trace.sourcePlane;
     const surface = trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : null;
+    if (this.family(actor) === "q2" && this.options.q2Edition === "rerelease" && trace.kind === "q2") {
+      if (this.solid(actor)?.solid !== "none" || this.actorFlags(actor).alwaysTouch === true)
+        this.options.callbacks.touch({ self: actor, other: otherId, plane, surface,
+          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: false } });
+      if (other !== null && this.live(other) && (this.solid(other)?.solid !== "none" || this.actorFlags(other).alwaysTouch === true))
+        this.options.callbacks.touch({ self: other, other: actor.id, plane, surface,
+          sourceTrace: { kind: "q2-rerelease", trace, ent: otherId, inverted: true } });
+      return undefined;
+    }
     if (this.solid(actor)?.solid !== "none") this.options.callbacks.touch({ self: actor, other: otherId, plane, surface });
     if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none") this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
     return undefined;

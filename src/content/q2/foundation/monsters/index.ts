@@ -151,7 +151,7 @@ export class Q2Monsters implements Q2SpawnModule {
     game.sourceCallbacks.register(this.callbacks);
     return this.perception.bind(game);
   }
-  private definition(classname: string, game: Q2GameServices): Q2MonsterDefinition | null {
+  definition(classname: string, game: Q2GameServices): Q2MonsterDefinition | null {
     const registered = this.editionDefinitions.get(game.options.edition)?.get(classname) ?? this.definitions.get(classname);
     if (registered !== undefined) return registered;
     if (classname === "turret_driver") {
@@ -270,8 +270,8 @@ export class Q2Monsters implements Q2SpawnModule {
     this.pendingDamage.delete(entity.actor.id);
     if (!game.host.actors.isLive(entity.actor.id)) return undefined;
     this.setSkin(context);
-    const healthTarget = entity.spawn.values.get("healthtarget");
-    if (healthTarget !== undefined) { const saved = entity.target; entity.target = healthTarget; game.useTargets(entity, entity.enemy); entity.target = saved; }
+    const healthTarget = entity.healthTarget;
+    if (healthTarget !== "") { const saved = entity.target; entity.target = healthTarget; game.useTargets(entity, entity.enemy); entity.target = saved; }
     if (game.host.actors.isLive(entity.actor.id)) game.show(entity);
     return undefined;
   }
@@ -298,6 +298,7 @@ export class Q2Monsters implements Q2SpawnModule {
       sourceCombatRules: () => this.sourceCombatRules,
       beforeSourceMove: displacement => this.sourceCombatHooks?.beforeMove(context, displacement) ?? { kind: "move", displacement },
       acceptsSourceGroundMove: origin => this.sourceCombatHooks?.acceptsGroundMove(context, origin) ?? true,
+      consumeSourceBlocked: () => this.sourceCombatHooks?.consumeBlocked(context) ?? false,
       runHintPath: distance => this.hintHooks?.run(context, distance) ?? false,
       checkLostHintPath: () => this.hintHooks?.checkLost(context) ?? false,
       schedule: (delay, callback) => {
@@ -365,6 +366,7 @@ export class Q2Monsters implements Q2SpawnModule {
     entity.count = entity.skin;
     entity.scale = game.options.edition === "rerelease" ? numberField(entity.spawn, "scale", 1) : 1;
     if (game.options.edition === "classic") entity.renderFlags |= 64;
+    else entity.renderFlags |= 32768;
     state.scale *= entity.scale;
     game.move(entity, { bounds: { min: scale(definition.bounds.min, entity.scale), max: scale(definition.bounds.max, entity.scale) } }, false);
     state.normalHeight = game.body(entity).bounds.max.z;
@@ -394,6 +396,7 @@ export class Q2Monsters implements Q2SpawnModule {
     const { entity, game, state } = context;
     const spawnDead = game.options.edition === "rerelease" && (entity.spawnflags & 65536) !== 0;
     if ((entity.spawnflags & 2) === 0 && state.locomotion === "walk" && game.host.now() < 1 && (game.options.edition === "classic" || (entity.spawnflags & 262144) === 0)) this.dropToFloor(context);
+    if (health(game, entity.actor.id) <= 0) return undefined;
     if (entity.target.length > 0) {
       const targets = game.targets(entity.target);
       if (targets.some(target => target.classname === "point_combat")) { state.combatTarget = entity.combatTarget = entity.target; entity.target = ""; }
@@ -548,7 +551,7 @@ export class Q2Monsters implements Q2SpawnModule {
       const commanderState = commander === null ? undefined : this.contexts.get(commander.actor.id)?.state;
       if (commander !== null && commanderState !== undefined) {
         if (state.spawnedBy === "carrier" && commander.classname === "monster_carrier") commanderState.monsterSlots++;
-        else if (state.spawnedBy === "medic" && commander.classname === "monster_medic_commander") commanderState.monsterSlots++;
+        else if (state.spawnedBy === "medic" && commander.classname === "monster_medic_commander") { if (game.options.edition === "rerelease") commanderState.monsterUsed -= state.monsterSlots; else commanderState.monsterSlots++; }
         else if (state.spawnedBy === "widow" && commander.classname.startsWith("monster_widow") && commanderState.monsterUsed > 0) commanderState.monsterUsed--;
       }
       if (!state.goodGuy && !state.doNotCount && (game.options.edition === "classic" || (entity.spawnflags & 65536) === 0)) game.counters.killedMonsters++;

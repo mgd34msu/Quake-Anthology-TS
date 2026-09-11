@@ -147,6 +147,10 @@ export class GameplayAuthority implements DamageAuthority {
       } else this.commitMutations(target, binding, latest, resumed.mutations);
       decision = captureDecision({ ...resumed, mutations: [...decision.mutations, ...resumed.mutations] }, request);
     }
+    if (policy.afterHealth !== undefined && decision.mutations.some(mutation => mutation.kind === "health")) {
+      const reaction = policy.afterHealth(decision, { target: () => this.read(target.id), attacker: () => request.attack.attacker === null ? null : this.read(request.attack.attacker) });
+      decision = captureDecision({ ...decision, reaction }, request);
+    }
     if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, decision);
     if (this.actors.isLive(target.id)) {
       const kick = decision.feedback?.kind === "q2" ? decision.feedback.knockback : request.knockback;

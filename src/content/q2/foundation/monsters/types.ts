@@ -114,6 +114,7 @@ export interface MonsterContext {
   sourceCombatRules(): "base" | "rogue";
   beforeSourceMove(displacement: Vec3): { readonly kind: "handled" } | { readonly kind: "move"; readonly displacement: Vec3 };
   acceptsSourceGroundMove(origin: Vec3): boolean;
+  consumeSourceBlocked(): boolean;
   runHintPath(distance: number): boolean;
   checkLostHintPath(): boolean;
   schedule(delaySeconds: number, callback: "monster_dead_think" | "M_FliesOn" | "M_FliesOff"): undefined;
@@ -143,6 +144,7 @@ export interface Q2MonsterSourceCombatHooks {
   recoverEnemy(context: MonsterContext): ActorId | null;
   beforeMove(context: MonsterContext, displacement: Vec3): { readonly kind: "handled" } | { readonly kind: "move"; readonly displacement: Vec3 };
   acceptsGroundMove(context: MonsterContext, origin: Vec3): boolean;
+  consumeBlocked(context: MonsterContext): boolean;
 }
 
 export interface Q2MonsterHintHooks {

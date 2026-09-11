@@ -1,6 +1,6 @@
 // Core damage/armor/impulse ordering from original combat.qc, g_combat.c, and the TS donors.
 // AI, source event accumulation, powerup sounds, obelisks and score rules stay in the owning game provider.
-import type { CombatPolicy, CombatState, DamageDecision, DamageMutation, DamagePreparation, DamageRequest } from "../../contracts/gameplay.ts";
+import type { CombatPolicy, CombatState, CurrentCombatState, DamageDecision, DamageMutation, DamagePreparation, DamageRequest } from "../../contracts/gameplay.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { sameActor } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -62,6 +62,8 @@ export interface Q1DamageSourceEffects {
   beforeHealth?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): boolean;
   /** Rogue Earth scales take after protection/team health gates, preserving spent armor and momentum. */
   afterArmor?(request: DamageRequest, take: number, target: CombatState, attacker: CombatState | null): number;
+  /** MG3's Buddha branch replaces lethal health and returns before pain/death callbacks. */
+  lethalHealth?(request: DamageRequest, health: number, target: CombatState, attacker: CombatState | null): { readonly health: number; readonly reaction: "none" | "death" };
 }
 export interface Q1CombatPolicyOptions extends PolicyOptions<Q1CombatContext> { readonly sourceEffects?: Q1DamageSourceEffects; }
 
@@ -89,7 +91,7 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
     if (context.walk && context.momentumDirection !== null) addImpulse(request, mutations, context.momentumDirection, round(damage * 8), context.arithmetic);
     // Q1 spends armor and applies momentum even when godmode, invincibility or teamplay stops health loss.
     if ((target.invulnerable && options.sourceEffects?.protectionApplies?.(request, target, attacker) !== false) || (context.baseTeamHealth !== false && context.teamplay === 1 && sameTeam(target, attacker))) return decision(request, mutations, 0, "none");
-    if (options.sourceEffects?.beforeHealth !== undefined) return { ...decision(request, mutations, 0, "none"), continuation: { kind: "q1-health", damage, take } };
+    if (options.sourceEffects?.beforeHealth !== undefined || options.sourceEffects?.lethalHealth !== undefined) return { ...decision(request, mutations, 0, "none"), continuation: { kind: "q1-health", damage, take } };
     const healthTake = round(options.sourceEffects?.afterArmor?.(request, take, target, attacker) ?? take);
     const health = Math.max(-99, round(target.health - healthTake));
     mutations.push({ kind: "health", before: target.health, after: health });
@@ -97,7 +99,7 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
   },
     resume(previous, current) {
       const { request, continuation } = previous;
-      if (continuation === undefined) throw new Error("Q1 combat resumed without a source continuation");
+      if (continuation?.kind !== "q1-health") throw new Error("Q1 combat resumed without a source continuation");
       const target = current.target();
       if (target === null || options.sourceEffects?.beforeHealth?.(request, continuation.damage, target, current.attacker()) === false) return decision(request, [], 0, "none");
       const latest = current.target();
@@ -105,7 +107,8 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
       const attacker = current.attacker(), context = options.context(request, latest, attacker);
       const take = numberFor(context.arithmetic, options.sourceEffects?.afterArmor?.(request, continuation.take, latest, attacker) ?? continuation.take);
       const health = Math.max(-99, numberFor(context.arithmetic, latest.health - take));
-      return decision(request, [{ kind: "health", before: latest.health, after: health }], take, health <= 0 ? "death" : "pain");
+      const lethal = health <= 0 ? options.sourceEffects?.lethalHealth?.(request, health, latest, attacker) : undefined;
+      return decision(request, [{ kind: "health", before: latest.health, after: lethal?.health ?? health }], take, lethal?.reaction ?? (health <= 0 ? "death" : "pain"));
     } };
 }
 
@@ -128,7 +131,21 @@ export interface Q2CombatContext {
   readonly suppressPain: boolean;
 }
 
-export function createQ2CombatPolicy(options: PolicyOptions<Q2CombatContext>): CombatPolicy {
+export interface Q2DamageSourceEffects {
+  /** CTF strength and LMCTF damage rune follow the surprise bonus, before momentum. */
+  beforeMomentum?(request: DamageRequest, damage: number, target: CombatState, attacker: CombatState | null): number;
+  powerArmorAllowed?(request: DamageRequest, target: CombatState, attacker: CombatState | null): boolean;
+  /** LMCTF resistance runs after power armor and before ordinary armor. */
+  afterPowerArmor?(request: DamageRequest, take: number, target: CombatState, attacker: CombatState | null): number;
+  armorAllowed?(request: DamageRequest, target: CombatState, attacker: CombatState | null): boolean;
+  /** CTF resistance runs after both armor sites. */
+  afterArmor?(request: DamageRequest, take: number, target: CombatState, attacker: CombatState | null): number;
+  /** LMCTF vampire healing observes committed victim health before death is tested. */
+  afterHealth?(decision: DamageDecision, current: CurrentCombatState): undefined;
+}
+export interface Q2CombatPolicyOptions extends PolicyOptions<Q2CombatContext> { readonly sourceEffects?: Q2DamageSourceEffects; }
+
+export function createQ2CombatPolicy(options: Q2CombatPolicyOptions): CombatPolicy {
   return { id: options.id, decide(request, target, attacker) {
     if (!target.canTakeDamage) return decision(request, [], 0, "none");
     const context = options.context(request, target, attacker);
@@ -139,6 +156,7 @@ export function createQ2CombatPolicy(options: PolicyOptions<Q2CombatContext>): C
     if (context.easySkill && !context.deathmatch && context.player) damage = Math.max(1, Math.trunc(damage * 0.5));
     if (context.defenderSphere && context.player) damage = Math.max(1, Math.trunc(damage * 0.5));
     if (request.delivery !== "radius" && context.monster && context.attackerPlayer && !context.hasEnemy && target.health > 0) damage = Math.trunc(damage * 2);
+    damage = Math.trunc(options.sourceEffects?.beforeMomentum?.(request, damage, target, attacker) ?? damage);
     const mutations: DamageMutation[] = [];
     const knockback = context.noKnockback || target.noKnockback === true ? 0 : Math.trunc(request.knockback);
     if (!flags.noKnockback && context.movable) {
@@ -147,16 +165,42 @@ export function createQ2CombatPolicy(options: PolicyOptions<Q2CombatContext>): C
     }
     const protectionSaved = target.invulnerable && !flags.noProtection ? damage : 0;
     let take = damage - protectionSaved;
-    const armor = options.armor(request, target.armor, take, flags);
-    if (armor.armor !== target.armor) mutations.push({ kind: "armor", before: target.armor, after: armor.armor });
-    take -= armor.powerSaved + armor.regularSaved;
+    const splitArmor = options.sourceEffects?.afterPowerArmor !== undefined || options.sourceEffects?.powerArmorAllowed !== undefined || options.sourceEffects?.armorAllowed !== undefined;
+    let powerSaved: number, regularSaved: number;
+    if (splitArmor) {
+      const power = options.sourceEffects?.powerArmorAllowed?.(request, target, attacker) === false
+        ? { armor: target.armor, powerSaved: 0, regularSaved: 0 }
+        : options.armor(request, target.armor, take, { ...flags, stage: "power" });
+      powerSaved = power.powerSaved;
+      take -= powerSaved;
+      take = Math.trunc(options.sourceEffects?.afterPowerArmor?.(request, take, { ...target, armor: power.armor }, attacker) ?? take);
+      const regular = options.sourceEffects?.armorAllowed?.(request, target, attacker) === false
+        ? { armor: power.armor, powerSaved: 0, regularSaved: 0 }
+        : options.armor(request, power.armor, take, { ...flags, stage: "regular" });
+      regularSaved = regular.regularSaved;
+      take -= regularSaved;
+      if (regular.armor !== target.armor) mutations.push({ kind: "armor", before: target.armor, after: regular.armor });
+    } else {
+      const armor = options.armor(request, target.armor, take, flags);
+      powerSaved = armor.powerSaved; regularSaved = armor.regularSaved;
+      if (armor.armor !== target.armor) mutations.push({ kind: "armor", before: target.armor, after: armor.armor });
+      take -= powerSaved + regularSaved;
+    }
+    take = Math.trunc(options.sourceEffects?.afterArmor?.(request, take, target, attacker) ?? take);
     if (!flags.noProtection && context.rejectTeamDamage) return decision(request, mutations, 0, "none");
     if (flags.destroyArmor && !target.invulnerable && !flags.noProtection) take = damage;
-    const feedback: NonNullable<DamageDecision["feedback"]> = { kind: "q2", powerArmor: armor.powerSaved, armor: armor.regularSaved + protectionSaved, blood: take, knockback };
+    const feedback: NonNullable<DamageDecision["feedback"]> = { kind: "q2", powerArmor: powerSaved, armor: regularSaved + protectionSaved, blood: take, knockback };
     if (take === 0) return { ...decision(request, mutations, 0, "none"), feedback };
     const health = Math.max(-999, Math.trunc(target.health - take));
     mutations.push({ kind: "health", before: target.health, after: health });
     return { ...decision(request, mutations, take, health <= 0 ? "death" : context.suppressPain ? "none" : "pain"), feedback };
+  }, afterHealth(result, current) {
+    if (options.sourceEffects?.afterHealth === undefined) return result.reaction;
+    options.sourceEffects.afterHealth(result, current);
+    const target = current.target();
+    if (target === null) return "none";
+    if (target.health <= 0) return "death";
+    return options.context(result.request, target, current.attacker()).suppressPain ? "none" : "pain";
   } };
 }
 

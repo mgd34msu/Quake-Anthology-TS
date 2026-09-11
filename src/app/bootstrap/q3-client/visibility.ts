@@ -9,7 +9,7 @@ import type { Q3SourcePresentationState } from "../simulation/q3/presentation.ts
 type Queries = Pick<SharedSceneQueries, "pointLeaf" | "leafCluster" | "leafArea" | "areaBits" | "boxLeaves" | "clusterVisible" | "areasConnected">;
 
 /** The local transport runs the same Q3 visibility selection as a network snapshot. */
-export function selectApplicationQ3Snapshot(player: PlayerStateFields, source: Q3SourcePresentationState,
+export function selectApplicationQ3Snapshot(player: Pick<PlayerStateFields, "clientNum" | "origin" | "viewheight">, source: Q3SourcePresentationState,
   queries: Queries, bounds: (number: number) => Bounds | null, leafCount: number, print: (text: string) => void): Q3VisibleEntities {
   const entities = new Map<number, Q3VisibilityEntity>(), links = new Map<number, Q3VisibilityLink>();
   let entityCount = 0;

@@ -113,7 +113,7 @@ export class Q2MissionPackWeapons {
       state.grenadeTime = 0;
       if (trap) this.projectiles.fireTrap(self, game, projection.start, projection.direction, 125 * weapons.multiplier(context), speed, 1, 165, held);
       else this.projectiles.fireTesla(self, game, projection.start, projection.direction, weapons.multiplier(context), speed);
-      return weapons.consume(context, 1);
+      return weapons.consume(context, 1, false);
     }
     const timer = state.grenadeTime - context.now, charged = 400 + (3 - timer) * 400 / 3;
     const speed = Math.trunc(trap ? charged : Math.min(800, charged)), axes = angleVectors(input.angles);

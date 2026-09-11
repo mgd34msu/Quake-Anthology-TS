@@ -88,11 +88,12 @@ export class SharedBodyTable implements BodyTable {
     return record.linked === null ? this.hooks.onUnlink(actor.id) : this.hooks.onLink(record.linked);
   }
 
-  link(actor: OwnedActor): undefined {
+  link(actor: OwnedActor, origin?: Vec3): undefined {
     this.actors.assertOwned(actor);
     const record = this.record(actor.id);
     if (record === null) throw new Error("Cannot link an actor without a body");
-    const state = copyBody(record.binding.read());
+    const current = record.binding.read();
+    const state = copyBody(origin === undefined ? current : { ...current, origin });
     const linked: LinkedBody = Object.freeze({ actor: actor.id, state,
       absoluteBounds: copyBounds(this.hooks.absoluteBounds(actor, state)), linkCount: ++record.linkCount });
     record.linked = linked;

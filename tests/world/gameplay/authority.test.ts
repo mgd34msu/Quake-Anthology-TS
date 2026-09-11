@@ -219,6 +219,67 @@ describe("shared actor and gameplay authority", () => {
     expect(fixed.feedback?.knockback).toBe(0);
   });
 
+  test("CTF and LMCTF source stages preserve distinct armor order and native shield cost", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("q2-mode-stages"));
+    const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q3:game", "q3:player");
+    const shield: ArmorState = { kind: "q2", points: 100, normalProtection: 0.6, energyProtection: 0.3, item: "q2:armor", powerArmor: { kind: "shield", cells: 10 } };
+    const armor = nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } }));
+    const request = attack(target.id, attacker.id, 1, 41);
+    const lmctf = createQ2CombatPolicy({ id: "lmctf:combat", context: () => q2Context, armor, sourceEffects: {
+      beforeMomentum: (_request, damage) => Math.trunc(Math.fround(damage * 1.75)),
+      afterPowerArmor: (_request, take) => Math.trunc(Math.fround(take / 1.75)),
+    } });
+    const lm = lmctf.decide(request, state(100, shield), state());
+    // 41 * 1.75 -> 71; shield saves 20; resistance 51 / 1.75 -> 29; armor saves 18.
+    expect(lm.feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 18, blood: 11, knockback: 41 });
+    const changed = lm.mutations.find(mutation => mutation.kind === "armor");
+    expect(changed?.kind === "armor" && changed.after.kind === "q2" ? changed.after.powerArmor : null).toEqual({ kind: "shield", cells: 0 });
+    const surprised = createQ2CombatPolicy({ id: "lmctf:combat", context: () => ({ ...q2Context, monster: true }), armor, sourceEffects: {
+      beforeMomentum: (_request, damage) => { expect(damage).toBe(82); return Math.trunc(Math.fround(damage * 1.75)); },
+      afterPowerArmor: (_request, take) => Math.trunc(Math.fround(take / 1.75)),
+    } });
+    expect(surprised.decide(request, state(100, shield), state()).appliedDamage).toBe(28);
+    const ctf = createQ2CombatPolicy({ id: "ctf:combat", context: () => q2Context, armor, sourceEffects: {
+      beforeMomentum: (_request, damage) => damage * 2,
+      afterArmor: (_request, take) => Math.trunc(take / 2),
+    } });
+    expect(ctf.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 38, blood: 12, knockback: 41 });
+    const regularProtected = createQ2CombatPolicy({ id: "lmctf:combat", context: () => q2Context, armor, sourceEffects: { armorAllowed: () => false } });
+    expect(regularProtected.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 0, blood: 21, knockback: 41 });
+    const bothProtected = createQ2CombatPolicy({ id: "ctf:combat", context: () => q2Context, armor, sourceEffects: { powerArmorAllowed: () => false, armorAllowed: () => false } });
+    expect(bothProtected.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 0, armor: 0, blood: 41, knockback: 41 });
+    const q1Armor: ArmorState = { kind: "q1", points: 100, absorption: 0.5, item: "q1:armor" };
+    expect(lmctf.decide(request, state(100, q1Armor), state()).appliedDamage).toBe(20);
+  });
+
+  test("Q2 after-health effects observe committed health and reenter before fresh death selection", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("q2-after-health"));
+    const callbacks = new ActorCallbackTable(actors);
+    const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q3:game", "q3:player");
+    const steps: string[] = [];
+    const authority = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    authority.create(target, state(10)); authority.create(attacker, state(200));
+    authority.register(createQ2CombatPolicy({ id: "q2:combat", context: () => q2Context,
+      armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64" })), sourceEffects: {
+        afterHealth: (result, current) => {
+          steps.push(`health:${current.target()?.health}:${result.request.attack.sequence}`);
+          if (result.request.attack.sequence === 1) {
+            const health = current.attacker()?.health;
+            if (health !== undefined) authority.setHealth(attacker, Math.min(250, health + (result.appliedDamage >> 1)));
+            const nested = attack(target.id, attacker.id, 2, 20);
+            authority.apply({ ...nested, attack: { ...nested.attack, combatProvider: "q2:combat" } });
+          }
+          return undefined;
+        },
+      } }));
+    callbacks.bind(target, { think: null, touch: null, use: null, pain: () => { steps.push("pain"); return undefined; },
+      die: () => { steps.push(`death:${authority.read(attacker.id)?.health}`); return undefined; } });
+    const request = attack(target.id, attacker.id, 1, 4);
+    authority.apply({ ...request, attack: { ...request.attack, combatProvider: "q2:combat" } });
+    expect(steps).toEqual(["health:6:1", "health:-14:2", "death:202", "death:202"]);
+    expect(authority.read(target.id)?.health).toBe(-14);
+  });
+
   test("Q1 empathy reenters after quad and reads the victim again before armor commits", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("q1-effects")), callbacks = new ActorCallbackTable(actors);
     const target = actors.allocate("q1:game", "q1:player"), attacker = actors.allocate("q1:game", "q1:player");

@@ -1,0 +1,14 @@
+export { BotBrain, BotGoalStatus } from "./brain.ts";
+export type { BotBrainConfigT, BotBrainCheckpoint, BotChatEventT } from "./brain.ts";
+export { RereleaseBotBehavior } from "./profile.ts";
+export type { RereleaseProfileOptions, RereleaseBehaviorCheckpoint, RereleaseCallbacks, RereleaseOrders, RereleaseSource } from "./profile.ts";
+export { SourceRereleaseNavigation } from "./nav.ts";
+export type { BotNavigation, NavPathT } from "./nav.ts";
+export { BotKnowledge, BotGameType, chooseWeapon, itemValue } from "./data/knowledge.ts";
+export { loadQuake1Knowledge } from "./data/knowledge-q1.ts";
+export { Bot_LoadKnowledge as loadQuake2Knowledge, BOT_WEAPON_BINDINGS, BOT_AMMO_CLASSNAMES, BOT_OBJECTIVE_BINDINGS } from "./data/knowledge-q2.ts";
+export { Bot_SetWeapon, Bot_TriggerEdict, Bot_UseItem, Bot_GetItemID, Bot_PickedUpItem, Edict_ForceLookAtPoint } from "./q2-exports.ts";
+export type { Q2BotExportsHost } from "./q2-exports.ts";
+export { Xorshift32 } from "./rng.ts";
+export { BotEntityKind, BotContents, BOT_BUTTON_ATTACK, BOT_BUTTON_JUMP, BOT_BUTTON_USE } from "./world.ts";
+export type { BotUsercmdT, BotWorldT, BotSelfT, BotEntityT, BotSoundT, BotTraceT } from "./world.ts";

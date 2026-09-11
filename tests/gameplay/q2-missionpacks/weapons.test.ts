@@ -31,6 +31,41 @@ function clearTrace(request: Q2TraceRequest): TraceResult {
 }
 
 describe("mission-pack source weapons", () => {
+  test("Rogue substitutes Xatrix item descriptors and classic random respawn replaces the source actor", () => {
+    const scene = fixture("classic", "blaster", 0.1, "deathmatch");
+    let armory: ReturnType<typeof registerQ2MissionPackArmory> | null = null;
+    const settings = { enabled: true, noMines: false, noNukes: false, noSpheres: false };
+    const items = new Q2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined,
+      randomRespawn: (entity, game) => armory?.items.randomRespawn(entity, game, settings) ?? null });
+    armory = registerQ2MissionPackArmory("rogue", { weapons: scene.weapons, items, monster: () => null, playerEffect: () => undefined, hunterCamera: false, intermission: () => false });
+    const ammo = scene.game.create("ammo_magslug");
+    expect(armory.items.spawn(ammo, scene.game)).toBe(true); expect(ammo.classname).toBe("ammo_magslug");
+    expect(items.itemDefinition(ammo)?.classname).toBe("ammo_flechettes");
+    items.configurePlayer(scene.player, scene.game); items.touch(ammo, scene.game, scene.player.id);
+    expect(scene.inventory.count(scene.player.id, "q2:ammo_flechettes")).toBe(50);
+    const before = ammo.actor.id; scene.setTime(30); ammo.think?.(ammo, scene.game);
+    expect(scene.actors.isLive(before)).toBe(false);
+    const replacement = [...scene.game.entities.values()].find(entity => entity.classname === "ammo_rockets");
+    expect(replacement?.solid).toBe("trigger"); expect(replacement?.nextThink).toBe(30.2);
+    const compass = scene.game.create("item_compass"); expect(armory.items.spawn(compass, scene.game)).toBe(true);
+    items.touch(compass, scene.game, scene.player.id); expect(items.use(scene.player, "q2:item_compass", scene.game)).toBe(true);
+    expect(scene.presentation.some(event => event.kind === "print" && event.text === "Origin: 0,0,0    Dir: 0\n")).toBe(true);
+    scene.actors.close();
+  });
+
+  test("Xatrix weapon selection cycles HyperBlaster and chooses Phalanx when rail ammo is exhausted", () => {
+    const scene = fixture("classic"), projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
+    new Q2MissionPackWeapons(projectiles).register(scene.weapons, "xatrix");
+    scene.inventory.configure(scene.player, { item: "q2:weapon_boomer", count: 1, capacity: 1 });
+    scene.inventory.configure(scene.player, { item: "q2:weapon_phalanx", count: 1, capacity: 1 });
+    scene.inventory.configure(scene.player, { item: "q2:ammo_magslug", count: 1, capacity: 50 });
+    scene.inventory.consume(scene.player, "q2:ammo_slugs", 200);
+    scene.state.weapon = "hyperblaster";
+    expect(scene.weapons.requestWeapon(scene.self, scene.game, "hyperblaster")).toBe("selected"); expect(scene.state.pending).toBe("ionripper");
+    expect(scene.weapons.requestWeapon(scene.self, scene.game, "railgun")).toBe("selected"); expect(scene.state.pending).toBe("phalanx");
+    scene.actors.close();
+  });
+
   test("retail expansion entity rows spawn through their source handlers with the map brush bounds", async () => {
     const classes = new Set(["rotating_light", "func_object_repair", "misc_viper_missile", "misc_amb4", "misc_nuke", "misc_crashviper", "misc_transport", "target_mal_laser", "info_teleport_destination", "trigger_teleport", "trigger_disguise", "target_steam", "target_anger", "target_killplayers", "target_blacklight", "target_orb", "misc_nuke_core", "func_plat2", "func_door_secret2", "func_force_wall"]);
     const seen = new Map<string, number>(), diagnostics: string[] = [];

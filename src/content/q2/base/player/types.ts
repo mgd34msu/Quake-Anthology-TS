@@ -64,6 +64,7 @@ export interface Q2PlayerHooks {
   weaponInput(actor: ActorId): Q2WeaponInput;
   banned(address: string): boolean;
   score?(victim: Q2Entity, attacker: Q2Entity | null, game: Q2GameServices, change: number, meansOfDeath: number, recipient: Q2Entity): undefined;
+  playerSpawned?(entity: Q2Entity, game: Q2GameServices): undefined;
   selectSpawn?(entity: Q2Entity, game: Q2GameServices): { readonly origin: Vec3; readonly angles: Vec3 } | null;
   /** Expansion modes may react synchronously after base death/disconnect state changes. */
   death?(entity: Q2Entity, game: Q2GameServices, attack: AttackProvenance | null): undefined;
@@ -203,7 +204,7 @@ export interface Q2CharacterWeapon {
 }
 export interface Q2CharacterServices {
   readonly host: Pick<Q2FoundationHost, "now" | "random" | "combat" | "inventory" | "pointContents" | "emit">;
-  readonly options: Pick<Q2GameServices["options"], "mode" | "deathmatchFlags">;
+  readonly options: Pick<Q2GameServices["options"], "mode" | "deathmatchFlags"> & { readonly edition?: Q2GameServices["options"]["edition"] };
   body: Q2GameServices["body"];
   move: Q2GameServices["move"];
   sound: Q2GameServices["sound"];

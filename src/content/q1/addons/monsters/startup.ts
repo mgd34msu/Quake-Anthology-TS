@@ -1,4 +1,4 @@
-/* quakec_mg3/monsters.qc InitMonster, StartMonster, monster_begin_walking. GPL-2.0-or-later. */
+/* quakec_{mg1,mg3}/monsters.qc InitMonster, StartMonster, monster_begin_walking. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1Foundation } from "../../foundation/runtime.ts";
@@ -17,7 +17,8 @@ export function initMg3Monster(monster: BaseMonster, context: Q1AddonContext, mo
   const { game, entity } = monster;
   if (game.options.deathmatch !== 0 || context.removedForRunes(entity) || context.removedOutsideCoop(entity)) return game.live(entity) ? game.remove(entity) : undefined;
   entity.movementFlags |= 16384; entity.fields.set("mdl", model); context.setNumber(entity, "lefty", type); context.setNumber(entity, "state", size); monster.lefty = true;
-  game.totalMonsters++; if (entity.text("health_target") !== "") entity.maxHealth = game.health(entity.actor.id);
+  if (context.program === "mg3" || context.services.cvar("horde") === 0 || (entity.spawnflags & 4) === 0) game.totalMonsters++;
+  if (context.program === "mg3" && entity.text("health_target") !== "") entity.maxHealth = game.health(entity.actor.id);
   if ((entity.spawnflags & 4) !== 0) { entity.use = game.named.use(entity, `${prefix(monster)}:start`); return undefined; }
   return game.schedule(entity, Math.max(0, entity.nextThink) + game.host.random() * 0.5 - game.time, game.named.action(entity, `${prefix(monster)}:monster_start`));
 }
@@ -48,6 +49,7 @@ export function startMg3Monster(monster: BaseMonster, context: Q1AddonContext): 
   if (target?.classname === "path_corner" && (entity.spawnflags & 4096) === 0) monster.play(spec.walk);
   else { monster.state.pauseUntil = 99999999; monster.play(spec.stand); if (target?.classname === "path_corner") entity.use = game.named.use(entity, `${name}:walk`); }
   if ((entity.spawnflags & 4) === 0) return monster.delay(entity.nextThink - game.time + game.host.random() * 0.5);
+  if (context.program !== "mg3" && [...game.entities.values()].some(candidate => candidate.classname === "horde_manager")) game.totalMonsters++;
   return (entity.spawnflags & 8) !== 0 ? monster.use(entity.activator) : undefined;
 }
 

@@ -124,6 +124,10 @@ export class ApplicationEffects {
     for (const group of this.groups.values()) group.models = [];
     const pending = this.pending; this.pending = [];
     for (const source of pending) await this.event(source);
+    const liveActors = new Set(snapshot.actors.map(actor => actor.id));
+    for (const actor of this.sourceLights.keys()) if (!liveActors.has(actor)) this.sourceLights.delete(actor);
+    for (const actor of this.trackerPain.keys()) if (!liveActors.has(actor)) this.trackerPain.delete(actor);
+    this.playerViews.retain(liveActors);
     this.steam = this.steam.filter(steam => steam.end >= now);
     if (elapsed > 0 || this.time === null) for (const steam of this.steam) if (steam.next <= now) {
       const event = steam.event, particles = (await this.group(steam.content)).particles;
@@ -195,12 +199,21 @@ export class ApplicationEffects {
       if (event.kind === "missionpack-player") {
         if (event.event.kind === "tracker-pain") this.trackerPain.set(event.event.actor, { content: source.content, until: event.event.until });
         else this.playerViews.receive(event.event);
-      } else {
+      } else if (event.kind === "missionpack-entity") {
         const group = await this.group(source.content), effect = event.event;
         if (effect.kind === "force-wall") group.particles.q2ForceWall(effect.start, effect.end, effect.color, source.seconds);
         else if (effect.id === -1) group.particles.q2Steam(effect.origin, effect.direction, effect.color, effect.count, effect.speed, source.seconds);
         else if (this.steam.length < 32) this.steam.push({ content: source.content, event: effect, end: source.seconds + effect.milliseconds / 1000, next: source.seconds });
-      }
+      } else if (event.kind === "ctf" || event.kind === "lmctf") {
+        const effect = event.event;
+        if (effect.kind === "grapple-cable") {
+          await this.group(source.content);
+          this.beam({ content: source.content, actor: effect.actor, start: add3(effect.start, effect.offset), end: effect.end,
+            die: source.seconds + 0.2, width: 0, color: 0, model: "models/ctf/segment/tris.md2", family: "q2" });
+        }
+      } else if (event.kind === "kick" || event.kind === "grapple-prediction") {
+        this.reject(source, "Q2 session action reached the presentation owner");
+      } else { const exhaustive: never = event; throw new Error(`Unknown Q2 composition event: ${String(exhaustive)}`); }
       return;
     }
     if (source.kind === "q2-rerelease") {

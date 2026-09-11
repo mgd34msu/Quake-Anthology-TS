@@ -41,7 +41,7 @@ export class SimulationEvents {
   emit(content: ContentId, source: SourcePresentationEvent): undefined {
     const time = this.now();
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
-    const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? source.event.event : source.event;
+    const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
     const reference = "actor" in event ? event.actor : null;
     const actor = reference === null ? null : "id" in reference ? reference.id : reference;
     const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
@@ -51,6 +51,12 @@ export class SimulationEvents {
     if (source.kind === "q2" && source.event.kind === "sound" && source.event.loop !== "once") {
       const key = `sound:${source.event.actor?.slot ?? -1}:${source.event.channel}:${source.event.path}`;
       if (source.event.loop === "stop") this.persistent.delete(key); else this.persistent.set(key, presentation);
+    }
+    if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) {
+      const event = source.event.event;
+      if (event.kind === "scoreboard" || source.event.kind === "lmctf" && event.kind === "hud" && "layout" in event)
+        this.message({ kind: "q2-layout", program: event.layout }, event.actor);
+      else if (event.kind === "match-status") this.message({ kind: "print", level: 2, text: event.text });
     }
     if (source.kind === "q1") this.q1(content, source.event);
     else if (source.kind === "q2") this.q2(content, source.event);

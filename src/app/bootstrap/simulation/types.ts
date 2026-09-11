@@ -84,6 +84,7 @@ export interface SimulationPresentation {
   readonly origin: Vec3;
   readonly angles: Vec3;
   readonly scale: number;
+  readonly alpha?: number;
   readonly visible: boolean;
   readonly viewWeapon: boolean;
 }

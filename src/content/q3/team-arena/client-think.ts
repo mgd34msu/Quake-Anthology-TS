@@ -224,14 +224,15 @@ export class ClientThinkRuntime {
     else playerStateToEntityState(ps, entity.s, true);
     sendPendingPredictableEvents(this.host.effects, ps);
     if (!(ps.eFlags & EF_FIRING)) client.fireHeld = false;
-    entity.r.currentOrigin = { ...entity.s.pos.base };
     entity.r.mins = { ...movement.bounds.min };
     entity.r.maxs = { ...movement.bounds.max };
     entity.waterlevel = movement.waterlevel;
     entity.watertype = movement.watertype;
-    this.host.clientEvents(entity, oldEventSequence);
-    this.host.world.link(entity);
-    if (!client.noclip) this.touchTriggers(entity);
+    entity.r.withCurrentOrigin(entity.s.pos.base, () => {
+      this.host.clientEvents(entity, oldEventSequence);
+      this.host.world.link(entity);
+      if (!client.noclip) this.touchTriggers(entity);
+    });
     entity.r.currentOrigin = { ...ps.origin };
     this.host.botTestAas(entity.r.currentOrigin);
     this.clientImpacts(entity, movement.contacts);

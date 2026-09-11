@@ -86,8 +86,9 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (this.q3Client !== null) return this.q3Client.camera();
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
     const fovX = 90, fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
-    return { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
+    const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
+    return this.effects.playerView(this.local.player.actor, camera).camera;
   }
 
   receive(events: readonly SimulationEvent[]): undefined {
@@ -171,7 +172,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
         transform: { origin: source.origin, axis, scale: { x: source.scale, y: source.scale, z: source.scale } }, previousOrigin: source.origin,
         pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 }, skin: source.skin,
-        color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
+        color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
       await append(source.content, entity, () => ({ viewModel: source.viewWeapon,
         player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null }));
@@ -196,6 +197,7 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   frame(snapshot: WorldSnapshot): RenderFrame {
     const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera);
+    const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => {
       const pattern = this.lightStyles.get(index);
       if (pattern === undefined || pattern.length === 0) return absent;
@@ -210,7 +212,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera));
     this.frames.begin();
     if (nativeFrame === undefined) {
-      const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input, entity => group.options.get(entity) ?? {}));
+      const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input,
+        entity => ({ ...group.options.get(entity), infrared: playerView.infrared })));
       const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
       this.frames.world(this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }, ...effects.operations] }));
     } else for (const command of nativeFrame.commands) {
@@ -225,6 +228,8 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
+    if (this.q3Client === null && playerView.blend !== null) draw.fillRect({ x: 0, y: 0, width: camera.viewport.width, height: camera.viewport.height },
+      playerView.blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, camera.viewport.height / 480));
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,

@@ -147,6 +147,11 @@ test("official campaign selection joins base, mission packs and rerelease addons
       impulse(227); expect(addon.playerNumber(actor.id, "parm15")).toBe(1); impulse(122); expect(addon.playerNumber(actor.id, "infiniteammo")).toBe(1);
       impulse(2); expect(world.game.weaponInput(actor, true, ZERO, 0, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/shells")).toBe(100);
       world.game.time = 2; impulse(4); expect(world.game.weaponInput(actor, true, ZERO, 2, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/nails")).toBe(200);
+      world.game.time = 3; impulse(121); world.combat.setArmor(actor, { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" });
+      let reactions = 0;
+      world.callbacks.bind(actor, { think: null, touch: null, use: null, pain: () => { reactions++; return undefined; }, die: () => { reactions++; return undefined; } });
+      world.game.damage(actor.id, actor.id, actor.id, 200, "rocketlauncher"); expect(world.game.health(actor.id)).toBe(1); expect(reactions).toBe(0);
+      expect(world.combat.read(actor.id)?.armor).toEqual({ kind: "q1", points: 39, absorption: 0.3, item: "q1:item_armor1" }); expect(world.source.clients.require(actor.id).deathRecorded).toBe(false);
       const checkpoint = world.capture(), restored = sourceWorld(level, program, checkpoint);
       expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source)); restored.actors.close();
     }

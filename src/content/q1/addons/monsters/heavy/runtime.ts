@@ -1,15 +1,14 @@
 /* MG3 heavy monster source controllers. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../../../contracts/identity.ts";
-import { sameActor } from "../../../../../contracts/identity.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../../../../persistence/value.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
 import type { Q1CallbackHandlers } from "../../../foundation/callbacks.ts";
-import { POINT } from "../../../foundation/types.ts";
 import type { MonsterFrame } from "../../../base/animation.ts";
 import type { MonsterSpecies } from "../../../base/species.ts";
 import { BaseMonster, registerMonsterCallbacks } from "../../../base/monsters.ts";
 import type { Q1AddonContext } from "../../context.ts";
 import { initMg3Monster, startMg3Monster, mg3MonsterActivator, registerMg3MonsterStartup } from "../startup.ts";
+import { Mg3Monster } from "../ai/index.ts";
 
 export const heavyPrefix = "mg3:heavy";
 export type HeavyAction = (monster: Q1HeavyMonster) => undefined;
@@ -25,7 +24,7 @@ export interface HeavyDefinition {
   readonly sight?: HeavyAction;
   readonly callbacks?: Readonly<Record<string, Q1CallbackHandlers>>;
 }
-export class Q1HeavyMonster extends BaseMonster {
+export class Q1HeavyMonster extends Mg3Monster {
   constructor(readonly runtime: Q1Mg3Heavy, entity: Q1Actor, readonly definition: HeavyDefinition) {
     super(runtime.context.game, entity, definition.spec, runtime.context.base, { callbackPrefix: heavyPrefix, frames: definition.frames,
       actions: new Map(Object.entries(definition.actions).map(([name, action]) => [name, (monster: BaseMonster) => action(runtime.require(monster.entity))])) });
@@ -44,21 +43,11 @@ export class Q1HeavyMonster extends BaseMonster {
     const action = this.definition.actions[name]; if (!this.definition.frames.has(name) && action !== undefined) return action(this);
     return super.play(name);
   }
-  override found(target: ActorId): undefined { this.definition.sight?.(this); return super.found(target); }
+  override sightSound(): undefined { return this.definition.sight === undefined ? super.sightSound() : this.definition.sight(this); }
   override meleeAttack(): undefined { return this.definition.melee?.(this); }
   override tryAttack(): boolean {
     if (this.definition.attack !== undefined) return this.definition.attack(this);
-    const { game, entity, spec } = this, enemy = this.enemy, start = this.eye(), end = enemy === null ? null : this.eye(enemy);
-    if (enemy === null || start === null || end === null) return false;
-    const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
-    if (trace.actor === null || !sameActor(trace.actor, enemy) || trace.inOpen && trace.inWater) return false;
-    const range = this.rangeDistance();
-    if (range < 120 && spec.melee) { this.meleeAttack(); return true; }
-    if (spec.missile === null || game.time < this.state.attackFinished || range >= 1000) return false;
-    if (range < 120) this.state.attackFinished = 0;
-    const chance = range < 120 ? 0.9 : range < 500 ? spec.melee ? 0.2 : 0.4 : spec.melee ? 0.05 : 0.1;
-    if (game.host.random() >= chance) return false;
-    this.play(spec.missile); this.attackFinished(2 * game.host.random()); return true;
+    return this.checkAttack();
   }
   override pain(attacker: ActorId | null, damage: number): undefined { this.retaliate(attacker); return this.definition.pain(this, attacker, damage); }
   override die(attacker: ActorId | null): undefined {

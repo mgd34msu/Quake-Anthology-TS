@@ -14,6 +14,15 @@ import { registerAddonCorpses } from "./corpses.ts";
 import { registerMg3Demodog } from "./monsters/demodog.ts";
 import { registerMg3Infected } from "./monsters/infected/index.ts";
 import { registerMg3Heavy } from "./monsters/heavy/index.ts";
+import { spawnMapActor } from "../foundation/spawns.ts";
+import { registerOrdinaryAddonMonsters } from "./monsters/ordinary/index.ts";
+
+import { registerFinalBoss } from "./monsters/bosses/final.ts";
+import { registerSacrifice } from "./monsters/bosses/sacrifice.ts";
+import { registerGhost } from "./monsters/bosses/ghost.ts";
+import { registerOrb } from "./monsters/bosses/orb.ts";
+import { registerShubZombie } from "./monsters/bosses/szombie.ts";
+import { registerOldnew } from "./monsters/bosses/oldnew.ts";
 
 export { Q1AddonContext } from "./context.ts";
 export type { Q1AddonEvent, Q1AddonProgram, Q1AddonServices } from "./context.ts";
@@ -32,9 +41,15 @@ export { handleQ1AddonImpulse, frameQ1AddonPlayer, omnicideQ1Addons } from "./co
 /** Register before map spawning; call context.frame from the shared Q1 source frame phase. */
 export function registerQ1CampaignAddons(base: Q1Base, program: "dopa" | "mg1" | "mg3", services: Q1AddonServices): Q1AddonContext {
   const context = new Q1AddonContext(base, program, services);
+  if (program === "mg3") base.game.registerSpawn("worldspawn", (game, entity) => {
+    spawnMapActor(game, entity); context.setNumber(entity, "isHordeMode", services.cvar("horde")); context.setNumber(entity, "cheats_allowed", services.cvar("sv_cheats")); return undefined;
+  });
   registerCampaignAddons(context); registerAddonTriggers(context); registerAddonBaseTriggers(context); registerAddonFieldTriggers(context); registerAddonBrushes(context);
   registerAddonEffects(context); registerAddonFog(context); registerAddonLights(context);
   registerAddonCorpses(context);
-  if (program === "mg3") { registerAddonRopes(context); registerMg3Items(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context); }
+  registerOrdinaryAddonMonsters(context);
+  if (program === "mg3") { registerAddonRopes(context); registerMg3Items(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context);
+    registerSacrifice(context); registerGhost(context); registerOrb(context); registerShubZombie(context); registerOldnew(context); registerFinalBoss(context);
+  }
   return context;
 }

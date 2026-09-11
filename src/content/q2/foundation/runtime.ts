@@ -338,7 +338,7 @@ export class Q2Foundation implements Q2GameServices {
   }
 
   show(entity: Q2Entity): undefined {
-    this.host.emit({ kind: "model", actor: entity.actor.id, path: entity.model, attachedModels: [entity.model2, entity.model3, entity.model4], frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale, skin: entity.skin, effects: entity.effects, renderFlags: entity.renderFlags });
+    this.host.emit({ kind: "model", actor: entity.actor.id, path: entity.model, attachedModels: [entity.model2, entity.model3, entity.model4], frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale, alpha: entity.alpha, skin: entity.skin, effects: entity.effects, renderFlags: entity.renderFlags });
     return this.host.emit({ kind: "visibility", actor: entity.actor.id, visible: entity.visible });
   }
 

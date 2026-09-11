@@ -23,8 +23,13 @@ import { rereleaseBoss2Definition } from "./base-variants/boss2.ts";
 import { createRereleaseJorgDefinition } from "./base-variants/jorg.ts";
 import { rereleaseMakronDefinition } from "./base-variants/makron.ts";
 import { createRereleaseBrainDefinition } from "./base-variants/brain.ts";
+import { createRereleaseParasiteDefinition } from "./base-variants/parasite.ts";
+
+import type { Q2MissionPackMonsterState } from "../../missionpacks/monsters/state.ts";
+import { createRereleaseMedicDefinitions } from "./base-variants/medic.ts";
 
 export interface Q2RereleaseMonsterOptions {
+  readonly source: Q2MissionPackMonsterState;
   readonly isN64: boolean;
   readonly expansion: "base" | "xatrix" | "rogue" | "mg1";
   readonly weapons: Q2MissionPackMonsterWeapons;
@@ -49,6 +54,8 @@ export function registerQ2RereleaseMonsters(monsters: Q2Monsters, options: Q2Rer
   monsters.register(rereleaseMakronDefinition, "rerelease");
   monsters.register(createRereleaseJorgDefinition(monsters, options.transferHealthbarTarget), "rerelease");
   monsters.register(createRereleaseBrainDefinition(monsters), "rerelease");
+  monsters.register(createRereleaseParasiteDefinition(monsters), "rerelease");
+  for (const definition of createRereleaseMedicDefinitions(monsters, options.weapons, options.source)) monsters.register(definition, "rerelease");
   const actor = createRereleaseActorModule(monsters);
   monsters.register(actor.definition, "rerelease");
   for (const definition of createRereleaseTankDefinitions(options.weapons)) monsters.register(definition, "rerelease");

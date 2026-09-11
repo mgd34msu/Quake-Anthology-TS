@@ -65,7 +65,11 @@ export function defaultCheckAttack(context: MonsterContext, profile: Q2AttackCha
     else if (rerelease) strafeChance *= profile.strafeScalar;
     if (rerelease && strafeChance === 0) return false;
     const next = game.host.random() < strafeChance ? "sliding" : "straight";
-    if (rerelease && next !== state.attackState) state.strafeTime = game.host.now() + 1 + game.host.random() * 2;
+    if (rerelease && next !== state.attackState) {
+      const random = game.host.rereleaseRandom;
+      if (random === undefined) throw new Error("Rerelease monster strafe timing requires the shared source RNG");
+      state.strafeTime = game.host.now() + random.timeMilliseconds(1000, 3000) / 1000;
+    }
     state.attackState = next;
   } else if (rerelease && state.locomotion !== "fly" && state.pathing === null) state.attackState = "straight";
   return false;
@@ -406,8 +410,10 @@ export class MonsterPerception {
     else if (!state.hintPath && !state.combatPoint && state.soundTarget === null && enemy !== null) { state.lostSight = false; state.lastSighting = enemy.origin; state.trailTime = game.host.now(); }
     if (goal === null) return false;
     if (!state.hintPath && enemy !== null && !state.combatPoint && state.soundTarget === null && this.closeEnough(context, enemy.origin, distance, entity.enemy)) return true;
-    if (Math.floor(game.host.random() * 4) !== 1 && stepDirection(context, state.idealYaw, distance)) return true;
-    if ((game.options.edition === "rerelease" || this.sourceCombatRules === "rogue") && context.blocked(distance)) return true;
+    if ((Math.floor(game.host.random() * 4) !== 1 || this.sourceCombatRules === "rogue" && state.charging) && stepDirection(context, state.idealYaw, distance)) return true;
+    if (context.consumeSourceBlocked()) return false;
+    if (!game.host.actors.isLive(entity.actor.id)) return false;
+    if (game.options.edition === "rerelease" && this.sourceCombatRules !== "rogue" && context.blocked(distance)) return true;
     return chaseDirection(context, goal, distance);
   }
 

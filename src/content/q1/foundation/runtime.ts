@@ -44,6 +44,14 @@ export class Q1Foundation {
     afterArmor: (request, take, target, attacker) => {
       let amount = take; for (const effects of this.sourceDamageEffects.values()) amount = effects.afterArmor?.(request, amount, target, attacker) ?? amount; return amount;
     },
+    lethalHealth: (request, proposed, target, attacker) => {
+      let result: { readonly health: number; readonly reaction: "none" | "death" } = { health: proposed, reaction: "death" };
+      for (const effects of this.sourceDamageEffects.values()) {
+        result = effects.lethalHealth?.(request, result.health, target, attacker) ?? result;
+        if (result.reaction === "none") break;
+      }
+      return result;
+    },
   };
   pickupRules: Q1PickupRules | null = null;
   private readonly weaponRules = new Map<string, Q1WeaponRules>();

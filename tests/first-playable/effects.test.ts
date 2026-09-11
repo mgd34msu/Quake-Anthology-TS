@@ -38,7 +38,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       velocity: { x: 0, y: 0, z: 0 }, movementDirection: 0, animation: q3SpawnAnimation(), sourceFlags: 0, powerups: 0, team: null, color: { x: 1, y: 1, z: 1, w: 1 } };
     const snapshot = (seconds: number): WorldSnapshot => ({ session: identity.session, frame: { frame: Math.trunc(seconds * 10),
       time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
-      actors: [], bodies: [], inventories: [], configurations: [], scene: { session: identity.session, time: { kind: "seconds", value: seconds },
+      actors: actors.observations(), bodies: [], inventories: [], configurations: [], scene: { session: identity.session, time: { kind: "seconds", value: seconds },
         world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } });
     effects.receive([
       { kind: "q1", content: q1, seconds: 1, sequence: 1, event: { kind: "effect", effect: "explosion", actor: null, origin: { x: 80, y: -20, z: 0 }, amount: 0 } },
@@ -109,6 +109,47 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       if ((renderer.pixels[offset] ?? 0) + (renderer.pixels[offset + 1] ?? 0) + (renderer.pixels[offset + 2] ?? 0) > 0) beamPixels++;
     expect(beamPixels).toBeGreaterThan(0);
     await effects.prepare(snapshot(8.21), []);
+    expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    expect(effects.drainUnhandled()).toEqual([]);
+    const q2Rogue = content.catalog.require("q2-classic-rogue").id;
+    effects.receive([
+      { kind: "q2-composition", content: q2Rogue, seconds: 9, sequence: 11, event: { kind: "missionpack-entity", event: { kind: "steam", id: 1,
+        origin: { x: 80, y: -15, z: 0 }, direction: { x: 0, y: 0, z: 1 }, count: 8, color: 0xe0, speed: 60, milliseconds: 300 } } },
+      { kind: "q2-composition", content: q2Rogue, seconds: 9, sequence: 12, event: { kind: "missionpack-entity", event: { kind: "force-wall",
+        start: { x: 80, y: -30, z: 10 }, end: { x: 80, y: 30, z: 10 }, color: 0xd0 } } },
+      { kind: "q2", content: q2Rogue, seconds: 9, sequence: 13, event: { kind: "effect", effect: "q2:tracker_explosion",
+        origin: { x: 90, y: 20, z: 0 }, direction: { x: 0, y: 0, z: 0 }, count: 0, color: 0 } },
+      { kind: "q2-composition", content: q2Rogue, seconds: 9, sequence: 14, event: { kind: "missionpack-player", event: { kind: "ir", actor: actor.id, until: 14 } } },
+      { kind: "q2-composition", content: q2Rogue, seconds: 9, sequence: 15, event: { kind: "missionpack-player", event: { kind: "sphere-camera",
+        actor: actor.id, sphere: rocketActor.id, origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 90, z: 0 } } } },
+      { kind: "q2-rerelease", content: q2Rogue, seconds: 9, sequence: 16, event: { kind: "dynamic-light", actor: rocketActor.id,
+        origin: rocket.origin, radius: 180, color: { x: 0.2, y: 0.7, z: 1 }, visible: true } },
+    ]);
+    await effects.prepare(snapshot(9), [{ ...rocket, effects: 0 }], [character]);
+    const expansion = effects.frame(camera), playerView = effects.playerView(actor.id, camera);
+    expect(playerView.camera.origin).toEqual(rocket.origin);
+    expect(playerView.camera.axis).toEqual(anglesToAxis({ x: 0, y: 90, z: 0 }));
+    expect(playerView.infrared).toBe(true); expect(playerView.blend).toEqual({ x: 1, y: 0, z: 0, w: 0.2 });
+    expect(effects.playerView(rocketActor.id, camera)).toEqual({ camera, infrared: false, blend: null });
+    expect(expansion.lights.some(light => light.radius === 150 && light.color.x === -1)).toBe(true);
+    expect(expansion.lights.some(light => light.radius === 180)).toBe(true);
+    expect(effects.drainSounds().map(sound => sound.path)).toEqual(["weapons/disrupthit.wav"]);
+    expect(await (await assets.provider(q2Rogue)).mounts.resolve("sound/weapons/disrupthit.wav")).not.toBeNull();
+    frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: snapshot(9).frame.time, viewport: camera.viewport,
+      clear: { color: { x: 0.2, y: 0.2, z: 0.2, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: expansion.operations });
+    target.execute(frames.finish(false));
+    expect(new Set(renderer.pixels).size).toBeGreaterThan(16);
+    effects.receive([
+      { kind: "q2-composition", content: q2Rogue, seconds: 9.1, sequence: 17, event: { kind: "missionpack-player", event: { kind: "sphere-camera",
+        actor: actor.id, sphere: null, origin: character.origin, angles: character.angles } } },
+      { kind: "q2-rerelease", content: q2Rogue, seconds: 9.1, sequence: 18, event: { kind: "dynamic-light", actor: rocketActor.id,
+        origin: rocket.origin, radius: 180, color: { x: 0.2, y: 0.7, z: 1 }, visible: false } },
+    ]);
+    await effects.prepare(snapshot(9.1), []);
+    expect(effects.playerView(actor.id, camera).camera).toBe(camera);
+    expect(effects.frame(camera).lights.some(light => light.radius === 180)).toBe(false);
+    await effects.prepare(snapshot(14), []);
+    expect(effects.playerView(actor.id, camera).infrared).toBe(false);
     expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     expect(effects.drainUnhandled()).toEqual([]);
     effects.close(); target.close();

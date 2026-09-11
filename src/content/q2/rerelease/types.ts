@@ -22,6 +22,8 @@ export class Q2RereleasePlayerState {
   gameHelp2Changed = 0;
   helpChanged = 0;
   helpTime = 0;
+  invisibilityUntil = 0;
+  invisibilityFadeUntil = 0;
   slimeDebounce = 0;
   animationTime = 0;
   flashTime = 0;
@@ -104,6 +106,7 @@ export interface Q2RereleaseHooks {
   navigation(start: Vec3, goal: Vec3): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" };
   monstersSearching(player: ActorId | null): boolean;
   monsterHoldsHealthBar?(monster: ActorId): boolean;
+  expansionPowerups?(player: ActorId): { readonly doubleUntil: number; readonly quadFireUntil: number; readonly irUntil: number };
   clearExpansionPowerups?(player: ActorId): undefined;
   playerCollision?(player: ActorId, collide: boolean): undefined;
   groundedOnWorld(player: ActorId): boolean;

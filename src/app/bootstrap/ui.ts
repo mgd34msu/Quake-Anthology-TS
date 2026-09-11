@@ -17,12 +17,15 @@ import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationInput, ApplicationInputUi, LocalInput } from "./input.ts";
 import type { SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
 
+import { Q2MatchUi } from "./q2-match-ui.ts";
+
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
   readonly preferences: SeatUiPreferences;
   readonly messages: SeatHudMessages;
   readonly weaponWheel: SeatWeaponWheel;
   readonly text: UiTextRenderer;
+  private readonly match: Q2MatchUi;
   private readonly settings: SettingsMenus;
   private readonly bindings: ReturnType<typeof registerBindingMenus>;
   private readonly disposeInput: () => void;
@@ -43,6 +46,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       focus: (focus, time) => { local.input.setFocus(focus, time); input.router.updateCapture(); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
+    this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
       items: mode => simulation.playerUi(local.player.actor).items.filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
         .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: null, selectedIcon: null })),
@@ -91,6 +95,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) {
+      if (source.kind === "q2-player" && source.event.kind === "userinfo") this.match.name(source.event.actor, source.event.name);
+      if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) this.match.receive(source.event);
       const duration = { kind: "seconds", value: 3 } satisfies { readonly kind: "seconds"; readonly value: number };
       const starts = { kind: "seconds", value: source.seconds } satisfies { readonly kind: "seconds"; readonly value: number };
       if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) {
@@ -119,7 +125,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const player = this.simulation.playerUi(this.local.player.actor);
     const armor = player.armor.kind === "none" ? 0 : player.armor.points;
     const base = emptyHudData(this.local.player.seat.id);
-    const hud = { ...base, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+    const hud = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
       crosshair: { ...base.crosshair, visible: crosshairVisible },
       vitals: [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false },
         ...(player.ammo === null ? [] : [{ label: "Ammo", value: player.ammo.count, icon: null, warning: player.ammo.count <= 5 }])] };
@@ -128,5 +134,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.messages.clear(); }
+  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.messages.clear(); }
 }

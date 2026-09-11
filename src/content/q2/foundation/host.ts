@@ -33,7 +33,7 @@ export interface Q2SpawnFields {
 }
 
 export type Q2PresentationEvent =
-  | { readonly kind: "model"; readonly actor: ActorId; readonly path: string; readonly attachedModels: readonly string[]; readonly frame: number; readonly oldFrame: number; readonly scale: number; readonly skin: number; readonly effects: number; readonly renderFlags: number }
+  | { readonly kind: "model"; readonly actor: ActorId; readonly path: string; readonly attachedModels: readonly string[]; readonly frame: number; readonly oldFrame: number; readonly scale: number; readonly alpha: number; readonly skin: number; readonly effects: number; readonly renderFlags: number }
   | { readonly kind: "visibility"; readonly actor: ActorId; readonly visible: boolean }
   | { readonly kind: "sound"; readonly actor: ActorId | null; readonly origin: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly attenuation: number; readonly reliable: boolean; readonly loop: "start" | "stop" | "once" }
   | { readonly kind: "centerprint"; readonly actor: ActorId; readonly text: string }
@@ -131,6 +131,8 @@ export class Q2Entity {
   killtarget: string;
   combatTarget: string;
   deathTarget: string;
+  healthTarget: string;
+  itemTarget: string;
   message: string;
   model: string;
   model2 = "";
@@ -151,6 +153,7 @@ export class Q2Entity {
   frame = 0;
   oldFrame = -1;
   scale = 1;
+  alpha = 1;
   skin = 0;
   effects = 0;
   renderFlags = 0;
@@ -209,6 +212,8 @@ export class Q2Entity {
     this.killtarget = spawn.values.get("killtarget") ?? "";
     this.combatTarget = spawn.values.get("combattarget") ?? "";
     this.deathTarget = spawn.values.get("deathtarget") ?? "";
+    this.healthTarget = spawn.values.get("healthtarget") ?? "";
+    this.itemTarget = spawn.values.get("itemtarget") ?? "";
     this.message = spawn.values.get("message") ?? "";
     this.model = spawn.values.get("model") ?? "";
     this.spawnflags = 0;

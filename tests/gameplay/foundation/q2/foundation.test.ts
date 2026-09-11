@@ -118,9 +118,13 @@ describe("Q2 permanent gameplay foundation", () => {
       if (model !== 1) throw new Error("Only the isolated door brush is present");
       return { min: zero, max: { x: 64, y: 32, z: 32 } };
     };
-    const loaded = scene.game.load('{ "classname" "func_door" "model" "*1" "targetname" "door" "speed" "100" "wait" "2" } { "classname" "trigger_relay" "targetname" "relay" "target" "secret" "delay" "0.5" } { "classname" "target_secret" "targetname" "secret" } { "classname" "item_health_mega" } { "classname" "target_speaker" "targetname" "speaker" "noise" "world/mach" "spawnflags" "2" }');
+    const loaded = scene.game.load('{ "classname" "func_door" "model" "*1" "healthtarget" "health-trigger" "itemtarget" "item-trigger" "targetname" "door" "speed" "100" "wait" "2" } { "classname" "trigger_relay" "targetname" "relay" "target" "secret" "delay" "0.5" } { "classname" "target_secret" "targetname" "secret" } { "classname" "item_health_mega" } { "classname" "target_speaker" "targetname" "speaker" "noise" "world/mach" "spawnflags" "2" }');
     const door = loaded.spawned[0], relay = loaded.spawned[1], mega = loaded.spawned[3], speaker = loaded.spawned[4];
     if (door === undefined || relay === undefined || mega === undefined || speaker === undefined) throw new Error("Missing source save actors");
+    expect(door.healthTarget).toBe("health-trigger"); expect(door.itemTarget).toBe("item-trigger"); expect(door.alpha).toBe(1);
+    door.healthTarget = ""; door.itemTarget = ""; door.alpha = 0.25;
+    scene.game.show(door);
+    expect([...scene.events].reverse().find(event => event.kind === "model" && event.actor === door.actor.id)).toMatchObject({ alpha: 0.25 });
     scene.items.touch(mega, scene.game, scene.player.id);
     scene.advance(0.1);
     scene.host.callbacks.use(door.actor, scene.player.id, scene.player.id);
@@ -157,6 +161,7 @@ describe("Q2 permanent gameplay foundation", () => {
     expect(items.capture(game)).toEqual(itemState); expect(movers.capture(game)).toEqual(moverState);
     const restoredDoor = game.entity(actors.referenceSaved(door.actor.id)), restoredSpeaker = game.entity(actors.referenceSaved(speaker.actor.id));
     if (restoredDoor === null || restoredSpeaker === null) throw new Error("Missing restored source actors");
+    expect(restoredDoor.healthTarget).toBe(""); expect(restoredDoor.itemTarget).toBe(""); expect(restoredDoor.alpha).toBe(0.25);
     expect(restoredDoor.beam?.slot).toBe(relay.actor.id.slot); expect(game.entity(restoredDoor.beam)).toBeNull();
     expect(restoredSpeaker.sound).toBe("world/mach.wav");
     for (const entity of game.entities.values()) if (entity.nextThink !== null) host.schedule(entity.actor, entity.nextThink);

@@ -20,6 +20,8 @@ import type { Q2RereleaseModule } from "../../q2/rerelease/index.ts";
 import { registerQ2RereleaseMonsters } from "../../q2/rerelease/monsters/index.ts";
 import type { Q2WeaponInput } from "../../q2/foundation/weapons/index.ts";
 import type { Q2CompositionOptions } from "./types.ts";
+import { setInfoValue } from "../../../core/cvars/info.ts";
+import { Q2Ctf } from "../../q2/multiplayer/ctf/index.ts";
 import { Q2ProductMatch } from "./match.ts";
 import { q2DeathBallRules } from "../../q2/missionpacks/modes/index.ts";
 export type * from "./types.ts";
@@ -126,7 +128,28 @@ export class Q2ProductRuntime {
         powerups: actor => this.powerups(actor),
       }, configuration.edition),
     }));
-    this.match = new Q2ProductMatch(configuration.match ?? { kind: "standard" }, () => this.players, this.items, () => this.game);
+    this.match = new Q2ProductMatch(configuration.match ?? { kind: "standard" }, () => this.players, this.items, () => this.game, {
+      items: this.items, weapons: this.weapons,
+      player: actor => this.players.states.get(actor) ?? null,
+      setSkin: (actor, skin) => {
+        const state = this.players.states.get(actor), entity = this.game.entity(actor);
+        if (state === undefined || entity === null) throw new Error("Match skin requires an admitted player");
+        return this.players.userinfoChanged(entity, this.game, setInfoValue(state.userinfo, "skin", skin, { dialect: "q2-classic", maximumLength: 512, target: "client-userinfo", serverHighCharacters: false, print: text => configuration.host.diagnostic(text) }));
+      },
+      spawnPlayer: (entity, game) => this.players.putInServer(entity, game),
+      observer: entity => configuration.playerHooks.setMovement(entity.actor.id, { kind: "noclip", enabled: true }),
+      teleport: (entity, game, origin, angles, velocity) => {
+        this.players.teleportPlayer(entity, game, origin, angles); game.move(entity, { velocity });
+        return configuration.playerHooks.setMovement(entity.actor.id, { kind: "teleport", origin, angles, velocity, commandAngles: configuration.playerHooks.movement(entity.actor.id).commandAngles, holdMilliseconds: 160, spectator: false });
+      },
+      chase: actor => { const entity = this.game.entity(actor); return entity === null ? undefined : this.players.chase(entity, this.game, 1, true); },
+      setGrapplePrediction: (actor, suppressed) => configuration.services.emit({ kind: "grapple-prediction", actor, suppressed }),
+      gravity: () => configuration.services.gravity(),
+      endLevel: (game, map) => map === null ? this.players.endDeathmatchLevel(game) : this.players.beginIntermission(game, map),
+      kick: actor => configuration.services.emit({ kind: "kick", actor }),
+      setDeathmatchFlags: flags => this.setDeathmatchFlags(flags),
+      chatAllowed: (actor, game) => this.players.chatAllowed(actor, game),
+    }, configuration.services);
     this.rogueSpawns = configuration.edition === "classic" && configuration.program === "rogue" ? new Q2RoguePlayerSpawns() : null;
     this.movementStopSpeed = configuration.match?.kind === "deathball" ? 0 : null;
     const playerHooks: Q2PlayerHooks = { ...configuration.playerHooks,
@@ -134,9 +157,12 @@ export class Q2ProductRuntime {
       score: (victim, attacker, game, change, means, recipient) => {
         if ((configuration.match === undefined || configuration.match.kind === "standard") && configuration.playerHooks.score !== undefined)
           return configuration.playerHooks.score(victim, attacker, game, change, means, recipient);
-        return this.match.score(victim, game, change, means, recipient);
+        return this.match.score(victim, game, change, means, recipient, attacker);
       },
+      playerSpawned: (entity, game) => { this.match.playerSpawned(entity, game); return configuration.playerHooks.playerSpawned?.(entity, game); },
       selectSpawn: (entity, game) => this.match.selectSpawn(entity, game) ?? this.rogueSpawns?.selectSpawn(game) ?? configuration.playerHooks.selectSpawn?.(entity, game) ?? null,
+      command: (entity, game, name, args) => this.match.command(entity, game, name, args) || configuration.playerHooks.command?.(entity, game, name, args) === true,
+      beforeDeathInventory: (entity, game, attack) => { this.match.dropInventory(entity, game); return configuration.playerHooks.beforeDeathInventory?.(entity, game, attack); },
       death: (entity, game, attack) => {
         this.match.death(entity, game);
         this.armory?.spheres.ownerDied(entity.actor.id, game); this.armory?.items.reset(entity.actor.id);
@@ -157,13 +183,25 @@ export class Q2ProductRuntime {
       } };
       const players = new Q2RereleasePlayers(this.items, this.weapons, playerHooks, hooks, configuration.rereleaseOptions, configuration.playerRules);
       const entities = createQ2RereleaseModule({ players, hooks, ...(configuration.campaign === undefined ? {} : { campaign: configuration.campaign }) });
-      const monsters = registerQ2RereleaseMonsters(this.monsters, { weapons: armory.projectiles,
+      const source = this.expansions.find(expansion => expansion.pack === "rogue")?.monsters.source;
+      if (source === undefined) throw new Error("Rerelease source composition requires Rogue monster state");
+      const monsters = registerQ2RereleaseMonsters(this.monsters, { source, weapons: armory.projectiles,
         transferHealthbarTarget: (oldActor, newActor, game) => entities.transferHealthbarTarget(oldActor, newActor, game),
         isN64: configuration.program === "n64", expansion: configuration.program === "mg2" ? "mg1" : configuration.program === "xatrix" || configuration.program === "rogue" ? configuration.program : "base" });
       this.players = players; this.rerelease = { players, entities, monsters };
     } else {
       this.players = new Q2Players(this.items, this.weapons, playerHooks, configuration.playerRules);
       this.rerelease = null;
+    }
+    if (this.match.source instanceof Q2Ctf) {
+      const mode = this.match.source, edition = this.rerelease?.entities;
+      this.items.setPickupPolicy({
+        instancedCoop: game => edition?.instancedCoop(game) ?? false,
+        beforePickup: (entity, game, actor) => mode.pickupsAllowed() && (edition?.beforePickup(entity, game, actor) ?? true),
+        beforeTargets: (entity, game, actor, taken) => edition?.beforeTargets(entity, game, actor, taken),
+        afterPickup: (entity, game, actor, taken) => edition?.afterPickup(entity, game, actor, taken),
+        keepAfterPickup: (entity, game, actor) => edition?.keepAfterPickup(entity, game, actor) ?? false,
+      });
     }
     this.modules = [
       ...(this.rerelease === null ? [] : [this.rerelease.entities]), this.players, this.match,
@@ -208,11 +246,14 @@ export class Q2ProductRuntime {
     if (admission.useQ2Weapons !== false) this.weapons.bind(entity, this.game);
     this.players.attach(entity, this.game, admission);
     this.match.admitted(entity, this.game);
-    this.players.putInServer(entity, this.game, false, landmark);
+    if (!(this.match.source instanceof Q2Ctf)) this.players.putInServer(entity, this.game, false, landmark);
     return entity;
   }
 
-  weaponInput(actor: ActorId, input: Q2WeaponInput): Q2WeaponInput { return this.armory?.items.input(actor, input) ?? input; }
+  weaponInput(actor: ActorId, input: Q2WeaponInput): Q2WeaponInput {
+    const adjusted = this.armory?.items.input(actor, input) ?? input, entity = this.game.entity(actor);
+    return this.match.source instanceof Q2Ctf && entity !== null ? this.match.source.weaponInput(entity, this.game, adjusted) : adjusted;
+  }
 
   powerups(actor: ActorId) {
     if (this.players.states.get(actor)?.useQ2Inventory === false) return this.configuration.services.foreignPowerups(actor);

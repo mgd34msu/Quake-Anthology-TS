@@ -18,6 +18,8 @@ import { supertankFrame } from "../../base/monsters/tables/supertank.ts";
 import { blockedCheckPlatform, monsterFlash } from "../../rerelease/monsters/common.ts";
 import { rogueBlockedCheckShot, rogueDuckDown, rogueDuckHold, rogueDuckUp, rogueMonsterDodge } from "./rogue-common.ts";
 import type { Q2MissionPackMonsterState } from "./state.ts";
+import { createRogueSoldierDefinitions } from "./rogue-soldier.ts";
+import { createRogueInfantryDefinition } from "./rogue-infantry.ts";
 import { brainFrame, brainMoves } from "./tables/rogue-brain.ts";
 import { floatFrame, floatMoves } from "./tables/rogue-float.ts";
 
@@ -115,7 +117,7 @@ export function createRogueBaseVariants(monsters: Q2Monsters, source: Q2MissionP
     },
   };
   const jorg = createJorgDefinition(monsters);
-  return [brain, floater, { ...gladiatorDefinition, blocked }, withBossExplosionCallbacks(boss2, monsters), withBossExplosionCallbacks(supertank, monsters),
+  return [...createRogueSoldierDefinitions(monsters, source), createRogueInfantryDefinition(monsters, source), brain, floater, { ...gladiatorDefinition, blocked }, withBossExplosionCallbacks(boss2, monsters), withBossExplosionCallbacks(supertank, monsters),
     withBossExplosionCallbacks({ ...jorg, initialize(context) { jorg.initialize?.(context); context.state.ignoreShots = true; return undefined; } }, monsters),
     withMakronSpawnCallbacks({ ...makronDefinition, initialize(context) { context.state.ignoreShots = true; return undefined; } }, monsters)];
 }

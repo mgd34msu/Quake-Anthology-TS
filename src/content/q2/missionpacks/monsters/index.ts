@@ -21,6 +21,9 @@ import { Q2RogueHints } from "./hints.ts";
 import { createRogueBaseVariants } from "./rogue-variants.ts";
 import { createRogueArsenalMonsters } from "./rogue-arsenal.ts";
 import { createRogueJumpingMonsters } from "./rogue-jumpers.ts";
+import { createWidowDefinition } from "./widow.ts";
+import { createWidow2Definition } from "./widow2.ts";
+import { createRogueGunnerDefinition } from "./rogue-gunner.ts";
 import { Q2MissionPackMonsterState } from "./state.ts";
 import type { Q2MissionPackMonstersCheckpoint } from "./state.ts";
 import type { Q2MissionPackMonsterServices, Q2MissionPackMonsterWeapons, Q2MonsterMissionPack } from "./types.ts";
@@ -31,7 +34,7 @@ export function q2XatrixMonsterDefinitions(monsters: Q2Monsters, weapons: Q2Miss
 
 export function q2RogueMonsterDefinitions(monsters: Q2Monsters, weapons: Q2MissionPackMonsterWeapons, services: Q2MissionPackMonsterServices, state: Q2MissionPackMonsterState): readonly Q2MonsterDefinition[] {
   return [createStalkerDefinition(monsters, weapons, state, () => services.gravity()), ...createRogueFlyerDefinitions(monsters, state),
-    ...createRogueHoverDefinitions(weapons, state), createRogueTurretDefinition(monsters, services.movers, state), createCarrierDefinition(monsters, services), ...createRogueMedicDefinitions(monsters, weapons, state), ...createRogueBaseVariants(monsters, state), ...createRogueArsenalMonsters(monsters, state), ...createRogueJumpingMonsters(monsters, state)];
+    ...createRogueHoverDefinitions(weapons, state), createRogueTurretDefinition(monsters, services.movers, state), createCarrierDefinition(monsters, services), ...createRogueMedicDefinitions(monsters, weapons, state), ...createRogueBaseVariants(monsters, state), ...createRogueArsenalMonsters(monsters, state), ...createRogueJumpingMonsters(monsters, state), createWidowDefinition(monsters, weapons, services, state), createWidow2Definition(monsters, weapons, services, state), createRogueGunnerDefinition(monsters, state)];
 }
 
 export const q2OriginalMissionPackFallbacks: ReadonlySet<string> = new Set(["monster_gekk", "monster_fixbot", "monster_gladb", "monster_boss5", "monster_chick_heat", "monster_soldier_ripper", "monster_soldier_hypergun", "monster_soldier_lasergun", "monster_stalker", "monster_kamikaze", "monster_daedalus", "monster_turret", "monster_carrier", "monster_medic_commander", "monster_widow", "monster_widow2"]);

@@ -39,7 +39,7 @@ export interface Q3VisibilityBindings {
 }
 export interface Q3VisibleEntities { readonly areaMask: Uint8Array; readonly entities: readonly EntityStateFields[]; }
 
-export function selectQ3SnapshotEntities(player: Readonly<PlayerStateFields>, host: Q3VisibilityBindings): Q3VisibleEntities {
+export function selectQ3SnapshotEntities(player: Readonly<Pick<PlayerStateFields, "clientNum" | "origin" | "viewheight">>, host: Q3VisibilityBindings): Q3VisibleEntities {
   if (!Number.isInteger(player.clientNum) || player.clientNum < 0 || player.clientNum >= 1024) throw new CommonError("drop", "SV_SvEntityForGentity: bad gEnt");
   const selected: number[] = [], visited = new Set<number>([player.clientNum]), areaBits = new Uint8Array(32);
   let areaBytes = 0;

@@ -181,11 +181,11 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
   if (context.program === "mg3") {
     game.named.register(prefix + "breakable_stop", { action: (_game, entity) => game.setBody(entity, { velocity: ZERO }) });
     game.named.register(prefix + "breakable_pain", { pain: (_game, entity) => {
-      game.host.combat.setHealth(entity.actor, 10000); game.setBody(entity, { velocity: { x: 0, y: 0, z: -20 } }); return schedule(entity, "breakable_stop", 1);
+      game.host.combat.setHealth(entity.actor, 10000); game.setBody(entity, { velocity: { x: 0, y: 0, z: -20 } }); return schedule(entity, "breakable_stop", entity.number("ltime") + 1 - game.time);
     } });
     game.named.register(prefix + "breakable_die", { die: (_game, entity) => game.remove(entity) });
     game.registerSpawn("func_breakable", (_game, entity) => {
-      pushBrush(entity); game.host.combat.setHealth(entity.actor, 10000); entity.damageable = true;
+      pushBrush(entity); game.host.combat.setHealth(entity.actor, 10000); entity.maxHealth = 10000; entity.damageable = true; entity.aimedDamage = false;
       entity.pain = game.named.pain(entity, prefix + "breakable_pain"); entity.die = game.named.die(entity, prefix + "breakable_die"); return undefined;
     });
   }

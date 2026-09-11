@@ -142,6 +142,12 @@ export function checkBottom(context: MonsterContext, origin: Vec3): boolean {
 }
 
 export function walkMove(context: MonsterContext, yaw: number, distance: number, commit = true, relink = true): boolean {
+  const moved = sourceMoveStep(context, yaw, distance, commit, relink);
+  if (commit && relink) context.consumeSourceBlocked();
+  return moved;
+}
+
+function sourceMoveStep(context: MonsterContext, yaw: number, distance: number, commit: boolean, relink: boolean): boolean {
   const body = context.game.body(context.entity);
   if (context.state.locomotion === "stationary") return false;
   if (body.ground === null && context.state.locomotion === "walk") return false;
@@ -212,8 +218,10 @@ export function stepDirection(context: MonsterContext, yaw: number, distance: nu
   changeYaw(context);
   const previous = context.game.body(context.entity);
   if (!walkMove(context, yaw, distance, true, false)) { context.game.link(context.entity); context.game.host.touchTriggers(context.entity.actor); return !context.game.host.actors.isLive(context.entity.actor.id); }
+  context.consumeSourceBlocked();
+  if (!context.game.host.actors.isLive(context.entity.actor.id)) return true;
   const delta = ((context.game.body(context.entity).angles.y - context.state.idealYaw) % 360 + 360) % 360;
-  if (delta > 45 && delta < 315) context.game.move(context.entity, { origin: previous.origin }, false);
+  if (delta > 45 && delta < 315 && !(context.sourceCombatRules() === "rogue" && context.entity.classname.startsWith("monster_widow"))) context.game.move(context.entity, { origin: previous.origin }, false);
   context.game.link(context.entity);
   context.game.host.touchTriggers(context.entity.actor);
   return true;
@@ -230,9 +238,11 @@ export function chaseDirection(context: MonsterContext, goal: Vec3, distance: nu
     const diagonal = x === 0 ? (y === 90 ? 45 : 315) : (y === 90 ? 135 : 215);
     if (diagonal !== turnaround && stepDirection(context, diagonal, distance)) return true;
   }
-  if (Math.floor(context.game.host.random() * 4) !== 0 || Math.abs(delta.y) > Math.abs(delta.x)) [x, y] = [y, x];
+  const directionRoll = Math.floor(context.game.host.random() * 4);
+  if ((context.sourceCombatRules() === "rogue" ? (directionRoll & 1) !== 0 : directionRoll !== 0) || Math.abs(delta.y) > Math.abs(delta.x)) [x, y] = [y, x];
   if (x !== -1 && x !== turnaround && stepDirection(context, x, distance)) return true;
   if (y !== -1 && y !== turnaround && stepDirection(context, y, distance)) return true;
+  if (context.sourceCombatRules() === "rogue" && context.game.host.actors.isLive(context.entity.actor.id) && health(context.game, context.entity.actor.id) > 0 && context.blocked(distance)) return true;
   if (old !== -1 && stepDirection(context, old, distance)) return true;
   const descending = Math.floor(context.game.host.random() * 2) === 0;
   for (let index = 0; index < 8; index++) {

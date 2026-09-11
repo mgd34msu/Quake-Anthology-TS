@@ -2,6 +2,8 @@
 import type { ArmorState, DamageRequest } from "../../contracts/gameplay.ts";
 
 export interface ArmorDamageFlags {
+  /** Split source armor sites without changing the native damage flags or cell cost. */
+  readonly stage?: "power" | "regular";
   readonly noArmor: boolean;
   readonly noPowerArmor: boolean;
   readonly noRegularArmor: boolean;
@@ -28,7 +30,7 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
   const protectionScale = flags.regularProtectionScale ?? 1;
   switch (armor.kind) {
     case "q1": {
-      if (flags.noRegularArmor) return { armor, powerSaved: 0, regularSaved: 0 };
+      if (flags.noRegularArmor || flags.stage === "power") return { armor, powerSaved: 0, regularSaved: 0 };
       const regularSaved = Math.min(armor.points, Math.ceil(multiply(multiply(armor.absorption, protectionScale), damage)));
       return { armor: { ...armor, points: armor.points - regularSaved, absorption: regularSaved >= armor.points ? 0 : armor.absorption }, powerSaved: 0, regularSaved };
     }
@@ -37,7 +39,7 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
       let powerArmor = armor.powerArmor;
       const rerelease = context.q2?.product === "rerelease";
       const facingLimit = rerelease ? Math.fround(0.3) : 0.3;
-      if (!flags.noPowerArmor && (!rerelease || context.q2?.alive === true) && powerArmor.kind !== "none" && powerArmor.cells > 0 && (powerArmor.kind !== "screen" || context.screenFacingDot > facingLimit)) {
+      if (flags.stage !== "regular" && !flags.noPowerArmor && (!rerelease || context.q2?.alive === true) && powerArmor.kind !== "none" && powerArmor.cells > 0 && (powerArmor.kind !== "screen" || context.screenFacingDot > facingLimit)) {
         const damagePerCell = powerArmor.kind === "screen" || context.q2?.ctf === true ? 1 : 2;
         const dividedDamage = Math.trunc(powerArmor.kind === "screen" ? damage / 3 : (2 * damage) / 3);
         const protectedDamage = rerelease ? Math.max(1, dividedDamage) : dividedDamage;
@@ -50,11 +52,11 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
         powerArmor = { ...powerArmor, cells: rerelease ? Math.max(0, powerArmor.cells - Math.max(damagePerCell, used)) : powerArmor.cells - used };
       }
       const protection = flags.energy ? armor.energyProtection : armor.normalProtection;
-      const regularSaved = flags.noRegularArmor ? 0 : Math.min(armor.points, Math.ceil(multiply(multiply(protection, protectionScale), damage - powerSaved)));
+      const regularSaved = flags.noRegularArmor || flags.stage === "power" ? 0 : Math.min(armor.points, Math.ceil(multiply(multiply(protection, protectionScale), damage - powerSaved)));
       return { armor: { ...armor, points: armor.points - regularSaved, powerArmor }, powerSaved, regularSaved };
     }
     case "q3": {
-      if (flags.noRegularArmor) return { armor, powerSaved: 0, regularSaved: 0 };
+      if (flags.noRegularArmor || flags.stage === "power") return { armor, powerSaved: 0, regularSaved: 0 };
       const regularSaved = Math.min(armor.points, Math.ceil(Math.fround(Math.fround(damage) * Math.fround(Math.fround(armor.protection) * Math.fround(protectionScale)))));
       return { armor: { ...armor, points: armor.points - regularSaved }, powerSaved: 0, regularSaved };
     }

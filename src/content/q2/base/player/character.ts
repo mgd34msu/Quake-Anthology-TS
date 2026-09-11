@@ -46,6 +46,7 @@ export interface Q2CharacterHost {
   spawnGib(gib: Q2CharacterGib): undefined;
 }
 export interface Q2CharacterOptions {
+  readonly edition?: "classic" | "rerelease";
   readonly model: string;
   readonly skin: number;
   readonly slot: number;
@@ -65,6 +66,7 @@ export class Q2CharacterActor {
   constructor(readonly actor: OwnedActor, readonly host: Q2CharacterHost, readonly options: Q2CharacterOptions) {
     this.entity = new Q2Entity(actor, { classname: "player", ordinal: -1, values: new Map<string, string>() });
     this.entity.model = options.model; this.entity.skin = options.skin; this.entity.viewHeight = 22;
+    this.entity.renderFlags = options.edition === "rerelease" ? 32768 : 0;
     this.state = new Q2PlayerState(options.slot, host.now()); this.state.airFinished = host.now() + 12;
     this.rules = createQ2PlayerRules(options.viewRules);
   }
@@ -93,7 +95,7 @@ export class Q2CharacterActor {
     return { entity: this.entity, state: this.state, rules: this.rules, movement: host.movement(actor.id), hooks: { noise: (id, origin) => host.noise(id, origin) },
       powerups: () => host.powerups(actor.id), weaponState: () => host.weapon(actor.id), environmentDamage: (amount, means, flags) => host.environmentDamage(actor, amount, means, flags),
       game: { host: { now: () => host.now(), random: () => host.random(), combat: host.combat, inventory: host.inventory, pointContents: point => host.pointContents(point), emit: event => host.emit(event) },
-        options: { mode: this.options.mode, deathmatchFlags: this.options.deathmatchFlags }, body: () => this.body(),
+        options: { mode: this.options.mode, deathmatchFlags: this.options.deathmatchFlags, edition: this.options.edition ?? "classic" }, body: () => this.body(),
         move: (_entity, changes, link = true) => { host.bodies.write(actor, { ...this.body(), ...changes }); if (link) host.bodies.link(actor); return undefined; },
         sound: (_entity, path, channel = 2, volume = 1, attenuation = 1) => host.emit({ kind: "sound", actor: actor.id, origin: this.body().origin, path, channel, volume, attenuation, reliable: false, loop: "once" }) } };
   }
@@ -154,7 +156,7 @@ export class Q2CharacterActor {
   }
   private show(): undefined {
     const entity = this.entity;
-    return this.host.emit({ kind: "model", actor: this.actor.id, path: entity.model, attachedModels: [entity.model2, entity.model3, entity.model4], frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale, skin: entity.skin, effects: entity.effects, renderFlags: entity.renderFlags });
+    return this.host.emit({ kind: "model", actor: this.actor.id, path: entity.model, attachedModels: [entity.model2, entity.model3, entity.model4], frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale, alpha: entity.alpha, skin: entity.skin, effects: entity.effects, renderFlags: entity.renderFlags });
   }
   afterClientThink(): undefined {
     const buttons = this.host.movement(this.actor.id).buttons;
@@ -176,7 +178,7 @@ export class Q2CharacterActor {
     this.state.drownDamage = 2; this.state.oldWaterLevel = 0; this.state.oldVelocity = zero; this.state.damageAlpha = 0; this.state.bonusAlpha = 0;
     this.state.fallTime = 0; this.state.damageTime = 0; this.state.damageBlood = 0; this.state.damageArmor = 0; this.state.damagePowerArmor = 0; this.state.damageKnockback = 0;
     this.state.animationPriority = 0; this.state.animationEnd = 39; this.entity.frame = 0; this.entity.model = this.options.model; this.entity.skin = this.options.skin;
-    this.entity.effects = 0; this.entity.renderFlags = 0; this.entity.viewHeight = 22; this.state.event = "q2:player-teleport";
+    this.entity.effects = 0; this.entity.renderFlags = this.options.edition === "rerelease" ? 32768 : 0; this.entity.viewHeight = 22; this.state.event = "q2:player-teleport";
     return this.show();
   }
   setAnimation(priority: "attack" | "pain" | "reverse", first: number, last: number): undefined {

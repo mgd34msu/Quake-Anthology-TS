@@ -27,6 +27,8 @@ One `ApplicationEffects` advances source particles, beams, explosion models, and
 
 Quake III games create a separate native cgame for each seat. Its actual snapshots, prediction, weapon selection, HUD, effects, and sound feed the shared renderer and audio engine. The source console routes game variables to the server, client variables to the invoking seat, and movement variables to the selected input provider.
 
+Weapon selection and holdable use carry the selected arsenal identity independently of movement commands. Quake II rerelease presentation uses its mounted Kfont, localized messages and story text, per-player fog, and source sky changes. Restoring a save republishes retained story, sky, and player fog state. Source autosave requests write actual saved-game files under `~/.local/share/quake-typescript/saves/`.
+
 Use `save /path/to/game.sav` and `load /path/to/game.sav` in the console, or `Application.saveGame()` and `loadGame()`. Quake I and II saves restore the exact recipe, source state, scheduled callbacks, actors, and clocks. A saved profile can change the active movement and character selections. Connected client slots must match the saved players. Native Quake III whole-game checkpoints and providers without complete state serializers report an error.
 
 `--listen-q2` binds the native Quake II protocol to the same authoritative simulation. `--bind` selects its local IP; port 0 requests an available port. The source wire rejects mixed recipes and unbound protocol layouts. Channels survive map travel while player actors and signon state change. Unified mixed-game networking remains separate work.

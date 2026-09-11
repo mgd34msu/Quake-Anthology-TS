@@ -12,6 +12,8 @@ export interface RogueMonsterState {
   badMedic1: ActorId | null;
   badMedic2: ActorId | null;
   medicTries: number;
+  chosenReinforcements: number[];
+  reactToDamageTime: number;
   summonStrength: number;
   lastPlayerEnemy: ActorId | null;
   badArea: ActorId | null;
@@ -40,7 +42,7 @@ export class Q2MissionPackMonsterState {
   get(entity: Q2Entity): RogueMonsterState {
     let state = this.actors.get(entity.actor.id);
     if (state === undefined) {
-      state = { blocked: false, turretOrientation: 0, healer: null, badMedic1: null, badMedic2: null, medicTries: 0, summonStrength: 0, lastPlayerEnemy: null, badArea: null, goodGuy: false, widowQuadUntil: 0, widowDoubleUntil: 0, widowInvulnerableUntil: 0 };
+      state = { blocked: false, turretOrientation: 0, healer: null, badMedic1: null, badMedic2: null, medicTries: 0, chosenReinforcements: [], reactToDamageTime: 0, summonStrength: 0, lastPlayerEnemy: null, badArea: null, goodGuy: false, widowQuadUntil: 0, widowDoubleUntil: 0, widowInvulnerableUntil: 0 };
       this.actors.set(entity.actor.id, state);
     }
     return state;
@@ -50,7 +52,7 @@ export class Q2MissionPackMonsterState {
     const actors: Q2MissionPackMonstersCheckpoint["actors"][number][] = [];
     for (const [actor, state] of this.actors) {
       if (!game.host.actors.isLive(actor)) continue;
-      actors.push({ actor: { slot: actor.slot, generation: actor.generation }, state: { ...state, healer: saveQ2Actor(state.healer), badMedic1: saveQ2Actor(state.badMedic1), badMedic2: saveQ2Actor(state.badMedic2), lastPlayerEnemy: saveQ2Actor(state.lastPlayerEnemy), badArea: saveQ2Actor(state.badArea) } });
+      actors.push({ actor: { slot: actor.slot, generation: actor.generation }, state: { ...state, chosenReinforcements: [...state.chosenReinforcements], healer: saveQ2Actor(state.healer), badMedic1: saveQ2Actor(state.badMedic1), badMedic2: saveQ2Actor(state.badMedic2), lastPlayerEnemy: saveQ2Actor(state.lastPlayerEnemy), badArea: saveQ2Actor(state.badArea) } });
     }
     return { version: 1, actors, flyerNextMove: this.flyerNextMove, hints: null, widowShotsFired: this.widowShotsFired, widowDamageMultiplier: this.widowDamageMultiplier };
   }
@@ -61,7 +63,7 @@ export class Q2MissionPackMonsterState {
     this.widowShotsFired = checkpoint.widowShotsFired; this.widowDamageMultiplier = checkpoint.widowDamageMultiplier;
     for (const saved of checkpoint.actors) {
       const actor = restoreQ2Actor(game, saved.actor);
-      this.actors.set(actor.id, { ...saved.state,
+      this.actors.set(actor.id, { ...saved.state, chosenReinforcements: [...saved.state.chosenReinforcements],
         healer: saved.state.healer === null ? null : game.host.actors.referenceSaved(saved.state.healer),
         badMedic1: saved.state.badMedic1 === null ? null : game.host.actors.referenceSaved(saved.state.badMedic1),
         badMedic2: saved.state.badMedic2 === null ? null : game.host.actors.referenceSaved(saved.state.badMedic2),

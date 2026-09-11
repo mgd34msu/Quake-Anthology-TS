@@ -27,7 +27,7 @@ export class ActorCallbackTable {
 
   think(self: OwnedActor, frame: FrameContext): boolean { return this.invoke(self, "think", callbacks => callbacks.think?.(self, frame)); }
   touch(contact: TouchContact): boolean {
-    if (!this.actors.isLive(contact.other)) return false;
+    if (!this.actors.isLive(contact.other) && contact.sourceTrace?.inverted !== true) return false;
     return this.invoke(contact.self, "touch", callbacks => callbacks.touch?.(contact));
   }
   use(self: OwnedActor, other: ActorId | null, activator: ActorId | null): boolean {

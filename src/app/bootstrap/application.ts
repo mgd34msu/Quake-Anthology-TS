@@ -1,3 +1,7 @@
+import { ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
+import type { ApplicationBotClient } from "./simulation/bots.ts";
+import { createApplicationBotNavigation } from "./simulation/navigation.ts";
+import { loadMountedBotAssetFiles } from "../../bots/behavior/index.ts";
 import type { ActorId, ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -69,6 +73,7 @@ export interface ApplicationHost {
 /** A single authoritative simulation owns every local and remote player's game state. */
 export class Application {
   private graphical: GraphicalApplication | null = null;
+  private bots: ApplicationBots | null = null;
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
   private requestedCommands: ApplicationCommandRequest[] = [];
@@ -115,6 +120,7 @@ export class Application {
       application.bindSourceCommands();
       if (options.dedicated) application.openDedicatedConsole();
       else await application.openGraphical();
+      application.bots = await application.createBots(content, simulation);
       await application.openNetwork();
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
       return application;
@@ -125,6 +131,20 @@ export class Application {
     }
   }
 
+  private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
+    clients: readonly ApplicationBotClient[] = [], restart = false): Promise<ApplicationBots | null> {
+    if (simulation.q3Source() === null) return null;
+    const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+    const navigation = await createApplicationBotNavigation({ content, simulation });
+    return new ApplicationBots({ session: this.session, simulation, files, navigation, clients, restart, automaticFrame: true,
+      leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
+      insertConsoleCommand: text => {
+        if (this.sourceCommands === null) throw new Error("Bot console has no source command buffer");
+        this.sourceCommands.insert(text);
+      }, openLog: openApplicationBotLog });
+  }
+
+  get botClients(): readonly ApplicationBotClient[] { return this.bots?.clients() ?? []; }
   get frameCount(): number { return this.frames; }
   get options(): ApplicationOptions { return this.launchOptions; }
   get content(): LoadedApplicationContent { return this.loadedContent; }
@@ -144,7 +164,9 @@ export class Application {
 
   private openDedicatedConsole(): void {
     if (this.sourceCommands !== null) {
-      for (const name of ["save", "load"]) this.sourceCommands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      if (this.dedicatedCommands !== this.sourceCommands) {
+        for (const name of ["save", "load"]) this.sourceCommands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      }
       this.dedicatedCommands = this.sourceCommands;
       this.dedicatedConsole = new DedicatedConsole();
       return;
@@ -219,12 +241,32 @@ export class Application {
       this.pendingMap = mapResourcePath(map); return undefined;
     });
     commands.register("map_restart", invocation => this.requestRestart(invocation.args));
+    commands.register("kick", invocation => this.kickClients(invocation.args));
     commands.register("centerview", () => {
       for (const local of this.graphical?.input.locals ?? []) local.builder.setViewAngles({ ...local.builder.viewAngles, x: 0 });
       return undefined;
     });
     commands.register("quit", () => this.requestQuit());
     this.sourceCommands = commands;
+  }
+
+  private kickClients(args: readonly string[]): undefined {
+    const source = this.simulation.q3Source(), target = args[0];
+    if (source === null || target === undefined) throw new Error("Usage: kick <player name|slot|all|allbots>");
+    const selected = this.simulation.players().filter(actor => {
+      const player = this.simulation.movementPlayer(actor);
+      if (player === null || this.localSeats.has(player.client)) return false;
+      if (target.toLowerCase() === "all") return true;
+      if (target.toLowerCase() === "allbots") return this.bots !== null && this.bots.actor(player.client) !== null;
+      const client = source.pool.clientAt(player.client.slot);
+      return String(player.client.slot) === target || client.pers.netname.replace(/\^[0-9]/g, "").toLowerCase() === target.toLowerCase();
+    });
+    if (selected.length === 0) throw new Error(`Player ${target} is not on the server`);
+    for (const actor of selected) {
+      const player = this.simulation.movementPlayer(actor);
+      if (player !== null) source.host.engine.dropClient(player.client.slot, "was kicked");
+    }
+    return undefined;
   }
 
   private requestRestart(args: readonly string[]): undefined {
@@ -236,6 +278,25 @@ export class Application {
 
   private async sourceActions(): Promise<void> {
     for (const source of this.sourceEvents) {
+      if (source.kind === "q1-composition") {
+        const event = source.event.kind === "addon" ? source.event.event : source.event;
+        if (event.kind === "developer-message") {
+          this.host.print(event.text);
+          for (const local of this.graphical?.input.locals ?? []) local.console.print(event.text);
+        }
+        continue;
+      }
+      if (source.kind === "q2-composition" && source.event.kind === "kick") {
+        const player = this.simulation.movementPlayer(source.event.actor);
+        if (player !== null) {
+          if (this.network?.disconnectClient(player.client, "was kicked")) continue;
+          const local = this.localSeats.has(player.client);
+          this.simulation.disconnectPlayer(source.event.actor);
+          this.session.closeClient(player.client); this.localSeats.delete(player.client);
+          if (local) this.requestQuit();
+        }
+        continue;
+      }
       if (source.kind === "q2-rerelease") {
         if (source.event.kind === "restart-level") this.pendingMap = mapResourcePath(source.event.map);
         else if (source.event.kind === "autosave") {
@@ -256,6 +317,7 @@ export class Application {
         if (event.execution === "now") this.sourceCommands.executeNow(event.text);
         else this.sourceCommands.append(event.text);
       } else if (event.kind === "drop-client") {
+        if (this.bots?.disconnect(event.client)) { this.host.print(`Client ${event.client}: ${event.reason}\n`); continue; }
         const actor = this.simulation.players().find(actor => this.simulation.movementPlayer(actor)?.client.slot === event.client);
         if (actor === undefined) continue;
         const player = this.simulation.movementPlayer(actor);
@@ -374,10 +436,15 @@ export class Application {
     const content = await loadApplicationContent(options, save?.recipe);
     const previousContent = this.content, previous = this.graphical;
     const q3 = this.simulation.q3Source();
+    const previousBotClients = this.bots?.clients() ?? [];
+    const preserveBots = initialSourceMilliseconds !== 0 || q3?.gameType !== 2;
+    const botClients = preserveBots ? previousBotClients : [];
+    const previousBots = this.bots;
     const q3Session = q3?.captureSession();
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     let simulation: SharedSimulation | null = null, assets: ApplicationAssets | null = null, art: NativeUiArt | null = null;
+    let nextBots: ApplicationBots | null = null;
     let nextAudio: ApplicationAudio | null = null;
     let nextEffects: ApplicationEffects | null = null;
     let nextInput: ApplicationInput | null = null;
@@ -391,7 +458,7 @@ export class Application {
         const player = this.simulation.movementPlayer(actor);
         if (player === null) throw new Error("Connected player has no source client identity");
         return player.client;
-      });
+      }).filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
       if (settings !== null && (settings.clientSlots.length !== clients.length || settings.clientSlots.some(slot => !clients.some(client => client.slot === slot))))
         throw new Error("Saved players do not match the connected session client slots");
       simulation = createSimulation({ identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
@@ -400,18 +467,22 @@ export class Application {
         ...(save === undefined ? { ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
-      const admissions = new Map(clients.map(client => {
+      const admissions = new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
         const actor = nextSimulation.players().find(actor => nextSimulation.movementPlayer(actor)?.client.equals(client));
         if (actor === undefined) throw new Error(`Restore did not bind client ${client.slot}`);
         return [client.slot, actor];
       }));
+      nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0);
       const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content);
       if (nextNetworkHost !== null) {
         const supported = nextNetworkHost.supportsSourceWire();
         if (supported.kind === "unsupported") throw new Error(`Native Q2 travel is unavailable: ${supported.reasons.join("; ")}`);
       }
       if (previous === null) {
+        if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
+        previousBots?.close(initialSourceMilliseconds !== 0);
+        this.bots = nextBots;
         this.session.attachWorld(simulation);
         this.worldSimulation = simulation;
         this.loadedContent = content;
@@ -432,6 +503,9 @@ export class Application {
         });
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
         const cgameSettings = new Map([...previous.q3].map(([seat, source]) => [seat, source.client.cvars.snapshots()]));
+        if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
+        previousBots?.close(initialSourceMilliseconds !== 0);
+        this.bots = nextBots;
         this.session.attachWorld(simulation);
         this.worldSimulation = simulation;
         this.loadedContent = content;
@@ -482,7 +556,7 @@ export class Application {
       await previousContent.close();
       this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
     } catch (error) {
-      if (!committed) { simulation?.close(); art?.close(); assets?.close(); await content.close(); }
+      if (!committed) { nextBots?.close(); simulation?.close(); art?.close(); assets?.close(); await content.close(); }
       else {
         if (nextAudio !== null && this.graphical?.audio !== nextAudio) nextAudio.close();
         if (nextEffects !== null && this.graphical?.effects !== nextEffects) nextEffects.close();
@@ -592,6 +666,7 @@ export class Application {
           if (this.simulation.q2Source() === null && this.simulation.q3Source() === null) throw new Error("Selected Quake source chat commands are not yet joined");
           this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         }
+        else if (command.name === "kick") this.kickClients(command.arguments_);
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
@@ -642,6 +717,7 @@ export class Application {
         commands: [...localCommands, ...remote] });
       this.frames++;
       this.sourceEvents = this.simulation.drainPresentationEvents();
+      this.bots?.receive(this.sourceEvents);
       this.network?.publish(output, this.sourceEvents, performance.now());
       const intents = this.simulation.takeTransitions();
       if (intents.length !== 0) {
@@ -655,7 +731,7 @@ export class Application {
         const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
         graphical.rerelease.receive(this.sourceEvents);
         await graphical.rerelease.prepare();
-        const presentationEvents = [...this.sourceEvents, ...graphical.rerelease.drainPrints()];
+        const presentationEvents = [...this.sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
         const nativeQ3 = this.simulation.q3Source()?.sourceState();
         for (const source of graphical.q3.values()) {
           if (nativeQ3 === undefined) throw new Error("Cgame has no authoritative source state");
@@ -721,7 +797,7 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
-    for (const close of [() => this.network?.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
+    for (const close of [() => this.bots?.close(), () => this.network?.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }

@@ -1,4 +1,5 @@
 /* quakec_mg3/monsters/mg3_demodog.qc and monsters.qc. GPL-2.0-or-later. */
+import { Mg3Monster } from "./ai/index.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../../../persistence/value.ts";
@@ -23,7 +24,7 @@ const actions: ReadonlyMap<string, (monster: BaseMonster) => undefined> = new Ma
   }],
 ]);
 
-export class Q1Demodog extends BaseMonster {
+export class Q1Demodog extends Mg3Monster {
   constructor(readonly context: Q1AddonContext, entity: Q1Actor) {
     super(context.game, entity, spec, context.base, { callbackPrefix: prefix, frames: demodogFrames, actions });
   }
@@ -32,7 +33,7 @@ export class Q1Demodog extends BaseMonster {
     entity.classname = "monster_dog"; context.setNumber(entity, "aflag", 1); entity.wait = 0;
     game.host.combat.setHealth(entity.actor, 25); entity.maxHealth = 25;
     entity.pain = game.named.pain(entity, `${prefix}:monster_pain`); entity.die = game.named.die(entity, `${prefix}:monster_die`);
-    entity.pathEnd = game.named.action(entity, `${prefix}:monster_stand`); entity.fields.set("allowPathFind", "1"); entity.fields.set("combat_style", "1");
+    entity.pathEnd = game.named.action(entity, `${prefix}:monster_stand`); entity.fields.set("allowPathFind", "1"); entity.fields.set("combat_style", "2");
     return initMg3Monster(this, context, "progs/dog_explosive.mdl", 1, 2);
   }
   override start(): undefined { return startMg3Monster(this, this.context); }
@@ -41,7 +42,7 @@ export class Q1Demodog extends BaseMonster {
   }
   override tryAttack(): boolean {
     const target = this.enemy === null ? null : this.game.host.bodies.read(this.enemy); if (target === null) return false;
-    if (this.rangeDistance() < 120) { this.entity.attackState = "melee"; return true; }
+    if ((this.game.world?.number("enemy_range") ?? 0) === 0) { this.entity.attackState = "melee"; return true; }
     const body = this.game.body(this.entity), delta = vsub(target.origin, body.origin), height = target.bounds.max.z - target.bounds.min.z;
     if (body.origin.z + body.bounds.min.z > target.origin.z + target.bounds.min.z + height * 0.75 || body.origin.z + body.bounds.max.z < target.origin.z + target.bounds.min.z + height * 0.25) return false;
     const distance = Math.hypot(delta.x, delta.y); if (distance < 80 || distance > 150) return false;

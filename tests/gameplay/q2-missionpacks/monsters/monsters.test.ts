@@ -23,7 +23,7 @@ import { walkMove } from "../../../../src/content/q2/foundation/monsters/ai.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
-function fixture(pack: Q2MonsterMissionPack) {
+export function missionPackMonsterFixture(pack: Q2MonsterMissionPack) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -85,6 +85,8 @@ function fixture(pack: Q2MonsterMissionPack) {
   };
 }
 
+
+const fixture = missionPackMonsterFixture;
 
 describe("original missionpack monster source behavior", () => {
   test("implemented definitions admit their actual retail map entity rows", async () => {
@@ -159,7 +161,7 @@ describe("original missionpack monster source behavior", () => {
     scene.game.move(actor.entity, { ground: scene.game.host.worldActor() });
     expect(walkMove(actor, 0, 32)).toBe(false);
     expect(scene.game.body(actor.entity).origin.x).toBe(0); expect(actor.entity.enemy).toBe(tesla.actor.id);
-    expect(scene.module.source.get(actor.entity).blocked).toBe(true);
+    expect(scene.module.source.get(actor.entity).blocked).toBe(false);
     scene.game.move(actor.entity, { origin: { x: 50, y: 0, z: 24 }, angles: zero });
     expect(walkMove(actor, 0, 8)).toBe(true); expect(scene.game.body(actor.entity).origin.x).toBe(42);
     actor.state.oldEnemy = scene.player.id; scene.game.remove(area);

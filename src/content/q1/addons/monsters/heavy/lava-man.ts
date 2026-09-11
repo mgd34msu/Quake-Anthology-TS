@@ -3,6 +3,7 @@ import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub } from "../../../foundation/types.ts";
 import { velocityAngles } from "../../../missionpacks/types.ts";
+import { spriteExplosion } from "../../../base/projectiles.ts";
 import type { HeavyDefinition, Q1HeavyMonster, Q1Mg3Heavy } from "./runtime.ts";
 import { heavyPrefix } from "./runtime.ts";
 import { frames } from "./tables/mg3_lavaman.ts";
@@ -69,7 +70,7 @@ export function lavaManDefinition(runtime: Q1Mg3Heavy): HeavyDefinition {
         if (game.host.contents(game.body(entity).origin) === "sky") return game.remove(entity);
         if (game.health(other) !== 0) game.damage(other, entity.actor.id, entity.owner, game.host.classname(other) === "monster_shambler" ? 20 : 40);
         game.radiusDamage(entity.actor.id, entity.owner, 40, other, null);
-        game.setOrigin(entity, vsub(game.body(entity).origin, vscale(normalize(game.body(entity).velocity), 8))); game.effect("explosion", game.body(entity).origin); game.effect("explosion", game.body(entity).origin); return game.remove(entity);
+        game.setOrigin(entity, vsub(game.body(entity).origin, vscale(normalize(game.body(entity).velocity), 8))); return spriteExplosion(game, entity);
       } },
     },
     spawn: monster => { const { game, entity } = monster; if (game.options.deathmatch !== 0) return game.remove(entity); game.totalMonsters++; entity.spawnflags |= 16384;

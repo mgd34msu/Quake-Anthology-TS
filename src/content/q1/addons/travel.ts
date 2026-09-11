@@ -17,6 +17,8 @@ export function newQ1AddonTravel(context: Q1AddonContext): Q1TravelState {
 export function captureQ1AddonTravel(context: Q1AddonContext, actor: OwnedActor): Q1TravelState {
   const { game } = context;
   const state = captureQ1Travel(game, actor);
+  // boss_end changes next-level parameters without changing the departing player's health.
+  if (context.program === "mg3" && game.world?.number("mg3.finalNewGameTravel") === 1) return { ...state, health: 50, maxHealth: 50 };
   if (game.health(actor.id) <= 0 || game.options.deathmatch !== 0 || game.worldType === 3) return { ...newQ1AddonTravel(context), extensions: state.extensions };
   return state;
 }

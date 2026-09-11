@@ -47,12 +47,15 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
   const providerTiming = timing(provider, family, rerelease);
-  return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}`),
+  const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
+  if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
+  const match: ProviderReference = rules === "standard" ? provider : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
+  return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
     map: { geometry: { content: product.id, path: options.map }, entities: provider },
     campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
     character: { definition: character, appearance }, weapons: [provider], enemies: { kind: "map-defined" },
     presentation: { assets: product.id, hud: provider, effects: provider, audio: provider },
-    engineBehavior: provider, combat: provider, inventory: provider, match: provider, transition: provider,
+    engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
     execution: [execution(provider, family, rerelease)],
     timing: [providerTiming, timing(movement, options.movement, false), timing(character, options.character, false)],
     ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
@@ -71,7 +74,10 @@ export class LoadedApplicationContent {
     const existing = this.scoped.get(content);
     if (existing !== undefined) return existing;
     const pending = (async (): Promise<MountedContent> => {
-      const mounts = await this.catalog.mountsFor(content);
+      const primary = await this.catalog.mountsFor(content);
+      const rules = content === this.recipe.map.entities.content && this.recipe.match.content !== content
+        ? await this.catalog.mountsFor(this.recipe.match.content) : [];
+      const mounts = [...new Map([...primary, ...rules].map(mount => [mount.identity.id, mount])).values()];
       const opened = await openMountPlan({ id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
         mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
       if (this.closed) { opened.close(); throw new Error("Application content closed during mount"); }
@@ -104,7 +110,8 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   if (!recipe.character.appearance.provider.startsWith(prefix)) throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
     map: recipe.map.geometry.requestedPath, movement: family(recipe.movement), character,
-    characterModel: recipe.character.appearance.provider.slice(prefix.length) };
+    characterModel: recipe.character.appearance.provider.slice(prefix.length),
+    rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : "standard" };
 }
 
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe): Promise<LoadedApplicationContent> {

@@ -37,7 +37,7 @@ export function rogueBlockedCheckShot(context: MonsterContext, chance: number, s
       return true;
     }
   }
-  if (!visible(context) || game.entity(entity.enemy)?.classname !== "tesla") return false;
+  if (!visible(context) || game.entity(entity.enemy)?.classname !== (game.options.edition === "rerelease" ? "tesla_mine" : "tesla")) return false;
   source.get(entity).blocked = true; context.attack(); source.get(entity).blocked = false;
   return true;
 }

@@ -1,3 +1,7 @@
+import { findRereleaseSpawnPoint, checkRereleaseGroundSpawnPoint } from "../../../../src/content/q2/rerelease/monsters/spawn-placement.ts";
+import { Q2MissionPackMonsterState } from "../../../../src/content/q2/missionpacks/monsters/state.ts";
+import { medicFrame } from "../../../../src/content/q2/rerelease/monsters/tables/medic.ts";
+import { decodeQ2MissionPackMonstersCheckpoint, encodeQ2MissionPackMonstersCheckpoint } from "../../../../src/persistence/q2-missionpacks.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
@@ -21,6 +25,8 @@ import { shamblerFrame } from "../../../../src/content/q2/rerelease/monsters/tab
 import { guncmdrFrame } from "../../../../src/content/q2/rerelease/monsters/tables/guncmdr.ts";
 import { Q2RereleaseRandom } from "../../../../src/core/random/q2-rerelease.ts";
 import { insaneFrame } from "../../../../src/content/q2/rerelease/monsters/tables/insane.ts";
+import { parasiteFrame } from "../../../../src/content/q2/rerelease/monsters/tables/parasite.ts";
+import { brainFrame } from "../../../../src/content/q2/rerelease/monsters/tables/brain.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
@@ -62,10 +68,11 @@ function fixture(isN64 = false) {
   const weapons = new Q2Ballistics({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const monsters = new Q2Monsters(weapons); registerQ2ClassicBaseMonsters(monsters);
   const projectiles = new Q2MissionPackProjectiles({ base: weapons, monster: actor => monsters.context(actor), playerEffect: () => undefined });
-  const module = registerQ2RereleaseMonsters(monsters, { isN64, expansion: "base", weapons: projectiles });
+  const source = new Q2MissionPackMonsterState();
+  const module = registerQ2RereleaseMonsters(monsters, { source, isN64, expansion: "base", weapons: projectiles });
   const game = new Q2Foundation(host, { edition: "rerelease", mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1, provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, [module]);
   const playerEntity = game.attachPlayer(player);
-  return { actors, callbacks, bodies, combat, inventory, player, playerEntity, game, monsters, events, random, diagnostics,
+  return { actors, callbacks, bodies, combat, inventory, player, playerEntity, game, monsters, source, events, random, diagnostics,
     rayHit(actor: ActorId) { rayActor = actor; },
     spawn(classname: string, values: ReadonlyMap<string, string> = new Map([["origin", "0 0 24"]])) {
       const entity = game.spawn({ classname, ordinal: -1, values });
@@ -95,6 +102,7 @@ describe("rerelease species on the shared Q2 controller", () => {
     const scene = fixture(), archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak");
     try {
       const wanted = new Set(["monster_berserk", "monster_arachnid", "monster_guardian", "monster_guncmdr", "monster_gunner", "monster_shambler", "monster_tank", "monster_tank_commander", "monster_gladiator", "monster_gladb", "monster_supertank", "monster_boss5", "monster_flipper", "monster_floater", "monster_hover", "monster_flyer", "monster_chick", "monster_mutant", "monster_boss2", "monster_jorg", "monster_makron", "misc_insane"]), representatives = new Map<string, Q2SpawnFields>();
+      for (const classname of ["monster_brain", "monster_chick_heat", "monster_parasite"]) wanted.add(classname);
       for (const entry of archive.entries.filter(entry => ["maps/base1.bsp", "maps/boss1.bsp", "maps/boss2.bsp"].includes(entry.path) || entry.path.startsWith("maps/mgu") && entry.path.endsWith(".bsp"))) for (const row of parseQ2Entities(readQ2Bsp(await archive.readEntry(entry)).entities, "rerelease")) if (wanted.has(row.classname)) representatives.set(row.classname, row);
       expect(representatives.has("monster_berserk")).toBe(true);
       for (const row of representatives.values()) { const entity = scene.game.spawn(row); expect(scene.monsters.context(entity.actor.id)).not.toBeNull(); }
@@ -146,6 +154,44 @@ describe("rerelease species on the shared Q2 controller", () => {
       scene.random.push(0); touch(restored.entity, scene.game, { self: restored.entity.actor, other: scene.player.id, plane: null, surface: null });
       touch(restored.entity, scene.game, { self: restored.entity.actor, other: scene.player.id, plane: null, surface: null });
       expect(scene.combat.read(scene.player.id)?.health).toBe(960); expect(restored.entity.style).toBe(0);
+    } finally { scene.actors.close(); }
+  });
+
+  test("Parasite launches a saved physical proboscis, drains health, and retracts on pain", () => {
+    const scene = fixture(), monster = scene.spawn("monster_parasite");
+    try {
+      monster.entity.enemy = scene.player.id; monster.setMove("parasite_move_fire_proboscis"); monster.entity.frame = parasiteFrame.drain03;
+      scene.combat.setHealth(monster.entity.actor, 100); monster.dispatch("parasite_fire_proboscis");
+      const tip = scene.game.entity(monster.entity.proboscus);
+      if (tip === null || tip.touch === null || tip.think === null) throw new Error("Parasite did not create a physical proboscis");
+      expect(tip.speed).toBe(1250); expect(tip.motion).toBe("fly-missile");
+      scene.game.move(tip, { origin: scene.game.body(scene.playerEntity).origin });
+      tip.touch(tip, scene.game, { self: tip.actor, other: scene.player.id, plane: null, surface: null });
+      expect(tip.style).toBe(1); expect(monster.state.nextFrame).toBe(parasiteFrame.drain06);
+      tip.think(tip, scene.game); expect(scene.combat.read(scene.player.id)?.health).toBe(993); expect(scene.combat.read(monster.entity.actor.id)?.health).toBe(102);
+      const source = scene.game.capture(), saved = source.entities.find(entity => entity.actor.slot === tip.actor.id.slot);
+      expect(saved?.callbacks.touch).toBe("rerelease.parasite.proboscis_touch");
+      expect(saved?.callbacks.think).toBe("rerelease.parasite.proboscis_think"); expect(saved?.links.proboscus).not.toBeNull();
+      expect(source.entities.find(entity => entity.actor.slot === monster.entity.actor.id.slot)?.links.proboscus?.generation).toBe(tip.actor.id.generation);
+      scene.game.damage(monster.entity.actor.id, scene.playerEntity, scene.player.id, 1, 0, zero, zero, zero, 0); scene.monsters.endFrame(scene.game);
+      expect(tip.style).toBe(2); expect(tip.speed).toBe(2500); expect(monster.state.move.name).toBe("parasite_move_pain1");
+      tip.think(tip, scene.game); expect(tip.style).toBe(3);
+      tip.think(tip, scene.game); expect(monster.entity.proboscus).toBeNull(); expect(scene.game.entity(tip.actor.id)).toBeNull();
+    } finally { scene.actors.close(); }
+  });
+
+  test("Brain fires both named saved eye beams and heat Chick selects guided rockets", () => {
+    const scene = fixture(), brain = scene.spawn("monster_brain"), chick = scene.spawn("monster_chick_heat");
+    try {
+      brain.entity.enemy = scene.player.id; brain.entity.frame = brainFrame.walk101; brain.dispatch("brain_laserbeam");
+      expect(scene.combat.read(scene.player.id)?.health).toBe(998);
+      const saved = scene.game.capture();
+      expect(saved.entities.find(entity => entity.actor.slot === brain.entity.beam?.slot)?.callbacks.postthink).toBe("rerelease.brain.right_eye_update");
+      expect(saved.entities.find(entity => entity.actor.slot === brain.entity.beam2?.slot)?.callbacks.postthink).toBe("rerelease.brain.left_eye_update");
+      chick.entity.enemy = scene.player.id; chick.dispatch("ChickRocket");
+      const rocket = [...scene.game.entities.values()].find(entity => entity.classname === "rocket" && entity.owner?.equals(chick.entity.actor.id) === true);
+      if (rocket === undefined) throw new Error("Heat Chick did not fire a guided rocket");
+      expect(rocket.speed).toBe(500); expect(rocket.accel).toBe(0.15); expect(rocket.think).not.toBeNull(); expect(chick.entity.skin).toBe(2);
     } finally { scene.actors.close(); }
   });
 
@@ -298,4 +344,105 @@ describe("rerelease species on the shared Q2 controller", () => {
       stand.use(stand, scene.game, null, null); expect(scene.game.entity(stand.actor.id)).toBeNull();
     } finally { scene.actors.close(); }
   });
+});
+
+test("Rerelease medic revives the same actor and preserves health and commander accounting", () => {
+  const scene = fixture(), medic = scene.spawn("monster_medic"), patient = scene.spawn("monster_medic", new Map([["origin", "200 0 24"]]));
+  try {
+    const actor = patient.entity.actor.id;
+    patient.entity.healthTarget = "old_health"; patient.entity.itemTarget = "old_item";
+    patient.entity.maxHealth = 740; patient.state.gibHealth = -130;
+    patient.state.monsterSlots = 9; patient.state.monsterUsed = 3;
+    scene.combat.setHealth(patient.entity.actor, -10); patient.state.dead = true;
+    patient.dispatch("medic_dead");
+    medic.entity.enemy = actor; medic.state.oldEnemy = scene.player.id; medic.state.medic = true;
+    scene.source.get(patient.entity).healer = medic.entity.actor.id;
+    medic.entity.frame = medicFrame.attack43; medic.dispatch("medic_cable_attack");
+    expect(patient.state.resurrecting).toBe(true);
+    expect(scene.combat.read(actor)?.canTakeDamage).toBe(false);
+    medic.entity.frame = medicFrame.attack50; medic.dispatch("medic_cable_attack");
+    const revived = scene.monsters.context(actor);
+    expect(revived?.entity).toBe(patient.entity);
+    expect(patient.entity.healthTarget).toBe(""); expect(patient.entity.itemTarget).toBe("");
+    expect(scene.combat.read(actor)?.health).toBe(740);
+    expect(revived?.state.gibHealth).toBe(-65);
+    expect(revived?.state.monsterSlots).toBe(9);
+    expect(revived?.state.monsterUsed).toBe(3);
+    expect(revived?.entity.enemy).toBe(scene.player.id);
+    expect(scene.source.get(patient.entity).healer).toBeNull();
+    expect(medic.entity.enemy).toBe(scene.player.id);
+  } finally { scene.actors.close(); }
+});
+
+test("Rerelease medic source state saves reinforcement choices and rejects healed players", () => {
+  const scene = fixture(), medic = scene.spawn("monster_medic_commander");
+  try {
+    expect(medic.state.monsterSlots).toBe(4);
+    const state = scene.source.get(medic.entity);
+    state.chosenReinforcements = [1, 0]; state.reactToDamageTime = 4.25; state.medicTries = 2;
+    const checkpoint = decodeQ2MissionPackMonstersCheckpoint(encodeQ2MissionPackMonstersCheckpoint(scene.source.capture(scene.game)));
+    state.chosenReinforcements.push(6);
+    scene.source.restore(scene.game, checkpoint);
+    expect(scene.source.get(medic.entity).chosenReinforcements).toEqual([1, 0]);
+    expect(scene.source.get(medic.entity).reactToDamageTime).toBe(4.25);
+    expect(scene.source.get(medic.entity).medicTries).toBe(2);
+    medic.entity.enemy = scene.player.id; medic.state.medic = true; medic.entity.frame = medicFrame.attack43;
+    medic.dispatch("medic_cable_attack");
+    expect(medic.state.medic).toBe(true);
+    expect(scene.combat.read(scene.player.id)?.health).toBe(1000);
+    scene.random.push(0); medic.dispatch("medic_quick_attack");
+    expect(medic.state.nextMove?.name).toBe("medic_move_attackHyperBlaster");
+    expect(medic.state.nextFrame).toBe(medicFrame.attack16);
+  } finally { scene.actors.close(); }
+});
+
+test("Rerelease medic timeout marks a corpse and summoned deaths release their weighted slots", () => {
+  const scene = fixture(), medic = scene.spawn("monster_medic_commander"), patient = scene.spawn("monster_medic", new Map([["origin", "200 0 24"]]));
+  try {
+    scene.combat.setHealth(patient.entity.actor, -10); patient.state.dead = true; patient.dispatch("medic_dead");
+    medic.state.medic = true; medic.state.oldEnemy = scene.player.id; medic.entity.enemy = patient.entity.actor.id;
+    medic.entity.timestamp = -1;
+    medic.checkAttack(200);
+    expect(scene.source.get(patient.entity).badMedic1).toBe(medic.entity.actor.id);
+    expect(medic.state.medic).toBe(false);
+    expect(medic.entity.enemy).toBe(scene.player.id);
+    const child = scene.spawn("monster_medic");
+    child.state.spawnedBy = "medic"; child.state.commander = medic.entity.actor.id; child.state.monsterSlots = 3;
+    medic.state.monsterSlots = 9; medic.state.monsterUsed = 5;
+    scene.game.damage(child.entity.actor.id, scene.playerEntity, scene.player.id, 350, 0, zero, zero, zero, 0);
+    scene.monsters.endFrame(scene.game);
+    expect(medic.state.monsterSlots).toBe(9);
+    expect(medic.state.monsterUsed).toBe(2);
+  } finally { scene.actors.close(); }
+});
+
+test("Rerelease commander growth uses saved callbacks and expires with its beam", () => {
+  const scene = fixture(), medic = scene.spawn("monster_medic_commander");
+  try {
+    scene.source.get(medic.entity).chosenReinforcements = [0];
+    medic.dispatch("medic_spawngrows");
+    const growth = [...scene.game.entities.values()].find(entity => entity.classname === "spawngro");
+    if (growth === undefined) throw new Error("Medic reinforcement growth did not spawn");
+    const beam = growth.beam;
+    expect(growth.model).toBe("models/items/spawngro3/tris.md2");
+    expect(growth.timestamp).toBe(1);
+    const saved = scene.game.capture().entities.find(entity => entity.actor.slot === growth.actor.id.slot);
+    expect(saved?.callbacks.think).toBe("rerelease.medic.spawngrow_think");
+    scene.advance(0.5);
+    expect(growth.alpha).toBe(0.25);
+    expect(scene.game.entity(beam)).not.toBeNull();
+    scene.advance(1);
+    expect(scene.game.entity(growth.actor.id)).toBeNull();
+    expect(scene.game.entity(beam)).toBeNull();
+  } finally { scene.actors.close(); }
+});
+
+
+test("Rerelease reinforcement placement drops farther than maxMoveUp and rejects unsupported ground", () => {
+  const scene = fixture(), medic = scene.spawn("monster_medic");
+  try {
+    const bounds = scene.game.body(medic.entity).bounds, high = { x: 200, y: 0, z: 104 };
+    expect(findRereleaseSpawnPoint(scene.game, high, bounds, 32)).toEqual({ x: 200, y: 0, z: 24 });
+    expect(checkRereleaseGroundSpawnPoint(scene.game, high, bounds, 256, -1)).toBe(false);
+  } finally { scene.actors.close(); }
 });

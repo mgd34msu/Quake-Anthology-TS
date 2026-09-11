@@ -11,6 +11,7 @@ import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/found
 import { ZERO, PLAYER_BOUNDS } from "../../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../../src/content/q1/base/index.ts";
 import { registerQ1CampaignAddons, BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_NEWGAME, captureQ1AddonTravel, admitQ1AddonTravel } from "../../../../src/content/q1/addons/index.ts";
+import { spawnSpammer } from "../../../../src/content/q1/addons/monsters/bosses/oldnew-children.ts";
 import { giveNextMg3Upgrade, mg3UpgradeFlag, mg3UpgradedMaximum, mg3HammerBodyFrame } from "../../../../src/content/q1/addons/items/index.ts";
 import type { Mg3Upgrade } from "../../../../src/content/q1/addons/items/index.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
@@ -35,7 +36,7 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => ({ fraction: hit === null || !request.monsters ? 1 : 0.5, end: request.end, normal: { x: -1, y: 0, z: 0 }, actor: request.monsters ? hit : null,
       startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }), contents: () => "empty", walkMove: () => false,
-    moveToGoal: () => undefined, changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, checkBottom: () => false, pushMove: () => null,
+    changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, moveToGoal: () => undefined, checkBottom: () => false, pushMove: () => null,
     scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined };
@@ -186,4 +187,39 @@ test("MG3 Bloody Nightmare travel preserves hammer, Bloody SSG and armor with so
       .toEqual(["q1:weapon/axe", "q1:weapon/mg3:mjolnir", "q1:weapon/shotgun", "q1:weapon/supershotgun"]);
     expect(next.combat.read(next.player.actor.id)?.armor).toEqual({ kind: "q1", points: 150, absorption: 0.8, item: "q1:armor/red" });
   } finally { source.actors.close(); next.actors.close(); }
+});
+
+
+test("retail MG3 bosses register source controllers and restore their live callbacks", async () => {
+  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak"), state = session();
+  try {
+    state.spawn("worldspawn");
+    for (const [mapName, classname, health] of [["boss2", "monster_oldone_new", 12000], ["map1", "monster_ghost", 10], ["boss", "monster_orb", 300]] satisfies [string, string, number][]) {
+      const entry = archive.findEntries(`maps/${mapName}.bsp`)[0]; if (entry === undefined) throw new Error(`Missing retail ${mapName}`);
+      const map = readQ1Bsp(await archive.readEntry(entry), { source: entry.path }), source = map.entityList.find(entity => q1EntityValue(entity, "classname") === classname);
+      if (source === undefined) throw new Error(`Missing retail ${classname}`);
+      const boss = state.spawn(classname, source); expect(state.game.health(boss.actor.id)).toBe(health); expect(boss.think).not.toBeNull(); expect(boss.die).not.toBeNull();
+    }
+    const finalBoss = state.spawn("monster_boss_final"); expect(finalBoss.classname).toBe("monster_boss"); expect(finalBoss.number("boss_immune")).toBe(1);
+    finalBoss.use?.(null, state.player.actor.id); expect(state.game.health(finalBoss.actor.id)).toBe(12000); expect(finalBoss.frame).toBe(0);
+    state.think(finalBoss, 0.1); expect(finalBoss.frame).toBe(1);
+    const zombie = state.spawn("monster_szombie"), sacrifice = state.spawn("misc_sacrifice");
+    expect(state.game.health(zombie.actor.id)).toBe(60); expect(sacrifice.use).not.toBeNull();
+    const oldnew = [...state.game.entities.values()].find(entity => entity.classname === "monster_oldone_new"); if (oldnew === undefined) throw new Error("Missing retail Oldnew");
+    const spammer = spawnSpammer(state.context, oldnew); state.think(spammer, 0.1); expect(spammer.count).toBe(1);
+    const saved = state.save(), restored = session(saved);
+    try {
+      expect(restored.game.capture()).toEqual(saved.source);
+      const restoredFinal = restored.game.entity(restored.actors.referenceSaved(finalBoss.actor.id)); if (restoredFinal === null) throw new Error("Missing restored final boss");
+      expect(restoredFinal.frame).toBe(1); restored.think(restoredFinal, 0.2); expect(restoredFinal.frame).toBe(2);
+      const restoredSpammer = restored.game.entity(restored.actors.referenceSaved(spammer.actor.id)); if (restoredSpammer === null) throw new Error("Missing restored Oldnew spammer");
+      restored.think(restoredSpammer, 0.2); expect(restoredSpammer.count).toBe(2);
+      expect([...restored.game.entities.values()].filter(entity => entity.classname === "spam")).toHaveLength(2);
+      const ghost = [...restored.game.entities.values()].find(entity => entity.classname === "monster_ghost"); if (ghost === undefined) throw new Error("Missing restored ghost");
+      restored.touch(ghost); expect(ghost.touch).toBeNull(); expect(ghost.think).not.toBeNull();
+      const restoredSacrifice = [...restored.game.entities.values()].find(entity => entity.classname === "misc_sacrifice"); if (restoredSacrifice === undefined) throw new Error("Missing restored sacrifice");
+      const frame = restoredSacrifice.frame; restored.think(restoredSacrifice, 0.1); expect(restoredSacrifice.frame).toBe(frame + 1);
+      expect(() => restored.save()).not.toThrow();
+    } finally { restored.actors.close(); }
+  } finally { archive.close(); state.actors.close(); }
 });

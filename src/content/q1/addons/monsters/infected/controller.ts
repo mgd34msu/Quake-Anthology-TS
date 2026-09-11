@@ -1,27 +1,21 @@
 /* quakec_mg3/monsters/mg3_*_infected.qc and monsters.qc. GPL-2.0-or-later. */
+import { Mg3Monster } from "../ai/index.ts";
 import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import { SaveReader } from "../../../../../persistence/value.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
-import { BaseMonster } from "../../../base/monsters.ts";
+import type { BaseMonster } from "../../../base/monsters.ts";
 import { throwGib, throwHead } from "../../../base/projectiles.ts";
-import { fireBullets } from "../../../foundation/weapons.ts";
-import { POINT, normalize, vscale, vsub } from "../../../foundation/types.ts";
 import type { Q1AddonContext } from "../../context.ts";
 import { infectedFrames } from "./frames.ts";
 import { infectedKind, infectedSpecies } from "./species.ts";
 import { initMg3Monster, startMg3Monster, mg3MonsterActivator } from "../startup.ts";
+import { mg3OrdinaryAttack } from "../ordinary/attack.ts";
+import { armyActions, armyPain } from "../ordinary/army.ts";
 
 export const infectedPrefix = "mg3:infected";
 const actions: ReadonlyMap<string, (monster: BaseMonster) => undefined> = new Map([
-  ["army_fire", monster => {
-    const { game, entity } = monster, target = monster.enemy === null ? null : game.host.bodies.read(monster.enemy);
-    if (target === null) return undefined;
-    monster.face(); game.sound(entity, "soldier/sattck1.wav", "weapon");
-    fireBullets(game, entity.actor, normalize(vsub(vsub(target.origin, vscale(target.velocity, 0.2)), monster.origin)), game.body(entity).angles, 4, 0.1, 0.1, null);
-    entity.effects |= 2; return undefined;
-  }],
-  ["army_refire", monster => { if (monster.game.options.skill === 3 && !monster.state.refired && monster.visible()) { monster.state.refired = true; monster.nextFrame = "army_atk1"; } return undefined; }],
+  ...armyActions,
   ["infected_corpse_hold", monster => monster.delay(9999)],
   ["infected_test_rise", monster => {
     const { game, entity } = monster; entity.solid = "slidebox";
@@ -32,7 +26,7 @@ const actions: ReadonlyMap<string, (monster: BaseMonster) => undefined> = new Ma
   ["infected_resurrect", monster => monster.game.named.action(monster.entity, `${infectedPrefix}:resurrect`)()],
 ]);
 
-export class Q1Infected extends BaseMonster {
+export class Q1Infected extends Mg3Monster {
   constructor(readonly context: Q1AddonContext, entity: Q1Actor, readonly replace: (entity: Q1Actor) => Q1Infected) {
     super(context.game, entity, infectedSpecies(entity), context.base, { callbackPrefix: infectedPrefix, frames: infectedFrames, actions });
   }
@@ -42,7 +36,7 @@ export class Q1Infected extends BaseMonster {
     entity.classname = classname; context.setNumber(entity, "infected", 1); game.host.combat.setHealth(entity.actor, spec.health);
     entity.pain = spec.stand.startsWith("hknight_corpse") ? null : game.named.pain(entity, `${infectedPrefix}:monster_pain`);
     entity.die = game.named.die(entity, `${infectedPrefix}:monster_die`); entity.pathEnd = game.named.action(entity, `${infectedPrefix}:monster_stand`);
-    if (spec.species === "knight" || spec.species === "hellknight") { context.setNumber(entity, "allowPathFind", 1); context.setNumber(entity, "combat_style", spec.species === "knight" ? 1 : 3); }
+    if (spec.species === "knight" || spec.species === "hellknight") { context.setNumber(entity, "allowPathFind", 1); context.setNumber(entity, "combat_style", spec.species === "knight" ? 2 : 3); }
     return initMg3Monster(this, context, `progs/${spec.model}.mdl`, 1, spec.species === "army" || spec.species === "knight" ? 1 : 2);
   }
   override start(): undefined { return startMg3Monster(this, this.context); }
@@ -50,13 +44,7 @@ export class Q1Infected extends BaseMonster {
     return super.use(mg3MonsterActivator(this.game, activator));
   }
   override tryAttack(): boolean {
-    if (this.spec.species !== "army") return super.tryAttack();
-    const { game, entity } = this, enemy = this.enemy, distance = this.rangeDistance();
-    if (enemy === null) return false;
-    const start = this.eye(), end = this.eye(enemy); if (start === null || end === null) return false;
-    const trace = game.host.trace({ start, end, bounds: POINT, ignore: entity.actor.id, monsters: true });
-    if (trace.actor === null || !sameActor(trace.actor, enemy) || trace.inOpen && trace.inWater || distance >= 1000 || game.time < this.state.attackFinished || game.host.random() >= (distance < 120 ? 0.9 : distance < 500 ? 0.4 : 0.05)) return false;
-    this.play("army_atk1"); this.attackFinished(1 + game.host.random()); if (game.host.random() < 0.3) { this.lefty = !this.lefty; this.context.setNumber(entity, "lefty", this.lefty ? 1 : 0); } return true;
+    return mg3OrdinaryAttack(this);
   }
   override meleeAttack(): undefined {
     if (this.spec.species !== "zombie") return super.meleeAttack();
@@ -69,11 +57,7 @@ export class Q1Infected extends BaseMonster {
       game.sound(entity, r < 0.5 ? "enforcer/pain1.wav" : "enforcer/pain2.wav", "voice"); state.painFinished = game.time + (r < 0.7 ? 1 : 2);
       return this.play(r < 0.2 ? "enf_paina1" : r < 0.4 ? "enf_painb1" : r < 0.7 ? "enf_painc1" : "enf_paind1");
     }
-    if (this.spec.species !== "army") return super.pain(attacker, damage);
-    this.retaliate(attacker); const { game, entity, state } = this;
-    if (state.painFinished > game.time || game.options.skill > 2 && game.host.random() * 100 > damage) return undefined;
-    const r = game.host.random(); state.painFinished = game.time + (r < 0.2 ? 0.6 : 1.1);
-    this.play(r < 0.2 ? "army_pain1" : r < 0.6 ? "army_painb1" : "army_painc1"); return game.sound(entity, r < 0.2 ? "soldier/pain1.wav" : "soldier/pain2.wav", "voice");
+    return this.spec.species === "army" ? armyPain(this, attacker, damage, true) : super.pain(attacker, damage);
   }
   override die(attacker: ActorId | null): undefined {
     const { game, entity, context } = this;
@@ -95,7 +79,7 @@ export class Q1Infected extends BaseMonster {
     game.host.combat.setHealth(entity.actor, spec.health); entity.maxHealth = spec.health;
     entity.pain = game.named.pain(entity, `${infectedPrefix}:monster_pain`); entity.aimedDamage = true; entity.damageable = true;
     if (spec.species === "zombie") entity.spawnflags = 128;
-    else { context.setNumber(entity, "combat_style", 1); transformed.state.painFinished = game.time + 1; transformed.state.attackFinished = 0; }
+    else { context.setNumber(entity, "combat_style", 2); transformed.state.painFinished = game.time + 1; transformed.state.attackFinished = 0; }
     entity.classname = spec.species === "zombie" ? "monster_zombie" : "monster_demon1"; transformed.retarget();
     if (game.host.walkMove(entity.actor, 0, 0)) return transformed.play(spec.species === "zombie" ? "zombie_paina1" : "demon1_pain1");
     game.killedMonsters++; game.host.emit({ kind: "monster-killed", actor: entity.actor.id, total: game.totalMonsters, found: game.killedMonsters });

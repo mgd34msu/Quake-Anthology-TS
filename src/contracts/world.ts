@@ -1,5 +1,6 @@
 import type { ActorId, CallbackId, ClientId, OwnedActor, ProviderId, SessionId } from "./identity.ts";
 import type { Bounds, Plane, Vec3 } from "./math.ts";
+import type { TraceResult } from "./scene.ts";
 import type { FrameContext, SourceTime, ThinkTiming } from "./time.ts";
 
 export interface ActorObservation {
@@ -37,7 +38,8 @@ export interface BodyTable {
   read(actor: ActorId): BodyState | null;
   write(actor: OwnedActor, state: BodyState): undefined;
   linked(actor: ActorId): LinkedBody | null;
-  link(actor: OwnedActor): undefined;
+  /** A source may link a snapped collision origin while preserving authoritative movement precision. */
+  link(actor: OwnedActor, origin?: Vec3): undefined;
   unlink(actor: OwnedActor): undefined;
 }
 
@@ -55,6 +57,12 @@ export interface TouchContact {
   readonly other: ActorId;
   readonly plane: Plane | null;
   readonly surface: { readonly name: string; readonly nativeFlags: number; readonly nativeValue: number } | null;
+  readonly sourceTrace?: {
+    readonly kind: "q2-rerelease";
+    readonly trace: Extract<TraceResult, { readonly kind: "q2" }>;
+    readonly ent: ActorId;
+    readonly inverted: boolean;
+  };
 }
 
 export interface PainReaction {

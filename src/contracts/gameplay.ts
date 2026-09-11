@@ -91,6 +91,8 @@ export interface CombatPolicy {
   decide(request: DamageRequest, target: CombatState, attacker: CombatState | null, prepared?: { readonly amount: number }): DamageDecision;
   /** May synchronously reenter. Returned mutations use freshly read state after that call returns. */
   resume?(decision: DamageDecision, current: CurrentCombatState): DamageDecision;
+  /** Runs after committed health and before pain/death; reentrant effects read current actors. */
+  afterHealth?(decision: DamageDecision, current: CurrentCombatState): DamageDecision["reaction"];
 }
 
 export type DamagePreparation = { readonly kind: "continue"; readonly amount: number } | { readonly kind: "cancel" };

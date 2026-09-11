@@ -1,3 +1,4 @@
+import type { ClientId } from "../../../contracts/identity.ts";
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { WireSelection } from '../../../network/common/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
@@ -93,6 +94,15 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         }
     }
     private reply(remote: TAddress, text: string): void { this.options.transport.send(remote, q2OutOfBand(text)); }
+    disconnectClient(client: ClientId, reason: string): boolean {
+        const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client));
+        if (peer === undefined) return false;
+        try {
+            this.reliable(peer, { kind: 'disconnect' });
+            peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), performance.now());
+        } finally { this.drop(peer, reason); }
+        return true;
+    }
     private drop(peer: ServerPeer<TAddress>, reason: string): void {
         this.peers.delete(addressKey(peer.remote));
         this.pending = this.pending.filter(command => command.source.kind !== 'remote-client' || !command.source.client.equals(peer.player.client));

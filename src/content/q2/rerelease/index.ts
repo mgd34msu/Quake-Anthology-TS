@@ -1,4 +1,6 @@
 import type { ActorId } from "../../../contracts/identity.ts";
+import type { OwnedActor } from "../../../contracts/identity.ts";
+import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q2Entity, Q2GameServices } from "../foundation/host.ts";
 import type { Q2PickupPolicy } from "../foundation/items.ts";
 import { add, dot, length, movedir, normalize, scale, subtract } from "../foundation/fields.ts";
@@ -44,13 +46,31 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
     this.players.extension = this;
     const items = this.players.items;
     items.setPickupPolicy(this);
+    items.register({ kind: "power", classname: "item_invisibility", model: "models/items/cloaker/tris.md2", icon: "p_cloaker", name: "Invisibility", sound: "items/pkup.wav", rotate: true, respawn: 300, coopStay: false });
     items.register({ kind: "custom", classname: "item_flashlight", model: "models/items/flashlight/tris.md2", icon: "p_torch", name: "Flashlight", sound: "items/pkup.wav", rotate: true, respawn: 0,
       capacity: 1, quantity: 1, coopStay: true, droppable: false,
-      pickup: (_entity, game, player) => game.host.inventory.count(player.id, "q2:item_flashlight") === 0,
+      pickup: (_entity, game, player) => game.host.inventory.count(player.id, "q2:item_flashlight") === 0 && game.host.inventory.give(player, "q2:item_flashlight", 1) > 0,
       use: (player, game) => { this.toggleFlashlight(player.id, game, !this.players.extra(player.id).flashlight); return true; } });
     items.register({ kind: "custom", classname: "item_compass", model: "", icon: "p_compass", name: "Compass", sound: "", rotate: false, respawn: 0,
       capacity: 1, quantity: 0, coopStay: true, droppable: false, pickup: () => false,
       use: (player, game) => { this.useCompass(player.id, game); return true; } });
+  }
+
+  usePowerup(player: OwnedActor, item: ItemId, game: Q2GameServices): boolean {
+    if (item === "q2:item_invisibility") {
+      const extra = this.players.extra(player.id);
+      extra.invisibilityUntil = Math.max(extra.invisibilityUntil, game.host.now()) + 30;
+      const entity = game.entity(player.id); if (entity !== null) game.sound(entity, "items/protect.wav", 3);
+      return true;
+    }
+    if (item === "q2:item_adrenaline") {
+      const entity = game.entity(player.id); if (entity === null) throw new Error("Rerelease adrenaline requires a source player");
+      if (game.options.mode !== "deathmatch") entity.maxHealth++;
+      if ((game.host.combat.read(player.id)?.health ?? 0) < entity.maxHealth) game.host.combat.setHealth(player, entity.maxHealth);
+      game.sound(entity, "items/n_health.wav", 3);
+      return true;
+    }
+    return false;
   }
 
   override spawn(entity: Q2Entity, game: Q2GameServices): boolean {

@@ -17,8 +17,18 @@ export class EntityShared {
   set mins(value: Vec3) { const state = this.body.read(); this.body.write({ ...state, bounds: { ...state.bounds, min: value } }); }
   get maxs(): Vec3 { return this.body.read().bounds.max; }
   set maxs(value: Vec3) { const state = this.body.read(); this.body.write({ ...state, bounds: { ...state.bounds, max: value } }); }
-  get currentOrigin(): Vec3 { return this.body.read().origin; }
-  set currentOrigin(value: Vec3) { this.body.write({ ...this.body.read(), origin: value }); }
+  private currentOriginView: { origin: Vec3 } | null = null;
+  get currentOrigin(): Vec3 { return this.currentOriginView?.origin ?? this.body.read().origin; }
+  set currentOrigin(value: Vec3) {
+    this.body.write({ ...this.body.read(), origin: value });
+    if (this.currentOriginView !== null) this.currentOriginView.origin = value;
+  }
+  /** ClientThink links a snapped source origin while ps.origin retains movement precision. */
+  withCurrentOrigin(origin: Vec3, call: () => undefined): undefined {
+    const previous = this.currentOriginView;
+    this.currentOriginView = { origin: { ...origin } };
+    try { return call(); } finally { this.currentOriginView = previous; }
+  }
   get currentAngles(): Vec3 { return this.body.read().angles; }
   set currentAngles(value: Vec3) { this.body.write({ ...this.body.read(), angles: value }); }
   private absMinOverride: Vec3 | null = null;

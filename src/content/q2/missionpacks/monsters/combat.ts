@@ -24,6 +24,7 @@ export function cleanupRogueHealTarget(monsters: Q2Monsters, source: Q2MissionPa
 }
 
 export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPackMonsterState, services: Q2MissionPackMonsterServices): Q2MonsterSourceCombatHooks {
+  const teslaClass = (game: Q2GameServices): string => game.options.edition === "rerelease" ? "tesla_mine" : "tesla";
   const isGoodGuy = (entity: Q2Entity): boolean => monsters.context(entity.actor.id)?.state.goodGuy ?? source.get(entity).goodGuy;
   function cleanup(context: MonsterContext): undefined {
     const target = context.game.entity(context.entity.enemy);
@@ -42,6 +43,7 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
   }
   return {
     isGoodGuy,
+    consumeBlocked(context) { const state = source.get(context.entity), blocked = state.blocked; state.blocked = false; return blocked; },
     recoverEnemy(context) {
       const state = source.get(context.entity), actor = state.lastPlayerEnemy;
       if (actor === null || health(context.game, actor) <= 0) return null;
@@ -53,7 +55,7 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
       const current = services.badAreaEntity(entity.actor.id);
       if (current !== null) {
         metadata.badArea = current.actor.id;
-        if (game.entity(entity.enemy)?.classname === "tesla") {
+        if (game.entity(entity.enemy)?.classname === teslaClass(game)) {
           const body = game.body(entity), forward = anglesVectors(body.angles).forward;
           const badDot = dot(forward, normalize(subtract(game.body(current).origin, body.origin))), moveDot = dot(forward, normalize(displacement));
           if (badDot < 0 && moveDot < 0 || badDot > 0 && moveDot > 0) return { kind: "move", displacement: scale(displacement, -1) };
@@ -70,7 +72,7 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
       const area = services.badAreaEntity(entity.actor.id, origin);
       if (area === null) return true;
       const owner = game.entity(area.owner), enemy = game.entity(entity.enemy);
-      if (owner?.classname === "tesla" && (enemy === null || enemy.classname !== "telsa" && (!game.host.isPlayer(enemy.actor.id) || !visible(context)))) {
+      if (owner?.classname === teslaClass(game) && (enemy === null || enemy.classname !== (game.options.edition === "classic" ? "telsa" : "tesla_mine") && (!game.host.isPlayer(enemy.actor.id) || !visible(context)))) {
         targetTesla(context, owner); source.get(entity).blocked = true;
       }
       return false;
@@ -79,8 +81,14 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
     beforeReact(context: MonsterContext, attacker: ActorId): boolean {
       const { entity, game, state } = context;
       const inflictor = game.entity(entity.lastAttack?.inflictor ?? null);
-      if (inflictor?.classname === "tesla") {
-        if (services.markTeslaArea(entity, inflictor)) targetTesla(context, inflictor);
+      if (inflictor?.classname === teslaClass(game)) {
+        const marked = services.markTeslaArea(entity, inflictor);
+        if (game.options.edition === "classic") { if (marked) targetTesla(context, inflictor); }
+        else {
+          const random = game.host.rereleaseRandom;
+          if (random === undefined) throw new Error("Rerelease Tesla reaction requires the shared source RNG");
+          if ((marked || (random.integer() & 1) !== 0) && game.entity(entity.enemy)?.classname !== "tesla_mine") targetTesla(context, inflictor);
+        }
         return true;
       }
       if (attacker === entity.actor.id || attacker === entity.enemy) return false;
@@ -91,9 +99,15 @@ export function createRogueCombatHooks(monsters: Q2Monsters, source: Q2MissionPa
         if (game.host.actors.isLive(entity.enemy) && percent > 0.33) return true;
         state.targetAnger = false;
       }
+      if (game.options.edition === "rerelease" && source.get(entity).reactToDamageTime > game.host.now()) return true;
       if (entity.enemy !== null && state.medic) {
         if (game.host.actors.isLive(entity.enemy) && percent > 0.25) return true;
         cleanup(context);
+      }
+      if (game.options.edition === "rerelease") {
+        const random = game.host.rereleaseRandom;
+        if (random === undefined) throw new Error("Rerelease damage reaction requires the shared source RNG");
+        source.get(entity).reactToDamageTime = game.host.now() + random.timeMilliseconds(3000, 5000) / 1000;
       }
       return false;
     },
