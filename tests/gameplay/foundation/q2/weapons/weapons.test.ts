@@ -89,6 +89,88 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
 }
 
 describe("Q2 base weapons on shared state", () => {
+  test("external handoff uses native drop and saved raise without replacing the selected name", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const scene = fixture(edition);
+      scene.state.pending = "shotgun";
+      scene.weapons.requestHolster(scene.self); scene.weapons.requestHolster(scene.self);
+      expect(scene.state.pending).toBeNull(); expect(scene.state.weapon).toBe("blaster");
+      scene.step(0); expect(scene.state.frame).toBe(53); expect(scene.weapons.isHolstered(scene.self)).toBe(false);
+      scene.step(0.1); expect(scene.state.frame).toBe(54);
+      const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(scene.weapons.capture(scene.game)));
+      scene.weapons.restore(scene.game, saved);
+      scene.step(0.2); scene.step(0.3);
+      expect(scene.weapons.isHolstered(scene.self)).toBe(true);
+      const state = scene.weapons.states.get(scene.player.id);
+      if (state === undefined) throw new Error("Missing restored primary");
+      expect(state.weapon).toBe("blaster"); expect(state.frame).toBe(55);
+      expect(decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(scene.weapons.capture(scene.game))).states[0]?.state.primaryHandoff).toBe("holstered");
+      scene.step(4); expect([...scene.game.entities.values()].filter(entity => entity.classname === "bolt")).toHaveLength(0);
+      scene.weapons.resumePrimary(scene.self, scene.game, { ...input, attack: false }, null);
+      expect(state.primaryHandoff).toBe("active"); expect(state.phase).toBe("activating"); expect(state.frame).toBe(0);
+      scene.weapons.resumePrimary(scene.self, scene.game, { ...input, attack: false }, null);
+      for (let frame = 41; frame <= 46; frame++) scene.step(frame / 10, { ...input, attack: false });
+      expect(state.phase).toBe("ready"); expect(state.weapon).toBe("blaster");
+    }
+  });
+
+  test("external rerelease request completes despite held holster and honors instant switching", () => {
+    for (const instantSwitch of [false, true]) {
+      const scene = fixture("rerelease"); scene.weapons.requestHolster(scene.self);
+      scene.step(0, { ...input, holster: true, instantSwitch });
+      expect(scene.weapons.isHolstered(scene.self)).toBe(instantSwitch);
+      for (let frame = 1; frame <= 4; frame++) scene.step(frame / 10, { ...input, holster: true, instantSwitch });
+      expect(scene.weapons.isHolstered(scene.self)).toBe(true);
+      scene.weapons.resumePrimary(scene.self, scene.game, { ...input, attack: false, holster: true, instantSwitch }, "missing-primary");
+      expect(scene.state.primaryHandoff).toBe("active"); expect(scene.state.weapon).toBe("railgun");
+    }
+  });
+
+  test("external request ends repeating native fire while its original attack input stays held", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const name of ["machinegun", "hyperblaster", "chaingun"]) {
+      const scene = fixture(edition, name);
+      scene.step(0); scene.weapons.requestHolster(scene.self);
+      for (let frame = 1; frame <= 70 && !scene.weapons.isHolstered(scene.self); frame++) scene.step(frame / 10);
+      expect(scene.weapons.isHolstered(scene.self)).toBe(true); expect(scene.state.weapon).toBe(name);
+      const count = scene.events.filter(event => event.kind === "muzzleflash").length;
+      scene.step(8); scene.step(9);
+      expect(scene.events.filter(event => event.kind === "muzzleflash")).toHaveLength(count);
+    }
+  });
+
+  test("external handoff cancels preparation or settles a primed reservation exactly once", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const primed of [false, true]) {
+      const scene = fixture(edition, "grenades"); scene.inventory.consume(scene.player, "q2:ammo_grenades", 199);
+      scene.step(0);
+      if (primed) for (let frame = 1; frame <= 11; frame++) scene.step(frame / 10);
+      scene.weapons.requestHolster(scene.self); scene.step(1.2);
+      expect(scene.weapons.isHolstered(scene.self)).toBe(true); expect(scene.state.weapon).toBe("grenades");
+      expect(scene.state.handReservation.kind).toBe("none");
+      expect(scene.inventory.count(scene.player.id, "q2:ammo_grenades")).toBe(primed ? 0 : 1);
+      const emitted = () => [...scene.game.entities.values()].filter(entity => entity.classname === "hgrenade" || entity.classname === "hand_grenade").length
+        + scene.presentation.filter(event => event.kind === "effect" && event.effect.includes("explosion")).length;
+      expect(emitted()).toBe(primed ? 1 : 0); scene.step(1.3); expect(emitted()).toBe(primed ? 1 : 0);
+    }
+  });
+
+  test("external drop finishes committed BFG emission and cannot duplicate a lethal held grenade", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
+      const charged = fixture(edition, "bfg"); charged.step(0); charged.weapons.requestHolster(charged.self);
+      for (let frame = 1; frame <= 80 && !charged.weapons.isHolstered(charged.self); frame++) charged.step(frame / 10);
+      expect(charged.weapons.isHolstered(charged.self)).toBe(true);
+      expect([...charged.game.entities.values()].filter(entity => entity.classname === "bfg blast")).toHaveLength(1);
+      expect(charged.inventory.count(charged.player.id, "q2:ammo_cells")).toBe(150);
+      const grenade = fixture(edition, "grenades"); grenade.combat.setHealth(grenade.player, 1);
+      grenade.self.die = () => grenade.weapons.tick(grenade.self, grenade.game, input);
+      for (let frame = 0; frame <= 11; frame++) grenade.step(frame / 10);
+      grenade.weapons.requestHolster(grenade.self); grenade.step(1.2);
+      expect(grenade.state.handReservation.kind).toBe("none");
+      expect(grenade.inventory.count(grenade.player.id, "q2:ammo_grenades")).toBe(199);
+      expect(grenade.presentation.filter(event => event.kind === "effect" && event.effect.includes("explosion"))).toHaveLength(edition === "classic" ? 1 : 0);
+      if (edition === "classic") { expect(grenade.state.weapon).toBeNull(); expect(grenade.weapons.isHolstered(grenade.self)).toBe(false); }
+    }
+  });
+
   test("actor projection preserves native handedness, pitch and rerelease aim without a source entity", () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) {
       const scene = fixture(edition), foreign = scene.actors.allocate("q1:character", "q1:player");

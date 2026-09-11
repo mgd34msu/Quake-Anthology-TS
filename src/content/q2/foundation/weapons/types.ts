@@ -77,6 +77,7 @@ export interface Q2WeaponInput {
 export type Q2HandReservation = { readonly kind: "none" } | { readonly kind: "finite" } | { readonly kind: "infinite" };
 
 export class Q2WeaponState {
+  primaryHandoff: "active" | "holstering" | "holstered" = "active";
   weapon: Q2WeaponName | null;
   lastWeapon: Q2WeaponName | null = null;
   pending: Q2WeaponName | null = null;

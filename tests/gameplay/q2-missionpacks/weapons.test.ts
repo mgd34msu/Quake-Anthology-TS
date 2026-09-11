@@ -31,6 +31,25 @@ function clearTrace(request: Q2TraceRequest): TraceResult {
 }
 
 describe("mission-pack source weapons", () => {
+  test("external handoff exits expansion repeat and held-throw paths through source runners", () => {
+    for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const name of ["trap", "tesla", "heatbeam", "chainfist", "etf_rifle"]) {
+      const scene = fixture(edition), projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
+      new Q2MissionPackWeapons(projectiles).register(scene.weapons, name === "trap" ? "xatrix" : "rogue", edition);
+      const definition = scene.weapons.definition(name);
+      scene.inventory.configure(scene.player, { item: definition.item, count: 20, capacity: 200 });
+      if (definition.ammo !== null) scene.inventory.configure(scene.player, { item: definition.ammo, count: 20, capacity: 200 });
+      scene.state.weapon = name; scene.state.phase = "ready"; scene.state.frame = definition.fireLast + 1;
+      for (let frame = 0; frame <= 11; frame++) scene.step(frame / 10);
+      scene.weapons.requestHolster(scene.self);
+      for (let frame = 12; frame <= 100 && !scene.weapons.isHolstered(scene.self); frame++) scene.step(frame / 10);
+      expect(scene.weapons.isHolstered(scene.self)).toBe(true); expect(scene.state.weapon).toBe(name);
+      const inventory = scene.inventory.entries(scene.player.id);
+      scene.step(11); expect(scene.inventory.entries(scene.player.id)).toEqual(inventory);
+      scene.weapons.resumePrimary(scene.self, scene.game, { ...input, attack: false }, name);
+      expect(scene.state.primaryHandoff).toBe("active"); expect(scene.weapons.states.get(scene.player.id)?.phase).toBe("activating");
+    }
+  });
+
   test("Rogue substitutes Xatrix item descriptors and classic random respawn replaces the source actor", () => {
     const scene = fixture("classic", "blaster", 0.1, "deathmatch");
     let armory: ReturnType<typeof registerQ2MissionPackArmory> | null = null;

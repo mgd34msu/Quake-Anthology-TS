@@ -8,6 +8,8 @@ import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
 import { angleVectors } from "./vectors.ts";
 import { projectQ2Actor } from "./projection.ts";
+import { millisecondSum, stepQ2ClassicFrame, stepQ2RereleaseFrame } from "./generic-frame.ts";
+import type { Q2RereleaseFrameHooks } from "./generic-frame.ts";
 import { MOD, Q2WeaponState } from "./types.ts";
 import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponName } from "./types.ts";
 import type { Q2NoiseRecord } from "./types.ts";
@@ -15,7 +17,6 @@ import type { Q2NoiseCheckpoint, Q2WeaponsCheckpoint } from "./checkpoint.ts";
 import { restoreQ2Actor } from "../checkpoint.ts";
 
 export type Q2WeaponSelection = "selected" | "current" | "not-owned" | "no-ammo" | "not-enough-ammo";
-function millisecondSum(time: number, seconds: number): number { return (Math.round(time * 1000) + Math.round(seconds * 1000)) / 1000; }
 export interface Q2WeaponContext {
   readonly self: Q2Entity;
   readonly game: Q2GameServices;
@@ -148,6 +149,37 @@ export class Q2Weapons extends Q2Ballistics {
     return "selected";
   }
 
+  requestHolster(self: Q2Entity): undefined {
+    const state = this.requireState(self);
+    if (state.primaryHandoff !== "active") return undefined;
+    state.primaryHandoff = state.weapon === null ? "holstered" : "holstering";
+    state.pending = null;
+    return undefined;
+  }
+
+  isHolstered(self: Q2Entity): boolean { return this.requireState(self).primaryHandoff === "holstered"; }
+
+  continuesAttack(context: Q2WeaponContext): boolean { return context.state.primaryHandoff === "active" && context.input.attack; }
+
+  resumePrimary(self: Q2Entity, game: Q2GameServices, input: Q2WeaponInput, name: Q2WeaponName | null = null): undefined {
+    const state = this.requireState(self);
+    if (state.primaryHandoff === "active") return undefined;
+    if (state.primaryHandoff !== "holstered") throw new Error("Q2 primary must finish holstering before it resumes");
+    const requested = name ?? state.weapon, definition = requested === null ? undefined : this.definitions.get(requested);
+    const alive = (game.host.combat.read(self.actor.id)?.health ?? 0) > 0;
+    state.pending = null;
+    if (alive) {
+      if (definition !== undefined && (definition.name === "blaster" || game.host.inventory.count(self.actor.id, definition.item) > 0)
+        && (definition.ammo === null || game.host.inventory.count(self.actor.id, definition.ammo) >= definition.quantity)) state.pending = definition.name;
+      else {
+        const context = this.context(self, game, state, input);
+        if (context !== null) this.noAmmo(context, false);
+        else state.pending = "blaster";
+      }
+    }
+    return this.changeWeapon(self, game, state, input);
+  }
+
   canDrop(self: Q2Entity, game: Q2GameServices, name: Q2WeaponName): boolean {
     if ((game.options.deathmatchFlags & 4) !== 0) return false;
     const state = this.requireState(self), count = game.host.inventory.count(self.actor.id, this.definition(name).item);
@@ -173,6 +205,7 @@ export class Q2Weapons extends Q2Ballistics {
       this.present(self, game, state);
       return undefined;
     }
+    if (state.primaryHandoff === "holstered") return this.present(self, game, state);
     if (state.weapon === null) {
       if (state.pending !== null) this.changeWeapon(self, game, state, input);
       this.present(self, game, state);
@@ -181,7 +214,7 @@ export class Q2Weapons extends Q2Ballistics {
     const classicSilenced = state.silencerShots > 0;
     const run = (): undefined => {
       const context = this.context(self, game, state, input, game.options.edition === "classic" ? classicSilenced : state.silencerShots > 0);
-      if (context === null) return undefined;
+      if (context === null || state.primaryHandoff === "holstered") return undefined;
       const extension = this.extensions.get(context.definition.name);
       if (extension?.think !== undefined) return extension.think(context, this);
       if (state.weapon === "grenades") return context.rerelease ? this.throwRerelease(context) : this.throwClassic(context);
@@ -284,13 +317,20 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   changeWeapon(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput): undefined {
-    if (game.options.edition === "rerelease" && (game.host.combat.read(self.actor.id)?.health ?? 0) > 0 && !input.instantSwitch && input.holster) return undefined;
-    if (state.grenadeTime !== 0 && (state.weapon === "grenades" ? state.handReservation.kind !== "none" : game.options.edition === "rerelease")) {
+    if (state.primaryHandoff === "active" && game.options.edition === "rerelease" && (game.host.combat.read(self.actor.id)?.health ?? 0) > 0 && !input.instantSwitch && input.holster) return undefined;
+    if (state.grenadeTime !== 0 && (state.weapon === "grenades" ? state.handReservation.kind !== "none"
+      : game.options.edition === "rerelease" || state.primaryHandoff === "holstering" && state.weapon !== null && this.extensions.get(state.weapon)?.held !== undefined)) {
       const old = this.context(self, game, state, input);
       if (old !== null) { if (!old.rerelease) state.grenadeTime = game.host.now(); this.fireHeld(old, false); }
     }
     this.cancelHandPreparation(self, game, state);
     state.grenadeTime = 0;
+    if (state.primaryHandoff === "holstering" && (game.host.combat.read(self.actor.id)?.health ?? 0) > 0) {
+      state.primaryHandoff = "holstered"; state.pending = null; state.latchedAttack = false; state.fireBuffered = false;
+      this.setLoop(self, game, state, "");
+      return undefined;
+    }
+    state.primaryHandoff = "active";
     if (state.weapon !== null && state.pending !== null && state.pending !== state.weapon && game.options.edition === "rerelease") game.sound(self, "weapons/change.wav", 1);
     state.lastWeapon = state.weapon; state.weapon = state.pending; state.pending = null; state.machinegunShots = 0; state.viewModel = null; state.viewSkin = 0;
     this.setLoop(self, game, state, "");
@@ -325,108 +365,31 @@ export class Q2Weapons extends Q2Ballistics {
     return (this.sourceRules.haste(context) || grapple) && phase === context.state.phase ? this.genericClassicFrame(context) : undefined;
   }
 
+  private genericFrameHooks(context: Q2WeaponContext): Q2RereleaseFrameHooks {
+    return {
+      random: () => context.game.host.random(), ammo: () => this.ammo(context), noAmmo: () => this.noAmmo(context),
+      fire: buffered => this.fire(buffered ? { ...context, input: { ...context.input, attack: true } } : context),
+      changeWeapon: () => this.changeWeapon(context.self, context.game, context.state, context.input),
+      reverseAnimation: () => this.reverseAnimation(context), attackAnimation: () => this.attackAnimation(context),
+      powerupSound: () => this.powerupSound(context), animationTime: () => this.animationTime(context),
+      prepareDrop: () => { if (context.state.primaryHandoff === "active") context.state.pending ??= context.state.weapon; return undefined; },
+    };
+  }
+
   private genericClassicFrame(context: Q2WeaponContext): undefined {
-    const { state, definition: d, input, self, game } = context;
+    const { state } = context;
+    if (state.primaryHandoff === "holstered") return undefined;
     if (this.sourceRules?.kind === "lmctf") state.sourceFiring = false;
-    const idleFirst = d.fireLast + 1;
-    if (state.phase === "dropping") {
-      if (state.frame === d.deactivateLast) return this.changeWeapon(self, game, state, input);
-      if (d.deactivateLast - state.frame === 4) this.reverseAnimation(context);
-      state.frame++; return undefined;
-    }
-    if (state.phase === "activating") {
-      if (state.frame === d.activateLast) { state.phase = "ready"; state.frame = idleFirst; }
-      else state.frame++;
-      return undefined;
-    }
-    if (state.pending !== null && state.phase !== "firing") {
-      state.phase = "dropping"; state.frame = d.idleLast + 1;
-      if (d.deactivateLast - state.frame < 4) this.reverseAnimation(context);
-      return undefined;
-    }
-    if (state.phase === "ready") {
-      if (input.attack || state.latchedAttack) {
-        state.latchedAttack = false;
-        if (this.ammo(context) < d.quantity) return this.noAmmo(context);
-        state.frame = d.activateLast + 1; state.phase = "firing";
-        this.attackAnimation(context);
-      } else {
-        if (state.frame === d.idleLast) { state.frame = idleFirst; return undefined; }
-        if (d.pauses.includes(state.frame) && Math.floor(game.host.random() * 16) !== 0) return undefined;
-        state.frame++; return undefined;
-      }
-    }
-    if (state.phase === "firing") {
-      if (d.fires.includes(state.frame)) { state.sourceFiring = true; this.powerupSound(context); this.fire(context); }
-      else state.frame++;
-      if (state.frame === idleFirst + 1) state.phase = "ready";
-    }
-    return undefined;
+    return stepQ2ClassicFrame(state, context.definition, { attack: context.input.attack,
+      changeRequested: state.pending !== null || state.primaryHandoff === "holstering" }, this.genericFrameHooks(context));
   }
 
   genericRerelease(context: Q2WeaponContext): undefined {
-    const { state, definition: d, input, self, game, now } = context;
-    const idleFirst = d.fireLast + 1, idleLast = d.name === "bfg" ? 54 : d.idleLast;
-    if (state.phase === "dropping") {
-      if (state.thinkTime <= now) {
-        if (state.frame === d.deactivateLast) return this.changeWeapon(self, game, state, input);
-        if (d.deactivateLast - state.frame === 4) this.reverseAnimation(context);
-        state.frame++; state.thinkTime = millisecondSum(now, this.animationTime(context));
-      }
-      return undefined;
-    }
-    if (state.phase === "activating") {
-      if (state.thinkTime <= now || input.instantSwitch) {
-        state.thinkTime = millisecondSum(now, this.animationTime(context));
-        if (state.frame === d.activateLast || input.instantSwitch) {
-          state.phase = "ready"; state.frame = idleFirst; state.fireBuffered = false;
-          state.fireFinished = input.instantSwitch ? 0 : millisecondSum(now, this.animationTime(context));
-        } else state.frame++;
-        return undefined;
-      }
-    }
-    if ((state.pending !== null || !input.instantSwitch && input.holster) && state.phase !== "firing") {
-      if (input.instantSwitch || state.thinkTime <= now) {
-        state.pending ??= state.weapon; state.phase = "dropping";
-        if (input.instantSwitch) return this.changeWeapon(self, game, state, input);
-        state.frame = idleLast + 1;
-        if (d.deactivateLast - state.frame < 4) this.reverseAnimation(context);
-        state.thinkTime = millisecondSum(now, this.animationTime(context));
-      }
-      return undefined;
-    }
-    if (state.phase === "ready") {
-      if ((state.fireBuffered || state.latchedAttack || input.attack) && state.fireFinished <= now) {
-        state.latchedAttack = false; state.thinkTime = now;
-        if (this.ammo(context) < d.quantity) return this.noAmmo(context);
-        state.phase = "firing"; state.lastFiringTime = millisecondSum(now, 2.5);
-        if (!d.repeating) {
-          state.frame = d.activateLast + 1; state.fireBuffered = false;
-          state.thinkTime = millisecondSum(state.thinkTime, (input.weaponThunk ? game.host.frameSeconds() : 0) + this.animationTime(context));
-          state.fireFinished = millisecondSum(now, this.animationTime(context));
-          if (d.fires.includes(state.frame)) { this.powerupSound(context); this.fire(context); }
-          this.attackAnimation(context);
-          return undefined;
-        }
-      } else if (state.thinkTime <= now) {
-        state.thinkTime = millisecondSum(now, this.animationTime(context));
-        if (state.frame === idleLast) { state.frame = idleFirst; return undefined; }
-        if (!d.pauses.includes(state.frame) || Math.floor(game.host.random() * 16) === 0) state.frame++;
-        return undefined;
-      }
-    }
-    if (state.phase === "firing" && state.thinkTime <= now) {
-      state.lastFiringTime = millisecondSum(now, 2.5);
-      if (!d.repeating) state.frame++;
-      state.fireFinished = millisecondSum(now, this.animationTime(context));
-      const firingContext = state.fireBuffered ? { ...context, input: { ...input, attack: true } } : context;
-      state.fireBuffered = false;
-      if (d.repeating) this.fire(firingContext);
-      else if (d.fires.includes(state.frame) && !(d.name === "shotgun" && state.frame === 9)) { this.powerupSound(context); this.fire(firingContext); }
-      if (state.frame === idleFirst) { state.phase = "ready"; state.fireBuffered = false; }
-      state.thinkTime = millisecondSum(now, this.animationTime(context) + (d.repeating && input.weaponThunk ? game.host.frameSeconds() : 0));
-    }
-    return undefined;
+    const { state, input } = context;
+    if (state.primaryHandoff === "holstered") return undefined;
+    return stepQ2RereleaseFrame(state, context.definition, { attack: input.attack,
+      changeRequested: state.pending !== null || state.primaryHandoff === "holstering", now: context.now, frameSeconds: context.game.host.frameSeconds(),
+      instantSwitch: input.instantSwitch, holster: input.holster, weaponThunk: input.weaponThunk }, this.genericFrameHooks(context));
   }
 
   multiplier(context: Q2WeaponContext): number {
@@ -475,7 +438,7 @@ export class Q2Weapons extends Q2Ballistics {
   private present(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState): undefined {
     const definition = state.weapon === null ? null : this.definition(state.weapon);
     const factor = game.options.edition === "classic" ? 1 : Math.max(0, (state.kickUntil - game.host.now()) / state.kickDuration);
-    return this.hooks.emit({ kind: "view-weapon", actor: self.actor.id, weapon: state.weapon, model: state.viewModel ?? definition?.viewModel ?? "", playerModel: definition?.playerModel ?? 0, frame: state.frame, skin: state.viewSkin, rate: state.gunRate, kickOrigin: scale(state.kickOrigin, factor), kickAngles: scale(state.kickAngles, factor) });
+    return this.hooks.emit({ kind: "view-weapon", actor: self.actor.id, weapon: state.weapon, model: state.primaryHandoff === "holstered" ? "" : state.viewModel ?? definition?.viewModel ?? "", playerModel: definition?.playerModel ?? 0, frame: state.frame, skin: state.viewSkin, rate: state.gunRate, kickOrigin: scale(state.kickOrigin, factor), kickAngles: scale(state.kickAngles, factor) });
   }
 
   private fire(context: Q2WeaponContext): undefined {
@@ -507,15 +470,15 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   private hyperblaster(context: Q2WeaponContext): undefined {
-    const { state, input, self, game, rerelease } = context;
+    const { state, self, game, rerelease } = context;
     if (rerelease) {
       state.frame = state.frame > 20 ? 6 : state.frame + 1;
       if (state.frame === 12) {
-        if (this.ammo(context) > 0 && input.attack) state.frame = 6;
+        if (this.ammo(context) > 0 && this.continuesAttack(context)) state.frame = 6;
         else game.sound(self, "weapons/hyprbd1a.wav", 0);
       }
       this.setLoop(self, game, state, state.frame >= 6 && state.frame <= 11 ? "weapons/hyprbl1a.wav" : "");
-      if (input.attack && state.frame >= 6 && state.frame <= 11) {
+      if (this.continuesAttack(context) && state.frame >= 6 && state.frame <= 11) {
         if (this.ammo(context) < 1) return this.noAmmo(context);
         const rotation = (state.frame - 5) * 2 * Math.PI / 6;
         this.blaster(context, { x: -4 * Math.sin(rotation), y: 4 * Math.cos(rotation), z: 0 }, game.options.mode === "deathmatch" ? 15 : 20, true, state.frame % 4 === 0 ? 64 : 0);
@@ -523,7 +486,7 @@ export class Q2Weapons extends Q2Ballistics {
       }
     } else {
       this.setLoop(self, game, state, "weapons/hyprbl1a.wav");
-      if (!input.attack) state.frame++;
+      if (!this.continuesAttack(context)) state.frame++;
       else {
         if (this.ammo(context) < 1) this.noAmmo(context);
         else {
@@ -541,7 +504,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   private machinegun(context: Q2WeaponContext): undefined {
     const { state, input, self, game, rerelease } = context;
-    if (!input.attack) { state.machinegunShots = 0; state.frame = rerelease ? 6 : state.frame + 1; return undefined; }
+    if (!this.continuesAttack(context)) { state.machinegunShots = 0; state.frame = rerelease ? 6 : state.frame + 1; return undefined; }
     state.frame = state.frame === 4 ? 5 : 4;
     if (this.ammo(context) < 1) { state.frame = 6; return this.noAmmo(context); }
     const random = () => game.host.random() * 2 - 1;
@@ -563,12 +526,12 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   private chaingun(context: Q2WeaponContext): undefined {
-    const { state, input, self, game, rerelease } = context;
+    const { state, self, game, rerelease } = context;
     if (rerelease && state.frame > 31) { state.frame = 5; game.sound(self, "weapons/chngnu1a.wav", 0, 1, 2); }
     else {
       if (!rerelease && state.frame === 5) game.sound(self, "weapons/chngnu1a.wav", 0, 1, 2);
-      if (state.frame === 14 && !input.attack) { state.frame = 32; this.setLoop(self, game, state, ""); return undefined; }
-      if (state.frame === 21 && input.attack && this.ammo(context) > 0) state.frame = 15;
+      if (state.frame === 14 && !this.continuesAttack(context)) { state.frame = 32; this.setLoop(self, game, state, ""); return undefined; }
+      if (state.frame === 21 && this.continuesAttack(context) && this.ammo(context) > 0) state.frame = 15;
       else state.frame++;
     }
     if (state.frame === 22) { this.setLoop(self, game, state, ""); game.sound(self, "weapons/chngnd1a.wav", 0, 1, 2); }
@@ -576,7 +539,7 @@ export class Q2Weapons extends Q2Ballistics {
     if (rerelease && (state.frame < 5 || state.frame > 21)) return undefined;
     if (rerelease) this.setLoop(self, game, state, "weapons/chngnl1a.wav");
     this.attackAnimation(context, state.frame & 1);
-    const shots = Math.min(this.ammo(context), state.frame <= 9 ? 1 : state.frame <= 14 ? input.attack ? 2 : 1 : 3);
+    const shots = Math.min(this.ammo(context), state.frame <= 9 ? 1 : state.frame <= 14 ? this.continuesAttack(context) ? 2 : 1 : 3);
     if (shots === 0) return this.noAmmo(context);
     const random = () => game.host.random() * 2 - 1;
     let origin: Vec3, angles: Vec3;
@@ -690,6 +653,7 @@ export class Q2Weapons extends Q2Ballistics {
   throwClassic(context: Q2WeaponContext, throwing?: Q2ThrowDefinition): undefined {
     const { state, input, self, game, now, definition } = context;
     const idleFirst = definition.fireLast + 1;
+    if (state.primaryHandoff === "holstering") return this.changeWeapon(self, game, state, input);
     if (state.pending !== null && state.phase === "ready") return this.changeWeapon(self, game, state, input);
     if (state.phase === "activating") { state.phase = "ready"; state.frame = idleFirst; return undefined; }
     if (state.phase === "ready") {
@@ -742,6 +706,10 @@ export class Q2Weapons extends Q2Ballistics {
     const soundFrame = throwing?.soundFrame ?? 5, holdFrame = throwing?.holdFrame ?? 11, cockSound = throwing?.cockSound ?? "weapons/hgrena1b.wav";
     const holdSound = throwing?.holdSound ?? "weapons/hgrenc1b.wav", explodes = throwing?.explode ?? true;
     const fire = (held: boolean): undefined => throwing === undefined ? this.throwGrenade(context, held) : throwing.fire(context, held);
+    if (state.primaryHandoff === "holstering") {
+      if (state.thinkTime <= now || input.instantSwitch) this.changeWeapon(self, game, state, input);
+      return undefined;
+    }
     if (state.pending !== null && state.phase === "ready") {
       if (state.thinkTime <= now) { this.changeWeapon(self, game, state, input); state.thinkTime = millisecondSum(now, this.animationTime(context)); }
       return undefined;

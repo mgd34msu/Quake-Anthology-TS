@@ -48,6 +48,7 @@ export class Q2MissionPackWeapons {
     }
     if (context.rerelease) {
       weapons.genericRerelease(context);
+      if (state.primaryHandoff === "holstered") return undefined;
       if (definition.name === "chainfist") {
         if ((state.frame === 42 || state.frame === 51) && Math.floor(game.host.random() * 8) !== 0 && input.hand !== "center" && game.host.random() < 0.4) {
           const projection = weapons.project(context, { x: 8, y: 8, z: -4 });
@@ -69,16 +70,17 @@ export class Q2MissionPackWeapons {
     else if (definition.name === "heatbeam") {
       if (state.phase === "firing") {
         weapons.setLoop(self, game, state, "weapons/bfg__l1a.wav");
-        if (weapons.ammo(context) >= 2 && input.attack) {
+        if (weapons.ammo(context) >= 2 && weapons.continuesAttack(context)) {
           if (state.frame >= 13) state.frame = 9;
           state.viewModel = "models/weapons/v_beamer2/tris.md2";
         } else { state.frame = 13; state.viewModel = null; }
       } else { state.viewModel = null; weapons.setLoop(self, game, state, ""); }
     }
     if (context.rerelease) weapons.genericRerelease(context); else weapons.genericClassic(context);
-    if (definition.name === "etf_rifle" && state.frame === 8 && input.attack) state.frame = 6;
+    if (state.primaryHandoff === "holstered") return undefined;
+    if (definition.name === "etf_rifle" && state.frame === 8 && weapons.continuesAttack(context)) state.frame = 6;
     if (definition.name === "chainfist") {
-      if (input.attack && (state.frame === 13 || state.frame === 23 || state.frame === 32)) { lastSequence = state.frame; state.frame = 6; }
+      if (weapons.continuesAttack(context) && (state.frame === 13 || state.frame === 23 || state.frame === 32)) { lastSequence = state.frame; state.frame = 6; }
       if (state.frame === 6) {
         let chance = game.host.random();
         if (lastSequence === 13) chance -= 0.34;
@@ -164,7 +166,7 @@ export class Q2MissionPackWeapons {
   private etf(context: Q2WeaponContext, weapons: Q2Weapons): undefined {
     const { self, game, input, state } = context;
     if (context.rerelease) {
-      if (!input.attack) { state.frame = 8; return undefined; }
+      if (!weapons.continuesAttack(context)) { state.frame = 8; return undefined; }
       state.frame = state.frame === 6 ? 7 : 6;
     }
     if (weapons.ammo(context) < context.definition.quantity) { weapons.kick(context, zero, zero); state.frame = 8; return weapons.noAmmo(context); }
@@ -204,9 +206,9 @@ export class Q2MissionPackWeapons {
   private heat(context: Q2WeaponContext, weapons: Q2Weapons): undefined {
     const { self, game, state } = context, projection = weapons.project(context, { x: 7, y: 2, z: -3 });
     if (context.rerelease) {
-      if (!context.input.attack || weapons.ammo(context) < 2) {
+      if (!weapons.continuesAttack(context) || weapons.ammo(context) < 2) {
         state.frame = 13; state.viewSkin = 0; weapons.setLoop(self, game, state, "");
-        return context.input.attack ? weapons.noAmmo(context) : undefined;
+        return weapons.continuesAttack(context) ? weapons.noAmmo(context) : undefined;
       }
       state.frame = state.frame > 12 || state.frame === 11 ? 8 : state.frame + 1;
       state.viewSkin = 1; weapons.setLoop(self, game, state, "weapons/bfg__l1a.wav"); weapons.powerupSound(context);
@@ -220,8 +222,8 @@ export class Q2MissionPackWeapons {
   }
 
   private chainfistRerelease(context: Q2WeaponContext, weapons: Q2Weapons): undefined {
-    const { self, game, state, input } = context;
-    if (!input.attack && (state.frame === 13 || state.frame === 23 || state.frame >= 32)) { state.frame = 33; return undefined; }
+    const { self, game, state } = context;
+    if (!weapons.continuesAttack(context) && (state.frame === 13 || state.frame === 23 || state.frame >= 32)) { state.frame = 33; return undefined; }
     const projection = weapons.project(context, { x: 0, y: 0, z: -4 }), own = game.body(self);
     const ownMin = add(own.origin, own.bounds.min), ownMax = add(own.origin, own.bounds.max);
     const closest = (point: Vec3, min: Vec3, max: Vec3): Vec3 => ({ x: Math.max(min.x, Math.min(max.x, point.x)), y: Math.max(min.y, Math.min(max.y, point.y)), z: Math.max(min.z, Math.min(max.z, point.z)) });
@@ -247,7 +249,7 @@ export class Q2MissionPackWeapons {
     }
     if (hit && state.emptySoundTime < context.now) { state.emptySoundTime = context.now + 0.5; game.sound(self, "weapons/sawslice.wav", 1); }
     weapons.playerNoise(self, game, projection.start, "weapon"); state.frame++;
-    if (input.attack) {
+    if (weapons.continuesAttack(context)) {
       if (state.frame === 12) state.frame = 14;
       else if (state.frame === 22) state.frame = 24;
       else if (state.frame >= 32) state.frame = 7;
