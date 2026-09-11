@@ -191,7 +191,7 @@ export class Q2CtfGrappleEquipment {
         if (!game.host.actors.isLive(hook.actor.id) || !game.host.actors.isLive(owner)) return undefined;
         this.sound(hook.actor.id, owner, game, "grhurt");
       }
-      if (this.hooks.dead(hook.enemy) || game.host.combat.read(hook.enemy)?.health !== undefined && (game.host.combat.read(hook.enemy)?.health ?? 0) <= 0 && hook.enemy !== game.host.worldActor()) return this.resetHook(hook, game);
+      if (this.hooks.dead(hook.enemy, game)) return this.resetHook(hook, game);
     }
     this.cable(hook, owner, game);
     const source = this.state(owner);

@@ -21,7 +21,10 @@ export function nativeGrappleHooks(hooks: NativeHooks, weaponAim = true): Grappl
       if (game.host.isPlayer(actor)) return "player";
       return entity?.solid === "box" ? "box" : entity?.solid === "brush" ? "brush" : "none";
     },
-    dead: actor => hooks.player(actor)?.dead === true,
+    dead: (actor, game) => {
+      const combat = game.host.combat.read(actor);
+      return hooks.player(actor)?.dead === true || combat?.canTakeDamage === true && combat.health <= 0;
+    },
     previousVelocity: actor => hooks.player(actor)?.oldVelocity ?? zero,
     setPreviousVelocity: (actor, velocity) => { const player = hooks.player(actor); if (player !== null) player.oldVelocity = velocity; return undefined; },
     volume: actor => (hooks.weapons.states.get(actor)?.silencerShots ?? 0) > 0 ? 0.2 : 1,

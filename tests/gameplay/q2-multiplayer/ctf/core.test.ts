@@ -96,6 +96,26 @@ function fixture(saved: SavedFixture | null = null) {
   return { game, ctf, items, weapons, inventory, combat, common, events, presentation, destinations, player, advance, touch, save };
 }
 
+test("grapple retains a zero-health brush and releases a damageable dead anchor", () => {
+  const scene = fixture(), owner = scene.player(0), core = scene.ctf.grapple.equipment;
+  if (core === null) throw new Error("Missing native CTF grapple");
+  const brush = scene.game.create("test_brush_anchor");
+  scene.game.solid(brush, "brush");
+  scene.combat.create(brush.actor, { health: 0, armor: { kind: "none" }, mass: 100,
+    canTakeDamage: false, invulnerable: false, team: null });
+  expect(core.fireGrapple(owner.actor.id, scene.game, zero, { x: 1, y: 0, z: 0 })).toBe(true);
+  const hook = scene.game.entity(core.state(owner.actor.id).grapple);
+  if (hook === null) throw new Error("Missing actual source hook");
+  core.touch(hook, scene.game, { self: hook.actor, other: brush.actor.id, plane: null, surface: null });
+  core.pull(hook, scene.game, false);
+  expect(core.state(owner.actor.id).grapple).toBe(hook.actor.id);
+  expect(scene.game.host.actors.isLive(hook.actor.id)).toBe(true);
+  scene.combat.setTraits(brush.actor, { canTakeDamage: true });
+  core.pull(hook, scene.game, false);
+  expect(core.state(owner.actor.id).grapple).toBeNull();
+  expect(scene.game.host.actors.isLive(hook.actor.id)).toBe(false);
+});
+
 function flags(scene: ReturnType<typeof fixture>) {
   const red = scene.game.spawn({ classname: "item_flag_team1", ordinal: 2, values: new Map([["origin", "0 0 128"]]) });
   const blue = scene.game.spawn({ classname: "item_flag_team2", ordinal: 3, values: new Map([["origin", "1024 0 128"]]) }); scene.advance(0.2); return { red, blue };

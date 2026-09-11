@@ -14,7 +14,7 @@ export type GrappleAnchor = "none" | "box" | "brush" | "world" | "player" | "cor
 export interface GrappleHooks {
   pose(actor: ActorId, game: Q2GameServices): GrapplePose;
   anchor(actor: ActorId, game: Q2GameServices): GrappleAnchor;
-  dead(actor: ActorId): boolean;
+  dead(actor: ActorId, game: Q2GameServices): boolean;
   previousVelocity(actor: ActorId): Vec3;
   setPreviousVelocity(actor: ActorId, velocity: Vec3): undefined;
   volume(actor: ActorId): number;

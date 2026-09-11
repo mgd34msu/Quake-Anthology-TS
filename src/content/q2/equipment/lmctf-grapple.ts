@@ -66,7 +66,7 @@ export class LmctfGrappleEquipment {
     if (!game.host.actors.isLive(owner) || game.host.bodies.read(owner) === null) return this.abort(owner, game);
     if (contact.other.equals(owner) || hook.enemy !== null && !hook.enemy.equals(contact.other)) return undefined;
     const state = this.state(owner), anchor = this.hooks.anchor(contact.other, game);
-    if (anchor === "none" || anchor === "box" || (contact.surface?.nativeFlags ?? 0) & 4 || !this.policy.canAttach(owner, contact.other, game) || this.hooks.dead(contact.other)) return this.abort(owner, game);
+    if (anchor === "none" || anchor === "box" || (contact.surface?.nativeFlags ?? 0) & 4 || !this.policy.canAttach(owner, contact.other, game) || this.hooks.dead(contact.other, game)) return this.abort(owner, game);
     game.move(hook, { velocity: zero }); state.hookState = 2;
     if (this.policy.canDamage(contact.other)) {
       const frame = Math.round(game.host.now() * 10), repeated = hook.enemy?.equals(contact.other) ?? false;
@@ -81,7 +81,7 @@ export class LmctfGrappleEquipment {
         if (repeated) hook.count = frame;
       }
     }
-    if (this.hooks.dead(contact.other)) return this.abort(owner, game);
+    if (this.hooks.dead(contact.other, game)) return this.abort(owner, game);
     if (hook.enemy === null) {
       const body = game.host.bodies.read(contact.other); if (body === null) return this.abort(owner, game);
       hook.enemy = contact.other; hook.pos1 = subtract(game.body(hook).origin, add(body.origin, body.bounds.min)); game.solid(hook, "trigger");
