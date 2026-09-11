@@ -1,7 +1,7 @@
 /* Permanent Q2 monster provider: shared actor authority with source animation/AI callbacks. GPL-2.0-or-later. */
 import type { SavedActorId } from "../../../../contracts/session.ts";
 import type { Q2CallbackDefinitions } from "../callbacks.ts";
-import { restoreQ2Actor, saveQ2Actor } from "../checkpoint.ts";
+import { restoreQ2Actor, saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "../checkpoint.ts";
 import type { Q2MonstersCheckpoint } from "./checkpoint.ts";
 import { createAlternateFlyState } from "./alternate-fly-state.ts";
 import { q2GibCallbacks } from "./gibs.ts";
@@ -189,7 +189,7 @@ export class Q2Monsters implements Q2SpawnModule {
           oldEnemy: saveQ2Actor(oldEnemy), moveTarget: saveQ2Actor(moveTarget), commander: saveQ2Actor(commander) },
         pendingDamage: pending === undefined ? null : { reaction: { damage: pending.reaction.damage, kick: pending.reaction.kick, point: { ...pending.reaction.point },
           attacker: saveQ2Actor(pending.reaction.attacker), inflictor: saveQ2Actor(pending.reaction.inflictor) },
-          attack: pending.attack === null ? null : structuredClone({ ...pending.attack, attacker: saveQ2Actor(pending.attack.attacker), inflictor: saveQ2Actor(pending.attack.inflictor) }) } };
+          attack: pending.attack === null ? null : structuredClone(saveQ2Attack(pending.attack)) } };
     }) };
   }
 
@@ -214,7 +214,7 @@ export class Q2Monsters implements Q2SpawnModule {
       const pending = saved.pendingDamage;
       if (pending !== null) this.pendingDamage.set(owner.id, {
         reaction: { ...pending.reaction, self: owner, attacker: reference(pending.reaction.attacker), inflictor: reference(pending.reaction.inflictor) },
-        attack: pending.attack === null ? null : { ...pending.attack, attacker: reference(pending.attack.attacker), inflictor: reference(pending.attack.inflictor) },
+        attack: pending.attack === null ? null : restoreQ2Attack(pending.attack, actor => game.host.actors.referenceSaved(actor)),
       });
     }
     this.perception.restore(game, checkpoint.perception);

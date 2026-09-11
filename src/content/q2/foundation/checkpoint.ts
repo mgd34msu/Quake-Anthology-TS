@@ -13,9 +13,23 @@ export function restoreQ2Actor(game: Q2GameServices, actor: SavedActorId): Owned
   return owner;
 }
 
-export interface Q2AttackCheckpoint extends Omit<AttackProvenance, "attacker" | "inflictor"> {
+export interface Q2AttackCheckpoint extends Omit<AttackProvenance, "attacker" | "inflictor" | "originatingProjectile"> {
   readonly attacker: SavedActorId | null;
   readonly inflictor: SavedActorId | null;
+  readonly originatingProjectile?: SavedActorId;
+}
+
+export function saveQ2Attack(attack: AttackProvenance): Q2AttackCheckpoint {
+  const { attacker, inflictor, originatingProjectile, ...values } = attack;
+  return { ...values, attacker: saveQ2Actor(attacker), inflictor: saveQ2Actor(inflictor),
+    ...(originatingProjectile === undefined ? {} : { originatingProjectile: { slot: originatingProjectile.slot, generation: originatingProjectile.generation } }) };
+}
+
+export function restoreQ2Attack(attack: Q2AttackCheckpoint, reference: (actor: SavedActorId) => ActorId): AttackProvenance {
+  const { attacker, inflictor, originatingProjectile, ...values } = attack;
+  return { ...values, attacker: attacker === null ? null : reference(attacker),
+    inflictor: inflictor === null ? null : reference(inflictor),
+    ...(originatingProjectile === undefined ? {} : { originatingProjectile: reference(originatingProjectile) }) };
 }
 
 export interface Q2EntityCheckpoint {

@@ -9,7 +9,7 @@ import type { EntityPool } from "./game/entities.ts";
 import type { CombatContext, DamageDiagnostic, Q3DamageCall } from "./game/combat.ts";
 import { q3DamageFeedback } from "./game/combat.ts";
 import { GameEntity } from "./game/state.ts";
-import type { UseParticipant } from "./game/state.ts";
+import type { UseParticipant, DamageParticipant } from "./game/state.ts";
 import { useActor } from "./game/use-participant.ts";
 import { GameFlags } from "./game/state.ts";
 import { GameType, Powerup, statSchema } from "./shared/definitions.ts";
@@ -51,6 +51,10 @@ export class Q3CombatBridge {
       authority: host.authority, entities: host.entities, spatial: host.world,
       actors: {
         participant: (actor: ActorId) => host.records.damageInflictor(actor),
+        parent: (actor: ActorId): ActorId | null => {
+          const parent = host.records.nativeByActor(actor)?.parent;
+          return parent?.inuse === true ? parent.actor.id : null;
+        },
         linkedBounds: (actor: ActorId) => host.records.host.bodies.linked(actor)?.absoluteBounds ?? null,
         isPlayer: (actor: ActorId) => {
           const native = host.records.nativeByActor(actor);
@@ -60,9 +64,10 @@ export class Q3CombatBridge {
       get time() { return host.time(); }, get intermissionQueued() { return host.intermissionQueued(); },
       get gameType() { return host.gameType(); }, get friendlyFire() { return host.friendlyFire(); }, get knockback() { return host.knockback(); },
       debugDamage: host.debugDamage,
-      attack: (inflictor: GameEntity, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number): AttackProvenance => ({
-        sequence: this.sequence++, time: { kind: "milliseconds", value: host.time() }, attacker: useActor(attacker), inflictor: inflictor.actor.id,
-        weapon: weapon ?? q3WeaponItem(inflictor.s.weapon || (attacker instanceof GameEntity ? attacker.s.weapon : 0))?.item ?? null, weaponProvider: host.weaponProvider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider,
+      attack: (inflictor: DamageParticipant, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number, originatingProjectile?: ActorId): AttackProvenance => ({
+        sequence: this.sequence++, time: { kind: "milliseconds", value: host.time() }, attacker: useActor(attacker), inflictor: useActor(inflictor),
+        ...(originatingProjectile === undefined ? {} : { originatingProjectile }),
+        weapon: weapon ?? q3WeaponItem((inflictor instanceof GameEntity ? inflictor.s.weapon : 0) || (attacker instanceof GameEntity ? attacker.s.weapon : 0))?.item ?? null, weaponProvider: host.weaponProvider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider,
         movementProvider: host.movementProvider, cause: { kind: "q3", meansOfDeath, damageFlags: flags },
       }),
       dispatch: (call: Q3DamageCall, operation: () => DamageOutcome): DamageOutcome => {
@@ -104,7 +109,8 @@ export class Q3CombatBridge {
         const target = host.records.nativeByActor(request.target), owner = host.records.nativeByActor(request.attack.attacker);
         const targetClient = target?.client ?? null, ownerClient = owner?.client ?? null;
         const method = request.attack.cause.kind === "q3" ? request.attack.cause.meansOfDeath : -1;
-        const source = host.product === "missionpack" && method === 25 ? host.records.nativeByActor(request.attack.inflictor) : null;
+        const parentActor = host.product === "missionpack" && method === 25 && request.attack.inflictor !== null ? this.context.actors.parent(request.attack.inflictor) : null;
+        const parent = host.records.nativeByActor(parentActor);
         const schema = statSchema(host.product);
         const guard = ownerClient !== null && schema.product === "missionpack" &&
           itemAt("missionpack", ownerClient.ps.stats.get(schema.persistentPowerup)).tag === Powerup.PW_GUARD;
@@ -117,7 +123,7 @@ export class Q3CombatBridge {
           battlesuit: targetClient !== null && targetClient.ps.powerups.get(Powerup.PW_BATTLESUIT) !== 0,
           falling: method === 19, juiced: method === 27,
           proximityProtected: host.product === "missionpack" && method === 25 &&
-            (target !== null && target === owner || source?.parent != null && this.sameTeam(target, source.parent)), product: host.product };
+            (target !== null && target === owner || parent !== null && this.sameTeam(target, parent)), product: host.product };
       },
     });
     const sourceState = (request: DamageRequest, state: CombatState, attacker: boolean): CombatState => {

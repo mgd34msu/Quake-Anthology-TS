@@ -15,7 +15,7 @@ import { q2WorldEffects, q2FallingDamage } from "./environment.ts";
 import { q2BuildView, q2ClientAnimation, q2ClientEffects, q2DamageFeedback } from "./view.ts";
 import { createQ2PlayerRules, Q2PlayerState } from "./types.ts";
 import type { Q2CharacterContext, Q2CharacterWeapon, Q2PlayerMovement, Q2PlayerRules, Q2PlayerView } from "./types.ts";
-import { saveQ2Actor } from "../../foundation/checkpoint.ts";
+import { saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "../../foundation/checkpoint.ts";
 import type { Q2CharacterCheckpoint } from "./checkpoint.ts";
 
 export interface Q2CharacterGib {
@@ -75,14 +75,14 @@ export class Q2CharacterActor {
     return { version: 1, painIndex: this.painIndex, deathIndex: this.deathIndex, state: structuredClone({ ...state, chaseTarget: saveQ2Actor(state.chaseTarget) }), rules: structuredClone(this.rules),
       entity: { model: entity.model, model2: entity.model2, model3: entity.model3, model4: entity.model4, skin: entity.skin, frame: entity.frame, oldFrame: entity.oldFrame, scale: entity.scale,
         effects: entity.effects, renderFlags: entity.renderFlags, flags: entity.flags, serverFlags: entity.serverFlags, viewHeight: entity.viewHeight, maxHealth: entity.maxHealth, sound: entity.sound, visible: entity.visible },
-      lastAttack: attack === null ? null : structuredClone({ ...attack, attacker: saveQ2Actor(attack.attacker), inflictor: saveQ2Actor(attack.inflictor) }) };
+      lastAttack: attack === null ? null : structuredClone(saveQ2Attack(attack)) };
   }
   restore(checkpoint: Q2CharacterCheckpoint, resolveActor: (actor: SavedActorId) => ActorId): undefined {
     this.painIndex = checkpoint.painIndex; this.deathIndex = checkpoint.deathIndex;
     const { chaseTarget, ...values } = structuredClone(checkpoint.state), attack = checkpoint.lastAttack;
     Object.assign(this.state, values); this.state.chaseTarget = chaseTarget === null ? null : resolveActor(chaseTarget);
     Object.assign(this.rules, structuredClone(checkpoint.rules)); Object.assign(this.entity, checkpoint.entity);
-    this.entity.lastAttack = attack === null ? null : { ...attack, attacker: attack.attacker === null ? null : resolveActor(attack.attacker), inflictor: attack.inflictor === null ? null : resolveActor(attack.inflictor) };
+    this.entity.lastAttack = attack === null ? null : restoreQ2Attack(attack, resolveActor);
     return undefined;
   }
   private body(): BodyState {

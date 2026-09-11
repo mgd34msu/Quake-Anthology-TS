@@ -6,7 +6,7 @@ import { add, integerField, length, numberField, scale, subtract, vectorField, z
 import { Q2Entity } from "./host.ts";
 import type { Q2FoundationHost, Q2GameOptions, Q2GameServices, Q2Motion, Q2SpawnFields, Q2SpawnModule, Q2Think } from "./host.ts";
 import { freeQ2Entity, Q2SourceCallbacks } from "./callbacks.ts";
-import { restoreQ2Actor, saveQ2Actor } from "./checkpoint.ts";
+import { restoreQ2Actor, saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "./checkpoint.ts";
 import type { Q2EntityCheckpoint, Q2FoundationCheckpoint } from "./checkpoint.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 
@@ -57,7 +57,7 @@ export class Q2EntityServices implements Q2GameServices {
         spawn: { classname: spawn.classname, ordinal: spawn.ordinal, values: [...spawn.values].map(([key, value]) => ({ key, value })) }, values: structuredClone(values),
         links: { activator: saveQ2Actor(activator), enemy: saveQ2Actor(enemy), owner: saveQ2Actor(owner), goal: saveQ2Actor(goal),
           teamMaster: saveQ2Actor(teamMaster), teamChain: saveQ2Actor(teamChain), chain: saveQ2Actor(chain), beam: saveQ2Actor(beam), beam2: saveQ2Actor(beam2), proboscus: saveQ2Actor(proboscus) },
-        lastAttack: lastAttack === null ? null : { ...lastAttack, attacker: saveQ2Actor(lastAttack.attacker), inflictor: saveQ2Actor(lastAttack.inflictor) },
+        lastAttack: lastAttack === null ? null : saveQ2Attack(lastAttack),
         callbacks: { think: this.sourceCallbacks.think.name(think), prethink: this.sourceCallbacks.think.name(prethink), postthink: this.sourceCallbacks.think.name(postthink), use: this.sourceCallbacks.use.name(use),
           touch: this.sourceCallbacks.touch.name(touch), pain: this.sourceCallbacks.pain.name(pain), die: this.sourceCallbacks.die.name(die), blocked: this.sourceCallbacks.blocked.name(blocked) } });
     }
@@ -86,7 +86,7 @@ export class Q2EntityServices implements Q2GameServices {
       entity.goal = reference(saved.links.goal); entity.teamMaster = reference(saved.links.teamMaster); entity.teamChain = reference(saved.links.teamChain); entity.chain = reference(saved.links.chain);
       entity.beam = reference(saved.links.beam); entity.beam2 = reference(saved.links.beam2);
       entity.proboscus = reference(saved.links.proboscus);
-      entity.lastAttack = saved.lastAttack === null ? null : { ...saved.lastAttack, attacker: reference(saved.lastAttack.attacker), inflictor: reference(saved.lastAttack.inflictor) };
+      entity.lastAttack = saved.lastAttack === null ? null : restoreQ2Attack(saved.lastAttack, actor => this.host.actors.referenceSaved(actor));
       entity.think = this.sourceCallbacks.think.resolve(saved.callbacks.think); entity.prethink = this.sourceCallbacks.think.resolve(saved.callbacks.prethink);
       entity.postthink = this.sourceCallbacks.think.resolve(saved.callbacks.postthink);
       entity.use = this.sourceCallbacks.use.resolve(saved.callbacks.use); entity.touch = this.sourceCallbacks.touch.resolve(saved.callbacks.touch);

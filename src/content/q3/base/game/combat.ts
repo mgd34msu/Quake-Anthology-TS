@@ -2,7 +2,7 @@
 // CanDamage and G_RadiusDamage; g_team.c: OnSameTeam. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
 
-import { add3, length3, normalize3, scale3, sub3, vec3 } from "../../../../core/math.ts";
+import { normalize3, vec3 } from "../../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../../core/math.ts";
 import type { ActorSpatialQueries } from "../world.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -16,6 +16,7 @@ import type { EntityPool } from "./entities.ts";
 import { GameFlags, MoverState } from "./state.ts";
 import { GameEntity } from "./state.ts";
 import type { UseParticipant, DamageParticipant } from "./state.ts";
+import { q3CanDamage, q3RadiusDamage } from "./radius-damage.ts";
 
 export enum DamageFlags {
   RADIUS = 0x1,
@@ -40,7 +41,7 @@ export interface DamageDirection { x: number; y: number; z: number }
 
 interface CombatServices {
   readonly authority: GameplayAuthority;
-  attack(inflictor: GameEntity, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number): AttackProvenance;
+  attack(inflictor: DamageParticipant, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number, originatingProjectile?: ActorId): AttackProvenance;
   /** Runs apply synchronously while retaining this source call for beforeReaction feedback. */
   dispatch(call: Q3DamageCall, operation: () => DamageOutcome): DamageOutcome;
   readonly time: number;
@@ -52,6 +53,7 @@ interface CombatServices {
   readonly spatial: ActorSpatialQueries;
   readonly actors: {
     participant(actor: ActorId): DamageParticipant;
+    parent(actor: ActorId): ActorId | null;
     linkedBounds(actor: ActorId): Bounds | null;
     isPlayer(actor: ActorId): boolean;
   };
@@ -96,9 +98,9 @@ export function q3AdmitTargetDamage(context: Pick<CombatContext, "intermissionQu
 }
 
 /** Caller supplies already weapon-scaled damage. Doubler/quad scaling belongs to g_weapon. */
-export function damage(context: CombatContext, target: DamageParticipant, inflictor: GameEntity | null,
+export function damage(context: CombatContext, target: DamageParticipant, inflictor: DamageParticipant | null,
   attacker: UseParticipant | null, direction: DamageDirection | null, point: Vec3 | null,
-  amount: number, flags: number, methodOfDeath: number): void {
+  amount: number, flags: number, methodOfDeath: number, originatingProjectile?: ActorId): void {
   if (context.intermissionQueued !== 0) return;
   if (!(target instanceof GameEntity)) {
     const origin = point ?? target.origin();
@@ -107,7 +109,7 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
     const impulseDirection = direction === null ? vec3(0, 0, 0) : { ...direction };
     if (direction === null) flags |= DamageFlags.NO_KNOCKBACK;
     else { const normalized = normalize3(direction); direction.x = normalized.x; direction.y = normalized.y; direction.z = normalized.z; }
-    context.authority.apply({ target: target.actor, attack: context.attack(source, owner, null, methodOfDeath, flags),
+    context.authority.apply({ target: target.actor, attack: context.attack(source, owner, null, methodOfDeath, flags, originatingProjectile),
       amount, knockback: amount, direction: impulseDirection, point: origin, normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" });
     return;
   }
@@ -125,7 +127,7 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
   const impulseDirection = direction === null ? vec3(0, 0, 0) : { ...direction };
   if (direction === null) flags |= DamageFlags.NO_KNOCKBACK;
   else { const normalized = normalize3(direction); direction.x = normalized.x; direction.y = normalized.y; direction.z = normalized.z; }
-  const attack = context.attack(source, owner, null, methodOfDeath, flags);
+  const attack = context.attack(source, owner, null, methodOfDeath, flags, originatingProjectile);
   const apply = () => context.authority.apply({ attack, target: target.actor.id,
     amount, knockback: amount, direction: impulseDirection, point: point ?? target.r.currentOrigin,
     normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" });
@@ -133,7 +135,7 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
 }
 
 export interface Q3DamageCall {
-  readonly target: GameEntity; readonly source: GameEntity; readonly owner: UseParticipant;
+  readonly target: GameEntity; readonly source: DamageParticipant; readonly owner: UseParticipant;
   readonly direction: Vec3 | null; readonly point: Vec3 | null;
   readonly amount: number; readonly flags: number; readonly methodOfDeath: number;
 }
@@ -159,8 +161,10 @@ export function q3DamageFeedback(context: CombatContext, call: Q3DamageCall, dec
   if ((flags & DamageFlags.NO_PROTECTION) === 0) {
     const checkTeam = context.product === "baseq3" || methodOfDeath !== 27 && (flags & DamageFlags.NO_TEAM_PROTECTION) === 0;
     if (checkTeam && target !== owner && nativeOwner !== null && onSameTeam(context,target,nativeOwner) && !context.friendlyFire) return;
+    const parent = context.product === "missionpack" && methodOfDeath === 25 ? context.actors.parent(useActor(call.source)) : null;
+    const parentEntity = parent === null ? null : context.entities.options.records.nativeByActor(parent);
     if (context.product === "missionpack" && methodOfDeath === 25 &&
-      (target === owner || call.source.parent !== null && onSameTeam(context,target,call.source.parent))) return;
+      (target === owner || parentEntity !== null && onSameTeam(context, target, parentEntity))) return;
     if ((target.flags & GameFlags.GODMODE) !== 0 || context.authority.read(target.actor.id)?.invulnerable) return;
   }
   if (client !== null && client.ps.powerups.get(Powerup.PW_BATTLESUIT) !== 0) {
@@ -195,40 +199,22 @@ export function q3DamageFeedback(context: CombatContext, call: Q3DamageCall, dec
 
 export function canDamage(context: CombatContext, target: DamageParticipant, origin: Vec3): boolean {
   const actor = useActor(target), bounds = context.actors.linkedBounds(actor);
-  if (bounds === null) return false;
-  const midpoint = scale3(add3(bounds.min, bounds.max), 0.5);
-  const trace = (end: Vec3) => context.spatial.traceActor({ start: origin, end, shape: { kind: "point" }, passActor: null, mask: 1 });
-  const center = trace(midpoint);
-  if (center.fraction === 1 || center.hit.kind === "actor" && center.hit.actor.equals(actor)) return true;
-  for (const [x, y] of [[15, 15], [15, -15], [-15, 15], [-15, -15]] satisfies readonly (readonly [number, number])[]) {
-    if (trace(vec3(midpoint.x + x, midpoint.y + y, midpoint.z)).fraction === 1) return true;
-  }
-  return false;
+  return bounds !== null && q3CanDamage(context.spatial, actor, bounds, origin);
 }
 
 export function radiusDamage(context: CombatContext, origin: Vec3, attacker: DamageParticipant,
-  amount: number, radius: number, ignore: DamageParticipant | null, methodOfDeath: number): boolean {
-  radius = Math.max(1, Math.fround(radius));
-  amount = Math.fround(amount);
-  const extent = vec3(radius, radius, radius);
-  const candidates = context.spatial.areaActors({ min: sub3(origin, extent), max: add3(origin, extent) }, 1024);
-  let hitClient = false;
-  for (const actor of candidates) {
-    if (ignore !== null && actor.equals(useActor(ignore)) || !context.authority.read(actor)?.canTakeDamage) continue;
-    const bounds = context.actors.linkedBounds(actor);
-    if (bounds === null) continue;
-    const target = context.actors.participant(actor);
-    const distanceAxis = (value: number, min: number, max: number): number => value < min ? min - value : value > max ? value - max : 0;
-    const distance = length3(vec3(distanceAxis(origin.x, bounds.min.x, bounds.max.x),
-      distanceAxis(origin.y, bounds.min.y, bounds.max.y), distanceAxis(origin.z, bounds.min.z, bounds.max.z)));
-    if (distance >= radius) continue;
-    const points = Math.fround(amount * Math.fround(1 - Math.fround(distance / radius)));
-    if (!canDamage(context, target, origin)) continue;
-    if (target instanceof GameEntity && attacker instanceof GameEntity && context.logAccuracyHit(target, attacker)) hitClient = true;
-    const targetOrigin = target instanceof GameEntity ? target.r.currentOrigin : target.origin();
-    if (targetOrigin === null) continue;
-    const direction = add3(sub3(targetOrigin, origin), vec3(0, 0, 24));
-    damage(context, target, null, attacker, direction, origin, Math.trunc(points), DamageFlags.RADIUS, methodOfDeath);
-  }
-  return hitClient;
+  amount: number, radius: number, ignore: DamageParticipant | null, methodOfDeath: number, originatingProjectile?: ActorId): boolean {
+  const ownerActor = useActor(attacker);
+  return q3RadiusDamage({ spatial: context.spatial,
+    target: actor => {
+      if (!context.authority.read(actor)?.canTakeDamage) return null;
+      const bounds = context.actors.linkedBounds(actor); if (bounds === null) return null;
+      const target = context.actors.participant(actor), position = target instanceof GameEntity ? target.r.currentOrigin : target.origin();
+      if (position === null) return null;
+      const owner = context.entities.options.records.nativeByActor(ownerActor);
+      return { bounds, origin: position, accuracyEligible: target instanceof GameEntity && owner !== null && context.logAccuracyHit(target, owner) };
+    },
+    damage: (actor, direction, point, points) => damage(context, context.actors.participant(actor), null, context.actors.participant(ownerActor),
+      { ...direction }, point, points, DamageFlags.RADIUS, methodOfDeath, originatingProjectile),
+  }, origin, amount, radius, ignore === null ? null : useActor(ignore));
 }

@@ -1,7 +1,7 @@
+import { q3RadiusDamage } from "../../../content/q3/base/game/radius-damage.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import { readVector } from "../../../persistence/shared.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
-import { sameActor } from "../../../contracts/identity.ts";
 import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { NumericProfile } from "../../../contracts/numeric.ts";
@@ -10,7 +10,7 @@ import type { TraceResult } from "../../../contracts/scene.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
 import type { SharedSceneQueries } from "../../../world/collision/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
-import { add3, length3, normalize3, scale3, sub3, vec3 } from "../../../core/math.ts";
+import { add3, length3, normalize3, scale3, vec3 } from "../../../core/math.ts";
 import { qvmAngleVectors } from "../../../core/qvm-math.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { q3MissileParameters, q3NailVelocity, q3BounceVelocity, q3MissileHitTime } from "../../../content/q3/base/game/ballistics-math.ts";
@@ -43,7 +43,8 @@ export interface Q3SharedBallisticsHost {
   teamDeathmatch(): boolean;
   teamGame(): boolean;
   isPlayer(actor: ActorId): boolean;
-  attack(actor: OwnedActor, inflictor: OwnedActor, weapon: number, method: number, flags: number): AttackProvenance;
+  worldActor(): ActorId;
+  attack(actor: ActorId, inflictor: ActorId, weapon: number, method: number, flags: number, originatingProjectile?: ActorId): AttackProvenance;
   event(event: Q3SharedBallisticEvent): undefined;
 }
 export interface Q3WeaponStatistics extends Q3RailStatistics { readonly actor: OwnedActor; readonly shots: number; }
@@ -95,7 +96,7 @@ export class Q3SharedBallistics {
       },
       emit: event => { this.event({ kind: "impact", hitKind: event.flesh ? "flesh" : "wall", actor: actor.id, weapon,
         origin: attack.muzzle, end: event.point, normal: event.normal, target: event.target, surfaceFlags: 0 }); },
-      damage: (target, direction, point, scaled) => this.hit(actor, actor, weapon, target, point, direction, scaled, 3),
+      damage: (target, direction, point, scaled) => this.hit(actor.id, actor.id, weapon, target, point, direction, scaled, 3),
       creditAccuracyHit: () => { if (!this.host.actors.isLive(actor.id)) return; const current = this.weaponStatistics(actor); this.weaponCounters.set(actor, { ...current, hits: (current.hits + 1) | 0 }); },
     }, actor.id, attack, spread, amount);
   }
@@ -107,9 +108,9 @@ export class Q3SharedBallistics {
     return this.host.scene.trace({ start, end, passActor: pass, target: { kind: "world" }, shape: { kind: "point" },
       policy: { kind: "q3", contentsMask: mask, curves: true, playerCurveClip: true }, numeric: this.host.numeric });
   }
-  private hit(actor: OwnedActor, inflictor: OwnedActor, weapon: number, target: ActorId, point: Vec3, direction: Vec3, amount: number, method: number, radius = false): void {
+  private hit(actor: ActorId, inflictor: ActorId, weapon: number, target: ActorId, point: Vec3, direction: Vec3, amount: number, method: number, radius = false, originatingProjectile?: ActorId): void {
     if (!this.host.combat.read(target)?.canTakeDamage) return;
-    this.host.combat.apply({ attack: this.host.attack(actor, inflictor, weapon, method, radius ? 1 : 0), target, amount, knockback: amount,
+    this.host.combat.apply({ attack: this.host.attack(actor, inflictor, weapon, method, radius ? 1 : 0, originatingProjectile), target, amount, knockback: amount,
       point, direction, normal: zero, delivery: radius ? "radius" : "direct" });
   }
   private contactHost(actor: OwnedActor, weapon: number, attack: Q3BulletAttack, method: number): Q3ContactHost {
@@ -132,7 +133,7 @@ export class Q3SharedBallistics {
       },
       emit: contact => { this.event({ kind: "contact", actor: actor.id, weapon, origin: contact.kind === "gauntlet-quad" ? this.host.pose(actor).origin : attack.muzzle, end: attack.muzzle,
         normal: zero, target: null, surfaceFlags: 0, contact }); },
-      damage: (target, direction, point, amount) => this.hit(actor, actor, weapon, target, point, direction, amount, method),
+      damage: (target, direction, point, amount) => this.hit(actor.id, actor.id, weapon, target, point, direction, amount, method),
       creditAccuracyHit: () => { if (!this.host.actors.isLive(actor.id)) return; const current = this.weaponStatistics(actor); this.weaponCounters.set(actor, { ...current, hits: (current.hits + 1) | 0 }); },
     };
   }
@@ -221,7 +222,7 @@ export class Q3SharedBallistics {
           const hitKind = this.hitKind(target);
           if (target !== null) {
             const velocity = evaluateTrajectoryDelta(projectile.trajectory, time);
-            this.hit(projectile.owner, projectile.actor, projectile.weapon, target, trace.end, length3(velocity) === 0 ? vec3(velocity.x, velocity.y, 1) : velocity, projectile.direct, projectile.method);
+            this.hit(projectile.owner.id, projectile.actor.id, projectile.weapon, target, trace.end, length3(velocity) === 0 ? vec3(velocity.x, velocity.y, 1) : velocity, projectile.direct, projectile.method, false, projectile.actor.id);
           }
           this.explode(projectile, snapVectorTowards(trace.end, projectile.trajectory.base), target, normal(trace), trace.kind === "q3" ? trace.surfaceFlags : 0, hitKind); continue;
         }
@@ -231,23 +232,24 @@ export class Q3SharedBallistics {
     }
   }
   private explode(projectile: Q3ProjectileState, origin: Vec3, ignore: ActorId | null, impactNormal = vec3(0, 0, 1), surfaceFlags = 0, hitKind: "wall" | "flesh" = "wall"): void {
-    const extent = vec3(projectile.radius, projectile.radius, projectile.radius);
-    for (const candidate of this.host.scene.queryActors({ min: sub3(origin, extent), max: add3(origin, extent) })) {
-      const target = candidate.body.actor;
-      if (ignore !== null && sameActor(target, ignore) || !this.host.combat.read(target)?.canTakeDamage) continue;
-      const bounds = candidate.body.absoluteBounds;
-      const axis = (value: number, min: number, max: number): number => value < min ? min - value : value > max ? value - max : 0;
-      const distance = length3(vec3(axis(origin.x, bounds.min.x, bounds.max.x), axis(origin.y, bounds.min.y, bounds.max.y), axis(origin.z, bounds.min.z, bounds.max.z)));
-      if (distance >= projectile.radius) continue;
-      const midpoint = scale3(add3(bounds.min, bounds.max), 0.5);
-      const center = this.trace(origin, midpoint, null, 1);
-      let visible = center.fraction === 1 || center.hit.kind === "actor" && sameActor(center.hit.actor, target);
-      for (const [x, y] of [[15, 15], [15, -15], [-15, 15], [-15, -15]] satisfies readonly (readonly [number, number])[]) {
-        if (visible) break; visible = this.trace(origin, vec3(midpoint.x + x, midpoint.y + y, midpoint.z), null, 1).fraction === 1;
-      }
-      if (visible) this.hit(projectile.owner, projectile.actor, projectile.weapon, target, origin, add3(sub3(candidate.body.state.origin, origin), vec3(0, 0, 24)),
-        Math.trunc(Math.fround(Math.fround(projectile.splash) * Math.fround(1 - Math.fround(distance / projectile.radius)))), projectile.splashMethod, true);
-    }
+    if (projectile.splash !== 0) q3RadiusDamage({ spatial: {
+      areaActors: (bounds, maximum) => this.host.scene.queryActors(bounds).slice(0, maximum).map(value => value.body.actor),
+      traceActor: query => {
+        const trace = this.trace(query.start, query.end, query.passActor, query.mask);
+        if (trace.kind !== "q3") throw new Error("Q3 radius trace requires its source collision policy");
+        return { fraction: trace.fraction, end: trace.end, hit: trace.hit, contact: trace.contact, contents: trace.contents, surfaceFlags: trace.surfaceFlags,
+          solidity: trace.allSolid ? "all-solid" : trace.startSolid ? "start-solid" : "clear" };
+      },
+    }, target: actor => {
+      const state = this.host.combat.read(actor), body = this.host.bodies.linked(actor);
+      if (state?.canTakeDamage !== true || body === null) return null;
+      const owner = this.host.combat.read(projectile.owner.id);
+      return { origin: body.state.origin, bounds: body.absoluteBounds, accuracyEligible: q3AccuracyHit(this.host.teamGame(),
+        { actor, damageable: state.canTakeDamage, player: this.host.isPlayer(actor), health: state.health, team: state.team },
+        { actor: projectile.owner.id, damageable: owner?.canTakeDamage ?? false, player: this.host.isPlayer(projectile.owner.id), health: owner?.health ?? 0, team: owner?.team ?? null }) };
+    }, damage: (target, direction, point, amount) => this.hit(projectile.owner.id, this.host.worldActor(), projectile.weapon,
+      target, point, direction, amount, projectile.splashMethod, true, projectile.actor.id),
+    }, origin, projectile.splash, projectile.radius, ignore);
     this.event({ kind: "impact", hitKind, actor: projectile.actor.id, weapon: projectile.weapon, origin, end: origin, normal: impactNormal, target: ignore, surfaceFlags });
     this.host.actors.release(projectile.actor);
   }

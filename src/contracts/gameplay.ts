@@ -24,6 +24,7 @@ export interface AttackProvenance {
   readonly time: SourceTime;
   readonly attacker: ActorId | null;
   readonly inflictor: ActorId | null;
+  readonly originatingProjectile?: ActorId;
   readonly weapon: ItemId | null;
   readonly weaponProvider: ProviderId;
   readonly combatProvider: ProviderId;

@@ -113,19 +113,19 @@ export class MissileRuntime {
 
   explode(entity: GameEntity): void {
     this.owned(entity);
-    const combat = this.host.combat, pool = combat.entities;
+    const combat = this.host.combat, pool = combat.entities, projectileActor = entity.actor.id;
     setOrigin(entity, snapVector(evaluateTrajectory(entity.s.pos, combat.time)));
     entity.s.eType = EntityType.ET_GENERAL;
     pool.addEvent(entity, EntityEvent.EV_MISSILE_MISS, directionToByte(vec3(0, 0, 1)));
     entity.freeAfterEvent = true;
     if (entity.splashDamage !== 0 && radiusDamage(combat, entity.r.currentOrigin, parentOf(entity), entity.splashDamage,
-      entity.splashRadius, entity, entity.splashMethodOfDeath)) this.accuracy(pool.at(entity.r.ownerNum));
+      entity.splashRadius, entity, entity.splashMethodOfDeath, projectileActor)) this.accuracy(pool.at(entity.r.ownerNum));
     this.host.world.link(entity);
   }
 
   impact(entity: GameEntity, trace: ServerTraceResult): void {
     this.owned(entity);
-    const combat = this.host.combat, pool = combat.entities, other = pool.at(trace.entityNum);
+    const combat = this.host.combat, pool = combat.entities, other = pool.at(trace.entityNum), projectileActor = entity.actor.id;
     const normal = normalOf(trace);
     let hitClient = false;
     if (!other.takedamage && (entity.s.eFlags & (EF_BOUNCE | EF_BOUNCE_HALF))) {
@@ -147,7 +147,7 @@ export class MissileRuntime {
       if (combat.logAccuracyHit(other, owner)) { this.accuracy(owner); hitClient = true; }
       let velocity = evaluateTrajectoryDelta(entity.s.pos, combat.time);
       if (length3(velocity) === 0) velocity = vec3(velocity.x, velocity.y, 1);
-      damage(combat, other, entity, owner, velocity, entity.s.origin, entity.damage, 0, entity.methodOfDeath);
+      damage(combat, other, entity, owner, velocity, entity.s.origin, entity.damage, 0, entity.methodOfDeath, projectileActor);
     }
     if (this.host.missionpack !== null && entity.s.weapon === Weapon.WP_PROX_LAUNCHER) {
       if (entity.s.pos.type !== TrajectoryType.TR_GRAVITY) return;
@@ -184,7 +184,7 @@ export class MissileRuntime {
     entity.freeAfterEvent = true; entity.s.eType = EntityType.ET_GENERAL;
     const position = snapVectorTowards(trace.end, entity.s.pos.base); setOrigin(entity, position);
     if (entity.splashDamage !== 0 && radiusDamage(combat, position, parentOf(entity), entity.splashDamage,
-      entity.splashRadius, other, entity.splashMethodOfDeath) && !hitClient) this.accuracy(pool.at(entity.r.ownerNum));
+      entity.splashRadius, other, entity.splashMethodOfDeath, projectileActor) && !hitClient) this.accuracy(pool.at(entity.r.ownerNum));
     this.host.world.link(entity);
   }
 

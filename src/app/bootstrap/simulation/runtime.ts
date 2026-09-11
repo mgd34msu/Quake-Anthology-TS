@@ -338,8 +338,9 @@ export class SharedSimulation implements Simulation {
           const quad = this.source.kind === "q1" ? (this.source.game.player(actor.id)?.powerups.get("quad") ?? 0) > this.timeSeconds
             : this.source.kind === "q2" && this.source.items.playerPowerups(actor.id).quadUntil > this.timeSeconds;
           return { origin: view.origin, angles: view.angles, viewheight: view.viewHeight, quadActive: quad, quad: quad && providerFamily(this.recipe.combat.provider) !== "q1" ? 4 : 1 }; },
-        attack: (actor, inflictor, weapon, method, flags) => ({ sequence: this.attackSequence++, time: { kind: "milliseconds", value: this.selectedMilliseconds },
-          attacker: actor.id, inflictor: inflictor.id, weapon: q3WeaponItem(weapon)?.item ?? null,
+        worldActor: () => { const actor = this.worldActor(); if (actor === null) throw new Error("Selected Q3 damage requires the admitted map world actor"); return actor; },
+        attack: (actor, inflictor, weapon, method, flags, originatingProjectile) => ({ sequence: this.attackSequence++, time: { kind: "milliseconds", value: this.selectedMilliseconds },
+          attacker: actor, inflictor, ...(originatingProjectile === undefined ? {} : { originatingProjectile }), weapon: q3WeaponItem(weapon)?.item ?? null,
           weaponProvider: this.weaponProvider.provider, combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider,
           movementProvider: this.recipe.movement.provider, cause: { kind: "q3", meansOfDeath: method, damageFlags: flags } }),
         event: event => this.events.emit(this.weaponProvider.content, { kind: "q3-ballistics", event }) });
