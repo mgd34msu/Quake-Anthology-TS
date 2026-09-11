@@ -1,6 +1,6 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Base } from "../base/provider.ts";
 import { MissionPackArsenal } from "./arsenal.ts";
 import { becomeDecoy, registerMissionPackMonsters } from "./monsters/index.ts";
@@ -25,7 +25,7 @@ export class Q1MissionPackRuntime {
   readonly monsters: Q1MissionPackMonsters;
   readonly world: Q1MissionpackWorld;
   private readonly characterEffects: MissionPackCharacterEffects;
-  constructor(readonly game: Q1Foundation, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly options: Q1MissionPackOptions = {}) {
+  constructor(readonly game: Q1EntityServices, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly options: Q1MissionPackOptions = {}) {
     this.arsenal = new MissionPackArsenal(game, pack);
     this.characterEffects = new MissionPackCharacterEffects(game, pack, options.footsteps ?? (() => false));
     this.monsters = registerMissionPackMonsters(game, base, pack, { charmer: () => this.arsenal.hornCharmer });
@@ -58,6 +58,6 @@ export class Q1MissionPackRuntime {
     });
   }
 }
-export function registerQ1MissionPack(game: Q1Foundation, base: Q1Base, pack: Q1MissionPack, options: Q1MissionPackOptions = {}): Q1MissionPackRuntime {
+export function registerQ1MissionPack(game: Q1EntityServices, base: Q1Base, pack: Q1MissionPack, options: Q1MissionPackOptions = {}): Q1MissionPackRuntime {
   return new Q1MissionPackRuntime(game, base, pack, options);
 }

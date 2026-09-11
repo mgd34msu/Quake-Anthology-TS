@@ -3,7 +3,7 @@ import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { normalize, vadd, vscale } from "../foundation/types.ts";
 
 export type Q1MissionPack = "hipnotic" | "rogue";
@@ -34,7 +34,7 @@ export const missionWeapons: readonly MissionWeaponDefinition[] = [
 export function setMissionReference(entity: Q1Actor, key: string, actor: ActorId | null): undefined {
   entity.references.set(key, actor); return undefined;
 }
-export function missionReference(game: Q1Foundation, entity: Q1Actor, key: string): ActorId | null {
+export function missionReference(game: Q1EntityServices, entity: Q1Actor, key: string): ActorId | null {
   const actor = entity.references.get(key) ?? null;
   return actor !== null && game.host.actors.isLive(actor) ? actor : null;
 }
@@ -46,11 +46,11 @@ export function velocityAngles(velocity: Vec3): Vec3 {
   const pitch = velocity.x === 0 && velocity.y === 0 ? velocity.z > 0 ? 90 : 270 : Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI;
   return { x: Math.fround(pitch < 0 ? pitch + 360 : pitch), y: Math.fround(yaw < 0 ? yaw + 360 : yaw), z: 0 };
 }
-export function grenadeVelocity(game: Q1Foundation, angles: Vec3, aimed: Vec3): Vec3 {
+export function grenadeVelocity(game: Q1EntityServices, angles: Vec3, aimed: Vec3): Vec3 {
   const basis = game.makeVectors(angles);
   return angles.x === 0 ? { ...vscale(aimed, 600), z: 200 } :
     vadd(vadd(vadd(vscale(basis.forward, 600), vscale(basis.up, 200)), vscale(basis.right, (game.host.random() * 2 - 1) * 10)), vscale(basis.up, (game.host.random() * 2 - 1) * 10));
 }
-export function moveMissile(game: Q1Foundation, entity: Q1Actor, velocity: Vec3): undefined {
+export function moveMissile(game: Q1EntityServices, entity: Q1Actor, velocity: Vec3): undefined {
   return game.setBody(entity, { velocity, angles: velocityAngles(normalize(velocity)), ground: null });
 }

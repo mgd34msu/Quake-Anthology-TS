@@ -1,7 +1,7 @@
 /* Base Quake campaign and boss behavior. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { doorDown } from "../foundation/movers.ts";
 import { ZERO, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { BaseMonster, registerMonsterCallbacks } from "./monsters.ts";
@@ -18,8 +18,8 @@ import { wizardFastFire } from "./monster-actions.ts";
 import { q1FinaleText } from "./finales.ts";
 import { registerCharacterCallbacks } from "./player.ts";
 
-const providers = new WeakMap<Q1Foundation, Q1Base>();
-export function q1Base(game: Q1Foundation): Q1Base { const base = providers.get(game); if (base === undefined) throw new Error("Q1 base content was not registered"); return base; }
+const providers = new WeakMap<Q1EntityServices, Q1Base>();
+export function q1Base(game: Q1EntityServices): Q1Base { const base = providers.get(game); if (base === undefined) throw new Error("Q1 base content was not registered"); return base; }
 
 export interface Q1CampaignBinding {
   readFlags(): number;
@@ -59,7 +59,7 @@ export class Q1Base implements MonsterServices {
   private electrodes: readonly [Q1Actor, Q1Actor] | null = null;
   private finaleStarted = false;
   private finaleDismissed = false;
-  constructor(readonly game: Q1Foundation, readonly options: Q1BaseOptions = {}) {
+  constructor(readonly game: Q1EntityServices, readonly options: Q1BaseOptions = {}) {
     this.campaign = options.campaign ?? new Q1CampaignState(0, game.options.skill); this.registered = options.registered ?? true;
     providers.set(game, this);
     this.levelRules = new Q1LevelRules(game, this.campaign, this.registered, options.officialCampaign ?? game.options.campaign.endsWith(":id1")); this.spawnSelector = new Q1SpawnSelector(game, this.campaign);
@@ -210,4 +210,4 @@ export class Q1Base implements MonsterServices {
   dismissFinale(): undefined { this.finaleDismissed = true; return undefined; }
   get hasFinishedFinale(): boolean { return this.options.finaleFinished?.() ?? this.finaleDismissed; }
 }
-export function registerQ1Base(game: Q1Foundation, options: Q1BaseOptions = {}): Q1Base { return new Q1Base(game, options); }
+export function registerQ1Base(game: Q1EntityServices, options: Q1BaseOptions = {}): Q1Base { return new Q1Base(game, options); }

@@ -1,5 +1,5 @@
 /* Mission pack client.qc / hipmisc.qc finale control. GPL-2.0-or-later. */
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO } from "../../foundation/types.ts";
 import { q1Base } from "../../base/provider.ts";
 import type { Q1SourceFinale } from "../../base/rules.ts";
@@ -8,11 +8,11 @@ import type { MissionpackWorldHooks } from "./index.ts";
 import { later, number } from "./common.ts";
 import { missionFinaleText } from "./finale-text.ts";
 
-export function startFinaleTimer(game: Q1Foundation): undefined {
+export function startFinaleTimer(game: Q1EntityServices): undefined {
   if (game.options.edition === "classic") return undefined;
   return later(game, game.create("mission_finale_timer"), 1, "mission:finale_check");
 }
-export function registerMissionCampaign(game: Q1Foundation, pack: Q1MissionPack, hooks: MissionpackWorldHooks): undefined {
+export function registerMissionCampaign(game: Q1EntityServices, pack: Q1MissionPack, hooks: MissionpackWorldHooks): undefined {
   const base = q1Base(game);
   game.named.register("mission:finale_transition", { action: (g, e) => { if (g.options.coop) g.travel("start", null); else { g.host.emit({ kind: "server-command", text: "menu_credits\n" }); g.host.emit({ kind: "server-command", text: "disconnect\n" }); } return g.remove(e); } });
   game.named.register("mission:finale_check", { action: (g, e) => later(g, e, base.hasFinishedFinale ? 5 : 0.1, base.hasFinishedFinale ? "mission:finale_transition" : "mission:finale_check") });
@@ -40,7 +40,7 @@ export function registerMissionCampaign(game: Q1Foundation, pack: Q1MissionPack,
     return undefined;
   } });
   if (pack !== "hipnotic") return undefined;
-  const endText = (g: Q1Foundation): undefined => {
+  const endText = (g: Q1EntityServices): undefined => {
     if (g.intermission === null) base.levelRules.beginCutscene(g.mapName, null, g.time);
     const result = base.levelRules.advanceFinale(g.time);
     if (result.kind === "finale" || result.kind === "sell-screen") { if (hooks.presentFinale === undefined) throw new Error("Hipnotic end text requires the shared finale journal"); hooks.presentFinale(result); }

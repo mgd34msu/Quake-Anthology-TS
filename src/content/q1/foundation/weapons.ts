@@ -3,7 +3,7 @@ import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import { ammoItem } from "./runtime.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
 import { POINT, ZERO, vadd, vsub, vscale, normalize, dot, isQ1BaseWeapon } from "./types.ts";
@@ -21,7 +21,7 @@ export function weaponModel(weapon: Q1Weapon): string {
     case "lightning": return "progs/v_light.mdl";
   }
 }
-export function bestWeapon(game: Q1Foundation, actor: OwnedActor): Q1Weapon {
+export function bestWeapon(game: Q1EntityServices, actor: OwnedActor): Q1Weapon {
   const order = game.weaponOrder ?? ["lightning", "supernailgun", "supershotgun", "nailgun", "shotgun", "axe"];
   const player = game.player(actor.id); if (player === null) return "axe";
   for (const weapon of order) if (game.weaponAvailable(player, weapon)) return weapon;
@@ -29,7 +29,7 @@ export function bestWeapon(game: Q1Foundation, actor: OwnedActor): Q1Weapon {
 }
 
 /** PF_aim preserves horizontal aim and corrects height toward a visible DAMAGE_AIM target. */
-export function aim(game: Q1Foundation, actor: OwnedActor, forward: Vec3): Vec3 {
+export function aim(game: Q1EntityServices, actor: OwnedActor, forward: Vec3): Vec3 {
   const body = game.host.bodies.read(actor.id); if (body === null) return forward;
   const start = vadd(body.origin, { x: 0, y: 0, z: 20 });
   const team = game.host.combat.read(actor.id)?.team ?? null;
@@ -55,7 +55,7 @@ export function aim(game: Q1Foundation, actor: OwnedActor, forward: Vec3): Vec3 
 }
 
 /** MultiDamage flushes when the next pellet changes target, preserving intervening reactions. */
-export function fireBullets(game: Q1Foundation, shooter: OwnedActor, direction: Vec3, viewAngles: Vec3, count: number, spreadX: number, spreadY: number, weapon: Q1Weapon | null): undefined {
+export function fireBullets(game: Q1EntityServices, shooter: OwnedActor, direction: Vec3, viewAngles: Vec3, count: number, spreadX: number, spreadY: number, weapon: Q1Weapon | null): undefined {
   const body = game.host.bodies.read(shooter.id); if (body === null) return undefined;
   const basis = game.makeVectors(viewAngles); let source = vadd(body.origin, vscale(basis.forward, 10));
   source = { ...source, z: Math.fround(body.origin.z + body.bounds.min.z + (body.bounds.max.z - body.bounds.min.z) * 0.7) };
@@ -74,7 +74,7 @@ export function fireBullets(game: Q1Foundation, shooter: OwnedActor, direction: 
   return flush();
 }
 
-function projectile(game: Q1Foundation, player: Q1PlayerState, kind: "rocket" | "grenade" | "spike" | "superspike", velocity: Vec3, origin: Vec3): Q1Actor {
+function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket" | "grenade" | "spike" | "superspike", velocity: Vec3, origin: Vec3): Q1Actor {
   const entity = game.create(kind === "rocket" ? "missile" : kind);
   entity.projectile = kind; entity.projectileWeapon = player.weapon; entity.owner = player.actor.id;
   entity.movement = kind === "grenade" ? "bounce" : "flymissile"; entity.solid = "bbox";
@@ -86,7 +86,7 @@ function projectile(game: Q1Foundation, player: Q1PlayerState, kind: "rocket" | 
     game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
   return entity;
 }
-export function projectileTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId | null, _normal: Vec3): undefined {
+export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, _normal: Vec3): undefined {
   if (other !== null && entity.owner !== null && sameActor(other, entity.owner)) return undefined;
   if (other !== null && game.entity(other)?.solid === "trigger") return undefined;
   if (game.host.contents(game.body(entity).origin) === "sky") return game.remove(entity);
@@ -105,7 +105,7 @@ export function projectileTouch(game: Q1Foundation, entity: Q1Actor, other: Acto
     case null: return undefined;
   }
 }
-function explode(game: Q1Foundation, entity: Q1Actor, direct: ActorId | null, rocket: boolean): undefined {
+function explode(game: Q1EntityServices, entity: Q1Actor, direct: ActorId | null, rocket: boolean): undefined {
   if (rocket && direct !== null && game.health(direct) !== 0) {
     let amount = Math.fround(100 + game.host.random() * 20);
     if (game.host.classname(direct) === "monster_shambler") amount *= 0.5;
@@ -117,7 +117,7 @@ function explode(game: Q1Foundation, entity: Q1Actor, direct: ActorId | null, ro
   // BecomeExplosion in the network Quake source removes the missile after emitting TE_EXPLOSION.
   return game.remove(entity);
 }
-function lightning(game: Q1Foundation, player: Q1PlayerState): undefined {
+function lightning(game: Q1EntityServices, player: Q1PlayerState): undefined {
   const body = game.host.bodies.read(player.actor.id); if (body === null) return undefined;
   const cells = game.host.inventory.count(player.actor.id, "q1:ammo/cells");
   if (player.waterLevel > 1) {
@@ -140,12 +140,12 @@ function lightning(game: Q1Foundation, player: Q1PlayerState): undefined {
   }
   return undefined;
 }
-export function fireWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
+export function fireWeapon(game: Q1EntityServices, player: Q1PlayerState): boolean {
   if (game.registeredWeapons.has(player.weapon) || !isQ1BaseWeapon(player.weapon)) return game.fireRegisteredWeapon(player);
   return fireBaseWeapon(game, player);
 }
 /** An overriding source definition can delegate its unmodified attack without reentering its own registration. */
-export function fireBaseWeapon(game: Q1Foundation, player: Q1PlayerState): boolean {
+export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): boolean {
   if (!isQ1BaseWeapon(player.weapon)) throw new Error("Base Q1 attack requires a base weapon");
   const repeating = player.continuousFiring;
   if (game.health(player.actor.id) <= 0 || game.time < (repeating ? player.nextWeaponFrame : player.attackFinished)) return false;
@@ -201,7 +201,7 @@ export function fireBaseWeapon(game: Q1Foundation, player: Q1PlayerState): boole
   game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 
-function axeStrike(game: Q1Foundation, strike: Q1Actor): undefined {
+function axeStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
         const player = strike.owner === null ? null : game.player(strike.owner); if (player === null) return game.remove(strike);
         const current = game.host.bodies.read(player.actor.id); if (current === null) return game.remove(strike);
         const start = vadd(current.origin, { x: 0, y: 0, z: 16 }), forward = game.makeVectors(player.viewAngles).forward;
@@ -213,7 +213,7 @@ function axeStrike(game: Q1Foundation, strike: Q1Actor): undefined {
         return game.remove(strike);
 }
 
-export function registerWeaponCallbacks(game: Q1Foundation): undefined {
+export function registerWeaponCallbacks(game: Q1EntityServices): undefined {
   game.named.register("projectile_touch", { touch: (runtime, entity, other, normal) => projectileTouch(runtime, entity, other, normal ?? ZERO) });
   game.named.register("GrenadeExplode", { action: (runtime, entity) => explode(runtime, entity, null, false) });
   game.named.register("player_axe3", { action: axeStrike });

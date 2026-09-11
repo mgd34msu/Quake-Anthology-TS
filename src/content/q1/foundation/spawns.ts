@@ -4,7 +4,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import { ZERO, vadd, vsub, vscale, dot, yawFor } from "./types.ts";
 import { precacheQ1World } from "./precache-world.ts";
 import { spawnPickup } from "./pickups.ts";
@@ -12,13 +12,13 @@ import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts"
 import { spawnMonster } from "./monsters.ts";
 export { linkDoors } from "./movers.ts";
 
-function initTrigger(game: Q1Foundation, entity: Q1Actor): undefined {
+function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
   const angles = game.body(entity).angles;
   entity.movedir = angles.x === 0 && angles.y === 0 && angles.z === 0 ? ZERO : moveDirection(angles, game);
   game.setBody(entity, { angles: ZERO }); entity.solid = "trigger"; entity.movement = "none"; entity.model = "";
   return undefined;
 }
-function spawnMulti(game: Q1Foundation, entity: Q1Actor): undefined {
+function spawnMulti(game: Q1EntityServices, entity: Q1Actor): undefined {
   initTrigger(game, entity);
   const secret = entity.classname === "trigger_secret";
   const once = secret || entity.classname === "trigger_once";
@@ -35,13 +35,13 @@ function spawnMulti(game: Q1Foundation, entity: Q1Actor): undefined {
   } else if ((entity.spawnflags & 1) === 0) entity.touch = game.named.touch(entity, "multi_touch");
   return undefined;
 }
-function spawnCounter(game: Q1Foundation, entity: Q1Actor): undefined {
+function spawnCounter(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.model = "";
   entity.count ||= 2;
   entity.use = game.named.use(entity, "counter_use");
   return undefined;
 }
-function teleport(game: Q1Foundation, entity: Q1Actor): undefined {
+function teleport(game: Q1EntityServices, entity: Q1Actor): undefined {
   initTrigger(game, entity);
   if (entity.target === "") throw new Error("trigger_teleport has no target");
   entity.use = game.named.use(entity, "teleport_use");
@@ -53,7 +53,7 @@ function teleport(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.touch = game.named.touch(entity, "teleport_touch");
   return undefined;
 }
-function spawnLight(game: Q1Foundation, entity: Q1Actor): undefined {
+function spawnLight(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.classname === "light" && entity.targetname === "") return game.remove(entity);
   const style = entity.number("style");
   if (style >= 32 && entity.classname !== "light_fluorospark") {
@@ -65,7 +65,7 @@ function spawnLight(game: Q1Foundation, entity: Q1Actor): undefined {
   if (entity.classname === "light_fluoro" || entity.classname === "light_fluorospark") game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: entity.classname === "light_fluoro" ? "ambience/fl_hum1.wav" : "ambience/buzz1.wav", volume: 0.5, attenuation: 3 });
   return undefined;
 }
-function spawnBarrel(game: Q1Foundation, entity: Q1Actor): undefined {
+function spawnBarrel(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.model = entity.classname === "misc_explobox2" ? "maps/b_exbox2.bsp" : "maps/b_explob.bsp";
   if (game.usesId1Precaches) game.precacheModel(entity.model); if (game.usesId1Precaches) game.precacheSound("weapons/r_exp3.wav");
   entity.solid = "bsp"; entity.movement = "push"; entity.damageable = true; entity.aimedDamage = true; game.host.combat.setHealth(entity.actor, 20);
@@ -76,7 +76,7 @@ function spawnBarrel(game: Q1Foundation, entity: Q1Actor): undefined {
   if (start.z - trace.end.z > 250) return game.remove(entity);
   return game.setOrigin(entity, trace.end);
 }
-export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (spawnPickup(game, entity)) return undefined;
   switch (entity.classname) {
     case "worldspawn": {
@@ -115,7 +115,7 @@ export function spawnMapActor(game: Q1Foundation, entity: Q1Actor): undefined {
 }
 
 
-function multiFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function multiFire(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   const secret = entity.classname === "trigger_secret";
   const sound = entity.sounds === 1 ? "misc/secret.wav" : entity.sounds === 2 ? "misc/talk.wav" : entity.sounds === 3 ? "misc/trigger1.wav" : "";
     if (entity.nextThink > game.time || !game.live(entity)) return undefined;
@@ -132,14 +132,14 @@ function multiFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | nul
     entity.touch = null; return game.schedule(entity, 0.1, game.named.action(entity, "SUB_Remove"));
 }
 
-function counterUse(game: Q1Foundation, entity: Q1Actor, _other: ActorId | null, activator: ActorId | null): undefined {
+function counterUse(game: Q1EntityServices, entity: Q1Actor, _other: ActorId | null, activator: ActorId | null): undefined {
     entity.count--; if (entity.count < 0) return undefined;
     if ((entity.spawnflags & 1) === 0) game.message(activator, entity.count >= 4 ? "$qc_more_go" : entity.count === 3 ? "$qc_three_more" : entity.count === 2 ? "$qc_two_more" : entity.count === 1 ? "$qc_one_more" : "$qc_sequence_completed");
     if (entity.count !== 0) return undefined;
     game.useTargets(entity, activator); return game.schedule(entity, 0.1, game.named.action(entity, "SUB_Remove"));
 }
 
-function teleportTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function teleportTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
     if (entity.targetname !== "" && entity.nextThink < game.time) return undefined;
     const player = game.isPlayer(other); if ((entity.spawnflags & 1) !== 0 && !player) return undefined;
     if (game.health(other) <= 0 || !player && game.entity(other)?.solid !== "slidebox") return undefined;
@@ -158,7 +158,7 @@ function teleportTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): und
     return undefined;
 }
 
-function changelevelTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function changelevelTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
   const map = entity.text("map");
         if (!game.isPlayer(other)) return undefined;
         if (game.options.noExit === 1 || game.options.noExit === 2 && game.mapName !== "start") { game.damage(other, entity.actor.id, entity.actor.id, 50000, null, "direct", "exit"); return undefined; }
@@ -167,7 +167,7 @@ function changelevelTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): 
         entity.activator = other; return game.schedule(entity, 0.1, game.named.action(entity, "execute_changelevel"));
 }
 
-function pathTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function pathTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
         const actor = game.entity(other), monster = actor?.monster;
         if (actor !== null && game.sourcePathTouch(entity, actor)) return undefined;
         if (actor === null || actor === undefined || monster === null || monster === undefined || monster.path !== entity.targetname || monster.enemy !== null) return undefined;
@@ -177,7 +177,7 @@ function pathTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefin
         else actor.idealYaw = yawFor(vsub(game.body(target).origin, game.body(actor).origin));
         return undefined;
 }
-export function registerSpawnCallbacks(game: Q1Foundation): undefined {
+export function registerSpawnCallbacks(game: Q1EntityServices): undefined {
   game.named.register("multi_use", { use: (runtime, entity, _other, activator) => multiFire(runtime, entity, activator) });
   game.named.register("multi_killed", { die: multiFire });
   game.named.register("multi_touch", { touch: (runtime, entity, other) => {
@@ -230,14 +230,14 @@ export function registerSpawnCallbacks(game: Q1Foundation): undefined {
 }
 
 /** spawn_tfog: broadcast immediately, then choose/play the sound on its source think. */
-export function spawnTeleportFog(game: Q1Foundation, origin: Vec3): Q1Actor {
+export function spawnTeleportFog(game: Q1EntityServices, origin: Vec3): Q1Actor {
   const fog = game.create("teleport_fog"); fog.classname = "";
   game.setBody(fog, { origin });
   game.schedule(fog, 0.2, game.named.action(fog, "play_teleport"));
   game.effect("teleport", origin); return fog;
 }
 /** spawn_tdeath: force_retouch makes stationary actors participate through shared source linking. */
-export function spawnTeledeath(game: Q1Foundation, origin: Vec3, owner: ActorId): Q1Actor {
+export function spawnTeledeath(game: Q1EntityServices, origin: Vec3, owner: ActorId): Q1Actor {
   const body = game.host.bodies.read(owner); if (body === null) throw new Error("Teledeath owner has no shared body");
   const death = game.create("teledeath"); death.solid = "trigger"; death.owner = owner;
   game.setBody(death, { origin, bounds: { min: vsub(body.bounds.min, { x: 1, y: 1, z: 1 }), max: vadd(body.bounds.max, { x: 1, y: 1, z: 1 }) } });

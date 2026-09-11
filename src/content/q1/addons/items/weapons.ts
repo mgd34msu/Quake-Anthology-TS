@@ -1,7 +1,7 @@
 /* quakec_mg3/mg3_weapons.qc, weapons.qc and player.qc. GPL-2.0-or-later. */
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "../../foundation/types.ts";
 import { POINT, normalize, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { aim, fireBaseWeapon, fireBullets } from "../../foundation/weapons.ts";
@@ -35,7 +35,7 @@ export function mg3WeaponFrame(context: Q1AddonContext, player: Q1PlayerState): 
   game.selectWeapon(player.actor, game.chooseBest(player.actor)); return undefined;
 }
 
-function emitWeapon(game: Q1Foundation, player: Q1PlayerState, punch: number): undefined {
+function emitWeapon(game: Q1EntityServices, player: Q1PlayerState, punch: number): undefined {
   return game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon,
     viewModel: game.weaponModel(player.weapon, player), frame: player.weaponFrame, punch });
 }

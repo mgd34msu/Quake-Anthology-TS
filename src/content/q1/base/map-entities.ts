@@ -3,7 +3,7 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import { moveDirection } from "../foundation/entity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { ZERO, vadd, vscale, vsub } from "../foundation/types.ts";
 import type { Q1SoundChannel } from "../foundation/types.ts";
 import { createMissile, launchLaser, launchSpike } from "./projectiles.ts";
@@ -16,17 +16,17 @@ export const remainingMapClassnames: readonly string[] = [
   "light_globe", "light_torch_small_walltorch", "light_flame_large_yellow", "light_flame_small_yellow", "light_flame_small_white",
   "ambient_suck_wind", "ambient_flouro_buzz", "ambient_drip", "ambient_thunder", "ambient_light_buzz", "ambient_swamp1", "ambient_swamp2", "viewthing", "misc_noisemaker",
 ];
-function initTrigger(game: Q1Foundation, entity: Q1Actor): undefined {
+function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.movedir = moveDirection(game.body(entity).angles, game); entity.solid = "trigger"; entity.model = ""; game.setBody(entity, { angles: ZERO }); return undefined;
 }
-function later(game: Q1Foundation, entity: Q1Actor, delay: number, name: string): undefined { return game.schedule(entity, delay, game.named.action(entity, name)); }
-function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
+function later(game: Q1EntityServices, entity: Q1Actor, delay: number, name: string): undefined { return game.schedule(entity, delay, game.named.action(entity, name)); }
+function trainNext(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.activated = true; const corner = game.find(entity.target)[0]; if (corner === undefined) throw new Error(`Train target not found: ${entity.target}`);
   entity.target = corner.target; if (entity.target === "") throw new Error("train_next: no next target");
   entity.wait = corner.wait; game.sound(entity, entity.sounds === 1 ? "plats/train1.wav" : "misc/null.wav");
   return game.calcMove(entity, vsub(game.body(corner).origin, game.body(entity).bounds.min), entity.speed, game.named.action(entity, "base:train_wait"));
 }
-function train(game: Q1Foundation, entity: Q1Actor): undefined {
+function train(game: Q1EntityServices, entity: Q1Actor): undefined {
   const teleport = entity.classname === "misc_teleporttrain";
   if (entity.target === "") throw new Error(`${entity.classname} without a target`);
   const sounds = teleport || entity.sounds === 0 ? ["misc/null.wav", "misc/null.wav"] : entity.sounds === 1 ? ["plats/train2.wav", "plats/train1.wav"] : [];
@@ -39,13 +39,13 @@ function train(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.use = game.named.use(entity, "base:train_use"); entity.blocked = game.named.blocked(entity, "base:train_blocked");
   return later(game, entity, 0.1, "base:train_find");
 }
-function sigilTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function sigilTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
   if (entity.solid !== "trigger" || !game.isPlayer(other) || game.health(other) <= 0) return undefined;
   game.message(other, game.options.edition === "classic" ? "You got the rune!" : "$qc_got_rune"); const player = game.host.actors.resolveOwned(other); if (player !== null) game.sound(player, "misc/runekey.wav", "item");
   game.effect("pickup", game.body(entity).origin, other); entity.solid = "none"; entity.model = ""; entity.touch = null; game.link(entity);
   const campaign = q1Base(game).campaign; campaign.writeFlags(campaign.readFlags() | (entity.spawnflags & 15)); entity.classname = ""; return game.useTargets(entity, other);
 }
-function sigil(game: Q1Foundation, entity: Q1Actor): undefined {
+function sigil(game: Q1EntityServices, entity: Q1Actor): undefined {
   const bits = entity.spawnflags & 15; if (bits === 0) throw new Error("item_sigil has no episode spawnflags");
   if (game.usesId1Precaches) game.precacheSound("misc/runekey.wav");
   for (let episode = 1; episode <= 4; episode++) if (game.usesId1Precaches && ((bits & (1 << (episode - 1))) !== 0)) game.precacheModel(`progs/end${episode}.mdl`);
@@ -54,12 +54,12 @@ function sigil(game: Q1Foundation, entity: Q1Actor): undefined {
   game.setBounds(entity, { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } });
   entity.touch = game.named.touch(entity, "base:sigil_touch"); return later(game, entity, 0.2, "base:sigil_place");
 }
-function shooterFire(game: Q1Foundation, entity: Q1Actor): undefined {
+function shooterFire(game: Q1EntityServices, entity: Q1Actor): undefined {
   if ((entity.spawnflags & 2) !== 0) { game.sound(entity, "enforcer/enfire.wav"); const laser = launchLaser(game, entity.actor.id, game.body(entity).origin, entity.movedir); if (entity.classname === "trap_shooter") game.setBody(laser, { velocity: vscale(entity.movedir, 500) }); }
   else { game.sound(entity, "weapons/spike2.wav"); launchSpike(game, entity.actor.id, game.body(entity).origin, vscale(entity.movedir, 500), (entity.spawnflags & 1) !== 0 ? "superspike" : "spike"); }
   return undefined;
 }
-function shooter(game: Q1Foundation, entity: Q1Actor): undefined {
+function shooter(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.fields.set("killstring", "$qc_ks_spiked");
   entity.movedir = moveDirection(game.body(entity).angles, game); game.setBody(entity, { angles: ZERO }); entity.use = game.named.use(entity, "base:shooter_fire");
   if ((entity.spawnflags & 2) !== 0) {
@@ -68,31 +68,31 @@ function shooter(game: Q1Foundation, entity: Q1Actor): undefined {
   if (entity.classname === "trap_spikeshooter") return undefined;
   entity.wait ||= 1; return later(game, entity, entity.number("nextthink") + entity.wait, "base:shooter_think");
 }
-export function spawnBubble(game: Q1Foundation, origin: Vec3, velocity = { x: 0, y: 0, z: 15 }, split = false): Q1Actor {
+export function spawnBubble(game: Q1EntityServices, origin: Vec3, velocity = { x: 0, y: 0, z: 15 }, split = false): Q1Actor {
   const bubble = game.create("bubble"); bubble.model = "progs/s_bubble.spr"; bubble.movement = "noclip"; bubble.frame = split ? 1 : 0; bubble.count = split ? 10 : 0;
   game.setBody(bubble, { origin, velocity, bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } } }); game.link(bubble);
   later(game, bubble, 0.5, "base:bubble_bob"); return bubble;
 }
-function bubbleBob(game: Q1Foundation, bubble: Q1Actor): undefined {
+function bubbleBob(game: Q1EntityServices, bubble: Q1Actor): undefined {
   const body = game.body(bubble); bubble.count++;
   if (bubble.count === 4) { spawnBubble(game, body.origin, body.velocity, true); bubble.frame = 1; bubble.count = 10; }
   const contents = game.host.contents(body.origin); if (bubble.count >= 20 || contents !== "water" && contents !== "slime" && contents !== "lava") return game.remove(bubble);
   const x = body.velocity.x - 10 + game.host.random() * 20, y = body.velocity.y - 10 + game.host.random() * 20, z = body.velocity.z + 10 + game.host.random() * 10;
   game.setBody(bubble, { velocity: { x: x > 10 ? 5 : x < -10 ? -5 : x, y: y > 10 ? 5 : y < -10 ? -5 : y, z: z > 30 ? 25 : z < 10 ? 15 : z } }); return later(game, bubble, 0.5, "base:bubble_bob");
 }
-function changelevelTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function changelevelTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
   if (!game.isPlayer(other)) return undefined;
   if (game.options.noExit === 1 || game.options.noExit === 2 && game.mapName !== "start") { game.damage(other, entity.actor.id, entity.actor.id, 50000, null, "direct", "exit"); return undefined; }
   const base = q1Base(game), map = entity.text("map"); base.levelRules.changelevelTouched(entity, other); base.options.playerExited?.(other); game.useTargets(entity, other);
   if ((entity.spawnflags & 1) !== 0 && game.options.deathmatch === 0) return base.levelRules.travelTo(base.options.sameLevel?.() ? game.mapName : map, other);
   entity.touch = null; entity.activator = other; return later(game, entity, 0.1, "base:execute_changelevel");
 }
-function fireballFly(game: Q1Foundation, entity: Q1Actor): undefined {
+function fireballFly(game: Q1EntityServices, entity: Q1Actor): undefined {
   const missile = createMissile(game, entity.actor.id, "fireball", "lavaball", game.body(entity).origin, { x: game.host.random() * 100 - 50, y: game.host.random() * 100 - 50, z: entity.speed + game.host.random() * 200 });
   missile.solid = "trigger"; missile.movement = "toss"; missile.touch = game.named.touch(missile, "base:fireball_touch");
   return later(game, entity, game.host.random() * 5 + 3, "base:fireball_fly");
 }
-export function registerMapCallbacks(game: Q1Foundation): undefined {
+export function registerMapCallbacks(game: Q1EntityServices): undefined {
   game.named.register("base:train_next", { action: trainNext });
   game.named.register("base:train_wait", { action: (runtime, entity) => { if (entity.wait !== 0) runtime.sound(entity, entity.sounds === 1 ? "plats/train2.wav" : "misc/null.wav"); return later(runtime, entity, entity.wait || 0.1, "base:train_next"); } });
   game.named.register("base:train_use", { use: (runtime, entity) => entity.state === "top" && !entity.activated ? trainNext(runtime, entity) : undefined });

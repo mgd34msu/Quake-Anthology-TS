@@ -216,3 +216,46 @@ test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, me
   expect(restored.bodies.read(restoredDoor.actor.id)?.origin).toEqual(bodies.read(door.actor.id)?.origin);
   actors.close(); restored.actors.close();
 });
+
+test.skipIf(!existsSync(path))("Q1 services attach existing foreign owners and restore their named continuations without resetting authority state", async () => {
+  const map = await loadMap(), original = gameFor(map, undefined, "classic");
+  const { runtime, actors, bodies, combat, inventory, player } = original;
+  const owners = [actors.allocateAtSource("q2:base", 900, "q2:authored-monster"), actors.allocate("q2:base", "q2:dynamic-monster")];
+  for (const owner of owners) {
+    bodies.create(owner, { origin: { x: 11, y: 22, z: 33 }, angles: ZERO, velocity: { x: 1, y: 2, z: 3 }, bounds: PLAYER_BOUNDS, ground: null });
+    combat.create(owner, { health: 37, armor: { kind: "none" }, mass: 275, canTakeDamage: true, invulnerable: false, team: null });
+    const body = bodies.read(owner.id), state = combat.read(owner.id), binding = actors.sourceOf(owner.id), count = actors.observations().length;
+    const entity = runtime.attachExisting(owner, "DelayedUse");
+    expect(entity.actor).toBe(owner);
+    expect(bodies.read(owner.id)).toEqual(body);
+    expect(combat.read(owner.id)).toEqual(state);
+    expect(actors.sourceOf(owner.id)).toEqual(binding);
+    expect(actors.observations()).toHaveLength(count);
+    expect(() => runtime.attachExisting(owner, "DelayedUse")).toThrow("already attached");
+    entity.target = "t9"; entity.activator = player.id;
+    runtime.schedule(entity, 0.25, runtime.named.action(entity, "DelayThink"));
+  }
+  const checkpoint = runtime.capture();
+  expect(checkpoint.entities.find(entity => entity.actor.slot === owners[0]?.id.slot)?.sourceSlot).toBe(900);
+  expect(checkpoint.entities.find(entity => entity.actor.slot === owners[1]?.id.slot)?.sourceSlot).toBeNull();
+  const saved: SavedTestWorld = {
+    source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(checkpoint)), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
+    bodies: captureSharedBodies(actors, bodies),
+    combat: actors.observations().flatMap(actor => { const state = combat.read(actor.id); return state === null ? [] : [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state }]; }),
+    inventories: actors.observations().flatMap(actor => inventory.has(actor.id) ? [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: inventory.entries(actor.id) }] : []),
+  };
+  const restored = gameFor(map, saved);
+  expect(restored.runtime.capture()).toEqual(checkpoint);
+  for (const owner of owners) {
+    const actor = restored.actors.resolveSaved({ slot: owner.id.slot, generation: owner.id.generation });
+    if (actor === null) throw new Error("Missing restored foreign owner");
+    expect(actor.owner).toBe("q2:base");
+    expect(restored.combat.read(actor.id)?.health).toBe(37);
+    expect(restored.bodies.read(actor.id)?.velocity).toEqual({ x: 1, y: 2, z: 3 });
+  }
+  original.due(0.3); restored.due(0.3);
+  expect(restored.runtime.capture()).toEqual(runtime.capture());
+  expect(runtime.find("t9")[0]?.count).toBe(1);
+  for (const owner of owners) expect(actors.isLive(owner.id)).toBe(false);
+  actors.close(); restored.actors.close();
+});

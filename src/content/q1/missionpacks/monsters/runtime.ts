@@ -1,7 +1,7 @@
 /* Source monster controllers share the Q1 frame, movement and combat owners. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { callbackName } from "../../foundation/callbacks.ts";
 import { baseSpecies } from "../../base/species.ts";
 import { charmer, findCharmedTarget, findHipnoticTarget, huntCharmer, walkWithCharmer } from "./charm.ts";
@@ -14,7 +14,7 @@ import type { Q1MissionPack } from "../types.ts";
 import type { MissionMonsterHooks, PackMonsterDefinition } from "./types.ts";
 
 export class MissionMonster extends BaseMonster {
-  constructor(game: Q1Foundation, entity: Q1Actor, readonly definition: PackMonsterDefinition, readonly runtime: Q1MissionPackMonsters) {
+  constructor(game: Q1EntityServices, entity: Q1Actor, readonly definition: PackMonsterDefinition, readonly runtime: Q1MissionPackMonsters) {
     super(game, entity, definition.spec, runtime.base, { callbackPrefix: runtime.pack, frames: definition.frames,
       actions: new Map(Object.entries(definition.actions).map(([name, action]) => [name, (monster: BaseMonster) => action(runtime.require(monster.entity))])) });
   }
@@ -111,7 +111,7 @@ export class Q1MissionPackMonsters {
   spawnedGremlins = 0;
   readonly monsters = new Map<OwnedActor, MissionMonster>();
   private readonly definitions = new Map<string, PackMonsterDefinition>();
-  constructor(readonly game: Q1Foundation, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly hooks: MissionMonsterHooks = {}) {
+  constructor(readonly game: Q1EntityServices, readonly base: Q1Base, readonly pack: Q1MissionPack, readonly hooks: MissionMonsterHooks = {}) {
     registerMonsterCallbacks(game, pack, entity => this.require(entity));
     if (pack === "hipnotic") for (const spec of baseSpecies) for (const classname of spec.classnames) {
       this.definitions.set(classname, { spec, baseBehavior: true, frames: new Map<string, MonsterFrame>(), actions: {}, pain: (monster, attacker, damage) => monster.painDefault(attacker, damage), die: (monster, attacker) => monster.dieDefault(attacker) });

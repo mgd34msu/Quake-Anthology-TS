@@ -2,7 +2,7 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, vscale, vsub, yawFor } from "../../foundation/types.ts";
 import { spawnTeleportFog } from "../../foundation/spawns.ts";
 import { aim } from "../../foundation/weapons.ts";
@@ -14,18 +14,18 @@ import { later, number, vector } from "./common.ts";
 import { missionFinaleText } from "./finale-text.ts";
 import { startFinaleTimer } from "./campaign.ts";
 
-function machine(game: Q1Foundation): Q1Actor { const entity = game.entity(game.world?.references.get("rogue:theMachine") ?? null); if (entity === null) throw new Error("End sequence time machine is missing"); return entity; }
-function removeStuff(game: Q1Foundation): undefined {
+function machine(game: Q1EntityServices): Q1Actor { const entity = game.entity(game.world?.references.get("rogue:theMachine") ?? null); if (entity === null) throw new Error("End sequence time machine is missing"); return entity; }
+function removeStuff(game: Q1EntityServices): undefined {
   for (const entity of [...game.entities.values()]) if (entity.classname === "ltrail_start") game.remove(entity);
   const core = [...game.entities.values()].find(entity => entity.classname === "item_time_core"); game.host.emit({ kind: "colored-explosion", origin: core === undefined ? ZERO : game.body(core).origin, colorStart: 230, colorLength: 5 });
   return core === undefined ? undefined : later(game, core, 0.1, "SUB_Remove");
 }
-function escapeLava(game: Q1Foundation, actor: Q1Actor): undefined { if (game.host.contents(game.body(actor).origin) !== "lava") return undefined; const point = game.find("point1")[0]; return point === undefined ? undefined : game.setOrigin(actor, game.body(point).origin); }
-function goal(game: Q1Foundation, actor: Q1Actor, target: string): undefined {
+function escapeLava(game: Q1EntityServices, actor: Q1Actor): undefined { if (game.host.contents(game.body(actor).origin) !== "lava") return undefined; const point = game.find("point1")[0]; return point === undefined ? undefined : game.setOrigin(actor, game.body(point).origin); }
+function goal(game: Q1EntityServices, actor: Q1Actor, target: string): undefined {
   actor.target = target; const point = game.find(target)[0]; if (point === undefined) throw new Error(`End sequence ${target} placing screwed up!`);
   actor.references.set("goalentity", point.actor.id); actor.references.set("movetarget", point.actor.id); return undefined;
 }
-function control(game: Q1Foundation, actor: Q1Actor): undefined {
+function control(game: Q1EntityServices, actor: Q1Actor): undefined {
   const world = game.world; if (world === null) throw new Error("Ending requires worldspawn"); const stage = world.number("rogue:actorStage");
   if (stage === 0) { goal(game, actor, "point1"); actor.frame = 6; number(world, "rogue:actorStage", 1); return later(game, actor, 0.1, "rogue:actor_run"); }
   if (stage === 2) { goal(game, actor, "machine"); number(world, "rogue:actorStage", 5); return later(game, actor, 0.1, "rogue:actor_fire1"); }
@@ -33,7 +33,7 @@ function control(game: Q1Foundation, actor: Q1Actor): undefined {
   if (stage === 3) { actor.target = "timepod"; game.useTargets(actor, actor.activator); goal(game, actor, "point2"); actor.frame = 6; return later(game, actor, 0.1, "rogue:actor_run"); }
   return undefined;
 }
-export function startRogueEnding(game: Q1Foundation, player: ActorId, hooks: MissionpackWorldHooks): undefined {
+export function startRogueEnding(game: Q1EntityServices, player: ActorId, hooks: MissionpackWorldHooks): undefined {
   const world = game.world; if (world === null || world.number("rogue:cutscene_running") === 0 || world.number("rogue:ending_started") !== 0) return undefined;
   const body = game.host.bodies.read(player); if (body === null) return undefined; number(world, "rogue:ending_started", 1);
   const camera = game.find("cameraview")[0], base = q1Base(game);
@@ -49,7 +49,7 @@ export function startRogueEnding(game: Q1Foundation, player: ActorId, hooks: Mis
   const origin = game.body(camera).origin, angles = velocityAngles(vsub(game.body(actor).origin, origin)); game.controlPlayer(player, { kind: "cutscene", origin, angles, viewOffset: ZERO });
   const tracker = game.create("rogue_camera_tracker"); tracker.owner = player; return later(game, tracker, 0.05, "rogue:track_camera");
 }
-export function registerRogueEnding(game: Q1Foundation): undefined {
+export function registerRogueEnding(game: Q1EntityServices): undefined {
   game.registerPathTouch("rogue:world_followers", (corner, mover) => {
     if (mover.classname !== "actor" && mover.classname !== "buzzsaw") return false;
     const current = mover.references.get("movetarget") ?? null; if (current === null || !sameActor(current, corner.actor.id)) return false;

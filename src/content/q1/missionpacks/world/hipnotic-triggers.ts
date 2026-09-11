@@ -1,15 +1,15 @@
 /* hipcount.qc / hiptrig.qc / hip_brk.qc. Copyright id Software. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, vadd } from "../../foundation/types.ts";
 import { brush, later, number, trigger } from "./common.ts";
 
-function counterOff(game: Q1Foundation, entity: Q1Actor): undefined {
+function counterOff(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.number("cnt") !== 0 && (entity.spawnflags & 32) !== 0) return number(entity, "aflag", 1);
   entity.use = game.named.use(entity, "hip:counter_start"); number(entity, "aflag", 0); return game.cancel(entity);
 }
-function counterTick(game: Q1Foundation, entity: Q1Actor): undefined {
+function counterTick(game: Q1EntityServices, entity: Q1Actor): undefined {
   const count = entity.number("cnt") + 1; number(entity, "cnt", count);
   number(entity, "counter_state", (entity.spawnflags & 16) !== 0 ? Math.floor(game.host.random() * entity.count) + 1 : count);
   game.useTargets(entity, entity.activator);
@@ -23,18 +23,18 @@ function counterTick(game: Q1Foundation, entity: Q1Actor): undefined {
   }
   return undefined;
 }
-function counterStart(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function counterStart(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   entity.activator = activator; number(entity, "aflag", 0);
   entity.use = (entity.spawnflags & 1) !== 0 ? game.named.use(entity, "hip:counter_stop") : null;
   if ((entity.spawnflags & 8) !== 0) { number(entity, "cnt", 0); number(entity, "counter_state", 0); }
   return entity.delay !== 0 ? later(game, entity, entity.delay, "hip:counter_tick") : counterTick(game, entity);
 }
-function onCount(game: Q1Foundation, entity: Q1Actor, other: ActorId | null): undefined {
+function onCount(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null): undefined {
   const counter = game.entity(other);
   const count = counter?.classname === "func_counter" ? counter.number("counter_state") : 0;
   return count === entity.count ? game.useTargets(entity, other) : undefined;
 }
-function useKey(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function useKey(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   if (activator === null || !game.isPlayer(activator) || entity.attackFinished > game.time) return undefined;
   entity.attackFinished = game.time + 2;
   const gold = (entity.spawnflags & 1) !== 0, key = gold ? "q1:key/gold" : "q1:key/silver";
@@ -49,7 +49,7 @@ function useKey(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null):
   return game.useTargets(entity, activator);
 }
 
-export function registerHipnoticTriggers(game: Q1Foundation): undefined {
+export function registerHipnoticTriggers(game: Q1EntityServices): undefined {
   game.named.register("hip:counter_tick", { action: counterTick });
   game.named.register("hip:counter_start", { use: (g, e, _other, a) => counterStart(g, e, a), action: (g, e) => counterStart(g, e, null) });
   game.named.register("hip:counter_stop", { use: counterOff });

@@ -2,7 +2,7 @@
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { moveDirection } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, normalize, vadd, vsub, vscale } from "../../foundation/types.ts";
 import { createMissile, launchSpike, launchLaser } from "../../base/projectiles.ts";
 import { launchRogueLavaSpike } from "../rogue-weapons.ts";
@@ -10,13 +10,13 @@ import { launchDragonFireball } from "../monsters/dragon.ts";
 import type { Q1MissionPack } from "../types.ts";
 import { later, number, trigger } from "./common.ts";
 
-export function registerMissionShooters(game: Q1Foundation, pack: Q1MissionPack): undefined {
+export function registerMissionShooters(game: Q1EntityServices, pack: Q1MissionPack): undefined {
   game.named.register("hip:shooter_laser_touch", { touch: (g, e, other) => {
     if (e.owner !== null && sameActor(other, e.owner)) return undefined; const body = g.body(e); if (g.host.contents(body.origin) === "sky") return g.remove(e);
     if ((e.spawnflags & 16) === 0) g.sound(e, "enforcer/enfstop.wav", "weapon", 3); const origin = vsub(body.origin, vscale(normalize(body.velocity), 8));
     if (g.health(other) !== 0) { g.effect("blood", origin, other, 15); g.damage(other, e.actor.id, e.owner, 15); } else g.effect("gunshot", origin); return g.remove(e);
   } });
-  const fire = (g: Q1Foundation, e: Q1Actor): undefined => {
+  const fire = (g: Q1EntityServices, e: Q1Actor): undefined => {
     const origin = g.body(e).origin;
     if (pack === "rogue") {
       if ((e.spawnflags & 1) !== 0 || e.spawnflags === 0) { g.sound(e, "weapons/spike2.wav", "voice"); launchSpike(g, e.actor.id, origin, vscale(e.movedir, 500), (e.spawnflags & 1) !== 0 ? "superspike" : "spike"); }
@@ -35,7 +35,7 @@ export function registerMissionShooters(game: Q1Foundation, pack: Q1MissionPack)
   game.named.register("mission:shooter_fire", { use: fire });
   game.named.register("mission:shooter_think", { action: (g, e) => { if (pack === "rogue" || e.number("shooter_state") !== 0) fire(g, e); return later(g, e, e.wait, "mission:shooter_think"); } });
   game.named.register("mission:shooter_switch", { use: (_g, e) => number(e, "shooter_state", 1 - e.number("shooter_state")) });
-  const spawn = (g: Q1Foundation, e: Q1Actor): undefined => {
+  const spawn = (g: Q1EntityServices, e: Q1Actor): undefined => {
     e.movedir = moveDirection(g.body(e).angles, g); g.setBody(e, { angles: ZERO }); e.use = g.named.use(e, "mission:shooter_fire");
     if (e.classname === "trap_spikeshooter") return undefined; e.wait ||= 1; number(e, "shooter_state", e.classname === "trap_shooter" ? 1 : e.number("state"));
     if (e.classname === "trap_switched_shooter") e.use = g.named.use(e, "mission:shooter_switch"); return later(g, e, e.number("nextthink") + e.wait + e.number("ltime") - g.time, "mission:shooter_think");

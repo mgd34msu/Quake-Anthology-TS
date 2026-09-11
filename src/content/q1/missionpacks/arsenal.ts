@@ -1,6 +1,6 @@
 /* Official mission-pack weapon and item registration over shared Q1 authority. */
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "../foundation/types.ts";
 import { fireHipnoticLaser, fireHipnoticMjolnir, fireHipnoticProximity, registerHipnoticWeaponCallbacks } from "./hipnotic-weapons.ts";
 import { fireRogueLava, fireRogueMultiGrenade, fireRogueMultiRocket, fireRoguePlasma, registerRogueWeaponCallbacks } from "./rogue-weapons.ts";
@@ -13,7 +13,7 @@ import { missionWeapons } from "./types.ts";
 import type { MissionWeapon, Q1MissionPack } from "./types.ts";
 import { registerRogueTossCallbacks, tossRogueBackpack, tossRogueWeapon } from "./backpacks.ts";
 
-function fire(game: Q1Foundation, player: Q1PlayerState, weapon: MissionWeapon): boolean {
+function fire(game: Q1EntityServices, player: Q1PlayerState, weapon: MissionWeapon): boolean {
   switch (weapon) {
     case "hipnotic:laser": return fireHipnoticLaser(game, player);
     case "hipnotic:mjolnir": return fireHipnoticMjolnir(game, player);
@@ -24,7 +24,7 @@ function fire(game: Q1Foundation, player: Q1PlayerState, weapon: MissionWeapon):
     case "rogue:plasma": return fireRoguePlasma(game, player);
   }
 }
-function animate(game: Q1Foundation, player: Q1PlayerState, seconds: number): undefined {
+function animate(game: Q1EntityServices, player: Q1PlayerState, seconds: number): undefined {
   if (player.continuousFiring || player.weaponAnimationAt < 0) return undefined;
   const step = Math.floor((seconds - player.weaponAnimationAt) / 0.1), frame = step >= 6 ? 0 : player.weapon === "hipnotic:mjolnir" ? Math.min(4, step + 1) : step + 1;
   if (frame !== player.weaponFrame) { player.weaponFrame = frame; game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon, viewModel: game.weaponModel(player.weapon), frame, punch: 0 }); }
@@ -39,7 +39,7 @@ export class MissionPackArsenal {
     if (this.pack === "rogue" && (impulse === 20 || impulse === 21)) { if (impulse === 20) tossRogueBackpack(this.game, player); else tossRogueWeapon(this.game, player); return true; }
     this.players.enableCombos(player); return missionWeaponImpulse(this.game, player, this.pack, impulse);
   }
-  constructor(readonly game: Q1Foundation, readonly pack: Q1MissionPack) {
+  constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack) {
     this.players = new MissionPackPlayers(game, pack);
     registerMissionPackPickupRules(game, pack, this.players);
     if (pack === "hipnotic") registerHipnoticWeaponCallbacks(game); else { registerRogueWeaponCallbacks(game); registerRogueTossCallbacks(game, this.players); new RogueGrapple(game); }
@@ -60,4 +60,4 @@ export class MissionPackArsenal {
     });
   }
 }
-export function registerMissionPackArsenal(game: Q1Foundation, pack: Q1MissionPack): MissionPackArsenal { return new MissionPackArsenal(game, pack); }
+export function registerMissionPackArsenal(game: Q1EntityServices, pack: Q1MissionPack): MissionPackArsenal { return new MissionPackArsenal(game, pack); }

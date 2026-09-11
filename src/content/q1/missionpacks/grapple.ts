@@ -2,13 +2,13 @@
 import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState } from "../foundation/types.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub, weaponItem } from "../foundation/types.ts";
 import { missionReference, setMissionReference, velocityAngles } from "./types.ts";
 
 export class RogueGrapple {
-  constructor(readonly game: Q1Foundation) {
+  constructor(readonly game: Q1EntityServices) {
     game.registerWeapon({ id: "rogue:grapple", model: "progs/v_grpple.mdl", ammo: null, rank: 12, fire: (_runtime, player) => this.fire(player), animate: (_runtime, player) => {
       if (this.hook(player.actor.id) === null || player.weaponFrame !== 1 || game.time < player.weaponAnimationAt + 0.1) return undefined;
       player.weaponFrame = 2; return this.presentation(player);

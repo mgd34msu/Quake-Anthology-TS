@@ -1,12 +1,12 @@
 /* hiprot.qc / hipclock.qc. Copyright id Software. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { moveDirection } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, length, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { later, number, targetEvent, vector } from "./common.ts";
 import { damageOnTargets, linkRotateTargets, normalizeAngles, rotateTargets, rotateTargetsFinal, setTargetOrigin } from "./rotate-targets.ts";
 
-function continuousThink(game: Q1Foundation, entity: Q1Actor): undefined {
+function continuousThink(game: Q1EntityServices, entity: Q1Actor): undefined {
   let elapsed = game.time - entity.number("ltime"); number(entity, "ltime", game.time);
   const state = entity.number("rotate_state");
   if (state === 2) { entity.count = Math.min(1, entity.count + entity.number("cnt") * elapsed); elapsed *= entity.count; }
@@ -18,7 +18,7 @@ function continuousThink(game: Q1Foundation, entity: Q1Actor): undefined {
   game.setBody(entity, { angles: normalizeAngles(vadd(game.body(entity).angles, vscale(entity.vector("rotate"), elapsed))) });
   rotateTargets(game, entity); return later(game, entity, 0.02, "hip:rotate_entity");
 }
-function continuousUse(game: Q1Foundation, entity: Q1Actor): undefined {
+function continuousUse(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.frame = 1 - entity.frame; const state = entity.number("rotate_state");
   if (state === 0) {
     if ((entity.spawnflags & 1) !== 0) {
@@ -32,7 +32,7 @@ function continuousUse(game: Q1Foundation, entity: Q1Actor): undefined {
   else number(entity, "rotate_state", 2);
   return undefined;
 }
-function reverseDoor(game: Q1Foundation, entity: Q1Actor): undefined {
+function reverseDoor(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.frame = 1 - entity.frame; const closing = entity.number("rotate_state") === 7;
   const start = closing ? entity.dest1 : entity.dest2, destination = closing ? entity.dest2 : entity.dest1;
   vector(entity, "dest", destination); number(entity, "rotate_state", closing ? 6 : 7);
@@ -40,12 +40,12 @@ function reverseDoor(game: Q1Foundation, entity: Q1Actor): undefined {
   number(entity, "endtime", game.time + entity.speed - (entity.number("endtime") - game.time)); number(entity, "ltime", game.time);
   return later(game, entity, 0.02, "hip:rotate_door");
 }
-function reverseGroup(game: Q1Foundation, entity: Q1Actor): undefined {
+function reverseGroup(game: Q1EntityServices, entity: Q1Actor): undefined {
   const group = entity.text("group");
   for (const member of group === "" ? [entity] : [...game.entities.values()].filter(value => value.text("group") === group && game.live(value))) reverseDoor(game, member);
   return undefined;
 }
-function trainStop(game: Q1Foundation, entity: Q1Actor, wait: boolean): undefined {
+function trainStop(game: Q1EntityServices, entity: Q1Actor, wait: boolean): undefined {
   const goal = game.entity(entity.references.get("goalentity") ?? null); if (goal === null) throw new Error("rotate_train: missing goal");
   number(entity, "rotate_state", wait ? 0 : 2); game.sound(entity, goal.text("noise") || entity.text("noise"));
   if ((goal.spawnflags & 2) !== 0) { vector(entity, "rotate", ZERO); game.setBody(entity, { angles: entity.vector("finalangle") }); }
@@ -53,7 +53,7 @@ function trainStop(game: Q1Foundation, entity: Q1Actor, wait: boolean): undefine
   if (wait) number(entity, "endtime", entity.number("ltime") + goal.wait); else entity.damage = 0;
   entity.fields.set("think1", "hip:rotate_train_next"); return undefined;
 }
-function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
+function trainNext(game: Q1EntityServices, entity: Q1Actor): undefined {
   number(entity, "rotate_state", 4);
   const current = game.entity(entity.references.get("goalentity") ?? null), target = game.find(entity.text("path"))[0];
   if (current === null || target?.classname !== "path_rotate") throw new Error("rotate_train_next: next target is not path_rotate");
@@ -92,7 +92,7 @@ function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
   number(entity, "duration", inverse); number(entity, "cnt", game.time); entity.dest2 = delta; entity.dest1 = body.origin; return undefined;
 }
 
-export function registerHipnoticRotation(game: Q1Foundation): undefined {
+export function registerHipnoticRotation(game: Q1EntityServices): undefined {
   game.registerSpawn("info_rotate", (g, e) => later(g, e, 2, "SUB_Remove"));
   game.registerSpawn("path_rotate", () => undefined);
   game.registerSpawn("rotate_object", (_g, e) => { e.solid = "none"; e.movement = "none"; return undefined; });

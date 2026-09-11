@@ -3,13 +3,13 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "../foundation/types.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
 import { aim } from "../foundation/weapons.ts";
 import { grenadeVelocity, missionReference, moveMissile, setMissionNumber, setMissionReference, velocityAngles } from "./types.ts";
 
-function finish(game: Q1Foundation, player: Q1PlayerState, delay: number, frame: number, model: string, punch: number): boolean {
+function finish(game: Q1EntityServices, player: Q1PlayerState, delay: number, frame: number, model: string, punch: number): boolean {
   player.attackFinished = Math.fround(game.time + delay); player.nextWeaponFrame = player.attackFinished;
   player.weaponFrame = frame; player.hostileUntil = Math.fround(game.time + 1);
   game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon, viewModel: model, frame, punch });
@@ -19,7 +19,7 @@ function finish(game: Q1Foundation, player: Q1PlayerState, delay: number, frame:
 
 export interface HipnoticLaserProfile { readonly weapon: Q1Weapon; readonly damage: number; readonly lightDamage: number; }
 const hipnoticLaser: HipnoticLaserProfile = { weapon: "hipnotic:laser", damage: 18, lightDamage: 25 };
-export function launchHipnoticLaser(game: Q1Foundation, shooter: ActorId, origin: Vec3, direction: Vec3, light = false, profile: HipnoticLaserProfile = hipnoticLaser): Q1Actor {
+export function launchHipnoticLaser(game: Q1EntityServices, shooter: ActorId, origin: Vec3, direction: Vec3, light = false, profile: HipnoticLaserProfile = hipnoticLaser): Q1Actor {
   const laser = game.create("hiplaser"), velocity = vscale(normalize(direction), 1000);
   laser.owner = shooter; laser.activator = shooter; laser.movement = "flymissile"; laser.solid = "bbox";
   laser.model = "progs/lasrspik.mdl"; laser.effects = light ? 8 : 0; laser.speed = 1000; laser.damage = light ? profile.lightDamage : profile.damage;
@@ -30,7 +30,7 @@ export function launchHipnoticLaser(game: Q1Foundation, shooter: ActorId, origin
   const owner = game.host.actors.resolveOwned(shooter); if (owner !== null) game.sound(owner, "hipweap/laserg.wav", "weapon");
   return laser;
 }
-export function fireHipnoticLaser(game: Q1Foundation, player: Q1PlayerState): boolean {
+export function fireHipnoticLaser(game: Q1EntityServices, player: Q1PlayerState): boolean {
   if (!game.host.inventory.consume(player.actor, "q1:ammo/cells", 1)) return false;
   const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
   const basis = game.makeVectors(player.viewAngles), outward = normalize({ ...basis.forward, z: 0 });
@@ -44,7 +44,7 @@ export function fireHipnoticLaser(game: Q1Foundation, player: Q1PlayerState): bo
   player.continuousFiring = true; player.weaponAnimationAt = -1;
   return finish(game, player, 0.1, paired ? 1 : 4, "progs/v_laserg.mdl", -1);
 }
-function laserTouch(game: Q1Foundation, laser: Q1Actor, other: ActorId, normal: Vec3 | null): undefined {
+function laserTouch(game: Q1EntityServices, laser: Q1Actor, other: ActorId, normal: Vec3 | null): undefined {
   laser.owner = null; laser.count++;
   if (game.host.contents(game.body(laser).origin) === "sky") return game.remove(laser);
   const oldDirection = normalize(laser.movedir), origin = game.body(laser).origin;
@@ -63,7 +63,7 @@ function laserTouch(game: Q1Foundation, laser: Q1Actor, other: ActorId, normal: 
   game.sound(laser, "enforcer/enfstop.wav", "weapon", 3); return game.remove(laser);
 }
 
-export function launchHipnoticProximity(game: Q1Foundation, owner: ActorId, origin: Vec3, velocity: Vec3): Q1Actor {
+export function launchHipnoticProximity(game: Q1EntityServices, owner: ActorId, origin: Vec3, velocity: Vec3): Q1Actor {
   const mine = game.create("proximity_grenade");
   mine.owner = owner; mine.activator = owner; mine.movement = "toss"; mine.solid = "bbox";
   mine.model = "progs/proxbomb.mdl"; mine.angularVelocity = { x: 100, y: 600, z: 100 }; mine.projectileWeapon = "hipnotic:proximity";
@@ -74,7 +74,7 @@ export function launchHipnoticProximity(game: Q1Foundation, owner: ActorId, orig
   game.schedule(mine, 2, game.named.action(mine, "hipnotic:proximity-watch"));
   return mine;
 }
-export function fireHipnoticProximity(game: Q1Foundation, player: Q1PlayerState): boolean {
+export function fireHipnoticProximity(game: Q1EntityServices, player: Q1PlayerState): boolean {
   if (!game.host.inventory.consume(player.actor, "q1:ammo/rockets", 1)) return false;
   const body = game.host.bodies.read(player.actor.id); if (body === null) return false;
   const velocity = grenadeVelocity(game, player.viewAngles, aim(game, player.actor, game.makeVectors(player.viewAngles).forward));
@@ -82,15 +82,15 @@ export function fireHipnoticProximity(game: Q1Foundation, player: Q1PlayerState)
   player.continuousFiring = false; player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1;
   return finish(game, player, 0.6, 1, "progs/v_prox.mdl", -2);
 }
-function proximityExplode(game: Q1Foundation, mine: Q1Actor): undefined {
+function proximityExplode(game: Q1EntityServices, mine: Q1Actor): undefined {
   game.radiusDamage(mine.actor.id, mine.activator, 95, null, "hipnotic:proximity");
   game.effect("explosion", game.body(mine).origin); return game.remove(mine);
 }
-function armProximityExplosion(game: Q1Foundation, mine: Q1Actor, delay = 0.1): undefined {
+function armProximityExplosion(game: Q1EntityServices, mine: Q1Actor, delay = 0.1): undefined {
   mine.damageable = false; setMissionNumber(mine, "hipnotic:detonating", 1); mine.owner = mine.activator;
   return game.schedule(mine, delay, game.named.action(mine, "hipnotic:proximity-explode"));
 }
-function proximityTouch(game: Q1Foundation, mine: Q1Actor, other: ActorId): undefined {
+function proximityTouch(game: Q1EntityServices, mine: Q1Actor, other: ActorId): undefined {
   if (sameActor(other, mine.actor.id) || game.host.classname(other) === mine.classname) return undefined;
   mine.movement = "toss";
   if (mine.count === 1) return undefined;
@@ -102,7 +102,7 @@ function proximityTouch(game: Q1Foundation, mine: Q1Actor, other: ActorId): unde
   setMissionReference(mine, "hipnotic:surface", other);
   game.setBounds(mine, { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } }); return game.link(mine);
 }
-function proximityWatch(game: Q1Foundation, mine: Q1Actor): undefined {
+function proximityWatch(game: Q1EntityServices, mine: Q1Actor): undefined {
   const mines = [...game.entities.values()].filter(entity => entity.classname === mine.classname && entity.number("hipnotic:detonating") === 0);
   const surface = missionReference(game, mine, "hipnotic:surface"), surfaceBody = surface === null ? null : game.host.bodies.read(surface);
   if (game.time > mine.delay || mines.length > 15 || surfaceBody !== null && length(surfaceBody.velocity) > 0) return proximityExplode(game, mine);
@@ -122,13 +122,13 @@ function proximityWatch(game: Q1Foundation, mine: Q1Actor): undefined {
   return game.schedule(mine, 0.25, game.named.action(mine, "hipnotic:proximity-watch"));
 }
 
-export function fireHipnoticMjolnir(game: Q1Foundation, player: Q1PlayerState): boolean {
+export function fireHipnoticMjolnir(game: Q1EntityServices, player: Q1PlayerState): boolean {
   const strike = game.create("hipnotic_hammer_strike"); strike.owner = player.actor.id;
   game.schedule(strike, 0.3, game.named.action(strike, "hipnotic:hammer-strike"));
   player.continuousFiring = false; player.weaponAnimationAt = game.time; player.weaponAnimationBase = game.host.inventory.count(player.actor.id, "q1:ammo/cells") < 30 ? 32 : 38;
   return finish(game, player, 0.8, 1, "progs/v_hammer.mdl", 0);
 }
-function hammerDamage(game: Q1Foundation, from: ActorId, start: Vec3, end: Vec3, damage: number, weapon: Q1Weapon): undefined {
+function hammerDamage(game: Q1EntityServices, from: ActorId, start: Vec3, end: Vec3, damage: number, weapon: Q1Weapon): undefined {
   const delta = vsub(end, start), side = { x: -delta.y * 16, y: -delta.y * 16, z: 0 }, hit: ActorId[] = [];
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(start, offset), end: vadd(end, offset), bounds: POINT, ignore: from, monsters: true });
@@ -141,7 +141,7 @@ function hammerDamage(game: Q1Foundation, from: ActorId, start: Vec3, end: Vec3,
   }
   return undefined;
 }
-function hammerStrike(game: Q1Foundation, strike: Q1Actor): undefined {
+function hammerStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
   const player = strike.owner === null ? null : game.player(strike.owner), body = player === null ? null : game.host.bodies.read(player.actor.id);
   if (player === null || body === null) return game.remove(strike);
   const basis = game.makeVectors(player.viewAngles), source = vadd(body.origin, { x: 0, y: 0, z: 16 });
@@ -169,7 +169,7 @@ function hammerStrike(game: Q1Foundation, strike: Q1Actor): undefined {
   else game.sound(player.actor, "knight/sword1.wav", "weapon");
   return game.remove(strike);
 }
-export function spawnHipnoticHammerBase(game: Q1Foundation, player: Q1PlayerState, origin: Vec3, weapon: Q1Weapon = "hipnotic:mjolnir"): undefined {
+export function spawnHipnoticHammerBase(game: Q1EntityServices, player: Q1PlayerState, origin: Vec3, weapon: Q1Weapon = "hipnotic:mjolnir"): undefined {
   const base = game.create("hipnotic_mjolnir_base"); base.owner = player.actor.id; base.movedir = game.makeVectors(player.viewAngles).forward; base.projectileWeapon = weapon;
   game.setOrigin(base, origin); game.schedule(base, 1, game.named.action(base, "SUB_Remove"));
   game.sound(base, "hipweap/mjolslap.wav", "auto"); game.sound(base, "hipweap/mjolhit.wav", "weapon");
@@ -180,7 +180,7 @@ export function spawnHipnoticHammerBase(game: Q1Foundation, player: Q1PlayerStat
   }
   return undefined;
 }
-function hammerLightning(game: Q1Foundation, bolt: Q1Actor): undefined {
+function hammerLightning(game: Q1EntityServices, bolt: Q1Actor): undefined {
   const base = game.entity(bolt.owner);
   if (game.time > bolt.delay || base === null || bolt.activator === null) return game.remove(bolt);
   const origin = game.body(base).origin, oldState = bolt.count;
@@ -216,8 +216,8 @@ function hammerLightning(game: Q1Foundation, bolt: Q1Actor): undefined {
   return game.schedule(bolt, 0.2, game.named.action(bolt, "hipnotic:hammer-lightning"));
 }
 
-const laserRegistrations = new WeakSet<Q1Foundation>();
-export function registerHipnoticLaserCallbacks(game: Q1Foundation): undefined {
+const laserRegistrations = new WeakSet<Q1EntityServices>();
+export function registerHipnoticLaserCallbacks(game: Q1EntityServices): undefined {
   if (laserRegistrations.has(game)) return undefined;
   laserRegistrations.add(game);
   game.named.register("hipnotic:laser-touch", { touch: laserTouch });
@@ -227,7 +227,7 @@ export function registerHipnoticLaserCallbacks(game: Q1Foundation): undefined {
   } });
   return undefined;
 }
-export function registerHipnoticWeaponCallbacks(game: Q1Foundation): undefined {
+export function registerHipnoticWeaponCallbacks(game: Q1EntityServices): undefined {
   registerHipnoticLaserCallbacks(game);
   game.named.register("hipnotic:proximity-touch", { touch: proximityTouch });
   game.named.register("hipnotic:proximity-watch", { action: proximityWatch });
@@ -235,8 +235,8 @@ export function registerHipnoticWeaponCallbacks(game: Q1Foundation): undefined {
   game.named.register("hipnotic:proximity-arm-explosion", { die: (runtime, mine) => armProximityExplosion(runtime, mine) });
   return registerHipnoticHammerCallbacks(game);
 }
-const hammerRegistrations = new WeakSet<Q1Foundation>();
-export function registerHipnoticHammerCallbacks(game: Q1Foundation): undefined {
+const hammerRegistrations = new WeakSet<Q1EntityServices>();
+export function registerHipnoticHammerCallbacks(game: Q1EntityServices): undefined {
   if (hammerRegistrations.has(game)) return undefined;
   hammerRegistrations.add(game);
   game.named.register("hipnotic:hammer-strike", { action: hammerStrike });

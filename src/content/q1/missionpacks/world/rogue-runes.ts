@@ -3,13 +3,13 @@ import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../../../persistence/value.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { later, number } from "./common.ts";
 
 interface RuneState { rune: number; notice: number; earthNoise: number; blackNoise: number; hellNoise: number; regeneration: number; }
 export class RogueRunes {
   private readonly players = new Map<OwnedActor, RuneState>();
-  constructor(private readonly game: Q1Foundation, private readonly gamecfg: () => number) {
+  constructor(private readonly game: Q1EntityServices, private readonly gamecfg: () => number) {
     game.host.actors.onRelease(actor => { this.players.delete(actor); return undefined; });
     game.registerStateExtension({ id: "rogue:runes", capture: () => encodeCheckpointValue([...this.players].map(([actor, state]) => ({ actor: { slot: actor.id.slot, generation: actor.id.generation }, ...state }))), restore: bytes => {
       this.players.clear(); const reader = new SaveReader(decodeCheckpointValue(bytes), "rogue:runes");

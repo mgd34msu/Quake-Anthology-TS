@@ -4,7 +4,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor, Q1Monster } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import { POINT, vadd, vsub, vscale, length, normalize, dot, yawFor } from "./types.ts";
 import { fireBullets } from "./weapons.ts";
 
@@ -18,7 +18,7 @@ function setSequence(monster: Q1Monster, mode: Q1Monster["mode"], firstFrame: nu
 function stand(monster: Q1Monster): undefined { return setSequence(monster, "stand", monster.species === "army" ? 0 : 69, stationary(monster.species === "army" ? 8 : 9)); }
 function walk(monster: Q1Monster): undefined { return setSequence(monster, "walk", monster.species === "army" ? 90 : 78, monster.species === "army" ? armyWalk : Array.from({ length: 8 }, () => 8)); }
 function run(monster: Q1Monster): undefined { return setSequence(monster, "run", monster.species === "army" ? 73 : 48, monster.species === "army" ? armyRun : dogRun); }
-function face(game: Q1Foundation, entity: Q1Actor, destination: Vec3): number {
+function face(game: Q1EntityServices, entity: Q1Actor, destination: Vec3): number {
   const body = game.body(entity), ideal = yawFor(vsub(destination, body.origin));
   let move = ideal - body.angles.y; if (move > 180) move -= 360; if (move < -180) move += 360;
   const speed = entity.number("yaw_speed") || 20;
@@ -26,17 +26,17 @@ function face(game: Q1Foundation, entity: Q1Actor, destination: Vec3): number {
   const yaw = (body.angles.y + Math.max(-speed, Math.min(speed, move)) + 360) % 360;
   game.setBody(entity, { angles: { ...body.angles, y: yaw } }); return yaw;
 }
-function visible(game: Q1Foundation, entity: Q1Actor, target: ActorId): boolean {
+function visible(game: Q1EntityServices, entity: Q1Actor, target: ActorId): boolean {
   const body = game.host.bodies.read(target); if (body === null) return false;
   const trace = game.host.trace({ start: vadd(game.body(entity).origin, { x: 0, y: 0, z: 25 }), end: vadd(body.origin, { x: 0, y: 0, z: game.isPlayer(target) ? 22 : 25 }), bounds: POINT, ignore: entity.actor.id, monsters: false });
   return trace.fraction === 1 && !(trace.inOpen && trace.inWater);
 }
-function foundTarget(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster, target: ActorId): undefined {
+function foundTarget(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster, target: ActorId): undefined {
   monster.enemy = target; monster.searchUntil = game.time + 5; monster.attackFinished = game.time + 1; run(monster);
   game.sightEntity = entity; game.sightTime = game.time;
   return game.sound(entity, monster.species === "army" ? "soldier/sight1.wav" : "dog/dsight.wav");
 }
-function findTarget(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): boolean {
+function findTarget(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster): boolean {
   let candidate: ActorId | null;
   if (game.sightEntity !== null && game.sightTime >= game.time - 0.1 && (entity.spawnflags & 3) === 0) candidate = game.sightEntity.monster?.enemy ?? null;
   else candidate = game.host.checkClient(entity.actor);
@@ -49,7 +49,7 @@ function findTarget(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): bo
   if (distance >= 500 && !inFront || distance >= 120 && distance < 500 && (game.player(candidate)?.hostileUntil ?? 0) < game.time && !inFront) return false;
   foundTarget(game, entity, monster, candidate); return true;
 }
-function tryAttack(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): boolean {
+function tryAttack(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster): boolean {
   const enemy = monster.enemy; if (enemy === null) return false;
   const target = game.host.bodies.read(enemy); if (target === null) return false;
   const body = game.body(entity), delta = vsub(target.origin, body.origin), distance = length(delta);
@@ -68,7 +68,7 @@ function tryAttack(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): boo
   setSequence(monster, "attack", 81, stationary(9)); monster.attackFinished = game.time + 1 + game.host.random(); monster.refired = false;
   game.host.random(); return true;
 }
-function monsterFrame(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): undefined {
+function monsterFrame(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster): undefined {
   const mode = monster.mode; const index = monster.frameIndex;
   const distance = monster.sequence[index] ?? 0; entity.frame = monster.firstFrame + index;
   if ((mode === "walk" || mode === "run") && index === 0 && game.host.random() < 0.2) game.sound(entity, monster.species === "army" ? "soldier/idle.wav" : "dog/idle.wav", "voice", 2);
@@ -147,7 +147,7 @@ function monsterFrame(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): 
   }
   return game.schedule(entity, 0.1, game.named.action(entity, "monster_frame"));
 }
-function gib(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): undefined {
+function gib(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster): undefined {
   const health = game.health(entity.actor.id); game.sound(entity, "player/udeath.wav");
   const velocity = (): Vec3 => vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + game.host.random() * 100 }, health > -50 ? 0.7 : 2);
   for (const model of monster.species === "army" ? ["gib1", "gib2", "gib3"] : ["gib3", "gib3", "gib3"]) {
@@ -159,7 +159,7 @@ function gib(game: Q1Foundation, entity: Q1Actor, monster: Q1Monster): undefined
   game.setBody(entity, { velocity: velocity(), bounds: POINT, origin: vadd(game.body(entity).origin, { x: 0, y: 0, z: -24 }) });
   entity.angularVelocity = { x: 0, y: game.host.random() * 600, z: 0 }; return game.schedule(entity, 10 + game.host.random() * 10, game.named.action(entity, "SUB_Remove"));
 }
-export function spawnMonster(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnMonster(game: Q1EntityServices, entity: Q1Actor): undefined {
   const species = entity.classname === "monster_army" ? "army" : "dog";
   if (game.usesId1Precaches) {
     if (game.options.deathmatch !== 0) return game.remove(entity);
@@ -204,7 +204,7 @@ export function spawnMonster(game: Q1Foundation, entity: Q1Actor): undefined {
 function requireMonster(entity: Q1Actor): Q1Monster {
   const monster = entity.monster; if (monster === null) throw new Error(`Missing saved monster state: ${entity.classname}`); return monster;
 }
-function dogLeapTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function dogLeapTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
   const monster = requireMonster(entity);
           if (game.health(entity.actor.id) <= 0) return undefined;
           if (game.host.combat.read(other)?.canTakeDamage && length(game.body(entity).velocity) > 300) game.damage(other, entity.actor.id, entity.actor.id, 10 + 10 * game.host.random());
@@ -213,19 +213,19 @@ function dogLeapTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): unde
           return undefined;
 }
 
-function retaliate(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | null): undefined {
+function retaliate(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null): undefined {
   const monster = requireMonster(entity), species = monster.species;
     if (attacker === null || sameActor(attacker, entity.actor.id) || game.entity(attacker)?.classname === entity.classname && species !== "army") return undefined;
     if (monster.enemy !== null && game.isPlayer(monster.enemy)) monster.oldEnemy = monster.enemy;
     if (monster.enemy === null || !sameActor(monster.enemy, attacker)) foundTarget(game, entity, monster, attacker); return undefined;
 }
-function monsterUse(game: Q1Foundation, entity: Q1Actor, _other: ActorId | null, activator: ActorId | null): undefined {
+function monsterUse(game: Q1EntityServices, entity: Q1Actor, _other: ActorId | null, activator: ActorId | null): undefined {
   const monster = requireMonster(entity);
     if (monster.enemy !== null || game.health(entity.actor.id) <= 0 || !game.isPlayer(activator) || activator === null) return undefined;
     if ((game.player(activator)?.powerups.get("invisibility") ?? 0) > game.time) return undefined;
     monster.enemy = activator; return game.schedule(entity, 0.1, game.named.action(entity, "monster_found_target"));
 }
-function monsterPain(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | null): undefined {
+function monsterPain(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null): undefined {
   const monster = requireMonster(entity), species = monster.species;
     retaliate(game, entity, attacker);
     if (species === "army") {
@@ -243,7 +243,7 @@ function monsterPain(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | nu
     }
     return monsterFrame(game, entity, monster);
 }
-function monsterDie(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | null): undefined {
+function monsterDie(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null): undefined {
   const monster = requireMonster(entity), species = monster.species;
     entity.damageable = false; entity.touch = null; game.killedMonsters++;
     game.host.emit({ kind: "monster-killed", actor: entity.actor.id, total: game.totalMonsters, found: game.killedMonsters });
@@ -257,7 +257,7 @@ function monsterDie(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | nul
     }
     game.link(entity); return monsterFrame(game, entity, monster);
 }
-function monsterStart(game: Q1Foundation, entity: Q1Actor): undefined {
+function monsterStart(game: Q1EntityServices, entity: Q1Actor): undefined {
   const monster = requireMonster(entity);
     const body = game.body(entity), start = vadd(body.origin, { x: 0, y: 0, z: 1 });
     const floor = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
@@ -268,7 +268,7 @@ function monsterStart(game: Q1Foundation, entity: Q1Actor): undefined {
     return game.schedule(entity, 0.1 + game.host.random() * 0.5, game.named.action(entity, "monster_frame"));
 }
 
-export function registerMonsterCallbacks(game: Q1Foundation): undefined {
+export function registerMonsterCallbacks(game: Q1EntityServices): undefined {
   game.named.register("monster_frame", { action: (runtime, entity) => monsterFrame(runtime, entity, requireMonster(entity)) });
   game.named.register("monster_path_end", { action: (runtime, entity) => { const monster = requireMonster(entity); monster.pauseUntil = runtime.time + 999999; stand(monster); entity.frame = monster.firstFrame; return undefined; } });
   game.named.register("monster_found_target", { action: (runtime, entity) => { const monster = requireMonster(entity); if (monster.enemy === null) return undefined; foundTarget(runtime, entity, monster, monster.enemy); return monsterFrame(runtime, entity, monster); } });

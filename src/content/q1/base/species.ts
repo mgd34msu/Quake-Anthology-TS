@@ -1,5 +1,5 @@
 /* QuakeC monster spawn defaults. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Bounds } from "../../../contracts/math.ts";
 import type { Q1Monster } from "../foundation/entity.ts";
 export type BaseSpecies = "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone";
@@ -41,7 +41,7 @@ export const baseSpecies: readonly MonsterSpecies[] = [
 ];
 
 /** progs106 monster spawn declarations, before model assignment and startup. */
-export function precacheId1Monster(game: Q1Foundation, species: Q1Monster["species"]): undefined {
+export function precacheId1Monster(game: Q1EntityServices, species: Q1Monster["species"]): undefined {
   switch (species) {
     case "knight":
       game.precacheModel("progs/knight.mdl");

@@ -1,7 +1,7 @@
 /* Mission-pack player.qc poses; the selected character retains its shared lifecycle. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q1CharacterDefinition, Q1CharacterPresentation, Q1CharacterSourcePose } from "../base/player.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import { length, vsub } from "../foundation/types.ts";
@@ -10,7 +10,7 @@ import type { Q1MissionPack } from "./types.ts";
 const hammer: Q1CharacterDefinition = {
   model: "progs/playham.mdl", stand: { first: 6, count: 12 }, run: { first: 0, count: 6 }, pain: { first: 18, count: 6 }, death: { first: 24, count: 8 },
 };
-export function missionPackCharacterPose(game: Q1Foundation, actor: ActorId, pack: Q1MissionPack): Q1CharacterSourcePose {
+export function missionPackCharacterPose(game: Q1EntityServices, actor: ActorId, pack: Q1MissionPack): Q1CharacterSourcePose {
   const player = game.player(actor); if (player === null) return { frame: null };
   const elapsed = player.weaponAnimationAt < 0 ? -1 : Math.floor((game.time - player.weaponAnimationAt) / 0.1), attacking = elapsed >= 0 && elapsed < 6;
   if (pack === "hipnotic" && player.weapon === "hipnotic:mjolnir") return { definition: hammer, frame: attacking ? player.weaponAnimationBase + elapsed : null };
@@ -23,7 +23,7 @@ export function missionPackCharacterPose(game: Q1Foundation, actor: ActorId, pac
 }
 
 export class MissionPackCharacterEffects {
-  constructor(readonly game: Q1Foundation, readonly pack: Q1MissionPack, readonly footsteps: () => boolean) {
+  constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack, readonly footsteps: () => boolean) {
     if (pack === "hipnotic") game.named.register("hipnotic:head-flies", { action: (runtime, timer) => {
       const owner = timer.owner === null ? null : runtime.host.actors.resolveOwned(timer.owner);
       if (owner !== null && runtime.health(owner.id) <= 0 && runtime.world?.number("worldtype") !== 2 && runtime.host.random() < 0.1) runtime.host.emit({ kind: "sound", actor: owner.id, path: "misc/flys.wav", channel: 6, attenuation: 3, volume: 0.7 });

@@ -1,8 +1,8 @@
 /* Quake progs106 weapons.qc W_Precache and world.qc worldspawn. GPL-2.0-or-later. */
-import type { Q1Foundation } from './runtime.ts';
+import type { Q1EntityServices } from './entity-services.ts';
 
 /** Runtime worldspawn declarations, in source order. main() is compiler packaging, not a spawn call. */
-export function precacheQ1World(game: Q1Foundation): void {
+export function precacheQ1World(game: Q1EntityServices): void {
   game.precacheSound("weapons/r_exp3.wav");
   game.precacheSound("weapons/rocket1i.wav");
   game.precacheSound("weapons/sgun1.wav");

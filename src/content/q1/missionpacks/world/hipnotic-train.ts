@@ -1,10 +1,10 @@
 /* hiptrain.qc / hipwater.qc / hip_push.qc. Copyright id Software. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, vadd, vscale, vsub, vectors } from "../../foundation/types.ts";
 import { brush, later, number, targetEvent, vector } from "./common.ts";
 
-function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
+function trainNext(game: Q1EntityServices, entity: Q1Actor): undefined {
   const current = entity.number("cnt"), corner = game.find(entity.target)[0];
   if (corner === undefined) throw new Error(`hip_train_next: missing ${entity.target}`);
   number(entity, "cnt", corner.speed); entity.target = corner.target;
@@ -20,7 +20,7 @@ function trainNext(game: Q1Foundation, entity: Q1Actor): undefined {
   return game.calcMove(entity, destination, entity.speed, game.named.action(entity, next));
 }
 
-export function registerHipnoticTrain(game: Q1Foundation): undefined {
+export function registerHipnoticTrain(game: Q1EntityServices): undefined {
   game.named.register("hip:train_next", { action: trainNext });
   game.named.register("hip:train_find", { action: (g, e) => {
     const corner = g.find(e.target)[0]; if (corner === undefined) throw new Error(`hip_func_train_find: missing ${e.target}`);

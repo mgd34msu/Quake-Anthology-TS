@@ -2,7 +2,7 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { spawnMapActor } from "../../foundation/spawns.ts";
 import { ZERO, length, vadd, vsub, vscale } from "../../foundation/types.ts";
 import type { MissionpackWorldHooks } from "./index.ts";
@@ -11,7 +11,7 @@ import { brush, later, number, vector } from "./common.ts";
 const flagBounds = { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 74 } };
 function teamName(team: number): string { return team === 5 ? "Red" : team === 14 ? "Blue" : team === 1 ? "Grey" : "UNKNOWN"; }
 export class RogueTeams {
-  constructor(private readonly game: Q1Foundation, private readonly hooks: MissionpackWorldHooks) {
+  constructor(private readonly game: Q1EntityServices, private readonly hooks: MissionpackWorldHooks) {
     game.setBaseTeamHealth(false);
     game.registerDamageSourceEffects("rogue:teams", {
       armorAllowed: request => !this.ctf || request.attack.attacker !== null && sameActor(request.attack.attacker, request.target) || this.team(request.attack.attacker) !== this.team(request.target) || ((hooks.gamecfg?.() ?? 0) & 2) !== 0,

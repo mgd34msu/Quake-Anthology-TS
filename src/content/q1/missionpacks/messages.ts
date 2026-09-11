@@ -1,6 +1,6 @@
 /* Classic mission-pack strings corresponding to rerelease localization keys. */
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 
 const classic: ReadonlyMap<string, string> = new Map([
   ["$qc_wetsuit", "Wetsuit"], ["$qc_empathy_shields", "Empathy Shields"], ["$qc_mjolnir", "Mjolnir"], ["$qc_laser_cannon", "Laser Cannon"], ["$qc_prox_gun", "Proximity Gun"],
@@ -16,10 +16,10 @@ const classic: ReadonlyMap<string, string> = new Map([
   ["$qc_no_ammo_available", "No ammo available!\n"], ["$qc_quad_cheat", "quad cheat\n"], ["$qc_wetsuit_cheat", "wetsuit cheat\n"], ["$qc_empathy_cheat", "empathy shields cheat\n"], ["$qc_genocide_cheat", "Genocide!\n"], ["$qc_dump_player_loc", "Dumping Player Location\n"],
   ["$qc_double_shotgun", "Double-barrelled Shotgun"], ["$qc_nailgun", "Nailgun"], ["$qc_super_nailgun", "Super Nailgun"], ["$qc_grenade_launcher", "Grenade Launcher"], ["$qc_rocket_launcher", "Rocket Launcher"], ["$qc_thunderbolt", "Thunderbolt"],
 ]);
-export function missionMessage(game: Q1Foundation, player: ActorId | null, key: string): undefined {
+export function missionMessage(game: Q1EntityServices, player: ActorId | null, key: string): undefined {
   return game.message(player, game.options.edition === "classic" ? classic.get(key) ?? key : key, false);
 }
-export function missionPickupMessage(game: Q1Foundation, player: ActorId, key: string): undefined {
+export function missionPickupMessage(game: Q1EntityServices, player: ActorId, key: string): undefined {
   if (game.options.edition === "classic") return game.message(player, `You got the ${classic.get(key) ?? key}\n`, false);
   return game.message(player, "$qc_got_item", false, [key]);
 }

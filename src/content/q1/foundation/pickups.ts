@@ -1,7 +1,7 @@
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "./types.ts";
 import { vadd, ZERO, WEAPONS, weaponItem } from "./types.ts";
 import { ammoItem } from "./runtime.ts";
@@ -12,9 +12,9 @@ interface Pickup {
   readonly bounds: "box" | "weapon" | "artifact";
   readonly skin: number;
   readonly respawn: number;
-  readonly take: (game: Q1Foundation, entity: Q1Actor, player: Q1PlayerState) => "refused" | "taken" | "leave";
+  readonly take: (game: Q1EntityServices, entity: Q1Actor, player: Q1PlayerState) => "refused" | "taken" | "leave";
 }
-function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
+function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | null {
   const name = entity.classname, big = (entity.spawnflags & (name === "item_weapon" ? 8 : 1)) !== 0;
   if (name === "item_health") {
     const mega = !big && (entity.spawnflags & 2) !== 0, amount = big ? 15 : mega ? 100 : 25;
@@ -79,7 +79,7 @@ function pickupDefinition(game: Q1Foundation, entity: Q1Actor): Pickup | null {
     take: (runtime, item, player) => { runtime.host.inventory.give(player.actor, "q1:ammo/shells", item.number("shells")); return "taken"; } };
   return null;
 }
-function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
+function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
   const leave = game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch));
   if (game.pickupAdmission !== null) {
     const owned = game.pickupAdmission.owns(player.actor.id, weaponItem(weapon));
@@ -108,7 +108,7 @@ function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: Q1Weapon)
 function rank(weapon: Q1Weapon): number {
   return ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun", "shotgun", "axe"].indexOf(weapon);
 }
-export function spawnPickup(game: Q1Foundation, entity: Q1Actor): boolean {
+export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
   const definition = pickupDefinition(game, entity); if (definition === null) return false;
   if (game.usesId1Precaches) {
     if (entity.classname === "item_weapon") {
@@ -152,7 +152,7 @@ export function spawnPickup(game: Q1Foundation, entity: Q1Actor): boolean {
   return true;
 }
 
-function pickupTouch(game: Q1Foundation, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
+function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
     const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
     if (entity.solid !== "trigger" || game.health(other) <= 0) return undefined;
     const player = game.player(other); if (player === null) return undefined;
@@ -170,14 +170,14 @@ function pickupTouch(game: Q1Foundation, entity: Q1Actor, other: import("../../.
     game.useTargets(entity, other); return undefined;
 }
 
-function placeItem(game: Q1Foundation, entity: Q1Actor): undefined {
+function placeItem(game: Q1EntityServices, entity: Q1Actor): undefined {
     const body = game.body(entity); const start = vadd(body.origin, { x: 0, y: 0, z: 6 });
     const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
     if (trace.allSolid || trace.fraction === 1) return game.remove(entity);
     entity.solid = "trigger"; entity.movement = "toss"; entity.movementFlags = 256 | 512;
     game.setBody(entity, { origin: trace.end, velocity: ZERO, ground: trace.actor }); game.link(entity); return undefined;
 }
-export function registerPickupCallbacks(game: Q1Foundation): undefined {
+export function registerPickupCallbacks(game: Q1EntityServices): undefined {
   game.named.register("item_touch", { touch: pickupTouch });
   game.named.register("PlaceItem", { action: placeItem });
   game.named.register("SUB_regen", { action: (runtime, entity) => { entity.solid = "trigger"; entity.model = entity.originalModel; runtime.sound(entity, "items/itembk2.wav"); return runtime.link(entity); } });

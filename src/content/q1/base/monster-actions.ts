@@ -1,7 +1,7 @@
 /* Direct ports of monster frame actions. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import { sameActor } from "../../../contracts/identity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import { q1Base } from "./provider.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -58,7 +58,7 @@ function hellKnightShot(monster: BaseMonster, offset: number): undefined {
   const direction = normalize(forward); launchSpike(game, entity.actor.id, origin, vscale({ ...direction, z: -direction.z + (game.host.random() - 0.5) * 0.1 }, 300), "knight");
   return game.sound(entity, "hknight/attack1.wav", "weapon");
 }
-export function wizardFastFire(game: Q1Foundation, timer: Q1Actor): undefined {
+export function wizardFastFire(game: Q1EntityServices, timer: Q1Actor): undefined {
   const shot = q1Base(game).wizardShots.get(timer.actor); if (shot === undefined) throw new Error("Wizard shot has no source target");
   const target = game.host.bodies.read(shot.enemy), origin = game.body(timer).origin, owner = timer.owner;
   if (owner !== null && game.health(owner) > 0 && target !== null) {

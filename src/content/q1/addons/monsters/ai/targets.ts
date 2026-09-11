@@ -2,14 +2,14 @@
 import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
-import type { Q1Foundation } from "../../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../../foundation/entity-services.ts";
 import { ZERO, vsub, yawFor } from "../../../foundation/types.ts";
 import type { Q1AddonContext } from "../../context.ts";
 
 function same(first: ActorId | null, second: ActorId | null): boolean {
   return first === null || second === null ? first === second : sameActor(first, second);
 }
-function destination(game: Q1Foundation, mover: Q1Actor, name: string): Q1Actor | undefined {
+function destination(game: Q1EntityServices, mover: Q1Actor, name: string): Q1Actor | undefined {
   const target = game.find(name)[0];
   mover.references.set("goalentity", target?.actor.id ?? null);
   mover.references.set("movetarget", target?.actor.id ?? null);
@@ -23,7 +23,7 @@ function pause(mover: Q1Actor, until: number): undefined {
   if (mover.monster !== null) mover.monster.pauseUntil = value;
   return undefined;
 }
-function moveTarget(game: Q1Foundation, corner: Q1Actor, other: ActorId): undefined {
+function moveTarget(game: Q1EntityServices, corner: Q1Actor, other: ActorId): undefined {
   const mover = game.entity(other);
   if (mover === null || !same(mover.references.get("movetarget") ?? null, corner.actor.id) || (mover.monster?.enemy ?? mover.references.get("enemy") ?? null) !== null) return undefined;
   corner.owner = other;
@@ -39,7 +39,7 @@ function moveTarget(game: Q1Foundation, corner: Q1Actor, other: ActorId): undefi
   }
   return undefined;
 }
-function cancelPause(game: Q1Foundation, trigger: Q1Actor): undefined {
+function cancelPause(game: Q1EntityServices, trigger: Q1Actor): undefined {
   for (const mover of game.find(trigger.target)) {
     if ((mover.movementFlags & 32) === 0) continue;
     pause(mover, 0);
@@ -47,7 +47,7 @@ function cancelPause(game: Q1Foundation, trigger: Q1Actor): undefined {
   }
   return undefined;
 }
-function switchPath(game: Q1Foundation, trigger: Q1Actor): undefined {
+function switchPath(game: Q1EntityServices, trigger: Q1Actor): undefined {
   for (const corner of game.find(trigger.target)) {
     if (corner.classname !== "path_corner") continue;
     const oldTarget = corner.target;

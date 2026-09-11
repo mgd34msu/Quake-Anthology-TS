@@ -113,7 +113,7 @@ export function sourceAngles(source: Q1Entity): Vec3 {
   const angles = q1EntityValue(source, "angles"); if (angles !== null) return parseVector(angles);
   const angle = Number(q1EntityValue(source, "angle") ?? 0); return { x: 0, y: angle, z: 0 };
 }
-export function moveDirection(angles: Vec3, game?: import("./runtime.ts").Q1Foundation): Vec3 {
+export function moveDirection(angles: Vec3, game?: import("./entity-services.ts").Q1EntityServices): Vec3 {
   if (angles.y === -1 && angles.x === 0 && angles.z === 0) return { x: 0, y: 0, z: 1 };
   if (angles.y === -2 && angles.x === 0 && angles.z === 0) return { x: 0, y: 0, z: -1 };
   return (game === undefined ? vectors(angles) : game.makeVectors(angles)).forward;

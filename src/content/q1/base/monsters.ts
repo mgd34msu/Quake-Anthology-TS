@@ -3,7 +3,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor, Q1Monster } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub, yawFor } from "../foundation/types.ts";
 import type { Q1Basis } from "../foundation/types.ts";
 import type { MonsterAi, MonsterFrame } from "./animation.ts";
@@ -38,7 +38,7 @@ export class BaseMonster {
   sliding = false;
   lightningCount = 0;
   countedDeath = false;
-  constructor(readonly game: Q1Foundation, readonly entity: Q1Actor, readonly spec: MonsterSpecies, readonly services: MonsterServices, readonly source?: BaseMonsterSource) {
+  constructor(readonly game: Q1EntityServices, readonly entity: Q1Actor, readonly spec: MonsterSpecies, readonly services: MonsterServices, readonly source?: BaseMonsterSource) {
     this.currentFrame = spec.stand; this.nextFrame = spec.stand;
     this.state = entity.monster ?? { species: spec.species, mode: "stand", frameIndex: 0, sequence: [], firstFrame: 0, enemy: null, oldEnemy: null,
       path: entity.target, pauseUntil: 0, attackFinished: 0, painFinished: 0, searchUntil: 0, deathDrop: false, refired: false };
@@ -398,7 +398,7 @@ export class BaseMonster {
   }
 }
 
-export function registerMonsterCallbacks(game: Q1Foundation, prefix: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
+export function registerMonsterCallbacks(game: Q1EntityServices, prefix: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
     game.named.register(`${prefix}:monster_jump_touch`, { touch: (_game, entity, other) => monsterJumpTouch(monster(entity), other) });
     game.named.register(`${prefix}:monster_frame`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.nextFrame); } });
     game.named.register(`${prefix}:monster_start`, { action: (_game, entity) => monster(entity).start() });

@@ -2,15 +2,15 @@
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Actor } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 
 export interface Q1CallbackHandlers {
-  action?(game: Q1Foundation, entity: Q1Actor): undefined;
-  use?(game: Q1Foundation, entity: Q1Actor, other: ActorId | null, activator: ActorId | null): undefined;
-  touch?(game: Q1Foundation, entity: Q1Actor, other: ActorId, normal: Vec3 | null): undefined;
-  pain?(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | null, damage: number): undefined;
-  die?(game: Q1Foundation, entity: Q1Actor, attacker: ActorId | null): undefined;
-  blocked?(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined;
+  action?(game: Q1EntityServices, entity: Q1Actor): undefined;
+  use?(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, activator: ActorId | null): undefined;
+  touch?(game: Q1EntityServices, entity: Q1Actor, other: ActorId, normal: Vec3 | null): undefined;
+  pain?(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null, damage: number): undefined;
+  die?(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId | null): undefined;
+  blocked?(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined;
 }
 export interface Q1StateExtension {
   readonly id: string;
@@ -28,7 +28,7 @@ export function callbackName(callback: object | null): string | null {
 
 export class Q1CallbackRegistry {
   private readonly handlers = new Map<string, Q1CallbackHandlers>();
-  constructor(private readonly game: Q1Foundation) {}
+  constructor(private readonly game: Q1EntityServices) {}
   register(name: string, handlers: Q1CallbackHandlers): undefined {
     if (this.handlers.has(name)) throw new Error(`Duplicate Q1 callback: ${name}`);
     this.handlers.set(name, handlers); return undefined;

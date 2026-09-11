@@ -1,7 +1,7 @@
 /* client.qc SetNewParms/SetChangeParms/DecodeLevelParms. GPL-2.0-or-later. */
 import type { ArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
 import type { OwnedActor } from "../../../contracts/identity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1FoundationOptions, Q1Weapon } from "../foundation/types.ts";
 import { WEAPONS, weaponItem } from "../foundation/types.ts";
 
@@ -21,7 +21,7 @@ export function newQ1Travel(options: Pick<Q1FoundationOptions, "edition" | "skil
   return { health, maxHealth: health, armor: { kind: "none" }, inventory, weapon: "shotgun", extensions: [] };
 }
 /** Captures source travel policy without changing the departing actor. */
-export function captureQ1Travel(game: Q1Foundation, actor: OwnedActor, weapon: Q1Weapon = game.player(actor.id)?.weapon ?? "shotgun", maxHealth = game.player(actor.id)?.maxHealth ?? 100, policy: { readonly resetInDeathmatch?: boolean } = {}): Q1TravelState {
+export function captureQ1Travel(game: Q1EntityServices, actor: OwnedActor, weapon: Q1Weapon = game.player(actor.id)?.weapon ?? "shotgun", maxHealth = game.player(actor.id)?.maxHealth ?? 100, policy: { readonly resetInDeathmatch?: boolean } = {}): Q1TravelState {
   const combat = game.host.combat.read(actor.id); if (combat === null) throw new Error("Q1 travel actor has no combat state");
   const player = game.player(actor.id), extensions: { readonly id: string; readonly bytes: Uint8Array }[] = [];
   if (player !== null) for (const extension of game.playerExtensions.values()) {
@@ -33,11 +33,11 @@ export function captureQ1Travel(game: Q1Foundation, actor: OwnedActor, weapon: Q
   return { health: Math.max(maxHealth / 2, Math.min(maxHealth, combat.health)), maxHealth, armor: combat.armor, inventory, weapon, extensions };
 }
 /** DecodeLevelParms resets equipment when returning to start with an episode rune. */
-export function decodeQ1Travel(game: Q1Foundation, state: Q1TravelState, serverFlags: number): Q1TravelState {
+export function decodeQ1Travel(game: Q1EntityServices, state: Q1TravelState, serverFlags: number): Q1TravelState {
   return serverFlags !== 0 && game.mapName === "start" ? { ...newQ1Travel(game.options), extensions: state.extensions } : state;
 }
 /** Applies to an existing admitted actor; it neither allocates one nor selects its movement/appearance. */
-export function admitQ1Travel(game: Q1Foundation, actor: OwnedActor, state: Q1TravelState): undefined {
+export function admitQ1Travel(game: Q1EntityServices, actor: OwnedActor, state: Q1TravelState): undefined {
   game.host.combat.setHealth(actor, state.health); game.host.combat.setArmor(actor, state.armor);
   if (!game.host.inventory.has(actor.id)) game.host.inventory.create(actor, state.inventory);
   else for (const entry of state.inventory) game.host.inventory.configure(actor, entry);

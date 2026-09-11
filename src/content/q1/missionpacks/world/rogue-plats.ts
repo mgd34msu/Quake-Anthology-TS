@@ -1,23 +1,23 @@
 /* newplats.qc / elevatr.qc. Copyright id Software / Rogue. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { moveDirection } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, dot, vadd, vsub, vscale } from "../../foundation/types.ts";
 import { brush, later, number } from "./common.ts";
 
-function move(game: Q1Foundation, entity: Q1Actor, up: boolean): undefined {
+function move(game: Q1EntityServices, entity: Q1Actor, up: boolean): undefined {
   game.sound(entity, entity.text("noise"), "voice"); entity.state = up ? "up" : "down";
   return game.calcMove(entity, up ? entity.pos1 : entity.pos2, entity.speed, game.named.action(entity, up ? "rogue:plat_top" : "rogue:plat_bottom"));
 }
-function elevatorGo(game: Q1Foundation, entity: Q1Actor): undefined {
+function elevatorGo(game: Q1EntityServices, entity: Q1Actor): undefined {
   game.sound(entity, entity.text("noise"), "voice"); entity.state = "up"; number(entity, "elevatorLastUse", game.time);
   return game.calcMove(entity, { ...entity.pos2, z: entity.pos2.z + entity.number("height") * entity.number("elevatorToFloor") }, entity.speed, game.named.action(entity, "rogue:elevator_stop"));
 }
-function buttonFire(game: Q1Foundation, entity: Q1Actor): undefined {
+function buttonFire(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.state === "up" || entity.state === "top") return undefined; game.sound(entity, entity.text("noise"), "voice"); entity.state = "up";
   return game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "rogue:elvbutton_wait"));
 }
-export function registerRoguePlats(game: Q1Foundation): undefined {
+export function registerRoguePlats(game: Q1EntityServices): undefined {
   for (const up of [true, false]) {
     game.named.register(up ? "rogue:plat_up" : "rogue:plat_down", { action: (g, e) => move(g, e, up) });
     game.named.register(up ? "rogue:plat_top" : "rogue:plat_bottom", { action: (g, e) => {

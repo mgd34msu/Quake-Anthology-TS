@@ -1,5 +1,5 @@
 import type { Q1Base } from "../../base/provider.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1MissionPack } from "../types.ts";
 import type { MissionMonsterHooks } from "./types.ts";
 import { Q1MissionPackMonsters } from "./runtime.ts";
@@ -19,7 +19,7 @@ import { eelDefinition } from "./eel.ts";
 import { swordDefinition } from "./sword.ts";
 import { wrathDefinition } from "./wrath.ts";
 
-export function registerMissionPackMonsters(game: Q1Foundation, base: Q1Base, pack: Q1MissionPack, hooks: MissionMonsterHooks = {}): Q1MissionPackMonsters {
+export function registerMissionPackMonsters(game: Q1EntityServices, base: Q1Base, pack: Q1MissionPack, hooks: MissionMonsterHooks = {}): Q1MissionPackMonsters {
   const runtime = new Q1MissionPackMonsters(game, base, pack, hooks);
   if (pack === "hipnotic") { runtime.register(scourgeDefinition(runtime)); runtime.register(gremlinDefinition(runtime)); runtime.register(armagonDefinition(runtime)); runtime.register(decoyDefinition); runtime.register(hipnoticArmyDefinition); runtime.register(hipnoticDogDefinition(runtime)); registerDormantSpikemine(game); registerHipnoticPaths(runtime); }
   if (pack === "rogue") { registerOverlordDestination(game); registerDragonCorners(game); for (const definition of [eelDefinition, swordDefinition, wrathDefinition, mummyDefinition, lavamanDefinition, overlordDefinition, morphDefinition(runtime), dragonDefinition(runtime)]) runtime.register(definition); }

@@ -7,7 +7,7 @@ import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { NavigationRuntime } from "../../../../../bots/navigation/runtime.ts";
 import type { NavigationRoute } from "../../../../../bots/navigation/types.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../../../persistence/value.ts";
-import type { Q1Foundation } from "../../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../../foundation/entity-services.ts";
 import type { BaseMonster } from "../../../base/monsters.ts";
 import { length, vsub, yawFor } from "../../../foundation/types.ts";
 
@@ -17,13 +17,13 @@ export interface Mg3MonsterNavigationHost {
   forActor(actor: OwnedActor): NavigationRuntime | null;
 }
 interface Path { readonly goal: Vec3; readonly route: NavigationRoute; cursor: number; }
-const registrations = new WeakMap<Q1Foundation, Mg3MonsterNavigation>();
+const registrations = new WeakMap<Q1EntityServices, Mg3MonsterNavigation>();
 function point(reader: SaveReader): Vec3 {
   return { x: reader.field("x").number(), y: reader.field("y").number(), z: reader.field("z").number() };
 }
 class Mg3MonsterNavigation {
   readonly paths = new Map<OwnedActor, Path>();
-  constructor(readonly game: Q1Foundation, readonly host: Mg3MonsterNavigationHost) {
+  constructor(readonly game: Q1EntityServices, readonly host: Mg3MonsterNavigationHost) {
     game.host.actors.onRelease(actor => { this.paths.delete(actor); return undefined; });
     game.registerStateExtension({ id: "mg3:monster-navigation", capture: () => encodeCheckpointValue([...this.paths].map(([actor, path]) => ({
       actor: { slot: actor.id.slot, generation: actor.id.generation }, goal: path.goal, cursor: path.cursor,
@@ -80,7 +80,7 @@ class Mg3MonsterNavigation {
 }
 
 /** Install with the map runtime before source checkpoint restore or the first Horde think. */
-export function registerMg3MonsterNavigation(game: Q1Foundation, host: Mg3MonsterNavigationHost): undefined {
+export function registerMg3MonsterNavigation(game: Q1EntityServices, host: Mg3MonsterNavigationHost): undefined {
   if (registrations.has(game)) throw new Error("MG3 monster navigation is already registered");
   registrations.set(game, new Mg3MonsterNavigation(game, host)); return undefined;
 }

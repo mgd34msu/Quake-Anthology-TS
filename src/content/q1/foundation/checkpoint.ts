@@ -3,9 +3,8 @@ import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import { Q1Actor } from "./entity.ts";
 import type { Q1Monster } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1PrecacheTables } from "./types.ts";
-import { Q1_PROVIDER } from "./types.ts";
 import { callbackName } from "./callbacks.ts";
 
 export interface Q1SavedCallbacks {
@@ -19,7 +18,7 @@ export interface Q1SavedCallbacks {
 }
 export interface Q1SavedEntity {
   readonly actor: SavedActorId;
-  readonly sourceSlot: number;
+  readonly sourceSlot: number | null;
   readonly classname: string;
   readonly sourceOrdinal: number | null;
   readonly state: Q1EntitySourceState;
@@ -80,14 +79,13 @@ export function captureEntitySourceState(entity: Q1Actor) {
 export type Q1EntitySourceState = ReturnType<typeof captureEntitySourceState>;
 export function saveQ1Actor(actor: ActorId | null): SavedActorId | null { return actor === null ? null : { slot: actor.slot, generation: actor.generation }; }
 function savedOwned(actor: OwnedActor): SavedActorId { return { slot: actor.id.slot, generation: actor.id.generation }; }
-function saveEntity(game: Q1Foundation, entity: Q1Actor): Q1SavedEntity {
+function saveEntity(game: Q1EntityServices, entity: Q1Actor): Q1SavedEntity {
   const source = game.host.actors.sourceOf(entity.actor.id);
-  if (source === null || source.provider !== Q1_PROVIDER) throw new Error("Q1 source entity has no source slot");
   const monster = entity.monster, move = entity.move;
   const done = move === null ? null : callbackName(move.done);
   if (move !== null && done === null) throw new Error("Q1 move has no named completion");
   return {
-    actor: savedOwned(entity.actor), sourceSlot: source.slot, classname: entity.classname, sourceOrdinal: entity.sourceOrdinal,
+    actor: savedOwned(entity.actor), sourceSlot: source?.slot ?? null, classname: entity.classname, sourceOrdinal: entity.sourceOrdinal,
     state: captureEntitySourceState(entity), fields: [...entity.fields].map(([key, value]) => ({ key, value })),
     references: [...entity.references].map(([key, actor]) => ({ key, actor: saveQ1Actor(actor) })),
     owner: saveQ1Actor(entity.owner), activator: saveQ1Actor(entity.activator), doorGroup: entity.doorGroup.map(door => savedOwned(door.actor)),
@@ -96,7 +94,7 @@ function saveEntity(game: Q1Foundation, entity: Q1Actor): Q1SavedEntity {
     callbacks: { think: callbackName(entity.think), use: callbackName(entity.use), touch: callbackName(entity.touch), pain: callbackName(entity.pain), die: callbackName(entity.die), blocked: callbackName(entity.blocked), pathEnd: callbackName(entity.pathEnd) },
   };
 }
-export function captureFoundation(game: Q1Foundation, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
+export function captureFoundation(game: Q1EntityServices, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
   return {
     format: "q1-foundation", version: 2,
     precaches: { phase: game.precaches.phase, models: [...game.precaches.models], sounds: [...game.precaches.sounds] }, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
@@ -114,7 +112,7 @@ export function captureFoundation(game: Q1Foundation, sequence: number, nextDyna
 }
 
 /** Restores source objects around existing authority tables. It never runs a spawn function. */
-export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCheckpoint): undefined {
+export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1FoundationCheckpoint): undefined {
   if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 2 || checkpoint.edition !== game.options.edition) throw new Error("Incompatible Q1 source checkpoint");
   if (game.entities.size !== 0 || game.players.size !== 0) throw new Error("Restore Q1 source state into a fresh provider");
   game.precaches.restore(checkpoint.precaches);
@@ -124,12 +122,11 @@ export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCh
   const reference = (saved: SavedActorId | null): ActorId | null => saved === null ? null : game.host.actors.referenceSaved(saved);
   for (const saved of checkpoint.entities) {
     const actor = owned(saved.actor), source = game.host.actors.sourceOf(actor.id);
-    if (source?.provider !== Q1_PROVIDER || source.slot !== saved.sourceSlot || game.entities.has(actor)) throw new Error("Q1 restored source-slot mismatch");
+    if ((source?.slot ?? null) !== saved.sourceSlot || (source !== null && source.provider !== actor.owner) || game.entities.has(actor)) throw new Error("Q1 restored source-slot mismatch");
     if (game.host.bodies.read(actor.id) === null || game.host.combat.read(actor.id) === null) throw new Error("Restore shared Q1 body and combat stores before source state");
-    const entity = new Q1Actor(actor, saved.classname, saved.sourceOrdinal, game.host.combat);
+    const entity = game.attachExisting(actor, saved.classname, undefined, saved.sourceOrdinal);
     Object.assign(entity, saved.state);
     for (const field of saved.fields) entity.fields.set(field.key, field.value);
-    game.entities.set(actor, entity);
   }
   const sourceEntity = (saved: SavedActorId): Q1Actor => {
     const entity = game.entities.get(owned(saved)); if (entity === undefined) throw new Error("Saved Q1 source reference points outside source entities"); return entity;
@@ -148,7 +145,6 @@ export function restoreFoundation(game: Q1Foundation, checkpoint: Q1FoundationCh
     entity.die = callbacks.die === null ? null : game.named.die(entity, callbacks.die);
     entity.blocked = callbacks.blocked === null ? null : game.named.blocked(entity, callbacks.blocked);
     entity.pathEnd = callbacks.pathEnd === null ? null : game.named.action(entity, callbacks.pathEnd);
-    game.bindActorCallbacks(entity);
   }
   for (const saved of checkpoint.players) {
     const actor = owned(saved.actor);

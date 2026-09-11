@@ -3,7 +3,7 @@ import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Bounds } from "../../../contracts/math.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Powerup } from "../foundation/types.ts";
 import { ZERO, weaponItem } from "../foundation/types.ts";
 import { missionWeapons } from "./types.ts";
@@ -27,7 +27,7 @@ export interface MissionItemServices {
 const artifactBounds: Bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
 const floorBounds: Bounds = { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 32 } };
 const weaponBounds: Bounds = { min: floorBounds.min, max: { x: 16, y: 16, z: 56 } };
-function randomType(game: Q1Foundation, item: Q1Actor): undefined {
+function randomType(game: Q1EntityServices, item: Q1Actor): undefined {
   const value = game.host.random();
   item.fields.set("rogue:random-type", value < 0.2 ? "item_powerup_shield" : value < 0.4 ? "item_powerup_belt" : value < 0.6 ? "item_artifact_invulnerability" : value < 0.8 ? "item_artifact_invisibility" : "item_artifact_super_damage"); return undefined;
 }
@@ -68,7 +68,7 @@ export function hipnoticWeaponRank(weapon: Q1PlayerState["weapon"]): number {
     default: return 10;
   }
 }
-function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: MissionWeaponDefinition): "refused" | "leave" | "taken" {
+function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: MissionWeaponDefinition): "refused" | "leave" | "taken" {
   const leave = game.pickupRules?.weaponLeave?.(game) ?? false, item = weaponItem(weapon.id), owned = game.host.inventory.count(player.actor.id, item) > 0;
   if (leave && owned) return "refused";
   game.host.inventory.give(player.actor, item, 1); game.host.inventory.give(player.actor, weapon.ammo ?? "q1:ammo/cells", weapon.pickupAmmo);
@@ -77,7 +77,7 @@ function takeWeapon(game: Q1Foundation, player: Q1PlayerState, weapon: MissionWe
   }
   return leave ? "leave" : "taken";
 }
-function pickup(game: Q1Foundation, entity: Q1Actor, other: ActorId, services: MissionItemServices): undefined {
+function pickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId, services: MissionItemServices): undefined {
   const item = definition(entity), player = game.player(other);
   if (item === null || player === null || entity.solid !== "trigger" || item.kind !== "horn" && game.health(other) <= 0) return undefined;
   let result: "refused" | "leave" | "taken" = "taken";
@@ -107,7 +107,7 @@ function pickup(game: Q1Foundation, entity: Q1Actor, other: ActorId, services: M
   if (item.kind === "horn") services.horn(entity, player); else game.useTargets(entity, other);
   return undefined;
 }
-export function registerMissionPackItems(game: Q1Foundation, services: MissionItemServices): undefined {
+export function registerMissionPackItems(game: Q1EntityServices, services: MissionItemServices): undefined {
   game.named.register("missionpack:item-touch", { touch: (runtime, entity, other) => pickup(runtime, entity, other, services) });
   game.named.register("missionpack:random-regen", { action: (runtime, entity) => {
     randomType(runtime, entity); const item = definition(entity); if (item === null) throw new Error("Missing Rogue random powerup definition");

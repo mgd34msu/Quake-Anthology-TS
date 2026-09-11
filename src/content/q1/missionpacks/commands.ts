@@ -1,7 +1,7 @@
 /* Official mission-pack ImpulseCommands developer and cheat branches. GPL-2.0-or-later. */
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Base } from "../base/provider.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState } from "../foundation/types.ts";
 import { WEAPONS, weaponItem } from "../foundation/types.ts";
 import type { MissionPackPlayers } from "./player.ts";
@@ -13,11 +13,11 @@ export interface MissionPackCommandOptions {
   readonly cheatsAllowed?: () => boolean;
   readonly developerMessage?: (text: string) => undefined;
 }
-function setCount(game: Q1Foundation, player: Q1PlayerState, item: ItemId, count: number, capacity: number): undefined {
+function setCount(game: Q1EntityServices, player: Q1PlayerState, item: ItemId, count: number, capacity: number): undefined {
   const entry = game.host.inventory.entries(player.actor.id).find(candidate => candidate.item === item);
   return game.host.inventory.configure(player.actor, entry === undefined ? { item, count, capacity } : { ...entry, count });
 }
-export function missionPackCommand(game: Q1Foundation, base: Q1Base, players: MissionPackPlayers, player: Q1PlayerState, pack: Q1MissionPack, impulse: number, options: MissionPackCommandOptions): boolean {
+export function missionPackCommand(game: Q1EntityServices, base: Q1Base, players: MissionPackPlayers, player: Q1PlayerState, pack: Q1MissionPack, impulse: number, options: MissionPackCommandOptions): boolean {
   const multiplayer = game.options.deathmatch !== 0 || game.options.coop;
   if (impulse === 9) {
     if (multiplayer && (game.options.edition === "classic" || !(options.cheatsAllowed?.() ?? false))) return true;
@@ -60,7 +60,7 @@ export function missionPackCommand(game: Q1Foundation, base: Q1Base, players: Mi
   }
   return false;
 }
-export function dumpMissionPackCoordinates(game: Q1Foundation, player: Q1PlayerState): undefined {
+export function dumpMissionPackCoordinates(game: Q1EntityServices, player: Q1PlayerState): undefined {
   if (game.world?.number("hipnotic:dump-coordinates") !== 1 || game.time < player.attackFinished) return undefined;
   const client = game.host.checkClient(player.actor), body = client === null ? null : game.host.bodies.read(client);
   return body === null ? undefined : game.message(null, `Player: '${body.origin.x} ${body.origin.y} ${body.origin.z}'\n`, false);

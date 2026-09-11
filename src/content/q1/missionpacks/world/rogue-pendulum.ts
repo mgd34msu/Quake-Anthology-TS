@@ -1,5 +1,5 @@
 /* pendulum.qc source animation boxes and shared impactVelocity. GPL-2.0-or-later. */
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO } from "../../foundation/types.ts";
 import { later, number } from "./common.ts";
 
@@ -14,7 +14,7 @@ const swings: readonly (readonly [number, number, number, number, number, number
   [4, -110, -28, -72, -8, 0.09, 0, 0], [3, -172, -70, -51, 17, 0.11, 0, 0], [2, -160, -96, -22, 50, 0.13, 0, 0],
   [1, -172, -112, 12, 88, 0.15, 0, 0], [0, -176, -120, 48, 128, 0.17, 0, 0],
 ];
-export function registerRoguePendulum(game: Q1Foundation): undefined {
+export function registerRoguePendulum(game: Q1EntityServices): undefined {
   for (const [index, [frame, min, max, low, high, delay, impact, sound]] of swings.entries()) game.named.register(`rogue:pend_swing${index + 1}`, { action: (g, e) => {
     e.frame = frame;
     if (index !== 13) g.setBounds(e, (e.spawnflags & 2) !== 0 ? { min: { x: -8, y: min, z: low }, max: { x: 8, y: max, z: high } } : { min: { x: min, y: -8, z: low }, max: { x: max, y: 8, z: high } });

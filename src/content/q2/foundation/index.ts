@@ -1,3 +1,4 @@
+export { Q2EntityServices } from "./entity-services.ts";
 export { Q2Foundation } from "./runtime.ts";
 export type { Q2SpawnReport } from "./runtime.ts";
 export { Q2Entity } from "./host.ts";

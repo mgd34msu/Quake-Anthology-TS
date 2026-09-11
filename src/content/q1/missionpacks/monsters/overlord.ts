@@ -1,6 +1,6 @@
 /* s_wrath.qc: destination selection, melee and staged death. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { spawnTeleportFog, spawnTeledeath } from "../../foundation/spawns.ts";
 import type { MissionMonster } from "./runtime.ts";
@@ -9,7 +9,7 @@ import { frames } from "./tables/s_wrath.ts";
 import { eye, hullBounds, radiusActors } from "./helpers.ts";
 import { wrathMissile } from "./wrath.ts";
 
-export function isSpawnPointEmpty(game: Q1Foundation, point: Q1Actor): boolean {
+export function isSpawnPointEmpty(game: Q1EntityServices, point: Q1Actor): boolean {
   for (const actor of radiusActors(game, game.body(point).origin, 64)) {
     if (actor === point.actor.id) continue;
     const other = game.entity(actor);
@@ -17,7 +17,7 @@ export function isSpawnPointEmpty(game: Q1Foundation, point: Q1Actor): boolean {
   }
   return true;
 }
-export function overlordDestination(game: Q1Foundation): Q1Actor | null {
+export function overlordDestination(game: Q1EntityServices): Q1Actor | null {
   const player = game.host.players()[0] ?? game.world?.actor.id ?? null;
   const body = player === null ? null : game.host.bodies.read(player);
   const basis = game.makeVectors(body?.angles ?? ZERO), origin = body?.origin ?? ZERO;
@@ -30,7 +30,7 @@ export function overlordDestination(game: Q1Foundation): Q1Actor | null {
   }
   return best ?? furthest;
 }
-export function registerOverlordDestination(game: Q1Foundation): undefined {
+export function registerOverlordDestination(game: Q1EntityServices): undefined {
   game.registerSpawn("info_overlord_destination", (_game, entity) => {
     const body = game.body(entity); entity.mangle = body.angles; entity.model = "";
     return game.setBody(entity, { angles: ZERO, origin: vadd(body.origin, { x: 0, y: 0, z: 27 }) });

@@ -2,18 +2,18 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, normalize, vadd, vsub, vscale } from "../../foundation/types.ts";
 import { later, number, trigger } from "./common.ts";
 
-export function rogueEarthquake(game: Q1Foundation, actor: ActorId, intensity: number): undefined {
+export function rogueEarthquake(game: Q1EntityServices, actor: ActorId, intensity: number): undefined {
   const owner = game.host.actors.resolveOwned(actor), body = game.host.bodies.read(actor); if (owner === null || body === null || body.ground === null) return undefined;
   game.host.bodies.write(owner, { ...body, velocity: vadd(body.velocity, { x: game.host.random() * intensity * 2 - intensity, y: game.host.random() * intensity * 2 - intensity, z: game.host.random() * intensity * 2 - intensity }) }); return undefined;
 }
-function quakeStop(game: Q1Foundation, entity: Q1Actor): undefined { if (game.world !== null) number(game.world, "rogue:earthquake_active", 0); return later(game, entity, (entity.spawnflags & 1) !== 0 ? game.host.random() * entity.wait : entity.wait, "rogue:quake_start"); }
-function quakeRumble(game: Q1Foundation, entity: Q1Actor): undefined { if (entity.attackFinished < game.time) return quakeStop(game, entity); game.sound(entity, "equake/rumble.wav", "voice", 0); return later(game, entity, 1, "rogue:quake_rumble"); }
-function sawStart(game: Q1Foundation, entity: Q1Actor): undefined { entity.touch = game.named.touch(entity, "rogue:saw_touch"); entity.use = null; const target = game.find(entity.target)[0]?.actor.id ?? null; entity.references.set("goalentity", target); entity.references.set("movetarget", target); return later(game, entity, 0.1, entity.target === "" ? "rogue:saw_stand" : "rogue:saw_fly"); }
-function trailFire(game: Q1Foundation, entity: Q1Actor): undefined {
+function quakeStop(game: Q1EntityServices, entity: Q1Actor): undefined { if (game.world !== null) number(game.world, "rogue:earthquake_active", 0); return later(game, entity, (entity.spawnflags & 1) !== 0 ? game.host.random() * entity.wait : entity.wait, "rogue:quake_start"); }
+function quakeRumble(game: Q1EntityServices, entity: Q1Actor): undefined { if (entity.attackFinished < game.time) return quakeStop(game, entity); game.sound(entity, "equake/rumble.wav", "voice", 0); return later(game, entity, 1, "rogue:quake_rumble"); }
+function sawStart(game: Q1EntityServices, entity: Q1Actor): undefined { entity.touch = game.named.touch(entity, "rogue:saw_touch"); entity.use = null; const target = game.find(entity.target)[0]?.actor.id ?? null; entity.references.set("goalentity", target); entity.references.set("movetarget", target); return later(game, entity, 0.1, entity.target === "" ? "rogue:saw_stand" : "rogue:saw_fly"); }
+function trailFire(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.classname !== "ltrail_end") {
     game.sound(entity, "weapons/lhit.wav", "voice"); const target = game.find(entity.target)[0] ?? game.world; if (target === null) throw new Error("Lightning trail requires worldspawn");
     const start = game.body(entity).origin, end = game.body(target).origin; game.host.emit({ kind: "beam", style: "lightning2", actor: entity.actor.id, start, end });
@@ -22,7 +22,7 @@ function trailFire(game: Q1Foundation, entity: Q1Actor): undefined {
   }
   return entity.number("items") < game.time ? later(game, entity, entity.number("frags"), "rogue:ltrail_chain") : later(game, entity, 0.05, "rogue:ltrail_fire");
 }
-export function registerRogueHazards(game: Q1Foundation): undefined {
+export function registerRogueHazards(game: Q1EntityServices): undefined {
   game.named.register("rogue:quake_stop", { action: quakeStop }); game.named.register("rogue:quake_rumble", { action: quakeRumble });
   game.named.register("rogue:quake_start", { action: (g, e) => { if (g.world !== null) number(g.world, "rogue:earthquake_active", 1); e.attackFinished = g.time + ((e.spawnflags & 1) !== 0 ? g.host.random() * e.delay : e.delay); return quakeRumble(g, e); } });
   game.registerSpawn("earthquake", (g, e) => { e.delay ||= 20; e.wait ||= 60; if (e.number("weapon") === 0) number(e, "weapon", 40); if (g.world !== null) { number(g.world, "rogue:earthquake_active", 0); number(g.world, "rogue:earthquake_intensity", e.number("weapon") * 0.5); } g.setBounds(e, POINT); return later(g, e, 1, "rogue:quake_stop"); });

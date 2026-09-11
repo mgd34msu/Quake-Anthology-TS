@@ -2,21 +2,21 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1Event } from "../../foundation/types.ts";
 import { POINT, ZERO, vadd } from "../../foundation/types.ts";
 import { later, number } from "./common.ts";
 
-function sound(game: Q1Foundation, entity: Q1Actor, path: string, channel: Extract<Q1Event, { kind: "sound" }>["channel"] = "auto"): undefined {
+function sound(game: Q1EntityServices, entity: Q1Actor, path: string, channel: Extract<Q1Event, { kind: "sound" }>["channel"] = "auto"): undefined {
   return game.host.emit({ kind: "sound", actor: entity.actor.id, path, channel, volume: entity.number("volume", 1), attenuation: entity.speed });
 }
-function playSound(game: Q1Foundation, entity: Q1Actor): undefined {
+function playSound(game: Q1EntityServices, entity: Q1Actor): undefined {
   let path = entity.text("noise");
   if ((entity.spawnflags & 1) !== 0) { const active = entity.number("sound_state") === 0; number(entity, "sound_state", active ? 1 : 0); if (!active) path = "misc/null.wav"; }
   const channel = entity.number("impulse");
   return sound(game, entity, path, channel === 0 ? "auto" : channel === 1 ? "weapon" : channel === 2 ? "voice" : channel === 3 ? "item" : channel === 4 ? "body" : channel === 5 ? 5 : channel === 6 ? 6 : 7);
 }
-function soundSpawn(game: Q1Foundation, entity: Q1Actor, periodic: boolean): undefined {
+function soundSpawn(game: Q1EntityServices, entity: Q1Actor, periodic: boolean): undefined {
   if (entity.number("volume") === 0) number(entity, "volume", 1);
   entity.speed = entity.speed === 0 ? 1 : entity.speed === -1 ? 0 : entity.speed;
   if ((entity.spawnflags & 1) !== 0 && entity.number("impulse") === 0) number(entity, "impulse", 7);
@@ -24,17 +24,17 @@ function soundSpawn(game: Q1Foundation, entity: Q1Actor, periodic: boolean): und
   if (periodic) { entity.wait ||= 20; entity.delay ||= 2; later(game, entity, Math.max(entity.delay, entity.wait * game.host.random()), "hip:play_sound"); }
   return undefined;
 }
-function becomeExplosion(game: Q1Foundation, entity: Q1Actor): undefined {
+function becomeExplosion(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.solid = "none"; entity.movement = "none"; entity.touch = null; entity.model = "progs/s_explod.spr"; entity.frame = 0;
   game.setBody(entity, { velocity: ZERO }); game.link(entity); return later(game, entity, 0.1, "base:explosion_frame");
 }
-function explode(game: Q1Foundation, entity: Q1Actor): undefined {
+function explode(game: Q1EntityServices, entity: Q1Actor): undefined {
   game.useTargets(entity, entity.activator); sound(game, entity, entity.damage < 120 ? "misc/shortexp.wav" : "misc/longexpl.wav");
   game.radiusDamage(entity.actor.id, entity.owner, entity.damage, entity.actor.id, null);
   if ((entity.spawnflags & 1) !== 0) game.effect("explosion", game.body(entity).origin);
   return becomeExplosion(game, entity);
 }
-function multiExplode(game: Q1Foundation, entity: Q1Actor): undefined {
+function multiExplode(game: Q1EntityServices, entity: Q1Actor): undefined {
   later(game, entity, entity.wait, "hip:multi_explode");
   if (entity.number("explosion_state") === 0) { number(entity, "explosion_state", 1); number(entity, "duration", game.time + entity.number("duration")); game.useTargets(entity, entity.activator); }
   if (game.time > entity.number("duration")) return game.remove(entity);
@@ -46,13 +46,13 @@ function multiExplode(game: Q1Foundation, entity: Q1Actor): undefined {
   if ((entity.spawnflags & 1) !== 0) game.effect("explosion", game.body(explosion).origin);
   return becomeExplosion(game, explosion);
 }
-export function multiExplosion(game: Q1Foundation, _source: Q1Actor, origin: Vec3, radius: number, damage: number, duration: number, pause: number, volume: number): Q1Actor {
+export function multiExplosion(game: Q1EntityServices, _source: Q1Actor, origin: Vec3, radius: number, damage: number, duration: number, pause: number, volume: number): Q1Actor {
   const entity = game.create("hip_multi_explosion"); entity.damage = damage; entity.wait = pause; entity.owner = game.world?.actor.id ?? null;
   number(entity, "duration", duration); number(entity, "volume", volume);
   game.setBody(entity, { origin, bounds: { min: { x: -radius, y: -radius, z: -radius }, max: { x: radius, y: radius, z: radius } } });
   multiExplode(game, entity); return entity;
 }
-export function earthquakeAfterPhysics(game: Q1Foundation, actor: ActorId): undefined {
+export function earthquakeAfterPhysics(game: Q1EntityServices, actor: ActorId): undefined {
   const world = game.world; if (world === null) return undefined;
   const owner = game.host.actors.resolveOwned(actor), body = game.host.bodies.read(actor); if (owner === null || body === null) return undefined;
   if (world.number("hip:earthquake") > game.time) {
@@ -61,7 +61,7 @@ export function earthquakeAfterPhysics(game: Q1Foundation, actor: ActorId): unde
   } else if (world.number("hip:quakeactive") === 1) { game.sound(owner, "misc/quakeend.wav", "voice", 0); number(world, "hip:quakeactive", 0); }
   return undefined;
 }
-export function registerHipnoticMisc(game: Q1Foundation): undefined {
+export function registerHipnoticMisc(game: Q1EntityServices): undefined {
   game.named.register("hip:play_sound", { use: playSound, action: (g, e) => { later(g, e, Math.max(e.delay, e.wait * g.host.random()), "hip:play_sound"); return playSound(g, e); } });
   for (const classname of ["play_sound", "play_sound_triggered", "random_thunder", "random_thunder_triggered"]) game.registerSpawn(classname, (g, e) => {
     const thunder = classname.startsWith("random_thunder"); if (thunder) e.fields.set("noise", "ambience/thunder1.wav");

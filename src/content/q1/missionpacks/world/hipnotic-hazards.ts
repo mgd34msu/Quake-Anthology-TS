@@ -3,21 +3,21 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { later, number, vector } from "./common.ts";
 
-export function isStruckByMjolnir(game: Q1Foundation, actor: ActorId): boolean {
+export function isStruckByMjolnir(game: Q1EntityServices, actor: ActorId): boolean {
   return [...game.entities.values()].some(entity => (entity.classname === "hipnotic_mjolnir_lightning" || entity.classname === "hipnotic_tesla_lightning") && entity.count === 1 && (() => {
     const enemy = entity.references.get("hipnotic:enemy"); return enemy !== undefined && enemy !== null && sameActor(actor, enemy);
   })());
 }
-function visible(game: Q1Foundation, entity: Q1Actor, actor: ActorId): boolean {
+function visible(game: Q1EntityServices, entity: Q1Actor, actor: ActorId): boolean {
   const body = game.host.bodies.read(actor); if (body === null) return false;
   const trace = game.host.trace({ start: vadd(game.body(entity).origin, entity.vector("view_ofs")), end: vadd(body.origin, { x: 0, y: 0, z: game.isPlayer(actor) ? 22 : game.entity(actor)?.vector("view_ofs").z ?? 0 }), bounds: POINT, ignore: entity.actor.id, monsters: false });
   return trace.fraction === 1 && !(trace.inOpen && trace.inWater);
 }
-function scan(game: Q1Foundation, entity: Q1Actor, radius: number, includeMonsters: boolean): readonly ActorId[] {
+function scan(game: Q1EntityServices, entity: Q1Actor, radius: number, includeMonsters: boolean): readonly ActorId[] {
   const origin = game.body(entity).origin, found: ActorId[] = [];
   for (const observation of [...game.host.actors.observations()].reverse()) {
     const actor = observation.id, target = game.entity(actor), body = game.host.bodies.read(actor); if (body === null || ((target?.movementFlags ?? 0) & 128) !== 0 || !game.isPlayer(actor) && (!includeMonsters || ((target?.movementFlags ?? 0) & 32) === 0)) continue;
@@ -25,7 +25,7 @@ function scan(game: Q1Foundation, entity: Q1Actor, radius: number, includeMonste
   }
   return found;
 }
-function lightningDamage(game: Q1Foundation, entity: Q1Actor, start: Vec3, end: Vec3, from: ActorId | null, amount: number): undefined {
+function lightningDamage(game: Q1EntityServices, entity: Q1Actor, start: Vec3, end: Vec3, from: ActorId | null, amount: number): undefined {
   const inflictor = from ?? game.world?.actor.id; if (inflictor === undefined) throw new Error("Lightning damage requires worldspawn");
   const side = { x: -(end.y - start.y) * 16, y: -(end.y - start.y) * 16, z: 0 }, hit: ActorId[] = [];
   for (const offset of [ZERO, side, vscale(side, -1)]) {
@@ -36,12 +36,12 @@ function lightningDamage(game: Q1Foundation, entity: Q1Actor, start: Vec3, end: 
   }
   return undefined;
 }
-function mineExplode(game: Q1Foundation, entity: Q1Actor): undefined {
+function mineExplode(game: Q1EntityServices, entity: Q1Actor): undefined {
   game.radiusDamage(entity.actor.id, entity.actor.id, 110, null, null); game.sound(entity, "weapons/r_exp3.wav", "weapon"); game.effect("explosion", game.body(entity).origin);
   game.sound(entity, "misc/null.wav", "voice"); game.setBody(entity, { velocity: ZERO }); entity.touch = null; entity.model = "progs/s_explod.spr"; entity.solid = "none"; entity.frame = 0;
   game.link(entity); return later(game, entity, 0.1, "base:explosion_frame");
 }
-function mineHome(game: Q1Foundation, entity: Q1Actor): undefined {
+function mineHome(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.frame = (entity.frame + 1) % 9; later(game, entity, 0.2, "hip:mine_home");
   if (entity.number("search_time") < game.time) {
     let distance = 2000, selected: ActorId | null = null;
@@ -54,12 +54,12 @@ function mineHome(game: Q1Foundation, entity: Q1Actor): undefined {
   const inFront = dot(normalize(vsub(target.origin, game.body(entity).origin)), game.makeVectors(game.body(entity).angles).forward) > 0.3;
   return game.setBody(entity, { velocity: vscale(direction, game.options.skill * 50 + (inFront ? 50 : 150)) });
 }
-function lightningThink(game: Q1Foundation, entity: Q1Actor): undefined {
+function lightningThink(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (game.time > entity.delay) return game.remove(entity);
   const start = game.body(entity).origin, end = entity.vector("oldorigin"); if (game.host.checkClient(entity.actor) !== null) game.host.emit({ kind: "beam", style: "lightning2", actor: entity.actor.id, start, end });
   lightningDamage(game, entity, start, end, entity.references.get("lastvictim") ?? null, entity.damage); return later(game, entity, 0.1, "hip:lightning_bolt");
 }
-function lightningUse(game: Q1Foundation, entity: Q1Actor): undefined {
+function lightningUse(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (game.time >= entity.number("pausetime")) { game.sound(entity, (entity.spawnflags & 2) !== 0 ? "weapons/lstart.wav" : "weapons/lhit.wav"); if (entity.classname === "trap_lightning_triggered") number(entity, "pausetime", game.time + 0.1); }
   let start = game.body(entity).origin, end: Vec3;
   if (entity.target !== "") { const enemy = game.entity(entity.references.get("enemy") ?? null) ?? game.world; if (enemy === null) throw new Error("Lightning requires worldspawn"); end = game.body(enemy).origin; }
@@ -71,12 +71,12 @@ function lightningUse(game: Q1Foundation, entity: Q1Actor): undefined {
   }
   if (game.host.checkClient(entity.actor) !== null) game.host.emit({ kind: "beam", style: "lightning2", actor: entity.actor.id, start, end }); return lightningDamage(game, entity, start, end, entity.actor.id, entity.damage);
 }
-function teslaScan(game: Q1Foundation, entity: Q1Actor): readonly ActorId[] {
+function teslaScan(game: Q1EntityServices, entity: Q1Actor): readonly ActorId[] {
   const targets: ActorId[] = [];
   for (const actor of scan(game, entity, entity.number("distance"), (entity.spawnflags & 1) !== 0)) { if (isStruckByMjolnir(game, actor)) continue; targets.push(actor); if (targets.length === entity.count) break; }
   return targets;
 }
-function teslaBolt(game: Q1Foundation, entity: Q1Actor): undefined {
+function teslaBolt(game: Q1EntityServices, entity: Q1Actor): undefined {
   const owner = game.entity(entity.owner); if (owner !== null) number(owner, "attack_state", 2);
   const enemy = entity.references.get("hipnotic:enemy") ?? null, target = enemy === null ? null : game.host.bodies.read(enemy);
   if (game.time > entity.delay || target === null) return game.remove(entity);
@@ -85,7 +85,7 @@ function teslaBolt(game: Q1Foundation, entity: Q1Actor): undefined {
   game.host.emit({ kind: "beam", style: "lightning2", actor: entity.actor.id, start, end: trace.end }); lightningDamage(game, entity, start, trace.end, entity.references.get("lastvictim") ?? null, entity.damage);
   return later(game, entity, 0.1, "hip:tesla_bolt");
 }
-function teslaThink(game: Q1Foundation, entity: Q1Actor): undefined {
+function teslaThink(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.number("hazard_state") === 0) return later(game, entity, 0.25, "hip:tesla_think");
   const state = entity.number("attack_state");
   if (state === 0) {
@@ -102,7 +102,7 @@ function teslaThink(game: Q1Foundation, entity: Q1Actor): undefined {
   if (state === 2) { number(entity, "attack_state", 3); return later(game, entity, 0.2, "hip:tesla_think"); }
   number(entity, "attack_state", 0); return entity.classname === "trap_gods_wrath" ? game.cancel(entity) : later(game, entity, 0.1, "hip:tesla_think");
 }
-export function registerHipnoticHazards(game: Q1Foundation): undefined {
+export function registerHipnoticHazards(game: Q1EntityServices): undefined {
   game.named.register("hip:mine_home", { action: mineHome });
   game.named.register("hip:mine_first", { action: (g, e) => { number(e, "search_time", 0); e.damageable = true; e.aimedDamage = true; e.use = g.named.use(e, "hip:mine_use"); return later(g, e, 0.1, "hip:mine_home"); } });
   game.named.register("hip:mine_use", { use: (g, e, _other, activator) => { if (activator !== null && g.isPlayer(activator) && (g.player(activator)?.powerups.get("invisibility") ?? 0) <= g.time) { e.references.set("enemy", activator); return later(g, e, 0.1, "hip:mine_home"); } return undefined; } });

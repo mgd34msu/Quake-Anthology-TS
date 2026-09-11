@@ -1,9 +1,9 @@
 /* newmisc.qc. Copyright id Software / Rogue. GPL-2.0-or-later. */
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { length, normalize, vscale, vsub } from "../../foundation/types.ts";
 import { later, trigger } from "./common.ts";
 
-export function registerRogueMisc(game: Q1Foundation): undefined {
+export function registerRogueMisc(game: Q1EntityServices): undefined {
   for (const model of ["lantern", "candle"]) game.registerSpawn(`light_${model}`, (_g, e) => { e.model = `progs/${model}.mdl`; e.solid = "none"; e.movement = "none"; return undefined; });
   game.named.register("rogue:rubble_touch", { touch: (g, e, other) => {
     if ((g.isPlayer(other) || ((g.entity(other)?.movementFlags ?? 0) & 32) !== 0) && length(g.body(e).velocity) > 0) g.damage(other, e.actor.id, e.actor.id, 10); return undefined;

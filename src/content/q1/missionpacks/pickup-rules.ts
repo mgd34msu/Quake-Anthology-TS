@@ -1,5 +1,5 @@
 /* Mission-pack modifications to the inherited items.qc paths. GPL-2.0-or-later. */
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Weapon } from "../foundation/types.ts";
 import type { MissionPackPlayers } from "./player.ts";
 import type { Q1MissionPack } from "./types.ts";
@@ -9,7 +9,7 @@ function rogueRank(weapon: Q1Weapon): number {
   const order: readonly Q1Weapon[] = ["rogue:plasma", "lightning", "rogue:multi-rocket", "rocketlauncher", "rogue:lava-supernailgun", "supernailgun", "rogue:multi-grenade", "grenadelauncher", "rogue:lava-nailgun", "supershotgun", "nailgun"];
   const rank = order.indexOf(weapon); return rank < 0 ? 12 : rank + 1;
 }
-export function registerMissionPackPickupRules(game: Q1Foundation, pack: Q1MissionPack, players: MissionPackPlayers): undefined {
+export function registerMissionPackPickupRules(game: Q1EntityServices, pack: Q1MissionPack, players: MissionPackPlayers): undefined {
   return game.registerPickupRules({ id: `q1:${pack}:pickups`,
     weaponLeave: runtime => runtime.options.coop || runtime.options.deathmatch === 2 || runtime.options.edition === "rerelease" && [3, 5].includes(runtime.options.deathmatch),
     weaponRank: pack === "hipnotic" ? hipnoticWeaponRank : rogueRank,

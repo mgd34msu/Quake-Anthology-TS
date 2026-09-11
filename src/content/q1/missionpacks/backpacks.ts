@@ -3,7 +3,7 @@ import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "../foundation/types.ts";
 import { vadd, vscale, weaponItem } from "../foundation/types.ts";
 import { aim } from "../foundation/weapons.ts";
@@ -22,7 +22,7 @@ function baseWeapon(weapon: Q1Weapon): Q1Weapon {
     default: return weapon;
   }
 }
-export function dropMissionPackBackpack(game: Q1Foundation, actor: OwnedActor, pack: Q1MissionPack): Q1Actor | null {
+export function dropMissionPackBackpack(game: Q1EntityServices, actor: OwnedActor, pack: Q1MissionPack): Q1Actor | null {
   const player = game.player(actor.id), body = game.host.bodies.read(actor.id); if (player === null || body === null) return null;
   const inventory = game.host.inventory;
   const shells = inventory.count(actor.id, "q1:ammo/shells"), nails = inventory.count(actor.id, "q1:ammo/nails"), rockets = inventory.count(actor.id, "q1:ammo/rockets"), cells = inventory.count(actor.id, "q1:ammo/cells");
@@ -49,7 +49,7 @@ const tossAmmo: readonly TossAmmo[] = [
   { item: "q1:ammo/cells", amount: 20, selected: ["lightning"], owners: ["lightning"] },
   { item: "rogue:ammo/plasma", amount: 10, selected: ["rogue:plasma"], owners: ["lightning"] },
 ];
-export function tossRogueBackpack(game: Q1Foundation, player: Q1PlayerState): Q1Actor | null {
+export function tossRogueBackpack(game: Q1EntityServices, player: Q1PlayerState): Q1Actor | null {
   const ammo = game.weaponAmmo(player.weapon), body = game.host.bodies.read(player.actor.id), inventory = game.host.inventory;
   if ((game.options.teamplay ?? 0) < 1 || ammo === null || inventory.count(player.actor.id, ammo) <= 0 || body === null) return null;
   const amounts = new Map<ItemId, number>();
@@ -76,7 +76,7 @@ const tossWeapons: readonly TossWeapon[] = [
   { weapon: "rocketlauncher", powered: "rogue:multi-rocket", classname: "weapon_rocketlauncher", model: "progs/g_rock2.mdl", name: "$qc_rocket_launcher" },
   { weapon: "lightning", powered: "rogue:plasma", classname: "weapon_lightning", model: "progs/g_light.mdl", name: "$qc_thunderbolt" },
 ];
-export function tossRogueWeapon(game: Q1Foundation, player: Q1PlayerState): Q1Actor | null {
+export function tossRogueWeapon(game: Q1EntityServices, player: Q1PlayerState): Q1Actor | null {
   const definition = tossWeapons.find(candidate => candidate.weapon === player.weapon || candidate.powered === player.weapon), body = game.host.bodies.read(player.actor.id);
   if (game.options.deathmatch !== 1 || (game.options.teamplay ?? 0) < 1 || definition === undefined || body === null) return null;
   const item = game.create(definition.classname); item.owner = player.actor.id; item.model = definition.model; item.movement = "bounce"; item.solid = "trigger";
@@ -87,7 +87,7 @@ export function tossRogueWeapon(game: Q1Foundation, player: Q1PlayerState): Q1Ac
   item.touch = game.named.touch(item, "rogue:tossed-weapon-touch"); game.schedule(item, 120, game.named.action(item, "SUB_Remove")); game.link(item);
   game.selectWeapon(player.actor, game.chooseBest(player.actor)); return item;
 }
-export function registerRogueTossCallbacks(game: Q1Foundation, players: MissionPackPlayers): undefined {
+export function registerRogueTossCallbacks(game: Q1EntityServices, players: MissionPackPlayers): undefined {
   return game.named.register("rogue:tossed-weapon-touch", { touch: (runtime, item, other: ActorId) => {
     const player = runtime.player(other), definition = tossWeapons.find(candidate => candidate.classname === item.classname);
     if (player === null || definition === undefined || item.owner !== null && sameActor(item.owner, other) && item.nextThink - runtime.time > 119) return undefined;

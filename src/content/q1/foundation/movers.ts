@@ -2,7 +2,7 @@
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "./entity.ts";
 import { moveDirection } from "./entity.ts";
-import type { Q1Foundation } from "./runtime.ts";
+import type { Q1EntityServices } from "./entity-services.ts";
 import { ZERO, vadd, vsub, vscale, dot, overlaps } from "./types.ts";
 
 function doorSound(entity: Q1Actor, moving: boolean): string {
@@ -12,12 +12,12 @@ function doorSound(entity: Q1Actor, moving: boolean): string {
   if (entity.sounds === 4) return moving ? "doors/ddoor1.wav" : "doors/ddoor2.wav";
   return "misc/null.wav";
 }
-export function doorDown(game: Q1Foundation, entity: Q1Actor): undefined {
+export function doorDown(game: Q1EntityServices, entity: Q1Actor): undefined {
   game.sound(entity, doorSound(entity, true)); entity.state = "down";
   if (entity.maxHealth > 0) { game.host.combat.setHealth(entity.actor, entity.maxHealth); entity.damageable = true; }
   return game.calcMove(entity, entity.pos1, entity.speed, game.named.action(entity, "door_hit_bottom"));
 }
-export function doorUp(game: Q1Foundation, entity: Q1Actor): undefined {
+export function doorUp(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.state === "up") return undefined;
   if (entity.state === "top") {
     if (entity.wait >= 0 && (entity.spawnflags & 32) === 0) game.schedule(entity, entity.wait, game.named.action(entity, "door_go_down")); return undefined;
@@ -26,7 +26,7 @@ export function doorUp(game: Q1Foundation, entity: Q1Actor): undefined {
   game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "door_hit_top"));
   return game.useTargets(entity, entity.activator);
 }
-function doorUse(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function doorUse(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   const master = entity.doorGroup[0] ?? entity;
   const down = (master.spawnflags & 32) !== 0 && (master.state === "up" || master.state === "top");
   for (const door of master.doorGroup.length === 0 ? [master] : master.doorGroup) {
@@ -34,7 +34,7 @@ function doorUse(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null)
   }
   return undefined;
 }
-export function spawnDoor(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnDoor(game: Q1EntityServices, entity: Q1Actor): undefined {
   const keySounds = game.worldType === 0 ? ["doors/medtry.wav", "doors/meduse.wav"] : game.worldType === 1 ? ["doors/runetry.wav", "doors/runeuse.wav"] : game.worldType === 2 ? ["doors/basetry.wav", "doors/baseuse.wav"] : [];
   for (const path of keySounds) if (game.usesId1Precaches) game.precacheSound(path);
   const sounds = [["misc/null.wav", "misc/null.wav"], ["doors/drclos4.wav", "doors/doormv1.wav"], ["doors/hydro1.wav", "doors/hydro2.wav"], ["doors/stndr1.wav", "doors/stndr2.wav"], ["doors/ddoor1.wav", "doors/ddoor2.wav"]][entity.sounds] ?? [];
@@ -54,7 +54,7 @@ export function spawnDoor(game: Q1Foundation, entity: Q1Actor): undefined {
   entity.touch = game.named.touch(entity, "door_touch");
   return undefined;
 }
-export function linkDoors(game: Q1Foundation): undefined {
+export function linkDoors(game: Q1EntityServices): undefined {
   const doors = [...game.entities.values()].filter(entity => entity.classname === "func_door");
   for (const master of doors) {
     if (master.doorGroup.length > 0) continue;
@@ -81,7 +81,7 @@ export function linkDoors(game: Q1Foundation): undefined {
   }
   return undefined;
 }
-export function spawnButton(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnButton(game: Q1EntityServices, entity: Q1Actor): undefined {
   const sound = ["buttons/airbut1.wav", "buttons/switch21.wav", "buttons/switch02.wav", "buttons/switch04.wav"][entity.sounds];
   if (game.usesId1Precaches && (sound !== undefined)) game.precacheSound(sound);
   const body = game.body(entity); entity.solid = "bsp"; entity.movement = "push"; entity.speed ||= 40; entity.wait ||= 1;
@@ -93,7 +93,7 @@ export function spawnButton(game: Q1Foundation, entity: Q1Actor): undefined {
   else entity.touch = game.named.touch(entity, "button_touch");
   return undefined;
 }
-export function spawnSecretDoor(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnSecretDoor(game: Q1EntityServices, entity: Q1Actor): undefined {
   const sounds = entity.sounds === 1 ? ["doors/latch2.wav", "doors/winch2.wav", "doors/drclos4.wav"] : entity.sounds === 2 ? ["doors/airdoor1.wav", "doors/airdoor2.wav"] : entity.sounds === 0 || entity.sounds === 3 ? ["doors/basesec1.wav", "doors/basesec2.wav"] : [];
   for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
   const body = game.body(entity); entity.mangle = body.angles; game.setBody(entity, { angles: ZERO });
@@ -104,7 +104,7 @@ export function spawnSecretDoor(game: Q1Foundation, entity: Q1Actor): undefined 
   entity.blocked = game.named.blocked(entity, "fd_secret_blocked"); entity.touch = game.named.touch(entity, "fd_secret_touch");
   return undefined;
 }
-export function spawnPlat(game: Q1Foundation, entity: Q1Actor): undefined {
+export function spawnPlat(game: Q1EntityServices, entity: Q1Actor): undefined {
   const sounds = entity.sounds === 1 ? ["plats/plat1.wav", "plats/plat2.wav"] : entity.sounds === 0 || entity.sounds === 2 ? ["plats/medplat1.wav", "plats/medplat2.wav"] : [];
   for (const path of sounds) if (game.usesId1Precaches) game.precacheSound(path);
   const body = game.body(entity), size = vsub(body.bounds.max, body.bounds.min);
@@ -125,7 +125,7 @@ export function spawnPlat(game: Q1Foundation, entity: Q1Actor): undefined {
   return undefined;
 }
 
-function doorTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefined {
+function doorTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
     if (!game.isPlayer(other)) return undefined;
     const master = entity.doorGroup[0] ?? entity; if (master.attackFinished > game.time) return undefined;
     master.attackFinished = game.time + 2; game.message(other, master.message);
@@ -140,7 +140,7 @@ function doorTouch(game: Q1Foundation, entity: Q1Actor, other: ActorId): undefin
     game.sound(entity, game.worldType === 2 ? "doors/baseuse.wav" : game.worldType === 1 ? "doors/runeuse.wav" : "doors/meduse.wav", "item");
     return doorUse(game, master, other);
 }
-function buttonFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function buttonFire(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   if (entity.state === "up" || entity.state === "top") return undefined;
   entity.activator = activator; entity.state = "up";
   game.sound(entity, ["buttons/airbut1.wav", "buttons/switch21.wav", "buttons/switch02.wav", "buttons/switch04.wav"][entity.sounds] ?? "buttons/airbut1.wav");
@@ -150,7 +150,7 @@ function secretShootable(entity: Q1Actor): boolean { return entity.targetname ==
 function secretSound(entity: Q1Actor, moving: boolean): string {
   return entity.sounds === 1 ? moving ? "doors/winch2.wav" : "doors/drclos4.wav" : entity.sounds === 2 ? moving ? "doors/airdoor1.wav" : "doors/airdoor2.wav" : moving ? "doors/basesec1.wav" : "doors/basesec2.wav";
 }
-function secretFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | null): undefined {
+function secretFire(game: Q1EntityServices, entity: Q1Actor, activator: ActorId | null): undefined {
   game.host.combat.setHealth(entity.actor, 10000);
   if (entity.state !== "bottom" || entity.move !== null) return undefined;
   entity.message = ""; game.useTargets(entity, activator); entity.damageable = false; entity.state = "up";
@@ -165,15 +165,15 @@ function secretFire(game: Q1Foundation, entity: Q1Actor, activator: ActorId | nu
 function platSound(entity: Q1Actor, moving: boolean): string {
   return entity.sounds === 1 ? moving ? "plats/plat1.wav" : "plats/plat2.wav" : moving ? "plats/medplat1.wav" : "plats/medplat2.wav";
 }
-function platDown(game: Q1Foundation, entity: Q1Actor): undefined {
+function platDown(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.state = "down"; game.sound(entity, platSound(entity, true));
   return game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "plat_hit_bottom"));
 }
-function platUp(game: Q1Foundation, entity: Q1Actor): undefined {
+function platUp(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.state = "up"; game.sound(entity, platSound(entity, true));
   return game.calcMove(entity, entity.pos1, entity.speed, game.named.action(entity, "plat_hit_top"));
 }
-export function registerMoverCallbacks(game: Q1Foundation): undefined {
+export function registerMoverCallbacks(game: Q1EntityServices): undefined {
   game.named.register("door_go_down", { action: doorDown });
   game.named.register("door_hit_bottom", { action: (runtime, entity) => { entity.state = "bottom"; return runtime.sound(entity, doorSound(entity, false)); } });
   game.named.register("door_hit_top", { action: (runtime, entity) => {

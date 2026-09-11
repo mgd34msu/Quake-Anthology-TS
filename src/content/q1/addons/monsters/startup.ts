@@ -1,7 +1,7 @@
 /* quakec_{mg1,mg3}/monsters.qc InitMonster, StartMonster, monster_begin_walking. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { BaseMonster } from "../../base/monsters.ts";
 import { vadd, vsub, yawFor } from "../../foundation/types.ts";
 import type { Q1AddonContext } from "../context.ts";
@@ -9,7 +9,7 @@ import { callbackName } from "../../foundation/callbacks.ts";
 
 const small = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 40 } };
 const large = { min: { x: -32, y: -32, z: -24 }, max: { x: 32, y: 32, z: 64 } };
-const startNames = new WeakMap<Q1Foundation, Set<string>>();
+const startNames = new WeakMap<Q1EntityServices, Set<string>>();
 function prefix(monster: BaseMonster): string { return monster.source?.callbackPrefix ?? "base"; }
 
 /** Native spawn functions set their own health and callbacks before InitMonster. */
@@ -56,11 +56,11 @@ export function startMg3Monster(monster: BaseMonster, context: Q1AddonContext): 
   return (entity.spawnflags & 8) !== 0 ? monster.use(entity.activator) : undefined;
 }
 
-export function mg3MonsterActivator(game: Q1Foundation, activator: ActorId | null): ActorId | null {
+export function mg3MonsterActivator(game: Q1EntityServices, activator: ActorId | null): ActorId | null {
   return activator !== null && game.isPlayer(activator) ? activator : game.host.players().find(player => game.health(player) > 0) ?? null;
 }
 
-export function registerMg3MonsterStartup(game: Q1Foundation, name: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
+export function registerMg3MonsterStartup(game: Q1EntityServices, name: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
   let names = startNames.get(game); if (names === undefined) { names = new Set<string>(); startNames.set(game, names); } names.add(`${name}:start`);
   game.named.register(`${name}:start`, { use: (_game, entity, _other, activator) => { entity.activator = activator; return monster(entity).start(); } });
   game.named.register(`${name}:walk`, { use: (_game, entity) => {
@@ -70,6 +70,6 @@ export function registerMg3MonsterStartup(game: Q1Foundation, name: string, mons
   return undefined;
 }
 
-export function waitingMg3Monster(game: Q1Foundation, entity: Q1Actor): boolean {
+export function waitingMg3Monster(game: Q1EntityServices, entity: Q1Actor): boolean {
   const name = callbackName(entity.use); return name !== null && (startNames.get(game)?.has(name) ?? false);
 }

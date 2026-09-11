@@ -2,7 +2,7 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Weapon } from "../foundation/types.ts";
 import { POINT, length, vadd, vscale, vsub } from "../foundation/types.ts";
 import type { Q1CampaignBinding } from "./provider.ts";
@@ -13,7 +13,7 @@ import type { SaveReader } from "../../../persistence/value.ts";
 export class Q1SpawnSelector {
   private lastSpawn: Q1Actor | null = null;
   private readonly sourceSelections = new Map<string, (forceSpawn: boolean) => Q1Actor | null | undefined>();
-  constructor(readonly game: Q1Foundation, readonly campaign: Q1CampaignBinding) {}
+  constructor(readonly game: Q1EntityServices, readonly campaign: Q1CampaignBinding) {}
   /** Undefined delegates to the next source rule; null deliberately defers admission. */
   registerSelection(id: string, select: (forceSpawn: boolean) => Q1Actor | null | undefined): undefined {
     if (this.sourceSelections.has(id)) throw new Error(`Duplicate Q1 source spawn selector ${id}`); this.sourceSelections.set(id, select); return undefined;
@@ -159,7 +159,7 @@ export class Q1LevelRules {
   private exitAfter = 0;
   private readonly playerStats = new Map<OwnedActor, { firedWeapon: boolean; tookDamage: boolean }>();
   private readonly sourceRules = new Map<string, Q1IntermissionRule>();
-  constructor(readonly game: Q1Foundation, readonly campaign: Q1CampaignBinding, readonly registered = true, readonly officialCampaign = true) {
+  constructor(readonly game: Q1EntityServices, readonly campaign: Q1CampaignBinding, readonly registered = true, readonly officialCampaign = true) {
     game.named.register("base:next_level", { action: (_game, entity) => { this.begin(this.nextMap, null); return game.remove(entity); } });
     game.host.actors.onRelease(actor => { this.playerStats.delete(actor); return undefined; });
   }

@@ -2,7 +2,7 @@
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { callbackName } from "../../foundation/callbacks.ts";
 import { spawnTeleportFog } from "../../foundation/spawns.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1Solid } from "../../foundation/types.ts";
 import type { MissionpackWorldHooks } from "./index.ts";
 import { later, vector } from "./common.ts";
@@ -10,7 +10,7 @@ import { later, vector } from "./common.ts";
 function solid(value: string): Q1Solid {
   switch (value) { case "none": case "trigger": case "bbox": case "slidebox": case "bsp": return value; default: throw new Error(`Invalid func_spawn saved solid ${value}`); }
 }
-function template(game: Q1Foundation, mold: Q1Actor, classname: string): Q1Actor {
+function template(game: Q1EntityServices, mold: Q1Actor, classname: string): Q1Actor {
   const entity = game.create(classname, { properties: [...mold.fields].filter(([key]) => key !== "classname").map(([key, value]) => ({ key, value })).concat({ key: "classname", value: classname }) });
   game.setBody(entity, game.body(mold)); game.spawnEntity(entity, { deathmatch: 0 });
   if (!game.live(entity)) throw new Error(`func_spawn template ${classname} removed itself`);
@@ -19,7 +19,7 @@ function template(game: Q1Foundation, mold: Q1Actor, classname: string): Q1Actor
   vector(entity, "spawnmins", body.bounds.min); vector(entity, "spawnmaxs", body.bounds.max);
   entity.model = ""; entity.solid = "none"; later(game, entity, 1, "hip:spawn_think"); game.link(entity); return entity;
 }
-export function registerHipnoticSpawn(game: Q1Foundation, hooks: MissionpackWorldHooks): undefined {
+export function registerHipnoticSpawn(game: Q1EntityServices, hooks: MissionpackWorldHooks): undefined {
   game.named.register("hip:spawn_think", { action: (g, e) => later(g, e, 1, "hip:spawn_think") });
   game.named.register("hip:spawn_use", { use: (g, e) => {
     const master = g.entity(e.references.get("spawnmaster") ?? null); if (master === null) throw new Error("func_spawn lost its initialized master");

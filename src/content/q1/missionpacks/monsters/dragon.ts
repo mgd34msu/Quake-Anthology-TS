@@ -3,7 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { throwGib } from "../../base/projectiles.ts";
 import { launchRoguePlasma } from "../rogue-weapons.ts";
@@ -13,7 +13,7 @@ import type { MissionAction, PackMonsterDefinition } from "./types.ts";
 import { frames } from "./tables/dragon.ts";
 import { hullBounds, missile, number } from "./helpers.ts";
 
-export function launchDragonFireball(game: Q1Foundation, owner: ActorId, origin: Vec3, direction: Vec3): Q1Actor {
+export function launchDragonFireball(game: Q1EntityServices, owner: ActorId, origin: Vec3, direction: Vec3): Q1Actor {
   const source = game.entity(owner); if (source !== null) source.effects |= 2;
   const shot = missile(game, owner, "fireball", "progs/fireball.mdl", origin, ZERO, "rogue:FireballTouch", 6);
   game.setBody(shot, { velocity: vscale(direction, game.host.random() * 300 + 900) }); shot.angularVelocity = { x: 0, y: 0, z: 300 };
@@ -168,7 +168,7 @@ export function dragonDefinition(runtime: Q1MissionPackMonsters): PackMonsterDef
     die: monster => monster.play("dragon_death1"),
   };
 }
-export function registerDragonCorners(game: Q1Foundation): undefined {
+export function registerDragonCorners(game: Q1EntityServices): undefined {
   game.registerSpawn("trigger_dragon", (_game, entity) => game.remove(entity));
   game.registerSpawn("dragon_corner", (_game, entity) => {
     if (entity.targetname === "") throw new Error("dragon_corner: no targetname"); entity.solid = "trigger"; entity.movement = "none"; entity.touch = game.named.touch(entity, "rogue:dragon_corner_touch"); entity.model = "";

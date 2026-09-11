@@ -3,16 +3,16 @@ import type { ActorId } from "../../../../../contracts/identity.ts";
 import { sameActor } from "../../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../../contracts/math.ts";
 import type { Q1Actor } from "../../../foundation/entity.ts";
-import type { Q1Foundation } from "../../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../../foundation/entity-services.ts";
 import { launchSpike } from "../../../base/projectiles.ts";
 import { POINT, ZERO, vadd, vscale, vsub } from "../../../foundation/types.ts";
 import { heavyPrefix } from "./runtime.ts";
 
-export function heavySpike(game: Q1Foundation, owner: ActorId, origin: Vec3, velocity: Vec3): Q1Actor {
+export function heavySpike(game: Q1EntityServices, owner: ActorId, origin: Vec3, velocity: Vec3): Q1Actor {
   const missile = launchSpike(game, owner, origin, velocity); missile.classname = "knightspike";
   missile.touch = game.named.touch(missile, `${heavyPrefix}:spike_touch`); return missile;
 }
-export function registerHeavyProjectiles(game: Q1Foundation): undefined {
+export function registerHeavyProjectiles(game: Q1EntityServices): undefined {
   game.named.register(`${heavyPrefix}:spike_touch`, { touch: (runtime, entity, other) => {
     if (entity.owner !== null && sameActor(other, entity.owner) || runtime.entity(other)?.solid === "trigger") return undefined;
     const origin = runtime.body(entity).origin; if (runtime.host.contents(origin) === "sky") return runtime.remove(entity);
@@ -22,7 +22,7 @@ export function registerHeavyProjectiles(game: Q1Foundation): undefined {
     return runtime.remove(entity);
   } }); return undefined;
 }
-export function heavyLightningDamage(game: Q1Foundation, actor: ActorId, start: Vec3, end: Vec3, damage: number): undefined {
+export function heavyLightningDamage(game: Q1EntityServices, actor: ActorId, start: Vec3, end: Vec3, damage: number): undefined {
   const delta = vsub(end, start), side = { x: -delta.y * 16, y: -delta.y * 16, z: 0 }; const hit: (ActorId | null)[] = [];
   for (const offset of [ZERO, side, vscale(side, -1)]) {
     const trace = game.host.trace({ start: vadd(start, offset), end: vadd(end, offset), bounds: POINT, ignore: actor, monsters: true });

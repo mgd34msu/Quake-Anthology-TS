@@ -30,3 +30,5 @@ export type { Q1WeaponRules } from "./extensions.ts";
 export { fireBaseWeapon } from "./weapons.ts";
 
 export { spawnTeleportFog, spawnTeledeath } from "./spawns.ts";
+
+export { Q1EntityServices } from "./entity-services.ts";

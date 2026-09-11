@@ -2,14 +2,14 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, vadd } from "../../foundation/types.ts";
 import { q1Base } from "../../base/provider.ts";
 import type { MissionpackWorldHooks } from "./index.ts";
 import { later, number } from "./common.ts";
 
 export class RogueTag {
-  constructor(private readonly game: Q1Foundation, private readonly hooks: MissionpackWorldHooks) {
+  constructor(private readonly game: Q1EntityServices, private readonly hooks: MissionpackWorldHooks) {
     game.named.register("rogue:tag_respawn", { action: () => this.respawn() });
     game.named.register("rogue:tag_fall", { action: (g, e) => { number(e, "tag_frags", 0); this.dropFloor(e); return later(g, e, 30, "rogue:tag_respawn"); } });
     game.named.register("rogue:tag_place", { action: (g, e) => { e.movement = "toss"; e.solid = "trigger"; g.setOrigin(e, vadd(g.body(e).origin, { x: 0, y: 0, z: 6 })); return this.dropFloor(e) ? undefined : g.remove(e); } });

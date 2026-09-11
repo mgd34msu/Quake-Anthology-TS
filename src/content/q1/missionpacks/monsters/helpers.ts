@@ -2,7 +2,7 @@
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, length, vadd, vscale, vsub } from "../../foundation/types.ts";
 import { throwGib, throwHead } from "../../base/projectiles.ts";
 import type { MissionMonster } from "./runtime.ts";
@@ -23,12 +23,12 @@ export function gib(monster: MissionMonster, head: string, gibs: readonly string
   for (const model of gibs) throwGib(game, monster.origin, model, game.health(entity.actor.id));
   return undefined;
 }
-export function eye(game: Q1Foundation, actor: ActorId): Vec3 | null {
+export function eye(game: Q1EntityServices, actor: ActorId): Vec3 | null {
   const body = game.host.bodies.read(actor);
   const entity = game.entity(actor);
   return body === null ? null : vadd(body.origin, entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: game.isPlayer(actor) ? 22 : (entity?.movementFlags ?? 0) & 2 ? 10 : 25 });
 }
-export function radiusActors(game: Q1Foundation, origin: Vec3, radius: number): readonly ActorId[] {
+export function radiusActors(game: Q1EntityServices, origin: Vec3, radius: number): readonly ActorId[] {
   return game.host.actors.observations().flatMap(actor => {
     const entity = game.entity(actor.id), body = game.host.bodies.read(actor.id);
     if (body === null || entity?.solid === "none") return [];
@@ -47,7 +47,7 @@ export function eelZap(monster: MissionMonster): undefined {
   }
   return undefined;
 }
-export function missile(game: Q1Foundation, owner: ActorId, classname: string, model: string, origin: Vec3, velocity: Vec3, touch: string, seconds = 5): Q1Actor {
+export function missile(game: Q1EntityServices, owner: ActorId, classname: string, model: string, origin: Vec3, velocity: Vec3, touch: string, seconds = 5): Q1Actor {
   const entity = game.create(classname); entity.owner = owner; entity.model = model; entity.movement = "flymissile"; entity.solid = "bbox";
   game.setBody(entity, { origin, velocity, bounds: POINT, ground: null }); entity.touch = game.named.touch(entity, touch);
   game.schedule(entity, seconds, game.named.action(entity, "SUB_Remove")); game.link(entity);

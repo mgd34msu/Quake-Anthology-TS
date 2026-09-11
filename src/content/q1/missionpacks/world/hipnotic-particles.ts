@@ -1,10 +1,10 @@
 /* hip_part.qc / hipholes.qc. Copyright id Software. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, vadd, vsub, vscale, vectors } from "../../foundation/types.ts";
 import { number } from "./common.ts";
 
-function fieldUse(game: Q1Foundation, entity: Q1Actor, other: Parameters<NonNullable<Q1Actor["use"]>>[0]): undefined {
+function fieldUse(game: Q1EntityServices, entity: Q1Actor, other: Parameters<NonNullable<Q1Actor["use"]>>[0]): undefined {
   const counter = game.entity(other);
   if ((entity.spawnflags & 1) !== 0 && (counter?.classname === "func_counter" ? counter.number("counter_state") : 0) !== entity.number("cnt")) return undefined;
   number(entity, "ltime", game.time + 0.25);
@@ -17,7 +17,7 @@ function fieldUse(game: Q1Foundation, entity: Q1Actor, other: Parameters<NonNull
   else { for (let x = start.x; x < end.x; x += 16) for (let y = start.y; y < end.y; y += 16) emit(x, y, start.z); }
   return undefined;
 }
-export function registerHipnoticParticles(game: Q1Foundation): undefined {
+export function registerHipnoticParticles(game: Q1EntityServices): undefined {
   game.named.register("hip:particlefield", { use: fieldUse, touch: (g, e, other) => {
     if (e.damage === 0 || g.time > e.number("ltime") || g.time < e.attackFinished) return undefined;
     e.attackFinished = g.time + 0.5; g.damage(other, e.actor.id, e.actor.id, e.damage); return undefined;

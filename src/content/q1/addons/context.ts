@@ -6,7 +6,7 @@ import { SaveReader } from "../../../persistence/value.ts";
 import type { Q1Base } from "../base/provider.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import { moveDirection } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { ZERO } from "../foundation/types.ts";
 import { mg3RuneCount } from "./campaign.ts";
 
@@ -36,7 +36,7 @@ export interface Q1AddonServices {
 
 /** Source-private addon words share the base campaign flags and all gameplay authorities. */
 export class Q1AddonContext {
-  readonly game: Q1Foundation;
+  readonly game: Q1EntityServices;
   frameTime = 0;
   private readonly playerWords = new Map<OwnedActor, Map<string, number>>();
   private readonly playerReferences = new Map<OwnedActor, Map<string, ActorId | null>>();

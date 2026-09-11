@@ -3,7 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1SourceFinale } from "../../base/rules.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1MissionPack } from "../types.ts";
 import { registerHipnoticTriggers } from "./hipnotic-triggers.ts";
 import { registerHipnoticTrain } from "./hipnotic-train.ts";
@@ -42,7 +42,7 @@ export class Q1MissionpackWorld {
   private readonly runes: RogueRunes | null;
   private readonly teams: RogueTeams | null;
   private readonly tag: RogueTag | null;
-  constructor(readonly game: Q1Foundation, readonly pack: Q1MissionPack, readonly hooks: MissionpackWorldHooks = {}) {
+  constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack, readonly hooks: MissionpackWorldHooks = {}) {
     registerMissionShooters(game, pack);
     registerMissionCampaign(game, pack, hooks);
     if (pack === "hipnotic") {
@@ -64,4 +64,4 @@ export class Q1MissionpackWorld {
   hasRegenerationRune(actor: ActorId): boolean { return this.runes?.hasRegeneration(actor) ?? false; }
   crashTimeMachine(): undefined { return crashTimeMachine(this.game); }
 }
-export function registerMissionpackWorld(game: Q1Foundation, pack: Q1MissionPack, hooks: MissionpackWorldHooks = {}): Q1MissionpackWorld { return new Q1MissionpackWorld(game, pack, hooks); }
+export function registerMissionpackWorld(game: Q1EntityServices, pack: Q1MissionPack, hooks: MissionpackWorldHooks = {}): Q1MissionpackWorld { return new Q1MissionpackWorld(game, pack, hooks); }

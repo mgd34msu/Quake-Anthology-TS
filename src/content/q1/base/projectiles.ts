@@ -4,28 +4,28 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Weapon } from "../foundation/types.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub, weaponItem, yawFor } from "../foundation/types.ts";
 import type { BaseMonster } from "./monsters.ts";
 import { q1Base } from "./provider.ts";
 
-function damageVelocity(game: Q1Foundation, damage: number): Vec3 {
+function damageVelocity(game: Q1EntityServices, damage: number): Vec3 {
   return vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + 100 * game.host.random() }, damage > -50 ? 0.7 : damage > -200 ? 2 : 10);
 }
-export function throwGib(game: Q1Foundation, origin: Vec3, model: string, damage: number): Q1Actor {
+export function throwGib(game: Q1EntityServices, origin: Vec3, model: string, damage: number): Q1Actor {
   const gib = game.create("gib"); gib.model = `progs/${model}.mdl`; gib.movement = "bounce";
   game.setBody(gib, { origin, velocity: damageVelocity(game, damage), bounds: POINT });
   gib.angularVelocity = { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
   game.schedule(gib, 10 + game.host.random() * 10, game.named.action(gib, "SUB_Remove")); game.link(gib); return gib;
 }
-export function throwHead(game: Q1Foundation, entity: Q1Actor, model: string, damage = game.health(entity.actor.id)): undefined {
+export function throwHead(game: Q1EntityServices, entity: Q1Actor, model: string, damage = game.health(entity.actor.id)): undefined {
   game.cancel(entity); entity.model = `progs/${model}.mdl`; entity.frame = 0; entity.movement = "bounce"; entity.damageable = false; entity.solid = "none";
   const origin = game.body(entity).origin;
   game.setBody(entity, { origin: vadd(origin, { x: 0, y: 0, z: -24 }), velocity: damageVelocity(game, damage), bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } }, ground: null });
   entity.angularVelocity = { x: 0, y: (game.host.random() * 2 - 1) * 600, z: 0 }; return game.link(entity);
 }
-export function spawnMeatSpray(game: Q1Foundation, owner: Q1Actor, origin: Vec3, velocity: Vec3): Q1Actor {
+export function spawnMeatSpray(game: Q1EntityServices, owner: Q1Actor, origin: Vec3, velocity: Vec3): Q1Actor {
   const missile = game.create("meat_spray"), angles = game.body(owner).angles;
   missile.owner = owner.actor.id; missile.movement = "bounce"; missile.solid = "none";
   game.makeVectors(game.options.edition === "rerelease" ? { ...angles, x: -angles.x } : angles);
@@ -44,7 +44,7 @@ export interface BackpackContents {
   readonly avoidUnderwaterLightning?: boolean;
   readonly ownerPickupDelay?: number;
 }
-export function dropBackpack(game: Q1Foundation, origin: Vec3, contents: BackpackContents, launch?: { readonly origin: Vec3; readonly velocity: Vec3; readonly movement: "bounce" | "toss" }): Q1Actor | null {
+export function dropBackpack(game: Q1EntityServices, origin: Vec3, contents: BackpackContents, launch?: { readonly origin: Vec3; readonly velocity: Vec3; readonly movement: "bounce" | "toss" }): Q1Actor | null {
   if (contents.shells + contents.nails + contents.rockets + contents.cells + (contents.extra?.reduce((total, entry) => total + entry.count, 0) ?? 0) === 0) return null;
   const pack = game.create("item_backpack"); pack.model = "progs/backpack.mdl"; pack.solid = "trigger"; pack.movement = launch?.movement ?? "toss";
   const weapon = contents.weapon, rerelease = game.options.edition === "rerelease";
@@ -58,7 +58,7 @@ export function dropBackpack(game: Q1Foundation, origin: Vec3, contents: Backpac
   pack.touch = game.named.touch(pack, "base:backpack_touch");
   game.schedule(pack, 120, game.named.action(pack, "SUB_Remove")); game.link(pack); return pack;
 }
-function backpackTouch(game: Q1Foundation, pack: Q1Actor, other: ActorId): undefined {
+function backpackTouch(game: Q1EntityServices, pack: Q1Actor, other: ActorId): undefined {
   const contents = q1Base(game).backpacks.get(pack.actor); if (contents === undefined) throw new Error("Missing source backpack contents");
   const weapon = contents.weapon;
   const ammo: readonly { readonly item: ItemId; readonly count: number }[] = [
@@ -83,22 +83,22 @@ function backpackTouch(game: Q1Foundation, pack: Q1Actor, other: ActorId): undef
     return game.remove(pack);
 }
 
-export function createMissile(game: Q1Foundation, owner: ActorId | null, classname: string, model: string, origin: Vec3, velocity: Vec3, lifetime = 5): Q1Actor {
+export function createMissile(game: Q1EntityServices, owner: ActorId | null, classname: string, model: string, origin: Vec3, velocity: Vec3, lifetime = 5): Q1Actor {
   const missile = game.create(classname); missile.owner = owner; missile.model = `progs/${model}.mdl`; missile.solid = "bbox"; missile.movement = "flymissile";
   game.setBody(missile, { origin, velocity, bounds: POINT, angles: { x: Math.atan2(velocity.z, Math.hypot(velocity.x, velocity.y)) * 180 / Math.PI, y: yawFor(velocity), z: 0 } });
   game.schedule(missile, lifetime, game.named.action(missile, "SUB_Remove")); game.link(missile); return missile;
 }
-export function launchSpike(game: Q1Foundation, owner: ActorId | null, origin: Vec3, velocity: Vec3, kind: "spike" | "superspike" | "wizard" | "knight" = "spike"): Q1Actor {
+export function launchSpike(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, velocity: Vec3, kind: "spike" | "superspike" | "wizard" | "knight" = "spike"): Q1Actor {
   const missile = createMissile(game, owner, kind === "wizard" ? "wizard_spike" : kind === "knight" ? "knight_spike" : kind, kind === "wizard" ? "w_spike" : kind === "knight" ? "k_spike" : "spike", origin, velocity, 6);
   missile.projectile = kind === "superspike" ? "superspike" : "spike";
   missile.touch = game.named.touch(missile, "projectile_touch");
   return missile;
 }
-export function launchLaser(game: Q1Foundation, owner: ActorId | null, origin: Vec3, direction: Vec3): Q1Actor {
+export function launchLaser(game: Q1EntityServices, owner: ActorId | null, origin: Vec3, direction: Vec3): Q1Actor {
   const missile = createMissile(game, owner, "enforcer_laser", "laser", origin, vscale(normalize(direction), 600)); missile.effects = 8;
   missile.touch = game.named.touch(missile, "base:laser_touch"); return missile;
 }
-function laserTouch(game: Q1Foundation, missile: Q1Actor, other: ActorId): undefined {
+function laserTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
     const owner = missile.owner;
     if (owner !== null && sameActor(other, owner)) return undefined;
     const body = game.body(missile); if (game.host.contents(body.origin) === "sky") return game.remove(missile);
@@ -107,7 +107,7 @@ function laserTouch(game: Q1Foundation, missile: Q1Actor, other: ActorId): undef
     else game.effect("gunshot", hit);
     return game.remove(missile);
 }
-export function spriteExplosion(game: Q1Foundation, missile: Q1Actor): undefined {
+export function spriteExplosion(game: Q1EntityServices, missile: Q1Actor): undefined {
   game.effect("explosion", game.body(missile).origin); missile.touch = null; missile.solid = "none"; missile.movement = "none"; missile.model = "progs/s_explod.spr"; missile.frame = 0;
   game.setBody(missile, { velocity: ZERO }); game.link(missile);
   return game.schedule(missile, 0.1, game.named.action(missile, "base:explosion_frame"));
@@ -119,8 +119,8 @@ export function launchOgreGrenade(monster: BaseMonster): undefined {
   missile.movement = "bounce"; missile.angularVelocity = { x: 300, y: 300, z: 300 };
   missile.touch = game.named.touch(missile, "base:ogre_grenade_touch"); return game.schedule(missile, 2.5, game.named.action(missile, "base:ogre_grenade_explode"));
 }
-function ogreGrenadeExplode(game: Q1Foundation, missile: Q1Actor): undefined { game.radiusDamage(missile.actor.id, missile.owner, 40, null, null); game.sound(missile, "weapons/r_exp3.wav"); return spriteExplosion(game, missile); }
-function ogreGrenadeTouch(game: Q1Foundation, missile: Q1Actor, other: ActorId): undefined {
+function ogreGrenadeExplode(game: Q1EntityServices, missile: Q1Actor): undefined { game.radiusDamage(missile.actor.id, missile.owner, 40, null, null); game.sound(missile, "weapons/r_exp3.wav"); return spriteExplosion(game, missile); }
+function ogreGrenadeTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
     if (missile.owner !== null && sameActor(other, missile.owner)) return undefined;
     if (game.isPlayer(other) || game.entity(other)?.aimedDamage) return ogreGrenadeExplode(game, missile);
     game.sound(missile, "weapons/bounce.wav"); if (length(game.body(missile).velocity) === 0) missile.angularVelocity = ZERO;
@@ -134,7 +134,7 @@ export function launchZombieGrenade(monster: BaseMonster, offset: Vec3): undefin
   missile.movement = "bounce"; missile.angularVelocity = { x: 3000, y: 1000, z: 2000 };
   missile.touch = game.named.touch(missile, "base:zombie_grenade_touch"); return undefined;
 }
-function zombieGrenadeTouch(game: Q1Foundation, missile: Q1Actor, other: ActorId): undefined {
+function zombieGrenadeTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
     if (missile.owner !== null && sameActor(other, missile.owner)) return undefined;
     if (game.host.combat.read(other)?.canTakeDamage) { game.damage(other, missile.actor.id, missile.owner, 10); game.sound(missile, "zombie/z_hit.wav", "weapon"); return game.remove(missile); }
     game.sound(missile, "zombie/z_miss.wav", "weapon"); game.setBody(missile, { velocity: ZERO }); missile.angularVelocity = ZERO;
@@ -148,18 +148,18 @@ export function launchVoreBall(monster: BaseMonster): undefined {
   q1Base(game).projectileTargets.set(missile.actor, enemy);
   missile.touch = game.named.touch(missile, "base:vore_touch"); return game.schedule(missile, Math.max(0.1, monster.distance * 0.002), game.named.action(missile, "base:vore_home"));
 }
-function voreHome(game: Q1Foundation, missile: Q1Actor): undefined {
+function voreHome(game: Q1EntityServices, missile: Q1Actor): undefined {
     const enemy = q1Base(game).projectileTargets.get(missile.actor); if (enemy === undefined) throw new Error("Vore missile has no source enemy");
     const body = game.host.bodies.read(enemy); if (body === null || game.health(enemy) < 1) return game.remove(missile);
     const speed = game.options.edition === "classic" && game.options.skill === 3 ? 350 : 250;
     game.setBody(missile, { velocity: vscale(normalize(vsub(vadd(body.origin, { x: 0, y: 0, z: 10 }), game.body(missile).origin)), speed) }); return game.schedule(missile, 0.2, game.named.action(missile, "base:vore_home"));
 }
-function voreTouch(game: Q1Foundation, missile: Q1Actor, other: ActorId): undefined {
+function voreTouch(game: Q1EntityServices, missile: Q1Actor, other: ActorId): undefined {
     if (missile.owner !== null && sameActor(other, missile.owner)) return undefined;
     if (game.host.classname(other) === "monster_zombie") game.damage(other, missile.actor.id, missile.actor.id, 110);
     game.radiusDamage(missile.actor.id, missile.owner, 40, null, null); game.sound(missile, "weapons/r_exp3.wav", "weapon"); return spriteExplosion(game, missile);
 }
-export function registerProjectileCallbacks(game: Q1Foundation): undefined {
+export function registerProjectileCallbacks(game: Q1EntityServices): undefined {
   game.named.register("base:backpack_touch", { touch: backpackTouch }); game.named.register("base:laser_touch", { touch: laserTouch });
   game.named.register("base:ogre_grenade_touch", { touch: ogreGrenadeTouch }); game.named.register("base:ogre_grenade_explode", { action: ogreGrenadeExplode });
   game.named.register("base:zombie_grenade_touch", { touch: zombieGrenadeTouch }); game.named.register("base:remove_touch", { touch: (runtime, entity) => runtime.remove(entity) });

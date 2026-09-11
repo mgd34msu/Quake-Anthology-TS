@@ -1,16 +1,16 @@
 /* timemach.qc. Copyright id Software / Rogue. GPL-2.0-or-later. */
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { POINT, ZERO, vadd, vsub, vscale, vectors } from "../../foundation/types.ts";
 import { later, number } from "./common.ts";
 
-function chunk(game: Q1Foundation, explosion: Q1Actor, machine: Q1Actor): undefined {
+function chunk(game: Q1EntityServices, explosion: Q1Actor, machine: Q1Actor): undefined {
   const basis = vectors(game.body(machine).angles), gib = game.create("time_machine_gib"); gib.solid = "none"; gib.movement = "toss"; gib.model = "progs/timegib.mdl";
   game.setBody(gib, { origin: vsub(vadd(game.body(machine).origin, vscale(basis.forward, 84)), vscale(basis.up, 136)), velocity: vscale(basis.up, -50), angles: game.body(machine).angles });
   gib.angularVelocity = { x: 300, y: 300, z: 300 }; game.sound(explosion, "weapons/r_exp3.wav", "weapon", 0); game.effect("explosion", game.body(gib).origin);
   machine.frame = 1; later(game, gib, 5, "SUB_Remove"); return game.link(gib);
 }
-function pain(game: Q1Foundation, machine: Q1Actor): undefined {
+function pain(game: Q1EntityServices, machine: Q1Actor): undefined {
   const health = game.health(machine.actor.id); if (health > 1100 && machine.number("pain_finished") > game.time) return undefined;
   if (game.host.random() < 0.4) {
     number(machine, "pain_finished", game.time + 2); const random = game.host.random(), basis = vectors(game.body(machine).angles), explosion = game.create("time_machine_pain");
@@ -21,12 +21,12 @@ function pain(game: Q1Foundation, machine: Q1Actor): undefined {
   if (health < 1000) { number(machine, "pain_finished", 0); machine.pain = null; machine.die = null; if (game.world !== null) number(game.world, "rogue:cutscene_running", 1); }
   return undefined;
 }
-export function crashTimeMachine(game: Q1Foundation): undefined {
+export function crashTimeMachine(game: Q1EntityServices): undefined {
   const machine = game.entity(game.world?.references.get("rogue:theMachine") ?? null); if (machine === null) throw new Error("Rogue time_crash requires item_time_machine");
   machine.damageable = false; machine.movement = "fly"; machine.solid = "none"; machine.angularVelocity = { x: 15, y: 0, z: 5 };
   game.setBody(machine, { velocity: { x: 0, y: 0, z: -50 }, bounds: POINT }); later(game, machine, 0.1, "rogue:time_fall"); machine.target = "timeramp"; return game.useTargets(machine, machine.activator);
 }
-export function registerRogueTime(game: Q1Foundation): undefined {
+export function registerRogueTime(game: Q1EntityServices): undefined {
   game.named.register("rogue:time_pain", { pain, die: pain });
   game.named.register("rogue:time_stop_shake", { action: (g, e) => { g.useTargets(e, e.activator); return g.remove(e); } });
   game.named.register("rogue:time_boom", { action: (g, e) => {

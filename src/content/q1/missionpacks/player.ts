@@ -4,7 +4,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Q1DamageSourceEffects } from "../../../world/gameplay/index.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "../foundation/types.ts";
 import { POINT, length, normalize, vadd, vscale, vsub, weaponItem, yawFor } from "../foundation/types.ts";
 import { missionReference, missionWeapons, moveMissile, setMissionNumber, setMissionReference } from "./types.ts";
@@ -27,7 +27,7 @@ const timers: readonly { readonly id: MissionPowerup; readonly warn: string; rea
 ];
 export class MissionPackPlayers {
   readonly sourceEffects: Q1DamageSourceEffects;
-  constructor(readonly game: Q1Foundation, readonly pack: Q1MissionPack) {
+  constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack) {
     this.sourceEffects = { beforeQuad: (request, damage) => this.beforeQuad(request, damage), afterQuad: (request, damage) => this.afterQuad(request, damage) };
     game.registerDamageSourceEffects(`q1:${pack}:effects`, this.sourceEffects);
     game.registerPlayerExtension({ id: `q1:${pack}:players`, attach: (_runtime, player) => this.attach(player), frame: (_runtime, player, seconds) => this.frame(player, seconds), afterPhysics: (_runtime, player, seconds) => this.afterPhysics(player, seconds) });
@@ -157,7 +157,7 @@ export class MissionPackPlayers {
     sphere.angularVelocity = { x: 40, y: 40, z: 40 }; sphere.delay = Math.fround(game.time + 30);
     game.setOrigin(sphere, game.body(item).origin); game.schedule(sphere, 0.1, game.named.action(sphere, "rogue:sphere-think")); return true;
   }
-  private sphereThink(game: Q1Foundation, sphere: Q1Actor): undefined {
+  private sphereThink(game: Q1EntityServices, sphere: Q1Actor): undefined {
     const player = sphere.owner === null ? null : game.player(sphere.owner), body = sphere.owner === null ? null : game.host.bodies.read(sphere.owner);
     if (player === null || body === null) return game.remove(sphere);
     if (sphere.attackFinished < game.time) { game.sound(sphere, "sphere/sphere.wav", "voice"); sphere.attackFinished = Math.fround(game.time + 4); }
@@ -180,7 +180,7 @@ export class MissionPackPlayers {
     }
     return game.schedule(sphere, 0.1, game.named.action(sphere, "rogue:sphere-think"));
   }
-  private sphereAttack(game: Q1Foundation, sphere: Q1Actor): undefined {
+  private sphereAttack(game: Q1EntityServices, sphere: Q1Actor): undefined {
     sphere.solid = "trigger"; sphere.touch = game.named.touch(sphere, "rogue:sphere-impact"); game.link(sphere);
     const target = missionReference(game, sphere, "rogue:enemy"), body = target === null ? null : game.host.bodies.read(target);
     if (target === null || body === null || game.health(target) < 1) { missionMessage(game, sphere.owner, "$qc_you_are_denied_vengeance"); return game.remove(sphere); }

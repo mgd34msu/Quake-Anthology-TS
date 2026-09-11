@@ -1,19 +1,19 @@
 /* player.qc/client.qc presentation and lifecycle. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
-import type { Q1Foundation } from "../foundation/runtime.ts";
+import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { ZERO, length, normalize, vadd, vscale } from "../foundation/types.ts";
 import { spawnBubble } from "./map-entities.ts";
 import { throwGib } from "./projectiles.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
 
-const characterTables = new WeakMap<Q1Foundation, Map<OwnedActor, Q1CharacterActor>>();
-function characterTable(game: Q1Foundation): Map<OwnedActor, Q1CharacterActor> {
+const characterTables = new WeakMap<Q1EntityServices, Map<OwnedActor, Q1CharacterActor>>();
+function characterTable(game: Q1EntityServices): Map<OwnedActor, Q1CharacterActor> {
   let table = characterTables.get(game); if (table !== undefined) return table;
   const created = new Map<OwnedActor, Q1CharacterActor>(); table = created; characterTables.set(game, created);
   game.host.actors.onRelease(actor => { created.delete(actor); return undefined; }); return table;
 }
-export function registerCharacterCallbacks(game: Q1Foundation): undefined {
+export function registerCharacterCallbacks(game: Q1EntityServices): undefined {
   game.named.register("base:death_bubbles", { action: (runtime, timer) => {
     const owner = timer.owner === null ? null : runtime.host.actors.resolveOwned(timer.owner); if (owner === null) return runtime.remove(timer);
     const level = characterTable(runtime).get(owner)?.waterLevel ?? runtime.player(owner.id)?.waterLevel ?? 0;
@@ -96,7 +96,7 @@ export class Q1CharacterActor {
   private drownDamage = 2;
   private hazardAt = 0;
   private inWater = false;
-  constructor(readonly game: Q1Foundation, readonly actor: OwnedActor, readonly options: Q1CharacterOptions = {}) {
+  constructor(readonly game: Q1EntityServices, readonly actor: OwnedActor, readonly options: Q1CharacterOptions = {}) {
     game.host.actors.assertOwned(actor); this.airFinished = game.time + 12; characterTable(game).set(actor, this);
   }
   get waterLevel(): 0 | 1 | 2 | 3 { return this.input.waterLevel; }

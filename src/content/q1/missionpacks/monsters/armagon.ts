@@ -2,7 +2,7 @@
 import { sameActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
-import type { Q1Foundation } from "../../foundation/runtime.ts";
+import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import type { Q1SoundChannel } from "../../foundation/types.ts";
 import { POINT, ZERO, dot, length, normalize, vadd, vscale, vsub, yawFor } from "../../foundation/types.ts";
 import { createMissile, throwGib } from "../../base/projectiles.ts";
@@ -124,7 +124,7 @@ function checkAttack(monster: MissionMonster): boolean {
   if (shot.distance < 400) { monster.play("armagon_stop1"); return true; }
   monster.lefty = true; return false;
 }
-function bodyExplode(game: Q1Foundation, body: Q1Actor): undefined {
+function bodyExplode(game: Q1EntityServices, body: Q1Actor): undefined {
   game.schedule(body, 0.1, game.named.action(body, "hipnotic:armagon_body_explode1"));
   const count = body.number("cnt"); if (count === 0) body.count = 0;
   if (count < 25) {
@@ -133,7 +133,7 @@ function bodyExplode(game: Q1Foundation, body: Q1Actor): undefined {
   } else { body.fields.set("cnt", "0"); game.schedule(body, 0.1, game.named.action(body, "hipnotic:armagon_body_explode2")); }
   return undefined;
 }
-function bodyExplosion(game: Q1Foundation, body: Q1Actor): undefined {
+function bodyExplosion(game: Q1EntityServices, body: Q1Actor): undefined {
   game.sound(body, "misc/longexpl.wav", "auto", 0.5);
   for (let i = 0; i < 3; i++) for (const model of ["gib1", "gib2", "gib3"]) throwGib(game, game.body(body).origin, model, -200);
   body.movement = "none"; body.model = "progs/s_explod.spr"; body.solid = "none"; body.frame = 0;
