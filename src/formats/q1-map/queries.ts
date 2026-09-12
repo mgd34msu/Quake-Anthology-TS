@@ -1,6 +1,6 @@
 /* Quake model traversal and visibility RLE, adapted from id Software model.c.
  * Copyright (C) 1996 Id Software, Inc. GPL-2.0-or-later. */
-import type { Vec3 } from "../../contracts/math.ts";
+import type { Plane, Vec3 } from "../../contracts/math.ts";
 import type { Q1WorldGeometry } from "../../contracts/scene.ts";
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import { index } from "./records.ts";
@@ -67,4 +67,29 @@ export function q1FaceVertices(map: Q1WorldGeometry, faceIndex: number): readonl
     vertices.push(vertex);
   }
   return vertices;
+}
+
+/** Identify an authored face at an existing hull-zero contact, without retracing. */
+export function q1FaceAtContact(map: Q1WorldGeometry, candidates: readonly number[], point: Vec3, plane: Plane): number | null {
+  const normal = plane.normal;
+  const distance = (point.x * normal.x + point.y * normal.y + point.z * normal.z - plane.distance)
+    / (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+  const projected = { x: point.x - normal.x * distance, y: point.y - normal.y * distance, z: point.z - normal.z * distance };
+  for (const faceIndex of candidates) {
+    const vertices = q1FaceVertices(map, faceIndex);
+    let positive = false, negative = false;
+    for (let i = 0; i < vertices.length; i++) {
+      const a = vertices[i], b = vertices[(i + 1) % vertices.length];
+      if (a === undefined || b === undefined) throw new RangeError("Missing Quake face vertex");
+      const edge = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+      const offset = { x: projected.x - a.x, y: projected.y - a.y, z: projected.z - a.z };
+      const side = (edge.y * offset.z - edge.z * offset.y) * normal.x
+        + (edge.z * offset.x - edge.x * offset.z) * normal.y + (edge.x * offset.y - edge.y * offset.x) * normal.z;
+      positive ||= side > 0;
+      negative ||= side < 0;
+      if (positive && negative) break;
+    }
+    if (vertices.length >= 3 && !(positive && negative)) return faceIndex;
+  }
+  return null;
 }

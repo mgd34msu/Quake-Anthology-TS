@@ -1,5 +1,12 @@
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
+import { Application } from "../../src/app/bootstrap/application.ts";
+import { applicationPreset } from "../../src/app/bootstrap/content.ts";
+import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
+import { EnvironmentReverb } from "../../src/audio/environments.ts";
+import { REVERB_PRESET_PLAIN } from "../../src/audio/reverb-presets.ts";
+import type { AudioTraceQuery } from "../../src/audio/environments.ts";
 import { ApplicationAudio } from "../../src/app/bootstrap/audio.ts";
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -122,3 +129,80 @@ test("measured audio work respects explicit lookahead and the device queue limit
     expect(() => audio.pump(undefined, -1)).toThrow("Invalid measured audio frame work");
   }
 });
+
+
+test("actual Q2 rerelease reverb uses native and foreign geometry without tracing the listener", async () => {
+  const corpus = join(import.meta.dir, "../../../qfiles");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const audioContent = catalog.require("q2-rerelease-baseq2").id;
+  const original = UnifiedAudio.prototype.setEnvironment;
+  const traces: AudioTraceQuery[] = [];
+  const selectors: EnvironmentReverb[] = [];
+  const update = EnvironmentReverb.prototype.update;
+  EnvironmentReverb.prototype.update = function(this: EnvironmentReverb, origin, milliseconds): void {
+    update.call(this, origin, milliseconds);
+    if (!selectors.includes(this)) selectors.push(this);
+  };
+  UnifiedAudio.prototype.setEnvironment = function(this: UnifiedAudio, seat, definitions, trace): void {
+    expect(definitions).toHaveLength(8);
+    expect(definitions[0]?.dimension).toBe(200);
+    traces.push(trace);
+    original.call(this, seat, definitions, trace);
+  };
+  try {
+    for (const [game, map] of [["q2-rerelease-baseq2", "base1"], ["q1-classic-id1", "e1m1"]]) {
+      if (game === undefined || map === undefined) throw new Error("Missing actual map pair");
+      const command = parseApplicationCommand(["--content-root", corpus, "--game", game, "--map", map, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200"]);
+      if (command.kind !== "run") throw new Error("Expected actual map command");
+      const preset = applicationPreset(catalog, command.options);
+      const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation, audio: { provider: "q2:official", content: audioContent } } } } });
+      const application = await Application.open(command.options, { print: () => undefined }, recipe);
+      try {
+        await application.step(100);
+        const selector = selectors.at(-1);
+        if (selector === undefined) throw new Error("Actual listener selector was not updated");
+        expect(selector.presetIndex).not.toBe(REVERB_PRESET_PLAIN);
+        const trace = traces.at(-1), player = application.localPlayers[0];
+        if (trace === undefined || player === undefined) throw new Error("Reverb was not joined to the actual application");
+        const position = application.simulation.playerView(player.actor).origin, zero = { x: 0, y: 0, z: 0 };
+        const start = { ...position, z: position.z + 1 };
+        const floor = trace(start, { ...start, z: start.z - 256 }, { x: -16, y: -16, z: 0 }, { x: 16, y: 16, z: 0 });
+        expect(floor.fraction).toBeGreaterThan(0);
+        expect(floor.fraction).toBeLessThan(1);
+        expect(floor.sky).toBe(false);
+        if (game === "q1-classic-id1") expect(floor.material).toBeNull();
+        const air = trace(position, { ...position, z: position.z + 1 }, zero, zero);
+        expect(air.fraction).toBe(1);
+        expect(air.material).toBeNull();
+        const world = application.content.world;
+        if (world.kind === "q3-bsp") throw new Error("Unexpected fixture geometry");
+        let skyHits = 0;
+        for (const face of world.faces) {
+          const info = world.textureInfo[face.textureInfo];
+          const sky = world.kind === "q2-bsp" ? (world.textureInfo[face.textureInfo]?.flags ?? 0) & 4 : world.textures[world.textureInfo[face.textureInfo]?.texture ?? -1]?.name.startsWith("sky");
+          if (!sky || info === undefined) continue;
+          const plane = world.planes[face.plane];
+          if (plane === undefined) throw new Error("Missing actual sky plane");
+          const center = { x: 0, y: 0, z: 0 };
+          for (let edgeOffset = 0; edgeOffset < face.edges.count; edgeOffset++) {
+            const signed = world.surfaceEdges[face.edges.first + edgeOffset];
+            if (signed === undefined) throw new Error("Missing sky edge");
+            const edge = world.edges[Math.abs(signed)], vertex = edge === undefined ? undefined : world.vertices[edge.vertices[signed < 0 ? 1 : 0]];
+            if (vertex === undefined) throw new Error("Missing sky vertex");
+            center.x += vertex.x / face.edges.count; center.y += vertex.y / face.edges.count; center.z += vertex.z / face.edges.count;
+          }
+          const side = face.back ? -1 : 1;
+          const before = { x: center.x + plane.normal.x * side * 16, y: center.y + plane.normal.y * side * 16, z: center.z + plane.normal.z * side * 16 };
+          const after = { x: center.x - plane.normal.x * side * 16, y: center.y - plane.normal.y * side * 16, z: center.z - plane.normal.z * side * 16 };
+          const hit = trace(before, after, zero, zero);
+          if (hit.sky && hit.fraction < 1) { skyHits++; break; }
+        }
+        expect(skyHits).toBeGreaterThan(0);
+        const configurations = traces.length;
+        await application.step(100);
+        expect(traces).toHaveLength(configurations);
+      } finally { await application.close(); }
+    }
+    expect(traces).toHaveLength(2);
+  } finally { UnifiedAudio.prototype.setEnvironment = original; EnvironmentReverb.prototype.update = update; }
+}, 30000);

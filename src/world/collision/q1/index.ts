@@ -5,7 +5,8 @@ import type { Axis, Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 import type { BspChild, LeafQueryResult, PointContentsQuery, Q1Hull, Q1WorldGeometry, SceneQueries, TracePolicy, TraceQuery, TraceResult } from "../../../contracts/scene.ts";
 import { angleVectors } from "../../../core/math.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
-import { q1LeafPvs } from "../../../formats/q1-map/queries.ts";
+import { q1SurfaceKind } from "../../../materials/legacy.ts";
+import { q1FaceAtContact, q1LeafPvs } from "../../../formats/q1-map/queries.ts";
 import { Q1SolidSpace } from "../../geometry/q1-solid/index.ts";
 import { deriveQ1ClipSolids } from "../../geometry/q1-solid/clipspace.ts";
 import { add, AXES, boxCell, clipCell, dot, lerp, scale, sub } from "../../geometry/q1-solid/polyhedron.ts";
@@ -38,6 +39,7 @@ function worldPlane(plane: Plane, axis: Axis, origin: Vec3): Plane {
 export class Q1Collision implements SceneQueries {
   readonly solidSpace: Q1SolidSpace;
   private readonly hulls = new Map<number, readonly Q1Hull[]>();
+  private readonly contactFaces = new Map<number, ReadonlyMap<string, readonly number[]>>();
   private readonly pvs = new Map<number, Uint8Array>();
   private readonly phs = new Map<number, Uint8Array>();
   private readonly blocks: (contents: number, policy: TracePolicy) => boolean;
@@ -55,6 +57,32 @@ export class Q1Collision implements SceneQueries {
   geometryCoverage(model = 0): { readonly arbitraryShapes: "bspx-brushes" | "drawing-bsp-cells"; readonly clipOnly: "brushes" | "derived-native-clipspace" } {
     const brushes = this.geometry.brushList?.find(entry => entry.model === model);
     return brushes === undefined ? { arbitraryShapes: "drawing-bsp-cells", clipOnly: "derived-native-clipspace" } : { arbitraryShapes: "bspx-brushes", clipOnly: "brushes" };
+  }
+  private surfaceFlags(model: number, point: Vec3, plane: Plane): number | undefined {
+    const key = (value: Plane): string => `${value.normal.x},${value.normal.y},${value.normal.z},${value.distance}`;
+    let indexed = this.contactFaces.get(model);
+    if (indexed === undefined) {
+      const range = this.geometry.models[model]?.faces;
+      if (range === undefined) throw new RangeError(`Unknown Quake model ${model}`);
+      const faces = new Map<string, number[]>();
+      for (let i = range.first; i < range.first + range.count; i++) {
+        const face = this.geometry.faces[i], authored = face === undefined ? undefined : this.geometry.planes[face.plane];
+        if (face === undefined || authored === undefined) throw new RangeError("Missing Quake face plane");
+        const oriented = face.back ? { normal: scale(authored.normal, -1), distance: -authored.distance } : authored;
+        const id = key(oriented), entries = faces.get(id);
+        if (entries === undefined) faces.set(id, [i]); else entries.push(i);
+      }
+      indexed = faces;
+      this.contactFaces.set(model, indexed);
+    }
+    const candidates = indexed.get(key(plane));
+    if (candidates === undefined) return undefined;
+    const index = q1FaceAtContact(this.geometry, candidates, point, plane);
+    if (index === null) return undefined;
+    const face = this.geometry.faces[index], info = face === undefined ? undefined : this.geometry.textureInfo[face.textureInfo];
+    const texture = info === undefined ? undefined : this.geometry.textures[info.texture];
+    // Q1 model.c SURF_DRAWSKY derives from the authored miptexture name.
+    return texture === undefined || texture === null ? undefined : q1SurfaceKind(texture.name) === "sky" ? 4 : 0;
   }
   trace(query: TraceQuery): Q1CollisionTrace {
     createNumericOperations(query.numeric);
@@ -80,7 +108,8 @@ export class Q1Collision implements SceneQueries {
       const trace = traceQ1Hull(hull, toLocal(sub(query.start, offset), axis), toLocal(sub(query.end, offset), axis), query.numeric, contents => this.blocks(contents, query.policy));
       const plane = worldPlane(trace.plane, axis, offset);
       const hit = trace.fraction < 1 || trace.startSolid;
-      return { kind: "q1", fraction: trace.fraction, end: trace.fraction === 1 ? query.end : add(fromLocal(trace.end, axis), offset),
+      const surfaceFlags = hullIndex === 0 && trace.fraction < 1 && !trace.allSolid ? this.surfaceFlags(model, trace.end, trace.plane) : undefined;
+      return { kind: "q1", ...(surfaceFlags === undefined ? {} : { surfaceFlags }), fraction: trace.fraction, end: trace.fraction === 1 ? query.end : add(fromLocal(trace.end, axis), offset),
         startSolid: trace.startSolid, allSolid: trace.allSolid, inOpen: trace.inOpen, inWater: trace.inWater,
         sourcePlane: { normal: plane.normal, distance: trace.plane.distance }, contact: trace.fraction < 1 ? { kind: "plane", plane } : { kind: "none" },
         hit: hit ? { kind: "world", model } : { kind: "none" }, contents: trace.contents };

@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import type { Bounds, Vec3 } from "../../../../src/contracts/math.ts";
@@ -5,6 +6,8 @@ import type { BspChild, BspNode, BspPlane, Q1ClipChild, Q1ClipNode, Q1WorldGeome
 import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../src/formats/q1-map/index.ts";
+import { q1FaceVertices } from "../../../../src/formats/q1-map/queries.ts";
+import { adaptTraceResult } from "../../../../src/world/collision/contents.ts";
 import { createQ1Collision, Q1_HULL_BOUNDS } from "../../../../src/world/collision/q1/index.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -90,7 +93,7 @@ describe("Quake hulls and derived solid cells", () => {
   });
 });
 
-const pakPath = "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK";
+const pakPath = resolve(import.meta.dir, "../../../../../qfiles/q1/id1/PAK0.PAK");
 test.skipIf(!existsSync(pakPath))("real Quake start.bsp supports native and foreign-size floor traces", async () => {
   const archive = await openArchive(pakPath);
   try {
@@ -114,5 +117,56 @@ test.skipIf(!existsSync(pakPath))("real Quake start.bsp supports native and fore
     const leaf = collision.leafAt(start);
     expect(leaf).toBeGreaterThan(0);
     expect(collision.clusterVisible(collision.leafCluster(leaf), collision.leafCluster(leaf))).toBe(true);
+  } finally { archive.close(); }
+});
+
+test.skipIf(!existsSync(pakPath))("real e1m1 point contacts retain sky and ordinary faces through inline transforms", async () => {
+  const archive = await openArchive(pakPath);
+  try {
+    const entry = archive.findEntries("maps/e1m1.bsp")[0];
+    if (entry === undefined) throw new Error("Missing retail e1m1");
+    const map = readQ1Bsp(await archive.readEntry(entry)), collision = createQ1Collision(map);
+    expect(map.leaves.filter(leaf => leaf.contents === -6)).toHaveLength(0);
+    let sky = false, ordinary = false, inline = false;
+    for (const [modelIndex, model] of map.models.entries()) {
+      for (let i = model.faces.first; i < model.faces.first + model.faces.count; i++) {
+        const face = map.faces[i], plane = face === undefined ? undefined : map.planes[face.plane];
+        if (face === undefined || plane === undefined) throw new Error("Missing retail face");
+        const info = map.textureInfo[face.textureInfo], texture = info === undefined ? undefined : map.textures[info.texture];
+        if (texture === undefined || texture === null) continue;
+        const isSky = texture.name.startsWith("sky");
+        if (modelIndex === 0 && (isSky ? sky : ordinary) || modelIndex > 0 && inline) continue;
+        const vertices = q1FaceVertices(map, i), center = { x: 0, y: 0, z: 0 };
+        for (const vertex of vertices) { center.x += vertex.x / vertices.length; center.y += vertex.y / vertices.length; center.z += vertex.z / vertices.length; }
+        const side = face.back ? -1 : 1;
+        const start = { x: center.x + plane.normal.x * side * 8, y: center.y + plane.normal.y * side * 8, z: center.z + plane.normal.z * side * 8 };
+        const end = { x: center.x - plane.normal.x * side * 8, y: center.y - plane.normal.y * side * 8, z: center.z - plane.normal.z * side * 8 };
+        const base = collision.trace({ ...query(start, end), target: { kind: "model", model: modelIndex, origin: zero, angles: zero } });
+        if (base.startSolid || base.fraction >= 1 || base.surfaceFlags === undefined) continue;
+        expect(base.surfaceFlags).toBe(isSky ? 4 : 0);
+        const q2 = adaptTraceResult(base, { kind: "q2", contentsMask: 3, leafContents: "merged" });
+        const q3 = adaptTraceResult(base, { kind: "q3", contentsMask: 1, curves: true, playerCurveClip: true });
+        if (q2.kind !== "q2" || q3.kind !== "q3") throw new Error("Unexpected collision dialect");
+        expect(q2.surface?.flags ?? 0).toBe(isSky ? 4 : 0);
+        expect(q3.surfaceFlags).toBe(isSky ? 20 : 0);
+        if (modelIndex === 0) {
+          if (isSky) {
+            const footprint = collision.trace({ ...query(start, end, { kind: "box", bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 0 } } }), policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } });
+            expect(footprint.surfaceFlags).toBeUndefined();
+            sky = true;
+          } else ordinary = true;
+        }
+        else {
+          const origin = { x: 103, y: -71, z: 29 }, transform = (p: Vec3): Vec3 => ({ x: origin.x - p.y, y: origin.y + p.x, z: origin.z + p.z });
+          const moved = collision.trace({ ...query(transform(start), transform(end)), target: { kind: "model", model: modelIndex, origin, angles: { x: 0, y: 90, z: 0 } } });
+          expect(moved.startSolid).toBe(false);
+          expect(moved.fraction).toBeCloseTo(base.fraction, 5);
+          expect(moved.surfaceFlags).toBe(base.surfaceFlags);
+          inline = true;
+        }
+      }
+      if (sky && ordinary && inline) break;
+    }
+    expect({ sky, ordinary, inline }).toEqual({ sky: true, ordinary: true, inline: true });
   } finally { archive.close(); }
 });

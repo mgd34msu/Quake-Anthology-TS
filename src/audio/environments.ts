@@ -142,13 +142,13 @@ export class EnvironmentReverb {
         const start = { x: origin.x, y: origin.y, z: origin.z + 1 };
         const floor = this.trace(start, { ...start, z: start.z - 256 }, { x: -16, y: -16, z: 0 }, { x: 16, y: 16, z: 0 });
         let selected = this.currentPreset;
-        if (floor.fraction >= 1 || floor.material === null)
+        if (floor.fraction >= 1 || floor.sky)
             selected = REVERB_PRESET_PLAIN;
         else {
             const environment = this.environments[this.environmentIndex];
             if (environment === undefined)
                 throw new Error("Reverb environment disappeared");
-            const material = floor.material.toLowerCase();
+            const material = floor.material?.toLowerCase() ?? null;
             for (const entry of environment.reverbs)
                 if (entry.materials === null || entry.materials.some(name => name.toLowerCase() === material)) {
                     selected = entry.presetIndex;

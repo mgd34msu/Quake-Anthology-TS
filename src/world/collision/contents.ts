@@ -88,8 +88,8 @@ export function adaptTraceResult(result: TraceResult, policy: TracePolicy): Trac
     const sourcePlane = planeWithType(result);
     switch (policy.kind) {
         case 'q1': return { ...fields, kind: 'q1', sourcePlane, surfaceFlags: result.kind === 'q2' ? result.surface?.flags ?? 0 : result.kind === 'q3' ? result.surfaceFlags : 0, inOpen: !result.allSolid, inWater: (nativeContents & 56) !== 0 };
-        case 'q2': return { ...fields, kind: 'q2', contents, surface: result.kind === 'q3' ? { name: '', flags: convertSurfaceFlags(result.surfaceFlags, 'q3', 'q2'), value: 0, material: '' } : nativeContents === -6 ? { name: 'sky', flags: 4, value: 0, material: '' } : null, sourcePlane, secondary: null };
-        case 'q3': return { ...fields, kind: 'q3', contents, surfaceFlags: result.kind === 'q2' && result.surface !== null ? convertSurfaceFlags(result.surface.flags, 'q2', 'q3') : result.kind === 'q1' && nativeContents === -6 ? 4 | 16 : 0, sourcePlane };
+        case 'q2': return { ...fields, kind: 'q2', contents, surface: result.kind === 'q3' ? { name: '', flags: convertSurfaceFlags(result.surfaceFlags, 'q3', 'q2'), value: 0, material: '' } : (nativeContents === -6 || result.kind === 'q1' && ((result.surfaceFlags ?? 0) & 4) !== 0) ? { name: 'sky', flags: 4, value: 0, material: '' } : null, sourcePlane, secondary: null };
+        case 'q3': return { ...fields, kind: 'q3', contents, surfaceFlags: result.kind === 'q2' && result.surface !== null ? convertSurfaceFlags(result.surface.flags, 'q2', 'q3') : result.kind === 'q1' && (nativeContents === -6 || ((result.surfaceFlags ?? 0) & 4) !== 0) ? 4 | 16 : 0, sourcePlane };
     }
 }
 export function adaptPointContents(result: PointContentsResult, policy: TracePolicy): PointContentsResult {

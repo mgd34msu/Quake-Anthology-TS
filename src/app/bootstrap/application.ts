@@ -470,6 +470,7 @@ export class Application {
       input = new ApplicationInput(renderer.window, players, this.options, this.simulation,
         this.inputActions(), () => performance.now());
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text));
+      await audio.prepareEnvironment(this.simulation.scene);
       applyFrontendPreferences(this.frontendOverrides, input, audio);
       this.frontendBaseline = readFrontendPreferences(input, audio);
       const fontSource = font.classic.picture.image.source;
@@ -628,6 +629,7 @@ export class Application {
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text));
         nextAudio = audio;
+        await audio.prepareEnvironment(nextSimulation.scene);
         const effects = new ApplicationEffects(assets, nextSimulation.scene, actor => nextSimulation.players().some(player => player.equals(actor)), options.seed);
         nextEffects = effects;
         audio.effectsVolume = previous.audio.effectsVolume;

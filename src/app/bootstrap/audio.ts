@@ -2,6 +2,9 @@ import type { ContentId, GameFamily } from "../../contracts/content.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
+import { parseEnvironments } from "../../audio/environments.ts";
+import type { AudioTraceQuery, ReverbEnvironment } from "../../audio/environments.ts";
+import type { SceneQueries } from "../../contracts/scene.ts";
 import { SoundBank, UnifiedAudio } from "../../audio/index.ts";
 import type { AudioAudience, AudioListener, LoopSound, SoundAsset } from "../../audio/index.ts";
 import { GameRandom } from "../../core/game-numeric.ts";
@@ -52,6 +55,8 @@ export class ApplicationAudio {
   private readonly cgameFrames: Q3SeatAudioFrame[] = [];
   private listeners: readonly AudioListener[] = [];
   private snapshot: WorldSnapshot | null = null;
+  private environment: { readonly definitions: readonly ReverbEnvironment[]; readonly trace: (listener: AudioListener) => AudioTraceQuery } | null = null;
+  private readonly environmentSeats: SeatId[] = [];
   private volume = 0.7;
   private closed = false;
 
@@ -61,6 +66,25 @@ export class ApplicationAudio {
     this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
     this.music = new ApplicationMusic(this.engine, print);
     this.engine.openDevice();
+  }
+
+  async prepareEnvironment(scene: SceneQueries): Promise<void> {
+    const mounts = await this.content.forContent(this.content.recipe.presentation.audio.content);
+    const resource = await mounts.resolve("sound/default.environments");
+    if (resource === null) return;
+    const definitions = parseEnvironments(new TextDecoder().decode(await mounts.read(resource)), text => this.print(text));
+    const timing = this.content.recipe.timing.find(value => value.provider === this.content.recipe.engineBehavior.provider);
+    if (timing === undefined) throw new Error("Audio geometry has no numeric profile");
+    if (this.closed) return;
+    this.environment = { definitions, trace: listener => (start, end, mins, maxs) => {
+      const current = this.listeners.find(value => value.seat.equals(listener.seat));
+      if (current === undefined) throw new Error("Reverb seat has no current listener");
+      const point = mins.x === 0 && mins.y === 0 && mins.z === 0 && maxs.x === 0 && maxs.y === 0 && maxs.z === 0;
+      const result = scene.trace({ start, end, shape: point ? { kind: "point" } : { kind: "box", bounds: { min: mins, max: maxs } }, target: { kind: "world" },
+        passActor: current.actor, numeric: timing.numeric, policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } });
+      if (result.kind !== "q2") throw new Error("Audio trace did not honor its shared query policy");
+      return { fraction: result.fraction, end: result.end, material: result.surface?.material || null, sky: ((result.surface?.flags ?? 0) & 4) !== 0 };
+    } };
   }
 
   get effectsVolume(): number { return this.volume; }
@@ -254,6 +278,15 @@ export class ApplicationAudio {
     this.listeners = listeners;
     for (const body of snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
     this.engine.setListeners(listeners);
+    for (let index = this.environmentSeats.length - 1; index >= 0; index--) {
+      const seat = this.environmentSeats[index];
+      if (seat !== undefined && !listeners.some(listener => listener.seat.equals(seat))) this.environmentSeats.splice(index, 1);
+    }
+    if (this.environment !== null) for (const listener of listeners) {
+      if (this.environmentSeats.some(seat => seat.equals(listener.seat))) continue;
+      this.engine.setEnvironment(listener.seat, this.environment.definitions, this.environment.trace(listener));
+      this.environmentSeats.push(listener.seat);
+    }
     this.engine.beginLoopFrame();
     for (const event of this.uiSounds.splice(0)) {
       const content = this.content.recipe.presentation.audio.content, family = this.content.catalog.product(content).expectation.family;
