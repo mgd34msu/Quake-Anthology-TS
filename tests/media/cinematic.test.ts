@@ -352,3 +352,57 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
     expect(assets.images.drainOperations()).toHaveLength(0);
   } finally { assets.close(); renderer.close(); await content.close(); }
 }, 60000);
+
+test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync("../qfiles/q3a/missionpack/pak0.pk3"))("Q3 UI movies use shared execution-owned images and release reused handles", async () => {
+  const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
+  const { ApplicationQ3Assets } = await import("../../src/app/bootstrap/q3-client/assets.ts");
+  const { ApplicationQ3Cinematics } = await import("../../src/app/bootstrap/q3-client/cinematics.ts");
+  const { ApplicationAudio } = await import("../../src/app/bootstrap/audio.ts");
+  const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
+  const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
+  const { Draw2D, TextCommandSink } = await import("../../src/text/draw2d.ts");
+  const parsed = parseApplicationCommand(["--content-root", "../qfiles", "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+  if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
+  const content = await loadApplicationContent(parsed.options);
+  const identity = createIdentityOwner("ui-video"), owner = { identity: Symbol("ui-video"), session: identity.session, generation: 0 };
+  let now = 0;
+  const assets = new ApplicationAssets(content, owner, { sample: () => now });
+  const audio = new ApplicationAudio(content, () => now, 1, "sarge", () => undefined);
+  const media = await ApplicationQ3Assets.create(assets, content.recipe.engineBehavior.content, () => undefined);
+  const movies = new ApplicationQ3Cinematics(media, audio, identity.seat(0), () => now);
+  const backend = new SoftwareRenderer(8, 8, owner);
+  const sources: import("../../src/materials/cinematic.ts").ShaderCinematicSource[] = [];
+  const draw = new Draw2D(new TextCommandSink(identity.seat(0), { x: 0, y: 0, width: 8, height: 8 }, () => undefined, call => {
+    const stage = call.picture.material.compiled.finished.sourceStages[0];
+    if (stage === undefined || !stage.active || stage.binding.kind !== "video") throw new Error("UI movie lost its shared dynamic binding");
+    sources.push(stage.binding.source);
+  }), "pixels");
+  try {
+    const asset = await movies.owner.prepare("mpteam1.roq");
+    assets.images.drainOperations();
+    const first = movies.play(asset); if (first === undefined) throw new Error("Missing UI movie slot");
+    for (const time of [0, 34, 68]) { now = time; movies.run(first.handle.index); }
+    movies.draw(first.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
+    const source = sources[0]; if (source === undefined) throw new Error("Missing UI movie draw");
+    expect(assets.images.drainOperations()).toHaveLength(0);
+    const uploads: ImageResourceOperation[] = [];
+    const apply = (operation: ImageResourceOperation): void => { backend.applyImageResource(operation); uploads.push(operation); };
+    const image = source.resolve(apply);
+    expect(uploads.map(operation => operation.kind)).toEqual(["create-image"]);
+    expect(image.source.kind).toBe("resource");
+    now = 102; movies.run(first.handle.index); source.resolve(apply);
+    expect(uploads.at(-1)?.kind).toBe("update-image");
+    movies.stop(first.handle.index);
+    const releases = assets.images.drainOperations(); expect(releases).toHaveLength(1);
+    for (const operation of releases) backend.applyImageResource(operation);
+    const second = movies.play(asset); if (second === undefined) throw new Error("Missing reused UI slot");
+    expect(second.handle.index).toBe(first.handle.index);
+    for (const time of [102, 136, 170]) { now = time; movies.run(second.handle.index); }
+    movies.draw(second.handle.index, { x: 0, y: 0, width: 8, height: 8 }, draw);
+    const replacement = sources[1]; if (replacement === undefined) throw new Error("Missing replacement movie draw");
+    expect(replacement.resolve(apply).ordinal).not.toBe(image.ordinal);
+    expect(() => source.resolve(apply)).toThrow();
+    movies.close(); expect(assets.images.drainOperations()).toHaveLength(1);
+    movies.close(); expect(assets.images.drainOperations()).toHaveLength(0);
+  } finally { movies.close(); audio.close(); assets.close(); await content.close(); }
+}, 30000);

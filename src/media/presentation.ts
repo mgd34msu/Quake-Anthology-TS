@@ -96,7 +96,7 @@ export class CinematicImage {
     } finally { this.executing = false; }
   }
 
-  release(): ImageResourceOperation | null {
+  release(): Extract<ImageResourceOperation, { readonly kind: "release-image" }> | null {
     if (this.executing) throw new Error("Cannot release a cinematic during upload");
     if (this.closed) return null;
     this.closed = true; this.pending = null;
