@@ -151,11 +151,13 @@ const zombie = { resources: [
   "progs/gib3.mdl",
 ] };
 
+const ordinaryCreatures: MonsterSourceDefinition["creatures"] = {
+  monster_army: army, monster_dog: dog, monster_enforcer: enforcer, monster_knight: knight, monster_demon1: demon,
+  monster_ogre: ogre, monster_ogre_marksman: ogre, monster_hell_knight: hellknight, monster_shambler: shambler,
+  monster_wizard: wizard, monster_shalrath: shalrath, monster_tarbaby: tarbaby, monster_zombie: zombie,
+};
+
 export const q1MonsterSources: readonly MonsterSourceDefinition[] = [
-  { provider: "q1:monsters/classic/id1", family: "q1", edition: "classic", program: "id1", creatures: {
-    monster_army: army, monster_dog: dog, monster_enforcer: enforcer, monster_knight: knight, monster_demon1: demon,
-    monster_ogre: ogre, monster_ogre_marksman: ogre, monster_hell_knight: hellknight, monster_shambler: shambler,
-    monster_wizard: wizard, monster_shalrath: shalrath, monster_tarbaby: tarbaby, monster_zombie: zombie,
-  } },
-  { provider: "q1:monsters/rerelease/id1", family: "q1", edition: "rerelease", program: "id1", creatures: { monster_army: army } },
+  { provider: "q1:monsters/classic/id1", family: "q1", edition: "classic", program: "id1", creatures: ordinaryCreatures },
+  { provider: "q1:monsters/rerelease/id1", family: "q1", edition: "rerelease", program: "id1", creatures: ordinaryCreatures },
 ];

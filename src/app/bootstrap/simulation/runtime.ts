@@ -2429,6 +2429,8 @@ export class SharedSimulation implements Simulation {
         result.push({ actor: entity.actor.id, content: entry.content, family: "q2", path: entity.model,
           frame: model?.frame ?? entity.frame, oldFrame: model?.oldFrame ?? entity.frame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
           renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles,
+          previousOrigin: entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? entity.pos2 : body.origin,
+          ...(entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? { modelBeam: { segmentLength: entity.frame } } : {}),
           scale: model?.scale ?? 1, visible: (entity.serverFlags & 1) === 0, viewWeapon: false });
       }
     }

@@ -102,7 +102,7 @@ export function createProboscis(monsters: Q2Monsters) {
     if (tip === null || owner === null) return undefined;
     const from = start(owner), tipOrigin = game.body(tip).origin, to = subtract(tipOrigin, scale(normalize(subtract(tipOrigin, from)), 8));
     segment.pos2 = to; game.move(segment, { origin: from });
-    return game.host.emit({ kind: "monster-beam", effect: "parasite", actor: owner.entity.actor.id, start: from, end: to });
+    return undefined;
   };
   function fire(context: MonsterContext): undefined {
     const { entity, game } = context, previous = game.entity(entity.proboscus);

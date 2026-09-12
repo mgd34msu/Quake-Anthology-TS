@@ -1,9 +1,10 @@
 /* Scene model assembly from Q1 r_alias.c/r_sprite.c, Q2 gl_mesh.c and
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
+import { GameRandom } from "../../../core/game-numeric.ts";
 import type { Bounds, Vec2, Vec4 } from "../../../contracts/math.ts";
 import type { DrawBatch } from "../../../contracts/render.ts";
 import type { DecodedModel, ModelVertex, Q2AliasModel, SceneEntity } from "../../../contracts/scene.ts";
-import { add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
+import { anglesToAxis, vectorToAngles, add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { buildMd2Geometry, buildMdlGeometry, interpolateAliasFrames, sampleTimedFrame } from "../../../formats/q12-model/animation.ts";
 import { interpolateMd3Frames } from "../../../formats/q3-model/md3.ts";
 import { skinMd4Surface } from "../../../formats/q3-model/md4.ts";
@@ -96,7 +97,26 @@ function cullGeometry(bounds: Bounds | null, context: ModelPreparationContext): 
 }
 
 export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
-  return prepareEntityAtTransform(entity, entity, context);
+  const beam = context.options?.(entity).modelBeam;
+  if (beam === undefined) return prepareEntityAtTransform(entity, entity, context);
+  // Rerelease CL_DrawBeam: centered models, with only the final segment stretched.
+  const delta = sub3(entity.previousOrigin, entity.transform.origin), distance = length3(delta);
+  const segmentLength = beam.segmentLength === 0 ? 30 : beam.segmentLength;
+  if (!Number.isFinite(segmentLength) || segmentLength <= 0) throw new RangeError("Invalid model beam segment length");
+  const direction = distance === 0 ? delta : scale3(delta, 1 / distance), angles = vectorToAngles(direction);
+  const random = new GameRandom(Math.trunc(context.timeSeconds * 1000) + (entity.actor?.slot ?? 0));
+  const segments: PreparedModelEntity[] = [];
+  for (let offset = 0; offset < distance; offset += segmentLength) {
+    const length = Math.min(distance - offset, segmentLength), frame = random.rand() % countFrames(entity.model);
+    const segment: SceneEntity = { ...entity,
+      transform: { origin: add3(entity.transform.origin, scale3(direction, offset + length * 0.5)),
+        axis: anglesToAxis({ ...angles, z: random.rand() % 360 }), scale: { x: length / segmentLength, y: 1, z: 1 } },
+      pose: { kind: "frame", frame, previousFrame: frame, backLerp: 0 },
+      flags: { kind: entity.flags.kind, bits: 8192 }, attachments: [] };
+    segments.push(prepareEntityAtTransform(segment, entity, context));
+  }
+  return { entity, frame: 0, previousFrame: 0, frameFallback: false, lod: 0, bounds: null,
+    cull: "in", personalModel: false, surfaces: [], attachments: segments, missingAttachments: [], modelEffectFlags: 0 };
 }
 
 function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {

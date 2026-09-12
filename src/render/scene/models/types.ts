@@ -13,6 +13,7 @@ export type ModelImageSelection = { readonly kind: "external"; readonly name: st
 
 /** Source renderer fields supplement the family-independent SceneEntity. */
 export interface ModelSourceOptions {
+  readonly modelBeam?: { readonly segmentLength: number };
   readonly syncBase?: number;
   readonly spriteRoll?: number;
   readonly customShader?: string | null;

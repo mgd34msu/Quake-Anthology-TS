@@ -83,3 +83,24 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("ordin
     }
   }
 }, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("rerelease Q1 ordinary creatures resolve their model, gib, projectile and sound resources", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const command = parseApplicationCommand(["--game", "q1-rerelease-id1", "--map", "e1m2"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 rerelease launch command");
+  const preset = applicationPreset(catalog, command.options);
+  const source: ProviderReference = { provider: "q1:monsters/rerelease/id1", content: catalog.require("q1-rerelease-id1").id };
+  const classnames = ["monster_army", "monster_dog", "monster_enforcer", "monster_knight", "monster_demon1", "monster_ogre", "monster_ogre_marksman",
+    "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_zombie"];
+  const enemies: EnemySelection = { kind: "replace", default: { source, classname: "monster_army" },
+    byClassname: Object.fromEntries(classnames.map(classname => [classname, { source, classname }])) };
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+  expect(recipe.enemies).toEqual(enemies);
+  expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
+  const paths = new Set(recipe.resources.map(resource => resource.requestedPath));
+  for (const path of ["progs/ogre.mdl", "progs/h_ogre.mdl", "progs/grenade.mdl", "progs/laser.mdl", "progs/k_spike.mdl", "progs/w_spike.mdl",
+    "progs/v_spike.mdl", "progs/zom_gib.mdl", "progs/bolt.mdl", "progs/s_light.mdl", "progs/gib1.mdl", "progs/backpack.mdl", "progs/s_explod.spr",
+    "sound/ogre/ogwake.wav", "sound/weapons/bounce.wav", "sound/weapons/r_exp3.wav", "sound/enforcer/enfstop.wav", "sound/shambler/sboom.wav",
+    "sound/wizard/hit.wav", "sound/zombie/z_hit.wav", "sound/blob/death1.wav"]) expect(paths.has(path)).toBe(true);
+  expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
+}, 60000);

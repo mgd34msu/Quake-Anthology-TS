@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { createContentDigest, createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../../../src/contracts/content.ts";
@@ -220,3 +221,34 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     expect(images.drainOperations()).toHaveLength(0);
   } finally { world?.close(); images.close(); q2.close(); q3.close(); }
 }, 60000);
+
+const rereleaseBeamArchive = new URL("../../../../../qfiles/q2/rerelease/baseq2/pak0.pak", import.meta.url).pathname;
+test.skipIf(!existsSync(rereleaseBeamArchive))("rerelease modeled parasite beam centers segments and stretches the final model with its real skin", async () => {
+  const file = rereleaseBeamArchive;
+  const source = await asset(file, "models/monsters/parasite/segment/tris.md2", "q2");
+  const model = entity(parseMd2(source.bytes), source.resource, "q2");
+  const beam: SceneEntity = { ...model, transform: { ...model.transform, origin: { x: 0, y: 0, z: 0 } },
+    previousOrigin: { x: 75, y: 0, z: 0 }, flags: { kind: "q2", bits: 128 } };
+  const prepared = prepareSceneEntity(beam, { camera, timeSeconds: 0.1, options: () => ({ modelBeam: { segmentLength: 0 } }) });
+  expect(prepared.surfaces).toHaveLength(0);
+  expect(prepared.attachments).toHaveLength(3);
+  expect(prepared.attachments.map(segment => segment.entity.transform.origin.x)).toEqual([15, 45, 67.5]);
+  expect(prepared.attachments.map(segment => segment.entity.transform.scale.x)).toEqual([1, 1, 0.5]);
+  for (const segment of prepared.attachments) {
+    expect(segment.entity.flags).toEqual({ kind: "q2", bits: 8192 });
+    expect(segment.surfaces[0]?.image.kind).toBe("external");
+    expect(segment.surfaces[0]?.unlit).toBe(false);
+    expect(segment.surfaces[0]?.translucent).toBe(false);
+  }
+  const beamVertices = prepared.attachments.flatMap(segment => segment.surfaces.flatMap(surface => surface.geometry.vertices));
+  expect(Math.max(...beamVertices.map(vertex => vertex.position.x))).toBeGreaterThan(75);
+  expect(Math.max(...beamVertices.map(vertex => vertex.position.x))).toBeLessThan(77);
+  const vertical = prepareSceneEntity({ ...beam, previousOrigin: { x: 0, y: 0, z: 75 } },
+    { camera, timeSeconds: 0.1, options: () => ({ modelBeam: { segmentLength: 0 } }) });
+  expect(vertical.attachments.map(segment => segment.entity.transform.origin.z)).toEqual([15, 45, 67.5]);
+  const verticalVertices = vertical.attachments.flatMap(segment => segment.surfaces.flatMap(surface => surface.geometry.vertices));
+  expect(Math.max(...verticalVertices.map(vertex => vertex.position.z))).toBeGreaterThan(75);
+  const custom = prepareSceneEntity(beam, { camera, timeSeconds: 0.1, options: () => ({ modelBeam: { segmentLength: 50 } }) });
+  expect(custom.attachments.map(segment => segment.entity.transform.origin.x)).toEqual([25, 62.5]);
+  expect(custom.attachments.map(segment => segment.entity.transform.scale.x)).toEqual([1, 0.5]);
+});

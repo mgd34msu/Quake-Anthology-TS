@@ -92,6 +92,8 @@ export interface SimulationPresentation {
   readonly effects: number;
   readonly renderFlags: number;
   readonly origin: Vec3;
+  readonly previousOrigin?: Vec3;
+  readonly modelBeam?: { readonly segmentLength: number };
   readonly angles: Vec3;
   readonly scale: number;
   readonly alpha?: number;

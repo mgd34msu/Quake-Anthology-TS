@@ -73,16 +73,16 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
-async function openSelectedId1(map: string, wizardClassname = "monster_wizard") {
-  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", map, "--dedicated", "--mode", "singleplayer"]);
+async function openSelectedId1(map: string, wizardClassname = "monster_wizard", edition: "classic" | "rerelease" = "classic") {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", `q1-${edition}-id1`, "--map", map, "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 application options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
-  const classic = q1MonsterSources.find(source => source.edition === "classic");
-  if (classic === undefined) throw new Error("Missing classic Q1 creatures");
-  const source = { provider: classic.provider, content: catalog.require("q1-classic-id1").id };
+  const selectedSource = q1MonsterSources.find(source => source.edition === edition);
+  if (selectedSource === undefined) throw new Error("Missing selected Q1 creatures");
+  const source = { provider: selectedSource.provider, content: catalog.require(`q1-${edition}-id1`).id };
   const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: {
     kind: "replace", default: { source, classname: "monster_army" },
-    byClassname: Object.fromEntries(Object.keys(classic.creatures).map(classname => [classname, { source, classname: classname === "monster_wizard" ? wizardClassname : classname }])),
+    byClassname: Object.fromEntries(Object.keys(selectedSource.creatures).map(classname => [classname, { source, classname: classname === "monster_wizard" ? wizardClassname : classname }])),
   } } } });
   return Application.open(command.options, { print: () => undefined }, recipe);
 }
@@ -206,3 +206,93 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
     await expect((async () => { for (let frame = 0; frame < 15; frame++) await different.step(100); })()).rejects.toThrow("monster_wizard -> q1:monsters/classic/id1/monster_ogre");
   } finally { await different.close(); }
 }, 30000);
+
+
+test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rerelease e1m2 selected ogre restores grenade damage and authored kill credit", async () => {
+  const application = await openSelectedId1("e1m2", "monster_wizard", "rerelease"), directory = await mkdtemp(join(tmpdir(), "q1-rerelease-ogre-"));
+  function continuation() {
+    return JSON.stringify({ selected: selectedId1(application), bodies: application.simulation.checkpoint().bodies },
+      (key: string, value: unknown) => key === "generation" ? 0 : value instanceof Uint8Array ? decodeCheckpointValue(value) : value);
+  }
+  try {
+    const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
+    for (let frame = 0; frame < 15; frame++) await application.step(100);
+    const selected = selectedId1(application), provider = "q1:monsters/rerelease/id1";
+    expect(selected.source.reference.provider).toBe(provider);
+    expect(selected.authored.length).toBeGreaterThan(0);
+    for (const entry of selected.authored) {
+      expect(entry.definition.classname).toBe(entry.classname);
+      const actor = application.simulation.actors.resolveSaved(entry.actor);
+      if (actor === null) throw new Error("Missing authored actor");
+      expect(actor.owner).toBe(application.content.recipe.map.entities.provider);
+      expect(application.simulation.actors.observe(actor.id)?.definition).toBe(`${provider}/${entry.classname}`);
+    }
+    const ogre = selected.source.entities.entities.find(entity => entity.classname === "monster_ogre");
+    if (ogre === undefined) throw new Error("Missing authored rerelease ogre");
+    const owner = application.simulation.actors.resolveSaved(ogre.actor), player = application.simulation.actors.resolveOwned(human.actor);
+    if (owner === null || player === null) throw new Error("Missing shared actors");
+    const body = application.simulation.bodies.read(owner.id), playerBody = application.simulation.bodies.read(player.id);
+    if (body === null || playerBody === null) throw new Error("Missing shared bodies");
+    // Put only the player in the authored ogre's open firing lane.
+    application.simulation.bodies.write(player, { ...playerBody, origin: { ...body.origin, x: body.origin.x + 300 } });
+    application.simulation.bodies.link(player); application.simulation.combat.setHealth(player, 1000);
+    let grenade = selectedId1(application).source.entities.entities.find(entity => entity.classname === "ogre_grenade" && entity.owner?.slot === owner.id.slot);
+    for (let frame = 0; frame < 50 && grenade === undefined; frame++) {
+      await application.step(100);
+      grenade = selectedId1(application).source.entities.entities.find(entity => entity.classname === "ogre_grenade" && entity.owner?.slot === owner.id.slot);
+    }
+    if (grenade === undefined) throw new Error("Authored rerelease ogre did not naturally launch a grenade");
+    expect(grenade.owner).toEqual(ogre.actor);
+    expect(grenade.callbacks.touch).toBe("base:ogre_grenade_touch");
+    expect(grenade.callbacks.think).toBe("base:ogre_grenade_explode");
+    const projectile = application.simulation.actors.resolveSaved(grenade.actor);
+    if (projectile === null) throw new Error("Missing live projectile");
+    const projectileBody = application.simulation.bodies.read(projectile.id);
+    if (projectileBody === null) throw new Error("Missing projectile body");
+    expect(Math.hypot(projectileBody.velocity.x, projectileBody.velocity.y, projectileBody.velocity.z)).toBeGreaterThan(0);
+    const save = join(directory, "live.sav"), before = continuation();
+    await application.saveGame(save);
+    const outcomes: string[] = [], frames: string[] = [];
+    for (let frame = 0; frame < 10; frame++) {
+      const output = await application.step(100);
+      for (const event of output.events) if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed") {
+        const decision = event.payload.outcome.decision, request = decision.request;
+        if (request.attack.inflictor?.equals(projectile.id) && request.target.equals(player.id) && decision.appliedDamage > 0) {
+          expect(request.attack.attacker?.equals(owner.id)).toBe(true);
+          expect(request.attack.weaponProvider).toBe(provider);
+          outcomes.push(JSON.stringify({ damage: decision.appliedDamage, cause: request.attack.cause }));
+        }
+      }
+      frames.push(continuation());
+    }
+    expect(outcomes.length).toBeGreaterThan(0);
+    await application.loadGame(save);
+    expect(continuation()).toEqual(before);
+    const restoredOwner = application.simulation.actors.resolveSaved(ogre.actor), restoredProjectile = application.simulation.actors.resolveSaved(grenade.actor), restoredPlayer = application.simulation.players()[0];
+    if (restoredOwner === null || restoredProjectile === null || restoredPlayer === undefined) throw new Error("Missing fresh restored actors");
+    expect(restoredOwner.id.equals(owner.id)).toBe(false);
+    expect(application.simulation.bodies.read(restoredProjectile.id)).toEqual(projectileBody);
+    const restoredOutcomes: string[] = [];
+    for (let frame = 0; frame < 10; frame++) {
+      const output = await application.step(100);
+      for (const event of output.events) if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed") {
+        const decision = event.payload.outcome.decision, request = decision.request;
+        if (request.attack.inflictor?.equals(restoredProjectile.id) && request.target.equals(restoredPlayer) && decision.appliedDamage > 0) {
+          expect(request.attack.attacker?.equals(restoredOwner.id)).toBe(true);
+          expect(request.attack.weaponProvider).toBe(provider);
+          restoredOutcomes.push(JSON.stringify({ damage: decision.appliedDamage, cause: request.attack.cause }));
+        }
+      }
+      const expected = frames[frame];
+      if (expected === undefined) throw new Error("Missing original continuation frame");
+      expect(continuation()).toEqual(expected);
+    }
+    expect(restoredOutcomes).toEqual(outcomes);
+    const map = application.simulation.q1Source(), health = application.simulation.combat.read(restoredOwner.id)?.health;
+    if (map === null || health === undefined) throw new Error("Missing map mission or ogre health");
+    const kills = map.game.killedMonsters;
+    map.game.damage(restoredOwner.id, restoredPlayer, restoredPlayer, health + 1);
+    expect(map.game.killedMonsters).toBe(kills + 1);
+    expect(selectedId1(application).authored.find(entry => entry.actor.slot === ogre.actor.slot)?.countedDeath).toBe(true);
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 60000);
