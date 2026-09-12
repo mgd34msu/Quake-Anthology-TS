@@ -19,6 +19,7 @@ interface ClientEventServices {
   readonly spawns: ClientSpawnRuntime;
   readonly drops: DropItemContext;
   readonly dmflags: number;
+  readonly primaryAttackAllowed?: (actor: import("../../../contracts/identity.ts").ActorId) => boolean;
 }
 
 /** Time, gameType, drop timing and dmflags may be live getters during dispatch. */
@@ -46,7 +47,7 @@ export function clientEvents(context: ClientEventsContext, entity: GameEntity, o
         damage(context.combat, entity, null, null, null, null, event === EntityEvent.EV_FALL_FAR ? 10 : 5, 0, 19);
         break;
       case EntityEvent.EV_FIRE_WEAPON:
-        context.weapons.fire(entity);
+        if (context.primaryAttackAllowed?.(entity.actor.id) !== false) context.weapons.fire(entity);
         break;
       case EntityEvent.EV_USE_ITEM1: {
         const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG) ? Powerup.PW_REDFLAG :

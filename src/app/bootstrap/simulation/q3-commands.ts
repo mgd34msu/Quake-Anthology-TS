@@ -5,9 +5,11 @@ import type { UserCommand } from "../../../content/q3/base/shared/player-state.t
 import type { MovementPlayer } from "./players.ts";
 
 /** Source client policy receives command units independently of the selected PMove input. */
-export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, milliseconds: number): UserCommand {
+export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, milliseconds: number, nativeWeapon: number): UserCommand {
   const command = input.command;
-  const controls = resolveQ3ArsenalControls(player.arsenal, input.arsenal, command, player.recipe.map.entities.content.includes("missionpack") ? "missionpack" : "baseq3");
+  const controls = player.arsenal.state.kind === "q3"
+    ? resolveQ3ArsenalControls(player.arsenal, input.arsenal, command, player.recipe.map.entities.content.includes("missionpack") ? "missionpack" : "baseq3")
+    : { requestedWeapon: nativeWeapon, useHoldable: input.arsenal?.useHoldable ?? (command.kind === "q3" && (command.buttons & 4) !== 0) };
   const buttons = (command.kind === "q3" ? command.buttons & ~4 : command.buttons & 1) | (controls.useHoldable ? 4 : 0);
   if (command.kind === "q3") return { serverTime: command.serverTimeMilliseconds,
     angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] }, buttons,

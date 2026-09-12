@@ -12,7 +12,7 @@ import { ConnectionState, GameFlags } from "./state.ts";
 import type { GameClient, GameEntity } from "./state.ts";
 import { gameAtof } from "./numeric.ts";
 
-const RESPAWN_AMMO = 40;
+export const RESPAWN_AMMO = 40;
 const RESPAWN_ARMOR = 25;
 const RESPAWN_HEALTH = 35;
 const RESPAWN_HOLDABLE = 60;
@@ -90,6 +90,19 @@ export function pickupAmmo(itemEntity: GameEntity, other: GameEntity): number {
   return pickupAmmoFrom(itemEntity, input.client, input.item);
 }
 
+export function q3WeaponPickupQuantity(input: { readonly count: number; readonly quantity: number;
+  readonly dropped: boolean; readonly gameType: number; readonly currentAmmo: number }): number {
+  if (input.count < 0) return 0;
+  const quantity = input.count !== 0 ? input.count : input.quantity;
+  return !input.dropped && input.gameType !== GameType.GT_TEAM
+    ? input.currentAmmo < quantity ? quantity - input.currentAmmo : 1
+    : quantity;
+}
+
+export function q3WeaponRespawnSeconds(context: WeaponPickupContext): number {
+  return context.gameType === GameType.GT_TEAM ? context.teamWeaponRespawnSeconds : context.weaponRespawnSeconds;
+}
+
 function pickupWeaponFrom(
   itemEntity: GameEntity,
   client: GameClient,
@@ -97,24 +110,14 @@ function pickupWeaponFrom(
   context: WeaponPickupContext,
 ): number {
   if (item.type !== ItemType.IT_WEAPON) throw new Error("Pickup_Weapon requires a weapon item");
-  let quantity: number;
-  if (itemEntity.count < 0) {
-    quantity = 0;
-  } else {
-    quantity = itemEntity.count !== 0 ? itemEntity.count : item.quantity;
-    if ((itemEntity.flags & GameFlags.DROPPED_ITEM) === 0 && context.gameType !== GameType.GT_TEAM) {
-      const currentAmmo = client.ps.ammo.get(item.tag);
-      quantity = currentAmmo < quantity ? quantity - currentAmmo : 1;
-    }
-  }
+  const quantity = q3WeaponPickupQuantity({ count: itemEntity.count, quantity: item.quantity,
+    dropped: (itemEntity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType, currentAmmo: client.ps.ammo.get(item.tag) });
 
   const weapons = statSchema(client.ps.product).weapons;
   client.ps.stats.set(weapons, client.ps.stats.get(weapons) | (1 << item.tag));
   addAmmoTo(client, item.tag, quantity);
   if (item.tag === Weapon.WP_GRAPPLING_HOOK) client.ps.ammo.set(item.tag, -1);
-  return context.gameType === GameType.GT_TEAM
-    ? context.teamWeaponRespawnSeconds
-    : context.weaponRespawnSeconds;
+  return q3WeaponRespawnSeconds(context);
 }
 
 export function pickupWeapon(itemEntity: GameEntity, other: GameEntity, context: WeaponPickupContext): number {

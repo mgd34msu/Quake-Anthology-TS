@@ -10,6 +10,18 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 
 export type Q1BaseWeapon = "axe" | "shotgun" | "supershotgun" | "nailgun" | "supernailgun" | "grenadelauncher" | "rocketlauncher" | "lightning";
+export function q1WeaponBit(weapon: Q1BaseWeapon): number {
+  switch (weapon) {
+    case "axe": return 4096;
+    case "shotgun": return 1;
+    case "supershotgun": return 2;
+    case "nailgun": return 4;
+    case "supernailgun": return 8;
+    case "grenadelauncher": return 16;
+    case "rocketlauncher": return 32;
+    case "lightning": return 64;
+  }
+}
 export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
 export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav";
 export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav"];
@@ -98,6 +110,8 @@ export interface Q1FoundationHost {
   sourceTarget?(actor: ActorId): { readonly aimedDamage: boolean; readonly push: boolean; readonly player: boolean };
   /** Apply a timed effect to the shared player state, including combat invulnerability. */
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
+  powerupExpires?(actor: ActorId, powerup: Q1Powerup): number;
+  sourceDamageMultiplier?(attacker: ActorId): number;
 }
 export interface Q1FoundationOptions {
   readonly provider?: ProviderId;

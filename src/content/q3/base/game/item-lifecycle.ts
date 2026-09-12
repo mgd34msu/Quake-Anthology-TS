@@ -82,7 +82,23 @@ export class ItemRegistry {
   }
 }
 
+export interface SourcePickupDescriptor {
+  readonly itemActor: import("../../../../contracts/identity.ts").ActorId;
+  readonly playerActor: import("../../../../contracts/identity.ts").ActorId;
+  readonly item: ItemDefinition;
+  readonly count: number;
+  readonly dropped: boolean;
+  readonly gameType: number;
+  readonly weaponRespawnSeconds: number;
+  readonly teamWeaponRespawnSeconds: number;
+}
+export type SourcePickupAdmission =
+  | { readonly kind: "native" }
+  | { readonly kind: "rejected" }
+  | { readonly kind: "picked"; readonly respawnSeconds: number };
+
 export interface ItemLifecycleContext {
+  readonly admitPickup?: (item: SourcePickupDescriptor) => SourcePickupAdmission;
   readonly entities: EntityPool;
   readonly world: ServerWorld & Pick<ActorSpatialQueries, "traceActor">;
   readonly product: Product;
@@ -251,7 +267,14 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
   if (client.ps.product !== context.product) throw new Error("Item touch player product does not match lifecycle product");
   const item = requirePublishedItem(context, entity);
   const pickupState = { modelIndex: entity.s.modelindex, modelIndex2: entity.s.modelindex2, generic1: entity.s.generic1 };
-  if (!canItemBeGrabbed(context.gameType, pickupState, inventory(client))) return;
+  const itemActor = entity.actor.id, playerActor = other.actor.id;
+  const admission = context.admitPickup?.({ itemActor, playerActor, item,
+    count: entity.count, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
+    weaponRespawnSeconds: context.weaponRespawnSeconds, teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds }) ?? { kind: "native" };
+  if (!entity.inuse || !other.inuse || context.entities.get(entity.slot) !== entity || context.entities.get(other.slot) !== other
+    || !entity.actor.id.equals(itemActor) || !other.actor.id.equals(playerActor)) return;
+  if (admission.kind === "rejected") return;
+  if (admission.kind === "native" && !canItemBeGrabbed(context.gameType, pickupState, inventory(client))) return;
   const className = item.className;
   if (className === null) throw new Error("Pickup item has no classname");
   context.log(`Item: ${other.s.number} ${className}\n`);
@@ -259,7 +282,8 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
   let predict = client.pers.predictItemPickup;
   const now = gameTime(context);
   let respawn: number;
-  if (item.type === ItemType.IT_TEAM) respawn = context.teamPickup(entity, other);
+  if (admission.kind === "picked") respawn = admission.respawnSeconds;
+  else if (item.type === ItemType.IT_TEAM) respawn = context.teamPickup(entity, other);
   else {
     respawn = pickupItem(entity, other, pickupContext(context, now));
     if (item.type === ItemType.IT_POWERUP) predict = false;

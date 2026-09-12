@@ -1,4 +1,5 @@
 /* weapons.qc/player.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
+import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { TouchContact } from "../../../contracts/world.ts";
@@ -22,10 +23,10 @@ export function weaponModel(weapon: Q1Weapon): string {
     case "lightning": return "progs/v_light.mdl";
   }
 }
-export function bestWeapon(game: Q1EntityServices, actor: OwnedActor): Q1Weapon {
+export function bestWeapon(game: Q1EntityServices, actor: OwnedActor, ammoCount?: (item: ItemId) => number): Q1Weapon {
   const order = game.weaponOrder ?? ["lightning", "supernailgun", "supershotgun", "nailgun", "shotgun", "axe"];
   const player = game.player(actor.id); if (player === null) return "axe";
-  for (const weapon of order) if (game.weaponAvailable(player, weapon)) return weapon;
+  for (const weapon of order) if (game.weaponAvailable(player, weapon, "best", ammoCount)) return weapon;
   return "axe";
 }
 

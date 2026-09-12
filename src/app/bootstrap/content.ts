@@ -1,4 +1,5 @@
-import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, ProviderTiming } from "../../contracts/content.ts";
+import { nativeProviderTiming } from "../../content/catalog/timing.ts";
+import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
 import { discoverInstalledContent, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
@@ -22,13 +23,6 @@ function baseProduct(family: GameFamily): string {
   }
 }
 
-function timing(provider: ProviderReference, family: GameFamily, rerelease: boolean): ProviderTiming {
-  return { provider: provider.provider,
-    numeric: { id: `${family}:binary32`, arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" },
-    clock: family === "q1" ? { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null }
-      : family === "q2" ? rerelease ? { kind: "q2-rerelease", frameMilliseconds: 25, preparation: "before-frame" } : { kind: "q2-classic", frameMilliseconds: 100 }
-      : { kind: "q3", serverFrameMilliseconds: 50, fixedMovementMilliseconds: null, maximumCommandMilliseconds: 200 } };
-}
 
 function execution(provider: ProviderReference, family: GameFamily, rerelease: boolean): ExecutionSelection {
   const common = { kind: "typescript", owner: provider, implementation: provider.provider, role: "server-game" } satisfies Pick<ExecutionSelection, "kind" | "owner" | "role"> & { readonly implementation: ProviderReference["provider"] };
@@ -46,7 +40,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   const character: ProviderReference = { provider: `${options.character}:character`, content: catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
-  const providerTiming = timing(provider, family, rerelease);
+  const providerTiming = nativeProviderTiming(provider, family, rerelease);
   const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
   if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
   const match: ProviderReference = rules === "standard" ? provider : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
@@ -57,7 +51,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     presentation: { assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
     execution: [execution(provider, family, rerelease)],
-    timing: [providerTiming, timing(movement, options.movement, false), timing(character, options.character, false)],
+    timing: [providerTiming, nativeProviderTiming(movement, options.movement, false), nativeProviderTiming(character, options.character, false)],
     ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 

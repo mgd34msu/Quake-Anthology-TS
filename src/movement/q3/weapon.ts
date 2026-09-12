@@ -21,6 +21,24 @@ export interface Q3SourceWeaponOptions {
   startTorso(animation: number): void;
 }
 
+export type Q3HoldableState = Pick<Q3SourceWeaponState, "pmFlags" | "holdableItem" | "holdableTag" | "health" | "maxHealth">;
+
+/** True consumes this weapon step; an already-held button permits normal primary processing. */
+export function stepQ3Holdable(state: Q3HoldableState, pressed: boolean, event: (event: number) => void): boolean {
+  if (pressed) {
+    if (!(state.pmFlags & F.USE_ITEM_HELD)) {
+      const tag = state.holdableTag;
+      if (tag !== Holdable.HI_MEDKIT || state.health < state.maxHealth + 25) {
+        state.pmFlags |= F.USE_ITEM_HELD;
+        event(EntityEvent.EV_USE_ITEM0 + tag);
+        state.holdableItem = 0; state.holdableTag = 0;
+      }
+      return true;
+    }
+  } else state.pmFlags &= ~F.USE_ITEM_HELD;
+  return false;
+}
+
 class WeaponStep {
   constructor(readonly state: Q3SourceWeaponState, readonly cmd: Pick<Q3Command, "buttons" | "weapon">, readonly options: Q3SourceWeaponOptions) {}
   get msec(): number { return this.options.msec; }
@@ -60,17 +78,7 @@ class WeaponStep {
     const ps = this.state;
     if (ps.pmFlags & F.RESPAWNED || ps.spectator) return;
     if (ps.health <= 0) { ps.weapon = Weapon.WP_NONE; return; }
-    if (this.cmd.buttons & B.USE_HOLDABLE) {
-      if (!(ps.pmFlags & F.USE_ITEM_HELD)) {
-        const tag = ps.holdableTag;
-        if (tag !== Holdable.HI_MEDKIT || ps.health < ps.maxHealth + 25) {
-          ps.pmFlags |= F.USE_ITEM_HELD;
-          this.event(EntityEvent.EV_USE_ITEM0 + tag);
-          ps.holdableItem = 0; ps.holdableTag = 0;
-        }
-        return;
-      }
-    } else ps.pmFlags &= ~F.USE_ITEM_HELD;
+    if (stepQ3Holdable(ps, (this.cmd.buttons & B.USE_HOLDABLE) !== 0, event => this.event(event))) return;
     if (ps.weaponTime > 0) ps.weaponTime -= this.msec;
     const external = this.options.externalSlot;
     if (external?.phase === "holstered") return;

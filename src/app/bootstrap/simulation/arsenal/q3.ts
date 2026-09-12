@@ -59,6 +59,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     return undefined;
   }
 
+  has(actor: ActorId): boolean { return this.players.has(actor); }
+
   admit(actor: OwnedActor, maxHealth: number, teamDeathmatch = false): ArsenalState {
     if (this.players.has(actor.id)) throw new Error("Selected Q3 arsenal already admitted");
     const arsenal = this.options.supply?.loadout ?? q3SpawnLoadout(this.provider, this.options.product, teamDeathmatch);

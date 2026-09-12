@@ -170,7 +170,7 @@ export class Q1EntityServices {
   }
   weaponItem(weapon: Q1Weapon): ItemId { return this.registeredWeapons.get(weapon)?.item ?? weaponItem(weapon); }
   weaponAmmo(weapon: Q1Weapon): ItemId | null { const extension = this.registeredWeapons.get(weapon); return extension === undefined ? ammoItem(weapon) : extension.ammo; }
-  weaponAvailable(player: Q1PlayerState, weapon: Q1Weapon, purpose: "best" | "fire" = "best"): boolean {
+  weaponAvailable(player: Q1PlayerState, weapon: Q1Weapon, purpose: "best" | "fire" = "best", ammoCount: (item: ItemId) => number = item => this.host.inventory.count(player.actor.id, item)): boolean {
     if (this.host.inventory.count(player.actor.id, this.weaponItem(weapon)) === 0) return false;
     const extension = this.registeredWeapons.get(weapon);
     if (!isQ1BaseWeapon(weapon) && extension === undefined) return false;
@@ -178,7 +178,7 @@ export class Q1EntityServices {
     if (purpose === "best" && extension?.bestAvailable !== undefined && !extension.bestAvailable(this, player)) return false;
     if (purpose === "best" && weapon === "lightning" && player.waterLevel > 1) return false;
     const ammo = this.weaponAmmo(weapon), needed = extension?.ammoPerShot ?? (purpose === "best" && (weapon === "supernailgun" || weapon === "supershotgun") ? 2 : 1);
-    return ammo === null || this.host.inventory.count(player.actor.id, ammo) >= needed;
+    return ammo === null || ammoCount(ammo) >= needed;
   }
   fireRegisteredWeapon(player: Q1PlayerState): boolean {
     if (player.primaryHolstered) return false;
@@ -292,16 +292,21 @@ export class Q1EntityServices {
     return undefined;
   }
 
+  initializeWeaponInventory(actor: OwnedActor): undefined {
+    const entries = WEAPONS.map(weapon => ({ item: weaponItem(weapon), count: weapon === "axe" || weapon === "shotgun" ? 1 : 0, capacity: 1 }));
+    entries.push({ item: "q1:ammo/shells", count: 25, capacity: 100 }, { item: "q1:ammo/nails", count: 0, capacity: 200 },
+      { item: "q1:ammo/rockets", count: 0, capacity: 100 }, { item: "q1:ammo/cells", count: 0, capacity: 100 });
+    if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, entries);
+    else for (const entry of entries) this.host.inventory.configure(actor, entry);
+    return undefined;
+  }
+
   attachPlayer(actor: OwnedActor, options: { readonly weapon?: Q1Weapon; readonly initializeInventory?: boolean; readonly maxHealth?: number } = {}): Q1PlayerState {
     this.host.actors.assertOwned(actor);
     const existing = this.players.get(actor); if (existing !== undefined) return existing;
     if (options.initializeInventory ?? true) {
-      const entries = WEAPONS.map(weapon => ({ item: weaponItem(weapon), count: weapon === "axe" || weapon === "shotgun" ? 1 : 0, capacity: 1 }));
-      entries.push({ item: "q1:ammo/shells", count: 25, capacity: 100 }, { item: "q1:ammo/nails", count: 0, capacity: 200 },
-        { item: "q1:ammo/rockets", count: 0, capacity: 100 }, { item: "q1:ammo/cells", count: 0, capacity: 100 },
-        { item: "q1:key/silver", count: 0, capacity: 1 }, { item: "q1:key/gold", count: 0, capacity: 1 });
-      if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, entries);
-      else for (const entry of entries) this.host.inventory.configure(actor, entry);
+      this.initializeWeaponInventory(actor);
+      for (const item of ["q1:key/silver", "q1:key/gold"] satisfies readonly ItemId[]) this.host.inventory.configure(actor, { item, count: 0, capacity: 1 });
     }
     const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
       continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, nailSide: 1,
@@ -362,15 +367,19 @@ export class Q1EntityServices {
     const targetBody = this.host.bodies.read(target); const source = this.host.bodies.read(inflictor);
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
-    return this.host.combat.apply({ target, amount: Math.fround(amount), knockback: Math.fround(amount), direction, point, normal: ZERO, delivery,
+    const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : this.host.sourceDamageMultiplier?.(attacker) ?? 1));
+    return this.host.combat.apply({ target, amount: scaled, knockback: scaled, direction, point, normal: ZERO, delivery,
       attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
         weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: this.provider, combatProvider: this.options.combatProvider,
         inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } });
   }
+  powerupExpires(actor: ActorId, powerup: Q1Powerup): number {
+    return this.host.powerupExpires?.(actor, powerup) ?? this.player(actor)?.powerups.get(powerup) ?? 0;
+  }
   combatContext(request: DamageRequest): Q1CombatContext {
     const inflictor = request.attack.inflictor === null ? null : this.host.bodies.linked(request.attack.inflictor);
     const target = this.host.bodies.read(request.target);
-    return { arithmetic: "binary32", quad: request.attack.attacker !== null && (this.player(request.attack.attacker)?.powerups.get("quad") ?? 0) > this.time,
+    return { arithmetic: "binary32", quad: request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
       teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || inflictor === null ? null :
         normalize(vsub(target.origin, vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5))) };
   }
@@ -446,17 +455,7 @@ export class Q1EntityServices {
     if (player === undefined) return undefined;
     if (waterLevel !== undefined) player.waterLevel = waterLevel;
     for (const extension of this.playerExtensions.values()) extension.frame?.(this, player, seconds);
-    const weaponExtension = this.registeredWeapons.get(player.weapon);
-    weaponExtension?.animate?.(this, player, seconds);
-    if (weaponExtension?.animate === undefined && isQ1BaseWeapon(player.weapon) && !player.continuousFiring && player.weaponAnimationAt >= 0) {
-      const frame = Math.floor((seconds - player.weaponAnimationAt) / 0.1);
-      const count = player.weapon === "axe" ? 4 : 6;
-      const next = frame >= count ? 0 : player.weaponAnimationBase + frame;
-      if (next !== player.weaponFrame) {
-        player.weaponFrame = next; this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: this.weaponModel(player.weapon, player), frame: next, punch: 0 });
-      }
-      if (frame >= count) player.weaponAnimationAt = -1;
-    }
+    this.weaponFrame(actor, seconds);
     if (player.megaRotAt >= 0 && player.megaRotAt <= seconds) {
       const health = this.health(actor.id);
       if (health > player.maxHealth) { this.host.combat.setHealth(actor, health - 1); player.megaRotAt = seconds + 1; }
@@ -478,6 +477,22 @@ export class Q1EntityServices {
       } else if (contents === "slime" && !suit) {
         player.hazardAt = seconds + 1; this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 4 * player.waterLevel, null, "direct", "slime");
       }
+    }
+    return undefined;
+  }
+  weaponFrame(actor: OwnedActor, seconds: number): undefined {
+    this.time = seconds; const player = this.players.get(actor);
+    if (player === undefined) return undefined;
+    const weaponExtension = this.registeredWeapons.get(player.weapon);
+    weaponExtension?.animate?.(this, player, seconds);
+    if (weaponExtension?.animate === undefined && isQ1BaseWeapon(player.weapon) && !player.continuousFiring && player.weaponAnimationAt >= 0) {
+      const frame = Math.floor((seconds - player.weaponAnimationAt) / 0.1);
+      const count = player.weapon === "axe" ? 4 : 6;
+      const next = frame >= count ? 0 : player.weaponAnimationBase + frame;
+      if (next !== player.weaponFrame) {
+        player.weaponFrame = next; this.host.emit({ kind: "weapon", player: actor.id, weapon: player.weapon, viewModel: this.weaponModel(player.weapon, player), frame: next, punch: 0 });
+      }
+      if (frame >= count) player.weaponAnimationAt = -1;
     }
     return undefined;
   }
@@ -567,7 +582,7 @@ export class Q1EntityServices {
       },
     };
   }
-  chooseBest(actor: OwnedActor): Q1Weapon { return bestWeapon(this, actor); }
+  chooseBest(actor: OwnedActor, ammoCount?: (item: ItemId) => number): Q1Weapon { return bestWeapon(this, actor, ammoCount); }
   givePowerup(player: Q1PlayerState, powerup: Q1Powerup, duration = 30): undefined {
     const expires = Math.fround(this.time + duration); player.powerups.set(powerup, expires); this.host.powerup(player.actor, powerup, expires);
     return this.host.emit({ kind: "powerup", player: player.actor.id, powerup, expires });

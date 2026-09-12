@@ -1,4 +1,5 @@
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
+import type { PickupSelection } from "../../../contracts/pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
@@ -57,7 +58,7 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
       if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, ammo) ? "taken" : "refused";
       const best = runtime.chooseBest(player.actor);
       if (runtime.host.inventory.give(player.actor, ammo.item, ammo.amount) === 0) return "refused";
-      if (player.weapon === best && player.autoSwitch !== "never") runtime.selectWeapon(player.actor, runtime.chooseBest(player.actor)); return "taken";
+      q1AmmoPickupSelection(runtime, player, best, player.autoSwitch !== "never"); return "taken";
     } };
   if (name === "item_key1" || name === "item_key2") {
     const item: ItemId = name === "item_key1" ? "q1:key/silver" : "q1:key/gold";
@@ -100,10 +101,17 @@ function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Wea
     game.host.inventory.give(player.actor, ammo, game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, amount) ?? amount);
   }
   if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned)) {
-    if (game.options.deathmatch === 0) game.selectWeapon(player.actor, selected);
-    else if ((game.pickupRules?.weaponRank?.(selected) ?? rank(selected)) < (game.pickupRules?.weaponRank?.(player.weapon) ?? rank(player.weapon))) game.selectWeapon(player.actor, selected);
+    q1WeaponPickupSelection(game, player, selected, game.options.deathmatch === 0 ? "always" : "better");
   }
   return leave ? "leave" : "taken";
+}
+export function q1AmmoPickupSelection(game: Q1EntityServices, player: Q1PlayerState, before: Q1Weapon, autoSwitch: boolean): undefined {
+  if (autoSwitch && player.weapon === before) game.selectWeapon(player.actor, game.chooseBest(player.actor));
+  return undefined;
+}
+export function q1WeaponPickupSelection(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon, selection: PickupSelection): undefined {
+  if (selection === "always" || selection === "better" && (game.pickupRules?.weaponRank?.(weapon) ?? rank(weapon)) < (game.pickupRules?.weaponRank?.(player.weapon) ?? rank(player.weapon))) game.selectWeapon(player.actor, weapon);
+  return undefined;
 }
 function rank(weapon: Q1Weapon): number {
   return ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun", "shotgun", "axe"].indexOf(weapon);

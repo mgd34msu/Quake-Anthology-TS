@@ -1,3 +1,5 @@
+import { MoveFlags } from "../../../../movement/q3/constants.ts";
+import { stepQ3Holdable } from "../../../../movement/q3/weapon.ts";
 import { q3AdmitTargetDamage } from "../../../../content/q3/base/game/combat.ts";
 import type { UseParticipant } from "../../../../content/q3/base/game/state.ts";
 import type { UseParticipantServices } from "../../../../content/q3/base/game/use-participant.ts";
@@ -14,8 +16,8 @@ import { Q3CombatBridge } from "../../../../content/q3/base/combat-bridge.ts";
 import { Q3GameSettings } from "../../../../content/q3/base/settings.ts";
 import { GameLevel } from "../../../../content/q3/base/game/level.ts";
 import { findQ3EntityTeams } from "../../../../content/q3/base/map-spawns.ts";
-import { EntityEvent, EntityType, GameType, Team } from "../../../../content/q3/base/shared/definitions.ts";
-import { findItem } from "../../../../content/q3/base/shared/items.ts";
+import { EntityEvent, EntityType, GameType, Team, MoveType, statSchema } from "../../../../content/q3/base/shared/definitions.ts";
+import { findItem, itemAt } from "../../../../content/q3/base/shared/items.ts";
 import type { Q3SourceHost, Q3SourceOptions, Q3SourceBots, Q3SourceSessionCarry } from "./types.ts";
 import { q3SourcePresentationState, q3SourceModels } from "./presentation.ts";
 import { ArenaRuntime } from "../../../../content/q3/team-arena/arenas.ts";
@@ -136,7 +138,7 @@ export class Q3SourceRuntime {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
-    this.itemLifecycle = { entities: this.pool, world: this.world, product: options.product,
+    this.itemLifecycle = { admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
       get gameType() { return runtime.gameType; }, get weaponRespawnSeconds() { return runtime.integer("g_weaponrespawn"); },
       get teamWeaponRespawnSeconds() { return runtime.integer("g_weaponTeamRespawn"); }, handicapForClient: number => this.userinfo(number, "handicap"),
       teamPickup: (item, player) => this.team.pickupTeam(item, player), useTargets: (item, player) => useTargets(this.targets(), item, player),
@@ -313,9 +315,25 @@ export class Q3SourceRuntime {
     const combat = this.combat;
     return combat.product === "baseq3" ? null : new PersonalPortalRuntime({ combat, world: this.world, models: this.config, random: this.random, items: this.drops });
   }
+  quadDamageFactor(): number { return this.number("g_quadfactor"); }
+
+  /** True blocks the selected primary for this command, including source movement preconditions. */
+  stepHoldable(actor: ActorId, pressed: boolean): boolean {
+    const entity = this.records.nativeByActor(actor), client = entity?.client;
+    if (entity === null || client == null) return true;
+    const ps = client.ps, schema = statSchema(ps.product);
+    if ((ps.pmFlags & MoveFlags.RESPAWNED) !== 0 || ps.pmType === MoveType.PM_SPECTATOR || entity.health <= 0) return true;
+    const item = ps.stats.get(schema.holdableItem);
+    const state = { pmFlags: ps.pmFlags, holdableItem: item, holdableTag: itemAt(ps.product, item).tag,
+      health: entity.health, maxHealth: ps.stats.get(schema.maxHealth) };
+    const consumed = stepQ3Holdable(state, pressed, event => ps.addEvent(event));
+    ps.pmFlags = state.pmFlags; ps.stats.set(schema.holdableItem, state.holdableItem);
+    return consumed;
+  }
+
   private runClientEvents(entity: GameEntity, oldSequence: number): void {
     const combat = this.combat, runtime = this;
-    const services = { world: this.world, weapons: this.weapons, spawns: this.spawns, drops: this.drops, get dmflags() { return runtime.integer("dmflags"); } };
+    const services = { primaryAttackAllowed: (actor: ActorId) => this.host.primaryAttackAllowed?.(actor) !== false, world: this.world, weapons: this.weapons, spawns: this.spawns, drops: this.drops, get dmflags() { return runtime.integer("dmflags"); } };
     if (combat.product === "baseq3") clientEvents({ ...services, product: "baseq3", combat }, entity, oldSequence);
     else {
       const personalPortal = this.personalPortal;

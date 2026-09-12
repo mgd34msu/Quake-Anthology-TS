@@ -2,7 +2,7 @@
 import type { Q1EntityServices } from './entity-services.ts';
 
 /** Runtime worldspawn declarations, in source order. main() is compiler packaging, not a spawn call. */
-export function precacheQ1World(game: Q1EntityServices): void {
+export function precacheQ1World(game: Pick<Q1EntityServices, "precacheSound" | "precacheModel">): void {
   game.precacheSound("weapons/r_exp3.wav");
   game.precacheSound("weapons/rocket1i.wav");
   game.precacheSound("weapons/sgun1.wav");

@@ -48,6 +48,7 @@ export type Q3SourceBots = ClientBotServices & (
 export interface Q3SourceHost extends ClientMovementHost {
   readonly moverActors: Pick<MoverActorAccess, "observe" | "write" | "link" | "release">;
   primaryAttackAllowed?(actor: ActorId): boolean;
+  admitPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupAdmission;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly callbacks: ActorCallbackTable;

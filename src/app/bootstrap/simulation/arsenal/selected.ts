@@ -3,12 +3,17 @@ import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/iden
 import type { ArsenalState, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
 import type { PlayerUi } from "../types.ts";
 
+import type { PrimaryWeaponHandoff } from "../weapon-slot.ts";
+
 export interface SelectedArsenal {
   readonly family: "q1" | "q2" | "q3";
   readonly provider: ProviderId;
+  has(actor: ActorId): boolean;
   admit(actor: OwnedActor, maxHealth: number, teamDeathmatch?: boolean): ArsenalState;
   read(actor: ActorId): ArsenalState;
   select(actor: ActorId, item: ItemId): boolean;
+  pendingWeapon(actor: ActorId): ItemId | null;
+  handoff(actor: ActorId): PrimaryWeaponHandoff;
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult;
   remove(actor: ActorId): undefined;
   ui(actor: ActorId): Pick<PlayerUi, "activeWeapon" | "ammo" | "items">;

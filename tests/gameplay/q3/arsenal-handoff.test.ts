@@ -1,3 +1,4 @@
+import { stepQ3Holdable } from "../../../src/movement/q3/weapon.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { WeaponStepInput } from "../../../src/contracts/movement.ts";
@@ -114,4 +115,21 @@ test("Q3 holster cancels a queued resume before any source raise commits", () =>
   f.handoff.resume(null); f.step(0);
   expect(f.save().arsenal.state).toEqual({ kind: "q3", sourceWeapon: Weapon.WP_MACHINEGUN, state: WeaponState.WEAPON_RAISING, timeMilliseconds: 250 });
   f.actors.close();
+});
+
+
+test("shared Q3 holdable step blocks initial use, debounces held input, and retains a refused medkit", () => {
+  const events: number[] = [];
+  const state = { pmFlags: 0, holdableItem: 42, holdableTag: Holdable.HI_MEDKIT, health: 125, maxHealth: 100 };
+  expect(stepQ3Holdable(state, true, event => events.push(event))).toBe(true);
+  expect(state.holdableItem).toBe(42);
+  expect(events).toEqual([]);
+  state.health = 100;
+  expect(stepQ3Holdable(state, true, event => events.push(event))).toBe(true);
+  expect(events).toEqual([EntityEvent.EV_USE_ITEM2]);
+  expect(state.holdableItem).toBe(0);
+  expect(stepQ3Holdable(state, true, event => events.push(event))).toBe(false);
+  expect(events).toHaveLength(1);
+  expect(stepQ3Holdable(state, false, event => events.push(event))).toBe(false);
+  expect(state.pmFlags).toBe(0);
 });
