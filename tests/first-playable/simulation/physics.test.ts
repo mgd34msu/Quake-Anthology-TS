@@ -40,6 +40,28 @@ function setup(family: PhysicsFamily = "q2", map = emptyWorld(), blocked: (pushe
   return { actors, callbacks, world, scene, physics, actor };
 }
 
+test("Q2 step preserves stationary support but still moves when ground friction consumes velocity", () => {
+  for (const speed of [0, 10]) {
+    const s = setup(), actor = s.actor("test:walker", zero, "step"), trigger = s.actor("test:trigger", zero, "stationary");
+    s.physics.setSolid(trigger, "trigger", null, "q2");
+    let touches = 0;
+    s.callbacks.bind(trigger, { think: null, use: null, pain: null, die: null, touch: () => { touches++; return undefined; } });
+    const body = s.physics.bodies.read(actor.id); if (body === null) throw new Error("Missing walker body");
+    const velocity = { x: speed, y: 0, z: 0 };
+    s.physics.bodies.write(actor, { ...body, ground: s.world.id, velocity });
+    s.physics.setMotion({ actor, kind: "step", velocity, angularVelocity: { x: 0, y: 100, z: 0 },
+      gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x2000003, owner: null });
+    const links = s.physics.bodies.linked(actor.id)?.linkCount;
+    s.physics.step(actor, 0.1);
+    expect(s.physics.bodies.read(actor.id)?.velocity).toEqual(zero);
+    expect(s.physics.bodies.read(actor.id)?.angles.y).toBe(10);
+    expect(s.physics.bodies.read(actor.id)?.ground).toBe(speed === 0 ? s.world.id : null);
+    expect(s.physics.bodies.linked(actor.id)?.linkCount).toBe(speed === 0 ? links : (links ?? 0) + 1);
+    expect(touches).toBe(speed === 0 ? 0 : 1);
+    s.actors.close();
+  }
+});
+
 test("attached bodies follow committed positions and do not integrate flight velocity", () => {
   const s = setup(), anchor = s.actor("test:anchor", zero, "stationary"), hook = s.actor("test:hook", { x: 20, y: 0, z: 0 }, "fly-missile");
   s.physics.bodies.attach(hook, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 20, y: 0, z: 0 } } });

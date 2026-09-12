@@ -588,20 +588,20 @@ export class SharedPhysics {
         if (hitSound && landed?.ground != null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
         return undefined;
       }
-      const wasGrounded = state.ground !== null, fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
       if (state.ground === null && this.dot(velocity, motion.gravityVector) >= -100) {
         const floor = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(motion.gravityVector, 0.25)));
         if (floor.fraction < 1 && !floor.startSolid && this.dot(floor.sourcePlane.normal, motion.gravityVector) <= -0.7) { this.writeLive(actor, { ground: this.hitActor(floor) }); state = this.bodies.read(actor.id) ?? state; }
       }
+      const wasGrounded = state.ground !== null, fallingFast = this.dot(state.velocity, motion.gravityVector) > this.worldGravity * 0.1;
+      this.writeLive(actor, { angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
+      if (this.moving(motion.angularVelocity)) {
+        const adjustment = elapsed * 600;
+        const friction = (value: number): number => value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment);
+        const angular = this.vector(friction(motion.angularVelocity.x), friction(motion.angularVelocity.y), friction(motion.angularVelocity.z));
+        this.motions.set(actor, { ...motion, angularVelocity: angular }); this.options.writeAngularVelocity?.(actor, angular);
+      }
       if (state.ground === null && !flags.fly && !(flags.swim && (flags.waterLevel ?? 0) > 2) && (flags.waterLevel ?? 0) === 0)
         velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
-      if ((state.ground !== null || flags.fly || flags.swim)) {
-        const speed = Math.hypot(velocity.x, velocity.y);
-        if (speed > 0 && (!flags.dead || this.checkBottom(actor, state))) {
-          const fraction = Math.max(0, speed - elapsed * Math.max(speed, 100) * 6) / speed;
-          velocity = this.vector(velocity.x * fraction, velocity.y * fraction, velocity.z);
-        }
-      }
       if (flags.fly && velocity.z !== 0) {
         const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * 2) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
@@ -610,17 +610,20 @@ export class SharedPhysics {
         const speed = Math.abs(velocity.z), factor = Math.max(0, speed - elapsed * Math.max(speed, 100) * (flags.waterLevel ?? 0)) / speed;
         velocity = this.vector(velocity.x, velocity.y, velocity.z * factor);
       }
-      this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
-      if (this.moving(motion.angularVelocity)) {
-        const adjustment = elapsed * 600;
-        const friction = (value: number): number => value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment);
-        const angular = this.vector(friction(motion.angularVelocity.x), friction(motion.angularVelocity.y), friction(motion.angularVelocity.z));
-        this.motions.set(actor, { ...motion, angularVelocity: angular }); this.options.writeAngularVelocity?.(actor, angular);
-      }
-      this.flyMove(actor, elapsed);
-      if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
-      const landed = this.bodies.read(actor.id);
-      if (!wasGrounded && fallingFast && landed !== null && landed.ground !== null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
+      if (this.moving(velocity)) {
+        if (state.ground !== null || flags.fly || flags.swim) {
+          const speed = Math.hypot(velocity.x, velocity.y);
+          if (speed > 0 && (!flags.dead || this.checkBottom(actor, state))) {
+            const fraction = Math.max(0, speed - elapsed * Math.max(speed, 100) * 6) / speed;
+            velocity = this.vector(velocity.x * fraction, velocity.y * fraction, velocity.z);
+          }
+        }
+        this.writeLive(actor, { velocity });
+        this.flyMove(actor, elapsed);
+        if (this.live(actor)) { this.bodies.link(actor); this.touchTriggers(actor); }
+        const landed = this.bodies.read(actor.id);
+        if (!wasGrounded && fallingFast && landed !== null && landed.ground !== null) this.emit({ actor: actor.id, kind: "land", origin: landed.origin });
+      } else this.writeLive(actor, { velocity });
       return undefined;
     }
     if (state.ground !== null) return undefined;
