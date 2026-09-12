@@ -7,6 +7,7 @@ import type { PickupAdmission } from "../../../contracts/pickups.ts";
 import type { Q1CombatContext, Q1DamageSourceEffects } from "../../../world/gameplay/policies.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
+import { foreignShamblerDamage } from "./shambler-damage.ts";
 import { Q1PrecacheRegistry } from "./precache.ts";
 import { Q1Actor, sourceAngles } from "./entity.ts";
 import type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Powerup, Q1Presentation, Q1Weapon, Q1SoundChannel, Q1Basis } from "./types.ts";
@@ -237,6 +238,7 @@ export class Q1EntityServices {
     if (this.entities.has(entity.actor)) throw new Error("Q1 actor already attached");
     if (this.host.bodies.read(entity.actor.id) === null || this.host.combat.read(entity.actor.id) === null) throw new Error("Attach Q1 behavior after shared body and combat admission");
     this.entities.set(entity.actor, entity);
+    this.host.combat.bindDamageAdjustment(entity.actor, request => foreignShamblerDamage(entity.monster?.species, request));
     this.bindActorCallbacks(entity);
     this.host.registerEntity?.(entity, this);
     return entity;

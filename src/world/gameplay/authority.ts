@@ -10,6 +10,7 @@ export interface PowerArmorCellBinding { read(): number; write(count: number): u
 
 export interface CombatStateBinding {
   admitDamage?(request: DamageRequest): "continue" | "handled";
+  adjustDamage?(request: DamageRequest): Pick<DamageRequest, "amount" | "knockback"> | null;
   read(): CombatState;
   writeHealth(health: number): undefined;
   writeArmor(armor: ArmorState): undefined;
@@ -85,6 +86,13 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
+  bindDamageAdjustment(actor: OwnedActor, adjustDamage: NonNullable<CombatStateBinding["adjustDamage"]>): undefined {
+    const binding = this.binding(actor);
+    if (binding.adjustDamage !== undefined) throw new Error("Actor already has source damage adjustment");
+    this.bindings.set(actor, { ...binding, adjustDamage });
+    return undefined;
+  }
+
   /** A player's power armor and energy weapons consume the same source inventory field. */
   bindPowerArmorCells(actor: OwnedActor, cells: PowerArmorCellBinding): undefined {
     this.actors.assertOwned(actor);
@@ -124,7 +132,7 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   apply(input: DamageRequest): DamageOutcome {
-    const request = captureRequest(input);
+    let request = captureRequest(input);
     const target = this.actors.resolveOwned(request.target);
     if (target === null) return { kind: "stale-target", request };
     const binding = this.binding(target);
@@ -139,6 +147,9 @@ export class GameplayAuthority implements DamageAuthority {
       return outcome;
     }
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
+    const adjustment = binding.adjustDamage?.(request);
+    if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
+    if (adjustment != null) request = captureRequest({ ...request, amount: adjustment.amount, knockback: adjustment.knockback });
     const prepared = policy.prepare?.(request, this.readState(target, binding), request.attack.attacker === null ? null : this.read(request.attack.attacker));
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     if (prepared?.kind === "continue" && !Number.isFinite(prepared.amount)) throw new RangeError("Prepared source damage must be finite");
