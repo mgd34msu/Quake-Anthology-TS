@@ -6,6 +6,7 @@ import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { SharedSimulation } from "../../../src/app/bootstrap/simulation/runtime.ts";
 import { createApplicationBotNavigation } from "../../../src/app/bootstrap/simulation/navigation.ts";
+import { playerCrouchedBounds } from "../../../src/app/bootstrap/simulation/player-movement.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
 for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak4.pk3")))(
@@ -26,6 +27,14 @@ for (const movement of ["q3", "q1", "q2"]) test.skipIf(!existsSync(resolve(corpu
       const changedNavigation = navigation.forClient(0);
       expect(changedNavigation).not.toBe(initialNavigation);
       expect(navigation.forClient(0)).toBe(changedNavigation);
+      for (const profile of [navigation.runtime.graph.profile, initialNavigation.graph.profile, changedNavigation.graph.profile]) {
+        expect(profile.shape.bounds).toEqual(player.standingBounds);
+        expect(profile.capabilities.has("crouch")).toBe(movement !== "q1");
+        expect(profile.capabilities.has("water-jump")).toBe(true);
+        if (movement === "q1") expect(profile.crouchedShape).toBeUndefined();
+        else expect(profile.crouchedShape?.bounds).toEqual(playerCrouchedBounds(player));
+      }
+      expect(navigation.crouchedBounds).toEqual(movement === "q1" ? player.standingBounds : playerCrouchedBounds(player));
       const sourcePlayer = simulation.q3Source()?.pool.at(0).client?.ps;
       const sourceBefore = sourcePlayer?.copy();
       const combatBefore = simulation.combat.read(actor), inventoryBefore = simulation.inventory.entries(actor);

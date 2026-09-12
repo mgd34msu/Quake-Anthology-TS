@@ -13,9 +13,13 @@ import type { LocomotionPlayer } from "./player-movement.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function profileFor(player: LocomotionPlayer): NavigationProfile {
-  return { movement: selectedMovementProfile(player), shape: { kind: "box", bounds: player.standingBounds },
-    crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) }, policy: playerTracePolicy(player),
-    capabilities: new Set(["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder"]),
+  const movement = selectedMovementProfile(player);
+  const crouches = movement.kind === "q2-classic" || movement.kind === "q2-rerelease" || movement.kind === "q3";
+  return { movement, shape: { kind: "box", bounds: player.standingBounds },
+    ...(crouches ? { crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape"> : {}),
+    policy: playerTracePolicy(player),
+    capabilities: new Set(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder"]
+      : ["walk", "jump", "drop", "swim", "water-jump", "ladder"]),
     maximumStep: 18, minimumFloorNormal: 0.7, maximumDrop: 128, team: null, monster: false };
 }
 
