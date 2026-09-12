@@ -121,10 +121,12 @@ function toggle(id: string, label: string, read: () => boolean, write: (value: b
   return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
 }
 export interface PrimaryInputSettings { readonly sensitivity: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
-export interface ControllerVibrationSettings { readonly controllerVibration: boolean; }
-export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): SettingBinding {
-  return toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
-    value => service.write({ controllerVibration: value }));
+export interface ControllerVibrationSettings { readonly controllerVibration: boolean; readonly controllerVibrationStrength: number; }
+export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
+  return [toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
+    value => service.write({ controllerVibration: value })),
+    numeric("controller-vibration-strength", "Vibration strength", 0, 1, 0.05, () => service.read().controllerVibrationStrength,
+      value => service.write({ controllerVibrationStrength: value }))];
 }
 export interface AudioSettings { readonly effectsVolume: number; readonly musicVolume: number; }
 export interface SettingsValueService<T> { read(): T; write(values: Partial<T>): void; }
@@ -144,7 +146,7 @@ export function bindAudioSettings(service: SettingsValueService<AudioSettings>):
 export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder, vibration?: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
   const mouse = builder.mouse, pad = input.gamepad;
   return [
-    ...(vibration === undefined ? [] : [bindControllerVibration(vibration)]),
+    ...(vibration === undefined ? [] : bindControllerVibration(vibration)),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: mouse.tuning.sensitivity, invertMouse: mouse.tuning.invertPitch, alwaysRun: builder.tuning.alwaysRun }),
       write: values => {
         mouse.tuning = { ...mouse.tuning, ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),

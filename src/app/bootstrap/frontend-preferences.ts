@@ -15,9 +15,10 @@ export function applyFrontendPreferences(values: FrontendPreferenceOverrides, in
   for (const local of input.locals) applyFrontendInput(values, local);
 }
 export function readFrontendInput(local: LocalInput): PrimaryInputSettings & ControllerVibrationSettings {
-  return { controllerVibration: local.haptics.enabled, sensitivity: local.builder.mouse.tuning.sensitivity, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
+  return { controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength, sensitivity: local.builder.mouse.tuning.sensitivity, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
 }
 export function applyFrontendInput(values: Partial<PrimaryInputSettings & ControllerVibrationSettings>, local: LocalInput): void {
+  if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength);
   if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration);
   local.builder.mouse.tuning = { ...local.builder.mouse.tuning,
     ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
@@ -32,6 +33,7 @@ export function readFrontendPreferences(input: ApplicationInput, audio: Applicat
 export function changedFrontendPreferences(before: FrontendPreferenceValues, after: FrontendPreferenceValues,
   selected: FrontendPreferenceOverrides): FrontendPreferenceOverrides {
   return { ...selected,
+    ...(after.controllerVibrationStrength === before.controllerVibrationStrength ? {} : { controllerVibrationStrength: after.controllerVibrationStrength }),
     ...(after.controllerVibration === before.controllerVibration ? {} : { controllerVibration: after.controllerVibration }),
     ...(after.effectsVolume === before.effectsVolume ? {} : { effectsVolume: after.effectsVolume }),
     ...(after.musicVolume === before.musicVolume ? {} : { musicVolume: after.musicVolume }),
@@ -45,7 +47,7 @@ export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
   constructor(private readonly dialect: () => CommandDialect) {}
   bindings(): readonly SettingBinding[] {
-    return [bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true }),
+    return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true, controllerVibrationStrength: this.values.controllerVibrationStrength ?? 1 }),
       write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? defaultMouseTuning.sensitivity,

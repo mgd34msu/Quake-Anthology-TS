@@ -53,3 +53,16 @@ test("capture writes PNG bytes from the actual CPU renderer", async () => {
     renderer.close();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("common vibration strength uses the existing frontend preference binding", async () => {
+  const { FrontendPreferences } = await import("../../src/app/bootstrap/frontend-preferences.ts");
+  const preferences = new FrontendPreferences(() => "q1-netquake");
+  const strength = preferences.bindings().find(binding => binding.id === "ui:input:controller-vibration-strength");
+  if (strength === undefined || strength.kind !== "slider") throw new Error("Missing common strength slider");
+  expect(strength.read()).toBe(1);
+  strength.write(0.35);
+  expect(preferences.values.controllerVibrationStrength).toBe(0.35);
+  const restored = preferences.bindings().find(binding => binding.id === strength.id);
+  if (restored === undefined || restored.kind !== "slider") throw new Error("Missing restored strength slider");
+  expect(restored.read()).toBe(0.35);
+});

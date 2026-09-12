@@ -36,6 +36,14 @@ export interface RumbleSink { setMotors(low: number, high: number, durationMilli
 export type HapticsResult = ControllerOperationResult | { readonly kind: "unchanged" };
 export class BnvibScheduler {
   private playing: { readonly pattern: BnvibPattern; readonly started: number } | null = null;
+  private gain = 1;
+  get strength(): number { return this.gain; }
+  setStrength(value: number, nowMilliseconds: number): HapticsResult {
+    if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error("Vibration strength must be between 0 and 1");
+    if (value === this.gain) return { kind: "unchanged" };
+    this.gain = value; this.lastIndex = -1;
+    return this.update(nowMilliseconds);
+  }
   private lastIndex = -1;
   private lastOutput = -Infinity;
   constructor(private readonly sink: RumbleSink) {}
@@ -65,7 +73,7 @@ export class BnvibScheduler {
     if (index === -2) return this.sink.setMotors(0, 0, hold);
     const sample = pattern.samples[index];
     if (sample === undefined) return this.stop();
-    return this.sink.setMotors(sample.ampLow / 255, sample.ampHigh / 255, hold);
+    return this.sink.setMotors(sample.ampLow / 255 * this.gain, sample.ampHigh / 255 * this.gain, hold);
   }
 }
 export interface SeatHapticsOptions {
@@ -86,6 +94,8 @@ export class SeatHaptics {
   private preference = true;
   private closed = false;
   get enabled(): boolean { return this.preference; }
+  get strength(): number { return this.scheduler.strength; }
+  setStrength(value: number): HapticsResult { return this.scheduler.setStrength(value, this.options.now()); }
   constructor(private readonly options: SeatHapticsOptions) {
     this.device = null;
     this.scheduler = new BnvibScheduler({ setMotors: (low, high, duration) => this.device === null

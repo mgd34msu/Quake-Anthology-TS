@@ -179,3 +179,25 @@ test.skipIf(!await Bun.file(retail).exists())("seat tactile requests retain supp
     } finally { haptics.close(); }
   } finally { await archive.close(); }
 });
+
+test("seat vibration strength scales both motors without restarting the authored envelope", async () => {
+  const { BnvibScheduler } = await import("../../src/input/haptics.ts");
+  const outputs: { low: number; high: number }[] = [];
+  const scheduler = new BnvibScheduler({ setMotors(low, high) { outputs.push({ low, high }); return { kind: "accepted" }; } });
+  const pattern = { sampleRateHz: 10, loop: null, samples: [
+    { ampLow: 255, ampHigh: 128, freqLow: 0, freqHigh: 0 },
+    { ampLow: 64, ampHigh: 255, freqLow: 0, freqHigh: 0 }] };
+  scheduler.play(pattern, 0);
+  expect(outputs.at(-1)).toEqual({ low: 1, high: 128 / 255 });
+  scheduler.setStrength(0.5, 25);
+  expect(outputs.at(-1)).toEqual({ low: 0.5, high: 128 / 255 * 0.5 });
+  scheduler.update(100);
+  expect(outputs.at(-1)).toEqual({ low: 64 / 255 * 0.5, high: 0.5 });
+  scheduler.setStrength(0, 110);
+  expect(outputs.at(-1)).toEqual({ low: 0, high: 0 });
+  scheduler.setStrength(1, 120);
+  expect(outputs.at(-1)).toEqual({ low: 64 / 255, high: 1 });
+  scheduler.stop(); scheduler.setStrength(0.5, 130);
+  expect(outputs.at(-1)).toEqual({ low: 0, high: 0 });
+  expect(() => scheduler.setStrength(NaN, 140)).toThrow();
+});
