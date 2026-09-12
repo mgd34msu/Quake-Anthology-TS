@@ -11,9 +11,73 @@ import { resolve } from "node:path";
 import type { ApplicationBots } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { BotInventory } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
 const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")));
+
+retail("Q2 map bots select and fire actual Q1 weapons and collect mapped source supplies", async () => {
+  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--map", "base1",
+    "--movement", "q2", "--character", "q2", "--mode", "deathmatch", "--dedicated"]);
+  if (launch.kind !== "run") throw new Error("Expected Q2 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, launch.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q1:official", content: catalog.require("q1-classic-id1").id },
+  ] } } });
+  const application = await Application.open(launch.options, { print: () => undefined }, recipe);
+  try {
+    const captured: ApplicationBots[] = [], services = application.simulation.botServices, attach = services.attach.bind(services);
+    services.attach = (director, transport) => { captured.push(transport); attach(director, transport); };
+    application.queueCommand("addbot", ["Ranger", "5"], null); await application.step(100);
+    const transport = captured[0], bot = transport?.director.roster()[0];
+    if (transport === undefined || bot === undefined) throw new Error("Missing selected Q1 bot");
+    const world = application.simulation, source = world.q2Source(), arsenal = world.q1WeaponSource();
+    if (source === null || arsenal === null) throw new Error("Missing independent map and weapon sources");
+    expect(world.q1Source()).toBeNull(); expect(world.q2WeaponSource()).toBeNull();
+    expect(arsenal.game.entity(bot.actor.id)).toBeNull();
+    expect(arsenal.game.player(bot.actor.id)?.actor.id.equals(bot.actor.id)).toBe(true);
+    expect(world.botServices.isBot(bot.actor.id)).toBe(true);
+    for (let frame = 0; frame < 50; frame++) await application.step(100);
+    const pickups = transport.game.pickups, nativeBot = source.game.entity(bot.actor.id);
+    if (pickups === null || nativeBot === null) throw new Error("Missing source-owned bot and pickups");
+    const supply = pickups.candidates(bot.sourceClient).find(item => item.name === "weapon_shotgun");
+    if (supply === undefined) throw new Error("Missing authored base1 shotgun supply");
+    expect(supply.preview.ammo.some(receipt => receipt.item === "q1:ammo/shells" && receipt.given > 0)).toBe(true);
+    const start = { x: 896, y: -96, z: -166.96875 };
+    source.players.teleportPlayer(nativeBot, source.game, start, { x: 0, y: 180, z: 0 });
+    let choseGoal = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      if (transport.director.library.goals.getTopGoal(bot.state.gs)?.entity === supply.entity) choseGoal = true;
+      if (pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind === "respawning") break;
+    }
+    expect(choseGoal).toBe(true);
+    expect(pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind).toBe("respawning");
+    for (const receipt of [...supply.preview.weapons, ...supply.preview.ammo]) expect(world.inventory.count(bot.actor.id, receipt.item)).toBe(receipt.before + receipt.given);
+    expect(world.inventory.count(bot.actor.id, "q2:weapon_shotgun")).toBe(0);
+    world.inventory.give(bot.actor, "q2:item_quad", 1);
+    expect(source.items.use(bot.actor, "q2:item_quad", source.game)).toBe(true);
+    transport.game.knowledge.updateInventory(bot.state);
+    expect(bot.state.inventory[BotInventory.QUAD]).toBe(1);
+    const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id), nativeHuman = source.game.entity(human.actor);
+    if (nativeHuman === null) throw new Error("Missing actual target");
+    source.players.teleportPlayer(nativeBot, source.game, start, { x: 0, y: 180, z: 0 });
+    source.players.teleportPlayer(nativeHuman, source.game, { x: 800, y: -96, z: start.z }, { x: 0, y: 0, z: 0 });
+    world.combat.setHealth(nativeHuman.actor, 1000);
+    expect(arsenal.game.selectWeapon(bot.actor, "axe")).toBe(true);
+    const shells = world.inventory.count(bot.actor.id, "q1:ammo/shells");
+    let attacked = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      if (((world.movementPlayer(bot.actor.id)?.buttons ?? 0) & 1) !== 0) attacked = true;
+      if ((world.combat.read(human.actor)?.health ?? 1000) < 1000) break;
+    }
+    expect(attacked).toBe(true);
+    expect(arsenal.game.player(bot.actor.id)?.weapon).toBe("shotgun");
+    expect(world.inventory.count(bot.actor.id, "q1:ammo/shells")).toBeLessThan(shells);
+    expect(world.combat.read(human.actor)?.health).toBeLessThan(1000);
+  } finally { await application.close(); }
+}, 120000);
 
 retail("one bot controller moves and fires in Q2 and preserves its real client and shared configuration through travel", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--map", "base1",

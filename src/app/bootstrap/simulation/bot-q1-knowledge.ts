@@ -4,7 +4,7 @@ import type { WeaponInfo } from "../../../bots/behavior/library/weapons.ts";
 import { DAMAGE_TYPE_IMPACT, DAMAGE_TYPE_RADIAL } from "../../../bots/behavior/library/weapons.ts";
 import { BotInventory } from "../../../bots/behavior/q3/ai-definitions.ts";
 import { createBotArsenalKnowledge } from "../../../bots/behavior/q3/arsenal-knowledge.ts";
-import type { Q1Foundation } from "../../../content/q1/foundation/runtime.ts";
+import type { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
 import type { Q1BaseWeapon, Q1PlayerState, Q1Weapon } from "../../../content/q1/foundation/types.ts";
 import { WEAPONS, isQ1BaseWeapon } from "../../../content/q1/foundation/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
@@ -18,7 +18,7 @@ interface Entry { readonly weapon: Q1BaseWeapon; readonly slot: number; readonly
 const zero = { x: 0, y: 0, z: 0 };
 
 /** progs106 weapons.qc/player.qc and foundation/weapons.ts; continuous frames fire every 0.1 seconds. */
-function shot(game: Q1Foundation, weapon: Q1BaseWeapon, player: Q1PlayerState | null): Shot {
+function shot(game: Q1EntityServices, weapon: Q1BaseWeapon, player: Q1PlayerState | null): Shot {
   const row = (damage: number, count: number, cycle: number, ammo: number, speed: number, range: number, radius: number, spreadX: number, spreadY: number, forward: number, side: number): Shot =>
     ({ damage, count, cycle, ammo, speed, range, radius, spreadX, spreadY, forward, side });
   const nails = player === null ? 2 : game.host.inventory.count(player.actor.id, "q1:ammo/nails");
@@ -37,10 +37,10 @@ function shot(game: Q1Foundation, weapon: Q1BaseWeapon, player: Q1PlayerState | 
 }
 
 export function createQ1BotKnowledge(options: {
-  readonly simulation: Pick<SharedSimulation, "inventory" | "combat" | "bodies"> & { q1Source(): { readonly game: Q1Foundation } | null };
+  readonly simulation: Pick<SharedSimulation, "inventory" | "combat" | "bodies" | "q1WeaponSource">;
   readonly actorForClient: (client: number) => ActorId | null;
 }) {
-  const source = options.simulation.q1Source();
+  const source = options.simulation.q1WeaponSource();
   if (source === null) throw new Error("Q1 bot weapon knowledge requires a selected Q1 arsenal");
   const game = source.game, inventory = options.simulation.inventory;
   const entries = new Map<number, Entry>(), uncoveredWeapons: Q1Weapon[] = [];
@@ -55,13 +55,13 @@ export function createQ1BotKnowledge(options: {
   };
   const knowledge = createBotArsenalKnowledge({
     updateInventory(state) {
-      const actor = options.actorForClient(state.client), player = actor === null ? null : game.player(actor);
+      const actor = options.actorForClient(state.client);
       if (actor === null) actorsForHandle.delete(state.ws); else actorsForHandle.set(state.ws, actor);
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       const combat = actor === null ? null : options.simulation.combat.read(actor);
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
       state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points;
-      state.inventory[BotInventory.QUAD] = Number((player?.powerups.get("quad") ?? 0) > game.time);
+      state.inventory[BotInventory.QUAD] = Number(actor !== null && game.powerupExpires(actor, "quad") > game.time);
       for (const entry of entries.values()) {
         state.inventory[64 + entry.slot] = actor === null ? 0 : Number(usable(actor, entry));
         state.inventory[96 + entry.slot] = actor === null || entry.ammo === null ? 0 : inventory.count(actor, entry.ammo);
