@@ -17,6 +17,7 @@ import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../.
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
+import { previewQ1Supply } from "../../../../src/content/q1/foundation/pickups.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 
 const path = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
@@ -426,7 +427,8 @@ test.skipIf(!existsSync(path))("Q1 source supply observations preserve actual of
       if (observation === null) throw new Error("Missing weapon offer");
       expect(observation.offer).toEqual({ kind: "weapon", offer: { item: "q1:weapon/nailgun", ammo: [{ item: "q1:ammo/nails", amount: 30 }] } });
       expect(observation.availability).toEqual({ kind: "ready", eligible: true });
-      const preview = admission.preview(player.id, observation.offer);
+      const preview = previewQ1Supply(runtime, gun.actor.id, player.id);
+      if (preview === null) throw new Error("Missing mapped weapon preview");
       expect(preview.weapons).toEqual([{ item: "q2:weapon_machinegun", before: 0, given: 1 }]);
       expect(preview.ammo).toEqual([{ item: "q2:ammo_bullets", before: 0, given: 30 }]);
       expect(runtime.capture()).toEqual(before); expect(inventory.entries(player.id)).toEqual(counts); expect(events).toHaveLength(eventCount);
@@ -465,12 +467,53 @@ test.skipIf(!existsSync(path))("Q1 source supply observations preserve actual of
       let modifierCalls = 0;
       runtime.registerPickupRules({ id: "observation-grant-check", weaponAmmoGrant: (_game, _player, _weapon, amount) => { modifierCalls++; return amount; } });
       expect(observeQ1Supply(runtime, gun.actor.id, player.id)).toBeNull();
+      expect(previewQ1Supply(runtime, gun.actor.id, player.id)).toBeNull();
       expect(observeQ1Supply(runtime, ammo.actor.id, player.id)?.offer).toEqual(ammoObservation.offer);
       expect(modifierCalls).toBe(0);
       runtime.pickupAdmission = admission;
       expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.offer).toEqual(observation.offer);
       runtime.cancel(gun); gun.touch = null; expect(observeQ1Supply(runtime, gun.actor.id, player.id)).toBeNull();
       const removed = ammo.actor.id; runtime.remove(ammo); expect(observeQ1Supply(runtime, removed, player.id)).toBeNull();
+    } finally { actors.close(); }
+  }
+});
+
+test.skipIf(!existsSync(path))("native Q1 supply previews match source touches without changing source state", async () => {
+  const map = await loadMap();
+  for (const deathmatch of [1, 2]) {
+    const { runtime, player, actors, inventory, callbacks, events, due } = gameFor(map, undefined, "rerelease", deathmatch);
+    try {
+      const gun = [...runtime.entities.values()].find(entity => entity.classname === "weapon_nailgun");
+      const ammo = [...runtime.entities.values()].find(entity => entity.classname === "item_spikes" && (entity.spawnflags & 1) === 0);
+      if (gun === undefined || ammo === undefined) throw new Error("Missing authored e1m1 supplies");
+      due(0.8);
+      const before = runtime.capture(), counts = inventory.entries(player.id), eventCount = events.length;
+      const preview = previewQ1Supply(runtime, gun.actor.id, player.id);
+      expect(preview).toEqual({ accepted: true, weapons: [{ item: "q1:weapon/nailgun", before: 0, given: 1 }],
+        ammo: [{ item: "q1:ammo/nails", before: 0, given: 30 }] });
+      expect(runtime.capture()).toEqual(before); expect(inventory.entries(player.id)).toEqual(counts); expect(events).toHaveLength(eventCount);
+      callbacks.touch({ self: gun.actor, other: player.id, plane: null, surface: null });
+      if (preview === null) throw new Error("Missing native weapon preview");
+      for (const receipt of [...preview.weapons, ...preview.ammo]) expect(inventory.count(player.id, receipt.item)).toBe(receipt.before + receipt.given);
+      if (deathmatch === 2) {
+        expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: false });
+        callbacks.touch({ self: gun.actor, other: player.id, plane: null, surface: null });
+        expect(inventory.count(player.id, "q1:ammo/nails")).toBe(30);
+      }
+      inventory.configure(player, { item: "q1:ammo/nails", count: 200, capacity: 200 });
+      expect(previewQ1Supply(runtime, gun.actor.id, player.id)).toEqual({ accepted: true,
+        weapons: [{ item: "q1:weapon/nailgun", before: 1, given: 0 }], ammo: [{ item: "q1:ammo/nails", before: 200, given: 0 }] });
+      expect(previewQ1Supply(runtime, ammo.actor.id, player.id)).toEqual({ accepted: false, weapons: [],
+        ammo: [{ item: "q1:ammo/nails", before: 200, given: 0 }] });
+      callbacks.touch({ self: ammo.actor, other: player.id, plane: null, surface: null });
+      expect(ammo.solid).toBe("trigger"); expect(inventory.count(player.id, "q1:ammo/nails")).toBe(200);
+      inventory.consume(player, "q1:ammo/nails", 10);
+      const partial = previewQ1Supply(runtime, ammo.actor.id, player.id);
+      expect(partial).toEqual({ accepted: true, weapons: [], ammo: [{ item: "q1:ammo/nails", before: 190, given: 10 }] });
+      callbacks.touch({ self: ammo.actor, other: player.id, plane: null, surface: null });
+      if (partial === null) throw new Error("Missing native ammo preview");
+      for (const receipt of partial.ammo) expect(inventory.count(player.id, receipt.item)).toBe(receipt.before + receipt.given);
+      expect(ammo.solid).toBe("none");
     } finally { actors.close(); }
   }
 });

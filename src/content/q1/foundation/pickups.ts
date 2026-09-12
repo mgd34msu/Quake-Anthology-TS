@@ -1,6 +1,7 @@
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { PickupSelection, PickupSupplyOffer, PickupSupplyObservation } from "../../../contracts/pickups.ts";
+import type { PickupSelection, PickupSupplyOffer, PickupSupplyObservation, PickupSupplyPreview } from "../../../contracts/pickups.ts";
+import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
@@ -129,6 +130,19 @@ export function observeQ1Supply(game: Q1EntityServices, pickup: ActorId, other: 
   }
   const regenerating = entity.nextThink >= 0 && entity.think !== null && "q1CallbackName" in entity.think && entity.think.q1CallbackName === "SUB_regen";
   return { actor: pickup, offer, availability: regenerating ? { kind: "respawning", atSeconds: entity.nextThink } : { kind: "inactive" } };
+}
+export function previewQ1Supply(game: Q1EntityServices, pickup: ActorId, recipient: ActorId): PickupSupplyPreview | null {
+  const observation = observeQ1Supply(game, pickup, recipient);
+  if (observation === null) return null;
+  const offer = observation.offer;
+  if (game.pickupAdmission !== null) return game.pickupAdmission.preview(recipient, offer);
+  if (offer.kind === "weapon") return previewPickupGrants(game.host.inventory.entries(recipient), {
+    kind: "weapon", weapons: [{ item: offer.offer.item, amount: 1 }], ammo: offer.offer.ammo,
+  });
+  if (offer.kind === "ammo") return previewPickupGrants(game.host.inventory.entries(recipient), {
+    kind: "ammo", acceptance: "nonzero", ammo: [offer.offer], weapons: { kind: "grant", grants: [] },
+  });
+  return null;
 }
 export function q1AmmoPickupSelection(game: Q1EntityServices, player: Q1PlayerState, before: Q1Weapon, autoSwitch: boolean): undefined {
   if (autoSwitch && player.weapon === before) game.selectWeapon(player.actor, game.chooseBest(player.actor));
