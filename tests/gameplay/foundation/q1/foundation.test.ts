@@ -11,10 +11,12 @@ import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBo
 import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../src/core/numeric.ts";
 import { createQ1MonsterMovement } from "../../../../src/movement/q1/index.ts";
-import { Q1Foundation, Q1_PROVIDER, PLAYER_BOUNDS, weaponItem } from "../../../../src/content/q1/foundation/index.ts";
+import { Q1Foundation, Q1_PROVIDER, PLAYER_BOUNDS, weaponItem, observeQ1Supply } from "../../../../src/content/q1/foundation/index.ts";
 import type { Q1Event, Q1FoundationHost, Q1FoundationCheckpoint } from "../../../../src/content/q1/foundation/index.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
+import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
+import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 
 const path = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
@@ -31,7 +33,7 @@ interface SavedTestWorld {
   readonly combat: readonly import("../../../../src/contracts/session.ts").CombatCheckpoint[];
   readonly inventories: readonly import("../../../../src/contracts/session.ts").InventoryCheckpoint[];
 }
-function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerelease" = "rerelease") {
+function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0) {
   const identities = createIdentityOwner("q1-foundation");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
@@ -75,7 +77,7 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
     players: () => players, checkClient: () => null, classname: actor => game?.entity(actor)?.classname ?? "player",
     powerup: (actor, powerup, expires) => { if (powerup === "invulnerability") combat.setTraits(actor, { invulnerable: expires > 0 }); return undefined; },
   };
-  const runtime = new Q1Foundation(host, { edition: saved?.source.edition ?? edition, skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
+  const runtime = new Q1Foundation(host, { edition: saved?.source.edition ?? edition, skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement" });
   game = runtime;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => runtime.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
@@ -400,4 +402,75 @@ test.skipIf(!existsSync(path))("Q1 exploding boxes retain native stationary boun
       expect(entity.movementFlags).toBe(1024 | (success ? 512 : 0));
     }
   } finally { actors.close(); }
+});
+
+test.skipIf(!existsSync(path))("Q1 source supply observations preserve actual offers, touch eligibility and regeneration", async () => {
+  const map = await loadMap();
+  for (const deathmatch of [1, 2]) {
+    const { runtime, player, actors, inventory, combat, callbacks, events, due } = gameFor(map, undefined, "rerelease", deathmatch);
+    try {
+      inventory.configure(player, { item: "q2:weapon_machinegun", count: 0, capacity: 1 });
+      inventory.configure(player, { item: "q2:ammo_bullets", count: 0, capacity: 200 });
+      const admission = new SharedPickupAdmission({ inventory, profile: Q1_Q2_SUPPLY_PROFILE,
+        ammoGranted: () => undefined, weaponGranted: () => undefined });
+      runtime.pickupAdmission = admission;
+      const gun = [...runtime.entities.values()].find(entity => entity.classname === "weapon_nailgun");
+      const ammo = [...runtime.entities.values()].find(entity => entity.classname === "item_spikes" && (entity.spawnflags & 1) === 0);
+      const health = [...runtime.entities.values()].find(entity => entity.classname === "item_health");
+      if (gun === undefined || ammo === undefined || health === undefined) throw new Error("Missing authored e1m1 supplies");
+      expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.availability).toEqual({ kind: "inactive" });
+      expect(observeQ1Supply(runtime, health.actor.id, player.id)).toBeNull();
+      due(0.8);
+      const before = runtime.capture(), counts = inventory.entries(player.id), eventCount = events.length;
+      const observation = observeQ1Supply(runtime, gun.actor.id, player.id);
+      if (observation === null) throw new Error("Missing weapon offer");
+      expect(observation.offer).toEqual({ kind: "weapon", offer: { item: "q1:weapon/nailgun", ammo: [{ item: "q1:ammo/nails", amount: 30 }] } });
+      expect(observation.availability).toEqual({ kind: "ready", eligible: true });
+      const preview = admission.preview(player.id, observation.offer);
+      expect(preview.weapons).toEqual([{ item: "q2:weapon_machinegun", before: 0, given: 1 }]);
+      expect(preview.ammo).toEqual([{ item: "q2:ammo_bullets", before: 0, given: 30 }]);
+      expect(runtime.capture()).toEqual(before); expect(inventory.entries(player.id)).toEqual(counts); expect(events).toHaveLength(eventCount);
+      callbacks.touch({ self: gun.actor, other: player.id, plane: null, surface: null });
+      expect(inventory.count(player.id, "q2:weapon_machinegun")).toBe(1);
+      expect(inventory.count(player.id, "q2:ammo_bullets")).toBe(30);
+      if (deathmatch === 1) {
+        const deadline = Math.fround(0.8 + 30);
+        expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.availability).toEqual({ kind: "respawning", atSeconds: deadline });
+        expect(gun.model).toBe("");
+        due(deadline - 0.1); expect(gun.solid).toBe("none");
+        due(deadline); expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: true });
+        inventory.configure(player, { item: "q2:ammo_bullets", count: 200, capacity: 200 });
+        const full = admission.preview(player.id, observation.offer);
+        expect(full.accepted).toBe(true); expect([...full.weapons, ...full.ammo].every(receipt => receipt.given === 0)).toBe(true);
+      } else {
+        expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: false });
+        callbacks.touch({ self: gun.actor, other: player.id, plane: null, surface: null });
+        expect(inventory.count(player.id, "q2:ammo_bullets")).toBe(30); expect(gun.nextThink).toBe(-1);
+      }
+      inventory.configure(player, { item: "q2:ammo_bullets", count: 0, capacity: 200 });
+      const ammoObservation = observeQ1Supply(runtime, ammo.actor.id, player.id);
+      if (ammoObservation === null) throw new Error("Missing ammo offer");
+      expect(ammoObservation.offer).toEqual({ kind: "ammo", offer: { item: "q1:ammo/nails", amount: 25 } });
+      combat.setHealth(player, 0);
+      expect(observeQ1Supply(runtime, ammo.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: false });
+      callbacks.touch({ self: ammo.actor, other: player.id, plane: null, surface: null }); expect(inventory.count(player.id, "q2:ammo_bullets")).toBe(0);
+      combat.setHealth(player, 100);
+      const ammoPreview = admission.preview(player.id, ammoObservation.offer);
+      callbacks.touch({ self: ammo.actor, other: player.id, plane: null, surface: null });
+      const ammoGrant = ammoPreview.ammo[0];
+      if (ammoGrant === undefined) throw new Error("Missing actual ammo preview grant");
+      expect(inventory.count(player.id, "q2:ammo_bullets")).toBe(ammoGrant.given);
+      if (deathmatch === 2) expect(observeQ1Supply(runtime, ammo.actor.id, player.id)?.availability).toEqual({ kind: "inactive" });
+      runtime.pickupAdmission = null;
+      let modifierCalls = 0;
+      runtime.registerPickupRules({ id: "observation-grant-check", weaponAmmoGrant: (_game, _player, _weapon, amount) => { modifierCalls++; return amount; } });
+      expect(observeQ1Supply(runtime, gun.actor.id, player.id)).toBeNull();
+      expect(observeQ1Supply(runtime, ammo.actor.id, player.id)?.offer).toEqual(ammoObservation.offer);
+      expect(modifierCalls).toBe(0);
+      runtime.pickupAdmission = admission;
+      expect(observeQ1Supply(runtime, gun.actor.id, player.id)?.offer).toEqual(observation.offer);
+      runtime.cancel(gun); gun.touch = null; expect(observeQ1Supply(runtime, gun.actor.id, player.id)).toBeNull();
+      const removed = ammo.actor.id; runtime.remove(ammo); expect(observeQ1Supply(runtime, removed, player.id)).toBeNull();
+    } finally { actors.close(); }
+  }
 });

@@ -1,5 +1,6 @@
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
-import type { PickupSelection } from "../../../contracts/pickups.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
+import type { PickupSelection, PickupSupplyOffer, PickupSupplyObservation } from "../../../contracts/pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
@@ -8,6 +9,7 @@ import { vadd, ZERO, WEAPONS, weaponItem } from "./types.ts";
 import { ammoItem } from "./entity-services.ts";
 
 interface Pickup {
+  readonly supply?: PickupSupplyOffer;
   readonly model: string;
   readonly sound: string;
   readonly bounds: "box" | "weapon" | "artifact";
@@ -41,7 +43,7 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
   const weapon = WEAPONS.find(candidate => name === `weapon_${candidate}`);
   if (weapon !== undefined && weapon !== "axe" && weapon !== "shotgun") {
     const model = weapon === "supershotgun" ? "g_shot" : weapon === "nailgun" ? "g_nail" : weapon === "supernailgun" ? "g_nail2" : weapon === "grenadelauncher" ? "g_rock" : weapon === "rocketlauncher" ? "g_rock2" : "g_light";
-    return { model: `progs/${model}.mdl`, sound: "weapons/pkup.wav", bounds: "weapon", skin: 0, respawn: 30,
+    return { supply: { kind: "weapon", offer: weaponOffer(weapon) }, model: `progs/${model}.mdl`, sound: "weapons/pkup.wav", bounds: "weapon", skin: 0, respawn: 30,
       take: (runtime, _entity, player) => takeWeapon(runtime, player, weapon) };
   }
   const ammo: { readonly item: ItemId; readonly model: string; readonly amount: number } | null =
@@ -52,14 +54,17 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
     name === "item_spikes" ? { item: "q1:ammo/nails", model: "nail", amount: big ? 50 : 25 } :
     name === "item_rockets" ? { item: "q1:ammo/rockets", model: "rock", amount: big ? 10 : 5 } :
     name === "item_cells" ? { item: "q1:ammo/cells", model: "batt", amount: big ? 12 : 6 } : null;
-  if (ammo !== null) return { model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
+  if (ammo !== null) {
+    const offer = { item: ammo.item, amount: ammo.amount };
+    return { supply: { kind: "ammo", offer }, model: `maps/b_${ammo.model}${big ? 1 : 0}.bsp`, sound: "weapons/lock4.wav", bounds: "box", skin: 0,
     respawn: game.options.deathmatch === 3 || game.options.deathmatch === 5 ? 15 : 30,
     take: (runtime, _entity, player) => {
-      if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, ammo) ? "taken" : "refused";
+      if (runtime.pickupAdmission !== null) return runtime.pickupAdmission.ammo(player.actor, offer) ? "taken" : "refused";
       const best = runtime.chooseBest(player.actor);
-      if (runtime.host.inventory.give(player.actor, ammo.item, ammo.amount) === 0) return "refused";
+      if (runtime.host.inventory.give(player.actor, offer.item, offer.amount) === 0) return "refused";
       q1AmmoPickupSelection(runtime, player, best, player.autoSwitch !== "never"); return "taken";
     } };
+  }
   if (name === "item_key1" || name === "item_key2") {
     const item: ItemId = name === "item_key1" ? "q1:key/silver" : "q1:key/gold";
     const prefix = game.worldType === 0 ? "w" : game.worldType === 1 ? "m" : "b";
@@ -80,30 +85,50 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
     take: (runtime, item, player) => { runtime.host.inventory.give(player.actor, "q1:ammo/shells", item.number("shells")); return "taken"; } };
   return null;
 }
-function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
+function weaponOffer(weapon: Q1Weapon): Extract<PickupSupplyOffer, { readonly kind: "weapon" }>["offer"] {
+  const ammo = ammoItem(weapon), amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
+  return { item: weaponItem(weapon), ammo: ammo === null ? [] : [{ item: ammo, amount }] };
+}
+function weaponEligibility(game: Q1EntityServices, player: Q1PlayerState, item: ItemId): { readonly leave: boolean; readonly owned: boolean } {
   const leave = game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch));
+  const owned = game.pickupAdmission?.owns(player.actor.id, item) ?? game.host.inventory.count(player.actor.id, item) > 0;
+  return { leave, owned };
+}
+function pickupPlayer(game: Q1EntityServices, other: ActorId): Q1PlayerState | null {
+  return game.health(other) <= 0 ? null : game.player(other);
+}
+function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Weapon): "refused" | "taken" | "leave" {
+  const offer = weaponOffer(weapon), { leave, owned } = weaponEligibility(game, player, offer.item);
+  if (leave && owned) return "refused";
   if (game.pickupAdmission !== null) {
-    const owned = game.pickupAdmission.owns(player.actor.id, weaponItem(weapon));
-    if (leave && owned) return "refused";
-    const ammo = ammoItem(weapon), amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
     const autoSwitch = player.autoSwitch === "always" || player.autoSwitch === "new" && !owned;
-    const accepted = game.pickupAdmission.weapon(player.actor, { item: weaponItem(weapon), ammo: ammo === null ? [] : [{ item: ammo, amount }] },
-      !autoSwitch ? "never" : game.options.deathmatch === 0 ? "always" : "better");
+    const accepted = game.pickupAdmission.weapon(player.actor, offer, !autoSwitch ? "never" : game.options.deathmatch === 0 ? "always" : "better");
     return !accepted ? "refused" : leave ? "leave" : "taken";
   }
-  const owned = game.host.inventory.count(player.actor.id, weaponItem(weapon)) > 0;
-  if (leave && owned) return "refused";
-  game.host.inventory.give(player.actor, weaponItem(weapon), 1);
+  game.host.inventory.give(player.actor, offer.item, 1);
   const selected = game.pickupRules?.weaponGranted?.(game, player, weapon) ?? weapon;
-  const ammo = ammoItem(weapon);
-  if (ammo !== null) {
-    const amount = weapon === "nailgun" || weapon === "supernailgun" ? 30 : weapon === "lightning" ? 15 : 5;
-    game.host.inventory.give(player.actor, ammo, game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, amount) ?? amount);
-  }
+  for (const ammo of offer.ammo) game.host.inventory.give(player.actor, ammo.item,
+    game.pickupRules?.weaponAmmoGrant?.(game, player, weapon, ammo.amount) ?? ammo.amount);
   if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned)) {
     q1WeaponPickupSelection(game, player, selected, game.options.deathmatch === 0 ? "always" : "better");
   }
   return leave ? "leave" : "taken";
+}
+
+/** Null also covers unsupported source callbacks or native custom weapon grants; it is not proof of absence. */
+export function observeQ1Supply(game: Q1EntityServices, pickup: ActorId, other: ActorId): PickupSupplyObservation | null {
+  const entity = game.entity(pickup);
+  if (entity === null) return null;
+  const offer = pickupDefinition(game, entity)?.supply;
+  if (offer === undefined || entity.touch === null || !("q1CallbackName" in entity.touch) || entity.touch.q1CallbackName !== "item_touch") return null;
+  if (offer.kind === "weapon" && game.pickupAdmission === null && (game.pickupRules?.weaponGranted !== undefined || game.pickupRules?.weaponAmmoGrant !== undefined)) return null;
+  if (entity.solid === "trigger") {
+    const player = pickupPlayer(game, other);
+    const weapon = player !== null && offer.kind === "weapon" ? weaponEligibility(game, player, offer.offer.item) : null;
+    return { actor: pickup, offer, availability: { kind: "ready", eligible: player !== null && !(weapon?.leave && weapon.owned) } };
+  }
+  const regenerating = entity.nextThink >= 0 && entity.think !== null && "q1CallbackName" in entity.think && entity.think.q1CallbackName === "SUB_regen";
+  return { actor: pickup, offer, availability: regenerating ? { kind: "respawning", atSeconds: entity.nextThink } : { kind: "inactive" } };
 }
 export function q1AmmoPickupSelection(game: Q1EntityServices, player: Q1PlayerState, before: Q1Weapon, autoSwitch: boolean): undefined {
   if (autoSwitch && player.weapon === before) game.selectWeapon(player.actor, game.chooseBest(player.actor));
@@ -162,8 +187,8 @@ export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
 
 function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
     const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
-    if (entity.solid !== "trigger" || game.health(other) <= 0) return undefined;
-    const player = game.player(other); if (player === null) return undefined;
+    if (entity.solid !== "trigger") return undefined;
+    const player = pickupPlayer(game, other); if (player === null) return undefined;
     const result = definition.take(game, entity, player); if (result === "refused") return undefined;
     game.sound(player.actor, definition.sound, "item"); game.effect("pickup", game.body(entity).origin, player.actor.id);
     if (result === "leave") { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return undefined; }

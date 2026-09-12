@@ -6,7 +6,7 @@ export type { Q1FoundationHost, Q1FoundationOptions, Q1PlayerState, Q1Event, Q1P
 export { Q1_PROVIDER, PLAYER_BOUNDS, WEAPONS, weaponItem } from "./types.ts";
 export { fireBullets, bestWeapon, fireWeapon, weaponModel } from "./weapons.ts";
 export { spawnMapActor, linkDoors } from "./spawns.ts";
-export { spawnPickup } from "./pickups.ts";
+export { spawnPickup, observeQ1Supply } from "./pickups.ts";
 
 export type { Q1CallbackHandlers, Q1StateExtension } from "./callbacks.ts";
 export { callbackName } from "./callbacks.ts";

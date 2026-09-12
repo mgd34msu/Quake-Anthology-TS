@@ -10,6 +10,17 @@ export type PickupSupplyOffer =
   | { readonly kind: "ammoWeapon"; readonly offer: PickupAmmoGrant & { readonly weapon: ItemId } }
   | { readonly kind: "weapon"; readonly offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] } };
 
+/** Availability belongs to the source pickup. Deadlines use that owner's source clock in seconds,
+ * not host time or an implicitly converted shared clock. Preview acceptance alone is not positive utility. */
+export interface PickupSupplyObservation {
+  readonly actor: ActorId;
+  readonly offer: PickupSupplyOffer;
+  readonly availability:
+    | { readonly kind: "ready"; readonly eligible: boolean }
+    | { readonly kind: "respawning"; readonly atSeconds: number }
+    | { readonly kind: "inactive" };
+}
+
 /** Supply acceptance only; source touch eligibility and lifecycle remain with the pickup owner. */
 export interface PickupSupplyPreview {
   readonly accepted: boolean;
