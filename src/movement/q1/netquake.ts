@@ -1,3 +1,4 @@
+import { sweepBody } from "../swept-body.ts";
 import { q1WaterTransition } from "./water-transition.ts";
 /* Ported from WinQuake/sv_user.c, sv_phys.c and rerelease donor extensions.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
@@ -55,42 +56,32 @@ class NetQuakeMove {
   }
   private flyMove(time: number): FlyResult {
     const c = this.context, m = c.math, n = m.n, s = this.state;
-    let original = s.velocity;
-    const primal = s.velocity;
-    let planes: Vec3[] = [], blocked = 0, timeLeft = time;
+    let blocked = 0;
     let stepTrace: TraceResult | null = null;
-    for (let bump = 0; bump < 4; bump++) {
-      if (c.removed || (s.velocity.x === 0 && s.velocity.y === 0 && s.velocity.z === 0)) break;
-      const trace = c.trace(s.origin, m.ma(s.origin, timeLeft, s.velocity));
-      if (trace.allSolid) { s.velocity = ZERO; return { blocked: 3, stepTrace }; }
-      if (trace.fraction > 0) { s.origin = trace.end; original = s.velocity; planes = []; }
-      if (trace.fraction === 1) break;
-      if (trace.hit.kind === "none") throw new Error("NetQuake slide trace blocked without a hit");
-      const normal = trace.sourcePlane.normal;
-      if (normal.z > 0.7) {
-        blocked |= 1;
-        if (c.isBsp(trace.hit)) { s.flags |= Q1_FLAG_ONGROUND; s.ground = trace.hit; }
-      }
-      if (normal.z === 0) { blocked |= 2; stepTrace = trace; }
-      this.impact(trace);
-      if (c.removed) break;
-      timeLeft = n.subtract(timeLeft, n.multiply(timeLeft, trace.fraction));
-      if (planes.length >= 5) { s.velocity = ZERO; return { blocked: 3, stepTrace }; }
-      planes.push(normal);
-      let accepted: Vec3 | null = null;
-      for (const plane of planes) {
-        const candidate = m.clip(original, plane, 1);
-        if (planes.every(other => other === plane || m.dot(candidate, other) >= 0)) { accepted = candidate; break; }
-      }
-      if (accepted !== null) s.velocity = accepted;
-      else {
-        const [first, second] = planes;
-        if (planes.length !== 2 || first === undefined || second === undefined) { s.velocity = ZERO; return { blocked: 7, stepTrace }; }
-        const direction = m.cross(first, second);
-        s.velocity = m.scale(direction, m.dot(direction, s.velocity));
-      }
-      if (m.dot(s.velocity, primal) <= 0) { s.velocity = ZERO; break; }
-    }
+    const stop = sweepBody({
+      read: () => c.removed ? null : s,
+      writeOrigin: origin => { s.origin = origin; }, writeVelocity: velocity => { s.velocity = velocity; },
+      trace: (start, end) => c.trace(start, end), stopWhenStill: true,
+      normal: trace => {
+        if (trace.hit.kind === "none") throw new Error("NetQuake slide trace blocked without a hit");
+        return trace.sourcePlane.normal;
+      },
+      samePlane: (first, second) => first === second,
+      impact: (trace, normal) => {
+        if (normal.z > 0.7) {
+          blocked |= 1;
+          if (c.isBsp(trace.hit)) { s.flags |= Q1_FLAG_ONGROUND; s.ground = trace.hit; }
+        }
+        if (normal.z === 0) { blocked |= 2; stepTrace = trace; }
+        this.impact(trace);
+      },
+      math: { advance: (origin, time, velocity) => m.ma(origin, time, velocity),
+        remaining: (time, fraction) => n.subtract(time, n.multiply(time, fraction)),
+        clip: (velocity, normal) => m.clip(velocity, normal, 1), dot: (first, second) => m.dot(first, second),
+        cross: (first, second) => m.cross(first, second), scale: (vector, amount) => m.scale(vector, amount) },
+    }, time);
+    if (stop === "solid" || stop === "plane-limit") blocked = 3;
+    else if (stop === "crease-blocked") blocked = 7;
     return { blocked, stepTrace };
   }
   private pushEntity(push: Vec3): TraceResult {

@@ -1,3 +1,4 @@
+import { sweepBody } from "../../../movement/swept-body.ts";
 import { pushQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { Q1PhysicsEntity, Q1PusherServices } from "../../../movement/q1/types.ts";
 import { touchQ1Triggers } from "../../../world/actors/triggers.ts";
@@ -521,43 +522,27 @@ export class SharedPhysics {
         trace: (start, end, bounds) => this.bodyTrace(actor, start, end, [], newToss, bounds), hitActor: trace => this.hitActor(trace),
         impact: trace => this.impact(actor, trace), takeKillVelocity: () => this.options.takeKillVelocity?.(actor) ?? false });
     }
-    let state = this.bodies.read(actor.id);
-    if (state === null) return undefined;
-    let originalVelocity = state.velocity;
-    const primal = state.velocity, planes: Vec3[] = [];
-    let remaining = elapsed;
+    if (this.bodies.read(actor.id) === null) return undefined;
     this.writeLive(actor, { ground: null });
-    for (let bump = 0; bump < 4; bump++) {
-      state = this.bodies.read(actor.id); if (state === null) return undefined;
-      const trace = this.bodyTrace(actor, state.origin, this.add(state.origin, this.scale(state.velocity, remaining)), [], newToss);
-      if (trace.allSolid) { this.writeLive(actor, { velocity: zero }); return undefined; }
-      if (trace.fraction > 0) { this.writeLive(actor, { origin: trace.end }); originalVelocity = state.velocity; planes.length = 0; }
-      if (trace.fraction === 1) break;
-      const normal = trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal;
-      const hit = this.hitActor(trace), target = hit === null ? null : this.options.actors.resolveOwned(hit);
-      const down = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 };
-      if ((newToss ? normal.z > 0.7 : this.dot(normal, down) < -0.7) && hit !== null && (trace.hit.kind === "world" || target !== null && this.solid(target)?.solid === "brush")) this.writeLive(actor, { ground: hit });
-      this.impact(actor, trace);
-      if (!this.live(actor)) return undefined;
-      remaining = this.n.subtract(remaining, this.n.multiply(remaining, trace.fraction));
-      if (planes.length >= 5) { this.writeLive(actor, { velocity: zero }); return undefined; }
-      planes.push(normal);
-      let velocity: Vec3 | null = null;
-      for (const plane of planes) {
-        const candidate = this.clip(originalVelocity, plane);
-        if (planes.every(other => other === plane || this.family(actor) !== "q1" && other.x === plane.x && other.y === plane.y && other.z === plane.z || this.dot(candidate, other) >= 0)) { velocity = candidate; break; }
-      }
-      if (velocity === null) {
-        const a = planes[0], b = planes[1];
-        if (planes.length !== 2 || a === undefined || b === undefined) velocity = zero;
-        else {
-          const direction = this.vector(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
-          const current = this.bodies.read(actor.id); velocity = current === null ? zero : this.scale(direction, this.dot(direction, current.velocity));
-        }
-      }
-      if (this.dot(velocity, primal) <= 0) { this.writeLive(actor, { velocity: zero }); break; }
-      this.writeLive(actor, { velocity });
-    }
+    sweepBody({
+      read: () => this.live(actor) ? this.bodies.read(actor.id) : null,
+      writeOrigin: origin => { this.writeLive(actor, { origin }); },
+      writeVelocity: velocity => { this.writeLive(actor, { velocity }); },
+      trace: (start, end) => this.bodyTrace(actor, start, end, [], newToss), stopWhenStill: false,
+      normal: trace => trace.contact.kind === "plane" ? trace.contact.plane.normal : trace.sourcePlane.normal,
+      samePlane: (first, second) => first === second || this.family(actor) !== "q1" && first.x === second.x && first.y === second.y && first.z === second.z,
+      impact: (trace, normal) => {
+        const hit = this.hitActor(trace), target = hit === null ? null : this.options.actors.resolveOwned(hit);
+        const down = this.motion(actor)?.gravityVector ?? { x: 0, y: 0, z: -1 };
+        if ((newToss ? normal.z > 0.7 : this.dot(normal, down) < -0.7) && hit !== null && (trace.hit.kind === "world" || target !== null && this.solid(target)?.solid === "brush")) this.writeLive(actor, { ground: hit });
+        this.impact(actor, trace);
+      },
+      math: { advance: (origin, time, velocity) => this.add(origin, this.scale(velocity, time)),
+        remaining: (time, fraction) => this.n.subtract(time, this.n.multiply(time, fraction)),
+        clip: (velocity, normal) => this.clip(velocity, normal), dot: (first, second) => this.dot(first, second),
+        cross: (a, b) => this.vector(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x),
+        scale: (vector, amount) => this.scale(vector, amount) },
+    }, elapsed);
     return undefined;
   }
   waterTransition(actor: OwnedActor, previousOrigin: Vec3): undefined {

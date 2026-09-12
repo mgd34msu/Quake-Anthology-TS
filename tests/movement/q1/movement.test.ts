@@ -1,3 +1,5 @@
+import { sweepBody } from "../../../src/movement/swept-body.ts";
+import { MovementMath } from "../../../src/movement/q1/common.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -253,4 +255,34 @@ test.skipIf(!existsSync(resolve(root, q1.path)))("NetQuake client think follows 
     link: () => { throw new Error("Removed client was linked"); }, afterPhysics: () => { throw new Error("Removed client reached PostThink"); }, isBsp: () => false,
   } });
   expect(removed.status).toBe("actor-removed");
+});
+
+
+test("shared sweep uses stored source planes and rereads impact velocity for the crease", () => {
+  const m = new MovementMath(createNumericOperations(Q1_DONOR_PROFILE));
+  for (const remove of [false, true]) {
+    let origin: Vec3 = zero, velocity: Vec3 = { x: 2, y: 2, z: 2 }, live = true, traces = 0, writes = 0;
+    const stop = sweepBody({
+      read: () => live ? { origin, velocity } : null,
+      writeOrigin: value => { origin = value; }, writeVelocity: value => { velocity = value; writes++; },
+      stopWhenStill: true, samePlane: (a, b) => a === b,
+      trace: (start, end) => {
+        traces++;
+        const fraction = traces === 1 ? 0.25 : traces === 2 ? 0 : 1;
+        return { kind: "q1", fraction, end: m.ma(start, fraction, m.sub(end, start)), startSolid: false, allSolid: false,
+          hit: fraction === 1 ? { kind: "none" } : { kind: "world", model: 0 }, inOpen: true, inWater: false,
+          contact: { kind: "plane", plane: { normal: { x: 0, y: 0, z: -1 }, distance: 0 } },
+          sourcePlane: { normal: traces === 1 ? { x: -1, y: 0, z: 0 } : { x: 0, y: -1, z: 0 }, distance: 0 } };
+      },
+      normal: trace => trace.sourcePlane.normal,
+      impact: () => { if (remove) live = false; else if (traces === 2) velocity = { x: 0, y: 0, z: 7 }; },
+      math: { advance: (start, time, speed) => m.ma(start, time, speed), remaining: (time, fraction) => m.n.subtract(time, m.n.multiply(time, fraction)),
+        clip: (speed, normal) => m.clip(speed, normal, 1), dot: (a, b) => m.dot(a, b), cross: (a, b) => m.cross(a, b), scale: (v, amount) => m.scale(v, amount) },
+    }, 1);
+    expect(stop).toBe(remove ? "removed" : "complete");
+    expect(traces).toBe(remove ? 1 : 3);
+    expect(writes).toBe(remove ? 0 : 2);
+    expect(origin).toEqual(remove ? { x: 0.5, y: 0.5, z: 0.5 } : { x: 0.5, y: 0.5, z: 5.75 });
+    expect(velocity).toEqual(remove ? { x: 2, y: 2, z: 2 } : { x: 0, y: 0, z: 7 });
+  }
 });
