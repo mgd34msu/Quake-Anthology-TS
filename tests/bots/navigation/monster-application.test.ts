@@ -1,3 +1,8 @@
+import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
+import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
+import { q1MonsterSources } from "../../../src/content/monsters/q1.ts";
+import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
+import { readSelectedMonstersCheckpoint } from "../../../src/app/bootstrap/simulation/monster-checkpoint.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -64,4 +69,108 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 
       mapBytes: start.bytes, navigationContent: start.reference.provenance.mount.identity.content });
     expect(prepared.asset).toBeNull();
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 30000);
+
+async function openSelectedId1(map: string) {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", map, "--dedicated", "--mode", "singleplayer"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 application options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const classic = q1MonsterSources.find(source => source.edition === "classic");
+  if (classic === undefined) throw new Error("Missing classic Q1 creatures");
+  const source = { provider: classic.provider, content: catalog.require("q1-classic-id1").id };
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: {
+    kind: "replace", default: { source, classname: "monster_army" },
+    byClassname: Object.fromEntries(Object.keys(classic.creatures).map(classname => [classname, { source, classname }])),
+  } } } });
+  return Application.open(command.options, { print: () => undefined }, recipe);
+}
+function selectedId1(application: Application) {
+  const checkpoint = simulationProviderCheckpoint(application.simulation.checkpoint(), "world:simulation");
+  const selected = readSelectedMonstersCheckpoint(new SaveReader(decodeCheckpointValue(checkpoint.bytes)).field("selectedMonsters"));
+  const source = selected.sources.find(source => source.kind === "q1");
+  if (source === undefined || source.kind !== "q1") throw new Error("Missing selected Q1 source checkpoint");
+  return { authored: selected.authored, source };
+}
+
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected Q1 ogre attacks through shared physics and restores a live grenade", async () => {
+  const application = await openSelectedId1("e1m2"), directory = await mkdtemp(join(tmpdir(), "q1-selected-roster-"));
+  try {
+    const classic = q1MonsterSources.find(source => source.edition === "classic");
+    if (classic === undefined) throw new Error("Missing classic Q1 source");
+    const resources = await application.content.forContent(application.content.catalog.require("q1-classic-id1").id);
+    for (const path of new Set(Object.values(classic.creatures).flatMap(creature => creature.resources))) {
+      expect(await resources.open(path)).not.toBeNull();
+    }
+    expect(Object.hasOwn(classic.creatures, "monster_fish")).toBe(false);
+    expect(Object.hasOwn(classic.creatures, "monster_boss")).toBe(false);
+    expect(Object.hasOwn(classic.creatures, "monster_oldone")).toBe(false);
+    const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
+    for (let frame = 0; frame < 15; frame++) await application.step(100);
+    const selected = selectedId1(application);
+    expect(selected.authored.length).toBeGreaterThan(0);
+    for (const entry of selected.authored) {
+      expect(entry.definition.classname).toBe(entry.classname);
+      const actor = application.simulation.actors.resolveSaved(entry.actor);
+      if (actor === null) throw new Error("Missing shared authored actor");
+      expect(actor.owner).toBe(application.content.recipe.map.entities.provider);
+      expect(application.simulation.actors.observe(actor.id)?.definition).toBe(`${classic.provider}/${entry.classname}`);
+      expect(application.simulation.bodies.read(actor.id)).not.toBeNull();
+    }
+    const ogre = selected.source.entities.entities.find(entity => entity.classname === "monster_ogre");
+    if (ogre === undefined) throw new Error("Authored ogre missing");
+    const ogreActor = application.simulation.actors.resolveSaved(ogre.actor), player = application.simulation.actors.resolveOwned(human.actor);
+    if (ogreActor === null || player === null) throw new Error("Missing shared actors");
+    const body = application.simulation.bodies.read(ogreActor.id), playerBody = application.simulation.bodies.read(player.id);
+    if (body === null || playerBody === null) throw new Error("Missing bodies");
+    application.simulation.bodies.write(player, { ...playerBody, origin: { ...body.origin, x: body.origin.x + 300 } });
+    application.simulation.bodies.link(player);
+    application.simulation.combat.setHealth(player, 10000);
+    let grenade = selectedId1(application).source.entities.entities.find(entity => entity.classname === "ogre_grenade" && entity.callbacks.touch === "base:ogre_grenade_touch");
+    for (let frame = 0; frame < 50 && grenade === undefined; frame++) {
+      await application.step(100);
+      grenade = selectedId1(application).source.entities.entities.find(entity => entity.classname === "ogre_grenade" && entity.callbacks.touch === "base:ogre_grenade_touch");
+    }
+    if (grenade === undefined) throw new Error("Authored ogre did not naturally launch a grenade");
+    expect(grenade.owner).toEqual(ogre.actor);
+    expect(grenade.callbacks.think).toBe("base:ogre_grenade_explode");
+    const grenadeActor = application.simulation.actors.resolveSaved(grenade.actor);
+    if (grenadeActor === null) throw new Error("Grenade has no shared actor");
+    const grenadeBody = application.simulation.bodies.read(grenadeActor.id);
+    expect(grenadeBody).not.toBeNull();
+    const save = join(directory, "grenade.sav");
+    await application.saveGame(save);
+    const beforeHealth = application.simulation.combat.read(player.id)?.health;
+    for (let frame = 0; frame < 8; frame++) await application.step(100);
+    const afterHealth = application.simulation.combat.read(player.id)?.health;
+    expect(afterHealth).toBeLessThan(beforeHealth ?? 0);
+    const continued = selectedId1(application).source.entities.entities.map(entity => ({ slot: entity.actor.slot, classname: entity.classname, state: entity.state, callbacks: entity.callbacks }));
+    await application.loadGame(save);
+    const restored = selectedId1(application), restoredGrenade = restored.source.entities.entities.find(entity => entity.actor.slot === grenade.actor.slot);
+    expect(restoredGrenade?.callbacks).toEqual(grenade.callbacks);
+    const restoredActor = application.simulation.actors.observations().find(actor => actor.id.slot === grenade.actor.slot);
+    if (restoredActor === undefined) throw new Error("Restored grenade actor missing");
+    expect(application.simulation.bodies.read(restoredActor.id)).toEqual(grenadeBody);
+    for (let frame = 0; frame < 8; frame++) await application.step(100);
+    const restoredPlayer = application.simulation.players()[0];
+    if (restoredPlayer === undefined) throw new Error("Restored player missing");
+    expect(application.simulation.combat.read(restoredPlayer)?.health).toBe(afterHealth);
+    expect(selectedId1(application).source.entities.entities.map(entity => ({ slot: entity.actor.slot, classname: entity.classname, state: entity.state, callbacks: entity.callbacks }))).toEqual(continued);
+    const mapSource = application.simulation.q1Source(), restoredOgre = application.simulation.actors.observations().find(actor => actor.id.slot === ogre.actor.slot);
+    if (mapSource === null || restoredOgre === undefined) throw new Error("Missing restored authored ogre");
+    const kills = mapSource.game.killedMonsters, health = application.simulation.combat.read(restoredOgre.id)?.health;
+    if (health === undefined) throw new Error("Ogre health missing");
+    mapSource.game.damage(restoredOgre.id, restoredPlayer, restoredPlayer, health + 1);
+    expect(mapSource.game.killedMonsters).toBe(kills + 1);
+    expect(selectedId1(application).authored.find(entry => entry.actor.slot === ogre.actor.slot)?.countedDeath).toBe(true);
+    for (let frame = 0; frame < 5; frame++) await application.step(100);
+    expect(selectedId1(application).source.entities.entities.some(entity => entity.classname === "item_backpack")).toBe(true);
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 30000);
+
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 keeps obstructed authored wizard placement rejected", async () => {
+  const application = await openSelectedId1("e1m3");
+  try {
+    await expect((async () => { for (let frame = 0; frame < 15; frame++) await application.step(100); })()).rejects.toThrow(
+      "Selected monster placement obstructed in maps/e1m3.bsp: source 383 monster_wizard -> q1:monsters/classic/id1/monster_wizard");
+  } finally { await application.close(); }
 }, 30000);
