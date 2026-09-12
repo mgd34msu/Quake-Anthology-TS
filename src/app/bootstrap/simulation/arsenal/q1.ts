@@ -100,7 +100,8 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to a different provider");
     if (intent?.weapon != null && !WEAPONS.some(weapon => this.options.game.weaponItem(weapon) === intent.weapon))
       throw new Error("Weapon does not belong to the selected Q1 product");
-    if (intent?.weapon != null) this.select(input.actor.id, intent.weapon);
+    if (intent?.weapon != null && this.options.game.weaponItem(this.require(input.actor.id).weapon) !== intent.weapon)
+      this.select(input.actor.id, intent.weapon);
     const before = this.read(input.actor.id), observation = this.options.observe(input.actor.id);
     const seconds = input.frame.time.kind === "seconds" ? input.frame.time.value : input.frame.time.value / 1000;
     const pressed = (input.command.buttons & 1) !== 0 && (input.command.kind !== "q3" || (input.command.buttons & CommandButtons.TALK) === 0);

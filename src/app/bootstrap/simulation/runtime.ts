@@ -2287,6 +2287,10 @@ export class SharedSimulation implements Simulation {
   }
   get sourceEntityText(): string { return this.options.world.entities; }
 
+  q1WeaponSource(): { readonly game: Q1EntityServices } | null {
+    if (this.selectedArsenal !== null) return this.selectedArsenal.family === "q1" && this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource : null;
+    return this.source.kind === "q1" ? this.source : null;
+  }
   q2WeaponSource(): { readonly game: Q2EntityServices; readonly weapons: Q2Weapons } | null {
     if (this.selectedArsenal !== null) return this.selectedArsenal.family === "q2" && this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
     return this.source.kind === "q2" ? this.source : null;

@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
+import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import type { ItemId } from "../../../src/contracts/gameplay.ts";
 
 test("Q1 force_retouch links players without a source entity and runs the actual map pickup", async () => {
@@ -111,4 +112,55 @@ test("native Q2 weapon intents select and fire while retaining source pending se
     expect(native.pending).toBeNull();
     expect(simulation.inventory.count(actor, "q2:ammo_shells")).toBeLessThan(10);
   } finally { simulation.close(); await content.close(); }
+});
+
+test("selected Q1 repeated desired weapon intents preserve native continuous fire on Q2", async () => {
+  const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q1", "--mode", "deathmatch"]);
+  if (command.kind !== "run") throw new Error("Expected native Q1 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q1:official", content: catalog.require("q1-classic-id1").id },
+  ] } } });
+  const content = await loadApplicationContent(command.options, recipe);
+  try {
+    const exercise = (repeatSelection: boolean) => {
+      const identity = createIdentityOwner(`q1-selected-intent-${repeatSelection}`);
+      const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+        skill: 0, mode: "deathmatch", seed: 17, maxClients: 1 });
+      try {
+        const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor;
+        const source = simulation.q1WeaponSource(), movement = simulation.movementPlayer(actor);
+        const native = source?.game.player(actor);
+        if (source === null || movement === null || native == null) throw new Error("Missing native Q1 player");
+        for (const item of ["q1:weapon/nailgun", "q1:weapon/lightning"] satisfies readonly ItemId[]) simulation.inventory.give(movement.actor, item, 1);
+        simulation.inventory.give(movement.actor, "q1:ammo/nails", 40);
+        simulation.inventory.give(movement.actor, "q1:ammo/cells", 40);
+        let sequence = 0;
+        const step = (weapon: ItemId | null, attack: boolean, impulse = 0) => simulation.step({ elapsedMilliseconds: 100, commands: [{
+          actor, source: { kind: "remote-client", client }, sequence: sequence++,
+          command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: movement.viewAngles,
+            forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse },
+          arsenal: { provider: movement.arsenal.provider, weapon, useHoldable: false },
+        }] });
+        const timeline: { weapon: string; frame: number; continuous: boolean; deadline: number; nextFrame: number; ammo: number }[] = [];
+        for (const [weapon, ammo] of [["q1:weapon/nailgun", "q1:ammo/nails"], ["q1:weapon/lightning", "q1:ammo/cells"]] satisfies readonly (readonly [ItemId, ItemId])[]) {
+          for (let frame = 0; frame < 4; frame++) {
+            step(frame === 0 || repeatSelection ? weapon : null, true);
+            timeline.push({ weapon: native.weapon, frame: native.weaponFrame, continuous: native.continuousFiring,
+              deadline: native.attackFinished, nextFrame: native.nextWeaponFrame, ammo: simulation.inventory.count(actor, ammo) });
+          }
+          expect(simulation.inventory.count(actor, ammo)).toBeLessThan(40);
+        }
+        expect(native.weapon).toBe("lightning");
+        expect(simulation.q1Source()).toBeNull();
+        expect(source.game.entity(actor)).toBeNull();
+        return timeline;
+      } finally { simulation.close(); }
+    };
+    const once = exercise(false), repeated = exercise(true);
+    expect(repeated).toEqual(once);
+    expect(once.some(frame => frame.weapon === "nailgun" && frame.continuous && frame.frame > 1)).toBe(true);
+    expect(once.some(frame => frame.weapon === "lightning" && frame.continuous && frame.frame > 1)).toBe(true);
+  } finally { await content.close(); }
 });
