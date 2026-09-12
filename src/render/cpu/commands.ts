@@ -18,6 +18,10 @@ export class CpuRenderTarget {
   private operations(operations: readonly RenderOperation[]): void {
     for (const operation of operations) {
       if (operation.kind === "draw") for (const batch of operation.batches) this.backend.draw(batch);
+      else if (operation.kind === "object-opacity") this.backend.withObjectOpacity(operation.opacity, () => {
+        for (const batch of operation.batches) this.backend.draw(batch);
+        return undefined;
+      });
       else this.backend.drawImmediate(operation);
     }
   }

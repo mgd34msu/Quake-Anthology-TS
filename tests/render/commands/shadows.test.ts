@@ -23,7 +23,10 @@ test("cone and cube depth producers shadow the receiver and rebuild moving caste
         shadow: { kind: "cast", resolution: 128 } } };
     const prepared = shadows.prepare([light], [], [caster]);
     for (const operation of images.drainOperations()) renderer.applyImageResource(operation);
-    for (const operation of prepared.operations) if (operation.kind !== "draw") renderer.drawImmediate(operation);
+    for (const operation of prepared.operations) {
+      if (operation.kind !== "depth-atlas") throw new Error("Shadow preparation must produce depth atlas operations");
+      renderer.drawImmediate(operation);
+    }
     expect(prepared.stats.facesRendered).toBe(kind === "cone" ? 1 : 6);
     const receiver = [{ x: -64, y: -64, z: 0 }, { x: 64, y: -64, z: 0 }, { x: 64, y: 64, z: 0 }, { x: -64, y: 64, z: 0 }];
     const batch: DrawBatch = { primitive: "triangles", texturing: "single", indices, texture: { kind: "bind-image", image: white },
@@ -48,7 +51,10 @@ test("cone and cube depth producers shadow the receiver and rebuild moving caste
     const moved = shadowCaster({ x: 80, y: 0, z: 32 }, [{ ...blocker, positions: blocker.positions.map(point => ({ ...point, x: point.x + 80 })) }]);
     const rebuilt = shadows.prepare([light], [], [moved]);
     expect(rebuilt.stats.rebuiltLights).toBe(1);
-    for (const operation of rebuilt.operations) if (operation.kind !== "draw") renderer.drawImmediate(operation);
+    for (const operation of rebuilt.operations) {
+      if (operation.kind !== "depth-atlas") throw new Error("Shadow preparation must produce depth atlas operations");
+      renderer.drawImmediate(operation);
+    }
     renderer.beginView({ viewport: { x: 0, y: 0, width: 64, height: 64 }, clipPlane: null, clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false } });
     renderer.draw(batch);
     expect(renderer.pixels[(32 * 64 + 32) * 4]).toBeGreaterThan(20);
@@ -78,7 +84,10 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL draws the shared cone and
   const prepared = shadows.prepare([point, cone], [{ positions: [{ x: -16, y: -16, z: 32 }, { x: 16, y: -16, z: 32 },
     { x: 16, y: 16, z: 32 }, { x: -16, y: 16, z: 32 }], indices }], []);
   for (const operation of images.drainOperations()) renderer.applyImageResource(operation);
-  for (const operation of prepared.operations) if (operation.kind !== "draw") renderer.drawImmediate(operation);
+  for (const operation of prepared.operations) {
+    if (operation.kind !== "depth-atlas") throw new Error("Shadow preparation must produce depth atlas operations");
+    renderer.drawImmediate(operation);
+  }
   const positions = [{ x: -64, y: -64, z: 0 }, { x: 64, y: -64, z: 0 }, { x: 64, y: 64, z: 0 }, { x: -64, y: 64, z: 0 }];
   const batch: DrawBatch = { primitive: "triangles", texturing: "single", indices, texture: { kind: "bind-image", image: white },
     state: { ...CPU_OPAQUE_STATE, cull: "none" }, lighting: { kind: "q2-world", worldPositions: positions,

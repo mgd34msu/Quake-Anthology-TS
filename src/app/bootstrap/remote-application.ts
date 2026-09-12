@@ -6,7 +6,7 @@ import type { SimulationOutput } from "../../contracts/session.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import type { IpAddress } from "../../network/common/endpoint.ts";
 import { addressKey, resolveAddress } from "../../network/common/endpoint.ts";
-import { Q2_DATAGRAM_LIMITS, UdpTransport } from "../../network/common/transport.ts";
+import { Q2_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS, UdpTransport } from "../../network/common/transport.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
@@ -21,6 +21,9 @@ import type { UnhandledApplicationEffect } from "./effects.ts";
 import { ApplicationInput } from "./input.ts";
 import type { LocalPlayer } from "./input.ts";
 import { readMenuArt } from "./menu-art.ts";
+import { Q1ClientNetwork } from "./network/q1-client.ts";
+import { Q1RemotePresentation } from "./network/remote-q1.ts";
+import type { Q1RemoteWorld } from "./network/remote-q1.ts";
 import { Q2ClientNetwork } from "./network/q2.ts";
 import { q2ApplicationLayout } from "./network/q2-layout.ts";
 import { Q2RemotePresentation } from "./network/remote.ts";
@@ -42,10 +45,10 @@ interface RemoteWorldFrontend {
 }
 interface RemoteCommand { readonly name: string; readonly args: readonly string[]; readonly seat: SeatId | null; }
 
-/** One native seat presents received Q2 state; its session has no authoritative world. */
+/** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
-  readonly remote: Q2RemotePresentation;
-  private readonly network: Q2ClientNetwork<IpAddress>;
+  readonly remote: Q2RemotePresentation | Q1RemotePresentation;
+  private readonly network: Q2ClientNetwork<IpAddress> | Q1ClientNetwork;
   private frontend: RemoteWorldFrontend | null = null;
   private controls: ApplicationInput | null = null;
   private presentation: WorldSeatPresentation | null = null;
@@ -62,34 +65,46 @@ export class RemoteApplication {
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
-    transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
-    this.remote = new Q2RemotePresentation({ identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
-      userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
-      print: text => { this.print(text); },
-      sendCommand: text => { this.network.command(text); }, loadContent: state => this.loadServerWorld(state) });
-    this.network = new Q2ClientNetwork({ transport, remote: address, host: this.remote,
-      qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
+    private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
+    if (launchOptions.network.kind === "q1-client") {
+      const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
+        print: text => this.print(text), sendCommand: text => this.network.command(text),
+        loadContent: world => this.loadServerWorld(world) });
+      this.remote = remote;
+      this.network = new Q1ClientNetwork({ transport, remote: address, host: remote,
+        seat: { name: "Player", color: 0, spawnParameters: "", extensionFlags: null } });
+    } else {
+      const remote = new Q2RemotePresentation({ identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
+        userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
+        print: text => this.print(text), sendCommand: text => this.network.command(text),
+        loadContent: state => this.loadQ2ServerWorld(state) });
+      this.remote = remote;
+      this.network = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
+    }
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost): Promise<RemoteApplication> {
-    if (options.network.kind !== "q2-client") throw new Error("RemoteApplication requires --connect-q2 ADDRESS");
-    if (options.dedicated || options.seats !== 1 || options.movement !== "q2" || options.character !== "q2")
-      throw new Error("Native Q2 remote play requires one graphical seat with Q2 movement and character providers");
-    if (!["male", "female", "cyborg"].includes(options.characterModel))
+    const q1 = options.network.kind === "q1-client";
+    if (!q1 && options.network.kind !== "q2-client") throw new Error("RemoteApplication requires a native connect address");
+    const family = q1 ? "q1" : "q2";
+    if (options.dedicated || options.seats !== 1 || options.movement !== family || options.character !== family)
+      throw new Error(`Native ${family} remote play requires one graphical seat with matching movement and character providers`);
+    if (!q1 && !["male", "female", "cyborg"].includes(options.characterModel))
       throw new Error("Remote Q2 character selection requires an installed male, female or cyborg player appearance");
-    const address = await resolveAddress(options.network.remote, 27910);
+    if (options.network.kind !== "q1-client" && options.network.kind !== "q2-client") throw new Error("Missing remote address");
+    const address = await resolveAddress(options.network.remote, q1 ? 26000 : 27910);
     const content = await loadApplicationContent(options);
     const identity = createIdentityOwner(`quake:remote:${addressKey(address)}`), session = new EngineSession(identity, { kind: "local" });
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null;
     try {
       const product = content.catalog.product(options.product);
-      if (product.expectation.family !== "q2" || product.expectation.edition === "rerelease")
-        throw new Error("Remote application presentation currently requires classic Quake II protocol 34 content");
+      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1")
+        throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34 content");
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
-      transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: Q2_DATAGRAM_LIMITS });
+      transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       application = new RemoteApplication(options, content, session, renderer, host, transport, address, identity);
       application.frontend = await application.loadFrontend(content);
-      host.print(`Connecting to Quake II server ${addressKey(address)}.\n`);
+      host.print(`Connecting to ${q1 ? "Quake" : "Quake II"} server ${addressKey(address)}.\n`);
       return application;
     } catch (error) {
       if (application !== null) await application.close();
@@ -103,7 +118,7 @@ export class RemoteApplication {
   get frameCount(): number { return this.frames; }
   get timeMilliseconds(): number { return this.elapsed; }
   get window(): NativeRenderer["window"] { return this.renderer.window; }
-  get networkAddress(): IpAddress { return this.network.options.transport.address; }
+  get networkAddress(): IpAddress { return this.transport.address; }
   get networkPhase(): ApplicationNetworkPhase { return this.network.phase; }
   get localPlayers(): readonly LocalPlayer[] { return this.controls?.locals.map(local => local.player) ?? []; }
   get presentationEvents(): readonly SimulationPresentationEvent[] { return this.sourceEvents; }
@@ -141,10 +156,16 @@ export class RemoteApplication {
       commands: frontend.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
   }
 
-  private async loadServerWorld(state: Q2ApplicationGameState): Promise<LoadedApplicationContent> {
+  private async loadQ2ServerWorld(state: Q2ApplicationGameState): Promise<LoadedApplicationContent> {
+    const layout = q2ApplicationLayout({ kind: "q2-classic", version: 34 });
+    const map = state.configStrings.get(layout.models + 1);
+    if (map === undefined) throw new Error("Q2 server supplied no world model");
+    const names = (first: number, maximum: number): string[] => Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
+    return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) });
+  }
+  private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }): Promise<LoadedApplicationContent> {
     this.controls?.stopHaptics();
-    const layout = q2ApplicationLayout(this.remote.protocol), path = state.configStrings.get(layout.models + 1);
-    if (path === undefined) throw new Error("Q2 server supplied no world model");
+    const path = world.map;
     const map = mapResourcePath(path);
     if (this.presentation !== null) this.uiPreferences = { ...this.presentation.ui.preferences.values };
     const differentMap = map !== this.content.recipe.map.geometry.requestedPath;
@@ -168,24 +189,21 @@ export class RemoteApplication {
     const frontend = this.frontend;
     if (frontend === null) throw new Error("Remote frontend has not loaded");
     const provider = await frontend.assets.provider(this.content.recipe.map.entities.content);
-    for (let index = 2; index < layout.maxModels; index++) {
-      const model = state.configStrings.get(layout.models + index);
-      if (model === undefined || model.length === 0 || model.startsWith("#")) continue;
+    for (const model of world.models) {
+      if (model === path || model.startsWith("#")) continue;
       const asset = await frontend.assets.model(this.content.recipe.map.entities.content, model);
       this.remote.registerResource(this.content.recipe.map.entities.content, model, asset.resource);
     }
-    for (let index = 1; index < layout.maxSounds; index++) {
-      const sound = state.configStrings.get(layout.sounds + index);
-      if (sound === undefined || sound.length === 0 || sound.startsWith("*")) continue;
+    for (const sound of world.sounds) {
+      if (sound.startsWith("*")) continue;
       const path = sound.startsWith("#") ? sound.slice(1) : `sound/${sound}`;
-      if (await provider.mounts.open(path) === null) throw new Error(`Server sound is absent from mounted content: ${path}`);
+      const resource = await provider.mounts.resolve(path);
+      if (resource === null) throw new Error(`Server sound is absent from mounted content: ${path}`);
+      this.remote.registerResource(this.content.recipe.map.entities.content, path, resource);
     }
-    for (let index = 1; index < layout.maxImages; index++) {
-      const image = state.configStrings.get(layout.images + index);
-      if (image === undefined || image.length === 0) continue;
+    for (const image of world.images ?? []) {
       const path = image.startsWith("/") || image.startsWith("\\") ? image.slice(1) : `pics/${image}.pcx`;
-      if (await provider.textures.load(path, { mipmap: false, wrap: "clamp" }) === null)
-        throw new Error(`Server image is absent from mounted content: ${path}`);
+      if (await provider.textures.load(path, { mipmap: false, wrap: "clamp" }) === null) throw new Error(`Server image is absent from mounted content: ${path}`);
     }
     this.commands = [];
     this.sourceEvents = [];
@@ -245,8 +263,8 @@ export class RemoteApplication {
     const timing = this.content.recipe.timing.find(timing => timing.provider === this.content.recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Remote world has no numeric profile for camera contents");
     const contents = scene.pointContents({ point: camera.origin, target: { kind: "world" }, passActor: actor, numeric: timing.numeric,
-      policy: { kind: "q2", contentsMask: -1, leafContents: "merged" } });
-    return contents.kind === "q2" && (contents.merged & 56) !== 0;
+      policy: this.options.network.kind === "q1-client" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: -1, leafContents: "merged" } });
+    return contents.kind === "q1" ? contents.contents <= -3 && contents.contents >= -5 : contents.kind === "q2" && (contents.merged & 56) !== 0;
   }
 
   async step(elapsedMilliseconds: number): Promise<SimulationOutput | null> {

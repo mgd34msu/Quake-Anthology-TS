@@ -1,3 +1,5 @@
+import { registerServerSettingsMenu } from "../../ui/settings/server.ts";
+import type { HostServerSettingsUi } from "../../ui/settings/server.ts";
 import type { CommonHudData } from "../../ui/hud/index.ts";
 import { ApplicationWeaponHudAssets } from "./weapon-hud.ts";
 import type { ApplicationAssets } from "./assets.ts";
@@ -35,6 +37,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly menuText: UiTextRenderer;
   private readonly match: Q2MatchUi;
   private readonly settings: SettingsMenus;
+  private readonly serverSettings: SettingsMenus | null;
   private readonly bindings: ReturnType<typeof registerBindingMenus>;
   private readonly disposeInput: () => void;
   private readonly disposeMenu: () => void;
@@ -50,7 +53,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi) {
     const seat = local.player.seat.id;
     this.now = input.now;
     this.measureHudText = (text, scale) => layoutText({ text, font, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
@@ -83,7 +86,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } });
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
-    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
+    this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
+    const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
+      enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
       write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
@@ -166,5 +172,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

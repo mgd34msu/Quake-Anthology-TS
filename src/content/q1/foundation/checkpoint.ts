@@ -35,7 +35,7 @@ export interface Q1SavedEntity {
 export interface Q1SavedPlayer {
   readonly actorProvider: ProviderId;
   readonly actor: SavedActorId;
-  readonly state: Omit<Q1PlayerState, "actor" | "powerups">;
+  readonly state: Omit<Q1PlayerState, "actor" | "powerups" | "alpha" | "scale"> & { readonly alpha?: number; readonly scale?: number };
   readonly powerups: readonly { readonly kind: Q1Powerup; readonly expires: number }[];
 }
 export interface Q1FoundationCheckpoint {
@@ -155,7 +155,7 @@ export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1Foundati
     if (game.players.has(actor)) throw new Error("Duplicate saved Q1 player");
     const powerups = new Map<Q1Powerup, number>();
     for (const powerup of saved.powerups) powerups.set(powerup.kind, powerup.expires);
-    game.players.set(actor, { ...saved.state, viewAngles: { ...saved.state.viewAngles }, actor, powerups });
+    game.players.set(actor, { ...saved.state, alpha: saved.state.alpha ?? 0, scale: saved.state.scale ?? 0, viewAngles: { ...saved.state.viewAngles }, actor, powerups });
   }
   game.time = checkpoint.time; game.frameSeconds = checkpoint.frameSeconds; game.forceRetouch = checkpoint.forceRetouch;
   game.basis = { forward: { ...checkpoint.basis.forward }, right: { ...checkpoint.basis.right }, up: { ...checkpoint.basis.up } }; game.totalSecrets = checkpoint.totalSecrets; game.foundSecrets = checkpoint.foundSecrets;

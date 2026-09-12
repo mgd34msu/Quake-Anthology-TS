@@ -7,6 +7,7 @@ import { parseEnvironments } from "../../audio/environments.ts";
 import type { AudioTraceQuery, ReverbEnvironment } from "../../audio/environments.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
 import { SoundBank, UnifiedAudio } from "../../audio/index.ts";
+import { sourceSoundChannel } from "../../audio/types.ts";
 import type { AudioAudience, AudioListener, LoopSound, SoundAsset } from "../../audio/index.ts";
 import { GameRandom } from "../../core/game-numeric.ts";
 import { EntityEvent } from "../../movement/q3/constants.ts";
@@ -255,7 +256,11 @@ export class ApplicationAudio {
         const event = source.event;
         if (event.kind === "sound") {
           const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
-          await this.play(source.content, "q1", event.path, event.actor, null, channel, event.volume, event.attenuation);
+          await this.play(source.content, "q1", event.path, event.actor, event.origin ?? null, channel, event.volume, event.attenuation);
+        } else if (event.kind === "stop-sound") {
+          const command = sourceSoundChannel("q1", event.channel);
+          if (command.kind === "replace-actor") throw new Error("NetQuake stop sound requires a nonnegative channel");
+          this.engine.stopSound(event.actor, command.kind === "auto" ? null : command.channel);
         } else if (event.kind === "ambient") {
           const sound = await this.sound(source.content, event.path, "q1");
           if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ sound, origin: event.origin,

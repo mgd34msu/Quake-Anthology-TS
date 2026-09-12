@@ -180,7 +180,7 @@ export class UnifiedAudio {
             this.options.onSound?.(request);
         return playing;
     }
-    stopSound(actor: ActorId, channel: SharedSoundChannel): void {
+    stopSound(actor: ActorId, channel: SharedSoundChannel | null): void {
         const entity = this.entity(actor);
         for (const state of this.seats) {
             state.mixer.stopSharedChannel(entity, channel);

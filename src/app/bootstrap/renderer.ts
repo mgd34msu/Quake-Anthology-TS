@@ -89,6 +89,10 @@ export class NativeRenderer {
   private operations(operations: readonly RenderOperation[]): void {
     for (const operation of operations) {
       if (operation.kind === "draw") for (const batch of operation.batches) this.draw(batch);
+      else if (operation.kind === "object-opacity") this.current.withObjectOpacity(operation.opacity, () => {
+        for (const batch of operation.batches) this.draw(batch);
+        return undefined;
+      });
       else this.current.drawImmediate(operation);
     }
   }

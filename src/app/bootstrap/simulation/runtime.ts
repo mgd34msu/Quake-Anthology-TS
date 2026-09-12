@@ -2674,6 +2674,9 @@ export class SharedSimulation implements Simulation {
     for (const actor of this.weaponSlots.keys()) { const projection = this.slotProjection(actor, models.find(model => model.viewWeapon && sameActor(model.actor, actor)) ?? null); if (projection.model !== null) result.push(projection.model); }
     return result;
   }
+  private q1VisualFields(alpha: number, scale: number): { readonly alpha: number; readonly scale: number } {
+    return { alpha: alpha === 0 ? 1 : Math.max(0, Math.min(1, Math.fround(alpha))), scale: scale === 0 ? 1 : Math.fround(scale) };
+  }
   private primaryPresentations(): readonly SimulationPresentation[] {
     const result: SimulationPresentation[] = [];
     if (this.source.kind === "q3") result.push(...this.source.game.presentations());
@@ -2687,8 +2690,7 @@ export class SharedSimulation implements Simulation {
         if (entity.model === this.recipe.map.geometry.requestedPath) continue;
         result.push({ actor: entity.actor.id, content: entry.content, family: "q1", path: entity.model,
           frame: entity.frame, oldFrame: entity.frame, skin: entity.skin, effects: entity.effects, renderFlags: 0,
-          origin: body.origin, angles: body.angles, alpha: alpha === 0 ? 1 : Math.max(0, Math.min(1, alpha)),
-          scale: scale === 0 ? 1 : scale, visible: true, viewWeapon: false });
+          origin: body.origin, angles: body.angles, ...this.q1VisualFields(alpha, scale), visible: true, viewWeapon: false });
       } else {
         const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
         if (entity.classname === "worldspawn") continue;
@@ -2704,10 +2706,12 @@ export class SharedSimulation implements Simulation {
       if (player.character === "q3" || player.intermission || player.cutscene !== null) continue;
       const body = this.bodies.read(player.actor.id); if (body === null) continue;
       const model = this.recipe.character.appearance.provider.split("/").at(-1) ?? "male";
+      const q1Player = this.source.kind === "q1" ? this.source.game.player(player.actor.id) : null;
+      const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       result.push({ actor: player.actor.id, content: this.recipe.character.appearance.content, family: player.character,
         path: this.q2Characters.get(player.actor)?.entity.model ?? (this.q1Characters.get(player.actor)?.presentation.model ?? (player.character === "q1" ? "progs/player.mdl" : `players/${model}/tris.md2`)), skinPath: player.character === "q2" ? `players/${model}/grunt.pcx` : null,
         frame: this.q2Characters.get(player.actor)?.entity.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: 0,
-        skin: 0, effects: 0, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false });
+        skin: 0, effects: 0, renderFlags: 0, origin: body.origin, angles: body.angles, ...visual, visible: true, viewWeapon: false });
     }
     for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
       frame: 0, oldFrame: 0, skin: 0, effects: 2, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false }); }
@@ -2734,9 +2738,11 @@ export class SharedSimulation implements Simulation {
     return [...this.characters].flatMap(([owner, character]): Q3CharacterView[] => {
       const player = this.playerStates.get(owner), body = this.bodies.read(owner.id), animation = character.animation.state;
       if (player === undefined || player.intermission || player.cutscene !== null || body === null || animation.kind !== "q3") return [];
+      const q1Player = this.source.kind === "q1" ? this.source.game.player(owner.id) : null;
+      const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       return [{ actor: owner.id, origin: body.origin, angles: player.viewAngles, velocity: body.velocity,
         movementDirection: player.state.kind === "q3" ? player.state.movementDirection : 0, animation, sourceFlags: character.sourceFlags,
-        powerups: 0, team: null, color: { x: 1, y: 1, z: 1, w: 1 } }];
+        powerups: 0, team: null, scale: visual.scale, opacity: visual.alpha, color: { x: 1, y: 1, z: 1, w: 1 } }];
     });
   }
 

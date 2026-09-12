@@ -390,6 +390,7 @@ export interface ModelTransform { readonly origin: Vec3; readonly axis: Axis; re
 export type ModelPose = { readonly kind: "frame"; readonly frame: number; readonly previousFrame: number; readonly backLerp: number }
   | { readonly kind: "skeleton"; readonly joints: readonly SkeletonJointPose[] };
 export interface SceneEntity {
+  readonly opacity?: number;
   readonly actor: ActorId | null;
   readonly resource: ResolvedResourceReference;
   readonly model: DecodedModel;

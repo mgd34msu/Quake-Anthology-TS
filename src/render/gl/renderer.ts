@@ -11,6 +11,7 @@ import { StageProgram } from "./programs.ts";
 import { GlTextures, withPixelStore } from "./textures.ts";
 import { DepthAtlasTarget } from "./depth-atlas.ts";
 import { Q2FogPass } from "./fog.ts";
+import { GlObjectOpacity } from "./object-opacity.ts";
 import { GlOutputGamma } from "./output-gamma.ts";
 import { outputGammaTable } from "../output-gamma.ts";
 
@@ -33,6 +34,8 @@ export class GlRenderer implements RendererBackend {
   private activeArrays: GeometryArrays | null = null;
   private depthAtlas: DepthAtlasTarget | null = null;
   private fog: Q2FogPass | null = null;
+  private objectOpacity: GlObjectOpacity | null = null;
+  private opacityActive = false;
   private outputGamma: GlOutputGamma | null = null;
   private gamma = 1;
   private gammaFinished = false;
@@ -125,6 +128,7 @@ export class GlRenderer implements RendererBackend {
   }
 
   private drawTarget(rendering = true): void {
+    if (this.objectOpacity?.bind() === true) return;
     if (this.outputGamma !== null) {
       if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL gamma target exceeds maximum texture size");
       const changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height);
@@ -323,7 +327,22 @@ export class GlRenderer implements RendererBackend {
     this.activeArrays = null;
   }
 
-  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" }>): undefined {
+  withObjectOpacity(opacity: number, draw: () => undefined): undefined {
+    this.opened();
+    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) throw new RangeError("Object opacity must be in 0..1");
+    if (this.opacityActive) throw new Error("Nested OpenGL object opacity is unsupported");
+    if (opacity === 0) return undefined;
+    if (opacity === 1) return draw();
+    if (this.activeArrays !== null) throw new Error("Object opacity cannot interrupt a prepared draw");
+    if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL opacity target exceeds maximum texture size");
+    this.drawTarget();
+    this.objectOpacity ??= new GlObjectOpacity(this.window, this.gl, this);
+    this.opacityActive = true;
+    try { return this.objectOpacity.draw(opacity, this.width, this.height, draw); }
+    finally { this.opacityActive = false; }
+  }
+
+  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined {
     this.opened(); this.drawTarget();
     const gl = this.gl;
     switch (operation.kind) {
@@ -518,6 +537,7 @@ export class GlRenderer implements RendererBackend {
     this.window.makeCurrent();
     this.disableArrays();
     this.outputGamma?.close(); this.outputGamma = null;
+    this.objectOpacity?.close(); this.objectOpacity = null;
     this.depthAtlas?.close(); this.depthAtlas = null;
     this.fog?.close(); this.fog = null;
     this.textures.close();

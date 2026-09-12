@@ -1,3 +1,4 @@
+import { ConfigStore } from "../../settings/config.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
@@ -108,6 +109,7 @@ export class Application {
   private frames = 0;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
+  private readonly serverProfileStore = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings"));
   private readonly reportedEffectGaps = new Set<string>();
   private network: NativeServer | null = null;
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
@@ -123,7 +125,7 @@ export class Application {
     private readonly localSeats: Map<ClientId, SessionSeat>) {}
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
-    if (options.network.kind === "q2-client") throw new Error("Remote clients require RemoteApplication without a local simulation");
+    if ((options.network.kind === "q1-client" || options.network.kind === "q2-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const content = await loadApplicationContent(options, recipe);
     try {
       if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);
@@ -513,7 +515,7 @@ export class Application {
         const sourceClient = await this.createQ3SeatClient(local, assets, audioOwner, inputOwner, native, this.simulation);
         if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
-          (name, args) => this.queueCommand(name, args, local.player.seat.id), typography);
+          (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -681,7 +683,7 @@ export class Application {
           const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id));
           if (sourceClient !== null) q3Clients.set(local.player.seat.id, sourceClient);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
-            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography);
+            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease);
           local.player.seat.attachPresentation(presentation, () => presentation.close());

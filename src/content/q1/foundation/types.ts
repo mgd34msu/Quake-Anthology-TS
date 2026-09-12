@@ -52,7 +52,8 @@ export interface Q1Basis { readonly forward: Vec3; readonly right: Vec3; readonl
 export type Q1CharacterAttack = { readonly kind: "axe"; readonly variant: 0 | 1 | 2 | 3 } | { readonly kind: "shotgun" | "rocket" | "nail" | "lightning" };
 
 export type Q1Event =
-  | { readonly kind: "sound"; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
+  | { readonly kind: "stop-sound"; readonly actor: ActorId; readonly channel: number }
+  | { readonly kind: "sound"; readonly origin?: Vec3; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
   | { readonly kind: "ambient"; readonly origin: Vec3; readonly path: string; readonly volume: number; readonly attenuation: number }
   | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[] }
   | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray" | "wizard-spike" | "knight-spike"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number }
@@ -148,6 +149,8 @@ export interface Q1Presentation {
   readonly sourceOrdinal: number | null;
 }
 export interface Q1PlayerState {
+  alpha: number;
+  scale: number;
   readonly actor: OwnedActor;
   weapon: Q1Weapon;
   primaryHolstered: boolean;

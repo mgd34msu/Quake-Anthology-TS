@@ -11,9 +11,9 @@ import { SourceStateBit } from "../../../src/materials/source-state.ts";
 import { identityMat4, perspectiveMat4 } from "../../../src/core/math.ts";
 import type { Q2FogOperation, Q2FragmentLight, Q2ShadowAtlas, SceneCamera } from "../../../src/contracts/render.ts";
 
-function fixture() {
+function fixture(alphaBits: 0 | 8 = 8) {
   const owner: RendererResourceOwner = { identity: Symbol("cpu"), session: createIdentityOwner("cpu test").session, generation: 0 };
-  const renderer = new SoftwareRenderer(8, 8, owner);
+  const renderer = new SoftwareRenderer(8, 8, owner, 8, 8, alphaBits);
   const white: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "white" }, width: 1, height: 1 };
   renderer.applyImageResource({ kind: "create-image", image: white,
     content: { kind: "rgba8", borderColor: { x: 0, y: 0, z: 0, w: 0 },
@@ -22,7 +22,7 @@ function fixture() {
   return { owner, renderer, white };
 }
 
-function triangle(image: RendererImage, z: number, color: RenderVertex["color"]): DrawBatch {
+function triangle(image: RendererImage, z: number, color: RenderVertex["color"]): Extract<DrawBatch, { readonly texturing: "single" }> {
   return { lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image },
     indices: [0, 1, 2], state: CPU_OPAQUE_STATE,
     vertices: [{ x: -1, y: -1 }, { x: 1, y: -1 }, { x: 0, y: 1 }].map(position => ({
@@ -30,6 +30,106 @@ function triangle(image: RendererImage, z: number, color: RenderVertex["color"])
 }
 
 function pixel(renderer: SoftwareRenderer): number[] { return [...renderer.pixels.slice((4 * 8 + 4) * 4, (4 * 8 + 5) * 4)]; }
+
+test("CPU object opacity composites completed destination-dependent passes and preserves scene depth/stencil", () => {
+  const { renderer, white } = fixture();
+  try {
+    renderer.beginView({ viewport: { x: 0, y: 0, width: 8, height: 8 }, clipPlane: null,
+      clear: { color: { x: 0.2, y: 0.4, z: 0.6, w: 1 }, depth: 0.9, stencil: true } });
+    renderer.setOverdrawMeasurement(true);
+    const first = triangle(white, 0, { x: 0.5, y: 0.5, z: 0.5, w: 1 });
+    const second = triangle(white, 0, { x: 0.2, y: 0.1, z: 0, w: 1 });
+    renderer.withObjectOpacity(0.5, () => {
+      renderer.draw({ ...first, state: { ...first.state, blend: { source: "dst-color", destination: "zero" } } });
+      renderer.draw(triangle(white, 0.2, { x: 0, y: 1, z: 0, w: 1 }));
+      renderer.draw({ ...second, state: { ...second.state, blend: { source: "one", destination: "one" } } });
+      expect(renderer.readDepthPixel(4, 3)).toBe(0.5);
+      return undefined;
+    });
+    expect(pixel(renderer)).toEqual([64, 90, 115, 255]);
+    expect(renderer.readDepthPixel(4, 3)).toBe(Math.fround(0.9));
+    const stencil = new Uint8Array(64);
+    renderer.readStencilOverdraw(stencil);
+    expect(stencil.every(value => value === 0)).toBe(true);
+    renderer.draw(triangle(white, 0.4, { x: 0, y: 0, z: 1, w: 1 }));
+    expect(pixel(renderer)).toEqual([0, 0, 255, 255]);
+  } finally { renderer.close(); }
+});
+
+test("CPU object scopes skip dynamic uploads at zero and retain successful uploads after failed draws", () => {
+  const { owner, renderer, white } = fixture(), target = new CpuRenderTarget(renderer);
+  let uploads = 0;
+  const dynamic: DrawBatch = { ...triangle(white, 0, { x: 1, y: 1, z: 1, w: 1 }),
+    texture: { kind: "dynamic-image", source: { resolve: apply => {
+      uploads++;
+      apply({ kind: "update-image", image: white, level: 0,
+        content: { width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) } });
+      return white;
+    } } } };
+  const frame = (opacity: number) => target.execute({ owner, sequence: 0, commands: [{ kind: "view", view: {
+    viewport: { x: 0, y: 0, width: 8, height: 8 }, clear: null, clipPlane: null,
+    target: { kind: "preview", id: "opacity" }, time: { kind: "seconds", value: 0 }, beforeView: [],
+    operations: [{ kind: "object-opacity", opacity, batches: [dynamic] }],
+  } }] });
+  try {
+    frame(0);
+    expect(uploads).toBe(0);
+    expect(pixel(renderer)).toEqual([0, 0, 0, 0]);
+    expect(() => renderer.withObjectOpacity(0.5, () => {
+      renderer.draw(dynamic);
+      throw new Error("late object failure");
+    })).toThrow("late object failure");
+    expect(uploads).toBe(1);
+    expect(pixel(renderer)).toEqual([0, 0, 0, 0]);
+    expect(renderer.readDepthPixel(4, 3)).toBe(1);
+    renderer.draw(triangle(white, 0, { x: 1, y: 1, z: 1, w: 1 }));
+    expect(pixel(renderer)).toEqual([255, 0, 0, 255]);
+    frame(1);
+    expect(uploads).toBe(2);
+    expect(renderer.readDepthPixel(4, 3)).toBe(0.5);
+  } finally { renderer.close(); }
+});
+
+test("CPU opacity isolates offset viewports and line depth and rejects nesting", () => {
+  const { renderer, white } = fixture();
+  try {
+    renderer.beginView({ viewport: { x: 4, y: 0, width: 4, height: 8 }, clipPlane: null,
+      clear: { color: { x: 0, y: 0, z: 1, w: 1 }, depth: 1, stencil: true } });
+    const base = triangle(white, 0, { x: 1, y: 0, z: 0, w: 1 });
+    renderer.withObjectOpacity(0.5, () => {
+      renderer.draw({ ...base, primitive: "lines", lineWidth: 1, indices: [0, 1],
+        vertices: base.vertices.map(vertex => ({ ...vertex, position: { ...vertex.position, y: 0 } })) });
+      expect(() => renderer.withObjectOpacity(0.5, () => undefined)).toThrow("cannot nest");
+      return undefined;
+    });
+    let faded = 0;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const offset = (y * 8 + x) * 4;
+      if (x < 4) expect([...renderer.pixels.slice(offset, offset + 4)]).toEqual([0, 0, 0, 0]);
+      if (renderer.pixels[offset] === 128) faded++;
+      expect(renderer.readDepthPixel(x, 7 - y)).toBe(1);
+    }
+    expect(faded).toBeGreaterThan(0);
+    for (const invalid of [NaN, Infinity, -0.1, 1.1]) expect(() => renderer.withObjectOpacity(invalid, () => undefined)).toThrow("0..1");
+  } finally { renderer.close(); }
+});
+
+test("CPU object opacity retains portal clipping and framebuffer alpha precision", () => {
+  for (const alphaBits of [0, 8] satisfies readonly (0 | 8)[]) {
+    const { renderer, white } = fixture(alphaBits);
+    try {
+      renderer.beginView({ viewport: { x: 0, y: 0, width: 8, height: 8 }, clipPlane: { x: 1, y: 0, z: 0, w: 0 },
+        clear: { color: { x: 0, y: 0, z: 1, w: 0.4 }, depth: 1, stencil: true } });
+      renderer.withObjectOpacity(0.5, () => {
+        renderer.draw(triangle(white, 0, { x: 1, y: 0, z: 0, w: 0.2 }));
+        return undefined;
+      });
+      expect(pixel(renderer)).toEqual([128, 0, 128, alphaBits === 0 ? 255 : 77]);
+      expect([...renderer.pixels.slice((4 * 8 + 2) * 4, (4 * 8 + 3) * 4)])
+        .toEqual([0, 0, 255, alphaBits === 0 ? 255 : 102]);
+    } finally { renderer.close(); }
+  }
+});
 
 test("CPU triangles write actual pixels and reject occluded depth", () => {
   const { renderer, white } = fixture();

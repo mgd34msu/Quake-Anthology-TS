@@ -241,14 +241,16 @@ function lowerLeft(a: ScreenVertex, b: ScreenVertex): boolean {
 
 /** RGBA rows are top to bottom; positions are homogeneous clip coordinates. */
 export class SoftwareRenderer implements RendererBackend {
-  private readonly drawPixels: Uint8Array;
   private outputPixels: Uint8Array | null = null;
   private gammaTable: Uint8Array | null = null;
   readonly capabilities = { textureUnits: 2, textureEnvAdd: true };
-  private readonly colorWords: Int32Array;
-  private readonly framebuffer: Framebuffer;
-  private readonly depth: Float64Array;
-  private readonly stencil: Uint32Array | null;
+  private framebuffer: Framebuffer;
+  private opacityFramebuffer: Framebuffer | null = null;
+  private opacityActive = false;
+  private get drawPixels(): Uint8Array { return this.framebuffer.pixels; }
+  private get colorWords(): Int32Array { return this.framebuffer.colorWords; }
+  private get depth(): Float64Array { return this.framebuffer.depth; }
+  private get stencil(): Uint32Array | null { return this.framebuffer.stencil; }
   private readonly stencilMaximum: number;
   private readonly subpixelScale: number;
   private readonly images: CpuImages;
@@ -295,16 +297,14 @@ export class SoftwareRenderer implements RendererBackend {
       throw new RangeError("CPU stencil precision must be between 0 and 32 bits");
     this.subpixelScale = 2 ** subpixelBits;
     this.viewport = { x: 0, y: 0, width, height };
-    this.drawPixels = new Uint8Array(width * height * 4);
-    this.colorWords = new Int32Array(this.drawPixels.buffer);
-    if (alphaBits === 0) this.colorWords.fill(colorWord(0, 0, 0, 1));
-    this.depth = new Float64Array(width * height);
-    this.depth.fill(1);
-    this.stencil = stencilBits === 0 ? null : new Uint32Array(width * height);
+    const pixels = new Uint8Array(width * height * 4), colorWords = new Int32Array(pixels.buffer);
+    if (alphaBits === 0) colorWords.fill(colorWord(0, 0, 0, 1));
+    const depth = new Float64Array(width * height);
+    depth.fill(1);
+    const stencil = stencilBits === 0 ? null : new Uint32Array(width * height);
     this.stencilMaximum = 2 ** stencilBits - 1;
     this.images = new CpuImages(owner);
-    this.framebuffer = { width, height, pixels: this.drawPixels, colorWords: this.colorWords,
-      depth: this.depth, stencil: this.stencil, originX: 0, originY: 0, stride: width };
+    this.framebuffer = { width, height, pixels, colorWords, depth, stencil, originX: 0, originY: 0, stride: width };
   }
 
   private assertOpen(): void {
@@ -312,6 +312,44 @@ export class SoftwareRenderer implements RendererBackend {
   }
 
   get pixels(): Uint8Array { return this.outputPixels ?? this.drawPixels; }
+
+  withObjectOpacity(opacity: number, draw: () => undefined): undefined {
+    this.assertOpen();
+    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) throw new RangeError("Object opacity must be in 0..1");
+    if (this.opacityActive) throw new Error("Object opacity scopes cannot nest");
+    if (opacity === 0) return undefined;
+    if (opacity === 1) {
+      this.opacityActive = true;
+      try { return draw(); } finally { this.opacityActive = false; }
+    }
+    const parent = this.framebuffer;
+    if (this.opacityFramebuffer === null) {
+      const pixels = new Uint8Array(parent.pixels.length);
+      this.opacityFramebuffer = { ...parent, pixels, colorWords: new Int32Array(pixels.buffer),
+        depth: new Float64Array(parent.depth.length), stencil: parent.stencil === null ? null : new Uint32Array(parent.stencil.length) };
+    }
+    const scratch = this.opacityFramebuffer;
+    scratch.pixels.set(parent.pixels);
+    scratch.depth.set(parent.depth);
+    if (scratch.stencil !== null && parent.stencil !== null) scratch.stencil.set(parent.stencil);
+    const viewport = this.viewport;
+    this.opacityActive = true;
+    this.framebuffer = scratch;
+    try {
+      draw();
+      const left = Math.max(0, viewport.x), right = Math.min(this.width, viewport.x + viewport.width);
+      for (let y = Math.max(0, viewport.y); y < Math.min(this.height, viewport.y + viewport.height); y++) {
+        for (let offset = (y * this.width + left) * 4; offset < (y * this.width + right) * 4; offset++) {
+          const backdrop = parent.pixels[offset] ?? 0, result = scratch.pixels[offset] ?? 0;
+          parent.pixels[offset] = this.alphaBits === 0 && offset % 4 === 3 ? 255 : Math.round(backdrop * (1 - opacity) + result * opacity);
+        }
+      }
+    } finally {
+      this.framebuffer = parent;
+      this.opacityActive = false;
+    }
+    return undefined;
+  }
 
   setOutputGamma(gamma: number): undefined {
     this.assertOpen();
@@ -348,6 +386,7 @@ export class SoftwareRenderer implements RendererBackend {
   close(): undefined {
     if (this.closed) return;
     this.images.clear();
+    this.opacityFramebuffer = null;
     this.closed = true;
   }
 
@@ -536,7 +575,7 @@ export class SoftwareRenderer implements RendererBackend {
         color: { x: 1, y: 1, z: 1, w: 1 } })) });
   }
 
-  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" }>): undefined {
+  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined {
     this.assertOpen();
     switch (operation.kind) {
       case "q2-fog": applyQ2DepthFog(this.framebuffer, operation, this.alphaBits); return;

@@ -600,7 +600,16 @@ export class AudioMixer {
     stopChannel(entity: number, channel: number): void {
         this.replaceChannel(entity, sourceSoundChannel("q3", channel));
     }
-    stopSharedChannel(entity: number, channel: SharedSoundChannel): void {
+    stopSharedChannel(entity: number, channel: SharedSoundChannel | null): void {
+        if (channel === null) {
+            for (const [index, voice] of this.voices.entries()) {
+                if (voice !== null && voice.entity === entity && voice.channel === null && (voice.policy === null || voice.policy.role === "effect")) {
+                    this.freeChannel(index);
+                    return;
+                }
+            }
+            return;
+        }
         this.replaceChannel(entity, { kind: "channel", channel }, true);
     }
     private replaceChannel(entity: number, command: SoundChannelCommand, cancelScheduled = false): void {

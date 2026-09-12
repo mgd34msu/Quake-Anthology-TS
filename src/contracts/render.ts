@@ -228,6 +228,8 @@ export interface Q2FogOperation {
   readonly skyDrawn: boolean;
 }
 export type RenderOperation = { readonly kind: "draw"; readonly batches: readonly DrawBatch[] }
+  /** Interpolates the complete ordered object against the current backdrop once. */
+  | { readonly kind: "object-opacity"; readonly opacity: number; readonly batches: readonly DrawBatch[] }
   | Q2FogOperation
   /** Binds a depth32f image, executes the passes, then restores the previous target and viewport. */
   | { readonly kind: "depth-atlas"; readonly image: RendererImage; readonly passes: readonly DepthAtlasPass[] }
@@ -280,7 +282,9 @@ export interface RendererBackend {
   readStencilOverdraw(destination: Uint8Array): undefined;
   readDepthPixel(windowX: number, windowY: number): number;
   beginView(view: RenderViewState): undefined;
-  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" }>): undefined;
+  /** Partial opacity commits color only; zero skips draw, one preserves direct rendering. */
+  withObjectOpacity(opacity: number, draw: () => undefined): undefined;
+  drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined;
   prepareGeometry(batch: DrawBatch): PreparedBackendDraw;
   clearColorBuffer(): undefined;
   drawShowImage(image: RendererImage, rect: Rect, proportional: boolean): undefined;

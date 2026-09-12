@@ -314,7 +314,7 @@ export class Q1EntityServices {
       this.initializeWeaponInventory(actor);
       for (const item of ["q1:key/silver", "q1:key/gold"] satisfies readonly ItemId[]) this.host.inventory.configure(actor, { item, count: 0, capacity: 1 });
     }
-    const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
+    const state: Q1PlayerState = { actor, alpha: 0, scale: 0, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
       continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, punchAngles: ZERO, nailSide: 1,
       maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
       waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };

@@ -215,3 +215,160 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
         await app.close();
     }
 }, 30000);
+
+test('production NetQuake remote frontend presents retail e1m1, sends input and travels without a simulation', async () => {
+    const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+    const { Q1RemotePresentation } = await import('../../../src/app/bootstrap/network/remote-q1.ts');
+    const { addressKey } = await import('../../../src/network/common/endpoint.ts');
+    const selected = parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1','--dedicated','--listen','0','--bind','127.0.0.1']);
+    if(selected.kind!=='run') throw new Error('Missing native server options');
+    const prints:string[]=[], host={print:(text:string):undefined=>{prints.push(text);return undefined;}};
+    const server=await Application.open(selected.options,host);
+    let remote:Awaited<ReturnType<typeof RemoteApplication.open>>|null=null;
+    try {
+        const address=server.networkAddress;if(address===null) throw new Error('No native listener');
+        const launch=parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1','--connect-q1',addressKey(address),'--renderer','cpu','--width','160','--height','120','--hidden']);
+        if(launch.kind!=='run') throw new Error('Missing native client options');
+        remote=await RemoteApplication.open(launch.options,host);
+        const app=remote;
+        const exchange=async():Promise<void>=>{await app.step(50);await Bun.sleep(1);await server.step(50);await Bun.sleep(1);await app.step(50);};
+        for(let i=0;i<100&&app.localPlayers.length===0;i++) await exchange();
+        expect(app.networkPhase).toBe('active'); expect(app.session.world).toBeNull();
+        expect(app.remote instanceof Q1RemotePresentation).toBe(true);
+        const local=app.localPlayers[0], admitted=server.networkClients[0];
+        if(local===undefined||admitted===undefined) throw new Error(`No native player: ${prints.join('\n')}`);
+        expect(app.remote.playerUi(local.actor).health).toBe(server.simulation.playerUi(admitted.actor).health);
+        expect(app.remote.playerUi(local.actor).activeWeapon).toBe(server.simulation.playerUi(admitted.actor).activeWeapon);
+        expect(new Set(app.readPixels()).size).toBeGreaterThan(16);
+        const before=server.simulation.bodies.read(admitted.actor)?.origin;
+        app.input({seat:local.seat.id,kind:'key',code:119,down:true,repeat:false,timeMilliseconds:performance.now()});
+        for(let i=0;i<8;i++) await exchange();
+        app.input({seat:local.seat.id,kind:'key',code:119,down:false,repeat:false,timeMilliseconds:performance.now()});
+        expect(server.simulation.bodies.read(admitted.actor)?.origin).not.toEqual(before);
+        app.queueCommand('use',['q1:weapon/axe'],local.seat.id);
+        for(let i=0;i<5;i++) await exchange();
+        expect(server.simulation.playerUi(admitted.actor).activeWeapon).toBe('q1:weapon/axe');
+        expect(app.remote.playerUi(local.actor).activeWeapon).toBe('q1:weapon/axe');
+        const source=server.simulation.q1Source(), native=server.simulation.players()[0];
+        if(source===null||native===undefined) throw new Error('No source player');
+        const player=source.game.player(native);if(player===null) throw new Error('No native player');
+        source.game.sound(player.actor,'weapons/shotgn2.wav','weapon');
+        await server.step(50);await Bun.sleep(1);
+        const sounding=await app.step(50);
+        const playback=sounding?.events.find(event=>event.payload.kind==='sound');
+        expect(playback?.payload.kind).toBe('sound');
+        if(playback?.payload.kind!=='sound') throw new Error('No decoded native sound playback');
+        expect(playback.payload.channel).toBe(1);expect(playback.payload.actor?.equals(local.actor)).toBe(true);
+        expect(app.remote.sourceRecords.some(record=>'kind' in record&&record.kind==='sound')).toBe(true);
+        const audible=app.presentationEvents.find(event=>event.kind==='q1'&&event.event.kind==='sound');
+        if(audible?.kind!=='q1'||audible.event.kind!=='sound'||audible.event.origin===undefined) throw new Error('No positional audio event');
+        const { ApplicationAudio }=await import('../../../src/app/bootstrap/audio.ts');
+        const audio=new ApplicationAudio(app.content,()=>1000,1,'player',host.print);
+        try {
+            audio.engine.setListeners([{seat:local.seat.id,actor:null,origin:audible.event.origin,axis:[{x:1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:0,z:1}],gain:1,underwater:false}]);
+            audio.engine.updateActor(local.actor,{x:100000,y:100000,z:100000});
+            await audio.receive([audible]);
+            expect(audio.engine.mix(512).some(value=>value!==0)).toBe(true);
+            if(!(app.remote instanceof Q1RemotePresentation)) throw new Error('Wrong remote adapter');
+            const decoded = app.remote;
+            const stop=async(channel:number):Promise<void>=>{
+                const packed=admitted.sourceEntity*8+channel;
+                await decoded.receive(new NetQuakeDecoder().decode(Uint8Array.of(16,packed&255,packed>>8)),performance.now());
+                await audio.receive(decoded.drainPresentationEvents().filter(event=>event.kind==='q1'&&event.event.kind==='stop-sound'));
+            };
+            await stop(1);expect(audio.engine.mix(512).every(value=>value===0)).toBe(true);
+            const auto={...audible,event:{...audible.event,channel:'auto'}} satisfies import('../../../src/app/bootstrap/simulation/types.ts').SimulationPresentationEvent;
+            await audio.receive([auto,auto]);await stop(0);
+            expect(audio.engine.mix(512).some(value=>value!==0)).toBe(true);
+            await stop(0);expect(audio.engine.mix(512).every(value=>value===0)).toBe(true);
+            await audio.receive([audible,{...audible,event:{...audible.event,channel:'voice'}}]);
+            await stop(1);expect(audio.engine.mix(512).some(value=>value!==0)).toBe(true);
+            await stop(2);expect(audio.engine.mix(512).every(value=>value===0)).toBe(true);
+            const other=app.remote.presentations().find(value=>!value.actor.equals(local.actor));
+            if(other===undefined) throw new Error('No second audio actor');
+            await audio.receive([{...audible,event:{...audible.event,actor:other.actor}}]);
+            await stop(1);expect(audio.engine.mix(512).some(value=>value!==0)).toBe(true);
+            await audio.receive([{...audible,event:{kind:'stop-sound',actor:other.actor,channel:1}}]);
+            expect(audio.engine.mix(512).every(value=>value===0)).toBe(true);
+
+        }finally{audio.close();}
+        const oldActor=local.actor, seat=local.seat, window=app.window;
+        server.queueCommand('map',['e1m2'],null);
+        for(let i=0;i<100&&(app.content.recipe.map.geometry.requestedPath!=='maps/e1m2.bsp'||app.localPlayers[0]?.actor.equals(oldActor)||app.networkPhase!=='active');i++) await exchange();
+        expect(app.content.recipe.map.geometry.requestedPath).toBe('maps/e1m2.bsp');
+        expect(app.networkPhase).toBe('active');expect(app.session.world).toBeNull();
+        expect(app.localPlayers[0]?.actor.equals(oldActor)).toBe(false);expect(app.localPlayers[0]?.seat).toBe(seat);expect(app.window).toBe(window);
+        await app.close();await Bun.sleep(1);await server.step(50);expect(server.networkClients.length).toBe(0);
+    } finally {await remote?.close();await server.close();}
+},30000);
+
+test('production NetQuake client honors advertised game port and original signon/move bytes', async () => {
+    const { Q1ClientNetwork } = await import('../../../src/app/bootstrap/network/q1-client.ts');
+    const { encodeNetQuakeControl } = await import('../../../src/network/q1/handshake.ts');
+    const { createIdentityOwner } = await import('../../../src/contracts/identity.ts');
+    const control=await UdpTransport.bind({host:'127.0.0.1',port:0}), game=await UdpTransport.bind({host:'127.0.0.1',port:0}), transport=await UdpTransport.bind({host:'127.0.0.1',port:0});
+    const identity=createIdentityOwner('native-port-proof'), reasons:string[]=[], messages:NetQuakeMessage[]=[];
+    const client=new Q1ClientNetwork({transport,remote:control.address,seat:{name:'Native',color:77,spawnParameters:'',extensionFlags:null},host:{
+        receive:async values=>{messages.push(...values);},command:value=>{if(value.command.kind!=='q1-netquake')throw new Error('Wrong command');return value.command;},disconnected:reason=>{reasons.push(reason);}}});
+    const server=new NetQuakeChannel();
+    const receive=async(socket:UdpTransport):Promise<Uint8Array>=>{for(let i=0;i<100;i++){const p=socket.poll();if(p?.kind==='packet')return p.payload;await Bun.sleep(1);}throw new Error('No native packet');};
+    const send=async(payload:Uint8Array,now:number):Promise<Uint8Array>=>{
+        game.send(transport.address,server.unreliable(payload));await Bun.sleep(1);await client.poll(now);
+        const packet=await receive(game), delivered=server.receive(packet,now);
+        for(const reply of delivered.replies)game.send(transport.address,reply);
+        if(delivered.delivery===null)throw new Error('No reliable command');return delivered.delivery.payload;
+    };
+    try {
+        await client.poll(0);
+        expect([...await receive(control)]).toEqual([128,0,0,12,1,81,85,65,75,69,0,3]);
+        control.send(transport.address,encodeNetQuakeControl({kind:'accept',port:game.address.port}));await Bun.sleep(1);await client.poll(1);
+        expect(client.serverAddress).toEqual(game.address);
+        expect([...await send(Uint8Array.of(25,1),2)]).toEqual([4,112,114,101,115,112,97,119,110,0]);
+        await Bun.sleep(1);await client.poll(3);
+        const stage2=await send(Uint8Array.of(25,2),4);
+        expect(new TextDecoder().decode(stage2)).toBe('\x04name "Native"\n\0\x04color 4 13\n\0\x04spawn \0');
+        await Bun.sleep(1);await client.poll(5);
+        expect([...await send(Uint8Array.of(25,3),6)]).toEqual([4,98,101,103,105,110,0]);
+        await Bun.sleep(1);await client.poll(7);
+        game.send(transport.address,server.unreliable(Uint8Array.of(7,0,0,128,63,128,1)));await Bun.sleep(1);await client.poll(8);
+        expect(client.phase).toBe('active');
+        const command={actor:identity.actor(0,0),source:{kind:'remote-client',client:identity.client(0,0)},sequence:0,command:{kind:'q1-netquake',acknowledgedServerTimeSeconds:99,viewAngles:{x:0,y:90,z:180},forwardMove:200,sideMove:-100,upMove:0,buttons:3,impulse:7}} satisfies import('../../../src/contracts/session.ts').ActorCommand;
+        client.submit([command],9);client.submit([command],10);await Bun.sleep(1);expect(game.poll()).toBeNull();
+        client.submit([command],11);
+        const move=server.receive(await receive(game),11).delivery;
+        expect(move?.kind).toBe('unreliable');
+        expect(move===null?[]:[...move.payload]).toEqual([3,0,0,128,63,0,64,128,200,0,156,255,0,0,3,7]);
+        expect(control.poll()).toBeNull();expect(reasons).toEqual([]);expect(messages.some(value=>value.kind==='entity')).toBe(true);
+        game.send(transport.address,server.unreliable(Uint8Array.of(4,154,2,0,0)));await Bun.sleep(1);
+        await expect(client.poll(12)).rejects.toThrow('requires native NetQuake 15');
+    } finally {client.close();control.close();game.close();}
+});
+
+import {loadApplicationContent} from '../../../src/app/bootstrap/content.ts';
+import {Q1RemotePresentation} from '../../../src/app/bootstrap/network/remote-q1.ts';
+import {createIdentityOwner} from '../../../src/contracts/identity.ts';
+import {EngineSession} from '../../../src/world/session/session.ts';
+import type {Q1ExtendedEntityState} from '../../../src/contracts/protocol.ts';
+test("NetQuake U_NOLERP snaps and dropped-packet interpolation retains the clamped endpoint", async () => {
+const launch=parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1']);
+if(launch.kind!=='run')throw Error('launch');
+const content=await loadApplicationContent(launch.options),identity=createIdentityOwner('native-review'),session=new EngineSession(identity,{kind:'local'});
+const remote=new Q1RemotePresentation({identity,session,content,loadContent:async()=>content,sendCommand:()=>{},print:()=>{}});
+const zero={x:0,y:0,z:0};
+const state=(x:number,step:boolean):Q1ExtendedEntityState=>({number:1,origin:{x,y:0,z:0},angles:zero,modelIndex:2,frame:0,colorMap:0,skin:0,effects:0,alpha:0,scale:16,lerpFinishSeconds:0,step});
+try {
+await remote.receive([{kind:'server-info',protocol:{kind:'q1-netquake',version:15},maxClients:1,gameType:0,level:'review',models:['maps/e1m1.bsp','progs/player.mdl'],sounds:[]},{kind:'set-view',entity:1},{kind:'client-data',weaponAlpha:0,data:{viewHeight:22,idealPitch:0,punchAngles:zero,velocity:zero,items:1,onGround:false,inWater:false,weaponFrame:0,armor:0,weaponModel:0,health:100,ammo:25,shells:25,nails:0,rockets:0,cells:0,activeWeapon:1}},{kind:'time',seconds:1},{kind:'entity',state:state(0,true)}],1000);
+await remote.receive([{kind:'time',seconds:1.1},{kind:'entity',state:state(20,true)}],1100);
+remote.samplePresentation(1150);
+expect(remote.presentations()[0]?.origin.x).toBe(20);
+const player=remote.player;if(player===null)throw Error('No remote view entity');
+expect(remote.playerView(player.actor).origin.x).toBe(20);
+await remote.receive([{kind:'time',seconds:1.5},{kind:'entity',state:state(40,false)}],1500);
+const sampled=remote.samplePresentation(1550);
+if(sampled===null||sampled.snapshot.frame.time.kind!=='seconds')throw Error('No sampled clock');
+expect(sampled.snapshot.frame.time.value).toBeCloseTo(1.45,12);
+expect(remote.presentations()[0]?.origin.x).toBeCloseTo(30,12);
+expect(remote.samplePresentation(1500)?.snapshot.frame.time).toEqual({kind:'seconds',value:1.4});
+expect(remote.samplePresentation(1600)?.snapshot.frame.time).toEqual({kind:'seconds',value:1.5});
+} finally {session.close();await content.close();}
+});

@@ -26,6 +26,8 @@ export interface Q3CharacterView {
   readonly powerups: number;
   readonly team: "red" | "blue" | null;
   readonly color: Vec4;
+  readonly scale?: number;
+  readonly opacity?: number;
 }
 
 export interface Q3CharacterRenderOptions {
@@ -80,7 +82,7 @@ export class Q3CharacterPresenter {
     const flags = 0x80 | (options.personalModel ? 2 : 0) | (options.shadowPlane === null ? 0 : 0x40);
     const part = (asset: Q3CharacterPart, axis: Axis, origin: Vec3, frame: LerpFrame | null,
       attachments: SceneEntity["attachments"]): SceneEntity => ({ actor: view.actor, resource: asset.resource,
-      model: asset.model, transform: { origin, axis, scale: UNIT }, previousOrigin: origin,
+      model: asset.model, opacity: view.opacity ?? 1, transform: { origin, axis, scale: asset === this.assets.lower ? { x: view.scale ?? 1, y: view.scale ?? 1, z: view.scale ?? 1 } : UNIT }, previousOrigin: origin,
       pose: { kind: "frame", frame: frame?.frame ?? 0, previousFrame: frame?.oldFrame ?? 0, backLerp: frame?.backLerp ?? 0 },
       skin: 0, color: view.color, shaderTime: options.shaderTime, flags: { kind: "q3", bits: flags },
       lightingOrigin: view.origin, shadowPlane: options.shadowPlane ?? 0, attachments });

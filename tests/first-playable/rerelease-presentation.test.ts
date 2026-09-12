@@ -1,3 +1,5 @@
+import { SaveReader } from "../../src/persistence/value.ts";
+import { readQ1FoundationCheckpoint } from "../../src/persistence/q1-foundation.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -142,13 +144,59 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK"))("Q1 a
       await scene.prepare(player.actor, snapshot, [projected()], []);
       const prepared = scene.view({ camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 } }, [], [], false);
       const batches = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
-      const translucent = batches.find(batch => batch.vertices.some(vertex => Math.abs(vertex.color.w - Math.fround(0.371337)) < 0.000001));
-      expect(translucent).toBeDefined();
-      expect(translucent?.state.depthWrite).toBe(false);
+      if (path.startsWith("*")) {
+        const translucent = batches.find(batch => batch.vertices.some(vertex => Math.abs(vertex.color.w - Math.fround(0.371337)) < 0.000001));
+        expect(translucent).toBeDefined(); expect(translucent?.state.depthWrite).toBe(false);
+      } else {
+        const object = prepared.view.operations.find(operation => operation.kind === "object-opacity");
+        expect(object?.kind === "object-opacity" ? object.opacity : null).toBe(Math.fround(0.371337));
+        expect(object?.kind === "object-opacity" ? object.batches.length : 0).toBeGreaterThan(0);
+      }
       actor.fields.set("alpha", "-1"); expect(projected().alpha).toBe(0);
       actor.fields.set("alpha", "2"); expect(projected().alpha).toBe(1);
       actor.fields.set("alpha", "0"); actor.fields.set("scale", "0");
       expect(projected().alpha).toBe(1); expect(projected().scale).toBe(1);
     }
   } finally { assets.close(); await content.close(); }
+}, 30000);
+
+for (const appearance of ["q1", "q3"]) test(`Q1 player visuals preserve raw fields and older saves for ${appearance} third-person models`, async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--character", appearance, "--dedicated", "--mode", "coop"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 launch");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q1-player-visuals");
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "coop", seed: 1, maxClients: 2 });
+  try {
+    const player = simulation.admitPlayer(identity.client(0, 0)); simulation.admitPlayer(identity.client(1, 0));
+    simulation.step({ elapsedMilliseconds: 16, commands: [] });
+    const source = simulation.q1Source(), state = source?.game.player(player.actor);
+    if (source === null || state == null) throw new Error("Missing source player");
+    const projected = () => {
+      if (appearance === "q3") {
+        const view = simulation.characterViews().find(value => value.actor.equals(player.actor));
+        if (view === undefined) throw new Error("Missing selected Q3 view");
+        return { path: "selected-q3", alpha: view.opacity, scale: view.scale };
+      }
+      const model = simulation.presentations().find(value => value.actor.equals(player.actor) && !value.viewWeapon);
+      if (model === undefined) throw new Error("Missing third-person model");
+      return model;
+    };
+    expect(projected().path).toBe(appearance === "q1" ? "progs/player.mdl" : "selected-q3"); expect(projected().alpha).toBe(1); expect(projected().scale).toBe(1);
+    state.alpha = 0.371337; state.scale = 1.31337;
+    expect(projected().alpha).toBe(Math.fround(state.alpha)); expect(projected().scale).toBe(Math.fround(state.scale));
+    const savedSource = source.game.capture();
+    const legacy = readQ1FoundationCheckpoint(new SaveReader({ ...savedSource, players: savedSource.players.map(player => {
+      const { alpha, scale, ...state } = player.state;
+      expect(alpha).toBeDefined(); expect(scale).toBeDefined(); return { ...player, state };
+    }) }));
+    expect(legacy.players.every(player => player.state.alpha === 0 && player.state.scale === 0)).toBe(true);
+    const restoredIdentity = createIdentityOwner("q1-player-visuals-restored");
+    const restored = createSimulation({ identity: restoredIdentity, restoredClients: [restoredIdentity.client(0, 0), restoredIdentity.client(1, 0)], recipe: content.recipe, world: content.world, mounts: content.mounts,
+      skill: 1, mode: "coop", seed: 1, maxClients: 2, restore: simulation.checkpoint() });
+    try {
+      const model = restored.presentations().find(value => value.actor.slot === player.actor.slot && !value.viewWeapon);
+      const view = restored.characterViews().find(value => value.actor.slot === player.actor.slot);
+      expect(appearance === "q1" ? model?.alpha : view?.opacity).toBe(Math.fround(0.371337));
+      expect(appearance === "q1" ? model?.scale : view?.scale).toBe(Math.fround(1.31337));
+    } finally { restored.close(); }
+  } finally { simulation.close(); await content.close(); }
 }, 30000);
