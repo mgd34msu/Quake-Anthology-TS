@@ -74,6 +74,19 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
     updateInventory: state => data.updateInventory(state),
     weaponInfo(library, handle, weapon) { return refresh(library, handle).find(candidate => candidate.info.number === weapon)?.info; },
     tactics: weapon => tactics(candidates.find(candidate => candidate.info.number === weapon)),
+    activationWeapon(library, state) {
+      const available = refresh(library, state.ws).filter(candidate => candidate.info.valid && !candidate.melee
+        && candidate.info.projectileInfo.gravity === 0 && owned(state, candidate)
+        && (candidate.personalityRole === null ? ammunition(state, candidate) >= candidate.info.ammoAmount : ammunition(state, candidate) > 0));
+      const order = [Weapon.WP_MACHINEGUN, Weapon.WP_SHOTGUN, Weapon.WP_PLASMAGUN, Weapon.WP_LIGHTNING,
+        ...(state.product === "missionpack" ? [Weapon.WP_CHAINGUN, Weapon.WP_NAILGUN] : []),
+        Weapon.WP_RAILGUN, Weapon.WP_ROCKET_LAUNCHER, Weapon.WP_BFG];
+      for (const role of order) {
+        const candidate = available.find(candidate => personalityRole(candidate) === role);
+        if (candidate !== undefined) return candidate.info.number;
+      }
+      return -1;
+    },
     chooseWeapon(library, state) {
       let bestWeight = Math.fround(0), bestWeapon = 0, bestRole: number | null = null, bestRate = 0;
       const consider = (candidate: BotWeaponKnowledge, role: number, weight: number | null): void => {

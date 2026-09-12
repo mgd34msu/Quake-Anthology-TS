@@ -14,7 +14,7 @@ import { ConnectionState } from "../../../src/content/q3/base/game/state.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
 import { tokenizeCommand } from "../../../src/core/commands/text.ts";
 import { navigationWorld, profile } from "../navigation/prediction.ts";
-import { BotCharacteristic } from "../../../src/bots/behavior/q3/ai-definitions.ts";
+import { BotCharacteristic, BotInventory } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 import { arenaPrediction } from "./arena-prediction.ts";
 import { GameAiContext } from "../../../src/bots/behavior/q3/ai-context.ts";
 import { BotState } from "../../../src/bots/behavior/q3/ai-state.ts";
@@ -101,6 +101,51 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       const library = bots.director.library, original = bots.director.ai.context;
       const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
       if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
+      const activation = new BotState("baseq3"); activation.ws = brain.ws;
+      activation.curPs.weaponState = WeaponState.WEAPON_RAISING;
+      const nativeKnowledge = q3BotGame(game, () => undefined).knowledge;
+      expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
+      const priority: readonly (readonly [number, BotInventory, BotInventory])[] = [
+        [2, BotInventory.MACHINEGUN, BotInventory.BULLETS], [3, BotInventory.SHOTGUN, BotInventory.SHELLS],
+        [8, BotInventory.PLASMAGUN, BotInventory.CELLS], [6, BotInventory.LIGHTNING, BotInventory.LIGHTNINGAMMO],
+        [7, BotInventory.RAILGUN, BotInventory.SLUGS], [5, BotInventory.ROCKETLAUNCHER, BotInventory.ROCKETS],
+        [9, BotInventory.BFG10K, BotInventory.BFGAMMO],
+      ];
+      for (const [, weapon, ammo] of priority) {
+        activation.inventory[weapon] = 1; activation.inventory[ammo] = 1;
+      }
+      for (const [selected, weapon] of priority) {
+        expect(nativeKnowledge.activationWeapon(library, activation)).toBe(selected);
+        activation.inventory[weapon] = 0;
+      }
+      activation.inventory[BotInventory.GAUNTLET] = 1;
+      activation.inventory[BotInventory.GRENADELAUNCHER] = 1; activation.inventory[BotInventory.GRENADES] = 20;
+      expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
+      for (const candidate of [
+        { info: { ...gauntlet, number: 7, weaponInventoryIndex: 64 }, melee: true, maximumRange: 60, personalityRole: null },
+        { info: { ...gauntlet, number: 8, weaponInventoryIndex: 64, projectileInfo: { ...gauntlet.projectileInfo, gravity: 1 } }, melee: false, maximumRange: null, personalityRole: null },
+      ]) {
+        activation.inventory[64] = 1;
+        expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [candidate] }).activationWeapon(library, activation)).toBe(-1);
+      }
+      expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [] }).activationWeapon(library, activation)).toBe(-1);
+      if (q2Simulation !== null) {
+        const actor = q2Simulation.admitPlayer(q2Simulation.options.identity.client(0, 1)).actor;
+        const owner = q2Simulation.actors.resolveOwned(actor);
+        if (owner === null) throw new Error("Q2 activation owner missing");
+        const knowledge = createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => actor });
+        const state = new BotState("baseq3"); state.ws = brain.ws; state.curPs.weaponState = WeaponState.WEAPON_RAISING;
+        const select = () => { knowledge.knowledge.updateInventory(state); return knowledge.resolveWeapon(0, knowledge.knowledge.activationWeapon(library, state)); };
+        expect(select()).toBe("q2:weapon_blaster");
+        q2Simulation.inventory.consume(owner, "q2:weapon_blaster", 1);
+        q2Simulation.inventory.give(owner, "q2:weapon_supershotgun", 1); q2Simulation.inventory.give(owner, "q2:ammo_shells", 1);
+        expect(select()).toBeNull();
+        q2Simulation.inventory.give(owner, "q2:ammo_shells", 1);
+        expect(select()).toBe("q2:weapon_supershotgun");
+        q2Simulation.inventory.give(owner, "q2:weapon_machinegun", 1); q2Simulation.inventory.give(owner, "q2:ammo_bullets", 1);
+        expect(select()).toBe("q2:weapon_machinegun");
+        expect(state.curPs.weaponState).toBe(WeaponState.WEAPON_RAISING);
+      }
       const cases = [
         ...(q2Simulation === null ? [] : [{ name: "Q2 blaster", active: 1, melee: false, knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge }]),
         { name: "Q3 gauntlet", active: 1, melee: true, knowledge: q3BotGame(game, () => undefined).knowledge },

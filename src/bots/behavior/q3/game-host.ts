@@ -69,6 +69,7 @@ export interface BotWeaponTactics {
 }
 export interface BotArsenalKnowledge {
   chooseWeapon(library: BotLibrary, state: BotState): number;
+  activationWeapon(library: BotLibrary, state: BotState): number;
   tactics(weapon: number): BotWeaponTactics;
   aggression(state: BotState): number;
   updateInventory(state: BotState): void;

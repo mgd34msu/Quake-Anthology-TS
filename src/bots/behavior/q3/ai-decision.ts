@@ -176,21 +176,6 @@ export function botGetItemLongTermGoal(context: GameAiContext, state: BotState, 
   return true;
 }
 
-export function botSelectActivateWeapon(context: GameAiContext, state: BotState): number {
-  if (inventory(state, BotInventory.MACHINEGUN) > 0 && inventory(state, BotInventory.BULLETS) > 0) return Weapon.WP_MACHINEGUN;
-  if (inventory(state, BotInventory.SHOTGUN) > 0 && inventory(state, BotInventory.SHELLS) > 0) return Weapon.WP_SHOTGUN;
-  if (inventory(state, BotInventory.PLASMAGUN) > 0 && inventory(state, BotInventory.CELLS) > 0) return Weapon.WP_PLASMAGUN;
-  if (inventory(state, BotInventory.LIGHTNING) > 0 && inventory(state, BotInventory.LIGHTNINGAMMO) > 0) return Weapon.WP_LIGHTNING;
-  if (context.game.options.product === "missionpack") {
-    if (inventory(state, BotInventory.CHAINGUN) > 0 && inventory(state, BotInventory.BELT) > 0) return Weapon.WP_CHAINGUN;
-    if (inventory(state, BotInventory.NAILGUN) > 0 && inventory(state, BotInventory.NAILS) > 0) return Weapon.WP_NAILGUN;
-  }
-  if (inventory(state, BotInventory.RAILGUN) > 0 && inventory(state, BotInventory.SLUGS) > 0) return Weapon.WP_RAILGUN;
-  if (inventory(state, BotInventory.ROCKETLAUNCHER) > 0 && inventory(state, BotInventory.ROCKETS) > 0) return Weapon.WP_ROCKET_LAUNCHER;
-  if (inventory(state, BotInventory.BFG10K) > 0 && inventory(state, BotInventory.BFGAMMO) > 0) return Weapon.WP_BFG;
-  return -1;
-}
-
 export function aiEnterIntermission(context: GameAiContext, state: BotState, reason: string): void {
   botRecordNodeSwitch(context, state, "intermission", "", reason);
   context.resetState(state);
@@ -697,7 +682,7 @@ export function botClearPath(context: GameAiContext, state: BotState, result: Bo
     const body = context.getEntityState(state.kamikazeBody) ?? new EntityState();
     const target = vec3(body.pos.base.x, body.pos.base.y, body.pos.base.z + 8);
     result.idealViewAngles = vectorToAngles(sub3(target, state.eye));
-    result.weapon = botSelectActivateWeapon(context, state);
+    result.weapon = context.game.knowledge.activationWeapon(context.library, state);
     if (result.weapon === -1) result.weapon = 0;
     if (result.weapon !== 0) {
       result.flags |= movementAim;
@@ -799,7 +784,7 @@ export function aiNodeSeekActivateEntity(context: GameAiContext, state: BotState
     }
     if ((result.flags & BotMoveResultFlag.MOVEMENTWEAPON) === 0) {
       result.flags |= BotMoveResultFlag.MOVEMENTWEAPON;
-      activation.weapon = botSelectActivateWeapon(context, state);
+      activation.weapon = context.game.knowledge.activationWeapon(context.library, state);
       if (activation.weapon === -1) activation.weapon = 0;
       result.weapon = activation.weapon;
     }
