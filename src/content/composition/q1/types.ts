@@ -2,6 +2,7 @@ import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
+import type { Q1EntityServices } from "../../q1/foundation/entity-services.ts";
 import type { Q1Actor } from "../../q1/foundation/entity.ts";
 import type { Q1CampaignBinding, Q1SourceFinale, Q1TravelState } from "../../q1/base/index.ts";
 import type { Q1AddonEvent } from "../../q1/addons/context.ts";
@@ -71,6 +72,7 @@ export interface Q1CompositionServices {
   placePlayer(actor: OwnedActor, spot: Q1Actor, travel: Q1TravelState): undefined;
   disconnect(actor: ActorId): undefined;
   teleport(actor: ActorId, origin: Vec3, angles: Vec3, velocity: Vec3, until: number): undefined;
+  weaponServices?(actor: ActorId): Q1EntityServices | null;
   selectedWeapon(actor: ActorId): ItemId | null;
   selectedAmmo(actor: ActorId): ItemId | null;
   selectWeapon(actor: ActorId, item: ItemId): boolean;

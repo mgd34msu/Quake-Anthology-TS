@@ -1,3 +1,4 @@
+import { q1Creatures } from "../../../src/content/q1/base/creatures.ts";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
 import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index.ts";
@@ -405,5 +406,109 @@ for (const mapEdition of armorEditions) test(`base1 ${mapEdition} map runs the o
       }));
       expect(projectiles(restored, restoredSource)).toEqual(projectiles(simulation, selected));
     } finally { restored.close(); }
+  } finally { simulation.close(); await content.close(); }
+}, 30000);
+
+for (const mapEdition of armorEditions) test(`e1m1 ${mapEdition} map runs the other Q1 edition arsenal with map inventory and travel`, async () => {
+  const weaponEdition = mapEdition === 'classic' ? 'rerelease' : 'classic';
+  const command = parseApplicationCommand(['--game', `q1-${mapEdition}-id1`, '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--dedicated', '--mode', 'coop']);
+  if (command.kind !== 'run') throw new Error('Expected Q1 launch');
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: 'selected', value: [
+    { provider: 'q1:official', content: catalog.require(`q1-${weaponEdition}-id1`).id },
+  ] } } });
+  const reference = recipe.weapons[0]; if (reference === undefined) throw new Error('Missing selected Q1 source');
+  expect(reference.provider).toBe(`q1:weapons/${weaponEdition}/id1`);
+  const content = await loadApplicationContent(command.options, recipe), identity = createIdentityOwner(`q1-same-family-${mapEdition}`), client = identity.client(0, 0);
+  const options: Parameters<typeof createSimulation>[0] = { identity, recipe, world: content.world, mounts: content.mounts, skill: 1, mode: 'coop', seed: 17, maxClients: 1, playerIdentity: value => ({ seat: value.slot, socialId: '' }) };
+  const simulation = createSimulation(options);
+  const step = (world: ReturnType<typeof createSimulation>, actor: ActorId, owner: ClientId, sequence: number, attack = false, impulse = 0) => world.step({ elapsedMilliseconds: 100, commands: [{
+    actor, source: { kind: 'remote-client', client: owner }, sequence,
+    command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: world.timeSeconds, viewAngles: { x: -25, y: 90, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse },
+  }] });
+  try {
+    const actor = simulation.admitPlayer(client).actor, map = simulation.q1Source(), player = simulation.movementPlayer(actor);
+    const selected = map?.composition.services.weaponServices?.(actor), native = map?.game.player(actor), weapon = selected?.player(actor);
+    if (map === null || player === null || selected == null || native == null || weapon == null) throw new Error('Missing selected or native Q1 continuation');
+    expect(selected).not.toBe(map.game); expect(selected.options.edition).toBe(weaponEdition); expect(map.game.options.edition).toBe(mapEdition);
+    expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(25);
+    for (let frame = 0; frame < 4; frame++) step(simulation, actor, client, frame);
+    const shells = [...map.game.entities.values()].find(entity => entity.classname === 'item_shells');
+    if (shells?.touch == null) throw new Error('Missing authored e1m1 shells');
+    shells.touch(actor, null); expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(45);
+    step(simulation, actor, client, 4, true); expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(44);
+    expect(weapon.attackFinished).toBeGreaterThan(0); expect(native.attackFinished).toBe(0);
+    for (let frame = 5; frame < 12; frame++) step(simulation, actor, client, frame);
+    const nailgun = [...map.game.entities.values()].find(entity => entity.classname === 'weapon_nailgun');
+    if (nailgun?.touch == null) throw new Error('Missing authored e1m1 nailgun');
+    nailgun.touch(actor, null); expect(weapon.weapon).toBe('nailgun');
+    expect(simulation.inventory.count(actor, 'q1:weapon/nailgun')).toBe(1);
+    simulation.inventory.give(player.actor, 'q1:weapon/lightning', 1); simulation.inventory.give(player.actor, 'q1:ammo/cells', 12);
+    step(simulation, actor, client, 12, false, 8); expect(weapon.weapon).toBe('lightning'); expect(native.weapon).toBe('shotgun');
+    map.game.givePowerup(native, 'quad'); map.game.givePowerup(native, 'invulnerability');
+    const quadUntil = native.powerups.get('quad'), protectionUntil = native.powerups.get('invulnerability');
+    if (quadUntil === undefined || protectionUntil === undefined) throw new Error('Missing map powerup deadlines');
+    expect(selected.powerupExpires(actor, 'quad')).toBe(quadUntil);
+    expect(selected.powerupExpires(actor, 'invulnerability')).toBe(protectionUntil);
+    // Explicit synthetic victim compares shared selected-source damage with the map-native quad policy.
+    const victim = map.game.create('arsenal_quad_probe');
+    simulation.combat.setHealth(victim.actor, 100); simulation.combat.setTraits(victim.actor, { canTakeDamage: true });
+    selected.damage(victim.actor.id, actor, actor, 1, 'shotgun'); expect(simulation.combat.read(victim.actor.id)?.health).toBe(96);
+    simulation.combat.setHealth(victim.actor, 100); map.game.damage(victim.actor.id, actor, actor, 1, 'shotgun'); expect(simulation.combat.read(victim.actor.id)?.health).toBe(96);
+    map.game.remove(victim);
+    step(simulation, actor, client, 13, true); expect(simulation.inventory.count(actor, 'q1:ammo/cells')).toBe(11);
+    expect(weapon.lightningSoundAt).toBeGreaterThan(selected.time); expect(native.lightningSoundAt).toBe(0);
+    for (let frame = 14; frame < 18; frame++) step(simulation, actor, client, frame);
+    step(simulation, actor, client, 18, false, 10); expect(weapon.weapon).toBe('axe');
+    step(simulation, actor, client, 19, false, 12); expect(weapon.weapon).toBe('lightning');
+    const backpack = map.composition.dropInventory(player.actor);
+    if (backpack === null) throw new Error('Missing coop backpack');
+    expect(q1Creatures(map.game).backpacks.get(backpack.actor)?.weapon).toBe('lightning');
+    const travel = simulation.captureTravel(), carry = travel.players[0]?.state;
+    if (carry?.kind !== 'q1') throw new Error('Missing Q1 map carry');
+    expect(carry.carry.weapon).toBe('lightning'); expect(carry.carry.inventory.find(entry => entry.item === 'q1:ammo/cells')?.count).toBe(11);
+    simulation.inventory.give(player.actor, 'q1:weapon/nailgun', 1); simulation.inventory.give(player.actor, 'q1:ammo/nails', 20);
+    step(simulation, actor, client, 20, false, 4); step(simulation, actor, client, 21, true);
+    const projectile = [...selected.entities.values()].find(entity => entity.classname === 'spike');
+    if (projectile === undefined) throw new Error('Missing actual selected Q1 nail');
+    expect(simulation.actors.sourceOf(projectile.actor.id)?.provider).toBe(reference.provider);
+    const restoredIdentity = createIdentityOwner(`q1-same-family-restore-${mapEdition}`), restoredClient = restoredIdentity.client(0, 0);
+    const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [restoredClient], restore: decodeSaveImage(encodeSaveImage(simulation.checkpoint())) });
+    try {
+      const restoredActor = restored.players()[0]; if (restoredActor === undefined) throw new Error('Missing restored Q1 player');
+      const restoredSource = restored.q1Source()?.composition.services.weaponServices?.(restoredActor);
+      expect(restoredSource?.provider).toBe(reference.provider);
+      expect(restoredSource?.player(restoredActor)?.lightningSoundAt).toBe(weapon.lightningSoundAt);
+      const restoredProjectile = restored.actors.resolveSaved(projectile.actor.id);
+      if (restoredProjectile === null) throw new Error('Missing saved selected nail');
+      expect(restored.actors.sourceOf(restoredProjectile.id)).toEqual(simulation.actors.sourceOf(projectile.actor.id));
+      expect(restored.bodies.read(restoredProjectile.id)?.origin).toEqual(simulation.bodies.read(projectile.actor.id)?.origin);
+      for (let frame = 22; frame < 26; frame++) { step(simulation, actor, client, frame, true); step(restored, restoredActor, restoredClient, frame, true); }
+      expect(restored.playerUi(restoredActor)).toEqual(simulation.playerUi(actor));
+      expect(restoredSource?.player(restoredActor)?.attackFinished).toBe(weapon.attackFinished);
+      expect(restoredSource?.time).toBe(selected.time);
+    } finally { restored.close(); }
+    const travelIdentity = createIdentityOwner(`q1-same-family-travel-${mapEdition}`), traveled = createSimulation({ ...options, identity: travelIdentity, travel });
+    try {
+      const arrival = traveled.admitTravel(travelIdentity.client(0, 0), travel).actor;
+      expect(traveled.playerUi(arrival).activeWeapon).toBe('q1:weapon/lightning');
+      expect(traveled.inventory.count(arrival, 'q1:ammo/cells')).toBe(11);
+      expect(traveled.inventory.count(arrival, 'q1:ammo/shells')).toBe(44);
+      expect(traveled.q1Source()?.composition.services.weaponServices?.(arrival)?.powerupExpires(arrival, 'quad')).toBe(0);
+    } finally { traveled.close(); }
+    const restartTravel = { ...travel, players: travel.players.map(record => ({ ...record, state: { kind: 'q1', carry: map.composition.newTravel() } satisfies typeof record.state })) };
+    const restartIdentity = createIdentityOwner(`q1-same-family-reset-${mapEdition}`), restarted = createSimulation({ ...options, identity: restartIdentity, travel: restartTravel });
+    try {
+      const arrival = restarted.admitTravel(restartIdentity.client(0, 0), restartTravel).actor;
+      expect(restarted.playerUi(arrival).activeWeapon).toBe('q1:weapon/shotgun');
+      expect(restarted.inventory.count(arrival, 'q1:ammo/shells')).toBe(25);
+      expect(restarted.inventory.count(arrival, 'q1:ammo/cells')).toBe(0);
+    } finally { restarted.close(); }
+    const spawn = map.composition.selectSpawn(actor);
+    if (spawn === null) throw new Error('Missing actual Q1 respawn point');
+    map.composition.services.placePlayer(player.actor, spawn, carry.carry);
+    expect(simulation.playerUi(actor).activeWeapon).toBe('q1:weapon/lightning');
+    expect(simulation.inventory.count(actor, 'q1:ammo/cells')).toBe(11);
+    expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(44);
   } finally { simulation.close(); await content.close(); }
 }, 30000);

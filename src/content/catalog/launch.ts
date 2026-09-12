@@ -6,7 +6,7 @@ import { normalizeResourcePath } from "../mounts/paths.ts";
 import type { InstalledCatalog } from "./index.ts";
 import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
 import { monsterResources, monsterSources, selectedMonsterTiming, validateMonsters } from "./monsters.ts";
-import { admitWeaponTiming, canonicalWeaponSource, Q2_WEAPON_PROVIDERS, selectedWeaponResources, selectedWeaponTiming } from "./weapons.ts";
+import { admitWeaponTiming, canonicalWeaponSource, Q1_WEAPON_PROVIDERS, Q2_WEAPON_PROVIDERS, selectedWeaponResources, selectedWeaponTiming } from "./weapons.ts";
 
 export interface LaunchPreset extends Omit<ExecutableRecipe, "schemaVersion" | "preset" | "map" | "execution" | "mounts" | "resources"> {
   readonly map: MapSelection;
@@ -143,7 +143,7 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
     }
   }
-  const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS), ...monsterSources.map(source => source.provider)]);
+  const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS), ...monsterSources.map(source => source.provider)]);
   const monsterProfiles = selectedMonsterTiming(selected.enemies);
   const weaponProfiles = selectedWeaponTiming(selected.map.entities, selected.weapons, options.catalog);
   const timing = [...selected.timing.filter(entry => !selectedSourceIds.has(entry.provider)), ...equipmentTiming(selected.equipment), ...monsterProfiles];

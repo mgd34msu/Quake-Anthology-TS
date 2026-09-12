@@ -18,6 +18,7 @@ export interface Q1SelectedArsenalTravel {
 
 export interface Q1SelectedArsenalOptions {
   readonly game: Q1EntityServices;
+  nativePlayer?(actor: ActorId): Q1PlayerState;
   readonly replacedItems?: readonly ItemId[];
   fired?(actor: ActorId, weapon: Q1BaseWeapon, animation: WeaponStepInput["animation"]): WeaponStepResult["animation"];
   observe(actor: ActorId): { readonly viewAngles: Vec3; readonly waterLevel: number };
@@ -41,8 +42,10 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     const game = this.options.game;
     if (game.player(actor.id) !== null) throw new Error("Selected Q1 arsenal already admitted");
     for (const entry of game.host.inventory.entries(actor.id)) if (this.options.replacedItems?.includes(entry.item)) game.host.inventory.configure(actor, { ...entry, count: 0 });
-    game.initializeWeaponInventory(actor);
-    game.attachPlayer(actor, { initializeInventory: false, maxHealth });
+    const native = this.options.nativePlayer?.(actor.id);
+    if (native === undefined) game.initializeWeaponInventory(actor);
+    const player = game.attachPlayer(actor, { initializeInventory: false, maxHealth: native?.maxHealth ?? maxHealth, ...(native === undefined ? {} : { weapon: native.weapon }) });
+    if (native !== undefined) player.autoSwitch = native.autoSwitch;
     return this.read(actor.id);
   }
 
@@ -84,14 +87,14 @@ export class Q1SelectedArsenal implements SelectedArsenal {
   pickupAmmo(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined {
     const game = this.options.game, player = this.require(actor.id);
     const before = game.chooseBest(actor, item => grants.find(grant => grant.item === item)?.before ?? game.host.inventory.count(actor.id, item));
-    return q1AmmoPickupSelection(game, player, before, autoSwitch);
+    return q1AmmoPickupSelection(game, player, before, autoSwitch && this.options.nativePlayer?.(actor.id).autoSwitch !== "never");
   }
 
   pickupWeapons(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined {
     const game = this.options.game, player = this.require(actor.id);
     for (const item of weapons) {
       const weapon = WEAPONS.find(weapon => game.weaponItem(weapon) === item);
-      if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, selection);
+      if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, this.options.nativePlayer?.(actor.id).autoSwitch === "never" ? "never" : selection);
     }
     return undefined;
   }

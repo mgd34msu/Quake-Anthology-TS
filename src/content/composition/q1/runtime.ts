@@ -3,6 +3,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { DamageDecision, ItemId } from "../../../contracts/gameplay.ts";
 import { Q1Foundation } from "../../q1/foundation/runtime.ts";
 import type { Q1Actor } from "../../q1/foundation/entity.ts";
+import { WEAPONS } from "../../q1/foundation/types.ts";
 import type { Q1FoundationHost, Q1FoundationOptions } from "../../q1/foundation/types.ts";
 import { registerQ1Base, q1ClientNotice, q1Obituary, newQ1Travel, captureQ1Travel, decodeQ1Travel, admitQ1Travel, dropBackpack } from "../../q1/base/index.ts";
 import type { Q1Base, Q1ObituaryActor, Q1TravelState, Q1IntermissionResult } from "../../q1/base/index.ts";
@@ -16,7 +17,7 @@ import { newQ1CtfTravel, captureQ1CtfTravel, decodeQ1CtfTravel } from "../../q1/
 import { newQ1AddonTravel, captureQ1AddonTravel, decodeQ1AddonTravel, admitQ1AddonTravel } from "../../q1/addons/travel.ts";
 import { mg3HammerBodyFrame, handleMg3ItemImpulse } from "../../q1/addons/items/index.ts";
 import { Q1SourceClients } from "./clients.ts";
-import { baseQ1Impulse } from "./commands.ts";
+import { baseQ1Impulse, q1WeaponImpulse } from "./commands.ts";
 import type { Q1Map } from "../../../formats/q1-map/index.ts";
 import type { Q1ClientAdmission, Q1CompositionServices, Q1SourceInput, Q1SourceSelection } from "./types.ts";
 
@@ -129,12 +130,14 @@ export class Q1SourceComposition {
   /** Returns true only when this selected source program consumed its impulse. */
   impulse(actor: ActorId): boolean {
     const client = this.clients.require(actor), player = this.game.player(actor);
-    if (client.impulse === 0 || player !== null && this.game.time < player.attackFinished) return false;
+    const weapons = this.services.weaponServices === undefined ? this.game : this.services.weaponServices(actor), weaponPlayer = weapons?.player(actor) ?? null;
+    if (client.impulse === 0 || weaponPlayer !== null && weapons !== null && weapons.time < weaponPlayer.attackFinished) return false;
     if (this.ctf?.impulse(actor)) return true;
     if (this.packs?.impulse(actor, client.impulse)) { client.impulse = 0; return true; }
     if (this.addon !== null && handleMg3ItemImpulse(this.addon, actor, client.impulse, text => this.services.emit({ kind: "developer-message", text }))) { client.impulse = 0; return true; }
     if (this.addon !== null && handleQ1AddonImpulse(this.addon, actor, client.impulse)) { client.impulse = 0; return true; }
-    if (player === null || this.services.selectedWeapon(actor) !== this.game.weaponItem(player.weapon)) return false;
+    if (weapons !== null && weaponPlayer !== null && q1WeaponImpulse(weapons, weaponPlayer, client.impulse)) { client.impulse = 0; return true; }
+    if (player === null || weapons === null) return false;
     if (baseQ1Impulse(this, player, client.impulse)) { client.impulse = 0; return true; }
     client.impulse = 0; return true;
   }
@@ -206,7 +209,7 @@ export class Q1SourceComposition {
     return this.base.spawnSelector.select(force);
   }
   newTravel(): Q1TravelState { return this.ctf !== null ? newQ1CtfTravel(this.ctf) : this.packs?.newTravel() ?? (this.addon !== null ? newQ1AddonTravel(this.addon) : newQ1Travel(this.game.options)); }
-  captureTravel(actor: OwnedActor): Q1TravelState { return this.ctf !== null ? captureQ1CtfTravel(this.ctf, actor) : this.packs?.captureTravel(actor) ?? (this.addon !== null ? captureQ1AddonTravel(this.addon, actor) : captureQ1Travel(this.game, actor)); }
+  captureTravel(actor: OwnedActor): Q1TravelState { return this.ctf !== null ? captureQ1CtfTravel(this.ctf, actor) : this.packs?.captureTravel(actor) ?? (this.addon !== null ? captureQ1AddonTravel(this.addon, actor) : captureQ1Travel(this.game, actor, WEAPONS.find(weapon => this.game.weaponItem(weapon) === this.services.selectedWeapon(actor.id)) ?? this.game.player(actor.id)?.weapon)); }
   decodeTravel(state: Q1TravelState): Q1TravelState {
     return this.ctf !== null ? decodeQ1CtfTravel(this.ctf, state) : this.packs?.decodeTravel(state, this.selection.campaign.readFlags()) ?? (this.addon !== null ? decodeQ1AddonTravel(this.addon, state) : decodeQ1Travel(this.game, state, this.selection.campaign.readFlags()));
   }
@@ -219,7 +222,7 @@ export class Q1SourceComposition {
     if (!this.game.options.coop && this.game.options.deathmatch === 0) return null;
     if (this.packs !== null) return this.packs.dropBackpack(actor);
     const body = this.game.host.bodies.read(actor.id); if (body === null) throw new Error("Q1 death drop has no shared body");
-    return dropBackpack(this.game, body.origin, { weapon: this.game.player(actor.id)?.weapon ?? null, shells: this.game.host.inventory.count(actor.id, "q1:ammo/shells"),
+    return dropBackpack(this.game, body.origin, { weapon: WEAPONS.find(weapon => this.game.weaponItem(weapon) === this.services.selectedWeapon(actor.id)) ?? this.game.player(actor.id)?.weapon ?? null, shells: this.game.host.inventory.count(actor.id, "q1:ammo/shells"),
       nails: this.game.host.inventory.count(actor.id, "q1:ammo/nails"), rockets: this.game.host.inventory.count(actor.id, "q1:ammo/rockets"), cells: this.game.host.inventory.count(actor.id, "q1:ammo/cells") });
   }
   requestIntermissionExit(pressed: boolean): Q1IntermissionResult {

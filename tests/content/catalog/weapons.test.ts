@@ -24,10 +24,12 @@ test.skipIf(!existsSync(corpusRoot))("foreign base Q1 weapons resolve their own 
       const weapon = { provider: "q1:official", content: catalog.require(`q1-${edition}-id1`).id } satisfies typeof preset.map.entities;
       const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [weapon] } } });
       const requests = selectedWeaponResources(preset.map.entities, [weapon], catalog);
-      expect(recipe.timing.filter(entry => entry.provider === weapon.provider)).toEqual([nativeProviderTiming(weapon, "q1", edition === "rerelease")]);
+      const role = canonicalWeaponSource(preset.map.entities, weapon, catalog);
+      expect(recipe.weapons).toEqual([role]);
+      expect(recipe.timing.filter(entry => entry.provider === role.provider)).toEqual([nativeProviderTiming(role, "q1", edition === "rerelease")]);
       if (recipe.ordering.kind !== "mixed" || preset.ordering.kind !== "mixed") throw new Error("Expected mixed provider order");
       expect(recipe.ordering.providers.slice(0, preset.ordering.providers.length)).toEqual([...preset.ordering.providers]);
-      expect(recipe.ordering.providers.filter(provider => provider === weapon.provider)).toHaveLength(1);
+      expect(recipe.ordering.providers.filter(provider => provider === role.provider)).toHaveLength(1);
       expect(requests.filter(request => request.path.startsWith("progs/v_"))).toHaveLength(8);
       for (const request of requests) {
         const resource = recipe.resources.find(entry => entry.requestedPath === request.path);
@@ -114,6 +116,29 @@ test.skipIf(!existsSync(resolve(import.meta.dir, "../../../../qfiles/q2/rereleas
     expect(recipe.weapons).toEqual([role]); expect(recipe.inventory).toEqual(preset.inventory);
     expect(recipe.map.entities).toEqual(preset.map.entities);
     expect(recipe.timing.find(entry => entry.provider === role.provider)).toEqual(nativeProviderTiming(role, "q2", edition === "rerelease"));
+    expect(recipe.timing.find(entry => entry.provider === preset.map.entities.provider)).toEqual(preset.timing.find(entry => entry.provider === preset.map.entities.provider));
+    expect(recipe.ordering.kind === "mixed" && recipe.ordering.providers.filter(provider => provider === role.provider).length === 1).toBe(true);
+    for (const request of selectedWeaponResources(preset.map.entities, [role], catalog)) expect(recipe.resources.some(resource => resource.requestedPath === request.path && resource.provenance.mount.identity.content === weapon.content)).toBe(true);
+  }
+}, 60000);
+
+test.skipIf(!existsSync(resolve(corpusRoot, "q1/rerelease/id1/pak0.pak")))("Q1 cross-edition arsenals retain independent NetQuake roles and source assets", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  for (const mapEdition of ["classic", "rerelease"]) {
+    const edition = mapEdition === "classic" ? "rerelease" : "classic";
+    const command = parseApplicationCommand(["--game", `q1-${mapEdition}-id1`, "--map", "e1m1"]);
+    if (command.kind !== "run") throw new Error("Expected Q1 launch");
+    const preset = applicationPreset(catalog, command.options);
+    const weapon = { provider: "q1:official", content: catalog.require(`q1-${edition}-id1`).id } satisfies typeof preset.map.entities;
+    const role = canonicalWeaponSource(preset.map.entities, weapon, catalog);
+    expect(role.provider).toBe(`q1:weapons/${edition}/id1`);
+    expect(canonicalWeaponSource(preset.map.entities, preset.map.entities, catalog)).toEqual(preset.map.entities);
+    expect(() => canonicalWeaponSource(preset.map.entities, { ...role, content: preset.map.entities.content }, catalog)).toThrow("does not match");
+    await expect(resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [{ provider: "q1:banana", content: weapon.content }] } } })).rejects.toThrow("Unsupported Q1 weapon provider");
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [weapon] } } });
+    expect(recipe.weapons).toEqual([role]); expect(recipe.inventory).toEqual(preset.inventory);
+    expect(recipe.map.entities).toEqual(preset.map.entities);
+    expect(recipe.timing.find(entry => entry.provider === role.provider)).toEqual(nativeProviderTiming(role, "q1", edition === "rerelease"));
     expect(recipe.timing.find(entry => entry.provider === preset.map.entities.provider)).toEqual(preset.timing.find(entry => entry.provider === preset.map.entities.provider));
     expect(recipe.ordering.kind === "mixed" && recipe.ordering.providers.filter(provider => provider === role.provider).length === 1).toBe(true);
     for (const request of selectedWeaponResources(preset.map.entities, [role], catalog)) expect(recipe.resources.some(resource => resource.requestedPath === request.path && resource.provenance.mount.identity.content === weapon.content)).toBe(true);

@@ -343,7 +343,7 @@ export class SharedSimulation implements Simulation {
     this.handGrenades = this.createHandGrenades();
     this.grapple = this.createGrapple();
     if (this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== this.source.kind) {
-      if (providerFamily(this.weaponProvider.provider) === "q1" && (this.source.kind === "q2" || this.source.kind === "q3")) {
+      if (providerFamily(this.weaponProvider.provider) === "q1") {
         this.selectedArsenal = this.createSelectedQ1Arsenal();
       } else if (providerFamily(this.weaponProvider.provider) === "q2" && (this.source.kind === "q1" || this.source.kind === "q2" || this.source.kind === "q3")) {
         this.selectedArsenal = this.createSelectedQ2Arsenal();
@@ -799,6 +799,7 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3" && this.source.game.options.product === "missionpack") throw new Error("Selected Q1 supply on Team Arena is not implemented");
     if (this.source.kind === "q2" && this.source.product.configuration.program !== "baseq2") throw new Error("Selected Q1 supply currently supports base Q2 items");
     if (product !== "id1") throw new Error("Selected Q1 arsenal currently supports only base id1");
+    if (this.source.kind === "q1" && this.recipe.map.entities.content.split(":")[2] !== "id1") throw new Error("Selected Q1 supply on Q1 maps currently supports base id1");
     const timing = providerTiming(this.recipe, this.weaponProvider.provider);
     const random = new SourceRandom(this.options.seed, "classic");
     const host = this.q1ActorHost(this.weaponProvider, { numeric: timing.numeric, random,
@@ -806,6 +807,7 @@ export class SharedSimulation implements Simulation {
       schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) });
     const powerupExpires = (actor: ActorId, powerup: Q1Powerup): number => {
       if (!this.actors.isLive(actor)) return 0;
+      if (this.source.kind === "q1") return this.source.game.player(actor)?.powerups.get(powerup) ?? 0;
       if (this.source.kind === "q2") {
         const powers = this.source.items.playerPowerups(actor);
         return powerup === "quad" ? powers.quadUntil : powerup === "invulnerability" ? powers.invulnerabilityUntil : powerup === "suit" ? powers.enviroUntil : 0;
@@ -826,20 +828,29 @@ export class SharedSimulation implements Simulation {
       skill: this.options.skill, deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", campaign: this.recipe.map.entities.provider,
       combatProvider: this.recipe.combat.provider, movementProvider: this.recipe.movement.provider, inventoryProvider: this.recipe.inventory.provider, gravity: this.physics.gravity });
     this.selectedWeaponSource = { kind: "q1", game, random };
-    const profile = this.source.kind === "q2" ? Q2_Q1_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE;
+    const profile: PickupSupplyProfile = this.source.kind === "q1" ? { id: "composition:q1-q1-supply", weaponOwnership: "all-destinations",
+      ammo: Q1_Q3_SUPPLY_PROFILE.ammo.map(entry => ({ source: entry.source, destinations: [entry.source] })),
+      weapons: Q1_Q3_SUPPLY_PROFILE.weapons.map(entry => ({ source: entry.source, destinations: [entry.source] })) } : this.source.kind === "q2" ? Q2_Q1_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE;
     const selected = new Q1SelectedArsenal({ game,
+      ...(this.source.kind === "q1" ? { nativePlayer: (actor: ActorId) => {
+        const player = this.source.kind === "q1" ? this.source.game.player(actor) : null;
+        if (player === null) throw new Error("Selected Q1 arsenal has no native map player");
+        return player;
+      } } : {}),
       fired: (actor, weapon) => {
         this.weaponCharacterAnimation(actor, "attack", weapon === "axe", this.weaponProvider.content, false);
+        if (this.source.kind === "q1") this.source.composition.fired(actor, game.weaponItem(weapon));
         const player = this.requirePlayer(actor), body = this.bodies.read(actor);
         if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor, this.source.game, body.origin, "weapon");
         return player.animation;
       },
-      replacedItems: [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
+      replacedItems: [...(this.source.kind === "q1" ? [] : replacedSupplyItems(profile)), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
       observe: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, waterLevel: player.waterLevel }; } });
     this.selectedSupply = new SharedPickupAdmission({ inventory: this.inventory, profile,
       ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
       weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; } });
     if (this.source.kind === "q2") this.source.items.setPickupAdmission(this.selectedSupply);
+    if (this.source.kind === "q1") this.source.game.pickupAdmission = this.selectedSupply;
     return selected;
   }
 
@@ -1192,8 +1203,11 @@ export class SharedSimulation implements Simulation {
         placePlayer: (actor, spot, travel) => this.placeQ1Player(this.requirePlayer(actor.id), spot, travel),
         disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
         teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
+        weaponServices: () => this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource.game : this.selectedArsenal === null && this.source.kind === "q1" ? this.source.game : null,
         selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
-        selectWeapon: (actor, item) => { if (this.source.kind !== "q1") return false; const game = this.source.game;
+        selectWeapon: (actor, item) => { if (this.source.kind !== "q1") return false;
+          if (this.selectedArsenal !== null) return this.selectedArsenal.select(actor, item);
+          const game = this.source.game;
           const weapon = [...Q1_WEAPONS, ...game.registeredWeapons.keys()].find(value => game.weaponItem(value) === item);
           return weapon !== undefined && game.selectWeapon(this.requirePlayer(actor).actor, weapon); },
         weaponChanged: actor => { const player = this.requirePlayer(actor); player.arsenal = this.arsenal(player); return undefined; },
@@ -1710,7 +1724,8 @@ export class SharedSimulation implements Simulation {
     else if (source.kind === "q2" && carried?.kind === "q2" && entity !== null) source.players.restoreCarry(entity, source.game, carried.carry);
     player.state = player.readState();
     if (this.selectedArsenal !== null) {
-      if (carriedPlayer?.selectedArsenal !== undefined) {
+      if (source.kind === "q1" && this.selectedArsenal.family === "q1") player.arsenal = this.selectedArsenal.admit(actor, 100);
+      else if (carriedPlayer?.selectedArsenal !== undefined) {
         const carry = carriedPlayer.selectedArsenal;
         if (this.selectedArsenal.family === "q1" && carry.kind === "q1") player.arsenal = this.selectedArsenal.admitTravel(actor, 100, carry.state);
         else if (this.selectedArsenal.family === "q2" && carry.kind === "q2" && this.selectedWeaponSource?.kind === "q2") {
@@ -1861,6 +1876,7 @@ export class SharedSimulation implements Simulation {
     const player = this.playerStates.get(input.actor);
     if (player === undefined) throw new Error("Weapon input has no admitted player");
     if (this.selectedArsenal !== null) {
+      if (this.source.kind === "q1" && this.selectedArsenal.family === "q1") this.source.composition.impulse(player.actor.id);
       if (this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf && this.source.product.match.source.match.paused)
         return { arsenal: this.selectedArsenal.read(player.actor.id), animation: input.animation, effects: [] };
       const arsenal = this.selectedArsenal.read(player.actor.id);

@@ -5,28 +5,36 @@ import type { InstalledCatalog } from "./index.ts";
 import { nativeProviderTiming } from "./timing.ts";
 import { EQUIPMENT_PROVIDERS } from "./equipment.ts";
 
+export const Q1_WEAPON_PROVIDERS = {
+  classic: "q1:weapons/classic/id1",
+  rerelease: "q1:weapons/rerelease/id1",
+} satisfies Readonly<Record<"classic" | "rerelease", ProviderReference["provider"]>>;
+
 export const Q2_WEAPON_PROVIDERS = {
   classic: "q2:weapons/classic/baseq2",
   rerelease: "q2:weapons/rerelease/baseq2",
 } satisfies Readonly<Record<"classic" | "rerelease", ProviderReference["provider"]>>;
 
 export function canonicalWeaponSource(map: ProviderReference, weapon: ProviderReference, catalog: InstalledCatalog): ProviderReference {
-  if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider) || !weapon.provider.startsWith("q2:")) return weapon;
-  const role = weapon.provider.startsWith("q2:weapons/");
-  if (!role && weapon.provider !== "q2:official") throw new Error(`Unsupported Q2 weapon provider ${weapon.provider}`);
+  if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return weapon;
+  const family = weapon.provider.startsWith("q1:") ? "q1" : weapon.provider.startsWith("q2:") ? "q2" : null;
+  if (family === null) return weapon;
+  const program = family === "q1" ? "id1" : "baseq2", providers = family === "q1" ? Q1_WEAPON_PROVIDERS : Q2_WEAPON_PROVIDERS;
+  const role = weapon.provider.startsWith(`${family}:weapons/`);
+  if (!role && weapon.provider !== `${family}:official`) throw new Error(`Unsupported ${family.toUpperCase()} weapon provider ${weapon.provider}`);
   const product = catalog.require(weapon.content).expectation;
   const mapProduct = catalog.require(map.content).expectation;
-  if (weapon.content !== map.content && mapProduct.family === "q2" && (mapProduct.campaign !== "baseq2" || mapProduct.edition !== "classic" && mapProduct.edition !== "rerelease"))
-    throw new Error("Cross-edition Q2 arsenals require a classic or rerelease baseq2 map program");
-  const base = product.family === "q2" && product.campaign === "baseq2" && (product.edition === "classic" || product.edition === "rerelease");
+  if (weapon.content !== map.content && mapProduct.family === family && (mapProduct.campaign !== program || mapProduct.edition !== "classic" && mapProduct.edition !== "rerelease"))
+    throw new Error(`Cross-edition ${family.toUpperCase()} arsenals require a classic or rerelease ${program} map program`);
+  const base = product.family === family && product.campaign === program && (product.edition === "classic" || product.edition === "rerelease");
   if (!base) {
-    if (role || weapon.content !== map.content || product.family !== "q2")
-      throw new Error("Selected Q2 arsenal roles require classic or rerelease baseq2 content");
+    if (role || weapon.content !== map.content || product.family !== family)
+      throw new Error(`Selected ${family.toUpperCase()} arsenal roles require classic or rerelease ${program} content`);
     return weapon;
   }
-  const provider = product.edition === "classic" ? Q2_WEAPON_PROVIDERS.classic : Q2_WEAPON_PROVIDERS.rerelease;
+  const provider = product.edition === "classic" ? providers.classic : providers.rerelease;
   if (role && weapon.provider !== provider) throw new Error(`Selected weapon role ${weapon.provider} does not match ${weapon.content}`);
-  if (weapon.content === map.content && map.provider === "q2:official") return map;
+  if (weapon.content === map.content && map.provider === `${family}:official`) return map;
   return { provider, content: weapon.content };
 }
 
@@ -92,7 +100,7 @@ export function selectedWeaponTiming(map: ProviderReference, weapons: readonly P
     const prior = providers.get(weapon.provider);
     if (weapon.provider === map.provider || prior !== undefined && prior !== weapon.content)
       throw new Error(`Selected weapon provider ${weapon.provider} has conflicting content`);
-    if (mapFamily === product.family && !Object.values(Q2_WEAPON_PROVIDERS).some(provider => provider === weapon.provider) || prior !== undefined) return [];
+    if (mapFamily === product.family && ![...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS)].some(provider => provider === weapon.provider) || prior !== undefined) return [];
     providers.set(weapon.provider, weapon.content);
     return [nativeProviderTiming(weapon, product.family, product.edition === "rerelease")];
   });
