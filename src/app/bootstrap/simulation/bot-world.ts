@@ -1,4 +1,4 @@
-import { observeQ1Supply } from "../../../content/q1/foundation/pickups.ts";
+import { observeQ1Supply, previewQ1Supply } from "../../../content/q1/foundation/pickups.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
@@ -6,6 +6,7 @@ import { PlayerState } from "../../../content/q3/base/shared/player-state.ts";
 import { EntityType, MoveType, WeaponState, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { GameMemory } from "../../../content/q3/base/game/memory.ts";
 import type { BotObservedEntity, BotObservedPickup, SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
+import { createQ1BotKnowledge } from "./bot-q1-knowledge.ts";
 import { createQ2BotKnowledge } from "./bot-q2-knowledge.ts";
 import type { SharedSimulation } from "./runtime.ts";
 
@@ -27,7 +28,9 @@ export function createSharedBotWorld(options: Options) {
   const simulation = options.simulation, source = simulation.q2Source() ?? simulation.q1Source();
   if (source === null) throw new Error("Shared bot observations require an admitted Q1 or Q2 world");
   const arsenal = simulation.q2WeaponSource();
-  if (arsenal === null) throw new Error("Shared bot weapon observations require a Q2 arsenal");
+  const nativeQ1 = source.kind === "q1" && simulation.weaponProvider.provider === simulation.recipe.map.entities.provider
+    && simulation.weaponProvider.content === simulation.recipe.map.entities.content;
+  if (arsenal === null && !nativeQ1) throw new Error("Shared bot weapon observations require native Q1 or native/selected Q2 weapons");
   const numeric = simulation.recipe.timing.find(entry => entry.provider === simulation.recipe.engineBehavior.provider)?.numeric;
   if (numeric === undefined) throw new Error("Bot world has no source numeric policy");
   const policy = { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } satisfies import("../../../contracts/scene.ts").TracePolicy;
@@ -43,12 +46,13 @@ export function createSharedBotWorld(options: Options) {
   };
   const metadata = (actor: ActorId | null) => {
     if (actor === null) return null;
-    const q2 = source.kind === "q2" ? source.game.entity(actor) : arsenal.game.entity(actor);
+    const q2 = source.kind === "q2" ? source.game.entity(actor) : arsenal?.game.entity(actor) ?? null;
     if (q2 !== null) return { model: q2.model, frame: q2.frame, classname: q2.classname, hidden: (q2.serverFlags & 1) !== 0, maxHealth: q2.maxHealth };
     const q1 = source.kind === "q1" ? source.game.entity(actor) : null;
     return q1 === null ? null : { model: q1.model, frame: q1.frame, classname: q1.classname, hidden: false, maxHealth: source.kind === "q1" ? source.game.player(actor)?.maxHealth ?? q1.maxHealth : q1.maxHealth };
   };
-  const knowledge = createQ2BotKnowledge({ simulation, actorForClient: client => actorForId(client) });
+  const knowledge = arsenal !== null ? createQ2BotKnowledge({ simulation, actorForClient: client => actorForId(client) })
+    : createQ1BotKnowledge({ simulation, actorForClient: client => actorForId(client) });
   const cvars = options.cvars;
   for (const [name, value] of Object.entries({ sv_maxclients: String(simulation.options.maxClients), g_gametype: "0", mapname: mapName,
     sv_mapname: mapName, g_spSkill: "2", bot_enable: "1", bot_minplayers: "0", dedicated: "1", g_gravity: String(simulation.physics.gravity) })) cvars.register(name, value);
@@ -95,7 +99,7 @@ export function createSharedBotWorld(options: Options) {
     if (body === null) return null;
     const observation = source.kind === "q1" ? observeQ1Supply(source.game, actor, recipient) : source.items.observeSupply(source.game, actor, recipient);
     if (observation === null) return null;
-    const preview = source.kind === "q1" ? source.game.pickupAdmission?.preview(recipient, observation.offer) ?? null
+    const preview = source.kind === "q1" ? previewQ1Supply(source.game, actor, recipient)
       : source.items.previewSupply(source.game, actor, recipient);
     if (preview === null) return null;
     const entity = metadata(actor);
@@ -127,9 +131,10 @@ export function createSharedBotWorld(options: Options) {
         ps.clientNum = movement.client.slot; ps.origin = { ...body.origin }; ps.velocity = { ...body.velocity }; ps.viewangles = { ...movement.viewAngles };
         ps.viewheight = movement.viewHeight; ps.groundEntityNum = body.ground === null ? 1023 : entityId(body.ground);
         ps.pmType = common.spectator ? MoveType.PM_SPECTATOR : (combat?.health ?? 0) <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
-        ps.weapon = knowledge.sourceWeapon(number); const phase = arsenal.weapons.states.get(actor)?.phase;
+        ps.weapon = knowledge.sourceWeapon(number); const phase = arsenal?.weapons.states.get(actor)?.phase;
         ps.weaponState = phase === "activating" ? WeaponState.WEAPON_RAISING : phase === "dropping" ? WeaponState.WEAPON_DROPPING
-          : phase === "firing" ? WeaponState.WEAPON_FIRING : WeaponState.WEAPON_READY;
+          : phase === "firing" || arsenal === null && source.kind === "q1" && (source.game.player(actor)?.attackFinished ?? 0) > source.game.time
+            ? WeaponState.WEAPON_FIRING : WeaponState.WEAPON_READY;
         ps.stats.set(schema.health, combat?.health ?? 0); ps.stats.set(schema.armor, combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points); ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
         ps.persistant.set(0, common.score); ps.persistant.set(3, common.spectator ? 3 : 0);
         player = { state: ps, connected: options.actor(number) === null || begun.has(number), team: common.spectator ? 3 : 0, name: common.name, lastHurtClient: 0, lastHurtMod: 0 };

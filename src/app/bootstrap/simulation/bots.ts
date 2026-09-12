@@ -304,8 +304,10 @@ export function openApplicationBotLog(filename: string): BotLogOpenResult {
 export function botAdmissionError(simulation: SharedSimulation): string | null {
   if (simulation.q3Source() !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
     ? null : "Q3-map bots require the native Q3 arsenal observation; this selected arsenal is not yet supported";
-  if (simulation.q2WeaponSource() === null) return "Shared bots require an actual native or selected Q2 arsenal";
   const q1 = simulation.q1Source(), q2 = simulation.q2Source();
+  const nativeQ1 = q1 !== null && simulation.weaponProvider.provider === simulation.recipe.map.entities.provider
+    && simulation.weaponProvider.content === simulation.recipe.map.entities.content;
+  if (simulation.q2WeaponSource() === null && !nativeQ1) return "Shared bots require actual native Q1 or native/selected Q2 weapons";
   if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)
     || q2 !== null && q2.product.match.selection.kind !== "standard") return "Shared bots support standard deathmatch; team and campaign objectives are not yet bound";
   return q1 !== null || q2 !== null ? null : "Bot world observation is unavailable";

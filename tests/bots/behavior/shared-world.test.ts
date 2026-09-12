@@ -8,6 +8,7 @@ import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { writeSaveImage } from "../../../src/persistence/save-image.ts";
 import { resolve } from "node:path";
+import type { ApplicationBots } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
@@ -76,12 +77,14 @@ retail("Q1 deathmatch bots use selected Q2 weapons through application commands 
   try { await writeSaveImage(save, simulation.checkpoint()); } finally { simulation.close(); await content.close(); }
   const messages: string[] = [], application = await Application.open(launch.options, { print: text => { messages.push(text); } });
   try {
-    const originalCount = application.simulation.actors.observations().length;
     application.queueCommand("addbot", ["Ranger", "5"], null); await application.step(100);
-    expect(application.botClients).toHaveLength(0); expect(application.simulation.players()).toHaveLength(0);
-    expect(application.simulation.actors.observations()).toHaveLength(originalCount);
-    expect(messages.some(message => message.includes("require an actual native or selected Q2 arsenal"))).toBe(true);
+    const nativeBot = application.botClients[0]; if (nativeBot === undefined) throw new Error("Native Q1 bot was not admitted");
+    expect(application.simulation.players()).toHaveLength(1);
+    application.queueCommand("removebot", [String(nativeBot.client.id.slot)], null); await application.step(100);
+    expect(application.botClients).toHaveLength(0); expect(nativeBot.client.isClosed).toBe(true);
     await application.loadGame(save);
+    const transports: ApplicationBots[] = [], services = application.simulation.botServices, attach = services.attach.bind(services);
+    services.attach = (director, transport) => { transports.push(transport); attach(director, transport); };
     const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
     application.queueCommand("addbot", ["Ranger", "5"], null); await application.step(100);
     const bot = application.botClients[0]; if (bot === undefined) throw new Error(`Q1 bot not admitted: ${messages.join("")}`);
@@ -117,13 +120,18 @@ retail("Q1 deathmatch bots use selected Q2 weapons through application commands 
     const resetOrigin = world.bodies.read(actor)?.origin;
     if (resetOrigin === undefined) throw new Error("Missing bot reset origin");
     source.composition.services.teleport(actor, resetOrigin, { x: 0, y: 90, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
-    await application.step(100); await application.step(100);
-    expect(world.movementPlayer(actor)?.viewAngles.y).toBeCloseTo(90, 2);
+    await application.step(100);
+    const brain = transports[0]?.director.roster().find(entry => entry.actor.id.equals(actor))?.state;
+    if (brain === undefined) throw new Error("Missing actual bot brain");
+    expect(brain.viewangles.y).toBe(90); expect(brain.idealViewangles.y).toBe(90);
+    await application.step(100);
     source.composition.requestRespawn(actor);
     const respawnView = world.movementPlayer(actor)?.viewAngles.y;
+    if (respawnView === undefined) throw new Error("Missing source respawn view");
     expect(world.q2WeaponSource()?.weapons.states.get(actor)?.phase).toBe("activating");
-    await application.step(100); await application.step(100);
-    expect(world.movementPlayer(actor)?.viewAngles.y).toBeCloseTo(respawnView ?? -1, 2);
+    await application.step(100);
+    expect(brain.viewangles.y).toBe(respawnView); expect(brain.idealViewangles.y).toBe(respawnView);
+    await application.step(100);
     const configuration = world.botServices.configuration; if (configuration === null) throw new Error("Missing bot configuration");
     expect(configuration).toBe(source.cvars); configuration.set("bot_thinktime", "150", true);
     await application.changeLevel("dm5");
@@ -141,4 +149,63 @@ retail("Q1 deathmatch bots use selected Q2 weapons through application commands 
     application.queueCommand("removebot", [String(bot.client.id.slot)], null); await application.step(100);
     expect(application.botClients).toHaveLength(0); expect(bot.client.isClosed).toBe(true);
   } finally { await application.close(); await rm(temporary, { recursive: true, force: true }); }
+}, 120000);
+
+retail("native Q1 bots pursue an authored supply and fight through the same director", async () => {
+  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4",
+    "--movement", "q1", "--character", "q2", "--mode", "deathmatch", "--dedicated"]);
+  if (launch.kind !== "run") throw new Error("Expected native Q1 launch");
+  const application = await Application.open(launch.options, { print: () => undefined });
+  try {
+    const captured: ApplicationBots[] = [], services = application.simulation.botServices, attach = services.attach.bind(services);
+    services.attach = (director, transport) => { captured.push(transport); attach(director, transport); };
+    application.queueCommand("addbot", ["Ranger", "5"], null); await application.step(100);
+    const transport = captured[0], bot = transport?.director.roster()[0];
+    if (transport === undefined || bot === undefined) throw new Error("Missing native Q1 director/player");
+    const world = application.simulation, source = world.q1Source();
+    if (source === null) throw new Error("Missing native Q1 source");
+    expect(world.q2WeaponSource()).toBeNull();
+    expect(world.weaponProvider).toEqual(world.recipe.map.entities);
+    for (let frame = 0; frame < 50; frame++) await application.step(100);
+    const pickups = transport.game.pickups;
+    if (pickups === null) throw new Error("Missing source supplies");
+    const target = pickups.candidates(bot.sourceClient).find(item => item.name === "weapon_rocketlauncher");
+    if (target === undefined) throw new Error("Missing authored dm4 rocket launcher");
+    expect(target.observation.availability).toEqual({ kind: "ready", eligible: true });
+    expect(target.preview.weapons).toEqual([{ item: "q1:weapon/rocketlauncher", before: 0, given: 1 }]);
+    const start = { x: 12.117749006091444, y: 131.88225099390857, z: -294.96875 };
+    // Place the actual source player in the previously checked supported 96-unit lane; all subsequent movement is bot commands.
+    source.composition.services.teleport(bot.actor.id, start, { x: 0, y: 315, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    let choseGoal = false, collected = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      if (transport.director.library.goals.getTopGoal(bot.state.gs)?.entity === target.entity) choseGoal = true;
+      if (world.inventory.count(bot.actor.id, "q1:weapon/rocketlauncher") === 1) { collected = true; break; }
+    }
+    expect(choseGoal).toBe(true); expect(collected).toBe(true);
+    for (const receipt of [...target.preview.weapons, ...target.preview.ammo]) expect(world.inventory.count(bot.actor.id, receipt.item)).toBe(receipt.before + receipt.given);
+    expect(pickups.inspect(bot.sourceClient, target.observation.actor)?.observation.availability.kind).toBe("respawning");
+    const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id);
+    source.composition.services.teleport(bot.actor.id, start, { x: 0, y: 315, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    source.composition.services.teleport(human.actor, { x: 80, y: 64, z: start.z }, { x: 0, y: 135, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    const targetPlayer = source.game.player(human.actor);
+    if (targetPlayer === null) throw new Error("Missing native target player");
+    world.combat.setHealth(targetPlayer.actor, 1000);
+    expect(source.game.selectWeapon(bot.actor, "axe")).toBe(true);
+    let attacked = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      if (((world.movementPlayer(bot.actor.id)?.buttons ?? 0) & 1) !== 0) attacked = true;
+      if ((world.combat.read(human.actor)?.health ?? 1000) < 1000) break;
+    }
+    expect(attacked).toBe(true); expect(world.combat.read(human.actor)?.health).toBeLessThan(1000);
+    expect(source.game.player(bot.actor.id)?.weapon).not.toBe("axe");
+    const clientId = application.botClients[0]?.client.id;
+    if (clientId === undefined) throw new Error("Lost native bot client");
+    await application.changeLevel("dm5");
+    expect(application.botClients[0]?.client.id.equals(clientId)).toBe(true);
+    expect(application.simulation.actors.isLive(bot.actor.id)).toBe(false);
+    application.queueCommand("removebot", [String(clientId.slot)], null); await application.step(100);
+    expect(application.botClients).toHaveLength(0);
+  } finally { await application.close(); }
 }, 120000);
