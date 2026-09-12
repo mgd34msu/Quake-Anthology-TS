@@ -193,7 +193,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
       if (game === undefined || entity === undefined) throw new Error("Native authored wizard missing");
       const body = game.body(entity), authored = parseQ1Entities(native.simulation.sourceEntityText)[383];
       const definition = { source: { provider: "q1:monsters/classic/id1", content: application.content.recipe.map.entities.content }, classname: "monster_wizard" } satisfies Parameters<typeof preservesAuthoredQ1Placement>[0]["definition"];
-      const input = { map: application.content.recipe.map, authored, definition, entity, body };
+      const input = { map: application.content.recipe.map, authored, definition, game, entity, body };
       expect(preservesAuthoredQ1Placement(input)).toBe(true);
       expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, bounds: { ...body.bounds, max: { ...body.bounds.max, x: 32 } } } })).toBe(false);
       expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, origin: { ...body.origin, x: body.origin.x + 1 } } })).toBe(false);

@@ -8,6 +8,7 @@ import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
 import { q1EntityValue } from "../../../formats/q1-map/index.ts";
 import { parseVector } from "../../../content/q1/foundation/entity.ts";
+import type { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
 import type { Q1Actor } from "../../../content/q1/foundation/entity.ts";
 import { baseSpecies } from "../../../content/q1/base/species.ts";
 
@@ -15,24 +16,30 @@ function sameVector(left: Vec3, right: Vec3): boolean {
   return left.x === right.x && left.y === right.y && left.z === right.z;
 }
 
-/** Native Q1 flying startup accepts its authored overlap through SV_movestep's fraction check. */
+/** Preserve exact native Q1 startup outcomes, including failed floor drops and flying overlap. */
 export function preservesAuthoredQ1Placement(input: {
   readonly map: ResolvedMap;
   readonly authored: Q1Entity | undefined;
   readonly definition: MonsterDefinitionReference;
+  readonly game: Q1EntityServices;
   readonly entity: Q1Actor;
   readonly body: BodyState;
 }): boolean {
-  const { map, authored, definition, entity, body } = input;
+  const { map, authored, definition, game, entity, body } = input;
   if (map.entities.provider !== "q1:official" || (definition.source.provider !== "q1:monsters/classic/id1" && definition.source.provider !== "q1:monsters/rerelease/id1")
     || map.entities.content !== definition.source.content || map.geometryContent !== definition.source.content || authored === undefined) return false;
   const classname = q1EntityValue(authored, "classname");
   if (classname !== definition.classname || entity.classname !== classname) return false;
   const species = baseSpecies.find(species => species.classnames.includes(classname));
-  if (species === undefined || species.movement !== "fly" || entity.movement !== "step" || (entity.movementFlags & 3) !== 1
-    || entity.model !== `progs/${species.model}.mdl`) return false;
-  return sameVector(body.bounds.min, species.bounds.min) && sameVector(body.bounds.max, species.bounds.max)
-    && sameVector(body.origin, parseVector(q1EntityValue(authored, "origin") ?? ""));
+  if (species === undefined || entity.movement !== "step" || entity.model !== `progs/${species.model}.mdl`
+    || !sameVector(body.bounds.min, species.bounds.min) || !sameVector(body.bounds.max, species.bounds.max)) return false;
+  const origin = parseVector(q1EntityValue(authored, "origin") ?? "");
+  if (species.movement === "fly") return (entity.movementFlags & 3) === 1 && sameVector(body.origin, origin);
+  if (species.movement !== "walk" || entity.movementFlags !== 32 || body.ground !== null || entity.solid !== "slidebox") return false;
+  const start = { ...origin, z: origin.z + 1 };
+  if (!sameVector(body.origin, start)) return false;
+  const floor = game.host.trace({ start, end: { ...start, z: start.z - 256 }, bounds: body.bounds, ignore: entity.actor.id, monsters: true });
+  return floor.fraction === 1 || floor.allSolid;
 }
 
 export function preservesAuthoredQ2Placement(input: {

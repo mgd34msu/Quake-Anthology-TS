@@ -528,7 +528,7 @@ export class SharedSimulation implements Simulation {
               authored: parseQ2Entities(this.options.world.entities, map.game.options.edition)[entry.sourceOrdinal], definition,
               native: map.monsters.definition(entry.classname, map.game), game: source.game, entity: q2Entity, body });
           const preserved = source.kind === "q1" && this.options.world.kind === "q1-bsp" && entity !== null
-            && preservesAuthoredQ1Placement({ map: this.recipe.map, authored: this.options.world.entityList[entry.sourceOrdinal], definition, entity, body });
+            && preservesAuthoredQ1Placement({ map: this.recipe.map, authored: this.options.world.entityList[entry.sourceOrdinal], definition, game: source.game, entity, body });
           if (!preserved && !preservedQ2) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
         }
         return undefined;
