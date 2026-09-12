@@ -99,6 +99,7 @@ export function q1SkyTexCoords(position: Vec3, viewOrigin: Vec3, time: number, l
 }
 
 export interface LegacyMaterialDrawContext {
+  readonly entityRGBA?: Vec4;
   readonly time: number;
   readonly animationFrame: number;
   readonly alternateAnimation: boolean;
@@ -118,7 +119,8 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
   if (material.kind === "q1" && material.surface === "sky" || material.kind === "q2" && (material.surfaceFlags & 4) !== 0)
     throw new Error("Sky surfaces require the sky geometry and layer path");
   const image = material.kind === "q1" ? q1AnimatedTexture(material, context.time, context.alternateAnimation) : q2AnimatedTexture(material, context.animationFrame);
-  const alpha = material.alpha, blended = alpha < 1;
+  const tint = context.entityRGBA ?? { x: 255, y: 255, z: 255, w: 255 };
+  const alpha = material.alpha * tint.w / 255, blended = alpha < 1;
   const fence = material.kind === "q1" && material.surface === "fence";
   const lightmap = material.lighting.kind === "lightmap" || material.lighting.kind === "decoupled-lightmap" ? material.lighting.image : null;
   const state: RenderState = { blend: blended ? { source: "src-alpha", destination: "one-minus-src-alpha" } : { source: "one", destination: "zero" },
@@ -134,7 +136,8 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
     const intensity = material.kind === "q2" && material.lighting.kind !== "vertex" && (material.warp || blended) ? 0.5 : 1;
     const color = material.lighting.kind === "vertex" ? { x: vertex.color.x / 255, y: vertex.color.y / 255, z: vertex.color.z / 255, w: alpha }
       : { x: intensity, y: intensity, z: intensity, w: alpha };
-    return { position: context.project(vertex.position), texCoord: uv, color };
+    return { position: context.project(vertex.position), texCoord: uv,
+      color: { x: color.x * tint.x / 255, y: color.y * tint.y / 255, z: color.z * tint.z / 255, w: color.w } };
   });
   const fragmentLighting = material.kind === "q2" ? context.fragmentLighting : undefined;
   const textureLighting: BatchLighting = fragmentLighting !== undefined && lightmap === null
@@ -169,7 +172,7 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
     }
   }
   if (context.fullbright !== null) batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: context.fullbright }, indices: geometry.indices,
-    vertices: vertices.map(vertex => ({ ...vertex, color: { x: 1, y: 1, z: 1, w: alpha } })),
+    vertices: vertices.map(vertex => ({ ...vertex, color: { x: tint.x / 255, y: tint.y / 255, z: tint.z / 255, w: alpha } })),
     state: { ...state, blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: blended ? "less-equal" : "equal", depthWrite: false, alphaTest: "gt0" } });
   return batches;
 }

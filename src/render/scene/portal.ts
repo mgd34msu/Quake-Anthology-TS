@@ -3,9 +3,9 @@
 import type { Axis, Plane, Vec3 } from "../../contracts/math.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
-import { add3, cross3, dot3, perpendicularVector, rotatePointAroundVector, scale3, sub3 } from "../../core/math.ts";
+import { add3, normalize3, cross3, dot3, perpendicularVector, rotatePointAroundVector, scale3, sub3 } from "../../core/math.ts";
 import type { ModelTransform } from "./view.ts";
-import { createViewProjector } from "./view.ts";
+import { createViewProjector, worldPoint, worldVector } from "./view.ts";
 
 export interface PortalEntity {
   readonly origin: Vec3;
@@ -31,14 +31,10 @@ function transform(vector: Vec3, surface: Axis, camera: Axis): Vec3 {
 /** First source entity within 64 units wins, including a translated inline plane. */
 export function portalCamera(original: Plane, entities: readonly PortalEntity[], view: SceneCamera, milliseconds: number,
   model: ModelTransform | null = null): PortalCamera | null {
-  const matchingDistance = model === null ? original.distance : f(original.distance + dot3(original.normal, model.origin));
-  const entity = entities.find(candidate => Math.abs(f(dot3(candidate.origin, original.normal) - matchingDistance)) <= 64);
+  const normal = model === null ? original.normal : normalize3(worldVector(original.normal, model));
+  const distance = model === null ? original.distance : dot3(normal, worldPoint(scale3(original.normal, original.distance), model));
+  const entity = entities.find(candidate => Math.abs(f(dot3(candidate.origin, normal) - distance)) <= 64);
   if (entity === undefined) return null;
-  const normal = model === null ? original.normal : {
-    x: dot3(original.normal, { x: model.axis[0].x, y: model.axis[1].x, z: model.axis[2].x }),
-    y: dot3(original.normal, { x: model.axis[0].y, y: model.axis[1].y, z: model.axis[2].y }),
-    z: dot3(original.normal, { x: model.axis[0].z, y: model.axis[1].z, z: model.axis[2].z }) };
-  const distance = model === null ? original.distance : f(original.distance + dot3(normal, model.origin));
   const side = perpendicularVector(normal), surfaceAxis: Axis = [normal, side, cross3(normal, side)];
   const mirror = entity.origin.x === entity.oldOrigin.x && entity.origin.y === entity.oldOrigin.y && entity.origin.z === entity.oldOrigin.z;
   let surfaceOrigin: Vec3, cameraOrigin: Vec3, cameraAxis: Axis;

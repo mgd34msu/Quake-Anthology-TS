@@ -2638,11 +2638,12 @@ export class SharedSimulation implements Simulation {
       if (this.selectedMonsters?.active(entry.entity.actor.id) === false) continue;
       if (body === null || this.player(entry.entity.actor.id) !== null || entry.entity.model === "") continue;
       if (entry.kind === "q1") {
-        const entity = entry.entity;
+        const entity = entry.entity, alpha = entity.number("alpha"), scale = entity.number("scale");
         if (entity.model === this.recipe.map.geometry.requestedPath) continue;
         result.push({ actor: entity.actor.id, content: entry.content, family: "q1", path: entity.model,
           frame: entity.frame, oldFrame: entity.frame, skin: entity.skin, effects: entity.effects, renderFlags: 0,
-          origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false });
+          origin: body.origin, angles: body.angles, alpha: alpha === 0 ? 1 : Math.max(0, Math.min(1, alpha)),
+          scale: scale === 0 ? 1 : scale, visible: true, viewWeapon: false });
       } else {
         const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
         if (entity.classname === "worldspawn") continue;

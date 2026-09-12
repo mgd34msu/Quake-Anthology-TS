@@ -5,6 +5,8 @@ import type { DecodedWorld, SceneEntity, SceneLight } from "../../../src/contrac
 import type { Palette, RendererResourceOwner, SceneCamera } from "../../../src/contracts/render.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
+import { localPoint, localVector, worldPoint, worldVector, createViewProjector } from "../../../src/render/scene/view.ts";
+import { portalCamera } from "../../../src/render/scene/portal.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { decodeQ2Map } from "../../../src/formats/q2-map/index.ts";
@@ -79,6 +81,14 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     const input: WorldViewInput = { camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 },
       ...(fixture.family === "q3" ? { q3Lights: [{ origin: camera.origin, radius: 300, color: { x: 1, y: 0.25, z: 0.1 } }] } : {}),
       clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } };
+    if (fixture.family !== "q3" && map.models.length > 1) {
+      const brush = scene.prepareModel(fixture.family === "q2" ? 20 : 1, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }), scale: 1.5 },
+        { ...input, materialContext: { entityRGBA: { x: 255, y: 255, z: 255, w: 127.5 } } });
+      const batches = brush.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+      expect(batches.length).toBeGreaterThan(0);
+      expect(batches.some(batch => batch.vertices.some(vertex => vertex.color.w > 0 && vertex.color.w <= 0.5))).toBe(true);
+      expect(batches.every(batch => !batch.state.depthWrite)).toBe(true);
+    }
     let drawInput = input;
     if (fixture.archive.includes("rerelease")) {
       const modelPath = "models/monsters/soldier/tris.md2", modelBytes = await read(modelPath), member = archive.findEntries(modelPath, "ascii-insensitive")[0];
@@ -121,3 +131,22 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     target.close(); scene.close(); images.close();
   } finally { archive.close(); }
 }, 60000);
+
+
+test("uniform brush transforms preserve inverse points, vectors and transformed portal planes", () => {
+  const camera: SceneCamera = { origin: { x: -100, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+    viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 75, 4096), clip: { kind: "none" } };
+  for (const scale of [1.31337, -1.31337]) {
+    const transform = { origin: { x: 10, y: 20, z: 30 }, axis: anglesToAxis({ x: 0, y: 90, z: 0 }), scale };
+    const point = { x: 128, y: 4, z: 8 }, world = worldPoint(point, transform), local = localPoint(world, transform);
+    expect(local.x).toBeCloseTo(point.x, 4); expect(local.y).toBeCloseTo(point.y, 4); expect(local.z).toBeCloseTo(point.z, 4);
+    expect(localVector(worldVector(point, transform), transform).x).toBeCloseTo(point.x, 4);
+    const projected = createViewProjector(camera, transform)(point), direct = createViewProjector(camera)(world);
+    expect(projected.x).toBeCloseTo(direct.x, 4); expect(projected.y).toBeCloseTo(direct.y, 4); expect(projected.z).toBeCloseTo(direct.z, 4);
+    const center = worldPoint({ x: 128, y: 0, z: 0 }, transform);
+    const portal = portalCamera({ normal: { x: 1, y: 0, z: 0 }, distance: 128 }, [{ origin: center, oldOrigin: center,
+      axis: camera.axis, frame: 0, oldFrame: 0, skinNum: 0 }], camera, 0, transform);
+    expect(portal?.mirror).toBe(true);
+  }
+  expect(() => localPoint(camera.origin, { origin: camera.origin, axis: camera.axis, scale: 0 })).toThrow("nonzero");
+});

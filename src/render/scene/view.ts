@@ -4,7 +4,20 @@ import type { Axis, Bounds, Mat4, Plane, Vec3, Vec4 } from "../../contracts/math
 import type { SceneCamera } from "../../contracts/render.ts";
 import { add3, dot3, scale3, sub3 } from "../../core/math.ts";
 
-export interface ModelTransform { readonly origin: Vec3; readonly axis: Axis; }
+export interface ModelTransform { readonly origin: Vec3; readonly axis: Axis; readonly scale?: number; }
+
+export function modelScale(model: ModelTransform): number {
+  const scale = model.scale ?? 1;
+  if (!Number.isFinite(scale) || scale === 0) throw new RangeError("Model scale must be finite and nonzero");
+  return scale;
+}
+
+export function localVector(vector: Vec3, model: ModelTransform): Vec3 {
+  const scale = modelScale(model);
+  return { x: dot3(vector, model.axis[0]) / scale, y: dot3(vector, model.axis[1]) / scale, z: dot3(vector, model.axis[2]) / scale };
+}
+
+export function localPoint(point: Vec3, model: ModelTransform): Vec3 { return localVector(sub3(point, model.origin), model); }
 const f = Math.fround;
 
 export function perspectiveProjection(fovX: number, fovY: number, far: number, near = 4): Mat4 {
@@ -20,7 +33,7 @@ export function perspectiveProjection(fovX: number, fovY: number, far: number, n
 export function createViewProjector(camera: SceneCamera, model?: ModelTransform): (point: Vec3) => Vec4 {
   const [forward, left, up] = camera.axis, projection = camera.projection;
   const row = (axis: Vec3, translation: number): Vec4 => model === undefined ? { ...axis, w: translation }
-    : { x: f(dot3(model.axis[0], axis)), y: f(dot3(model.axis[1], axis)), z: f(dot3(model.axis[2], axis)),
+    : { x: f(dot3(model.axis[0], axis) * modelScale(model)), y: f(dot3(model.axis[1], axis) * modelScale(model)), z: f(dot3(model.axis[2], axis) * modelScale(model)),
       w: f(dot3(model.origin, axis) + translation) };
   const eyeX = row(scale3(left, -1), dot3(camera.origin, left));
   const eyeY = row(up, -dot3(camera.origin, up));
@@ -71,6 +84,9 @@ export function portalClipPlane(camera: SceneCamera): Vec4 | null {
   return { x: -b / projection[0], y: c / projection[5], z: d / projection[14], w: a + d * projection[10] / projection[14] };
 }
 
-export function worldPoint(point: Vec3, model: ModelTransform): Vec3 {
-  return add3(model.origin, add3(add3(scale3(model.axis[0], point.x), scale3(model.axis[1], point.y)), scale3(model.axis[2], point.z)));
+export function worldVector(point: Vec3, model: ModelTransform): Vec3 {
+  const scale = modelScale(model);
+  return add3(add3(scale3(model.axis[0], point.x * scale), scale3(model.axis[1], point.y * scale)), scale3(model.axis[2], point.z * scale));
 }
+
+export function worldPoint(point: Vec3, model: ModelTransform): Vec3 { return add3(model.origin, worldVector(point, model)); }

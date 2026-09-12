@@ -13,6 +13,9 @@ import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
 import { CpuRenderTarget, SoftwareRenderer } from "../../src/render/cpu/index.ts";
 import { q2SkySides } from "../../src/render/scene/q2-sky.ts";
 import { Draw2D, TextCommandSink } from "../../src/text/draw2d.ts";
+import { ApplicationWorldScene } from "../../src/app/bootstrap/presentation-scene.ts";
+import { anglesToAxis } from "../../src/core/math.ts";
+import { perspectiveProjection } from "../../src/render/scene/view.ts";
 import { SeatTextPresentation } from "../../src/text/layout.ts";
 
 test("rerelease fog messages preserve wire colors, world heights and interrupted source fades", () => {
@@ -108,3 +111,44 @@ test("Q2 geometry edition selects world lighting independently of external brush
     } finally { assets.close(); await content.close(); }
   }
 }, 60_000);
+
+test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK"))("Q1 actor presentation preserves raw alpha and scale for real MDL, SPR and brush assets", async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--dedicated", "--mode", "singleplayer"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 presentation launch");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q1-actor-opacity");
+  const assets = new ApplicationAssets(content, { identity: Symbol("q1-actor-opacity"), session: identity.session, generation: 0 });
+  try {
+    const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+      skill: 1, mode: "singleplayer", seed: 1, maxClients: 1 });
+    const source = simulation.q1Source();
+    if (source === null) throw new Error("Missing native Q1 source");
+    await assets.loadWorld();
+    const player = simulation.admitPlayer(identity.client(0, 1)), scene = new ApplicationWorldScene(assets, null);
+    const snapshot = simulation.step({ elapsedMilliseconds: 16, commands: [] }).snapshot;
+    const camera = { origin: { x: -100, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+      projection: perspectiveProjection(90, 90, 4096, 1), viewport: { x: 0, y: 0, width: 64, height: 64 }, clip: { kind: "none" } } satisfies import("../../src/contracts/render.ts").SceneCamera;
+    for (const path of ["progs/soldier.mdl", "progs/s_explod.spr", "*1"]) {
+      const actor = source.game.create("info_notnull"); actor.model = path;
+      const resource = await assets.model(content.recipe.map.entities.content, path);
+      expect(resource.model.kind).toBe(path.startsWith("*") ? "brush-model" : path.endsWith(".mdl") ? "q1-mdl" : "q1-spr");
+      const projected = () => {
+        const value = simulation.presentations().find(value => value.actor.equals(actor.actor.id));
+        if (value === undefined) throw new Error("Missing shared actor presentation");
+        return value;
+      };
+      expect(projected().alpha).toBe(1); expect(projected().scale).toBe(1);
+      actor.fields.set("alpha", "0.371337"); actor.fields.set("scale", "1.31337");
+      expect(projected().alpha).toBe(Math.fround(0.371337)); expect(projected().scale).toBe(Math.fround(1.31337));
+      await scene.prepare(player.actor, snapshot, [projected()], []);
+      const prepared = scene.view({ camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 } }, [], [], false);
+      const batches = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+      const translucent = batches.find(batch => batch.vertices.some(vertex => Math.abs(vertex.color.w - Math.fround(0.371337)) < 0.000001));
+      expect(translucent).toBeDefined();
+      expect(translucent?.state.depthWrite).toBe(false);
+      actor.fields.set("alpha", "-1"); expect(projected().alpha).toBe(0);
+      actor.fields.set("alpha", "2"); expect(projected().alpha).toBe(1);
+      actor.fields.set("alpha", "0"); actor.fields.set("scale", "0");
+      expect(projected().alpha).toBe(1); expect(projected().scale).toBe(1);
+    }
+  } finally { assets.close(); await content.close(); }
+}, 30000);

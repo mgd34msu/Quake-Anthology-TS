@@ -26,6 +26,7 @@ interface BrushPresentation {
   readonly model: number;
   readonly transform: ModelTransform;
   readonly frame: number;
+  readonly alpha: number;
 }
 
 export class ApplicationWorldScene {
@@ -84,10 +85,13 @@ export class ApplicationWorldScene {
       const asset = await this.assets.model(source.content, source.path);
       const axis = anglesToAxis(source.angles);
       if (asset.model.kind === "brush-model") {
-        if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform: { origin: weaponViewOrigin(source), axis }, animationFrame: source.frame });
+        const transform = { origin: weaponViewOrigin(source), axis, scale: source.scale };
+        const alpha = source.alpha ?? 1;
+        if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform, animationFrame: source.frame,
+          entityRGBA: { x: 255, y: 255, z: 255, w: alpha * 255 }, castsShadow: alpha === 1 });
         else {
           if (asset.brushScene === null) throw new Error(`Brush model ${source.path} has no prepared scene`);
-          brushModels.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: weaponViewOrigin(source), axis }, frame: source.frame });
+          brushModels.push({ scene: asset.brushScene, model: asset.model.model, transform, frame: source.frame, alpha });
         }
         continue;
       }
@@ -144,7 +148,8 @@ export class ApplicationWorldScene {
     const batches = [...this.groups.values()].flatMap(group => group.entities.flatMap(entity => group.renderer.prepare([entity],
       group.options.get(entity)?.viewModel === true ? { ...input, camera: weaponCamera } : input,
       current => ({ ...group.options.get(current), infrared }))));
-    const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
+    const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
+      materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
     return this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }, ...operations] });
   }
 

@@ -23,13 +23,13 @@ import type { PatchGrid } from "./patch-lod.ts";
 import { rgbaImage } from "./resources.ts";
 import { SceneShaderRegistry } from "./shaders.ts";
 import type { SceneTexture } from "./textures.ts";
-import { boundsInFrustum, cameraFrustum, createViewProjector, farClip, portalClipPlane, worldPoint } from "./view.ts";
+import { boundsInFrustum, cameraFrustum, createViewProjector, farClip, portalClipPlane, worldPoint, localPoint, modelScale, worldVector } from "./view.ts";
 import type { ModelTransform } from "./view.ts";
 import { visibleWorld } from "./visibility.ts";
 import type { VisibleWorld, WorldVisibilityOptions } from "./visibility.ts";
 import { portalCamera, portalSurfaceOffscreen } from "./portal.ts";
 import type { PortalEntity } from "./portal.ts";
-import { faceDlightMask, gridDlightMask, projectDlightTexture, receivesProjectedDlights, transformDlights } from "../../materials/dlight.ts";
+import { faceDlightMask, gridDlightMask, projectDlightTexture, receivesProjectedDlights } from "../../materials/dlight.ts";
 import type { DynamicLight } from "../../materials/q3-lighting.ts";
 import { Q2ShadowScene, shadowCaster, shadowMesh } from "./shadows.ts";
 import type { PreparedShadows, ShadowAtlasOptions, ShadowCaster, ShadowMesh } from "./shadows.ts";
@@ -80,7 +80,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly beforeView?: readonly RenderOperation[];
   /** Entity lighting, video upload, shadows and private game overlays join here. */
   readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow">>;
-  readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean; readonly castsShadow?: boolean }[];
+  readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean; readonly castsShadow?: boolean; readonly entityRGBA?: MaterialDrawContext["entityRGBA"] }[];
   readonly prepareFlare?: (surface: WorldSurface, context: MaterialDrawContext) => readonly RenderOperation[];
 }
 export interface PreparedWorldView {
@@ -245,8 +245,7 @@ export class WorldScene {
 
   materialContext(input: WorldViewInput, model?: ModelTransform, fog: FogVolume | null = null): MaterialDrawContext {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
-    const localViewOrigin = model === undefined ? input.camera.origin : {
-      x: dot3(sub3(input.camera.origin, model.origin), model.axis[0]), y: dot3(sub3(input.camera.origin, model.origin), model.axis[1]), z: dot3(sub3(input.camera.origin, model.origin), model.axis[2]) };
+    const localViewOrigin = model === undefined ? input.camera.origin : localPoint(input.camera.origin, model);
     const coordinate = fog === null ? null : fogCoordinates(fog, input.camera.origin, input.camera.axis[0]);
     return { time, timeOffset: 0, refdefTime: Math.trunc(time * 1000), identityLight: input.identityLight ?? 1,
       entityRGBA: input.materialContext?.entityRGBA ?? { x: 255, y: 255, z: 255, w: 255 }, lighting: input.materialContext?.lighting ??
@@ -316,6 +315,7 @@ export class WorldScene {
     for (const surface of surfaces) operations.push(...this.surfaceOperations(surface, input, context));
     for (const model of input.inlineModels ?? []) {
       const childInput = { ...input, animationFrame: model.animationFrame ?? input.animationFrame ?? 0,
+        materialContext: { ...input.materialContext, ...(model.entityRGBA === undefined ? {} : { entityRGBA: model.entityRGBA }) },
         alternateAnimation: model.alternateAnimation ?? input.alternateAnimation ?? false };
       operations.push(...this.prepareModel(model.model, model.transform, childInput));
     }
@@ -338,7 +338,8 @@ export class WorldScene {
       const dynamicLightBatches = (deformed: MaterialGeometry): readonly DrawBatch[] => {
         if (!receivesProjectedDlights(shader) || input.q3Lights === undefined || input.q3Lights.length === 0) return [];
         if (input.q3Lights.length > 32) throw new RangeError("Q3 projected lighting supports the source 32-light mask");
-        const lights = model === undefined ? input.q3Lights : transformDlights(input.q3Lights, model.origin, model.axis);
+        const lights = model === undefined ? input.q3Lights : input.q3Lights.map(light => ({ ...light,
+          origin: localPoint(light.origin, model), radius: light.radius / Math.abs(modelScale(model)) }));
         let mask = lights.length === 32 ? -1 : (1 << lights.length) - 1;
         mask = surface.plane === null ? gridDlightMask(lights, mask, surface.bounds) : faceDlightMask(lights, mask, surface.plane);
         return projectDlightTexture(deformed, mask, lights, this.dlightImage, context.project, shader.material.cull);
@@ -346,7 +347,7 @@ export class WorldScene {
       const drawContext = { ...(surface.fog === null ? context : this.materialContext(input, model, surface.fog)), timeOffset: remap?.timeOffset ?? 0, dynamicLightBatches };
       if (shader.finished.iterator.kind === "sky") return this.skyOperations(shader, geometry, input, drawContext);
       const batches = prepareMaterialBatches(shader, geometry, drawContext);
-      return [{ kind: "draw", batches: context.deformView.mirror ? batches.map(batch => ({ ...batch, state: { ...batch.state,
+      return [{ kind: "draw", batches: (context.deformView.mirror !== (model !== undefined && modelScale(model) < 0)) ? batches.map(batch => ({ ...batch, state: { ...batch.state,
         cull: batch.state.cull === "none" ? "none" : batch.state.cull === "front" ? "back" : "front" } })) : batches }];
     }
     const material = surface.material;
@@ -358,8 +359,9 @@ export class WorldScene {
       const lightmap = surface.lightmap;
       const lights = (material.kind === "q2" && input.q2FragmentLighting !== undefined ? [] : input.lights ?? []).map(light => {
         if (model === undefined) return light;
-        const relative = sub3(light.origin, model.origin);
-        return { ...light, origin: { x: dot3(relative, model.axis[0]), y: dot3(relative, model.axis[1]), z: dot3(relative, model.axis[2]) } };
+        const scale = Math.abs(modelScale(model));
+        return { ...light, origin: localPoint(light.origin, model), radius: light.radius / scale, minimum: light.minimum / scale,
+          color: { x: light.color.x * scale, y: light.color.y * scale, z: light.color.z * scale } };
       });
       const built = material.kind === "q1" ? buildQ1Lightmap(lightmap.face, input.q1Styles ?? q1DefaultStyles, { encoding: lightmap.encoding, dynamicLights: lights })
         : buildQ2Lightmap(lightmap.face, input.q2Styles ?? q2DefaultStyles, { dynamicLights: lights, modulate: this.options.q2LightModulate ?? 1 });
@@ -367,16 +369,13 @@ export class WorldScene {
       this.shaders.textures.images.update(lightmap.direct, 0, directLightmapPixels(built));
     }
     const fragmentLighting = input.q2FragmentLighting;
-    const rotateNormal = (normal: Vec3): Vec3 => model === undefined ? normalize3(normal) : normalize3({
-      x: dot3(normal, { x: model.axis[0].x, y: model.axis[1].x, z: model.axis[2].x }),
-      y: dot3(normal, { x: model.axis[0].y, y: model.axis[1].y, z: model.axis[2].y }),
-      z: dot3(normal, { x: model.axis[0].z, y: model.axis[1].z, z: model.axis[2].z }) });
-    const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
+    const rotateNormal = (normal: Vec3): Vec3 => normalize3(model === undefined ? normal : worldVector(normal, model));
+    const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
       alternateAnimation: input.alternateAnimation ?? false, fullbright: surface.fullbright, q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined || material.kind !== "q2" ? {} : { fragmentLighting: { kind: "q2-world",
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
         normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
-      ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror ? "back" : "front", depthRange: context.depthRange, project: context.project });
+      ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
     return [{ kind: "draw", batches }];
   }
 
