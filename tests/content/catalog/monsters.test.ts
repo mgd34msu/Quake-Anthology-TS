@@ -17,7 +17,7 @@ test("selected creature definitions resolve edition assets and clocks without re
       const enemies: EnemySelection = { kind: "replace", default: {
         source: { provider: `${family}:monsters/${edition}/${program}`, content: catalog.require(`${family}-${edition}-${program}`).id },
         classname: family === "q1" ? "monster_army" : "monster_infantry",
-      }, byClassname: {} };
+      }, byClassname: edition === "classic" ? { [family === "q1" ? "monster_soldier" : "monster_army"]: { source: { provider: `${family}:monsters/${edition}/${program}`, content: catalog.require(`${family}-${edition}-${program}`).id }, classname: family === "q1" ? "monster_dog" : "monster_berserk" } } : {} };
       const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
       expect(recipe.enemies).toEqual(enemies);
       expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
@@ -26,6 +26,7 @@ test("selected creature definitions resolve edition assets and clocks without re
       else if (recipe.ordering.kind === "mixed") expect(recipe.ordering.providers.slice(0, preset.ordering.providers.length)).toEqual([...preset.ordering.providers]);
       expect(recipe.timing.some(entry => entry.provider === enemies.default.source.provider)).toBe(true);
       expect(recipe.resources.some(resource => resource.requestedPath === (family === "q1" ? "sound/soldier/sattck1.wav" : "sound/infantry/infatck1.wav"))).toBe(true);
+      if (edition === "classic") expect(recipe.resources.some(resource => resource.requestedPath === (family === "q1" ? "sound/dog/dattack1.wav" : "sound/berserk/attack.wav"))).toBe(true);
       expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
     }
   }

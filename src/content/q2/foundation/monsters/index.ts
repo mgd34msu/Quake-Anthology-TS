@@ -515,6 +515,7 @@ export class Q2Monsters implements Q2SpawnModule {
       entity.use = this.sourceTriggerUse;
       return game.cancel(entity);
     }
+    mission?.started();
     return game.schedule(entity, game.options.edition === "classic" ? 0.1 : game.host.frameSeconds(), this.sourceThink);
   }
 

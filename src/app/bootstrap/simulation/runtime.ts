@@ -1,3 +1,4 @@
+import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
 import { WeaponSlot } from "./weapon-slot.ts";
 import type { PrimaryWeaponHandoff, WeaponReference, WeaponSlotState } from "./weapon-slot.ts";
 import { projectWeaponSlot } from "./weapon-slot-projection.ts";
@@ -418,8 +419,9 @@ export class SharedSimulation implements Simulation {
         ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
         lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) });
       monsters = new Q2Monsters(weapons, { mission: actor => this.monsterMissions.get(actor) ?? null });
+      const modules = registered.edition === "classic" ? [registerQ2ClassicBaseMonsters(monsters), monsters] : [monsters];
       const game = new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
-        { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, [monsters]);
+        { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, modules);
       source = { kind: "q2", reference, random, clock, game, monsters };
     }
     this.monsterSources.set(reference.provider, source);
@@ -448,6 +450,16 @@ export class SharedSimulation implements Simulation {
     const map = this.source;
     if (map.kind !== "q1" && map.kind !== "q2") throw new Error("Selected monster map admission currently requires a Q1 or Q2 authored map");
     const selected = new SelectedMonsters(selection, map, { attach: (actor, definition, mission) => this.attachMonster(actor, definition, mission),
+      validatePlacement: (entry, definition) => {
+        const body = this.bodies.read(entry.actor.id);
+        if (body === null) throw new Error("Started selected monster has no shared body");
+        const source = this.monsterSourceFor(definition);
+        const trace = this.scene.geometryTrace({ start: body.origin, end: body.origin, shape: { kind: "box", bounds: body.bounds },
+          target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
+          policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
+        if (trace.startSolid || trace.allSolid) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+        return undefined;
+      },
       resume: (actor, activator) => {
         const entry = this.actorExecutions.get(actor);
         if (entry === undefined || entry.kind === "q3") throw new Error("Activated monster has no creature source continuation");

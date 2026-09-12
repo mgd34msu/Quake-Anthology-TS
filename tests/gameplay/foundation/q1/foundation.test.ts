@@ -106,6 +106,31 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
   return { runtime, report, player, actors, callbacks, bodies, combat, inventory, events, due };
 }
 
+test.skipIf(!existsSync(path))("Q1 monster startup preserves failed drop state and reports placement after native walkmove", async () => {
+  const game = gameFor(await loadMap(), undefined, "classic"), { runtime, player, actors } = game;
+  try {
+    for (const result of [{ fraction: 1, allSolid: false }, { fraction: 0, allSolid: true }, { fraction: 0.5, allSolid: false }]) {
+      const entity = runtime.create("monster_dog"); runtime.spawnEntity(entity);
+      const origin = { x: 20, y: 30, z: 40 }, raised = { ...origin, z: 41 }, landed = { ...origin, z: 10 };
+      runtime.setBody(entity, { origin, ground: player.id }); entity.movementFlags = 1024;
+      const order: string[] = [];
+      runtime.host.trace = request => {
+        order.push("drop"); expect(request.start).toEqual(raised); expect(runtime.body(entity).origin).toEqual(raised);
+        return { ...result, end: landed, normal: { x: 0, y: 0, z: 1 }, actor: entity.actor.id, startSolid: result.allSolid, sky: false, inOpen: true, inWater: false };
+      };
+      runtime.host.walkMove = (actor, yaw, distance) => { expect(actor).toBe(entity.actor); expect([yaw, distance]).toEqual([0, 0]); order.push("walk"); return true; };
+      runtime.monsterMissions.set(entity.actor.id, { ambush: false, spawned: () => undefined, started: () => { order.push("started"); return undefined; },
+        killed: () => undefined, route: () => null, use: () => false, combatRoute: () => ({ goal: null, standGround: false }), foundTarget: () => undefined });
+      runtime.named.action(entity, "walkmonster_start_go")();
+      const success = result.fraction < 1 && !result.allSolid;
+      expect(runtime.body(entity).origin).toEqual(success ? landed : raised);
+      expect(runtime.body(entity).ground).toBe(success ? entity.actor.id : player.id);
+      expect(entity.movementFlags).toBe(1024 | 32 | (success ? 512 : 0));
+      expect(order).toEqual(["drop", "walk", "started"]);
+    }
+  } finally { actors.close(); }
+});
+
 test.skipIf(!existsSync(path))("fresh Q1 arsenal publishes its initial view without replaying attachment", async () => {
   const game = gameFor(await loadMap()), state = game.runtime.player(game.player.id);
   if (state === null) throw new Error("Missing source player");

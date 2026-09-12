@@ -29,6 +29,7 @@ export interface AuthoredMonster extends AuthoredTarget {
 export interface MonsterMission {
   readonly ambush: boolean;
   spawned(): undefined;
+  started(): undefined;
   killed(attacker: ActorId | null): undefined;
   route(): ActorId | null;
   use(activator: ActorId | null): boolean;

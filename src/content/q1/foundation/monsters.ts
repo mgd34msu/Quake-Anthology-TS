@@ -287,12 +287,18 @@ function monsterDie(game: Q1EntityServices, entity: Q1Actor, attacker: ActorId |
 function monsterStart(game: Q1EntityServices, entity: Q1Actor): undefined {
   const monster = requireMonster(entity);
     const body = game.body(entity), start = vadd(body.origin, { x: 0, y: 0, z: 1 });
+    game.setBody(entity, { origin: start });
     const floor = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
-    game.setBody(entity, { origin: floor.end, ground: floor.actor }); entity.movementFlags = 32 | (floor.fraction < 1 && !floor.allSolid ? 512 : 0);
+    if (floor.fraction < 1 && !floor.allSolid) {
+      game.setBody(entity, { origin: floor.end, ground: floor.actor }); entity.movementFlags |= 512;
+    }
+    game.host.walkMove(entity.actor, 0, 0);
+    entity.movementFlags |= 32;
     entity.idealYaw = body.angles.y; entity.yawSpeed = entity.number("yaw_speed") || 20;
     entity.damageable = true; game.link(entity);
     const mission = game.monsterMissions.get(entity.actor.id);
     if (mission === undefined ? monster.path !== "" && game.find(monster.path)[0]?.classname === "path_corner" : mission.route() !== null) walk(monster);
+    mission?.started();
     return game.schedule(entity, 0.1 + game.host.random() * 0.5, game.named.action(entity, "monster_frame"));
 }
 

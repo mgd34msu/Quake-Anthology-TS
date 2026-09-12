@@ -24,6 +24,7 @@ export type SelectedMonsterSource = {
 
 export interface SelectedMonsterBehavior {
   attach(actor: OwnedActor, definition: MonsterDefinitionReference, mission: MonsterMission): undefined;
+  validatePlacement(entry: AuthoredMonster, definition: MonsterDefinitionReference): undefined;
   enemy(actor: ActorId): ActorId | null;
   oldEnemy(actor: ActorId): ActorId | null;
   setRoute(actor: ActorId, goal: ActorId | null, pauseUntil: number): undefined;
@@ -166,7 +167,11 @@ export class SelectedMonsters {
   }
 
   mission(entry: AuthoredMonster): MonsterMission {
-    return { ambush: (entry.spawnflags & 1) !== 0, route: () => this.route(entry), foundTarget: () => {
+    return { ambush: (entry.spawnflags & 1) !== 0, started: () => {
+      const definition = this.definitions.get(entry.actor.id);
+      if (definition === undefined) throw new Error("Started monster has no selected definition");
+      return this.behavior.validatePlacement(entry, definition);
+    }, route: () => this.route(entry), foundTarget: () => {
       if (entry.combatTarget !== "" && this.behavior.enemy(entry.actor.id) !== null && this.map.kind === "q2") {
         const target = this.map.game.pickTarget(entry.combatTarget);
         if (target !== null) {
