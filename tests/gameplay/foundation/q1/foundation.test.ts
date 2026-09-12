@@ -365,3 +365,39 @@ test.skipIf(!existsSync(path))("dedicated Q1 services allocate and restore under
   expect(() => wrong.restore(saved)).toThrow("Incompatible Q1 source checkpoint");
   original.actors.close();
 });
+
+
+test.skipIf(!existsSync(path))("Q1 exploding boxes retain native stationary bounds and floor placement", async () => {
+  const { runtime, actors, player } = gameFor(await loadMap(), undefined, "classic");
+  try {
+    const authored = [...runtime.entities.values()].filter(entity => entity.classname === "misc_explobox" || entity.classname === "misc_explobox2");
+    expect(authored.length).toBeGreaterThan(0);
+    for (const entity of authored) { expect(entity.solid).toBe("bbox"); expect(entity.movement).toBe("none"); }
+    const world = runtime.world;
+    if (world === null) throw new Error("Missing actual world actor");
+    for (const classname of ["misc_explobox", "misc_explobox2"]) for (const result of [
+      { fraction: 1, allSolid: false, drop: 256 }, { fraction: 0, allSolid: true, drop: 0 },
+      { fraction: 0.5, allSolid: false, drop: 128 }, { fraction: 251 / 256, allSolid: false, drop: 251 },
+    ]) {
+      const entity = runtime.create(classname), origin = { x: 20, y: 30, z: 400 }, raised = { ...origin, z: 402 };
+      runtime.setBody(entity, { origin, ground: player.id }); entity.movementFlags = 1024;
+      const landed = { ...raised, z: raised.z - result.drop };
+      runtime.host.trace = request => {
+        expect(request.start).toEqual(raised); expect(runtime.body(entity).origin).toEqual(raised);
+        expect(request.bounds).toEqual({ min: ZERO, max: { x: 32, y: 32, z: classname === "misc_explobox2" ? 32 : 64 } });
+        expect(request.ignore).toBe(entity.actor.id);
+        return { ...result, end: landed, normal: { x: 0, y: 0, z: 1 }, actor: world.actor.id, startSolid: result.allSolid, sky: false, inOpen: true, inWater: false };
+      };
+      runtime.spawnEntity(entity);
+      const success = result.fraction < 1 && !result.allSolid, removed = success && result.drop > 250;
+      expect(actors.isLive(entity.actor.id)).toBe(!removed);
+      if (removed) continue;
+      expect(entity.solid).toBe("bbox"); expect(entity.movement).toBe("none");
+      expect(entity.model).toBe(classname === "misc_explobox2" ? "maps/b_exbox2.bsp" : "maps/b_explob.bsp");
+      expect(runtime.health(entity.actor.id)).toBe(20); expect(entity.die).not.toBeNull();
+      expect(runtime.body(entity).origin).toEqual(success ? landed : raised);
+      expect(runtime.body(entity).ground).toBe(success ? world.actor.id : player.id);
+      expect(entity.movementFlags).toBe(1024 | (success ? 512 : 0));
+    }
+  } finally { actors.close(); }
+});

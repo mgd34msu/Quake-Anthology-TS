@@ -68,13 +68,17 @@ function spawnLight(game: Q1EntityServices, entity: Q1Actor): undefined {
 function spawnBarrel(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.model = entity.classname === "misc_explobox2" ? "maps/b_exbox2.bsp" : "maps/b_explob.bsp";
   if (game.usesId1Precaches) game.precacheModel(entity.model); if (game.usesId1Precaches) game.precacheSound("weapons/r_exp3.wav");
-  entity.solid = "bsp"; entity.movement = "push"; entity.damageable = true; entity.aimedDamage = true; game.host.combat.setHealth(entity.actor, 20);
+  entity.solid = "bbox"; entity.movement = "none"; entity.damageable = true; entity.aimedDamage = true; game.host.combat.setHealth(entity.actor, 20);
   game.setBounds(entity, { min: ZERO, max: { x: 32, y: 32, z: entity.classname === "misc_explobox2" ? 32 : 64 } });
   entity.die = game.named.die(entity, "barrel_die");
   const body = game.body(entity), start = vadd(body.origin, { x: 0, y: 0, z: 2 });
+  game.setBody(entity, { origin: start });
   const trace = game.host.trace({ start, end: vadd(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds, ignore: entity.actor.id, monsters: true });
-  if (start.z - trace.end.z > 250) return game.remove(entity);
-  return game.setOrigin(entity, trace.end);
+  if (trace.fraction < 1 && !trace.allSolid) {
+    game.setBody(entity, { origin: trace.end, ground: trace.actor }); entity.movementFlags |= 512;
+    if (start.z - trace.end.z > 250) return game.remove(entity);
+  }
+  return undefined;
 }
 export function spawnMapActor(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (spawnPickup(game, entity)) return undefined;
