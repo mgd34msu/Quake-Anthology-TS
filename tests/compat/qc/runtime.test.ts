@@ -1044,3 +1044,97 @@ test.skipIf(!haveCorpus)("verified id1 attacks and environmental callbacks prese
       expect(run(true, hazard)).toEqual(run(false, hazard));
   } finally { archive.close(); }
 }, 45000);
+
+test.skipIf(!haveCorpus)("actual id1 broadcast writers preserve all temp effects, bytes and actor generations", async () => {
+  const { QcWorldHost } = await import("../../../src/compat/qc/world-host.ts");
+  const { QcBroadcastMessages } = await import("../../../src/compat/qc/presentation-host.ts");
+  const { createSceneQueries } = await import("../../../src/world/collision/index.ts");
+  const { readQ1Bsp } = await import("../../../src/formats/q1-map/index.ts");
+  const { parseQ12Model } = await import("../../../src/formats/q12-model/index.ts");
+  const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
+  const program = await readProgram("id1/PAK0.PAK"), archive = await openArchive(corpus + "id1/PAK0.PAK");
+  const actors = new SessionActorRegistry(createIdentityOwner("qc-broadcast"));
+  try {
+    const mapEntry = archive.findEntries("maps/e1m1.bsp")[0], spriteEntry = archive.findEntries("progs/s_explod.spr")[0];
+    if (mapEntry === undefined || spriteEntry === undefined) throw new Error("Missing actual broadcast resources");
+    const map = readQ1Bsp(await archive.readEntry(mapEntry)), sprite = parseQ12Model(await archive.readEntry(spriteEntry), "progs/s_explod.spr");
+    if (sprite.kind !== "q1-spr") throw new Error("Expected actual explosion sprite");
+    const scene = createSceneQueries(map), numeric = createNumericOperations(Q1_DONOR_PROFILE);
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 16);
+    const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => qcLinkBounds(body, 0, numeric),
+      onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => { scene.link(body, { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false }); return undefined; } });
+    const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 16, lifetime: quakeEdictLifetime(1),
+      storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }), now: () => ({ kind: "seconds", value: 3 }),
+      unlink: actor => bodies.unlink(actor), exhausted: () => { throw new Error("No message edicts"); } });
+    slots.bindExisting(0, "quakec:world"); const shooter = slots.allocate("quakec:writer");
+    const world = new QcWorldHost({ program, entities, actors, slots, bodies, scene, numeric: Q1_DONOR_PROFILE,
+      model: name => name === "progs/s_explod.spr" ? { index: 1, bounds: sprite.bounds } : null,
+      foreignReference: () => { throw new Error("No foreign message actors"); } });
+    world.actor(0); world.actor(1);
+    const events: import("../../../src/compat/qc/presentation-host.ts").QcBroadcastEvent[] = [];
+    let messages = new QcBroadcastMessages(world, event => { events.push(event); return undefined; });
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake", random: new SourceRandom(1), host: world.host, isFreeEntity: world.isFreeEntity }), serverActive: () => true });
+    // The registry is built from these real host functions before each source execution.
+    const source = () => new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake", random: new SourceRandom(1),
+      host: new Map([...world.host, ...messages.host]), isFreeEntity: world.isFreeEntity }), serverActive: () => true });
+    const field = (name: string): number => { const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
+    const words = entities.at(1), origin = { x: 480.1875, y: -352.1875, z: 89.1875 };
+    words.setVector(field("origin"), origin); words.setFloat(field("ammo_cells"), 2); words.setFloat(field("t_width"), 100);
+    words.setFloat(field("solid"), 0); words.setFloat(field("takedamage"), 0); world.link(1);
+    const actual = source();
+    actual.globals.setInt(actual.globalOffset("self"), entities.reference(1)); actual.globals.setFloat(actual.globalOffset("time"), 3);
+    actual.globals.setVector(actual.globalOffset("v_forward"), { x: 1, y: 0, z: 0 });
+    actual.execute(program.functionNamed("W_FireLightning").index);
+    actual.execute(program.functionNamed("GrenadeExplode").index);
+    expect(events).toHaveLength(0); messages.flush();
+    expect(events[0]).toMatchObject({ kind: "beam", style: "lightning2", actor: shooter.id, start: { x: 480.125, y: -352.125, z: 105.125 } });
+    expect(events[1]).toMatchObject({ kind: "effect", effect: "explosion", origin: { x: 480.125, y: -352.125, z: 89.125 } });
+    expect(words.float(field("ammo_cells"))).toBe(1);
+    const write = (name: QcHostBuiltinName, value: number, integer = false): void => {
+      const builtin = messages.host.get(name); if (builtin === undefined) throw new Error(`Missing ${name}`);
+      vm.globals.setFloat(4, 0); if (integer) vm.globals.setInt(7, value); else vm.globals.setFloat(7, value); builtin(vm);
+    };
+    const reset = (): void => { events.length = 0; messages = new QcBroadcastMessages(world, event => { events.push(event); return undefined; }); };
+    reset();
+    write("WriteChar", 23); write("WriteAngle", 0); write("WriteLong", 0);
+    write("WriteString", vm.strings.setEngine("message-byte", "\x80"), true);
+    expect([...messages.bytes()]).toEqual([23, 0, 0, 0, 0, 0, 128, 0]); messages.flush();
+    expect(events[0]).toMatchObject({ kind: "effect", effect: "spike", origin: { x: 0, y: 0, z: 16 } });
+    reset();
+    for (let type = 0; type < 14; type++) {
+      write("WriteByte", 23); write("WriteByte", type);
+      const beam = type === 5 || type === 6 || type === 9 || type === 13;
+      if (beam) write("WriteEntity", entities.reference(1), true);
+      for (let axis = 0; axis < (beam ? 6 : 3); axis++) write("WriteCoord", axis + 0.1875);
+      if (type === 12) { write("WriteByte", 176); write("WriteByte", 8); }
+    }
+    messages.flush(); expect(events).toHaveLength(14);
+    expect(events[7]).toMatchObject({ kind: "effect", effect: "wizard-spike" }); expect(events[8]).toMatchObject({ kind: "effect", effect: "knight-spike" });
+    expect(events[12]).toEqual({ kind: "colored-explosion", origin: { x: 0.125, y: 1.125, z: 2.125 }, colorStart: 176, colorLength: 8 });
+    const encoded: Uint8Array[] = [];
+    reset();
+    for (const mode of ["entity", "short", "bytes"]) {
+      write("WriteByte", 23); write("WriteByte", 6);
+      if (mode === "entity") write("WriteEntity", entities.reference(1), true);
+      else if (mode === "short") write("WriteShort", 1);
+      else { write("WriteByte", 1); write("WriteByte", 0); }
+      for (let axis = 0; axis < 6; axis++) write("WriteCoord", axis);
+      encoded.push(messages.bytes().slice(-16));
+    }
+    const firstEncoding = encoded[0]; if (firstEncoding === undefined) throw new Error("Missing entity encoding");
+    for (const bytes of encoded) expect(bytes).toEqual(firstEncoding);
+    actors.release(shooter); const replacement = slots.bindExisting(1, "quakec:replacement");
+    expect(replacement.id.equals(shooter.id)).toBe(false);
+    messages.flush(); expect(events).toHaveLength(3);
+    for (const event of events) { if (event.kind !== "beam") throw new Error("Expected captured beam"); expect(event.actor.equals(shooter.id)).toBe(true); }
+    reset();
+    write("WriteByte", 23); write("WriteByte", 3); for (let axis = 0; axis < 3; axis++) write("WriteCoord", 0);
+    write("WriteByte", 23); write("WriteByte", 6); write("WriteShort", 15); for (let axis = 0; axis < 6; axis++) write("WriteCoord", 0);
+    expect(() => messages.flush()).toThrow("had no owned actor"); expect(events).toHaveLength(0);
+    reset(); write("WriteByte", 23); write("WriteByte", 3); write("WriteCoord", 0);
+    expect(() => messages.flush()).toThrow(); expect(events).toHaveLength(0);
+    reset(); const byte = messages.host.get("WriteByte"); if (byte === undefined) throw new Error("Missing byte writer");
+    for (const destination of [1, 2, 3]) { vm.globals.setFloat(4, destination); expect(() => byte(vm)).toThrow("destination"); }
+    expect(messages.bytes()).toHaveLength(0);
+  } finally { actors.close(); archive.close(); }
+});

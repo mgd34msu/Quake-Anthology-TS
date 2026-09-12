@@ -1,5 +1,5 @@
-import { SizeBuf, MSG_WriteByte, MSG_WriteCoord } from "../../network/q1/message.ts";
-import { NetQuakeDecoder } from "../../network/q1/netquake.ts";
+import { SizeBuf, MSG_WriteByte, MSG_WriteChar, MSG_WriteShort, MSG_WriteLong, MSG_WriteCoord, MSG_WriteAngle, MSG_WriteString } from "../../network/q1/message.ts";
+import { NetQuakeDecoder, writeNetQuakeMessage } from "../../network/q1/netquake.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { NetworkEvent } from "../../contracts/protocol.ts";
 /* Quake WinQuake/pr_cmds.c PF_* presentation and precache builtins. GPL-2.0-or-later. */
@@ -100,27 +100,70 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
 }
 
 
+export type QcBroadcastEvent = Extract<Q1Event, { readonly kind: "effect" | "beam" | "colored-explosion" }>;
+
 /** Raw QC datagram writes retain NetQuake encoding before joining shared effects. */
 export class QcBroadcastMessages {
   readonly host: ReadonlyMap<QcHostBuiltinName, QcBuiltin>;
   private readonly buffer = new SizeBuf(1024);
+  private readonly owners = new Map<number, ActorId | null>();
   private readonly decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 });
-  constructor(world: QcWorldHost, private readonly emit: (effect: Extract<Q1Event, { readonly kind: "effect" }>) => undefined) {
-    const write = (operation: (buffer: SizeBuf, value: number) => void): QcBuiltin => vm => {
+  constructor(world: QcWorldHost, private readonly emit: (effect: QcBroadcastEvent) => undefined) {
+    const write = (operation: (vm: Parameters<QcBuiltin>[0]) => void): QcBuiltin => vm => {
       if (vm.program !== world.options.program || vm.entities !== world.options.entities) return vm.fail("QC message belongs to another source");
       if (vm.argFloat(0) !== 0) return vm.fail("QC message destination is not the supported MSG_BROADCAST datagram");
-      operation(this.buffer, vm.argFloat(1));
+      const before = this.buffer.cursize;
+      operation(vm);
+      // Capture identity when each possible entity word completes, independent of the writer used.
+      for (let end = Math.max(1, before); end < this.buffer.cursize; end++) {
+        const low = this.buffer.data[end - 1], high = this.buffer.data[end];
+        if (low === undefined || high === undefined) throw new Error("Missing written QC message byte");
+        this.owners.set(end - 1, world.options.slots.at(low + high * 256)?.id ?? null);
+      }
     };
-    this.host = new Map<QcHostBuiltinName, QcBuiltin>([["WriteByte", write(MSG_WriteByte)], ["WriteCoord", write(MSG_WriteCoord)]]);
+    const number = (operation: (buffer: SizeBuf, value: number) => void): QcBuiltin => write(vm => operation(this.buffer, vm.argFloat(1)));
+    this.host = new Map<QcHostBuiltinName, QcBuiltin>([
+      ["WriteByte", number(MSG_WriteByte)], ["WriteChar", number(MSG_WriteChar)],
+      ["WriteShort", number(MSG_WriteShort)], ["WriteLong", number(MSG_WriteLong)],
+      ["WriteCoord", number(MSG_WriteCoord)], ["WriteAngle", number(MSG_WriteAngle)],
+      ["WriteString", write(vm => MSG_WriteString(this.buffer, vm.argString(1)))],
+      ["WriteEntity", write(vm => MSG_WriteShort(this.buffer, vm.entities.slot(vm.argInt(1))))],
+    ]);
   }
+  bytes(): Uint8Array { return this.buffer.bytes(); }
   flush(): undefined {
-    const effects = this.decoder.decode(this.buffer.bytes()).map(message => {
-      if (message.kind !== "temporary-entity" || message.effect.kind !== "point" || message.effect.type !== 2)
-        throw new Error(`Unsupported QC broadcast message ${message.kind}`);
-      return { kind: "effect", effect: "gunshot", actor: null, origin: message.effect.origin, amount: message.effect.count } satisfies Extract<Q1Event, { readonly kind: "effect" }>;
+    const encoded = new SizeBuf(1024);
+    const effects = this.decoder.decode(this.buffer.bytes()).map((message): QcBroadcastEvent => {
+      if (message.kind !== "temporary-entity") throw new Error(`Unsupported QC broadcast message ${message.kind}`);
+      const offset = encoded.cursize;
+      writeNetQuakeMessage(encoded, this.decoder.protocol, message);
+      const effect = message.effect;
+      if (effect.kind === "explosion-colors") return { kind: "colored-explosion", origin: effect.origin, colorStart: effect.colorStart, colorLength: effect.colorLength };
+      if (effect.kind === "beam") {
+        const actor = this.owners.get(offset + 2);
+        if (actor === undefined || actor === null) throw new Error(`QC beam entity ${effect.entity} had no owned actor when written`);
+        const style = effect.type === 5 ? "lightning1" : effect.type === 6 ? "lightning2" : effect.type === 9 ? "lightning3" : effect.type === 13 ? "grapple" : null;
+        if (style === null) throw new Error(`Unsupported QC beam ${effect.type}`);
+        return { kind: "beam", style, actor, start: effect.start, end: effect.end };
+      }
+      let name: Extract<Q1Event, { readonly kind: "effect" }>["effect"];
+      switch (effect.type) {
+        case 0: name = "spike"; break;
+        case 1: name = "superspike"; break;
+        case 2: name = "gunshot"; break;
+        case 3: name = "explosion"; break;
+        case 4: name = "tar-explosion"; break;
+        case 7: name = "wizard-spike"; break;
+        case 8: name = "knight-spike"; break;
+        case 10: name = "lava-splash"; break;
+        case 11: name = "teleport"; break;
+        default: throw new Error(`Unsupported QC point effect ${effect.type}`);
+      }
+      return { kind: "effect", effect: name, actor: null, origin: effect.origin, amount: effect.count };
     });
     for (const effect of effects) this.emit(effect);
     this.buffer.clear();
+    this.owners.clear();
     return undefined;
   }
 }
