@@ -96,7 +96,7 @@ export interface Q1FoundationHost {
   /** Performs source step-up / bottom checks and links the resulting body. */
   walkMove(actor: OwnedActor, yaw: number, distance: number): boolean;
   changeYaw(actor: OwnedActor): undefined;
-  moveToGoal(actor: OwnedActor, goal: ActorId, distance: number): undefined;
+  moveToGoal(actor: OwnedActor, goal: ActorId, distance: number, mode?: "range" | "contact"): undefined;
   checkBottom(actor: ActorId): boolean;
   /** Calls the source blocked callback before rolling riders back, then returns the blocking actor. */
   pushMove(actor: OwnedActor, displacement: Vec3): ActorId | null;

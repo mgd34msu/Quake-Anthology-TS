@@ -12,6 +12,7 @@ import { precacheId1Monster } from "./species.ts";
 import type { MonsterSpecies } from "./species.ts";
 import { monsterAction, monsterJumpTouch } from "./monster-actions.ts";
 import { castLightning, throwGib, throwHead } from "./projectiles.ts";
+import { pathEndTime } from "../foundation/monsters.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 
 export interface BaseMonsterSource {
@@ -99,7 +100,7 @@ export class BaseMonster {
   eye(target: ActorId = this.entity.actor.id): Vec3 | null {
     const body = this.game.host.bodies.read(target); if (body === null) return null;
     const entity = this.game.entity(target);
-    const offset = entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: this.game.isPlayer(target) ? 22 : entity?.monster?.species === "fish" ? 10 : 25 };
+    const offset = entity?.fields.has("view_ofs") ? entity.vector("view_ofs") : { x: 0, y: 0, z: entity?.monster?.species === "fish" ? 10 : this.game.monsterTarget(target)?.viewHeight ?? 25 };
     return vadd(body.origin, offset);
   }
   rangeDistance(target = this.enemy): number { const start = this.eye(), end = target === null ? null : this.eye(target); return start === null || end === null ? Infinity : length(vsub(end, start)); }
@@ -111,6 +112,7 @@ export class BaseMonster {
   }
   found(target: ActorId): undefined {
     this.enemy = target; this.state.mode = "run"; this.state.searchUntil = this.game.time + 5;
+    this.game.monsterMissions.get(this.entity.actor.id)?.foundTarget();
     this.attackFinished(1);
     if (this.game.isPlayer(target)) { this.game.sightEntity = this.entity; this.game.sightTime = this.game.time; }
     const targetBody = this.game.host.bodies.read(target); if (targetBody !== null) this.entity.idealYaw = yawFor(vsub(targetBody.origin, this.origin));
@@ -124,25 +126,38 @@ export class BaseMonster {
   }
   findTarget(): boolean {
     const { game, entity } = this;
-    const candidate = game.sightEntity !== null && game.sightTime >= game.time - 0.1 && (entity.spawnflags & 3) === 0
+    const candidate = game.sightEntity !== null && game.sightTime >= game.time - 0.1 && !(game.monsterMissions.get(entity.actor.id)?.ambush ?? ((entity.spawnflags & 3) !== 0))
       ? game.sightEntity.monster?.enemy ?? null : game.host.checkClient(entity.actor);
-    if (candidate === null || game.health(candidate) <= 0 || (game.player(candidate)?.powerups.get("invisibility") ?? 0) > game.time) return false;
+    if (candidate === null || game.health(candidate) <= 0) return false;
+    const observed = game.monsterTarget(candidate);
+    if (observed === null || observed.invisible || observed.notarget) return false;
     const body = game.host.bodies.read(candidate); if (body === null) return false;
     const delta = vsub(body.origin, this.origin), distance = this.rangeDistance(candidate);
     if (distance >= 1000 || !this.visible(candidate)) return false;
     const front = dot(normalize(delta), this.makeVectors().forward) > 0.3;
-    if (distance >= 500 && !front || distance >= 120 && distance < 500 && (game.player(candidate)?.hostileUntil ?? 0) < game.time && !front) return false;
+    if (distance >= 500 && !front || distance >= 120 && distance < 500 && (observed.hostileUntil === null || observed.hostileUntil < game.time) && !front) return false;
     this.found(candidate); return true;
+  }
+  route(): ActorId | null {
+    const mission = this.game.monsterMissions.get(this.entity.actor.id);
+    return mission === undefined ? this.state.path === "" ? null : this.game.find(this.state.path)[0]?.actor.id ?? null : mission.route();
+  }
+  updateRoute(): undefined {
+    const goal = this.route();
+    if (goal === null || this.state.pauseUntil > this.game.time) { this.state.mode = "stand"; return this.play(this.spec.stand); }
+    if (this.state.mode === "stand") { this.state.mode = "walk"; return this.play(this.spec.walk); }
+    return undefined;
   }
   ai(mode: MonsterAi, distance: number): undefined {
     const { game, entity } = this;
+    if (mode === "stand" || mode === "walk" || mode === "run") this.state.mode = mode;
     switch (mode) {
-      case "stand": if (!this.findTarget() && game.time > this.state.pauseUntil && this.state.path !== "") this.play(this.spec.walk); return undefined;
+      case "stand": if (!this.findTarget() && game.time > this.state.pauseUntil && this.route() !== null) this.play(this.spec.walk); return undefined;
       case "turn": if (!this.findTarget()) this.face(); return undefined;
       case "walk": {
         if (this.findTarget() || game.time < this.state.pauseUntil) return undefined;
-        const path = game.find(this.state.path)[0]; if (path === undefined) { this.state.pauseUntil = game.time + 999999; return this.play(this.spec.stand); }
-        game.host.moveToGoal(entity.actor, path.actor.id, distance);
+        const path = this.route(); if (path === null) { this.state.pauseUntil = pathEndTime(game.time); return this.play(this.spec.stand); }
+        game.host.moveToGoal(entity.actor, path, distance);
         return undefined;
       }
       case "run": return this.run(distance);
@@ -161,9 +176,11 @@ export class BaseMonster {
     const { game, entity } = this;
     if (this.enemy === null || game.health(this.enemy) <= 0) {
       if (this.state.oldEnemy !== null && game.health(this.state.oldEnemy) > 0) { this.enemy = this.state.oldEnemy; this.state.oldEnemy = null; }
-      else { this.enemy = null; return this.play(this.state.path === "" ? this.spec.stand : this.spec.walk); }
+      else { this.enemy = null; return this.play(this.route() === null ? this.spec.stand : this.spec.walk); }
     }
     const enemy = this.enemy; if (enemy === null) return undefined;
+    const combatRoute = game.monsterMissions.get(entity.actor.id)?.combatRoute();
+    if (combatRoute?.goal != null) { game.host.moveToGoal(entity.actor, combatRoute.goal, distance, "contact"); return undefined; }
     const seen = this.visible(); game.world?.fields.set("enemy_visible", seen ? "1" : "0"); if (seen) this.state.searchUntil = game.time + 5;
     if (this.searchForCoopTarget()) return undefined;
     this.updateRunKnowledge();
@@ -177,6 +194,7 @@ export class BaseMonster {
       return undefined;
     }
     if (seen && this.tryAttack()) return undefined;
+    if (combatRoute?.standGround === true) return undefined;
     if (this.sliding) {
       this.face(); const direction = entity.idealYaw + (this.lefty ? 90 : -90);
       if (!game.host.walkMove(entity.actor, direction, distance)) { this.lefty = !this.lefty; game.host.walkMove(entity.actor, direction + 180, distance); }
@@ -308,10 +326,12 @@ export class BaseMonster {
   }
   countKill(): undefined {
     if (this.countedDeath) return undefined; this.countedDeath = true;
-    if (this.services.countMonsterKill(this)) { this.game.killedMonsters++; this.game.host.emit({ kind: "monster-killed", actor: this.entity.actor.id, total: this.game.totalMonsters, found: this.game.killedMonsters }); }
+    const mission = this.game.monsterMissions.get(this.entity.actor.id);
+    if (mission !== undefined) mission.killed(this.enemy);
+    else if (this.services.countMonsterKill(this)) { this.game.killedMonsters++; this.game.host.emit({ kind: "monster-killed", actor: this.entity.actor.id, total: this.game.totalMonsters, found: this.game.killedMonsters }); }
     if (this.game.options.edition === "rerelease" && (this.entity.movementFlags & 32) !== 0 && this.enemy !== null && !sameActor(this.enemy, this.entity.actor.id) && ((this.game.entity(this.enemy)?.movementFlags ?? 0) & 32) !== 0) this.game.host.emit({ kind: "achievement", player: null, id: "ACH_FRIENDLY_FIRE" });
     this.entity.movementFlags &= ~3;
-    return this.game.useTargets(this.entity, this.enemy);
+    return mission === undefined ? this.game.useTargets(this.entity, this.enemy) : undefined;
   }
   die(attacker: ActorId | null): undefined {
     const { game, entity, spec } = this;
@@ -347,13 +367,13 @@ export class BaseMonster {
       precacheId1Monster(game, spec.species);
     }
     const crucified = spec.species === "zombie" && (entity.spawnflags & 1) !== 0;
-    if (!crucified) game.totalMonsters++;
+    if (!crucified) { const mission = game.monsterMissions.get(entity.actor.id); if (mission === undefined) game.totalMonsters++; else mission.spawned(); }
     entity.maxHealth = spec.health; game.host.combat.setHealth(entity.actor, spec.health);
     entity.model = `progs/${spec.model}.mdl`; entity.solid = "slidebox"; entity.movement = "step"; entity.aimedDamage = true;
     if (spec.killString !== undefined) entity.fields.set("killstring", spec.killString);
     entity.yawSpeed = entity.number("yaw_speed") || (spec.movement === "fly" || spec.movement === "swim" ? 10 : 20);
     entity.idealYaw = game.body(entity).angles.y;
-    if (!crucified && spec.movement !== "boss") entity.movementFlags |= 32 | (spec.movement === "fly" ? 1 : spec.movement === "swim" ? 2 : 0);
+    if (!crucified && spec.movement !== "boss") entity.movementFlags |= spec.movement === "fly" ? 1 : spec.movement === "swim" ? 2 : 0;
     game.setBounds(entity, spec.bounds);
     entity.pain = game.named.pain(entity, `${this.source?.callbackPrefix ?? "base"}:monster_pain`); entity.die = game.named.die(entity, `${this.source?.callbackPrefix ?? "base"}:monster_die`);
     entity.pathEnd = game.named.action(entity, `${this.source?.callbackPrefix ?? "base"}:monster_stand`); entity.use = game.named.use(entity, `${this.source?.callbackPrefix ?? "base"}:monster_use`);
@@ -373,21 +393,29 @@ export class BaseMonster {
         else game.setBody(entity, { origin: start });
         game.host.walkMove(entity.actor, 0, 0);
       }
-      if (spec.species === "fish" && game.options.edition === "classic") game.totalMonsters++;
+      if (spec.species === "fish" && game.options.edition === "classic" && !game.monsterMissions.has(entity.actor.id)) game.totalMonsters++;
+      entity.movementFlags |= 32;
       entity.damageable = true; entity.idealYaw = game.body(entity).angles.y; game.link(entity);
       if (spec.movement === "fly") game.host.walkMove(entity.actor, 0, 0);
+      const mission = game.monsterMissions.get(entity.actor.id);
+      if (mission !== undefined) { mission.started(); this.updateRoute(); }
+      else {
       const path = game.find(this.state.path)[0];
       if (this.state.path !== "") {
         if (spec.movement !== "fly") entity.idealYaw = yawFor(vsub(path === undefined ? ZERO : game.body(path).origin, this.origin));
         if (spec.movement === "swim") this.play(spec.walk);
         else { if (path?.classname === "path_corner") this.play(spec.walk); else this.state.pauseUntil = Math.fround(99999999); this.play(spec.stand); }
       } else { this.state.pauseUntil = Math.fround(99999999); this.play(spec.stand); }
+      }
       if (spec.movement !== "fly" && entity.think !== null) return game.schedule(entity, entity.nextThink - game.time + game.host.random() * 0.5, entity.think);
       return undefined;
   }
   use(activator: ActorId | null): undefined {
     const { game, entity } = this;
-    if (this.enemy !== null || game.health(entity.actor.id) <= 0 || activator === null || !game.isPlayer(activator) || (game.player(activator)?.powerups.get("invisibility") ?? 0) > game.time) return undefined;
+    if (game.monsterMissions.get(entity.actor.id)?.use(activator) === true) return undefined;
+    if (this.enemy !== null || game.health(entity.actor.id) <= 0 || activator === null || !game.isPlayer(activator)) return undefined;
+    const observed = game.monsterTarget(activator);
+    if (observed === null || observed.invisible || observed.notarget) return undefined;
     this.enemy = activator; return game.schedule(entity, 0.1, game.named.action(entity, `${this.source?.callbackPrefix ?? "base"}:monster_found`));
   }
   awake(activator: ActorId | null): undefined {
@@ -401,6 +429,7 @@ export class BaseMonster {
 export function registerMonsterCallbacks(game: Q1EntityServices, prefix: string, monster: (entity: Q1Actor) => BaseMonster): undefined {
     game.named.register(`${prefix}:monster_jump_touch`, { touch: (_game, entity, other) => monsterJumpTouch(monster(entity), other) });
     game.named.register(`${prefix}:monster_frame`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.nextFrame); } });
+    game.named.register(`${prefix}:monster_route`, { action: (_game, entity) => monster(entity).updateRoute() });
     game.named.register(`${prefix}:monster_start`, { action: (_game, entity) => monster(entity).start() });
     game.named.register(`${prefix}:monster_stand`, { action: (_game, entity) => { const value = monster(entity); return value.play(value.spec.stand); } });
     game.named.register(`${prefix}:monster_found`, { action: (_game, entity) => { const value = monster(entity); return value.enemy === null ? undefined : value.found(value.enemy); } });

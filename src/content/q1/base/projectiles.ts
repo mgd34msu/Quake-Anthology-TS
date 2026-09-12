@@ -8,7 +8,7 @@ import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Weapon } from "../foundation/types.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub, weaponItem, yawFor } from "../foundation/types.ts";
 import type { BaseMonster } from "./monsters.ts";
-import { q1Base } from "./provider.ts";
+import { q1Creatures } from "./creatures.ts";
 
 function damageVelocity(game: Q1EntityServices, damage: number): Vec3 {
   return vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + 100 * game.host.random() }, damage > -50 ? 0.7 : damage > -200 ? 2 : 10);
@@ -48,7 +48,7 @@ export function dropBackpack(game: Q1EntityServices, origin: Vec3, contents: Bac
   if (contents.shells + contents.nails + contents.rockets + contents.cells + (contents.extra?.reduce((total, entry) => total + entry.count, 0) ?? 0) === 0) return null;
   const pack = game.create("item_backpack"); pack.model = "progs/backpack.mdl"; pack.solid = "trigger"; pack.movement = launch?.movement ?? "toss";
   const weapon = contents.weapon, rerelease = game.options.edition === "rerelease";
-  q1Base(game).backpacks.set(pack.actor, {
+  q1Creatures(game).backpacks.set(pack.actor, {
     weapon, extra: contents.extra ?? [], selection: contents.selection ?? "source-default", avoidUnderwaterLightning: contents.avoidUnderwaterLightning ?? rerelease, ownerPickupDelay: contents.ownerPickupDelay ?? 0,
     shells: Math.max(contents.shells, rerelease && (weapon === "shotgun" || weapon === "supershotgun") ? 5 : 0),
     nails: Math.max(contents.nails, rerelease && (weapon === "nailgun" || weapon === "supernailgun") ? 20 : 0),
@@ -59,20 +59,40 @@ export function dropBackpack(game: Q1EntityServices, origin: Vec3, contents: Bac
   game.schedule(pack, 120, game.named.action(pack, "SUB_Remove")); game.link(pack); return pack;
 }
 function backpackTouch(game: Q1EntityServices, pack: Q1Actor, other: ActorId): undefined {
-  const contents = q1Base(game).backpacks.get(pack.actor); if (contents === undefined) throw new Error("Missing source backpack contents");
+  const contents = q1Creatures(game).backpacks.get(pack.actor); if (contents === undefined) throw new Error("Missing source backpack contents");
   const weapon = contents.weapon;
   const ammo: readonly { readonly item: ItemId; readonly count: number }[] = [
     { item: "q1:ammo/shells", count: contents.shells }, { item: "q1:ammo/nails", count: contents.nails },
     { item: "q1:ammo/rockets", count: contents.rockets }, { item: "q1:ammo/cells", count: contents.cells },
     ...contents.extra ?? [],
   ];
-    const player = game.player(other); if (player === null || game.health(other) <= 0 || !game.live(pack)) return undefined;
+    const player = game.player(other), actor = game.host.actors.resolveOwned(other);
+    if (actor === null || !game.isPlayer(other) || game.health(other) <= 0 || !game.live(pack)) return undefined;
     if (pack.owner !== null && sameActor(other, pack.owner) && pack.nextThink - game.time > 120 - (contents.ownerPickupDelay ?? 0)) return undefined;
+    const feedback = (): undefined => {
+      game.message(other, "$qc_backpack_got", false); game.sound(actor, "weapons/lock4.wav", "item"); game.effect("pickup", game.body(pack).origin, other);
+      return undefined;
+    };
+    const admission = game.pickupAdmission;
+    if (admission !== null) {
+      const grants = ammo.filter(entry => entry.count > 0).map(entry => ({ item: entry.item, amount: entry.count }));
+      if (weapon === null) { for (const grant of grants) admission.ammo(actor, grant, false); }
+      else {
+        const owned = admission.owns(other, weaponItem(weapon));
+        const autoSwitch = player === null || (game.pickupRules?.autoSwitch?.(game, player, owned)
+          ?? (game.options.edition === "classic" || player.autoSwitch === "always" || player.autoSwitch === "new" && !owned));
+        const always = contents.selection !== "rank" && game.options.edition === "classic" && game.options.deathmatch === 0;
+        const underwater = !always && player !== null && (contents.avoidUnderwaterLightning ?? game.options.edition === "rerelease") && player.waterLevel !== 0 && weapon === "lightning";
+        admission.weapon(actor, { item: weaponItem(weapon), ammo: grants }, !autoSwitch || underwater ? "never" : always ? "always" : "better");
+      }
+      feedback(); return game.remove(pack);
+    }
+    if (player === null) return undefined;
     const hadWeapon = weapon === null || game.host.inventory.count(other, weaponItem(weapon)) > 0;
     for (const entry of ammo) game.host.inventory.give(player.actor, entry.item, entry.count);
     if (weapon !== null) game.host.inventory.give(player.actor, weaponItem(weapon), 1);
     const selected = weapon ?? player.weapon; game.pickupRules?.weaponGranted?.(game, player, selected);
-    game.message(other, "$qc_backpack_got", false); game.sound(player.actor, "weapons/lock4.wav", "item"); game.effect("pickup", game.body(pack).origin, other);
+    feedback();
     if (game.pickupRules?.autoSwitch?.(game, player, hadWeapon) ?? (game.options.edition === "classic" || player.autoSwitch === "always" || player.autoSwitch === "new" && !hadWeapon)) {
       const rank = (weapon: Q1Weapon): number => {
         const base = ["lightning", "rocketlauncher", "supernailgun", "grenadelauncher", "supershotgun", "nailgun"].indexOf(weapon);
@@ -145,11 +165,11 @@ export function launchVoreBall(monster: BaseMonster): undefined {
   const direction = normalize(vsub(vadd(target, { x: 0, y: 0, z: 10 }), monster.origin));
   const missile = createMissile(game, entity.actor.id, "vore_ball", "v_spike", vadd(monster.origin, { x: 0, y: 0, z: 10 }), vscale(direction, 400));
   missile.angularVelocity = { x: 300, y: 300, z: 300 }; game.effect("muzzleflash", monster.origin, entity.actor.id); game.sound(entity, "shalrath/attack2.wav", "weapon");
-  q1Base(game).projectileTargets.set(missile.actor, enemy);
+  q1Creatures(game).projectileTargets.set(missile.actor, enemy);
   missile.touch = game.named.touch(missile, "base:vore_touch"); return game.schedule(missile, Math.max(0.1, monster.distance * 0.002), game.named.action(missile, "base:vore_home"));
 }
 function voreHome(game: Q1EntityServices, missile: Q1Actor): undefined {
-    const enemy = q1Base(game).projectileTargets.get(missile.actor); if (enemy === undefined) throw new Error("Vore missile has no source enemy");
+    const enemy = q1Creatures(game).projectileTargets.get(missile.actor); if (enemy === undefined) throw new Error("Vore missile has no source enemy");
     const body = game.host.bodies.read(enemy); if (body === null || game.health(enemy) < 1) return game.remove(missile);
     const speed = game.options.edition === "classic" && game.options.skill === 3 ? 350 : 250;
     game.setBody(missile, { velocity: vscale(normalize(vsub(vadd(body.origin, { x: 0, y: 0, z: 10 }), game.body(missile).origin)), speed) }); return game.schedule(missile, 0.2, game.named.action(missile, "base:vore_home"));

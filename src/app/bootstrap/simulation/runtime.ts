@@ -16,6 +16,9 @@ import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound 
 import { readGrappleRuntimeCheckpoint } from "./grapple-checkpoint.ts";
 import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
+import { Q1Creatures } from "../../../content/q1/base/creatures.ts";
+import { baseSpecies } from "../../../content/q1/base/species.ts";
+import { q1AmmoPickupSelection, q1WeaponPickupSelection } from "../../../content/q1/foundation/pickups.ts";
 import { threewaveCharacterPose } from "../../../content/q1/equipment/threewave-weapon.ts";
 import { ThreewaveGrapple } from "../../../content/q1/equipment/threewave-grapple.ts";
 import { aim as q1Aim } from "../../../content/q1/foundation/weapons.ts";
@@ -42,6 +45,7 @@ import { Q3_Q1_SUPPLY_PROFILE } from "../../../content/composition/q3-q1-supply.
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
 import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
+import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect } from "../../../content/composition/q1-q2-supply.ts";
 import { Q3SharedBallistics, readQ3ProjectileStates, readQ3WeaponStatistics } from "./q3-ballistics.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
 import { Q2Lmctf } from "../../../content/q2/multiplayer/lmctf/runtime.ts";
@@ -108,7 +112,7 @@ import { MovementPlayer, movementOrigin, providerFamily, providerTiming } from "
 import { SimulationEvents } from "./events.ts";
 import { SourceRandom } from "./random.ts";
 import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, sourceActorsCheckpoint, readSourceActorsCheckpoint,
-  savedActorId, readSavedActor, encodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
+  savedActorId, readSavedActor, encodeCheckpointValue, decodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
   readQ2CharacterCheckpoint } from "../../../persistence/index.ts";
 import { readContentId } from "../../../persistence/recipe.ts";
 import { readRandom, readVector } from "../../../persistence/shared.ts";
@@ -382,7 +386,7 @@ export class SharedSimulation implements Simulation {
       if (q1Supply !== undefined && this.source.kind === "q1") {
         const game = this.source.game;
         game.pickupAdmission = new SharedPickupAdmission({ inventory: this.inventory, profile: Q1_Q3_SUPPLY_PROFILE,
-          ammoGranted: (actor, grants) => { selectedArsenal.pickupAmmo(actor, grants, game.player(actor.id)?.autoSwitch !== "never");
+          ammoGranted: (actor, grants, autoSwitch) => { selectedArsenal.pickupAmmo(actor, grants, autoSwitch && game.player(actor.id)?.autoSwitch !== "never");
             this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; },
           weaponGranted: (actor, weapons, selection) => { selectedArsenal.pickupWeapons(actor, weapons, selection);
             this.requirePlayer(actor.id).arsenal = selectedArsenal.read(actor.id); return undefined; } });
@@ -429,6 +433,22 @@ export class SharedSimulation implements Simulation {
     let source: SelectedMonsterSource;
     if (registered.family === "q1") {
       const game = new Q1EntityServices(this.q1ActorHost(reference, runtime), { ...common, deathmatch: 0, coop: this.options.mode === "coop", gravity: this.physics.gravity, precacheProgram: "id1" });
+      const creatures = new Q1Creatures(game, {
+        countMonsterKill: monster => { throw new Error(`Selected creature has no authored mission: ${monster.entity.classname}`); },
+        finale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
+        finishFinale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
+      });
+      creatures.registerSpecies(baseSpecies.filter(species => species.classnames.every(classname => Object.hasOwn(registered.creatures, classname))));
+      game.registerStateExtension({ id: "q1:selected-creatures",
+        capture: () => encodeCheckpointValue({ version: 1, ...creatures.captureFields() }),
+        restore: bytes => {
+          const reader = new SaveReader(decodeCheckpointValue(bytes), "q1:selected-creatures");
+          reader.field("version").literal(1);
+          return creatures.restoreFields(reader);
+        },
+        clone: (original, target) => creatures.clone(original, target),
+      });
+      game.pickupAdmission = this.selectedCreaturePickups();
       source = { kind: "q1", reference, random, clock, game };
     } else {
       let monsters: Q2Monsters;
@@ -582,8 +602,54 @@ export class SharedSimulation implements Simulation {
     return undefined;
   }
 
+  private selectedCreaturePickups(): SharedPickupAdmission {
+    const selected = this.selectedArsenal;
+    const identity: PickupSupplyProfile = { id: "composition:q1-creature-q1-supply", weaponOwnership: "all-destinations",
+      ammo: Q1_Q3_SUPPLY_PROFILE.ammo.map(entry => ({ source: entry.source, destinations: [entry.source] })),
+      weapons: Q1_Q3_SUPPLY_PROFILE.weapons.map(entry => ({ source: entry.source, destinations: [entry.source] })) };
+    const profile = selected?.family === "q3" ? Q1_Q3_SUPPLY_PROFILE : selected?.family === "q1" || this.source.kind === "q1" ? identity : Q1_Q2_SUPPLY_PROFILE;
+    return new SharedPickupAdmission({ inventory: this.inventory, profile,
+      ammoGranted: (actor, grants, autoSwitch) => {
+        if (selected !== null) {
+          selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id);
+        } else if (this.source.kind === "q1") {
+          const game = this.source.game, player = game.player(actor.id);
+          if (player === null) throw new Error("Q1 pickup recipient has no admitted player");
+          const before = game.chooseBest(actor, item => grants.find(grant => grant.item === item)?.before ?? this.inventory.count(actor.id, item));
+          q1AmmoPickupSelection(game, player, before, autoSwitch && player.autoSwitch !== "never");
+        }
+        return undefined;
+      }, weaponGranted: (actor, weapons, selection) => {
+        if (selected !== null) {
+          selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id);
+        } else if (this.source.kind === "q1") {
+          const game = this.source.game, player = game.player(actor.id);
+          if (player === null) throw new Error("Q1 pickup recipient has no admitted player");
+          for (const item of weapons) {
+            const weapon = [...Q1_WEAPONS, ...game.registeredWeapons.keys()].find(weapon => game.weaponItem(weapon) === item);
+            if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, player.autoSwitch === "never" ? "never" : selection);
+          }
+        } else if (this.source.kind === "q2" && selection !== "never") {
+          const source = this.source, player = source.game.entity(actor.id);
+          if (player === null) throw new Error("Q2 pickup recipient has no admitted player");
+          for (const item of weapons) {
+            const definition = source.weapons.registeredDefinitions().find(weapon => weapon.item === item);
+            const current = source.weapons.states.get(actor.id)?.weapon;
+            const currentItem = source.weapons.registeredDefinitions().find(weapon => weapon.name === current)?.item ?? null;
+            if (definition !== undefined && q1Q2PickupSelect(currentItem, item, selection)) source.weapons.requestWeapon(player, source.game, definition.name);
+          }
+        }
+        return undefined;
+      } });
+  }
+
   private createMonsterMovement(numeric: ReturnType<typeof providerTiming>["numeric"], random: SourceRandom): Q1MonsterMovement {
     return createQ1MonsterMovement({ scene: this.scene, numeric: createNumericOperations(numeric), random,
+      readTarget: actor => {
+        const body = this.bodies.read(actor);
+        return body === null ? null : { origin: body.origin,
+          absoluteBounds: this.bodies.linked(actor)?.absoluteBounds ?? { min: add(body.origin, body.bounds.min), max: add(body.origin, body.bounds.max) } };
+      },
       read: actor => {
         const body = this.physics.bodies.read(actor), entry = this.actorExecutions.get(actor), entity = entry?.kind === "q1" ? entry.entity : null;
         if (body === null || entity === null) return null;
@@ -674,7 +740,7 @@ export class SharedSimulation implements Simulation {
       replacedItems: [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
       observe: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, waterLevel: player.waterLevel }; } });
     this.selectedQ1Supply = new SharedPickupAdmission({ inventory: this.inventory, profile,
-      ammoGranted: (actor, grants) => { selected.pickupAmmo(actor, grants, true); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
+      ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
       weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; } });
     if (this.source.kind === "q2") this.source.items.setPickupAdmission(this.selectedQ1Supply);
     return selected;
@@ -692,7 +758,7 @@ export class SharedSimulation implements Simulation {
         random: () => runtime.random.nextUnit(),
         walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance),
         checkBottom: actor => movement.checkBottom(actor),
-        moveToGoal: (actor, goal, distance) => movement.moveToGoal(actor, goal, distance),
+        moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode),
         changeYaw: actor => { movement.changeYaw(actor); return undefined; },
         pushMove: (actor, displacement) => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
           const angular = entity?.angularVelocity ?? zero, elapsed = runtime.frameSeconds();

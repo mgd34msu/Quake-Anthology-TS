@@ -46,7 +46,10 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
   const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors);
   const monsterMovement = createQ1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 },
-    read: actor => { const body = bodies.read(actor), entity = game?.entity(actor); if (body === null || entity == null) return null;
+    readTarget: actor => {
+    const owner = actors.resolveOwned(actor), body = bodies.read(actor);
+    return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
+  }, read: actor => { const body = bodies.read(actor), entity = game?.entity(actor); if (body === null || entity == null) return null;
       return { origin: body.origin, angles: body.angles, bounds: body.bounds, absoluteBounds: bodies.linked(actor)?.absoluteBounds ?? { min: vadd(body.origin, body.bounds.min), max: vadd(body.origin, body.bounds.max) },
         flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null }; },
     write: (actor, state) => { const body = bodies.read(actor.id), entity = game?.entity(actor.id); if (body === null || entity == null) throw new Error("Missing native yaw actor");

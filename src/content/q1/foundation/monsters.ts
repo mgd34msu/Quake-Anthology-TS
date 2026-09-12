@@ -22,7 +22,9 @@ export function pathEndTime(time: number): number { return Math.fround(Math.frou
 export function setMonsterRoute(game: Q1EntityServices, entity: Q1Actor, goal: ActorId | null, pauseUntil: number): undefined {
   const monster = requireMonster(entity);
   monster.pauseUntil = pauseUntil;
-  if (goal === null || pauseUntil > game.time) stand(monster); else if (monster.mode === "stand") walk(monster);
+  const prefix = entity.fields.get("source.monsterCallbackPrefix");
+  if (prefix !== undefined) game.named.action(entity, `${prefix}:monster_route`)();
+  else if (goal === null || pauseUntil > game.time) stand(monster); else if (monster.mode === "stand") walk(monster);
   const target = goal === null ? null : game.host.bodies.read(goal);
   if (target !== null) entity.idealYaw = yawFor(vsub(target.origin, game.body(entity).origin));
   return undefined;
@@ -109,7 +111,7 @@ function monsterFrame(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monste
     if (mode === "run") {
       const combatRoute = game.monsterMissions.get(entity.actor.id)?.combatRoute();
       if (combatRoute?.goal != null) {
-        game.host.moveToGoal(entity.actor, combatRoute.goal, distance);
+        game.host.moveToGoal(entity.actor, combatRoute.goal, distance, "contact");
         monster.frameIndex = (monster.frameIndex + 1) % monster.sequence.length;
         return game.schedule(entity, 0.1, game.named.action(entity, "monster_frame"));
       }

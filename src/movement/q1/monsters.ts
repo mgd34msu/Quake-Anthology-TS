@@ -26,6 +26,7 @@ export interface Q1MonsterMoveServices {
   readonly numeric: NumericOperations;
   readonly random: Pick<RandomSource, "nextInteger">;
   read(actor: ActorId): Q1MonsterMoveState | null;
+  readTarget(actor: ActorId): Pick<Q1MonsterMoveState, "origin" | "absoluteBounds"> | null;
   write(actor: OwnedActor, state: Q1MonsterMoveState): undefined;
   /** Source linking may call nested triggers, teleport, or remove the actor. */
   link(actor: OwnedActor, touchTriggers: boolean): undefined;
@@ -91,7 +92,7 @@ export class Q1MonsterMovement {
     if ((state.flags & (Q1_FLAG_SWIM | Q1_FLAG_FLY)) !== 0) {
       for (let attempt = 0; attempt < 2; attempt++) {
         destination = m.add(state.origin, move);
-        const enemy = state.enemy === null ? null : this.services.read(state.enemy);
+        const enemy = state.enemy === null ? null : this.services.readTarget(state.enemy);
         if (attempt === 0 && enemy !== null) {
           const dz = n.subtract(state.origin.z, enemy.origin.z);
           if (dz > 40) destination = m.vec(destination.x, destination.y, n.subtract(destination.z, 8));
@@ -166,7 +167,7 @@ export class Q1MonsterMovement {
     return this.moveStep(actor, m.vec(n.multiply(Math.cos(radians), distance), n.multiply(Math.sin(radians), distance), 0), true);
   }
   closeEnough(actor: ActorId, goal: ActorId, distance: number): boolean {
-    const self = this.services.read(actor), target = this.services.read(goal);
+    const self = this.services.read(actor), target = this.services.readTarget(goal);
     if (self === null || target === null) return false;
     const n = this.services.numeric, a = self.absoluteBounds, b = target.absoluteBounds;
     return b.min.x <= n.add(a.max.x, distance) && b.max.x >= n.subtract(a.min.x, distance)
@@ -174,7 +175,7 @@ export class Q1MonsterMovement {
       && b.min.z <= n.add(a.max.z, distance) && b.max.z >= n.subtract(a.min.z, distance);
   }
   newChaseDirection(actor: OwnedActor, goal: ActorId, distance: number): undefined {
-    const state = this.services.read(actor.id), enemy = this.services.read(goal);
+    const state = this.services.read(actor.id), enemy = this.services.readTarget(goal);
     if (state === null || enemy === null) return undefined;
     const n = this.services.numeric;
     const oldDirection = this.angleMod(n.multiply(n.toInt32(n.divide(state.idealYaw, 45)), 45));
@@ -211,10 +212,10 @@ export class Q1MonsterMovement {
     }
     return undefined;
   }
-  moveToGoal(actor: OwnedActor, goal: ActorId, distance: number): undefined {
+  moveToGoal(actor: OwnedActor, goal: ActorId, distance: number, mode: "range" | "contact" = "range"): undefined {
     const state = this.services.read(actor.id);
     if (state === null || (state.flags & (Q1_FLAG_ONGROUND | Q1_FLAG_FLY | Q1_FLAG_SWIM)) === 0) return undefined;
-    if (state.enemy !== null && this.closeEnough(actor.id, goal, distance)) return undefined;
+    if (mode === "range" && state.enemy !== null && this.closeEnough(actor.id, goal, distance)) return undefined;
     if ((this.services.random.nextInteger() & 3) === 1 || !this.stepDirection(actor, state.idealYaw, distance)) {
       if (this.services.read(actor.id) !== null) this.newChaseDirection(actor, goal, distance);
     }

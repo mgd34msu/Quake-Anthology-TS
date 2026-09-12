@@ -212,7 +212,8 @@ test.skipIf(!existsSync(resolve(root, q1.path)))("Quake monster bottom checks an
   const target: Q1MonsterMoveState = { ...monster, origin: goalOrigin, absoluteBounds: absoluteBounds(goalOrigin), enemy: null };
   let linked = 0;
   const movement = createQ1MonsterMovement({ scene: loaded.scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random,
-    read: id => id.equals(actor.id) ? monster : id.equals(goal) ? target : null,
+    read: id => id.equals(actor.id) ? monster : null,
+    readTarget: id => id.equals(goal) ? target : null,
     write: (_actor, state) => { monster = state; },
     link: () => { linked++; monster = { ...monster, absoluteBounds: absoluteBounds(monster.origin) }; } });
   expect(movement.checkBottom(actor.id)).toBe(true);

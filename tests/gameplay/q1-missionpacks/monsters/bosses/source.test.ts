@@ -41,7 +41,10 @@ async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelea
     const entity = active?.entity(body.actor); if (entity === null || entity === undefined || entity.solid === "none" || entity.classname === "worldspawn") return undefined;
     scene.link(body, { family: "q1", shape: { kind: "box" }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
   } });
-  const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, read: actor => {
+  const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, readTarget: actor => {
+    const owner = actors.resolveOwned(actor), body = bodies.read(actor);
+    return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
+  }, read: actor => {
     const body = bodies.read(actor), entity = active?.entity(actor); if (body === null || entity === null || entity === undefined) return null;
     return { ...body, absoluteBounds: translatedBodyBounds(entity.actor, body), flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null };
   }, write: (actor, state) => {
@@ -55,7 +58,7 @@ async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelea
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
     if (trace.kind !== "q1") throw new Error("Q1 trace expected");
     return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal, actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? active?.world?.actor.id ?? null : null, startSolid: trace.startSolid, allSolid: trace.allSolid, sky: false, inOpen: trace.inOpen, inWater: trace.inWater };
-  }, contents: () => "empty", walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance), changeYaw: actor => movement.changeYaw(actor), moveToGoal: (actor, goal, distance) => movement.moveToGoal(actor, goal, distance), checkBottom: actor => movement.checkBottom(actor), pushMove: () => null,
+  }, contents: () => "empty", walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance), changeYaw: actor => movement.changeYaw(actor), moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode), checkBottom: actor => movement.checkBottom(actor), pushMove: () => null,
     scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; }, emit: event => { events.push(event); return undefined; }, transition: () => undefined,
     players: () => players, checkClient: () => null, classname: actor => active?.entity(actor)?.classname ?? "player", powerup: () => undefined };
   function provider() {

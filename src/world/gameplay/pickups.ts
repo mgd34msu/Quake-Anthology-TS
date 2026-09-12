@@ -5,7 +5,7 @@ import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoR
 export interface SharedPickupAdmissionOptions {
   readonly inventory: InventoryTable;
   readonly profile: PickupSupplyProfile;
-  ammoGranted(actor: OwnedActor, grants: readonly PickupAmmoReceipt[]): undefined;
+  ammoGranted(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined;
   weaponGranted(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined;
 }
 
@@ -51,12 +51,12 @@ export class SharedPickupAdmission implements PickupAdmission {
       given: this.options.inventory.give(actor, grant.item, grant.amount) }));
   }
 
-  ammo(actor: OwnedActor, offer: PickupAmmoGrant): boolean {
+  ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch = true): boolean {
     const grants = this.resolveAmmo([offer]);
     this.requireEntries(actor.id, grants.map(grant => grant.item));
     const receipt = this.giveAmmo(actor, grants);
     if (!receipt.some(grant => grant.given > 0)) return false;
-    this.options.ammoGranted(actor, receipt);
+    this.options.ammoGranted(actor, receipt, autoSwitch);
     return true;
   }
 

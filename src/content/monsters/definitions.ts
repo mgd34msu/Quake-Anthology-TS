@@ -12,6 +12,9 @@ const army = { resources: ["progs/soldier.mdl", "progs/h_guard.mdl", "progs/gib1
   ...["soldier/death1.wav", "soldier/idle.wav", "soldier/pain1.wav", "soldier/pain2.wav", "soldier/sattck1.wav", "soldier/sight1.wav", "player/udeath.wav", "weapons/lock4.wav"].map(path => `sound/${path}`)] };
 const dog = { resources: ["progs/dog.mdl", "progs/h_dog.mdl", "progs/gib3.mdl",
   ...["dog/dattack1.wav", "dog/ddeath.wav", "dog/dpain1.wav", "dog/dsight.wav", "dog/idle.wav", "player/udeath.wav"].map(path => `sound/${path}`)] };
+const enforcer = { resources: ["progs/enforcer.mdl", "progs/h_mega.mdl", "progs/laser.mdl", "progs/gib1.mdl", "progs/gib2.mdl", "progs/gib3.mdl", "progs/backpack.mdl",
+  ...["enforcer/death1.wav", "enforcer/enfire.wav", "enforcer/enfstop.wav", "enforcer/idle1.wav", "enforcer/pain1.wav", "enforcer/pain2.wav",
+    "enforcer/sight1.wav", "enforcer/sight2.wav", "enforcer/sight3.wav", "enforcer/sight4.wav", "player/udeath.wav", "weapons/lock4.wav"].map(path => `sound/${path}`)] };
 const classicBerserk = { resources: ["models/monsters/berserk/tris.md2", "models/monsters/berserk/skin.pcx",
   "models/objects/gibs/bone/tris.md2", "models/objects/gibs/sm_meat/tris.md2", "models/objects/gibs/head2/tris.md2",
   ...["berserk/sight.wav", "berserk/bersrch1.wav", "berserk/berpain2.wav", "berserk/berdeth2.wav", "berserk/beridle1.wav", "berserk/attack.wav", "misc/udeath.wav"].map(path => `sound/${path}`)] };
@@ -24,7 +27,7 @@ const rereleaseInfantry = { resources: [...infantryResources, ...["arm", "chest"
 
 /** These identities bind the existing source modules, including their edition-specific continuations. */
 export const monsterSources: readonly MonsterSourceDefinition[] = [
-  { provider: "q1:monsters/classic/id1", family: "q1", edition: "classic", program: "id1", creatures: { monster_army: army, monster_dog: dog } },
+  { provider: "q1:monsters/classic/id1", family: "q1", edition: "classic", program: "id1", creatures: { monster_army: army, monster_dog: dog, monster_enforcer: enforcer } },
   { provider: "q1:monsters/rerelease/id1", family: "q1", edition: "rerelease", program: "id1", creatures: { monster_army: army } },
   { provider: "q2:monsters/classic/baseq2", family: "q2", edition: "classic", program: "baseq2", creatures: { monster_infantry: classicInfantry, monster_berserk: classicBerserk } },
   { provider: "q2:monsters/rerelease/baseq2", family: "q2", edition: "rerelease", program: "baseq2", creatures: { monster_infantry: rereleaseInfantry } },

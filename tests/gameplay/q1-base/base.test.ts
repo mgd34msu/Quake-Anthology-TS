@@ -1,3 +1,6 @@
+import { Q3SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q3.ts";
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { Q1_Q3_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q3-supply.ts";
 import { test, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -16,6 +19,7 @@ import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundati
 import { PLAYER_BOUNDS, ZERO, vadd } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base, Q1CharacterActor, Q1CampaignState, captureQ1Travel, admitQ1Travel, newQ1Travel, q1Obituary, dropBackpack } from "../../../src/content/q1/base/index.ts";
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/index.ts";
+import { setMonsterRoute } from "../../../src/content/q1/foundation/monsters.ts";
 import { monsterFrames } from "../../../src/content/q1/base/frames.ts";
 import type { Q1FoundationCheckpoint } from "../../../src/content/q1/foundation/index.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../src/persistence/q1-foundation.ts";
@@ -35,7 +39,7 @@ interface SavedBaseWorld {
   readonly combat: readonly import("../../../src/contracts/session.ts").CombatCheckpoint[];
   readonly inventories: readonly import("../../../src/contracts/session.ts").InventoryCheckpoint[];
 }
-function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0) {
+function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePrecaches = true) {
   const identities = createIdentityOwner("q1-base-smoke");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
@@ -46,7 +50,10 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0) {
     const model = entity.model.startsWith("*") ? Number(entity.model.slice(1)) : null;
     scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: entity.owner, role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
   } });
-  const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, read: actor => {
+  const movement = new Q1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 }, readTarget: actor => {
+    const owner = actors.resolveOwned(actor), body = bodies.read(actor);
+    return owner === null || body === null ? null : { origin: body.origin, absoluteBounds: translatedBodyBounds(owner, body) };
+  }, read: actor => {
     const body = bodies.read(actor), entity = runtime?.entity(actor); if (body === null || entity === null || entity === undefined) return null;
     return { ...body, absoluteBounds: translatedBodyBounds(entity.actor, body), flags: entity.movementFlags, ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground }, idealYaw: entity.idealYaw, yawSpeed: entity.yawSpeed, enemy: entity.monster?.enemy ?? null };
   }, write: (actor, state) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing source body"); bodies.write(actor, { ...body, angles: state.angles }); return undefined; }, link: actor => bodies.link(actor) });
@@ -69,7 +76,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0) {
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
   };
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", precacheProgram: "id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
+  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch, coop: false, gravity: 800, maxClients: 4, campaign: "q1:id1", ...(nativePrecaches ? { precacheProgram: "id1" } : {}), combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const campaign = new Q1CampaignState(), base = registerQ1Base(game, { campaign });
   let report: import("../../../src/content/q1/foundation/index.ts").Q1SpawnReport | null = null, player: OwnedActor;
@@ -204,4 +211,69 @@ test.skipIf(!existsSync(archivePath))("id1 monster precaches match native spawn 
       expect(state.game.precaches.sounds).toContain("soldier/sattck1.wav"); expect(state.game.precaches.phase).toBe("frozen");
     } finally { state.actors.close(); }
   }
+});
+
+
+test.skipIf(!existsSync(archivePath))("base monster mission owns activation, route and one death notification", async () => {
+  const map = await readMap("e1m7");
+  const { game, base, actors, player } = createGame({ ...map, entityList: parseQ1Entities('{ "classname" "worldspawn" }') }, undefined, 0, false);
+  const entity = game.create("monster_knight");
+  let spawned = 0, started = 0, used = 0, killed = 0;
+  game.monsterMissions.set(entity.actor.id, {
+    ambush: false, spawned: () => { spawned++; return undefined; },
+    started: () => { expect(entity.damageable).toBe(true); expect(entity.movementFlags & 32).toBe(32); started++; return undefined; },
+    killed: () => { killed++; return undefined; }, route: () => { expect(started).toBe(1); return player.id; },
+    use: () => { used++; return true; }, combatRoute: () => ({ goal: player.id, standGround: false }), foundTarget: () => undefined,
+  });
+  const total = game.totalMonsters;
+  game.spawnEntity(entity); expect(spawned).toBe(1); expect(game.totalMonsters).toBe(total);
+  const monster = base.monsters.get(entity.actor);
+  if (monster === undefined) throw new Error("Missing mission monster");
+  monster.start(); expect(started).toBe(1); expect(monster.route()).toBe(player.id);
+  setMonsterRoute(game, entity, player.id, game.time + 30);
+  expect(monster.state.mode).toBe("stand"); expect(monster.state.pauseUntil).toBe(game.time + 30);
+  monster.enemy = player.id; monster.use(null); expect(used).toBe(1);
+  const before = game.killedMonsters;
+  monster.countKill(); monster.countKill(); expect(killed).toBe(1); expect(game.killedMonsters).toBe(before);
+  actors.close();
+});
+
+
+test.skipIf(!existsSync(archivePath))("source backpacks map ammo for native and foreign players without inventing weapon selection", async () => {
+  const map = await readMap("e1m7"), { game, actors, inventory, player, events } = createGame(map);
+  inventory.configure(player, { item: "q3:ammo/lightning", count: 0, capacity: 200 });
+  const arsenal = new Q3SelectedArsenal({ provider: "q3:official", product: "baseq3", inventory,
+    fire: () => undefined, useHoldable: () => undefined });
+  arsenal.admit(player, 100);
+  inventory.give(player, "q3:weapon/lightning", 1);
+  const active = arsenal.read(player.id).activeWeapon;
+  let selections = 0;
+  game.pickupAdmission = new SharedPickupAdmission({ inventory, profile: Q1_Q3_SUPPLY_PROFILE,
+    ammoGranted: (actor, grants, autoSwitch) => arsenal.pickupAmmo(actor, grants, autoSwitch), weaponGranted: (_actor, _weapons, selection) => { expect(selection).toBe("better"); selections++; return undefined; } });
+  for (const foreign of [false, true]) {
+    if (foreign) game.players.delete(player);
+    expect(game.player(player.id) === null).toBe(foreign);
+    const before = inventory.count(player.id, "q3:ammo/lightning"), native = inventory.count(player.id, "q1:ammo/cells");
+    const pack = dropBackpack(game, ZERO, { weapon: null, shells: 0, nails: 0, rockets: 0, cells: 5 });
+    if (pack === null) throw new Error("Missing cell backpack");
+    const sounds = events.filter(event => event.kind === "sound").length;
+    pack.touch?.(player.id, null); expect(game.live(pack)).toBe(false);
+    expect(inventory.count(player.id, "q3:ammo/lightning")).toBe(before + 5);
+    expect(inventory.count(player.id, "q1:ammo/cells")).toBe(native);
+    expect(arsenal.read(player.id).activeWeapon).toBe(active); expect(arsenal.pendingWeapon(player.id)).toBe(null);
+    expect(events.filter(event => event.kind === "sound").length).toBe(sounds + 1);
+  }
+  expect(selections).toBe(0);
+  inventory.configure(player, { item: "q3:ammo/lightning", count: 0, capacity: 200 });
+  game.pickupAdmission.ammo(player, { item: "q1:ammo/cells", amount: 5 });
+  expect(arsenal.pendingWeapon(player.id)).toBe("q3:weapon/lightning");
+  inventory.configure(player, { item: "q3:ammo/lightning", count: 200, capacity: 200 });
+  const full = dropBackpack(game, ZERO, { weapon: null, shells: 0, nails: 0, rockets: 0, cells: 5 });
+  if (full === null) throw new Error("Missing full-inventory backpack");
+  full.touch?.(player.id, null); expect(game.live(full)).toBe(false); expect(inventory.count(player.id, "q3:ammo/lightning")).toBe(200); expect(selections).toBe(0);
+  inventory.configure(player, { item: "q3:weapon/lightning", count: 0, capacity: 1 });
+  const armed = dropBackpack(game, ZERO, { weapon: "lightning", shells: 0, nails: 0, rockets: 0, cells: 5 });
+  if (armed === null) throw new Error("Missing weapon backpack");
+  armed.touch?.(player.id, null); expect(game.live(armed)).toBe(false); expect(inventory.count(player.id, "q3:weapon/lightning")).toBe(1); expect(selections).toBe(1);
+  actors.close();
 });

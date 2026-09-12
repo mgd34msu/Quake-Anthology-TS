@@ -4,17 +4,14 @@ import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import { doorDown } from "../foundation/movers.ts";
 import { ZERO, normalize, vadd, vscale, vsub } from "../foundation/types.ts";
-import { BaseMonster, registerMonsterCallbacks } from "./monsters.ts";
+import { BaseMonster } from "./monsters.ts";
 import type { MonsterServices } from "./monsters.ts";
 import { baseSpecies } from "./species.ts";
 import { remainingMapClassnames, spawnRemainingMapActor, registerMapCallbacks } from "./map-entities.ts";
-import { throwGib, registerProjectileCallbacks } from "./projectiles.ts";
+import { throwGib } from "./projectiles.ts";
 import { Q1LevelRules, Q1SpawnSelector } from "./rules.ts";
-import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
-import type { BackpackContents } from "./projectiles.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
-import { WEAPONS } from "../foundation/types.ts";
-import { wizardFastFire } from "./monster-actions.ts";
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
+import { Q1Creatures } from "./creatures.ts";
 import { q1FinaleText } from "./finales.ts";
 import { registerCharacterCallbacks } from "./player.ts";
 
@@ -45,16 +42,16 @@ export const Q1_BASE_CLASSNAMES: readonly string[] = [...baseSpecies.flatMap(spe
 
 /** Registers base content on the permanent Q1 provider; it has no independent game frame loop. */
 export class Q1Base implements MonsterServices {
-  readonly monsters = new Map<OwnedActor, BaseMonster>();
-  readonly backpacks = new Map<OwnedActor, BackpackContents>();
-  readonly projectileTargets = new Map<OwnedActor, ActorId>();
-  readonly wizardShots = new Map<OwnedActor, { readonly enemy: ActorId; readonly right: Vec3 }>();
+  readonly creatures: Q1Creatures;
+  get monsters() { return this.creatures.monsters; }
+  get backpacks() { return this.creatures.backpacks; }
+  get projectileTargets() { return this.creatures.projectileTargets; }
+  get wizardShots() { return this.creatures.wizardShots; }
   readonly campaign: Q1CampaignBinding;
   readonly registered: boolean;
   readonly levelRules: Q1LevelRules;
   readonly spawnSelector: Q1SpawnSelector;
   private readonly killCountRules = new Map<string, (monster: BaseMonster) => boolean>();
-  private hellKnightType = 0;
   private lightningEnd = -1;
   private electrodes: readonly [Q1Actor, Q1Actor] | null = null;
   private finaleStarted = false;
@@ -64,13 +61,10 @@ export class Q1Base implements MonsterServices {
     providers.set(game, this);
     this.levelRules = new Q1LevelRules(game, this.campaign, this.registered, options.officialCampaign ?? game.options.campaign.endsWith(":id1")); this.spawnSelector = new Q1SpawnSelector(game, this.campaign);
     game.registerPlayerExtension({ id: "q1:base-level-stats", attach: (_game, player) => this.levelRules.resetPlayer(player.actor) });
-    game.host.actors.onRelease(actor => { this.monsters.delete(actor); this.backpacks.delete(actor); this.projectileTargets.delete(actor); this.wizardShots.delete(actor); return undefined; });
+    this.creatures = new Q1Creatures(game, this);
     const monster = (entity: Q1Actor): BaseMonster => { const value = this.monsters.get(entity.actor); if (value === undefined) throw new Error(`Missing Q1 monster controller for ${entity.classname}`); return value; };
-    registerMonsterCallbacks(game, "base", monster);
-    registerProjectileCallbacks(game);
     registerMapCallbacks(game);
     registerCharacterCallbacks(game);
-    game.named.register("base:wizard_fastfire", { action: wizardFastFire });
     game.named.register("base:lightning_use", { use: (_game, entity, _other, activator) => this.useLightning(entity, activator) });
     game.named.register("base:lightning_fire", { action: (_game, entity) => this.fireLightning(entity) });
     game.named.register("base:finale_2", { action: (_game, timer) => {
@@ -89,9 +83,7 @@ export class Q1Base implements MonsterServices {
     } });
     game.named.register("base:finale_6", { action: (_game, timer) => { game.host.emit({ kind: "finale", text: "", stage: 6 }); if (game.options.coop) game.travel("start", null); else this.options.finishCampaign?.(); return game.remove(timer); } });
     game.registerStateExtension({ id: "q1:base", capture: () => this.capture(), restore: bytes => this.restore(bytes), clone: (source, target) => this.clone(source, target) });
-    for (const spec of baseSpecies) for (const classname of spec.classnames) game.registerSpawn(classname, (_game, entity) => {
-      const monster = new BaseMonster(game, entity, spec, this); this.monsters.set(entity.actor, monster); return monster.spawn();
-    });
+    this.creatures.registerSpecies(baseSpecies);
     for (const classname of remainingMapClassnames) game.registerSpawn(classname, (_game, entity) => spawnRemainingMapActor(this, entity));
   }
   registerKillCountRule(id: string, rule: (monster: BaseMonster) => boolean): undefined {
@@ -99,53 +91,29 @@ export class Q1Base implements MonsterServices {
     this.killCountRules.set(id, rule); return undefined;
   }
   countMonsterKill(monster: BaseMonster): boolean { for (const rule of this.killCountRules.values()) if (!rule(monster)) return false; return true; }
-  private clone(source: Q1Actor, target: Q1Actor): undefined {
-    const original = this.monsters.get(source.actor);
-    if (original !== undefined) { const monster = new BaseMonster(this.game, target, original.spec, this, original.source); monster.restore(new SaveReader(original.capture())); this.monsters.set(target.actor, monster); }
-    const backpack = this.backpacks.get(source.actor); if (backpack !== undefined) this.backpacks.set(target.actor, backpack);
-    const enemy = this.projectileTargets.get(source.actor); if (enemy !== undefined) this.projectileTargets.set(target.actor, enemy);
-    const shot = this.wizardShots.get(source.actor); if (shot !== undefined) this.wizardShots.set(target.actor, shot);
-    return undefined;
-  }
+  private clone(source: Q1Actor, target: Q1Actor): undefined { return this.creatures.clone(source, target); }
   private capture(): Uint8Array {
     const saved = (actor: ActorId) => ({ slot: actor.slot, generation: actor.generation });
-    return encodeCheckpointValue({ version: 1, flags: this.campaign.readFlags(), hellKnightType: this.hellKnightType, lightningEnd: this.lightningEnd, finaleStarted: this.finaleStarted, finaleDismissed: this.finaleDismissed,
+    return encodeCheckpointValue({ version: 1, flags: this.campaign.readFlags(), lightningEnd: this.lightningEnd, finaleStarted: this.finaleStarted, finaleDismissed: this.finaleDismissed,
       spawn: this.spawnSelector.capture(), rules: this.levelRules.capture(),
       electrodes: this.electrodes === null ? null : this.electrodes.map(entity => saved(entity.actor.id)),
-      monsters: [...this.monsters.values()].map(monster => ({ actor: saved(monster.entity.actor.id), state: monster.capture() })),
-      backpacks: [...this.backpacks].map(([actor, contents]) => ({ actor: saved(actor.id), contents: { weapon: contents.weapon, shells: contents.shells, nails: contents.nails, rockets: contents.rockets, cells: contents.cells, extra: contents.extra ?? [], selection: contents.selection ?? "source-default", avoidUnderwaterLightning: contents.avoidUnderwaterLightning ?? this.game.options.edition === "rerelease", ownerPickupDelay: contents.ownerPickupDelay ?? 0 } })),
-      targets: [...this.projectileTargets].map(([actor, enemy]) => ({ actor: saved(actor.id), enemy: saved(enemy) })),
-      shots: [...this.wizardShots].map(([actor, shot]) => ({ actor: saved(actor.id), enemy: saved(shot.enemy), right: shot.right })),
+      ...this.creatures.captureFields(),
     });
   }
   private restore(bytes: Uint8Array): undefined {
     const root = new SaveReader(decodeCheckpointValue(bytes), "q1:base"); root.field("version").literal(1);
     const actor = (reader: SaveReader): OwnedActor => { const value = this.game.host.actors.resolveSaved({ slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) }); if (value === null) return reader.fail("missing saved actor"); return value; };
-    const reference = (reader: SaveReader): ActorId => this.game.host.actors.referenceSaved({ slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) });
-    this.campaign.writeFlags(root.field("flags").number()); this.hellKnightType = root.field("hellKnightType").number(); this.lightningEnd = root.field("lightningEnd").number();
+    this.campaign.writeFlags(root.field("flags").number()); this.lightningEnd = root.field("lightningEnd").number();
     this.finaleStarted = root.field("finaleStarted").boolean(); this.finaleDismissed = root.field("finaleDismissed").boolean();
     this.spawnSelector.restore(root.field("spawn")); this.levelRules.restore(root.field("rules"));
     this.electrodes = root.field("electrodes").nullable(reader => {
       const entries = reader.list(value => this.game.entity(actor(value).id)), first = entries[0], second = entries[1];
       if (entries.length !== 2 || first === undefined || first === null || second === undefined || second === null) return reader.fail("missing lightning electrodes"); return [first, second];
     });
-    this.monsters.clear(); this.backpacks.clear(); this.projectileTargets.clear(); this.wizardShots.clear();
-    root.field("monsters").list(reader => {
-      const owner = actor(reader.field("actor")), entity = this.game.entity(owner.id); if (entity === null) return reader.fail("missing source monster entity");
-      const spec = baseSpecies.find(species => species.classnames.includes(entity.classname)); if (spec === undefined) return reader.fail("unknown base monster");
-      const monster = new BaseMonster(this.game, entity, spec, this); monster.restore(reader.field("state")); this.monsters.set(owner, monster); return undefined;
-    });
-    root.field("backpacks").list(reader => { const data = reader.field("contents"); this.backpacks.set(actor(reader.field("actor")), { weapon: data.field("weapon").nullable(value => value.choice(...WEAPONS, ...this.game.registeredWeapons.keys())), shells: data.field("shells").number(), nails: data.field("nails").number(), rockets: data.field("rockets").number(), cells: data.field("cells").number(), extra: data.field("extra").list(entry => ({ item: namespaced(entry.field("item")), count: entry.field("count").number() })), selection: data.field("selection").choice("source-default", "rank"), avoidUnderwaterLightning: data.field("avoidUnderwaterLightning").boolean(), ownerPickupDelay: data.field("ownerPickupDelay").number() }); return undefined; });
-    root.field("targets").list(reader => { this.projectileTargets.set(actor(reader.field("actor")), reference(reader.field("enemy"))); return undefined; });
-    root.field("shots").list(reader => { const right = reader.field("right"); this.wizardShots.set(actor(reader.field("actor")), { enemy: reference(reader.field("enemy")), right: { x: right.field("x").number(), y: right.field("y").number(), z: right.field("z").number() } }); return undefined; });
+    this.creatures.restoreFields(root);
     return undefined;
   }
-  nextHellKnightMelee(): string {
-    this.hellKnightType++;
-    if (this.hellKnightType === 1) return "hknight_slice1";
-    if (this.hellKnightType === 2) return "hknight_smash1";
-    this.hellKnightType = 0; return "hknight_watk1";
-  }
+  nextHellKnightMelee(): string { return this.creatures.nextHellKnightMelee(); }
   spawnLightning(entity: Q1Actor): undefined {
     entity.use = this.game.named.use(entity, "base:lightning_use"); return undefined;
   }

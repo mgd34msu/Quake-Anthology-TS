@@ -3,7 +3,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
-import { q1Base } from "./provider.ts";
+import { q1Creatures } from "./creatures.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { length, normalize, vadd, vscale, vsub, ZERO } from "../foundation/types.ts";
 import type { BaseMonster } from "./monsters.ts";
@@ -45,7 +45,7 @@ function wizardFast(monster: BaseMonster): undefined {
   for (const shot of [{ side: 1, delay: 0.8 }, { side: -1, delay: 0.3 }]) {
     const timer = game.create("wizard_fastfire"); timer.owner = entity.actor.id;
     const origin = vadd(monster.origin, vadd({ x: 0, y: 0, z: 30 }, vadd(vscale(axes.forward, 14), vscale(axes.right, 14 * shot.side))));
-    game.setOrigin(timer, origin); q1Base(game).wizardShots.set(timer.actor, { enemy, right: vscale(axes.right, shot.side) });
+    game.setOrigin(timer, origin); q1Creatures(game).wizardShots.set(timer.actor, { enemy, right: vscale(axes.right, shot.side) });
     game.schedule(timer, shot.delay, game.named.action(timer, "base:wizard_fastfire"));
   }
   return undefined;
@@ -59,7 +59,7 @@ function hellKnightShot(monster: BaseMonster, offset: number): undefined {
   return game.sound(entity, "hknight/attack1.wav", "weapon");
 }
 export function wizardFastFire(game: Q1EntityServices, timer: Q1Actor): undefined {
-  const shot = q1Base(game).wizardShots.get(timer.actor); if (shot === undefined) throw new Error("Wizard shot has no source target");
+  const shot = q1Creatures(game).wizardShots.get(timer.actor); if (shot === undefined) throw new Error("Wizard shot has no source target");
   const target = game.host.bodies.read(shot.enemy), origin = game.body(timer).origin, owner = timer.owner;
   if (owner !== null && game.health(owner) > 0 && target !== null) {
     const body = game.host.bodies.read(owner); if (body !== null) game.effect("muzzleflash", body.origin, owner);
