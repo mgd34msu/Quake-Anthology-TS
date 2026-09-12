@@ -1,3 +1,4 @@
+import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { cameraWithKick } from "../../../src/app/bootstrap/presentation.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
@@ -725,4 +726,201 @@ test("dedicated actual id1 QuakeC application traverses authored pushers and liv
     expect(simulation.combat.read(victim.id)?.health).toBeLessThan(before);
     expect(source.currentPhysicsCallback).toBeNull();
   } finally { await application.close(); }
+}, 45000);
+
+
+test("dedicated actual id1 QC client reuses its raw actor, retains movement and fires the source shotgun", async () => {
+    const command = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--dedicated', '--character', 'q1']);
+    if (command.kind !== 'run')
+        throw new Error("Missing actual QC fixture state");
+    const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+    const recipe = await resolveLaunch({ catalog, preset: { ...preset, execution: [{ kind: 'quakec', owner: preset.map.entities, role: 'server-game', artifact: { content: preset.map.entities.content, path: 'progs.dat' }, api: { kind: 'q1-netquake', programVersion: 6, systemCrc: 5927 } }] }, choice: presetChoice(preset.id) });
+    const application = await Application.open(command.options, { print: () => undefined }, recipe);
+    try {
+        const simulation = application.simulation, source = simulation.quakecSource();
+        if (source === null)
+            throw new Error("Missing actual QC fixture state");
+        const client = simulation.options.identity.client(0, 0), reserved = source.slots.at(1);
+        const admitted = simulation.admitPlayer(client), player = simulation.movementPlayer(admitted.actor);
+        if (player === null || reserved === null)
+            throw new Error('Missing reserved client');
+        expect(admitted.actor).toBe(reserved.id);
+        expect(simulation.q1Source()).toBeNull();
+        expect(source.isActiveClient(admitted.actor)).toBe(true);
+        expect(simulation.combat.read(admitted.actor)?.health).toBe(100);
+        expect(simulation.inventory.count(admitted.actor, 'q1:ammo/shells')).toBe(25);
+        const spawned = simulation.bodies.read(admitted.actor);
+        if (spawned === null)
+            throw new Error("Missing actual QC fixture state");
+        simulation.step({ elapsedMilliseconds: 50, commands: [{ actor: admitted.actor, source: { kind: 'remote-client', client }, sequence: 0, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: player.viewAngles, forwardMove: 100, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 } }] });
+        const moved = simulation.bodies.read(admitted.actor);
+        if (moved === null)
+            throw new Error("Missing actual QC fixture state");
+        expect(moved.origin).not.toEqual(spawned.origin);
+        simulation.step({ elapsedMilliseconds: 50, commands: [] });
+        expect(simulation.bodies.read(admitted.actor)?.origin).not.toEqual(moved.origin);
+        simulation.step({ elapsedMilliseconds: 50, commands: [{ actor: admitted.actor, source: { kind: 'remote-client', client }, sequence: 1, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: player.viewAngles, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 } }] });
+        for (let i = 0; i < 3; i++)
+            simulation.step({ elapsedMilliseconds: 100, commands: [] });
+        simulation.step({ elapsedMilliseconds: 50, commands: [{ actor: admitted.actor, source: { kind: 'remote-client', client }, sequence: 2, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: player.viewAngles, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 2, impulse: 0 } }] });
+        expect(simulation.bodies.read(admitted.actor)?.velocity.z).toBe(230);
+        simulation.step({ elapsedMilliseconds: 50, commands: [] });
+        expect(simulation.bodies.read(admitted.actor)?.velocity.z).toBe(190);
+        const playerBody = simulation.bodies.read(admitted.actor);
+        if (playerBody === null)
+            throw new Error("Missing actual QC fixture state");
+        const lane = (() => {
+            for (const target of simulation.actors.observations().filter(a => source.classname(a.id) === 'monster_army')) {
+                const targetBody = simulation.bodies.read(target.id);
+                if (targetBody === null)
+                    continue;
+                for (const distance of [80, 120, 160])
+                    for (const [offsetX, offsetY, yaw] of [[-distance, 0, 0], [distance, 0, 180], [0, -distance, 90], [0, distance, 270]]) {
+                        if (offsetX === undefined || offsetY === undefined || yaw === undefined)
+                            throw new Error("Missing actual QC fixture state");
+                        const candidate = { x: targetBody.origin.x + offsetX, y: targetBody.origin.y + offsetY, z: targetBody.origin.z };
+                        const clear = simulation.scene.trace({ start: candidate, end: candidate, shape: { kind: 'box', bounds: playerBody.bounds }, target: { kind: 'world' }, policy: { kind: 'q1', move: 'normal', hull: null }, numeric: Q1_DONOR_PROFILE, passActor: admitted.actor });
+                        const shot = simulation.scene.trace({ start: { ...candidate, z: candidate.z + 15 }, end: { ...targetBody.origin, z: targetBody.origin.z + 15 }, shape: { kind: 'point' }, target: { kind: 'world' }, policy: { kind: 'q1', move: 'normal', hull: null }, numeric: Q1_DONOR_PROFILE, passActor: admitted.actor });
+                        if (!clear.startSolid && !clear.allSolid && shot.hit.kind === 'actor' && shot.hit.actor.equals(target.id))
+                            return { target, origin: candidate, angle: yaw };
+                    }
+            }
+            throw new Error('No valid authored creature lane');
+        })();
+        const { target, origin, angle } = lane;
+        simulation.bodies.write(player.actor, { ...playerBody, origin, velocity: { x: 0, y: 0, z: 0 } });
+        simulation.bodies.link(player.actor);
+        const before = simulation.combat.read(target.id)?.health;
+        const output = simulation.step({ elapsedMilliseconds: 100, commands: [{ actor: admitted.actor, source: { kind: 'remote-client', client }, sequence: 3, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: { x: 0, y: angle, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 1, impulse: 0 } }] });
+        if (before === undefined)
+            throw new Error('Missing victim health');
+        const after = simulation.combat.read(target.id)?.health;
+        if (after === undefined)
+            throw new Error("Missing actual QC fixture state");
+        expect(after).toBeLessThan(before);
+        expect(simulation.inventory.count(admitted.actor, 'q1:ammo/shells')).toBe(24);
+        expect(output.events.length).toBeGreaterThan(0);
+        const slot = source.sourceSlot(admitted.actor), linked = simulation.bodies.linked(admitted.actor);
+        if (slot === null || linked === null)
+            throw new Error('Missing client link');
+        const absmin = source.prepared.program.fieldsByName.get('absmin'), absmax = source.prepared.program.fieldsByName.get('absmax');
+        if (absmin === undefined || absmax === undefined)
+            throw new Error('Missing raw bounds fields');
+        expect(source.entities.at(slot).vector(absmin.offset)).toEqual(linked.absoluteBounds.min);
+        expect(source.entities.at(slot).vector(absmax.offset)).toEqual(linked.absoluteBounds.max);
+        expect(() => simulation.checkpoint()).toThrow('complete saved-game checkpoint');
+        simulation.disconnectPlayer(admitted.actor);
+        expect(source.isActiveClient(admitted.actor)).toBe(false);
+        expect(simulation.players()).toEqual([]);
+        expect(simulation.actors.isLive(admitted.actor)).toBe(true);
+        const reconnected = simulation.admitPlayer(simulation.options.identity.client(0, 1));
+        expect(reconnected.actor.equals(admitted.actor)).toBe(false);
+        expect(simulation.actors.isLive(admitted.actor)).toBe(false);
+        expect(source.sourceSlot(reconnected.actor)).toBe(1);
+        expect(source.isActiveClient(reconnected.actor)).toBe(true);
+        expect(simulation.inventory.count(reconnected.actor, 'q1:ammo/shells')).toBe(25);
+        const reconnectClient = simulation.options.identity.client(0, 1);
+        simulation.step({ elapsedMilliseconds: 50, commands: [1, 0].map((impulse, sequence): Parameters<typeof simulation.step>[0]['commands'][number] => ({
+                actor: reconnected.actor, source: { kind: 'remote-client', client: reconnectClient }, sequence,
+                command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse },
+            })) });
+        expect(source.clientArsenal(reconnected.actor).activeWeapon).toBe('q1:weapon/axe');
+        simulation.step({ elapsedMilliseconds: 50, commands: [] });
+        await application.close();
+        expect(source.isActiveClient(reconnected.actor)).toBe(false);
+        expect(simulation.actors.isLive(reconnected.actor)).toBe(false);
+    }
+    finally {
+        await application.close();
+    }
+}, 45000);
+test("native NetQuake held movement survives a fresh encoded save without another command", async () => {
+    const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q1", "--character", "q1", "--dedicated"]);
+    if (command.kind !== "run")
+        throw new Error("Expected native NetQuake launch");
+    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("native-held-command"), client = identity.client(0, 0);
+    const options: Parameters<typeof createSimulation>[0] = { identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+        skill: 0, mode: "singleplayer", seed: 17, maxClients: 1 };
+    const simulation = createSimulation(options);
+    try {
+        const actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor);
+        if (player === null)
+            throw new Error("Missing native player");
+        simulation.step({ elapsedMilliseconds: 50, commands: [1, 0].map((impulse, sequence): Parameters<typeof simulation.step>[0]["commands"][number] => ({
+            actor, source: { kind: "remote-client", client }, sequence,
+            command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: simulation.timeSeconds, viewAngles: player.viewAngles,
+                forwardMove: 100, sideMove: 0, upMove: 0, buttons: 0, impulse },
+        })) });
+        expect(simulation.q1Source()?.game.player(actor)?.weapon).toBe("axe");
+        expect(player.netQuakeCommand?.impulse).toBe(0);
+        const before = simulation.bodies.read(actor);
+        const saved = decodeSaveImage(encodeSaveImage(simulation.checkpoint()));
+        const restoredIdentity = createIdentityOwner("native-held-command-restored"), restoredClient = restoredIdentity.client(0, 0);
+        const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [restoredClient], restore: saved });
+        try {
+            const restoredActor = restored.players()[0];
+            if (restoredActor === undefined || before === null)
+                throw new Error("Missing restored native player");
+            expect(restored.movementPlayer(restoredActor)?.netQuakeCommand).toEqual(player.netQuakeCommand);
+            for (let frame = 0; frame < 3; frame++) {
+                simulation.step({ elapsedMilliseconds: 50, commands: [] });
+                restored.step({ elapsedMilliseconds: 50, commands: [] });
+                expect(restored.bodies.read(restoredActor)?.origin).toEqual(simulation.bodies.read(actor)?.origin);
+                expect(restored.bodies.read(restoredActor)?.velocity).toEqual(simulation.bodies.read(actor)?.velocity);
+            }
+            expect(simulation.bodies.read(actor)?.origin).not.toEqual(before.origin);
+        }
+        finally {
+            restored.close();
+        }
+    }
+    finally {
+        simulation.close();
+        await content.close();
+    }
+});
+
+
+test("actual QC client think preserves selected toss physics and source model bounds", async () => {
+const command = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--dedicated', '--character', 'q1']);
+if (command.kind !== 'run') throw new Error('Missing launch');
+const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false });
+const preset = applicationPreset(catalog, command.options);
+const recipe = await resolveLaunch({ catalog, preset: { ...preset, execution: [{ kind: 'quakec', owner: preset.map.entities, role: 'server-game',
+  artifact: { content: preset.map.entities.content, path: 'progs.dat' }, api: { kind: 'q1-netquake', programVersion: 6, systemCrc: 5927 } }] }, choice: presetChoice(preset.id) });
+const app = await Application.open(command.options, { print: () => undefined }, recipe);
+try {
+  const simulation = app.simulation, source = simulation.quakecSource(); if (source === null) throw new Error('Missing source');
+  const player = simulation.admitPlayer(simulation.options.identity.client(0, 0)), slot = source.sourceSlot(player.actor);
+  if (slot === null) throw new Error('Missing player slot');
+  const words = source.entities.at(slot), field = (name: string): number => {
+    const value = source.prepared.program.fieldsByName.get(name); if (value === undefined) throw new Error(name); return value.offset;
+  };
+  const origin = words.vector(field('origin'));
+  words.setVector(field('velocity'), { x: 0, y: 0, z: 0 }); words.setFloat(field('movetype'), 6); words.setFloat(field('flags'), 8);
+  words.setFloat(field('nextthink'), simulation.timeSeconds + 0.05);
+  words.setInt(field('think'), source.prepared.program.functionNamed('BecomeExplosion').index);
+  source.worldHost.link(slot);
+  // Explicit source-controlled client think, without changing the map or its authored actors.
+  const runThink = source.runThink.bind(source);
+  source.runThink = (actor, frame) => {
+    runThink(actor, frame);
+    if (actor.id.equals(player.actor)) {
+      const bounds = { min: words.vector(field('mins')), max: words.vector(field('maxs')) };
+      const trace = source.options.scene.trace({ start: origin, end: { ...origin, z: origin.z - 8 }, shape: { kind: 'box', bounds }, target: { kind: 'world' },
+        policy: { kind: 'q1', move: 'normal', hull: null }, numeric: Q1_DONOR_PROFILE, passActor: actor.id });
+      expect(bounds).toEqual({ min: { x: -28, y: -28, z: -28 }, max: { x: 28, y: 28, z: 28 } });
+      expect(trace.fraction).toBe(1); expect(trace.end.z).toBe(origin.z - 8);
+    }
+    return undefined;
+  };
+  simulation.step({ elapsedMilliseconds: 100, commands: [] });
+  expect(words.vector(field('origin'))).toEqual({ ...origin, z: origin.z - 8 });
+  expect(words.vector(field('velocity'))).toEqual({ x: 0, y: 0, z: -80 });
+  expect(words.vector(field('mins'))).toEqual({ x: -28, y: -28, z: -28 });
+  expect(words.vector(field('maxs'))).toEqual({ x: 28, y: 28, z: 28 });
+  expect(simulation.bodies.read(player.actor)?.bounds).toEqual({ min: { x: -28, y: -28, z: -28 }, max: { x: 28, y: 28, z: 28 } });
+
+} finally { await app.close(); }
+
 }, 45000);

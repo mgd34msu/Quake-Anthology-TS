@@ -148,16 +148,17 @@ export class QcWorldHost {
         if (state.ground !== null) fields.setInt(ground, this.reference(state.ground));
         return undefined;
       },
+      linked: body => {
+        fields.setVector(this.field("absmin"), body.absoluteBounds.min);
+        fields.setVector(this.field("absmax"), body.absoluteBounds.max);
+        return undefined;
+      },
     };
   }
   link(slot: number): void {
     const actor = this.actor(slot);
     if (slot === 0) return;
     this.options.bodies.link(actor);
-    const linked = this.options.bodies.linked(actor.id);
-    if (linked === null) throw new Error("QC source link did not retain shared bounds");
-    const fields = this.options.entities.at(slot);
-    fields.setVector(this.field("absmin"), linked.absoluteBounds.min); fields.setVector(this.field("absmax"), linked.absoluteBounds.max);
   }
   private setSize(vm: QcMachine, slot: number, bounds: Bounds): void {
     const { min, max } = bounds;

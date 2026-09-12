@@ -1,4 +1,5 @@
 import type { ActorId } from "../../../contracts/identity.ts";
+import type { Q1UserCommand } from "../../../contracts/protocol.ts";
 import type { ActorAnimationState, AnimationState, ArsenalState, MovementState, WeaponState } from "../../../contracts/movement.ts";
 import type { TraceHit } from "../../../contracts/scene.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
@@ -67,12 +68,17 @@ export function readAnimation(reader: SaveReader): AnimationState {
 }
 function readActorAnimation(reader: SaveReader): ActorAnimationState { return { provider: namespaced(reader.field("provider")), state: readAnimation(reader.field("state")) }; }
 export function captureMovementPlayer(player: MovementPlayer) {
-  return { actor: savedActorId(player.actor.id), clientSlot: player.client.slot, state: saveMovement(player.state), arsenal: player.arsenal, animation: player.animation,
+  return { version: 1, netQuakeCommand: player.netQuakeCommand, actor: savedActorId(player.actor.id), clientSlot: player.client.slot, state: saveMovement(player.state), arsenal: player.arsenal, animation: player.animation,
     viewAngles: player.viewAngles, commandAngles: player.commandAngles, viewHeight: player.viewHeight, bounds: player.bounds, ground: saveHit(player.ground), waterLevel: player.waterLevel, waterType: player.waterType,
     intermission: player.intermission, cutscene: player.cutscene, gravityMultiplier: player.gravityMultiplier, worldGravity: player.worldGravity, buttons: player.buttons, previousButtons: player.previousButtons, lastSequence: player.lastSequence, lastWeaponSeconds: player.lastWeaponSeconds };
 }
 export function readMovementPlayer(reader: SaveReader, reference: ActorReference) {
-  return { actor: readSavedActor(reader.field("actor")), clientSlot: reader.field("clientSlot").integer(0), state: readMovement(reader.field("state"), reference), arsenal: readArsenal(reader.field("arsenal")), animation: readActorAnimation(reader.field("animation")),
+  reader.field("version").literal(1);
+  const netQuakeCommand = reader.field("netQuakeCommand").nullable((value): Q1UserCommand => ({ kind: value.field("kind").literal("q1-netquake"),
+    acknowledgedServerTimeSeconds: value.field("acknowledgedServerTimeSeconds").finite(), viewAngles: readVector(value.field("viewAngles")),
+    forwardMove: value.field("forwardMove").finite(), sideMove: value.field("sideMove").finite(), upMove: value.field("upMove").finite(),
+    buttons: value.field("buttons").integer(0), impulse: value.field("impulse").integer(0) }));
+  return { netQuakeCommand, actor: readSavedActor(reader.field("actor")), clientSlot: reader.field("clientSlot").integer(0), state: readMovement(reader.field("state"), reference), arsenal: readArsenal(reader.field("arsenal")), animation: readActorAnimation(reader.field("animation")),
     viewAngles: readVector(reader.field("viewAngles")), commandAngles: readVector(reader.field("commandAngles")), viewHeight: reader.field("viewHeight").number(), bounds: readBounds(reader.field("bounds")), ground: readHit(reader.field("ground"), reference),
     waterLevel: reader.field("waterLevel").number(), waterType: reader.field("waterType").number(), intermission: reader.field("intermission").boolean(), gravityMultiplier: reader.field("gravityMultiplier").number(), worldGravity: reader.field("worldGravity").number(), buttons: reader.field("buttons").number(),
     previousButtons: reader.field("previousButtons").number(), lastSequence: reader.field("lastSequence").integer(-1), lastWeaponSeconds: reader.field("lastWeaponSeconds").number(),

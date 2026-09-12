@@ -225,3 +225,32 @@ test.skipIf(!existsSync(resolve(root, q1.path)))("Quake monster bottom checks an
   expect(linked).toBe(2);
   expect(random.checkpoint().draws).toBe(1);
 }, 20000);
+
+test.skipIf(!existsSync(resolve(root, q1.path)))("NetQuake client think follows clamp and preserves the selected branch", async () => {
+  const { physicsNetQuake } = await import("../../../src/movement/q1/netquake.ts");
+  const loaded = await fixtureScene(q1), host = services(loaded.scene), base = input(loaded.origin), order: string[] = [];
+  const result = physicsNetQuake(base, host, { hooks: {
+    beforePhysics: (_input, state) => {
+      if (state.kind !== "q1-netquake") throw new Error("Unexpected movement family");
+      order.push("pre"); return { kind: "continue", state: { ...state, moveType: 8, velocity: { x: 4000, y: 0, z: 0 } } };
+    },
+    think: (_input, state) => {
+      if (state.kind !== "q1-netquake") throw new Error("Unexpected movement family");
+      order.push("think"); expect(state.velocity.x).toBe(2000);
+      return { kind: "continue", state: { ...state, moveType: 0, velocity: { x: 3000, y: 0, z: 0 } } };
+    },
+    link: (_actor, state) => { order.push("link"); return { kind: "continue", state }; },
+    afterPhysics: (_input, state) => { order.push("post"); return { kind: "continue", state }; },
+    isBsp: () => false,
+  } });
+  if (result.status !== "active") throw new Error("Unexpected client removal");
+  expect(order).toEqual(["pre", "think", "link", "post"]);
+  expect(result.state.moveType).toBe(0);
+  expect(result.state.velocity.x).toBe(3000);
+  expect(result.state.origin.x).toBeCloseTo(base.state.origin.x + 60, 8);
+  const removed = physicsNetQuake({ ...base, state: { ...base.state, moveType: 8 } }, host, { hooks: {
+    beforePhysics: (_input, state) => ({ kind: "continue", state }), think: () => ({ kind: "actor-removed" }),
+    link: () => { throw new Error("Removed client was linked"); }, afterPhysics: () => { throw new Error("Removed client reached PostThink"); }, isBsp: () => false,
+  } });
+  expect(removed.status).toBe("actor-removed");
+});

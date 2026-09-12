@@ -50,16 +50,16 @@ export class MovementContext {
   readonly math: MovementMath;
   readonly contacts: MovementContact[] = [];
   readonly effects: OrderedMovementEffect[] = [];
-  readonly bounds: Bounds;
   readonly viewHeight: number;
   removed = false;
   substep = 0;
   constructor(readonly input: Q1PlayerInput, readonly services: MovementServices, readonly options: Q1MovementOptions) {
     this.math = new MovementMath(services.numeric);
-    this.bounds = shapeBounds(input.shape);
     this.viewHeight = options.viewHeight ?? 22;
   }
-  trace(start: Vec3, end: Vec3, shape = this.input.shape, move: "normal" | "no-monsters" | "missile" = "normal"): TraceResult {
+  get shape(): TraceShape { return this.options.hooks?.shape?.() ?? this.input.shape; }
+  get bounds(): Bounds { return shapeBounds(this.shape); }
+  trace(start: Vec3, end: Vec3, shape = this.shape, move: "normal" | "no-monsters" | "missile" = "normal"): TraceResult {
     return this.services.scene.trace({ start, end, shape, target: { kind: "world" },
       policy: { kind: "q1", move, hull: null }, numeric: this.input.profile.numeric, passActor: this.input.actor.id });
   }
@@ -93,9 +93,11 @@ export class MovementContext {
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
     return continuation.state;
   }
-  lifecycle(state: MovementState, phase: "beforePhysics" | "afterPhysics", input = this.input): MovementState {
+  lifecycle(state: MovementState, phase: "beforePhysics" | "think" | "afterPhysics", input = this.input): MovementState {
     if (this.removed || this.options.hooks === undefined) return state;
-    const continuation = this.options.hooks[phase](input, state);
+    const hook = this.options.hooks[phase];
+    if (hook === undefined) return state;
+    const continuation = hook(input, state);
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
     return continuation.state;
   }

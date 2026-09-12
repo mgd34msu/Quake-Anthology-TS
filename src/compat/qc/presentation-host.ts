@@ -1,3 +1,7 @@
+import { SizeBuf, MSG_WriteByte, MSG_WriteCoord } from "../../network/q1/message.ts";
+import { NetQuakeDecoder } from "../../network/q1/netquake.ts";
+import type { ActorId } from "../../contracts/identity.ts";
+import type { NetworkEvent } from "../../contracts/protocol.ts";
 /* Quake WinQuake/pr_cmds.c PF_* presentation and precache builtins. GPL-2.0-or-later. */
 import type { ContentId, ResolvedResourceReference } from "../../contracts/content.ts";
 import type { Q1Event, Q1SoundChannel } from "../../content/q1/foundation/types.ts";
@@ -17,6 +21,7 @@ export interface QcPresentationServices {
   lookup(kind: "sound", name: string): QcPrecachedResource | null;
   loading(): boolean;
   print(text: string): undefined;
+  message?(event: NetworkEvent, actor: ActorId): undefined;
   /** Structurally accepted by the application's existing SimulationEvents instance. */
   readonly events: {
     emit(content: ContentId, source: { readonly kind: "q1"; readonly event: QcPresentationEvent }): undefined;
@@ -37,6 +42,15 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
       return builtin(vm);
     });
   };
+  install("bprint", vm => { services.print(vm.varString(0)); });
+  const message = services.message;
+  if (message !== undefined) {
+    for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {
+      const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = vm.varString(1);
+      message(name === "sprint" ? { kind: "print", level: 2, text }
+        : name === "centerprint" ? { kind: "center-print", text } : { kind: "command-text", text }, actor.id);
+    });
+  }
   for (const kind of ["sound", "model"] satisfies readonly ("sound" | "model")[]) {
     install(kind === "sound" ? "precache_sound" : "precache_model", vm => {
       if (!services.loading()) return vm.fail("PF_Precache_*: Precache can only be done in spawn functions");
@@ -83,4 +97,30 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
     emit({ kind: "lightstyle", style, pattern: vm.argString(1) });
   });
   return bindings;
+}
+
+
+/** Raw QC datagram writes retain NetQuake encoding before joining shared effects. */
+export class QcBroadcastMessages {
+  readonly host: ReadonlyMap<QcHostBuiltinName, QcBuiltin>;
+  private readonly buffer = new SizeBuf(1024);
+  private readonly decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 });
+  constructor(world: QcWorldHost, private readonly emit: (effect: Extract<Q1Event, { readonly kind: "effect" }>) => undefined) {
+    const write = (operation: (buffer: SizeBuf, value: number) => void): QcBuiltin => vm => {
+      if (vm.program !== world.options.program || vm.entities !== world.options.entities) return vm.fail("QC message belongs to another source");
+      if (vm.argFloat(0) !== 0) return vm.fail("QC message destination is not the supported MSG_BROADCAST datagram");
+      operation(this.buffer, vm.argFloat(1));
+    };
+    this.host = new Map<QcHostBuiltinName, QcBuiltin>([["WriteByte", write(MSG_WriteByte)], ["WriteCoord", write(MSG_WriteCoord)]]);
+  }
+  flush(): undefined {
+    const effects = this.decoder.decode(this.buffer.bytes()).map(message => {
+      if (message.kind !== "temporary-entity" || message.effect.kind !== "point" || message.effect.type !== 2)
+        throw new Error(`Unsupported QC broadcast message ${message.kind}`);
+      return { kind: "effect", effect: "gunshot", actor: null, origin: message.effect.origin, amount: message.effect.count } satisfies Extract<Q1Event, { readonly kind: "effect" }>;
+    });
+    for (const effect of effects) this.emit(effect);
+    this.buffer.clear();
+    return undefined;
+  }
 }

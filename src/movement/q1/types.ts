@@ -3,7 +3,7 @@
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { MovementContinuation, MovementInput, MovementServices, MovementState, Q1MovementInput, Q1MovementState, QwMovementInput } from "../../contracts/movement.ts";
-import type { TraceHit, TraceResult } from "../../contracts/scene.ts";
+import type { TraceHit, TraceResult, TraceShape } from "../../contracts/scene.ts";
 
 export const Q1_MOVE_NONE = 0;
 export const Q1_MOVE_WALK = 3;
@@ -29,10 +29,12 @@ export const Q1_STEP_HEIGHT = 18;
 
 /** Source callbacks publish state before invoking game code and return its changes. */
 export interface Q1MovementHooks {
+  shape?(): TraceShape;
   link(actor: OwnedActor, state: MovementState, touchTriggers: boolean): MovementContinuation;
   isBsp(hit: TraceHit): boolean;
   /** PlayerPreThink runs after SV_ClientThink and before SV_Physics_Client. */
   beforePhysics(input: Q1MovementInput | QwMovementInput, state: MovementState): MovementContinuation;
+  think?(input: Q1MovementInput | QwMovementInput, state: MovementState): MovementContinuation;
   afterPhysics(input: Q1MovementInput | QwMovementInput, state: MovementState): MovementContinuation;
   sound?(actor: OwnedActor, path: "misc/h2ohit1.wav" | "demon/dland2.wav", state: Q1MovementState): undefined;
   playerAction?(actor: OwnedActor, action: "jump" | "swim", state: Q1MovementState): undefined;

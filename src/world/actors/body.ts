@@ -7,6 +7,7 @@ import type { SessionActorRegistry } from "./registry.ts";
 export interface BodyStateBinding {
   read(): BodyState;
   write(state: BodyState): undefined;
+  linked?(body: LinkedBody): undefined;
 }
 
 export interface BodyLinkHooks {
@@ -153,7 +154,9 @@ export class SharedBodyTable implements BodyTable {
     if (!Number.isSafeInteger(saved.linkCount) || saved.linkCount < 0 || (saved.linked !== null && saved.linkCount === 0)) throw new RangeError("Invalid saved body link count");
     record.linkCount = saved.linkCount;
     record.linked = saved.linked === null ? null : Object.freeze({ actor: actor.id, state: copyBody(saved.linked.state), absoluteBounds: copyBounds(saved.linked.absoluteBounds), linkCount: saved.linkCount });
-    return record.linked === null ? this.hooks.onUnlink(actor.id) : this.hooks.onLink(record.linked);
+    if (record.linked === null) return this.hooks.onUnlink(actor.id);
+    record.binding.linked?.(record.linked);
+    return this.hooks.onLink(record.linked);
   }
 
   link(actor: OwnedActor, origin?: Vec3): undefined {
@@ -165,6 +168,7 @@ export class SharedBodyTable implements BodyTable {
     const linked: LinkedBody = Object.freeze({ actor: actor.id, state,
       absoluteBounds: copyBounds(this.hooks.absoluteBounds(actor, state)), linkCount: ++record.linkCount });
     record.linked = linked;
+    record.binding.linked?.(linked);
     return this.hooks.onLink(linked);
   }
 

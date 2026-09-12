@@ -36,6 +36,10 @@ class NetQuakeMove {
   }
   private link(touchTriggers: boolean): void { this.setState(this.context.link(this.state, touchTriggers)); }
   private impact(trace: TraceResult): void { this.setState(this.context.touch(trace, this.state)); }
+  private think(): boolean {
+    this.setState(this.context.lifecycle(this.state, "think"));
+    return !this.context.removed;
+  }
   private velocityBounds(): void {
     const m = this.context.math, s = this.state, maximum = this.context.options.maxVelocity ?? 2000;
     const coordinate = (value: number) => Number.isFinite(m.n.store(value)) ? value : 0;
@@ -91,7 +95,7 @@ class NetQuakeMove {
   }
   private pushEntity(push: Vec3): TraceResult {
     const c = this.context, s = this.state;
-    const trace = c.trace(s.origin, c.math.add(s.origin, push), this.input.shape,
+    const trace = c.trace(s.origin, c.math.add(s.origin, push), c.shape,
       s.moveType === Q1_MOVE_FLYMISSILE ? "missile" : c.options.solid === "not" || c.options.solid === "trigger" ? "no-monsters" : "normal");
     s.origin = trace.end;
     this.link(true);
@@ -321,24 +325,34 @@ class NetQuakeMove {
     }
     this.waterTransition();
   }
-  run(): Q1MovementResult {
-    const c = this.context, s = this.state;
-    s.viewAngles = c.math.vec(this.input.command.viewAngles.x, this.input.command.viewAngles.y, this.input.command.viewAngles.z);
+  prepare(): Q1MovementState {
+    const c = this.context;
+    this.state.viewAngles = c.math.vec(this.input.command.viewAngles.x, this.input.command.viewAngles.y, this.input.command.viewAngles.z);
     this.clientThink();
+    return this.state;
+  }
+  physics(): Q1MovementResult {
+    const c = this.context, s = this.state;
     this.setState(c.lifecycle(s, "beforePhysics"));
     if (!c.removed) this.playerActions();
+    // Preserve the existing extension paths; the branch-local order below is SV_Physics_Client's classic set.
+    const extensionThink = s.moveType === Q1_MOVE_STEP || s.moveType === Q1_MOVE_FLYMISSILE || s.moveType === Q1_MOVE_GIB;
+    if (!c.removed && extensionThink) this.think();
+    const think = (): boolean => extensionThink ? !c.removed : this.think();
     if (!c.removed) {
       this.velocityBounds();
       switch (s.moveType) {
-        case Q1_MOVE_NONE: break;
+        case Q1_MOVE_NONE: think(); break;
         case Q1_MOVE_WALK:
+          if (!think()) break;
           if (!this.checkWater() && (s.flags & Q1_FLAG_WATERJUMP) === 0) this.gravity();
           this.checkStuck();
           if (!c.removed) this.walkMove();
           break;
-        case Q1_MOVE_FLY: this.flyMove(this.frameSeconds); break;
-        case Q1_MOVE_NOCLIP: s.origin = c.math.ma(s.origin, this.frameSeconds, s.velocity); break;
-        case Q1_MOVE_TOSS: case Q1_MOVE_BOUNCE: case Q1_MOVE_FLYMISSILE: this.toss(); break;
+        case Q1_MOVE_FLY: if (think()) this.flyMove(this.frameSeconds); break;
+        case Q1_MOVE_NOCLIP: if (think()) s.origin = c.math.ma(s.origin, this.frameSeconds, s.velocity); break;
+        case Q1_MOVE_TOSS: case Q1_MOVE_BOUNCE: if (think()) this.toss(); break;
+        case Q1_MOVE_FLYMISSILE: this.toss(); break;
         case Q1_MOVE_GIB:
           if (this.input.profile.edition !== "rerelease") throw new Error("MOVETYPE_GIB requires Quake rerelease behavior");
           this.toss(); break;
@@ -362,8 +376,14 @@ class NetQuakeMove {
   }
 }
 
+export function prepareNetQuake(input: Q1MovementInput, services: MovementServices, options: Q1MovementOptions = {}): Q1MovementState {
+  return new NetQuakeMove(input, services, options).prepare();
+}
+export function physicsNetQuake(input: Q1MovementInput, services: MovementServices, options: Q1MovementOptions = {}): Q1MovementResult {
+  return new NetQuakeMove(input, services, options).physics();
+}
 export function moveNetQuake(input: Q1MovementInput, services: MovementServices, options: Q1MovementOptions = {}): Q1MovementResult {
-  return new NetQuakeMove(input, services, options).run();
+  return physicsNetQuake({ ...input, state: prepareNetQuake(input, services, options) }, services, options);
 }
 export function createQ1MovementProvider(id: ProviderId, options: Q1MovementOptions = {}): Extract<MovementProvider, { readonly kind: "q1-netquake" }> {
   return { kind: "q1-netquake", id, move: (input, services) => moveNetQuake(input, services, options) };

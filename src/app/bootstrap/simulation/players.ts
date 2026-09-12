@@ -1,3 +1,7 @@
+import { prepareNetQuake, physicsNetQuake } from "../../../movement/q1/netquake.ts";
+import type { Q1MovementOptions } from "../../../movement/q1/types.ts";
+import type { Q1MovementState, Q1MovementResult } from "../../../contracts/movement.ts";
+import type { Q1UserCommand } from "../../../contracts/protocol.ts";
 import type { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { ExecutableRecipe, GameFamily, ProviderTiming } from "../../../contracts/content.ts";
@@ -18,7 +22,17 @@ import type { ClientMovementOptions } from "./q3/types.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
+export interface NetQuakeClientBinding {
+  readonly projection: { read(state: Q1MovementState): Q1MovementState; write(state: Q1MovementState): undefined } | null;
+  readonly jumpAuthority: "selected-movement" | "source-gamecode";
+  input(command: Q1UserCommand): undefined;
+  beforePhysics(frame: FrameContext): undefined;
+  think(frame: FrameContext): undefined;
+  afterPhysics(frame: FrameContext): undefined;
+}
+
 export interface PlayerMovementHost {
+  readonly netQuake?: NetQuakeClientBinding;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
@@ -96,6 +110,7 @@ export class MovementPlayer {
   buttons = 0;
   previousButtons = 0;
   lastSequence = -1;
+  netQuakeCommand: Q1UserCommand | null = null;
   lastWeaponSeconds = -Infinity;
   arsenalIntent: ArsenalIntent | undefined;
   sourceMovement: ClientMovementOptions | null = null;
@@ -145,9 +160,12 @@ export class MovementPlayer {
     this.ground = body.ground === null ? { kind: "none" } : world !== null && body.ground.equals(world)
       ? { kind: "world", model: 0 } : { kind: "actor", actor: body.ground };
     switch (state.kind) {
-      case "q1-netquake": return { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles,
-        ground: this.ground, flags: this.ground.kind === "none" ? state.flags & ~512 : state.flags | 512,
-        health: this.host.combat.read(this.actor.id)?.health ?? 0 };
+      case "q1-netquake": {
+        const current = { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles,
+          ground: this.ground, flags: this.ground.kind === "none" ? state.flags & ~512 : state.flags | 512,
+          health: this.host.combat.read(this.actor.id)?.health ?? 0 };
+        return this.host.netQuake?.projection?.read(current) ?? current;
+      }
       case "q1-quakeworld": return { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
       case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 2 : state.type };
       case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 4 : state.type };
@@ -163,12 +181,80 @@ export class MovementPlayer {
     if (state.kind === "q1-netquake") { this.waterLevel = state.waterLevel; this.waterType = state.waterType; this.viewAngles = state.viewAngles; }
     const body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Player has no body during movement");
+    if (state.kind === "q1-netquake" && this.host.netQuake !== undefined) this.bounds = body.bounds;
     const angles = state.kind === "q1-netquake" || state.kind === "q1-quakeworld" ? state.angles : this.viewAngles;
     this.host.bodies.write(this.actor, { ...body, origin: movementOrigin(state), velocity: movementVelocity(state), angles,
       bounds: this.bounds, ground: this.ground.kind === "actor" ? this.ground.actor : this.ground.kind === "world" ? this.host.worldActor() : null });
+    if (state.kind === "q1-netquake") this.host.netQuake?.projection?.write(state);
     if (link) this.host.bodies.link(this.actor);
     if (triggers) this.host.touchTriggers(this.actor);
     return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
+  }
+
+  receiveNetQuake(input: ActorCommand): undefined {
+    if (input.command.kind !== "q1-netquake") throw new Error("NetQuake client requires a NetQuake command");
+    if (input.sequence <= this.lastSequence) return undefined;
+    this.netQuakeCommand = { ...input.command, impulse: input.command.impulse || this.netQuakeCommand?.impulse || 0 };
+    this.arsenalIntent = input.arsenal;
+    this.previousButtons = this.buttons; this.buttons = input.command.buttons;
+    this.commandAngles = input.command.viewAngles; this.viewAngles = input.command.viewAngles; this.lastSequence = input.sequence;
+    return undefined;
+  }
+  private netQuakeInput(frame: FrameContext): Q1MovementInput {
+    const state = this.readState(), profile = selectedMovementProfile(this), combat = this.host.combat.read(this.actor.id);
+    if (state.kind !== "q1-netquake" || profile.kind !== "q1-netquake" || combat === null) throw new Error("Missing NetQuake movement state");
+    const command = this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
+      forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
+    return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, shape: { kind: "box", bounds: this.bounds },
+      environment: playerMovementEnvironment(this, combat), arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
+  }
+  private netQuakeOptions(): Q1MovementOptions {
+    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
+    return { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight,
+      ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }), hooks: {
+        ...(binding === undefined ? {} : { shape: () => {
+          const body = this.host.bodies.read(this.actor.id);
+          if (body === null) throw new Error("NetQuake client lost its authoritative body");
+          return { kind: "box", bounds: body.bounds } satisfies import("../../../contracts/scene.ts").TraceShape;
+        } }),
+        playerAction: (actor, action) => this.host.jump(actor, action),
+        link: (_actor, next, triggers) => this.commit(next, true, triggers),
+        isBsp: hit => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),
+        beforePhysics: (input, state) => {
+          const committed = this.commit(state, false, false);
+          if (committed.kind === "actor-removed") return committed;
+          binding?.beforePhysics(input.frame);
+          return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
+        },
+        afterPhysics: (input, state) => {
+          const committed = this.commit(state, false, false);
+          if (committed.kind === "actor-removed") return committed;
+          binding?.afterPhysics(input.frame);
+          return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
+        },
+        think: (input, state) => {
+          const committed = this.commit(state, false, false);
+          if (committed.kind === "actor-removed") return committed;
+          binding?.think(input.frame);
+          return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
+        },
+      } };
+  }
+  prepareNetQuake(frame: FrameContext): undefined {
+    const input = this.netQuakeInput(frame);
+    this.host.netQuake?.input(input.command);
+    const prepared = prepareNetQuake({ ...input, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
+    this.commit(prepared, false, false);
+    return undefined;
+  }
+  private readStateQ1(): Q1MovementState {
+    const state = this.readState(); if (state.kind !== "q1-netquake") throw new Error("NetQuake source changed movement family"); return state;
+  }
+  physicsNetQuake(frame: FrameContext): Q1MovementResult {
+    const result = physicsNetQuake(this.netQuakeInput(frame), this.services, this.netQuakeOptions());
+    if (result.status === "active" && this.host.actors.isLive(this.actor.id)) { this.accept(result); this.commit(result.state, false, false); }
+    if (this.netQuakeCommand !== null) this.netQuakeCommand = { ...this.netQuakeCommand, impulse: 0 };
+    return result;
   }
 
   move(input: ActorCommand, frame: FrameContext): MovementResult {
