@@ -16,6 +16,14 @@ import { tokenizeCommand } from "../../../src/core/commands/text.ts";
 import { navigationWorld, profile } from "../navigation/prediction.ts";
 import { BotCharacteristic } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 import { arenaPrediction } from "./arena-prediction.ts";
+import { GameAiContext } from "../../../src/bots/behavior/q3/ai-context.ts";
+import { BotState } from "../../../src/bots/behavior/q3/ai-state.ts";
+import { botAttackMove } from "../../../src/bots/behavior/q3/ai-navigation.ts";
+import { botChooseWeapon } from "../../../src/bots/behavior/q3/ai-combat.ts";
+import { createBotArsenalKnowledge } from "../../../src/bots/behavior/q3/arsenal-knowledge.ts";
+import { q3BotGame } from "../../../src/bots/behavior/q3/source-game.ts";
+import { createQ2BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q2-knowledge.ts";
+import { WeaponState } from "../../../src/content/q3/base/shared/definitions.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
 
@@ -83,6 +91,43 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       bots.receive(simulation.drainPresentationEvents());
     }
     expect(player.pers.connected).toBe(ConnectionState.CONNECTED);
+    const q2Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
+    if (q2Launch.kind !== "run") throw new Error("Expected Q2 arsenal fixture");
+    const q2Content = existsSync(resolve(corpus, "q2/baseq2/pak0.pak")) ? await loadApplicationContent(q2Launch.options) : null;
+    let q2Simulation: SharedSimulation | null = null;
+    try {
+      if (q2Content !== null) q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
+        world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+      const library = bots.director.library, original = bots.director.ai.context;
+      const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
+      if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
+      const cases = [
+        ...(q2Simulation === null ? [] : [{ name: "Q2 blaster", active: 1, melee: false, knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge }]),
+        { name: "Q3 gauntlet", active: 1, melee: true, knowledge: q3BotGame(game, () => undefined).knowledge },
+        { name: "Q3 machinegun", active: 2, melee: false, knowledge: q3BotGame(game, () => undefined).knowledge },
+        { name: "remapped melee", active: 7, melee: true, knowledge: createBotArsenalKnowledge({ updateInventory: () => undefined,
+          candidates: () => [{ info: { ...gauntlet, number: 7 }, melee: true, maximumRange: 60, personalityRole: null }] }) },
+      ];
+      for (const entry of cases) {
+        const directions: number[] = [];
+        const context = new GameAiContext({ ...original.game, knowledge: entry.knowledge, random: { random: () => 0.5, crandom: () => 0 } }, library,
+          { ...original.host, navigation: { ...original.navigation, moveInDirection: (_handle, direction) => { directions.push(direction.x); return true; } } });
+        const state = new BotState("baseq3");
+        state.character = brain.character; state.ws = brain.ws; state.ms = brain.ms; state.enemy = 0;
+        state.curPs.weapon = entry.active; state.curPs.weaponState = WeaponState.WEAPON_RAISING; state.weaponNum = 9;
+        context.time = 10;
+        botChooseWeapon(context, state);
+        expect(state.weaponNum).toBe(9);
+        for (const distance of [80, 100, 200]) {
+          context.observations.update(0, { ...original.observations.info(0), origin: { x: distance, y: 0, z: 0 } }, 10);
+          directions.length = 0;
+          botAttackMove(context, state, 0);
+          const expected = entry.melee || distance > 180 ? 1 : distance < 100 ? -1 : 0;
+          expect(Math.sign(directions[0] ?? 0), `${entry.name} at ${distance}`).toBe(expected);
+          expect(state.curPs.weapon).toBe(entry.active);
+        }
+      }
+    } finally { q2Simulation?.close(); await q2Content?.close(); }
     const initial = { ...player.ps.origin };
     const selected = simulation.movementPlayer(entity.actor.id);
     if (selected === null || selected.state.kind !== "q3") throw new Error("Bot lost its selected movement state");

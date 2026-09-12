@@ -12,7 +12,7 @@ import { infoValueForKey } from "../../../core/info-string.ts";
 import { add3, cross3, dot3, length3, normalize3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
 import { qvmAngleMod, qvmAngleVectors } from "../../../core/qvm-math.ts";
-import { EntityType, GameType, Team, Weapon } from "../../../content/q3/base/shared/definitions.ts";
+import { EntityType, GameType, Team } from "../../../content/q3/base/shared/definitions.ts";
 import { ENTITYNUM_NONE, MoveFlags } from "../../../content/q3/base/shared/player-state.ts";
 import type { GameAiContext } from "./ai-context.ts";
 import { botAITrace, botEntityInfo, entityIsDead, inFieldOfVision, vectorToAngles } from "./ai-combat.ts";
@@ -216,8 +216,10 @@ export function botAttackMove(context: GameAiContext, state: BotState, travelFla
     if (state.attackJumpTime > context.time) moveType = BotMoveType.WALK;
     else state.attackJumpTime = f(context.time + 1);
   }
-  const attackDistance = state.curPs.weapon === Weapon.WP_GAUNTLET ? 0 : 140;
-  const attackRange = state.curPs.weapon === Weapon.WP_GAUNTLET ? 0 : 40;
+  const weapon = context.game.knowledge.weaponInfo(context.library, state.ws, state.curPs.weapon);
+  const melee = weapon !== undefined && context.game.knowledge.tactics(state.curPs.weapon).melee;
+  const attackDistance = melee ? 0 : 140;
+  const attackRange = melee ? 0 : 40;
   if (skill <= f(0.4)) {
     if (distance > attackDistance + attackRange && context.navigation.moveInDirection(state.ms, forward, 400, moveType)) return result;
     if (distance < attackDistance - attackRange && context.navigation.moveInDirection(state.ms, backward, 400, moveType)) return result;
