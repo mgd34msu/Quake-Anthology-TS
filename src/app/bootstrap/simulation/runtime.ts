@@ -1,3 +1,5 @@
+import { Q1ClientVisibility } from "../../../world/gameplay/q1-client-visibility.ts";
+import type { Q1ClientEye } from "../../../world/gameplay/q1-client-visibility.ts";
 import { selectedMonsterDefinitions } from "../../../content/catalog/monsters.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import { Q2MissionPackProjectiles } from "../../../content/q2/missionpacks/projectiles/index.ts";
@@ -22,7 +24,7 @@ import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound 
 import { readGrappleRuntimeCheckpoint } from "./grapple-checkpoint.ts";
 import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
-import { Q1Creatures } from "../../../content/q1/base/creatures.ts";
+import { Q1Creatures, q1Creatures } from "../../../content/q1/base/creatures.ts";
 import { baseSpecies } from "../../../content/q1/base/species.ts";
 import { q1AmmoPickupSelection, q1WeaponPickupSelection } from "../../../content/q1/foundation/pickups.ts";
 import { threewaveCharacterPose } from "../../../content/q1/equipment/threewave-weapon.ts";
@@ -209,9 +211,7 @@ export class SharedSimulation implements Simulation {
   private closed = false;
   private stepping = false;
   private checkingQ2Rules = false;
-  private checkClientAt = -Infinity;
-  private checkClientIndex = -1;
-  private checkedClient: ActorId | null = null;
+  private readonly q1ClientVisibility: Q1ClientVisibility;
   private attackSequence = 0;
   private q1Restart = false;
   private readonly lastAttack = new Map<OwnedActor, AttackProvenance>();
@@ -340,6 +340,15 @@ export class SharedSimulation implements Simulation {
       return undefined;
     });
     this.q1Movement = this.createMonsterMovement(timing.numeric, this.random);
+    this.q1ClientVisibility = new Q1ClientVisibility({ maxClients: this.options.maxClients, visibility: this.scene,
+      client: slot => {
+        const player = [...this.playerStates.values()].find(player => player.client.slot + 1 === slot);
+        const actor = slot === 0 ? this.worldActor() : player?.actor.id ?? null;
+        const eye = actor === null ? null : this.q1VisibilityEye(actor);
+        return { actor, free: actor === null || !this.actors.isLive(actor), health: actor === null ? 0 : this.combat.read(actor)?.health ?? 0,
+          notarget: actor !== null && ((this.source.kind === "q1" && this.source.composition.noTarget(actor)) || (this.monsterTarget(actor)?.notarget ?? false)),
+          origin: eye?.origin ?? zero, viewOffset: eye?.viewOffset ?? zero };
+      } });
     this.source = this.createSource();
     this.handGrenades = this.createHandGrenades();
     this.grapple = this.createGrapple();
@@ -858,6 +867,7 @@ export class SharedSimulation implements Simulation {
   private q1ActorHost(source: ProviderReference, runtime: ActorHostRuntime): Q1FoundationHost {
     const content = source.content;
     const movement = source.provider === this.recipe.map.entities.provider ? this.q1Movement : this.createMonsterMovement(runtime.numeric, runtime.random);
+    const visibilityNumeric = createNumericOperations(runtime.numeric);
     return createQ1ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
         monsterTarget: actor => this.monsterTarget(actor),
         registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
@@ -886,7 +896,10 @@ export class SharedSimulation implements Simulation {
           if (event.kind === "teleport-player") { this.grapple?.release(event.player); const player = this.player(event.player); if (player !== null) { player.viewAngles = event.angles; if (player.state.kind === "q1-netquake") player.state = { ...player.state, viewAngles: event.angles, teleportTimeSeconds: event.lockUntil }; } }
           return this.events.emit(content, { kind: "q1", event }, { kind: "seconds", value: runtime.now() });
         }, transition: intent => { this.transitions.push(intent); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
-        checkClient: observer => this.checkClient(observer), powerup: (actor, powerup, expires) => this.powerup(actor, powerup, expires),
+        checkClient: observer => {
+          const eye = this.q1VisibilityEye(observer.id);
+          return eye === null ? null : this.q1ClientVisibility.check(eye, runtime.now(), visibilityNumeric);
+        }, powerup: (actor, powerup, expires) => this.powerup(actor, powerup, expires),
         controlPlayer: (actor, control) => this.controlPlayer(actor, control),
         setGravity: (actor, scale) => { const player = this.player(actor); if (player !== null) {
           player.gravityMultiplier = scale;
@@ -1476,19 +1489,16 @@ export class SharedSimulation implements Simulation {
     return result.kind === "q2" ? result.merged : result.contents;
   }
 
-  private visible(a: Vec3, b: Vec3, kind: "pvs" | "phs"): boolean {
-    return this.scene.clusterVisible(this.scene.leafCluster(this.scene.pointLeaf(a)), this.scene.leafCluster(this.scene.pointLeaf(b)), kind);
-  }
-
-  private checkClient(observer: OwnedActor): ActorId | null {
-    const players = this.players();
-    if (this.timeSeconds - this.checkClientAt >= 0.1) {
-      this.checkClientAt = this.timeSeconds; this.checkedClient = null;
-      for (let count = 0; count < players.length; count++) { this.checkClientIndex = (this.checkClientIndex + 1) % players.length;
-        const candidate = players[this.checkClientIndex]; if (candidate !== undefined && (this.combat.read(candidate)?.health ?? 0) > 0 && !(this.source.kind === "q1" && this.source.composition.noTarget(candidate))) { this.checkedClient = candidate; break; } }
+  private q1VisibilityEye(actor: ActorId): Q1ClientEye | null {
+    const body = this.bodies.read(actor); if (body === null) return null;
+    const entry = this.actorExecutions.get(actor), player = this.player(actor);
+    if (entry?.kind === "q1" && entry.entity.fields.has("view_ofs")) return { origin: body.origin, viewOffset: entry.entity.vector("view_ofs") };
+    if (player !== null) return { origin: body.origin, viewOffset: { x: 0, y: 0, z: player.viewHeight } };
+    if (entry?.kind === "q1" && entry.entity.monster !== null) {
+      const eye = q1Creatures(entry.services).monsters.get(entry.entity.actor)?.eye();
+      if (eye !== null && eye !== undefined) return { origin: eye, viewOffset: zero };
     }
-    const candidate = this.checkedClient, source = this.bodies.read(observer.id), target = candidate === null ? null : this.bodies.read(candidate);
-    return source !== null && target !== null && this.visible(add(target.origin, { x: 0, y: 0, z: this.player(candidate)?.viewHeight ?? 22 }), source.origin, "pvs") ? candidate : null;
+    return { origin: body.origin, viewOffset: { x: 0, y: 0, z: this.monsterTarget(actor)?.viewHeight ?? 0 } };
   }
 
   private worldActor(): ActorId | null { return this.actors.atSource(this.recipe.map.entities.provider, this.options.world.kind === "q3-bsp" ? 1022 : 0)?.id ?? null; }
@@ -2603,15 +2613,14 @@ export class SharedSimulation implements Simulation {
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
-    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 10 : 1, bytes });
+    const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 11 : 1, bytes });
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else providers.push(...captureQ2Product(source.product));
 
     add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed },
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds,
       sourceSchedulingMilliseconds: this.sourceSchedulingMilliseconds,
-      attackSequence: this.attackSequence, checkClientAt: this.checkClientAt, checkClientIndex: this.checkClientIndex,
-      checkedClient: this.checkedClient === null ? null : savedActorId(this.checkedClient),
+      attackSequence: this.attackSequence, q1ClientVisibility: this.q1ClientVisibility.capture(),
       sourceCvars: source.kind === "q1" ? source.cvars.snapshots().map(value => ({ name: value.name, value: value.value })) : [],
       campaign: { flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }, physics: this.physics.capture(), events: this.events.capture(),
       portals: [...this.areaPortals].map(([portal, open]) => ({ portal, open })),
@@ -2667,8 +2676,7 @@ export class SharedSimulation implements Simulation {
     const scheduling = reader.field("sourceSchedulingMilliseconds");
     this.sourceSchedulingMilliseconds = scheduling.value === undefined ? this.hostMilliseconds : scheduling.finite();
     this.attackSequence = reader.field("attackSequence").integer(0);
-    this.checkClientAt = reader.field("checkClientAt").number(); this.checkClientIndex = reader.field("checkClientIndex").integer(-1);
-    this.checkedClient = reader.field("checkedClient").nullable(reference);
+    this.q1ClientVisibility.restore(reader.field("q1ClientVisibility").value);
     this.q1Campaign.flags = reader.field("campaign").field("flags").number(); this.q1Campaign.skill = reader.field("campaign").field("skill").choice(0, 1, 2, 3);
     restoreSharedWorldState(save, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory, storage: () => "typescript" });
     reader.field("players").list(value => {

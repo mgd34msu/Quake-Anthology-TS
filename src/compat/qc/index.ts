@@ -18,3 +18,4 @@ export type { QcWorldHostOptions } from "./world-host.ts";
 export { createQcPresentationBindings } from "./presentation-host.ts";
 export type { QcPresentationServices, QcPresentationEvent, QcPrecachedResource } from "./presentation-host.ts";
 export { createQcMovementBindings, createQcTouchCallback } from "./movement-host.ts";
+export { QcClientHost } from "./client-host.ts";

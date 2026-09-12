@@ -553,5 +553,59 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     expect(events.lightStyle(2)).toBe("az"); expect(events.lightStyles(1)).toContainEqual({ kind: "q1", style: 2, value: 0 });
     expect(events.takePresentation().some(value => value.kind === "q1" && value.event.kind === "particles" && value.event.count === 12 && value.event.color === 73)).toBe(true);
 
+    // Only field-backed reserved clients: this exercises visibility, not client game startup.
+    const { QcClientHost } = await import("../../../src/compat/qc/client-host.ts");
+    const secondClient = slots.allocate("quakec:visibility-client"), observer = slots.allocate("quakec:visibility-observer");
+    expect(sourceSlot(current.id)).toBe(1); expect(sourceSlot(secondClient.id)).toBe(2);
+    host.actor(2); host.actor(sourceSlot(observer.id));
+    const firstWords = entities.at(1), secondWords = entities.at(2), observerWords = entities.at(sourceSlot(observer.id));
+    const zero = { x: 0, y: 0, z: 0 }, cluster = (point: import("../../../src/contracts/math.ts").Vec3) => scene.leafCluster(scene.pointLeaf(point));
+    const positions = parseEntities(world.entities).flatMap(entity => {
+      const values = entity.get("origin")?.split(/\s+/).map(Number), px = values?.[0], py = values?.[1], pz = values?.[2];
+      return px === undefined || py === undefined || pz === undefined ? [] : [{ x: px, y: py, z: pz }];
+    });
+    const hidden = positions.find(point => cluster(point) >= 0 && !scene.clusterVisible(cluster(origin), cluster(point), "pvs"));
+    if (hidden === undefined) throw new Error("Retail BSP has no distinct hidden authored position for the visibility witness");
+    firstWords.setFloat(field("health"), 0);
+    secondWords.setFloat(field("health"), 100); secondWords.setFloat(field("flags"), 0);
+    secondWords.setVector(field("origin"), origin); secondWords.setVector(field("view_ofs"), zero);
+    observerWords.setVector(field("origin"), origin);
+    observerWords.setVector(field("view_ofs"), { x: hidden.x - origin.x, y: hidden.y - origin.y, z: hidden.z - origin.z });
+    expect(scene.clusterVisible(cluster(origin), cluster(origin), "pvs")).toBe(true);
+    let checkTime = 0;
+    const clients = new QcClientHost(host, { scene, maxClients: 2, serverTime: () => checkTime });
+    const visibilityVm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: clients.host }), serverActive: () => true });
+    visibilityVm.globals.setInt(visibilityVm.globalOffset("self"), host.reference(observer.id));
+    const check = () => { visibilityVm.execute(program.functionNamed("checkclient").index); return visibilityVm.globals.int(1); };
+    expect(check()).toBe(0);
+    expect(clients.visibility.capture()).toEqual({ lastCheckSlot: 0, lastCheckTime: 0, checkedCluster: null });
+    checkTime = 0.1; expect(check()).toBe(0);
+    const cached = clients.visibility.capture(); expect(cached.lastCheckSlot).toBe(2); expect(cached.checkedCluster).toBe(cluster(origin));
+    secondWords.setVector(field("origin"), hidden);
+    checkTime = 0.15; expect(check()).toBe(0);
+    const restoredClients = new QcClientHost(host, { scene, maxClients: 2, serverTime: () => checkTime });
+    restoredClients.visibility.restore(cached);
+    const eye = { origin: hidden, viewOffset: zero };
+    expect(restoredClients.visibility.check(eye, checkTime, numeric)).toBeNull();
+    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckTime: Infinity })).toThrow();
+    expect(() => restoredClients.visibility.restore({ ...cached, lastCheckSlot: 3 })).toThrow();
+    expect(() => restoredClients.visibility.restore({ ...cached, checkedCluster: world.leaves.length })).toThrow();
+    expect(restoredClients.visibility.capture()).toEqual(cached);
+    checkTime = 0.21; expect(check()).toBe(host.reference(secondClient.id));
+    expect(restoredClients.visibility.check(eye, checkTime, numeric)).toEqual(secondClient.id);
+    expect(restoredClients.visibility.capture()).toEqual(clients.visibility.capture());
+    secondWords.setFloat(field("flags"), 128);
+    checkTime = 0.22; expect(check()).toBe(host.reference(secondClient.id));
+    secondWords.setFloat(field("health"), 0); expect(check()).toBe(0);
+    secondWords.setFloat(field("health"), 100);
+    // The prior slot terminates a full scan even with NOTARGET set, matching PF_newcheckclient.
+    checkTime = 0.32; expect(check()).toBe(host.reference(secondClient.id));
+    firstWords.setFloat(field("health"), 100); firstWords.setFloat(field("flags"), 0);
+    firstWords.setVector(field("origin"), hidden); firstWords.setVector(field("view_ofs"), zero);
+    checkTime = 0.43; expect(check()).toBe(host.reference(current.id));
+    firstWords.setFloat(field("flags"), 128); secondWords.setFloat(field("flags"), 0);
+    checkTime = 0.54; expect(check()).toBe(host.reference(secondClient.id));
+    slots.free(secondClient); checkTime = 0.55; expect(check()).toBe(0);
+
   } finally { archive.close(); }
 });

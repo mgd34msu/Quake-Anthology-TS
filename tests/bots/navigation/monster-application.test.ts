@@ -438,3 +438,53 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK1.PAK")))("retail e1m7 keeps the
     } finally { await application.close(); }
   }
 }, 60000);
+
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("native Q1 client visibility preserves source eye PVS through a fresh application save", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m2", "--dedicated", "--mode", "singleplayer"]);
+  if (command.kind !== "run") throw new Error("Expected native Q1 launch");
+  const application = await Application.open(command.options, { print: () => undefined });
+  const directory = await mkdtemp(join(tmpdir(), "q1-client-pvs-"));
+  try {
+    const simulation = application.simulation, source = simulation.q1Source();
+    if (source === null) throw new Error("Missing native Q1 source");
+    const monster = [...source.composition.base.monsters.values()].find(monster => monster.entity.classname === "monster_ogre");
+    if (monster === undefined) throw new Error("Missing authored ogre");
+    const client = application.session.createClient(0), admitted = simulation.admitPlayer(client.id);
+    const player = simulation.actors.resolveOwned(admitted.actor);
+    if (player === null) throw new Error("Missing shared player");
+    expect(player.id.slot).not.toBe(client.id.slot + 1);
+    expect(source.game.host.checkClient(monster.entity.actor)).toBeNull();
+    const eye = monster.eye(); if (eye === null) throw new Error("Missing source monster eye");
+    const playerBody = simulation.bodies.read(player.id); if (playerBody === null) throw new Error("Missing player body");
+    // Player-only pose: establish a visible cached client eye beside the authored ogre.
+    simulation.bodies.write(player, { ...playerBody, origin: { ...eye, z: eye.z - 22 } }); simulation.bodies.link(player);
+    await application.step(100);
+    expect(source.game.host.checkClient(monster.entity.actor)).toEqual(player.id);
+    const scene = simulation.scene, observerEye = monster.eye(); if (observerEye === null) throw new Error("Missing current monster eye");
+    const cluster = (point: import("../../../src/contracts/math.ts").Vec3) => scene.leafCluster(scene.pointLeaf(point));
+    const hidden = [...source.game.entities.values()].map(entity => source.game.body(entity).origin)
+      .find(point => cluster(point) >= 0 && !scene.clusterVisible(cluster(point), cluster(observerEye), "pvs"));
+    if (hidden === undefined) throw new Error("No actual map position hidden from the authored ogre");
+    const currentBody = simulation.bodies.read(player.id); if (currentBody === null) throw new Error("Missing current player body");
+    simulation.bodies.write(player, { ...currentBody, origin: { ...hidden, z: hidden.z - 22 }, velocity: { x: 0, y: 0, z: 0 } }); simulation.bodies.link(player);
+    expect(source.game.host.checkClient(monster.entity.actor)).toEqual(player.id);
+    const image = simulation.checkpoint(), checkpoint = simulationProviderCheckpoint(image, "world:simulation");
+    expect(checkpoint.version).toBe(11);
+    const state = new SaveReader(decodeCheckpointValue(checkpoint.bytes)).field("q1ClientVisibility").value;
+    expect(state).toMatchObject({ lastCheckSlot: 1, lastCheckTime: 0.1 });
+    const legacy = { ...image, providers: image.providers.map(provider => provider.schema === "world:simulation" ? { ...provider, version: 10 } : provider) };
+    expect(() => simulationProviderCheckpoint(legacy, "world:simulation")).toThrow("unsupported");
+    await application.saveGame(join(directory, "cached.sav"));
+    await application.loadGame(join(directory, "cached.sav"));
+    const restored = application.simulation, restoredSource = restored.q1Source();
+    if (restoredSource === null) throw new Error("Missing restored source");
+    const restoredMonster = [...restoredSource.composition.base.monsters.values()].find(value => value.entity.actor.id.slot === monster.entity.actor.id.slot);
+    const restoredPlayer = restored.players()[0];
+    if (restoredMonster === undefined || restoredPlayer === undefined) throw new Error("Missing restored source actors");
+    expect(restoredPlayer.equals(player.id)).toBe(false);
+    expect(new SaveReader(decodeCheckpointValue(simulationProviderCheckpoint(restored.checkpoint(), "world:simulation").bytes)).field("q1ClientVisibility").value).toEqual(state);
+    expect(restoredSource.game.host.checkClient(restoredMonster.entity.actor)).toEqual(restoredPlayer);
+    await application.step(100);
+    expect(restoredSource.game.host.checkClient(restoredMonster.entity.actor)).toBeNull();
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 30000);
