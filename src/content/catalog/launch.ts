@@ -5,7 +5,7 @@ import type { MountedContent, OpenMountOptions } from "../mounts/index.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import type { InstalledCatalog } from "./index.ts";
 import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
-import { monsterResources, monsterSources, selectedMonsterTiming, validateMonsters } from "./monsters.ts";
+import { selectedMonsterDefinitions, monsterResources, monsterSources, selectedMonsterTiming, validateMonsters } from "./monsters.ts";
 import { admitWeaponTiming, canonicalWeaponSource, Q1_WEAPON_PROVIDERS, Q2_WEAPON_PROVIDERS, selectedWeaponResources, selectedWeaponTiming } from "./weapons.ts";
 
 export interface LaunchPreset extends Omit<ExecutableRecipe, "schemaVersion" | "preset" | "map" | "execution" | "mounts" | "resources"> {
@@ -49,7 +49,7 @@ function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
     ...launch.weapons, ...equipmentProviders(launch.equipment), launch.engineBehavior, launch.combat, launch.inventory, launch.match, launch.transition,
     launch.presentation.hud, launch.presentation.effects, launch.presentation.audio, ...launch.execution.map(module => module.owner)];
   if (launch.campaign.kind === "campaign") references.push(launch.campaign.mission, launch.campaign.gamecode);
-  if (launch.enemies.kind === "replace") references.push(launch.enemies.default.source, ...Object.values(launch.enemies.byClassname).map(definition => definition.source));
+  references.push(...selectedMonsterDefinitions(launch.enemies).map(definition => definition.source));
   return [...new Set([launch.map.geometry.content, launch.presentation.assets, ...references.map(reference => reference.content),
     ...launch.execution.flatMap(module => module.kind === "typescript" ? [] : [module.artifact.content])])];
 }

@@ -187,10 +187,12 @@ export interface MonsterDefinitionReference {
   readonly classname: string;
 }
 
+export type MonsterSelectionTarget = MonsterDefinitionReference | { readonly kind: "map-defined" };
+
 export type EnemySelection =
   | { readonly kind: "map-defined" }
-  | { readonly kind: "replace"; readonly default: MonsterDefinitionReference;
-      readonly byClassname: Readonly<Record<string, MonsterDefinitionReference>> };
+  | { readonly kind: "replace"; readonly default: MonsterSelectionTarget;
+      readonly byClassname: Readonly<Record<string, MonsterSelectionTarget>> };
 
 export type GrappleSelection =
   | { readonly kind: "disabled" }

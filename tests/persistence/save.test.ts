@@ -144,3 +144,18 @@ test("Q3 session cvars use original seven signed integer fields", () => {
   expect(encodeQ3ClientSession(decodeQ3ClientSession(text))).toBe(text);
   expect(decodeQ3ClientSession("4294967298 0 0 0 0 0 0").team).toBe(2);
 });
+
+test("schema 3 monster targets retain old references and encode native defaults and exceptions", () => {
+  const base = recipe(), definition = { source: base.map.entities, classname: "monster_army" };
+  for (const enemies of [
+    { kind: "replace", default: definition, byClassname: { monster_ogre: definition } },
+    { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_army: definition } },
+    { kind: "replace", default: definition, byClassname: { monster_ogre: { kind: "map-defined" } } },
+  ] satisfies readonly ExecutableRecipe["enemies"][]) {
+    const selected = { ...base, enemies };
+    expect(readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(selected))))).toEqual(selected);
+  }
+  for (const target of [{ kind: "unknown" }, { kind: "map-defined", source: definition.source }, { kind: "map-defined", classname: "monster_army" }]) {
+    expect(() => readRecipe(new SaveReader({ ...base, enemies: { kind: "replace", default: target, byClassname: {} } }))).toThrow();
+  }
+});

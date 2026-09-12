@@ -49,12 +49,14 @@ export class SelectedMonsters {
 
   resolve(classname: string, fields: ReadonlyMap<string, string>): MonsterDefinitionReference | null {
     if (!classname.startsWith("monster_")) return null;
+    const target = this.selection.byClassname[classname] ?? this.selection.default;
+    if ("kind" in target) return null;
     const supported = this.map.kind === "q1" ? q1Ordinary : q2Ordinary;
     if (!supported.has(classname)) throw new Error(`Selected monster admission does not yet preserve authored ${classname} obligations`);
     const flags = Number(fields.get("spawnflags") ?? 0);
     const inhibition = this.map.kind === "q1" ? 0xf00 : this.map.game.options.edition === "rerelease" ? 0xff00 : 0x1f00;
     if ((flags & ~inhibition & ~(this.map.kind === "q2" ? 3 : 1)) !== 0 || classname === "monster_zombie" && (flags & 1) !== 0) throw new Error(`Selected monster admission does not yet preserve ${classname} spawn flags ${flags}`);
-    return this.selection.byClassname[classname] ?? this.selection.default;
+    return target;
   }
 
   admitQ1(actor: OwnedActor, source: Q1Entity, ordinal: number, definition: MonsterDefinitionReference): undefined {
@@ -83,7 +85,7 @@ export class SelectedMonsters {
       const provider = this.map.kind === "q1" ? this.map.game.provider : this.map.game.options.provider;
       if (actor === null || actor.owner !== provider) throw new Error("Missing authored monster map owner");
       const expected = this.selection.byClassname[saved.classname] ?? this.selection.default;
-      if (expected.classname !== saved.definition.classname || expected.source.provider !== saved.definition.source.provider || expected.source.content !== saved.definition.source.content
+      if ("kind" in expected || expected.classname !== saved.definition.classname || expected.source.provider !== saved.definition.source.provider || expected.source.content !== saved.definition.source.content
         || actors.observe(actor.id)?.definition !== `${expected.source.provider}/${expected.classname}`) throw new Error("Saved monster definition differs from selected actor");
       const { definition, ...fields } = saved;
       const entry: AuthoredMonster = { ...fields, actor, routeGoal: saved.routeGoal === null ? null : actors.referenceSaved(saved.routeGoal), combatGoal: saved.combatGoal === null ? null : actors.referenceSaved(saved.combatGoal),

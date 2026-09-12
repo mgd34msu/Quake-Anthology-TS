@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "bun:test";
-import type { EnemySelection, ProviderReference } from "../../../src/contracts/content.ts";
+import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../src/contracts/content.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -26,7 +26,7 @@ test("selected creature definitions resolve edition assets and clocks without re
       expect(recipe.weapons).toEqual(preset.weapons);
       if (preset.ordering.kind === "native") expect(recipe.ordering).toEqual(preset.ordering);
       else if (recipe.ordering.kind === "mixed") expect(recipe.ordering.providers.slice(0, preset.ordering.providers.length)).toEqual([...preset.ordering.providers]);
-      expect(recipe.timing.some(entry => entry.provider === enemies.default.source.provider)).toBe(true);
+      expect(recipe.timing.some(entry => entry.provider === `${family}:monsters/${edition}/${program}`)).toBe(true);
       expect(recipe.resources.some(resource => resource.requestedPath === (family === "q1" ? "sound/soldier/sattck1.wav" : "sound/infantry/infatck1.wav"))).toBe(true);
       if (edition === "classic") expect(recipe.resources.some(resource => resource.requestedPath === (family === "q1" ? "sound/dog/dattack1.wav" : "sound/berserk/attack.wav"))).toBe(true);
       expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
@@ -144,3 +144,18 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("Q2 br
         "models/monsters/brain/gibs/chest.pcx", "models/monsters/brain/gibs/head.pcx", "models/monsters/parasite/segment/tris.md2", "models/monsters/parasite/segment/skin.pcx", "sound/misc/lasfly.wav"]) expect(paths.has(path)).toBe(true);
   }
 }, 60000);
+
+test("native monster targets add no replacement resources or clocks", async () => {
+  const { monsterResources, selectedMonsterDefinitions, selectedMonsterTiming } = await import("../../../src/content/catalog/monsters.ts");
+  const definition = { source: { provider: "q1:monsters/classic/id1", content: "q1:classic:id1:installed" }, classname: "monster_army" } satisfies MonsterDefinitionReference;
+  const native: EnemySelection = { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_boss: { kind: "map-defined" } } };
+  expect(selectedMonsterDefinitions(native)).toEqual([]); expect(monsterResources(native)).toEqual([]); expect(selectedMonsterTiming(native)).toEqual([]);
+  for (const enemies of [
+    { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_army: definition } },
+    { kind: "replace", default: definition, byClassname: { monster_boss: { kind: "map-defined" } } },
+  ] satisfies readonly EnemySelection[]) {
+    expect(selectedMonsterDefinitions(enemies)).toEqual([definition]);
+    expect(monsterResources(enemies).every(resource => resource.content === definition.source.content)).toBe(true);
+    expect(selectedMonsterTiming(enemies).map(timing => timing.provider)).toEqual([definition.source.provider]);
+  }
+});

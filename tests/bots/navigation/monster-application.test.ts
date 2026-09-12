@@ -1,3 +1,4 @@
+import type { EnemySelection, MonsterDefinitionReference, MonsterSelectionTarget } from "../../../src/contracts/content.ts";
 import { preservesAuthoredQ1Placement } from "../../../src/app/bootstrap/simulation/monster-placement.ts";
 import { parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
@@ -192,7 +193,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
       const game = native.simulation.q1Source()?.game, entity = game === undefined ? undefined : [...game.entities.values()].find(entity => entity.sourceOrdinal === 383);
       if (game === undefined || entity === undefined) throw new Error("Native authored wizard missing");
       const body = game.body(entity), authored = parseQ1Entities(native.simulation.sourceEntityText)[383];
-      const definition = { source: { provider: "q1:monsters/classic/id1", content: application.content.recipe.map.entities.content }, classname: "monster_wizard" } satisfies Parameters<typeof preservesAuthoredQ1Placement>[0]["definition"];
+      const definition: MonsterDefinitionReference = { source: { provider: "q1:monsters/classic/id1", content: application.content.recipe.map.entities.content }, classname: "monster_wizard" } satisfies Parameters<typeof preservesAuthoredQ1Placement>[0]["definition"];
       const input = { map: application.content.recipe.map, authored, definition, game, entity, body };
       expect(preservesAuthoredQ1Placement(input)).toBe(true);
       expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, bounds: { ...body.bounds, max: { ...body.bounds.max, x: 32 } } } })).toBe(false);
@@ -345,5 +346,95 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail e2m3
       expect(restored.id.equals(fish.id)).toBe(false);
       for (const expected of frames) { await application.step(100); expect(continuation()).toEqual(expected); }
     } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  }
+}, 60000);
+
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 mixes native and selected classes across fresh saves", async () => {
+  for (const nativeDefault of [true, false]) {
+    const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m2", "--dedicated"]);
+    if (command.kind !== "run") throw new Error("Expected Q1 options");
+    const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+    const registered = q1MonsterSources.find(source => source.edition === "classic");
+    if (registered === undefined) throw new Error("Missing classic creatures");
+    const definition = { source: { provider: registered.provider, content: catalog.require("q1-classic-id1").id }, classname: "monster_army" };
+    const enemies: EnemySelection = nativeDefault
+      ? { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_army: definition } }
+      : { kind: "replace", default: definition, byClassname: Object.fromEntries(Object.keys(registered.creatures).filter(name => name !== "monster_army").map((name): readonly [string, MonsterSelectionTarget] => [name, { kind: "map-defined" }])) };
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    const application = await Application.open(command.options, { print: () => undefined }, recipe), directory = await mkdtemp(join(tmpdir(), "native-selected-roster-"));
+    try {
+      const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
+      for (let frame = 0; frame < 5; frame++) await application.step(100);
+      const map = application.simulation.q1Source();
+      if (map === null) throw new Error("Missing native map");
+      const native = [...map.game.entities.values()].find(entity => entity.classname === "monster_ogre");
+      const selected = selectedId1(application), soldier = selected.authored.find(entry => entry.classname === "monster_army");
+      if (native === undefined || soldier === undefined) throw new Error("Actual mixed roster missing");
+      expect(selected.authored.every(entry => entry.classname === "monster_army")).toBe(true);
+      expect(selected.source.entities.entities.some(entity => entity.classname === "monster_ogre")).toBe(false);
+      expect(application.simulation.actors.observe(native.actor.id)?.definition).toBe("q1:monster_ogre");
+      const selectedActor = application.simulation.actors.resolveSaved(soldier.actor);
+      if (selectedActor === null) throw new Error("Missing selected actor");
+      expect(map.game.entity(selectedActor.id)).toBeNull();
+      const total = map.game.totalMonsters, nativeId = native.actor.id;
+      const continuation = () => {
+        const source = application.simulation.q1Source();
+        if (source === null) throw new Error("Missing native continuation");
+        const value: unknown = JSON.parse(JSON.stringify({ native: source.game.capture(), selected: selectedId1(application), bodies: application.simulation.checkpoint().bodies }, (key: string, value: unknown) => key === "generation" ? 0 : value instanceof Uint8Array ? decodeCheckpointValue(value) : value));
+        return value;
+      };
+      const path = join(directory, "mixed.sav"); await application.saveGame(path);
+      for (let frame = 0; frame < 3; frame++) await application.step(100);
+      const expected = continuation(); await application.loadGame(path);
+      const restored = application.simulation.q1Source();
+      if (restored === null) throw new Error("Missing restored map");
+      const restoredNative = [...restored.game.entities.values()].find(entity => entity.actor.id.slot === nativeId.slot);
+      const restoredSelected = application.simulation.actors.resolveSaved(soldier.actor);
+      if (restoredNative === undefined || restoredSelected === null) throw new Error("Missing restored mixed actors");
+      expect(restoredNative.actor.id.equals(nativeId)).toBe(false);
+      expect(restored.game.entity(restoredSelected.id)).toBeNull(); expect(restored.game.totalMonsters).toBe(total);
+      for (let frame = 0; frame < 3; frame++) await application.step(100);
+      expect(continuation()).toEqual(expected);
+      const player = application.simulation.actors.atSource(recipe.map.entities.provider, human.actor.slot);
+      if (player === null) throw new Error("Missing restored player");
+      const kills = restored.game.killedMonsters;
+      for (const victim of [restoredNative.actor, restoredSelected]) {
+        const health = application.simulation.combat.read(victim.id)?.health;
+        if (health === undefined) throw new Error("Missing victim health");
+        restored.game.damage(victim.id, player.id, player.id, health + 1);
+      }
+      expect(restored.game.killedMonsters).toBe(kills + 2);
+      const boss = parseQ1Entities('{ "classname" "monster_boss" "spawnflags" "1" }')[0];
+      if (boss === undefined) throw new Error("Missing boss fields");
+      if (nativeDefault) expect(restored.game.monsterAdmission?.resolve("monster_boss", boss)).toBeNull();
+      else expect(() => restored.game.monsterAdmission?.resolve("monster_boss", boss)).toThrow("obligations");
+    } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  }
+}, 60000);
+
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK1.PAK")))("retail e1m7 keeps the native boss with native roster defaults and exceptions", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m7", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const definition: MonsterDefinitionReference = { source: { provider: "q1:monsters/classic/id1", content: catalog.require("q1-classic-id1").id }, classname: "monster_army" };
+  for (const nativeDefault of [true, false]) {
+    const enemies: EnemySelection = nativeDefault
+      ? { kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_army: definition } }
+      : { kind: "replace", default: definition, byClassname: { monster_boss: { kind: "map-defined" } } };
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    const application = await Application.open(command.options, { print: () => undefined }, recipe);
+    try {
+      for (let frame = 0; frame < 3; frame++) await application.step(100);
+      const map = application.simulation.q1Source();
+      if (map === null) throw new Error("Missing native map");
+      const boss = [...map.game.entities.values()].find(entity => entity.classname === "monster_boss");
+      if (boss === undefined) throw new Error("Actual authored boss missing");
+      expect(application.simulation.actors.observe(boss.actor.id)?.definition).toBe("q1:monster_boss");
+      expect(boss.use).not.toBeNull();
+      expect(selectedId1(application).authored.some(entry => entry.classname === "monster_boss")).toBe(false);
+      const selectedFlags = parseQ1Entities('{ "classname" "monster_army" "spawnflags" "4096" }')[0];
+      if (selectedFlags === undefined) throw new Error("Missing selected flag fields");
+      expect(() => map.game.monsterAdmission?.resolve("monster_army", selectedFlags)).toThrow("spawn flags");
+    } finally { await application.close(); }
   }
 }, 60000);

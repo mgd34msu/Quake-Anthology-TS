@@ -5,7 +5,7 @@ import type { InstalledCatalog } from "./index.ts";
 export { monsterSources } from "../monsters/definitions.ts";
 
 export function selectedMonsterDefinitions(enemies: EnemySelection): readonly MonsterDefinitionReference[] {
-  return enemies.kind === "map-defined" ? [] : [enemies.default, ...Object.values(enemies.byClassname)];
+  return enemies.kind === "map-defined" ? [] : [enemies.default, ...Object.values(enemies.byClassname)].flatMap(target => "kind" in target ? [] : [target]);
 }
 
 export function validateMonsters(enemies: EnemySelection, catalog: InstalledCatalog): undefined {

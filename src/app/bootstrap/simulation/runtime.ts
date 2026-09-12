@@ -1,3 +1,4 @@
+import { selectedMonsterDefinitions } from "../../../content/catalog/monsters.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import { Q2MissionPackProjectiles } from "../../../content/q2/missionpacks/projectiles/index.ts";
 import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
@@ -558,7 +559,7 @@ export class SharedSimulation implements Simulation {
         if (entity === null) throw new Error("Selected Q1 route actor has no source continuation");
         return setMonsterRoute(source.game, entity, goal, pauseUntil);
       } });
-    for (const definition of [selection.default, ...Object.values(selection.byClassname)]) this.monsterSourceFor(definition);
+    for (const definition of selectedMonsterDefinitions(selection)) this.monsterSourceFor(definition);
     if (map.kind === "q1") {
       map.game.monsterAdmission = { resolve: (classname, source) => selected.resolve(classname, new Map(source.properties.map(property => [property.key, property.value]))), spawn: (actor, fields, ordinal, definition) => selected.admitQ1(actor, fields, ordinal, definition) };
       map.game.authoredPathFollower = actor => selected.q1PathFollower(actor);

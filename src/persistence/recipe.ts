@@ -1,4 +1,4 @@
-import type { ArchiveMount, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
+import type { ArchiveMount, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
 import { readApi, readNativeAbi } from "./execution.ts";
 import { readClock, readDigest, readNumeric, readOrdering } from "./shared.ts";
@@ -53,7 +53,14 @@ function readCampaign(reader: SaveReader): CampaignSelection {
 export function readCharacter(reader: SaveReader): CharacterSelection { return { definition: readProvider(reader.field("definition")), appearance: readProvider(reader.field("appearance")) }; }
 function readEnemies(reader: SaveReader): EnemySelection {
   if (reader.field("kind").choice("map-defined", "replace") === "map-defined") return { kind: "map-defined" };
-  const definition = (value: SaveReader) => ({ source: readProvider(value.field("source")), classname: value.field("classname").string() });
+  const definition = (value: SaveReader): MonsterSelectionTarget => {
+    if (value.field("kind").value !== undefined) {
+      const kind = value.field("kind").literal("map-defined");
+      if (value.value === null || typeof value.value !== "object" || Object.keys(value.value).some(key => key !== "kind")) return value.fail("expected only a native monster target kind");
+      return { kind };
+    }
+    return { source: readProvider(value.field("source")), classname: value.field("classname").string() };
+  };
   const overrides = reader.field("byClassname");
   if (overrides.value === null || typeof overrides.value !== "object" || Array.isArray(overrides.value) || overrides.value instanceof Uint8Array) return overrides.fail("expected authored classname replacements");
   return { kind: "replace", default: definition(reader.field("default")),
