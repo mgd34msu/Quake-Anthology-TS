@@ -34,7 +34,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
     clipTrigger: () => true, navigation: () => ({ kind: "no-navigation" }), monstersSearching: () => false, groundedOnWorld: () => true,
     pushPlayer: () => undefined, setActorGravity: () => undefined, setWorldGravity: () => undefined, lightStyle: () => "m" };
   const weapons = new Q2Weapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
-  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.025, random: () => 0.5,
+  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.025, random: () => 0.5,
     schedule: () => undefined, touchTriggers: () => undefined, keyConsumed: () => undefined,
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: (match.kind === "ctf" || match.kind === "lmctf") && request.end.z === request.start.z - 128 ? request.start : request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),

@@ -2,7 +2,7 @@ import type { MonsterContext } from "../../foundation/monsters/types.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import { anglesVectors, attackTraceMask, changeYaw, enemyBody, finishDodge, health, monsterSolidMask, vectorAngles } from "../../foundation/monsters/ai.ts";
-import { add, dot, length, normalize, numberField, scale, subtract } from "../../foundation/fields.ts";
+import { add, dot, length, normalize, scale, subtract } from "../../foundation/fields.ts";
 import type { Q2RereleaseRandomSource } from "../../../../core/random/q2-rerelease.ts";
 
 export function rereleaseRandom(context: MonsterContext): Q2RereleaseRandomSource {
@@ -14,8 +14,8 @@ export function rereleaseRandom(context: MonsterContext): Q2RereleaseRandomSourc
 function traceContents(trace: TraceResult): number { return trace.kind === "q1" ? 0 : trace.contents; }
 
 export function calculatePitchToFire(context: MonsterContext, target: Vec3, start: Vec3, aim: Vec3, speed: number, seconds: number, mortar: boolean, destroyOnTouch = false): Vec3 | null {
-  const angles = vectorAngles(aim), world = context.game.entity(context.game.host.worldActor());
-  const gravity = world === null ? 800 : numberField(world.spawn, "gravity", 800);
+  const angles = vectorAngles(aim);
+  const gravity = context.game.host.gravity();
   let bestPitch = 0, bestDistance = Infinity;
   for (const pitch of [-80, -70, -60, -50, -40, -30, -20, -10, -5]) {
     if (mortar && pitch >= -30) break;

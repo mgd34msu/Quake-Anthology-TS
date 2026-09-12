@@ -40,7 +40,7 @@ function targetGame(selected: Q2GameOptions = options) {
     context: request => ({ arithmetic: "binary64", player: players.includes(request.target), monster: false, attackerPlayer: false,
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false,
       friendlyFire: false, nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, frameSeconds: () => 0.1, random: () => 0.5,
+  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     touchTriggers: () => undefined,
     trace: () => { throw new Error("This target-only check must not query geometry"); },

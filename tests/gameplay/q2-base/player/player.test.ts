@@ -111,7 +111,7 @@ function campaign() {
   const players = new Q2Players(items, weapons, hooks);
   const host: Q2FoundationHost = {
     actors: shared.actors, bodies: shared.bodies, combat: shared.combat, inventory: shared.inventory, callbacks: new ActorCallbackTable(shared.actors),
-    now: () => now, frameSeconds: () => 0.1, random: () => 0.5, schedule: () => undefined,
+    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5, schedule: () => undefined,
     touchTriggers: () => undefined, keyConsumed: id => { const entity = game.entity(id); return entity === null ? undefined : players.consumedKey(entity, game); },
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),

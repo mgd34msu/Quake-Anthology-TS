@@ -32,7 +32,7 @@ import { brainFrame } from "../../../../src/content/q2/rerelease/monsters/tables
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
-function fixture(isN64 = false) {
+function fixture(isN64 = false, gravity = 800) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-base-monsters")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -44,7 +44,9 @@ function fixture(isN64 = false) {
   let now = 0, rayActor: ActorId = player.id;
   const random: number[] = [], diagnostics: string[] = [], rereleaseRandom = new Q2RereleaseRandom(1);
   const plane = { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 };
+  const traces: Q2TraceRequest[] = [];
   const trace = (request: Q2TraceRequest): TraceResult => {
+    traces.push(request);
     const clear: TraceResult = { kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, hit: { kind: "none" }, contact: { kind: "none" }, contents: 0, surface: null, sourcePlane: plane, secondary: null };
     if (request.bounds !== null && request.end.z < request.start.z && request.end.z + request.bounds.min.z <= 0) {
       const z = -request.bounds.min.z;
@@ -54,7 +56,7 @@ function fixture(isN64 = false) {
     return clear;
   };
   const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.1, random: () => random.shift() ?? rereleaseRandom.float(), rereleaseRandom,
+    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => gravity, frameSeconds: () => 0.1, random: () => random.shift() ?? rereleaseRandom.float(), rereleaseRandom,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
     players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => ((game.entity(actor)?.serverFlags ?? 0) & 4) !== 0,
@@ -74,7 +76,7 @@ function fixture(isN64 = false) {
   const module = registerQ2RereleaseMonsters(monsters, { source, isN64, expansion: "base", weapons: projectiles });
   const game = new Q2Foundation(host, { edition: "rerelease", mapName: "base1", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1, provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, [module]);
   const playerEntity = game.attachPlayer(player);
-  return { actors, callbacks, bodies, combat, inventory, player, playerEntity, game, monsters, source, events, random, diagnostics,
+  return { actors, callbacks, bodies, combat, inventory, player, playerEntity, game, monsters, source, events, random, diagnostics, traces,
     rayHit(actor: ActorId) { rayActor = actor; },
     spawn(classname: string, values: ReadonlyMap<string, string> = new Map([["origin", "0 0 24"]])) {
       const entity = game.spawn({ classname, ordinal: -1, values });
@@ -465,4 +467,27 @@ test("Rerelease reinforcement placement drops farther than maxMoveUp and rejects
     expect(findRereleaseSpawnPoint(scene.game, high, bounds, 32)).toEqual({ x: 200, y: 0, z: 24 });
     expect(checkRereleaseGroundSpawnPoint(scene.game, high, bounds, 256, -1)).toBe(false);
   } finally { scene.actors.close(); }
+});
+
+
+test("rerelease gunner prediction and grenade launch use host gravity without a source world entity", () => {
+  function launch(gravity: number) {
+    const scene = fixture(false, gravity), gunner = scene.spawn("monster_gunner");
+    gunner.entity.enemy = scene.player.id;
+    scene.rayHit(scene.game.host.worldActor());
+    expect(scene.game.entity(scene.game.host.worldActor())).toBeNull();
+    scene.random.push(0.5, 0.5);
+    gunner.dispatch("GunnerGrenade");
+    const grenade = [...scene.game.entities.values()].find(entity => entity.classname === "grenade");
+    if (grenade === undefined) throw new Error("Gunner did not launch its source grenade");
+    const trajectory = scene.traces.find(trace => trace.bounds === null && trace.ignore === null);
+    if (trajectory === undefined) throw new Error("Gunner did not simulate a firing trajectory");
+    return { velocity: scene.game.body(grenade).velocity, trajectory };
+  }
+  const normal = launch(800), low = launch(400);
+  expect(low.trajectory.start).toEqual(normal.trajectory.start);
+  expect(low.trajectory.end.x).toBeCloseTo(normal.trajectory.end.x, 8);
+  expect(low.trajectory.end.z).toBeGreaterThan(normal.trajectory.end.z);
+  expect(low.velocity.z).toBeLessThan(normal.velocity.z);
+  expect(low.velocity).not.toEqual(normal.velocity);
 });

@@ -48,8 +48,12 @@ function ordinaryDefinitions(monsters: Q2Monsters) {
   };
 }
 
-export function registerQ2RereleaseOrdinaryMonsters(monsters: Q2Monsters): undefined {
+export function registerQ2RereleaseOrdinaryMonsters(monsters: Q2Monsters, weapons: Q2MissionPackMonsterWeapons): undefined {
   for (const definition of Object.values(ordinaryDefinitions(monsters))) monsters.register(definition, "rerelease");
+  for (const definition of [...createRereleaseChickDefinitions(weapons), ...createRereleaseTankDefinitions(weapons), ...createRereleaseGladiatorDefinitions(weapons)]) {
+    if (definition.classname === "monster_chick_heat" || definition.classname === "monster_gladb") continue;
+    monsters.register(definition, "rerelease");
+  }
   return undefined;
 }
 

@@ -19,7 +19,7 @@ function sharedHost(actors = new SessionActorRegistry(createIdentityOwner("q2-en
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const scheduled = new Map<OwnedActor, number>();
   let now = 0;
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, frameSeconds: () => 0.1, random: () => 0.5,
+  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     touchTriggers: () => undefined, trace: () => { throw new Error("Entity service check does not trace geometry"); },
     pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [],

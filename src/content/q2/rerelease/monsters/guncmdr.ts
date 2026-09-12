@@ -168,8 +168,7 @@ export function createGunCommanderDefinition(weapons: Q2MissionPackMonsterWeapon
         else {
           const speed = shot.kind === "mortar" ? 850 : 600, predicted = calculatePitchToFire(context, target, start, aim, speed, 2.5, shot.kind === "mortar");
           const right = (game.host.random() * 2 - 1) * 10, up = predicted === null ? 200 + (game.host.random() * 2 - 1) * 10 : game.host.random() * 10;
-          const world = game.entity(game.host.worldActor());
-          context.weapons.fireGrenade(entity, game, start, predicted ?? aim, 50, speed, 2.5, 90, false, false, true, { right, up, gravity: world === null ? 800 : numberField(world.spawn, "gravity", 800) });
+          context.weapons.fireGrenade(entity, game, start, predicted ?? aim, 50, speed, 2.5, 90, false, false, true, { right, up, gravity: game.host.gravity() });
         }
         return monsterFlash(context, shot.id, start, aim);
       },

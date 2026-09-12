@@ -59,7 +59,7 @@ function fixture(saved: SavedFixture | null = null) {
     }
   }
   const world = actors.ownedBy("q2:game").find(actor => actors.sourceOf(actor.id)?.slot === 0); if (world === undefined) throw new Error("Missing fixture world");
-  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.1, random: () => 0.25, schedule: () => undefined, touchTriggers: () => undefined,
+  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.25, schedule: () => undefined, touchTriggers: () => undefined,
     trace: (request: Q2TraceRequest) => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null,
       sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 }, secondary: null }),
     pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true, nearby: () => [...common.keys()], players: () => [...common.keys()],

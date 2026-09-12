@@ -56,7 +56,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const tracing = { trace: clearTrace };
   const host: Q2FoundationHost = {
     actors, callbacks, bodies, combat, inventory,
-    now: () => now, frameSeconds: () => frameSeconds, random: () => 0.5, schedule: () => undefined, touchTriggers: () => undefined,
+    now: () => now, gravity: () => 800, frameSeconds: () => frameSeconds, random: () => 0.5, schedule: () => undefined, touchTriggers: () => undefined,
     trace: request => tracing.trace(request), pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
     nearby: (origin, radius) => [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")].map(actor => actor.id).filter(actor => {
       const body = bodies.read(actor);

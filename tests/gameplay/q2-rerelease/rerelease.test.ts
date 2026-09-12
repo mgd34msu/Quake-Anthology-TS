@@ -41,7 +41,7 @@ function rerelease(initializeInventory = true, worldFields = "") {
   const weapons = new Q2Weapons({ emit: () => undefined, noise: () => undefined, dodge: () => undefined, lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const items = createQ2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
   const players = new Q2RereleasePlayers(items, weapons, hooks, rrHooks), module = createQ2RereleaseModule({ players, hooks: rrHooks });
-  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.025, random: () => 0.5,
+  const host: Q2FoundationHost = { actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.025, random: () => 0.5,
     schedule: () => undefined, touchTriggers: () => undefined, keyConsumed: () => undefined,
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),

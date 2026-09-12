@@ -1,5 +1,5 @@
 // Rerelease m_gunner.cpp. ZeniMax Media, GPL-2.0.
-import { add, length, normalize, numberField, scale, subtract } from "../../foundation/fields.ts";
+import { add, length, normalize, scale, subtract } from "../../foundation/fields.ts";
 import { anglesVectors, clearShot, corpse, enemyBody, finishDodge, health, projectFlash, setDuck, targetDistance, vectorAngles, visible } from "../../foundation/monsters/ai.ts";
 import { throwGib } from "../../foundation/monsters/gibs.ts";
 import { muzzleOffset } from "../../foundation/monsters/muzzle.ts";
@@ -33,8 +33,7 @@ function grenade(context: MonsterContext): undefined {
   if (distance > 512 && delta.z < 64 && delta.z > -64) delta = { ...delta, z: delta.z + distance - 512 };
   const pitch = Math.max(-0.5, Math.min(0.4, normalize(delta).z)), aim = add(add(axes.forward, scale(axes.right, spread)), scale(axes.up, pitch));
   const predicted = calculatePitchToFire(context, target, start, aim, 600, 2.5, false), right = (game.host.random() * 2 - 1) * 10, up = predicted === null ? 200 + (game.host.random() * 2 - 1) * 10 : game.host.random() * 10;
-  const world = game.entity(game.host.worldActor());
-  context.weapons.fireGrenade(entity, game, start, predicted ?? aim, 50, 600, 2.5, 90, false, false, true, { right, up, gravity: world === null ? 800 : numberField(world.spawn, "gravity", 800) });
+  context.weapons.fireGrenade(entity, game, start, predicted ?? aim, 50, 600, 2.5, 90, false, false, true, { right, up, gravity: game.host.gravity() });
   return monsterFlash(context, id, start, predicted ?? aim);
 }
 function jump(context: MonsterContext, up: boolean): undefined {

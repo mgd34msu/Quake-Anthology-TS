@@ -94,8 +94,7 @@ export function createRereleaseSupertankDefinitions(weapons: Q2MissionPackMonste
         const target = predictAim(context, start, 0, false, (game.host.random() * 2 - 1) * 0.1); if (target === null) return undefined;
         for (let speed = 500; speed < 1000; speed += 100) {
           const direction = calculatePitchToFire(context, target.point, start, target.direction, speed, 2.5, true); if (direction === null) continue;
-          const world = game.entity(game.host.worldActor());
-          context.weapons.fireGrenade(entity, game, start, direction, 50, speed, 2.5, 90, false, false, true, { right: 0, up: 0, gravity: world === null ? 800 : numberField(world.spawn, "gravity", 800) });
+          context.weapons.fireGrenade(entity, game, start, direction, 50, speed, 2.5, 90, false, false, true, { right: 0, up: 0, gravity: game.host.gravity() });
           return monsterFlash(context, id, start, direction);
         }
         return undefined;

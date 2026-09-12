@@ -64,7 +64,7 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("ordin
     const preset = applicationPreset(catalog, command.options), content = catalog.require(`q2-${edition}-baseq2`).id;
     const source: ProviderReference = { provider: `q2:monsters/${edition}/baseq2`, content };
     const classnames = ["monster_infantry", "monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_berserk", "monster_gunner",
-      "monster_floater", "monster_hover", "monster_flyer", "monster_mutant", "monster_parasite"];
+      "monster_floater", "monster_hover", "monster_flyer", "monster_mutant", "monster_parasite", "monster_chick", "monster_tank", "monster_tank_commander", "monster_gladiator"];
     const enemies: EnemySelection = { kind: "replace", default: { source, classname: "monster_infantry" },
       byClassname: Object.fromEntries(classnames.map(classname => [classname, { source, classname }])) };
     const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
@@ -77,6 +77,8 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("ordin
       for (const path of ["models/monsters/parasite/tip/tris.md2", "models/monsters/parasite/tip/base.pcx", "models/monsters/parasite/segment/tris.md2",
         "models/monsters/parasite/segment/skin.pcx", "models/monsters/parasite/gibs/fleg.pcx", "models/monsters/soldier/gibs/arm_lt.pcx",
         "models/monsters/infantry/gibs/arm.pcx", "models/monsters/infantry/gibs/chest.pcx", "models/monsters/infantry/gibs/foot.pcx", "models/monsters/infantry/gibs/head.pcx",
+        "models/monsters/bitch/gibs/tube.pcx", "models/monsters/tank/gibs/barm_c.pcx", "models/monsters/tank/cskin.pcx",
+        "models/monsters/gladiatr/gibs/larm.pcx", "sound/weapons/rg_hum.wav", "models/objects/rocket/tris.md2", "sound/weapons/rockfly.wav",
         "models/monsters/mutant/gibs/hand.pcx", "sound/berserk/jump.wav", "sound/world/explod2.wav", "sound/weapons/rocklx1a.wav"]) expect(paths.has(path)).toBe(true);
     }
   }

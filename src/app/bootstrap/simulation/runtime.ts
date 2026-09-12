@@ -1,3 +1,4 @@
+import { Q2MissionPackProjectiles } from "../../../content/q2/missionpacks/projectiles/index.ts";
 import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
 import { registerQ2RereleaseOrdinaryMonsters } from "../../../content/q2/rerelease/monsters/index.ts";
 import { WeaponSlot } from "./weapon-slot.ts";
@@ -474,11 +475,15 @@ export class SharedSimulation implements Simulation {
         ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
         lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) });
       monsters = new Q2Monsters(weapons, { mission: actor => this.monsterMissions.get(actor) ?? null });
-      if (registered.edition === "rerelease") registerQ2RereleaseOrdinaryMonsters(monsters);
+      const projectiles = registered.edition === "rerelease" ? new Q2MissionPackProjectiles({ base: weapons,
+        monster: actor => monsters.context(actor), gravity: () => this.physics.gravity,
+        playerEffect: event => this.events.emit(reference.content, { kind: "q2-composition", event: { kind: "missionpack-player", event } }, clock.frame.time) }) : null;
+      if (projectiles !== null) registerQ2RereleaseOrdinaryMonsters(monsters, projectiles);
       const modules = registered.edition === "classic" ? [registerQ2ClassicBaseMonsters(monsters), monsters] : [monsters];
       const game = new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
         { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, modules);
       weapons.registerCallbacks(game);
+      if (projectiles !== null) game.sourceCallbacks.register(projectiles.callbacks);
       source = { kind: "q2", reference, random, clock, game, monsters, ballistics: weapons };
     }
     this.monsterSources.set(reference.provider, source);
@@ -870,6 +875,7 @@ export class SharedSimulation implements Simulation {
     readMonster: (actor: ActorId) => Q2MonsterState | undefined): Q2FoundationHost {
     const content = source.content;
     return createQ2ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+      gravity: () => this.physics.gravity,
       monsterTarget: actor => this.monsterTarget(actor),
       weaponTarget: actor => this.q2WeaponTarget(actor),
       registerEntity: (entity, services) => this.registerActorExecution({ kind: "q2", entity, services, content, readMonster: () => readMonster(entity.actor.id) }),

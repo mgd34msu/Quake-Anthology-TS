@@ -99,6 +99,7 @@ export interface Q2FoundationHost {
   readonly inventory: SharedInventoryTable;
   now(): number;
   frameSeconds(): number;
+  gravity(): number;
   random(): number;
   /** Rerelease source callbacks share this stream with random(); classic hosts omit it. */
   readonly rereleaseRandom?: Q2RereleaseRandomSource;

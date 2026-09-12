@@ -46,7 +46,7 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
     return clear;
   };
   const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => 0.1, random: () => 0.5,
+    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
     players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => monsters.context(actor) !== null,

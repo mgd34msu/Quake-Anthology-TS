@@ -49,7 +49,7 @@ function fixture(edition: Q2Edition, step = 0.1) {
     return clear;
   };
   const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory, now: () => now, frameSeconds: () => step, random: () => random.shift() ?? 0.5,
+    actors, callbacks, bodies, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => step, random: () => random.shift() ?? 0.5,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     trace, pointContents: point => point.z < 0 ? 1 : 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
     players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor === player.id, isMonster: actor => (game.entity(actor)?.serverFlags ?? 0) % 8 >= 4,

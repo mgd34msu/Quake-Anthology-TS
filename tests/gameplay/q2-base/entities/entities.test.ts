@@ -51,7 +51,7 @@ function fixture(saved?: SavedEntities) {
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false,
       nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
   const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors),
-    now: () => now, frameSeconds: () => 0.1, random: () => { if (restoring) throw new Error("Restore consumed source randomness"); return 0.5; }, touchTriggers: () => undefined, keyConsumed: () => undefined,
+    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => { if (restoring) throw new Error("Restore consumed source randomness"); return 0.5; }, touchTriggers: () => undefined, keyConsumed: () => undefined,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end,
       contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null, secondary: null,
