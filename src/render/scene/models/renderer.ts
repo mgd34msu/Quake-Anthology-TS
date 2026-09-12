@@ -141,17 +141,18 @@ export class SceneModelRenderer {
         this.materials.set(key, { kind: "q3", name, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
       }
       const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
-        : selection.kind === "indexed" ? this.indexedTexture(selection, options) : await this.externalTexture(entity, selection.name, options);
+        : selection.kind === "indexed" ? this.indexedTexture(entity, selection, options) : await this.externalTexture(entity, selection.name, options);
       this.materials.set(key, { kind: "legacy", texture });
     })();
     this.pending.set(key, pending);
     return pending;
   }
 
-  private indexedTexture(selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
+  private indexedTexture(entity: SceneEntity, selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
     if (this.provider.palette === null) throw new Error(`Indexed model ${selection.name} has no content palette`);
     const colors = options.playerColors, translation = colors === undefined ? null : q1PlayerTranslation(colors.top, colors.bottom);
-    return this.provider.textures.register(colors === undefined ? selection.name : `${selection.name}:${colors.top}:${colors.bottom}`, modelImage(selection, this.provider.palette, translation),
+    const image = entity.model.kind === "q1-mdl" ? { ...selection, pixels: floodSkin(selection.pixels, selection.width, selection.height, this.provider.palette) } : selection;
+    return this.provider.textures.register(colors === undefined ? selection.name : `${selection.name}:${colors.top}:${colors.bottom}`, modelImage(image, this.provider.palette, translation),
       { wrap: "repeat", filter: "linear" });
   }
 
