@@ -1,3 +1,4 @@
+import { createBotArsenalBinding, type BotArsenalBinding } from "./bot-arsenal.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { createSharedBotWorld } from "./bot-world.ts";
 import type { SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
@@ -81,6 +82,7 @@ export class ApplicationBots {
   readonly population: SharedBotPopulation;
   readonly source: Q3SourceRuntime | null;
   readonly game: SourceBotGame;
+  private readonly arsenal: BotArsenalBinding | null;
   private readonly shared: ReturnType<typeof createSharedBotWorld> | null;
   private readonly connections = new Map<number, BotConnection>();
   private readonly snapshots = new Map<number, readonly number[]>();
@@ -93,6 +95,8 @@ export class ApplicationBots {
     const source = options.simulation.q3Source();
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
     this.source = source;
+    this.arsenal = source === null ? null : createBotArsenalBinding(options.simulation, client =>
+      options.simulation.players().find(actor => options.simulation.movementPlayer(actor)?.client.slot === client) ?? null);
     if (source === null && options.configuration === undefined) throw new Error("Shared bot configuration requires the application console registry");
     this.shared = source === null && options.configuration !== undefined ? createSharedBotWorld({ simulation: options.simulation, cvars: options.configuration,
       actor: client => this.connections.get(client)?.actor.id ?? null,
@@ -106,7 +110,7 @@ export class ApplicationBots {
       },
       print: options.print, console: options.insertConsoleCommand,
       message: (client, text) => { for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text); } }) : null;
-    const game = source === null ? this.shared?.game : q3BotGame(source, options.insertConsoleCommand);
+    const game = source === null ? this.shared?.game : q3BotGame(source, options.insertConsoleCommand, this.arsenal ?? undefined);
     if (game === undefined) throw new Error("Bot world projection is unavailable");
     this.game = game;
     this.director = new SourceBotDirector({ files: options.files, entities: source?.options.entities ?? options.simulation.sourceEntityText,
@@ -180,15 +184,15 @@ export class ApplicationBots {
     if (this.shared !== null) return { command: selectedQ3Command(command, player, this.elapsedMilliseconds),
       arsenal: { provider: player.arsenal.provider, weapon: this.shared.knowledge.resolveWeapon(client, command.weapon), useHoldable: false } };
     if (this.source === null) throw new Error("Bot source observation is unavailable");
-    if (player.arsenal.state.kind !== "q3") throw new Error("Q3 brain weapon inventory requires a selected arsenal projection");
     const sourcePlayer = this.source.pool.at(client).client;
     if (sourcePlayer === null) throw new Error("Source bot lost its player state");
     const angles = player.profile.kind === "q3" ? command.angles : {
       x: (command.angles.x + sourcePlayer.ps.deltaAngles.x) & 65535,
       y: (command.angles.y + sourcePlayer.ps.deltaAngles.y) & 65535,
       z: (command.angles.z + sourcePlayer.ps.deltaAngles.z) & 65535 };
-    const weapon = Q3_WEAPON_ITEMS.find(item => item.weapon === command.weapon)?.item ?? null;
-    return { command: selectedQ3Command({ ...command, angles }, player, this.elapsedMilliseconds),
+    const weapon = this.arsenal === null ? Q3_WEAPON_ITEMS.find(item => item.weapon === command.weapon)?.item ?? null
+      : this.arsenal.resolveWeapon(client, command.weapon);
+    return { command: selectedQ3Command({ ...command, angles, weapon: this.arsenal === null ? command.weapon : sourcePlayer.ps.weapon }, player, this.elapsedMilliseconds),
       arsenal: { provider: player.arsenal.provider, weapon, useHoldable: (command.buttons & 4) !== 0 } };
   }
 
@@ -302,8 +306,10 @@ export function openApplicationBotLog(filename: string): BotLogOpenResult {
 }
 
 export function botAdmissionError(simulation: SharedSimulation): string | null {
-  if (simulation.q3Source() !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
-    ? null : "Q3-map bots require the native Q3 arsenal observation; this selected arsenal is not yet supported";
+  const q3 = simulation.q3Source();
+  if (q3 !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
+    || q3.options.product === "baseq3" && simulation.q2WeaponSource() !== null && simulation.options.mode === "deathmatch" && q3.gameType === 0
+    ? null : "Q3-map bots support native Q3 weapons or selected Q2 weapons in base Q3 deathmatch";
   const q1 = simulation.q1Source(), q2 = simulation.q2Source();
   if (simulation.q2WeaponSource() === null && simulation.q1WeaponSource() === null) return "Shared bots require actual Q1 or Q2 weapons";
   if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)

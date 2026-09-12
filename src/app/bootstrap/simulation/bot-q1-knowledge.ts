@@ -1,3 +1,4 @@
+import { WeaponState } from "../../../content/q3/base/shared/definitions.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { WeaponInfo } from "../../../bots/behavior/library/weapons.ts";
@@ -91,6 +92,10 @@ export function createQ1BotKnowledge(options: {
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {
       const actor = options.actorForClient(client), entry = entries.get(decisionSlot);
       return actor !== null && entry !== undefined && usable(actor, entry) ? entry.item : null;
+    },
+    sourceWeaponState(client: number): WeaponState {
+      const actor = options.actorForClient(client);
+      return actor !== null && (game.player(actor)?.attackFinished ?? 0) > game.time ? WeaponState.WEAPON_FIRING : WeaponState.WEAPON_READY;
     },
     sourceWeapon(client: number): number {
       const actor = options.actorForClient(client), current = actor === null ? null : game.player(actor)?.weapon;

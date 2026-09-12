@@ -1,3 +1,4 @@
+import { WeaponState } from "../../../content/q3/base/shared/definitions.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { BotState } from "../../../bots/behavior/q3/ai-state.ts";
@@ -100,6 +101,12 @@ export function createQ2BotKnowledge(options: { readonly simulation: Pick<Shared
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {
       const actor = options.actorForClient(client), entry = entries.get(decisionSlot);
       return actor !== null && entry !== undefined && canUse(actor, entry) ? entry.definition.item : null;
+    },
+    sourceWeaponState(client: number): WeaponState {
+      const actor = options.actorForClient(client);
+      const phase = actor === null ? undefined : source.weapons.states.get(actor)?.phase;
+      return phase === "activating" ? WeaponState.WEAPON_RAISING : phase === "dropping" ? WeaponState.WEAPON_DROPPING
+        : phase === "firing" ? WeaponState.WEAPON_FIRING : WeaponState.WEAPON_READY;
     },
     sourceWeapon(client: number): number {
       const actor = options.actorForClient(client), current = actor === null ? null : source.weapons.states.get(actor)?.weapon;

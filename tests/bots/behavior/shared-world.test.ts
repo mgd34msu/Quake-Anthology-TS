@@ -1,3 +1,6 @@
+import { statSchema } from "../../../src/content/q3/base/shared/definitions.ts";
+import { teleportPlayer } from "../../../src/content/q3/base/game/misc.ts";
+import { SimulationBotServices } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -11,10 +14,110 @@ import { resolve } from "node:path";
 import type { ApplicationBots } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import { BotInventory } from "../../../src/bots/behavior/q3/ai-definitions.ts";
+import { BotInventory, BotModelIndex } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
 const retail = test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")) || !existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")));
+
+retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsenal", async () => {
+  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
+    "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);
+  if (launch.kind !== "run") throw new Error("Expected Q3 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, launch.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q2:official", content: catalog.require("q2-classic-baseq2").id },
+  ] } } });
+  const captured: ApplicationBots[] = [], attach = SimulationBotServices.prototype.attach;
+  SimulationBotServices.prototype.attach = function (director, transport) { captured.push(transport); attach.call(this, director, transport); };
+  const application = await Application.open(launch.options, { print: () => undefined }, recipe).finally(() => { SimulationBotServices.prototype.attach = attach; });
+  try {
+    application.queueCommand("addbot", ["Sarge", "5"], null); await application.step(100);
+    const transport = captured[0], bot = transport?.director.roster()[0];
+    if (transport === undefined || bot === undefined) throw new Error("Missing selected Q2 bot on Q3");
+    const world = application.simulation, source = world.q3Source(), arsenal = world.q2WeaponSource();
+    if (source === null || arsenal === null) throw new Error("Missing actual Q3 map or Q2 arsenal");
+    const native = source.records.nativeByActor(bot.actor.id), pickups = transport.game.pickups;
+    if (native?.client == null || pickups === null) throw new Error("Missing actual source client or pickups");
+    for (let frame = 0; frame < 50; frame++) await application.step(100);
+    const supply = pickups.candidates(bot.sourceClient).find(item => item.name === "weapon_shotgun");
+    if (supply === undefined) throw new Error("Missing authored shotgun");
+    expect(pickups.ownsItemGoal?.(bot.sourceClient, supply.entity)).toBe(true);
+    const center = { x: supply.origin.x, y: supply.origin.y, z: supply.origin.z + 24 };
+    let start: typeof center | null = null;
+    for (const offset of [{ x: 96, y: 0 }, { x: -96, y: 0 }, { x: 0, y: 96 }, { x: 0, y: -96 }]) {
+      const candidate = { x: center.x + offset.x, y: center.y + offset.y, z: center.z };
+      const shape = { kind: "box", mins: native.r.mins, maxs: native.r.maxs } satisfies Parameters<typeof source.world.trace>[0]["shape"];
+      const lane = source.world.trace({ start: candidate, end: center, shape, passEntityNum: native.s.number, mask: 0x2010001 });
+      const support = source.world.trace({ start: candidate, end: { ...candidate, z: candidate.z - 48 }, shape, passEntityNum: native.s.number, mask: 0x2010001 });
+      if (lane.solidity === "clear" && lane.fraction === 1 && support.solidity === "clear" && support.fraction < 1) { start = candidate; break; }
+    }
+    if (start === null) throw new Error("Authored shotgun has no supported approach lane");
+    teleportPlayer({ combat: source.combat, world: source.world }, native, start, { x: 0, y: Math.atan2(center.y - start.y, center.x - start.x) * 180 / Math.PI, z: 0 });
+    native.client.ps.velocity = { x: 0, y: 0, z: 0 }; source.world.link(native);
+    const nativeAmmo = native.client.ps.ammo.get(3);
+    const frameCommands = transport.frame.bind(transport);
+    let checkedCommands = 0, selectedShotgun = false;
+    transport.frame = (time, elapsed) => {
+      const commands = frameCommands(time, elapsed);
+      for (const command of commands) if (command.command.kind === "q3") {
+        if (command.arsenal?.weapon === "q2:weapon_shotgun" || command.arsenal?.weapon === "q2:weapon_supershotgun") selectedShotgun = true;
+        const client = source.records.nativeByActor(command.actor)?.client;
+        if (client == null) throw new Error("Command has no live native source player");
+        if (command.command.weapon !== client.ps.weapon) throw new Error("Foreign decision weapon escaped into native transport");
+        checkedCommands++;
+      }
+      return commands;
+    };
+    let chose = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      const goal = transport.director.library.goals.getTopGoal(bot.state.gs);
+      if (goal?.entity === supply.entity && goal.number >= 0x40000000) chose = true;
+      if (pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind === "respawning") break;
+    }
+    expect(chose).toBe(true);
+    expect(pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind).toBe("respawning");
+    expect(world.inventory.count(bot.actor.id, "q2:weapon_shotgun")).toBe(1);
+    expect(world.inventory.count(bot.actor.id, "q2:ammo_shells")).toBeGreaterThan(0);
+    expect(native.client.ps.ammo.get(3)).toBe(nativeAmmo);
+    const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id), target = source.records.nativeByActor(human.actor);
+    if (target?.client == null) throw new Error("Missing real human target");
+    teleportPlayer({ combat: source.combat, world: source.world }, native, start, { x: 0, y: Math.atan2(center.y - start.y, center.x - start.x) * 180 / Math.PI, z: 0 });
+    native.client.ps.velocity = { x: 0, y: 0, z: 0 }; source.world.link(native);
+    teleportPlayer({ combat: source.combat, world: source.world }, target, center, { x: 0, y: 0, z: 0 });
+    target.client.ps.velocity = { x: 0, y: 0, z: 0 }; source.world.link(target);
+    world.combat.setHealth(target.actor, 100);
+    world.inventory.consume(bot.actor, "q2:ammo_bullets", world.inventory.count(bot.actor.id, "q2:ammo_bullets"));
+    let shotgunHit = false;
+    expect(transport.game.entity(1).player?.state.weapon).toBeGreaterThan(0);
+    expect(transport.game.entity(1).player?.state.weapon).not.toBe(target.client.ps.weapon);
+    const shells = world.inventory.count(bot.actor.id, "q2:ammo_shells");
+    for (let frame = 0; frame < 60; frame++) {
+      const output = await application.step(100);
+      for (const event of output.events) if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed") {
+        const decision = event.payload.outcome.decision, attack = decision.request.attack;
+        if (decision.request.target.equals(human.actor) && attack.attacker?.equals(bot.actor.id) === true && decision.appliedDamage > 0
+          && (attack.weapon === "q2:weapon_shotgun" || attack.weapon === "q2:weapon_supershotgun")) shotgunHit = true;
+      }
+      if (shotgunHit) break;
+    }
+    expect(world.combat.read(human.actor)?.health).toBeLessThan(100);
+    expect(shotgunHit).toBe(true);
+    expect(world.inventory.count(bot.actor.id, "q2:ammo_shells")).toBeLessThan(shells);
+    expect(selectedShotgun).toBe(true);
+    const firedWeapon = arsenal.weapons.states.get(bot.actor.id)?.weapon;
+    if (firedWeapon == null) throw new Error("Bot lost its actual firing weapon");
+    expect(["shotgun", "supershotgun"]).toContain(firedWeapon);
+    expect(native.client.ps.weapon).toBeLessThan(11);
+    expect(checkedCommands).toBeGreaterThan(0);
+    const schema = statSchema("baseq3");
+    native.client.ps.stats.set(schema.holdableItem, BotModelIndex.MEDKIT);
+    world.combat.setHealth(bot.actor, 30);
+    for (let frame = 0; frame < 20 && native.client.ps.stats.get(schema.holdableItem) !== 0; frame++) await application.step(100);
+    expect(native.client.ps.stats.get(schema.holdableItem)).toBe(0);
+    expect(world.combat.read(bot.actor.id)?.health).toBe(native.client.ps.stats.get(schema.maxHealth) + 25);
+  } finally { await application.close(); }
+}, 120000);
 
 retail("Q2 map bots select and fire actual Q1 weapons and collect mapped source supplies", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--map", "base1",

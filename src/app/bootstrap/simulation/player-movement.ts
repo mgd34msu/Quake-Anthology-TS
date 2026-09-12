@@ -8,6 +8,8 @@ import { createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider, Q2R
 import { createQ3MovementProvider, EntityEvent, Q3_SOURCE_POSTURES, Q3_SOURCE_STANDING_BOUNDS } from "../../../movement/q3/index.ts";
 import type { Q3MovementHooks, Q3Postures } from "../../../movement/q3/index.ts";
 import { createQ3SourceMovementHooks } from "../../../content/q3/foundation/movement-hooks.ts";
+import { q3SourceAnimation, q3SourceTorso } from "../../../movement/q3/animation.ts";
+import { PlayerAnimation } from "../../../movement/q3/constants.ts";
 import { q3SpawnArsenalRuntime } from "../../../content/q3/foundation/arsenal.ts";
 import { readQ3ArsenalRuntime, readQ3MovementState } from "./q3/player-state.ts";
 import { movementOrigin, movementProfile, providerFamily } from "./players.ts";
@@ -103,9 +105,17 @@ export function createPlayerMovementPrediction(simulation: SharedSimulation, pla
   const baseline = entity !== undefined && source !== null && profile.kind === "q3" ? readQ3MovementState(entity, source.records) : player.state;
   let initial = relocated(baseline, origin, velocity);
   if (initial.kind === "q3") initial = { ...initial, movementFlags: (initial.movementFlags & ~2) | (crouched ? 1 : 0) };
-  let runtime = entity !== undefined && source !== null ? readQ3ArsenalRuntime(entity, q3SpawnArsenalRuntime(source.options.product, 100)) : q3SpawnArsenalRuntime("baseq3", 100);
-  const provider = createPlayerMovementProvider(player, { q1: { viewHeight: player.viewHeight }, q2: new Q2RereleaseMovementContext(),
-    q3: createQ3SourceMovementHooks({ read: () => runtime, write: (_actor, _execution, next) => { runtime = next; return undefined; }, gauntletHit: () => false }) });
+  let q3Hooks: Q3MovementHooks;
+  if (player.arsenal.state.kind === "q3") {
+    let runtime = entity !== undefined && source !== null ? readQ3ArsenalRuntime(entity, q3SpawnArsenalRuntime(source.options.product, 100)) : q3SpawnArsenalRuntime("baseq3", 100);
+    q3Hooks = createQ3SourceMovementHooks({ read: () => runtime, write: (_actor, _execution, next) => { runtime = next; return undefined; }, gauntletHit: () => false });
+  } else {
+    q3Hooks = { firing: () => false,
+      animation: (request, context) => context.animation.state.kind === "q3" ? q3SourceAnimation(request, context) : { animation: context.animation, effects: [] },
+      torso: context => context.animation.state.kind === "q3" ? q3SourceTorso(PlayerAnimation.TORSO_STAND, context, true) : { animation: context.animation, effects: [] },
+      weapon: context => ({ arsenal: context.arsenal, animation: context.animation, effects: [], movementFlags: context.motion.pmFlags }) };
+  }
+  const provider = createPlayerMovementProvider(player, { q1: { viewHeight: player.viewHeight }, q2: new Q2RereleaseMovementContext(), q3: q3Hooks });
   return { provider, services: { scene: simulation.scene, numeric: player.services.numeric,
     touch: (_contact, state) => ({ kind: "continue", state }),
     weaponStep: input => ({ arsenal: input.arsenal, animation: input.animation, effects: [] }),

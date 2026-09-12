@@ -3,11 +3,10 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
 import { PlayerState } from "../../../content/q3/base/shared/player-state.ts";
-import { EntityType, MoveType, WeaponState, statSchema } from "../../../content/q3/base/shared/definitions.ts";
+import { EntityType, MoveType, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { GameMemory } from "../../../content/q3/base/game/memory.ts";
 import type { BotObservedEntity, BotObservedPickup, SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
-import { createQ1BotKnowledge } from "./bot-q1-knowledge.ts";
-import { createQ2BotKnowledge } from "./bot-q2-knowledge.ts";
+import { createBotArsenalBinding } from "./bot-arsenal.ts";
 import type { SharedSimulation } from "./runtime.ts";
 
 interface Options {
@@ -49,8 +48,8 @@ export function createSharedBotWorld(options: Options) {
     const q1 = source.kind === "q1" ? source.game.entity(actor) : null;
     return q1 === null ? null : { model: q1.model, frame: q1.frame, classname: q1.classname, hidden: false, maxHealth: source.kind === "q1" ? source.game.player(actor)?.maxHealth ?? q1.maxHealth : q1.maxHealth };
   };
-  const knowledge = arsenal !== null ? createQ2BotKnowledge({ simulation, actorForClient: client => actorForId(client) })
-    : createQ1BotKnowledge({ simulation, actorForClient: client => actorForId(client) });
+  const knowledge = createBotArsenalBinding(simulation, client => actorForId(client));
+  if (knowledge === null) throw new Error("Shared bot arsenal binding is unavailable");
   const cvars = options.cvars;
   for (const [name, value] of Object.entries({ sv_maxclients: String(simulation.options.maxClients), g_gametype: "0", mapname: mapName,
     sv_mapname: mapName, g_spSkill: "2", bot_enable: "1", bot_minplayers: "0", dedicated: "1", g_gravity: String(simulation.physics.gravity) })) cvars.register(name, value);
@@ -129,10 +128,7 @@ export function createSharedBotWorld(options: Options) {
         ps.clientNum = movement.client.slot; ps.origin = { ...body.origin }; ps.velocity = { ...body.velocity }; ps.viewangles = { ...movement.viewAngles };
         ps.viewheight = movement.viewHeight; ps.groundEntityNum = body.ground === null ? 1023 : entityId(body.ground);
         ps.pmType = common.spectator ? MoveType.PM_SPECTATOR : (combat?.health ?? 0) <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
-        ps.weapon = knowledge.sourceWeapon(number); const phase = arsenal?.weapons.states.get(actor)?.phase;
-        ps.weaponState = phase === "activating" ? WeaponState.WEAPON_RAISING : phase === "dropping" ? WeaponState.WEAPON_DROPPING
-          : phase === "firing" || q1Arsenal !== null && (q1Arsenal.game.player(actor)?.attackFinished ?? 0) > q1Arsenal.game.time
-            ? WeaponState.WEAPON_FIRING : WeaponState.WEAPON_READY;
+        ps.weapon = knowledge.sourceWeapon(number); ps.weaponState = knowledge.sourceWeaponState(number);
         ps.stats.set(schema.health, combat?.health ?? 0); ps.stats.set(schema.armor, combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points); ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
         ps.persistant.set(0, common.score); ps.persistant.set(3, common.spectator ? 3 : 0);
         player = { state: ps, connected: options.actor(number) === null || begun.has(number), team: common.spectator ? 3 : 0, name: common.name, lastHurtClient: 0, lastHurtMod: 0 };
