@@ -1225,3 +1225,52 @@ for (const mode of ['qc', 'native']) {
   } finally { await app.close(); }
 }
 }, 30000);
+
+test.skipIf(!haveCorpus)("actual id1 e1m2 makestatic preserves resources and pose before source release", async () => {
+  const { Application } = await import("../../../src/app/bootstrap/application.ts");
+  const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
+  const { applicationPreset } = await import("../../../src/app/bootstrap/content.ts");
+  const { discoverInstalledContent, presetChoice, resolveLaunch } = await import("../../../src/content/catalog/index.ts");
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m2", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Missing dedicated command");
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset: { ...preset, execution: [{ kind: "quakec", owner: preset.map.entities, role: "server-game",
+    artifact: { content: preset.map.entities.content, path: "progs.dat" }, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }] }, choice: presetChoice(preset.id) });
+  const app = await Application.open(command.options, { print: () => undefined }, recipe);
+  try {
+    const source = app.simulation.quakecSource(); if (source === null) throw new Error("Missing actual source");
+    const startup = app.simulation.drainPresentationEvents().filter(event => event.kind === "q1" && event.event.kind === "static-model");
+    expect(startup).toHaveLength(24);
+    expect(startup.some(event => event.kind === "q1" && event.event.kind === "static-model" && event.event.path === "progs/flame.mdl"
+      && event.event.origin.x === 932 && event.event.origin.y === 640 && event.event.origin.z === 340)).toBe(true);
+    expect(source.machine.profiling[source.prepared.program.functionNamed("light_torch_small_walltorch").index]).toBeGreaterThan(0);
+    const vm = source.machine, field = (name: string): number => vm.fieldOffset(name);
+    vm.execute(source.prepared.program.functionNamed("spawn").index);
+    const reference = vm.globals.int(1), slot = source.entities.slot(reference), actor = source.slots.at(slot);
+    if (actor === null) throw new Error("Source spawn did not admit actor");
+    const words = source.entities.at(slot), origin = { x: 1.1875, y: -2.1875, z: 3.1875 }, angles = { x: 12.375, y: 43.875, z: 0.125 };
+    words.setVector(field("origin"), origin); words.setVector(field("angles"), angles);
+    words.setFloat(field("frame"), 300.75); words.setFloat(field("colormap"), 258.75); words.setFloat(field("skin"), 259.75);
+    words.setFloat(field("modelindex"), 255); words.setInt(field("model"), vm.strings.setEngine("static-model-test", "progs/not-precached.mdl"));
+    vm.globals.setInt(4, reference);
+    expect(() => vm.execute(source.prepared.program.functionNamed("makestatic").index, 1)).toThrow("not precached");
+    expect(app.simulation.actors.isLive(actor.id)).toBe(true); expect(app.simulation.drainPresentationEvents()).toHaveLength(0);
+    words.setInt(field("model"), vm.strings.setEngine("static-model-test", "progs/flame.mdl"));
+    vm.globals.setInt(4, reference); vm.execute(source.prepared.program.functionNamed("makestatic").index, 1);
+    expect(app.simulation.actors.isLive(actor.id)).toBe(false); expect(source.slots.at(slot)).toBeNull(); expect(source.worldHost.isFreeEntity(slot)).toBe(true);
+    const emitted = app.simulation.drainPresentationEvents(); expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ kind: "q1", event: { kind: "static-model", path: "progs/flame.mdl", frame: 300, colorMap: 258, skin: 259, origin, angles } });
+    vm.execute(source.prepared.program.functionNamed("spawn").index);
+    const reused = source.slots.at(source.entities.slot(vm.globals.int(1))); if (reused === null) throw new Error("Missing reused source actor");
+    expect(source.entities.slot(vm.globals.int(1))).toBe(slot); expect(reused.id.equals(actor.id)).toBe(false);
+    source.entities.at(slot).setVector(field("origin"), { x: 999, y: 999, z: 999 });
+    expect(emitted[0]).toMatchObject({ kind: "q1", event: { origin, angles } });
+    source.entities.at(slot).setInt(field("model"), 0);
+    vm.globals.setInt(4, source.entities.reference(slot)); vm.execute(source.prepared.program.functionNamed("makestatic").index, 1);
+    expect(app.simulation.actors.isLive(reused.id)).toBe(false); expect(source.worldHost.isFreeEntity(slot)).toBe(true);
+    const emptyModel = app.simulation.drainPresentationEvents();
+    expect(emptyModel).toHaveLength(1); expect(emptyModel[0]).toMatchObject({ kind: "q1", event: { kind: "static-model", path: "", origin: { x: 999, y: 999, z: 999 } } });
+    await app.step(100);
+    expect(app.simulation.events.capture().persistent.filter(event => event.kind === "q1" && event.event.kind === "static-model")).toHaveLength(26);
+  } finally { await app.close(); }
+}, 30000);
