@@ -1,3 +1,4 @@
+import { weaponViewOrigin } from "../weapon-view.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { SceneEntity } from "../../../contracts/scene.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -34,7 +35,7 @@ export class ApplicationQ3ForeignModels {
       let group = this.groups.get(asset.provider);
       if (group === undefined) { group = { renderer: new SceneModelRenderer(asset.provider, this.assets.world), models: [] }; this.groups.set(asset.provider, group); }
       const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
-        transform: { origin: source.origin, axis: anglesToAxis(source.angles), scale: { x: source.scale, y: source.scale, z: source.scale } },
+        transform: { origin: weaponViewOrigin(source), axis: anglesToAxis(source.angles), scale: { x: source.scale, y: source.scale, z: source.scale } },
         previousOrigin: source.origin, pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 },
         skin: source.skin, color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };

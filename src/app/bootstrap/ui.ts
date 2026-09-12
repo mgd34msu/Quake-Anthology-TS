@@ -1,11 +1,11 @@
-import type { RenderCommand, SceneCamera } from "../../contracts/render.ts";
+import type { Rect, RenderCommand, SceneCamera } from "../../contracts/render.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
 import { KeyCode } from "../../input/key-codes.ts";
 import { tokenizeCommand } from "../../core/commands/index.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
-import { SeatHudMessages, SeatWeaponWheel, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
+import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
 import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
 import { bindWindowResolution } from "../../ui/settings/services.ts";
@@ -125,6 +125,12 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         this.messages.notify(this.local.player.seat.id, source.event.text, true, starts, duration);
       }
     }
+  }
+
+  weaponOcclusion(context: UiDrawContext, gameVisible: boolean): readonly Rect[] {
+    if (!gameVisible || this.local.input.focus.kind !== "game") return [];
+    const player = this.simulation.playerUi(this.local.player.actor);
+    return hudVitalOccupiedRects(context, player.ammo === null ? 2 : 3, this.preferences.values.hudScale);
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,

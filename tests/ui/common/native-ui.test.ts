@@ -14,7 +14,7 @@ import { SeatInput } from "../../../src/input/seat.ts";
 import { InputCommandBuilder } from "../../../src/input/user-command.ts";
 import { NativeUiController, defaultUiSkin, loadNativeUiArt, renderUiCommands, uiSkinFont } from "../../../src/ui/common/index.ts";
 import { bindCvarSetting, bindInputSettings, registerSettingsMenus, SeatUiPreferences } from "../../../src/ui/settings/index.ts";
-import { drawCommonHud, emptyHudData, SeatHudMessages, SeatWeaponWheel } from "../../../src/ui/hud/index.ts";
+import { drawCommonHud, hudVitalOccupiedRects, emptyHudData, SeatHudMessages, SeatWeaponWheel } from "../../../src/ui/hud/index.ts";
 import type { WheelItem } from "../../../src/ui/hud/wheel.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { SdlWindow } from "../../../src/platform/sdl.ts";
@@ -183,4 +183,28 @@ test.skipIf(process.env["QUAKE_UI_NATIVE_SMOKE"] !== "1")("SDL menu clicks use t
     ui.draw({ ...context, binding: { ...context.binding, viewport, safeArea: viewport } });
     button(160, 180, true); button(160, 180, false); expect(clicked).toBe(2);
   } finally { router.close(); ui.closeAll(); window.close(); }
+});
+
+test("weapon occlusion follows the actual HUD vital fills at each seat safe area and scale", () => {
+  const owner = createIdentityOwner("hud-weapon-area"), seat = owner.seat(1), base = drawContext(owner, seat, 640);
+  const preferences = new SeatUiPreferences(seat), messages = new SeatHudMessages(seat);
+  for (const scale of [0.75, 1, 1.5]) {
+    const context: UiDrawContext = { ...base, binding: { ...base.binding,
+      safeArea: { x: 672, y: 24, width: 576, height: 432 }, hudScale: 1.25 } };
+    const settings = { ...preferences.values, hudScale: scale, crosshair: false };
+    const vitals = [{ label: "Health", value: 100, warning: false, icon: null }, { label: "Armor", value: 50, warning: false, icon: null }];
+    const commands = drawCommonHud(context, { ...emptyHudData(seat), vitals },
+      { skin: defaultUiSkin(fontId), preferences: settings, messages, camera: null, localize: text => text });
+    const occupied = hudVitalOccupiedRects(context, vitals.length, scale);
+    const fills = commands.flatMap(command => command.kind === "fill" ? [command.rect] : []);
+    expect(occupied).toHaveLength(2);
+    expect(fills).toHaveLength(2);
+    for (const [index, rect] of occupied.entries()) {
+      const fill = fills[index];
+      if (fill === undefined) throw new Error("Missing actual vital background");
+      expect(rect.x).toBeCloseTo(fill.x, 10); expect(rect.y).toBeCloseTo(fill.y, 10);
+      expect(rect.width).toBeCloseTo(fill.width, 10); expect(rect.height).toBeCloseTo(fill.height, 10);
+      expect(rect.x).toBeGreaterThan(context.binding.safeArea.x);
+    }
+  }
 });

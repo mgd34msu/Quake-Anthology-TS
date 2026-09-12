@@ -15,6 +15,20 @@ import type { CarouselPresentation, WheelPresentation } from "./wheel.ts";
 export * from "./wheel.ts";
 export * from "./q1-wheel.ts";
 
+export function hudVitalRects(count: number, scale: number): readonly Rect[] {
+  const width = Math.min(600 / scale / Math.max(1, count), 160), start = 320 - width * count / 2;
+  return Array.from({ length: count }, (_, index) => ({ x: start + index * width, y: 434, width: width - 4, height: 42 }));
+}
+
+export function hudVitalOccupiedRects(context: UiDrawContext, count: number, hudScale: number): readonly Rect[] {
+  const fitted = fitUi(context.binding.safeArea), scale = hudScale * context.binding.hudScale;
+  return hudVitalRects(count, scale).map(rect => ({
+    x: fitted.x + (320 + (rect.x - 320) * scale) * fitted.scale,
+    y: fitted.y + (480 + (rect.y - 480) * scale) * fitted.scale,
+    width: rect.width * scale * fitted.scale, height: rect.height * scale * fitted.scale
+  }));
+}
+
 export interface HudValue { readonly label: string; readonly value: number; readonly icon: ResourceId | null; readonly warning: boolean; }
 export interface HudInventoryItem { readonly id: string; readonly label: string; readonly count: number; readonly selected: boolean; readonly binding: string | null; readonly icon: ResourceId | null; }
 export interface HudPrompt { readonly action: string; readonly binding: string; readonly icon: ResourceId | null; }
@@ -133,10 +147,12 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   }
   if (data.vitals.length > 0) {
     anchor = { x: 320, y: 480 };
-    const width = Math.min(600 / groupScale / data.vitals.length, 160), start = 320 - width * data.vitals.length / 2;
+    const rects = hudVitalRects(data.vitals.length, groupScale);
     for (const [index, vital] of data.vitals.entries()) {
-      const x = start + index * width;
-      fill({ x, y: 434, width: width - 4, height: 42 }, background);
+      const rect = rects[index];
+      if (rect === undefined) continue;
+      const x = rect.x;
+      fill(rect, background);
       if (vital.icon !== null) image(vital.icon, { x: x + 6, y: 442, width: 24, height: 24 });
       text(`${vital.label} ${vital.value}`, x + (vital.icon === null ? 8 : 34), 446, vital.warning ? accent : color);
     }

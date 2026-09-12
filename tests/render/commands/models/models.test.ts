@@ -1,3 +1,6 @@
+import { resolve } from "node:path";
+import { weaponViewCamera } from "../../../../src/app/bootstrap/weapon-view.ts";
+import { createMd5Model, parseMd5Anim, parseMd5Mesh, q1ReplacementSkinSelection } from "../../../../src/formats/q3-model/index.ts";
 import { existsSync } from "node:fs";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../../src/content/archive/index.ts";
@@ -251,4 +254,31 @@ test.skipIf(!existsSync(rereleaseBeamArchive))("rerelease modeled parasite beam 
   const custom = prepareSceneEntity(beam, { camera, timeSeconds: 0.1, options: () => ({ modelBeam: { segmentLength: 50 } }) });
   expect(custom.attachments.map(segment => segment.entity.transform.origin.x)).toEqual([25, 62.5]);
   expect(custom.attachments.map(segment => segment.entity.transform.scale.x)).toEqual([1, 0.5]);
+});
+
+const rereleaseGunArchive = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
+test.skipIf(!existsSync(rereleaseGunArchive))("Q1 replacement MD5 gun retains source FRONT winding; ordinary MD5 retains BACK", async () => {
+  const mesh = await asset(rereleaseGunArchive, "progs/v_shot2.md5mesh", "q1");
+  const animation = await asset(rereleaseGunArchive, "progs/v_shot2.md5anim", "q1");
+  const original = await asset(rereleaseGunArchive, "progs/v_shot2.mdl", "q1");
+  const model = createMd5Model(parseMd5Mesh(new TextDecoder().decode(mesh.bytes)), parseMd5Anim(new TextDecoder().decode(animation.bytes)));
+  const replacement = { ...model, skinSelection: q1ReplacementSkinSelection(model, parseMdl(original.bytes)) };
+  const prepared = prepareSceneEntity(entity(replacement, mesh.resource, "q1"), { camera, timeSeconds: 0, options: () => ({ viewModel: true }) });
+  expect(prepared.surfaces.length).toBeGreaterThan(0);
+  expect(prepared.surfaces.every(surface => surface.cull === "front")).toBe(true);
+  const ordinary = prepareSceneEntity(entity(model, mesh.resource, "q1"), { camera, timeSeconds: 0 });
+  expect(ordinary.surfaces.every(surface => surface.cull === "back")).toBe(true);
+});
+
+test("weapon HUD framing preserves world camera, viewport and horizontal scale", () => {
+  const source: SceneCamera = { ...camera, projection: perspectiveProjection(90, 73.73979529168804, 16384) };
+  expect(weaponViewCamera(source, [])).toBe(source);
+  const framed = weaponViewCamera(source, [{ x: 120, y: 434, width: 400, height: 42 }]);
+  expect(framed.viewport).toBe(source.viewport);
+  expect(framed.axis).toBe(source.axis);
+  expect(framed.origin).toBe(source.origin);
+  expect(framed.projection[0]).toBe(source.projection[0]);
+  expect(framed.projection[5]).toBe(source.projection[5]);
+  expect(framed.projection[9]).toBeCloseTo(-46 / 480, 8);
+  expect(source.projection[9]).toBe(0);
 });

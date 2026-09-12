@@ -146,7 +146,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal) })) };
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
     surfaces.push({ name, entity, options, transform: entity.transform, image, localGeometry, geometry,
-      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" ? "front" : "back",
+      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? "front" : "back",
       alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
       translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
   }

@@ -1,10 +1,11 @@
+import { weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { SceneEntity, SceneLight } from "../../contracts/scene.ts";
-import type { RenderOperation } from "../../contracts/render.ts";
+import type { RenderOperation, SceneCamera } from "../../contracts/render.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
@@ -83,15 +84,15 @@ export class ApplicationWorldScene {
       const asset = await this.assets.model(source.content, source.path);
       const axis = anglesToAxis(source.angles);
       if (asset.model.kind === "brush-model") {
-        if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform: { origin: source.origin, axis }, animationFrame: source.frame });
+        if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform: { origin: weaponViewOrigin(source), axis }, animationFrame: source.frame });
         else {
           if (asset.brushScene === null) throw new Error(`Brush model ${source.path} has no prepared scene`);
-          brushModels.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: source.origin, axis }, frame: source.frame });
+          brushModels.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: weaponViewOrigin(source), axis }, frame: source.frame });
         }
         continue;
       }
       const entity: SceneEntity = { actor: source.actor, resource: asset.resource, model: asset.model,
-        transform: { origin: source.origin, axis, scale: { x: source.scale, y: source.scale, z: source.scale } }, previousOrigin: source.previousOrigin ?? source.origin,
+        transform: { origin: weaponViewOrigin(source), axis, scale: { x: source.scale, y: source.scale, z: source.scale } }, previousOrigin: source.previousOrigin ?? source.origin,
         pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 }, skin: source.skin,
         color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
@@ -131,7 +132,7 @@ export class ApplicationWorldScene {
     };
   }
 
-  view(input: WorldViewInput, operations: readonly RenderOperation[], shadowLights: readonly SceneLight[], infrared: boolean): ReturnType<WorldScene["prepareView"]> {
+  view(input: WorldViewInput, operations: readonly RenderOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
     input = { ...input, inlineModels: this.inlineModels, ...this.styles() };
 
     if (shadowLights.length > 0) {
@@ -140,8 +141,9 @@ export class ApplicationWorldScene {
         profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
     }
-    const batches = [...this.groups.values()].flatMap(group => group.renderer.prepare(group.entities, input,
-      entity => ({ ...group.options.get(entity), infrared })));
+    const batches = [...this.groups.values()].flatMap(group => group.entities.flatMap(entity => group.renderer.prepare([entity],
+      group.options.get(entity)?.viewModel === true ? { ...input, camera: weaponCamera } : input,
+      current => ({ ...group.options.get(current), infrared }))));
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame }));
     return this.assets.world.prepareView({ ...input, operations: [...brushes, { kind: "draw", batches }, ...operations] });
   }
