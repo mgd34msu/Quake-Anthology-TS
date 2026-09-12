@@ -1144,7 +1144,7 @@ export class SharedSimulation implements Simulation {
         emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event }); return this.events.emit(content, { kind: "q1-composition", event }); },
         selectedPlayer: actor => { const player = this.requirePlayer(actor), life = this.q1Characters.get(player.actor)?.presentation.life;
           return { deadFlag: life === "dying" ? 1 : life === "dead" ? 2 : life === "respawnable" ? 3 : (this.combat.read(actor)?.health ?? 0) > 0 ? 0 : 2,
-            isBot: false, viewAngles: player.viewAngles, viewOffset: this.q1Characters.get(player.actor)?.presentation.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
+            isBot: this.botServices.isBot(actor), viewAngles: player.viewAngles, viewOffset: this.q1Characters.get(player.actor)?.presentation.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
             waterType: player.waterType === -3 || player.waterType === 32 ? "water" : player.waterType === -4 || player.waterType === 16 ? "slime" : player.waterType === -5 || player.waterType === 8 ? "lava" : "empty",
             waterLevel: player.waterLevel === 3 ? 3 : player.waterLevel === 2 ? 2 : player.waterLevel === 1 ? 1 : 0,
             teleportUntil: player.state.kind === "q1-netquake" ? player.state.teleportTimeSeconds : 0 }; },
@@ -1470,6 +1470,7 @@ export class SharedSimulation implements Simulation {
 
   prepareBotClient(client: ClientId): OwnedActor {
     this.assertOpen();
+    if (this.source.kind === "q1") return this.requirePlayer(this.admitPlayer(client).actor).actor;
     if (this.source.kind === "q2") {
       const admitted = this.admitPlayer(client), entity = this.source.game.entity(admitted.actor);
       if (entity === null) throw new Error("Bot admission lost its shared source entity");
@@ -1605,7 +1606,7 @@ export class SharedSimulation implements Simulation {
       else player.state = state;
     }
     if (previous.x !== player.viewAngles.x || previous.y !== player.viewAngles.y || previous.z !== player.viewAngles.z)
-      this.events.emit(this.recipe.map.entities.content, { kind: "view-reset", actor: player.actor.id, angles: player.viewAngles });
+      this.events.emit(this.recipe.map.entities.content, { kind: "view-reset", reason: "source", actor: player.actor.id, angles: player.viewAngles });
     return undefined;
   }
 
@@ -1911,7 +1912,7 @@ export class SharedSimulation implements Simulation {
       player.bounds = player.standingBounds; player.viewHeight = 26; player.animation = character.animation;
     }
     if (link) this.bodies.link(player.actor);
-    this.events.emit(this.recipe.map.entities.content, { kind: "view-reset", actor, angles: change.angles });
+    this.events.emit(this.recipe.map.entities.content, { kind: "view-reset", reason: change.kind, actor, angles: change.angles });
     return undefined;
   }
 
@@ -2279,6 +2280,10 @@ export class SharedSimulation implements Simulation {
   }
   get sourceEntityText(): string { return this.options.world.entities; }
 
+  q2WeaponSource(): { readonly game: Q2EntityServices; readonly weapons: Q2Weapons } | null {
+    if (this.selectedArsenal !== null) return this.selectedArsenal.family === "q2" && this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
+    return this.source.kind === "q2" ? this.source : null;
+  }
   q2Source(): Extract<SourceRuntime, { readonly kind: "q2" }> | null { return this.source.kind === "q2" ? this.source : null; }
   q1Source() { return this.source.kind === "q1" ? this.source : null; }
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }

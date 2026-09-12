@@ -106,7 +106,7 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
   | { readonly kind: "q1-level"; readonly event: Q1IntermissionResult }
   | { readonly kind: "q2"; readonly event: Q2PresentationEvent }
   | { readonly kind: "q2-weapon"; readonly event: Q2WeaponEvent }
-  | { readonly kind: "view-reset"; readonly actor: ActorId; readonly angles: Vec3 }
+  | { readonly kind: "view-reset"; readonly reason: "spawn" | "teleport" | "freeze" | "source"; readonly actor: ActorId; readonly angles: Vec3 }
   | { readonly kind: "q2-composition"; readonly event: Q2CompositionEvent }
   | { readonly kind: "q2-rerelease"; readonly event: Q2RereleaseEvent }
   | { readonly kind: "q2-player"; readonly event: Q2PlayerEvent }

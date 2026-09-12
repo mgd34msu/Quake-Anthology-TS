@@ -1,5 +1,5 @@
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
-import { createQ2BotWorld } from "./bot-q2-world.ts";
+import { createSharedBotWorld } from "./bot-world.ts";
 import type { SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
@@ -24,6 +24,7 @@ import type { SimulationPresentationEvent } from "./types.ts";
 
 /** Stable source imports are installed before the game and bound before bot admission. */
 export class SimulationBotServices {
+  isBot(actor: ActorId): boolean { return this.transport?.isBot(actor) ?? false; }
   get configuration(): CvarRegistry | null { return this.transport?.game.options.cvars ?? null; }
   private director: SourceBotDirector | null = null;
   private transport: ApplicationBots | null = null;
@@ -80,23 +81,32 @@ export class ApplicationBots {
   readonly population: SharedBotPopulation;
   readonly source: Q3SourceRuntime | null;
   readonly game: SourceBotGame;
-  private readonly q2: ReturnType<typeof createQ2BotWorld> | null;
+  private readonly shared: ReturnType<typeof createSharedBotWorld> | null;
   private readonly connections = new Map<number, BotConnection>();
   private readonly snapshots = new Map<number, readonly number[]>();
   private elapsedMilliseconds = 0;
   private closed = false;
 
   constructor(readonly options: ApplicationBotsOptions) {
+    const error = botAdmissionError(options.simulation);
+    if (error !== null) throw new Error(error);
     const source = options.simulation.q3Source();
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
     this.source = source;
     if (source === null && options.configuration === undefined) throw new Error("Shared bot configuration requires the application console registry");
-    this.q2 = source === null && options.configuration !== undefined ? createQ2BotWorld({ simulation: options.simulation, cvars: options.configuration,
+    this.shared = source === null && options.configuration !== undefined ? createSharedBotWorld({ simulation: options.simulation, cvars: options.configuration,
       actor: client => this.connections.get(client)?.actor.id ?? null,
       connect: (client, restart) => this.director.connect(client, restart), drop: client => { this.disconnect(client); },
+      begin: client => { const actor = this.connections.get(client)?.actor.id;
+        if (actor === undefined) throw new Error("Bot begin has no actual player");
+        const player = options.simulation.movementPlayer(actor);
+        if (player === null) throw new Error("Bot begin has no actual view");
+        this.resetView(actor, player.viewAngles);
+        this.resetWeapon(actor);
+      },
       print: options.print, console: options.insertConsoleCommand,
       message: (client, text) => { for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text); } }) : null;
-    const game = source === null ? this.q2?.game : q3BotGame(source, options.insertConsoleCommand);
+    const game = source === null ? this.shared?.game : q3BotGame(source, options.insertConsoleCommand);
     if (game === undefined) throw new Error("Bot world projection is unavailable");
     this.game = game;
     this.director = new SourceBotDirector({ files: options.files, entities: source?.options.entities ?? options.simulation.sourceEntityText,
@@ -167,8 +177,8 @@ export class ApplicationBots {
   private encodeCommand(client: number, command: UserCommand): Pick<ActorCommand, "command" | "arsenal"> {
     const connection = this.connection(client), player = this.options.simulation.movementPlayer(connection.actor.id);
     if (player === null) throw new Error("Admitted bot has no selected movement player");
-    if (this.q2 !== null) return { command: selectedQ3Command(command, player, this.elapsedMilliseconds),
-      arsenal: { provider: player.arsenal.provider, weapon: this.q2.knowledge.resolveWeapon(client, command.weapon), useHoldable: false } };
+    if (this.shared !== null) return { command: selectedQ3Command(command, player, this.elapsedMilliseconds),
+      arsenal: { provider: player.arsenal.provider, weapon: this.shared.knowledge.resolveWeapon(client, command.weapon), useHoldable: false } };
     if (this.source === null) throw new Error("Bot source observation is unavailable");
     if (player.arsenal.state.kind !== "q3") throw new Error("Q3 brain weapon inventory requires a selected arsenal projection");
     const sourcePlayer = this.source.pool.at(client).client;
@@ -209,8 +219,23 @@ export class ApplicationBots {
     ring.assignAcknowledgement(ring.acknowledge + 1);
     return ring.lookupMasked(ring.acknowledge) || null;
   }
+  private resetView(actor: ActorId, angles: import("../../../contracts/math.ts").Vec3): void {
+    if (!this.options.simulation.actors.isLive(actor)) return;
+    const entry = this.director.roster().find(entry => entry.actor.id.equals(actor));
+    if (entry === undefined) return;
+    Object.assign(entry.state.viewangles, angles); Object.assign(entry.state.idealViewangles, angles);
+  }
+  private resetWeapon(actor: ActorId): void {
+    if (!this.options.simulation.actors.isLive(actor)) return;
+    const entry = this.director.roster().find(entry => entry.actor.id.equals(actor));
+    if (entry === undefined) return;
+    const observed = this.game.entity(entry.sourceClient).player;
+    if (observed === null) throw new Error("Bot spawn has no actual arsenal observation");
+    entry.state.weaponNum = observed.state.weapon;
+  }
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const event of events) {
+      if (event.kind === "view-reset" && this.shared !== null) { this.resetView(event.actor, event.angles); if (event.reason === "spawn") this.resetWeapon(event.actor); continue; }
       if (event.kind !== "q3-source" || event.event.kind !== "server-command") continue;
       for (const [slot, connection] of this.connections) {
         if (event.event.client !== -1 && event.event.client !== slot) continue;
@@ -222,6 +247,7 @@ export class ApplicationBots {
     if (this.closed) throw new Error("Bot transport is closed");
     this.elapsedMilliseconds = elapsedMilliseconds;
     this.snapshots.clear();
+    this.shared?.refresh();
     const sourceTime = this.options.automaticFrame === true && this.source !== null && this.source.host.cvars.variableValue("dedicated") !== 0
       ? this.source.level.time : timeMilliseconds;
     return this.population.frame({ timeMilliseconds: sourceTime, elapsedMilliseconds });
@@ -229,6 +255,7 @@ export class ApplicationBots {
   clients(): readonly ApplicationBotClient[] {
     return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable, userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot) }));
   }
+  isBot(actor: ActorId): boolean { return [...this.connections.values()].some(connection => connection.actor.id.equals(actor)); }
   actor(client: ClientId): ActorId | null {
     const connection = this.connections.get(client.slot);
     return connection?.client.id.equals(client) ? connection.actor.id : null;
@@ -272,4 +299,14 @@ export function openApplicationBotLog(filename: string): BotLogOpenResult {
       close: () => result(() => { closeSync(descriptor); }),
     } };
   } catch (error) { return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }; }
+}
+
+export function botAdmissionError(simulation: SharedSimulation): string | null {
+  if (simulation.q3Source() !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
+    ? null : "Q3-map bots require the native Q3 arsenal observation; this selected arsenal is not yet supported";
+  if (simulation.q2WeaponSource() === null) return "Shared bots require an actual native or selected Q2 arsenal";
+  const q1 = simulation.q1Source(), q2 = simulation.q2Source();
+  if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)
+    || q2 !== null && q2.product.match.selection.kind !== "standard") return "Shared bots support standard deathmatch; team and campaign objectives are not yet bound";
+  return q1 !== null || q2 !== null ? null : "Bot world observation is unavailable";
 }

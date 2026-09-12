@@ -64,8 +64,8 @@ function weaponInfo(definition: Q2WeaponDefinition, slot: number, shot: Ballisti
       push: 0, detonation: shot.detonation, bounce: shot.bounce, bounceFriction: 0, bounceStop: 0 } };
 }
 
-export function createQ2BotKnowledge(options: { readonly simulation: Pick<SharedSimulation, "q2Source" | "inventory" | "combat">; readonly actorForClient: (client: number) => ActorId | null }) {
-  const source = options.simulation.q2Source();
+export function createQ2BotKnowledge(options: { readonly simulation: Pick<SharedSimulation, "q2WeaponSource" | "inventory" | "combat">; readonly actorForClient: (client: number) => ActorId | null }) {
+  const source = options.simulation.q2WeaponSource();
   if (source === null) throw new Error("Q2 bot weapon knowledge requires a selected Q2 arsenal");
   const definitions = source.weapons.registeredDefinitions(), entries = new Map<number, Entry>(), uncoveredWeapons: string[] = [];
   for (const [index, definition] of definitions.entries()) {

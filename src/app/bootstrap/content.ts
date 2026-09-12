@@ -1,3 +1,4 @@
+import { resolveLaunchResource } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
@@ -111,6 +112,16 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
     map: recipe.map.geometry.requestedPath, movement: family(recipe.movement), character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
     rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : "standard" };
+}
+
+export async function resolveApplicationTravel(content: LoadedApplicationContent, path: string): Promise<ExecutableRecipe> {
+  const recipe = content.recipe;
+  const geometry = await resolveLaunchResource(content.catalog, content.mounts, { content: recipe.map.geometryContent, path }, "map");
+  const resources = new Map(recipe.resources.map(resource => {
+    const current = resource.id === recipe.map.geometry.id ? geometry : resource;
+    return [current.id, current];
+  }));
+  return { ...recipe, map: { ...recipe.map, geometry }, resources: [...resources.values()] };
 }
 
 async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecipe): Promise<MountedContent> {

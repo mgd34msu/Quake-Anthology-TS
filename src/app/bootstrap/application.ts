@@ -1,6 +1,6 @@
 import { ApplicationQ2Console } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
-import { ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
+import { botAdmissionError, ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
 import type { ApplicationBotClient } from "./simulation/bots.ts";
 import { createApplicationBotNavigation } from "./simulation/navigation.ts";
 import { loadMountedBotAssetFiles } from "../../bots/behavior/index.ts";
@@ -33,7 +33,7 @@ import { ApplicationAssets } from "./assets.ts";
 import { ApplicationAudio } from "./audio.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
-import { applicationOptionsForRecipe, loadApplicationContent } from "./content.ts";
+import { applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommands, LocalInput, LocalPlayer } from "./input.ts";
@@ -152,16 +152,18 @@ export class Application {
 
   private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
     clients: readonly ApplicationBotClient[] = [], restart = false, requested = false): Promise<ApplicationBots | null> {
-    if (simulation.q3Source() === null && simulation.q2Source() === null) return null;
-    if (simulation.q3Source() === null) {
-      if (clients.length === 0 && !requested) return null;
-      if (simulation.options.mode !== "deathmatch" || simulation.q2Source()?.product.match.selection.kind !== "standard") throw new Error("Shared bot observations currently support Q2 deathmatch; co-op and team objectives are not yet bound");
+    if (simulation.q3Source() === null && clients.length === 0 && !requested) return null;
+    const unsupported = botAdmissionError(simulation);
+    if (unsupported !== null) {
+      if (clients.length !== 0 || requested) throw new Error(unsupported);
+      return null;
     }
     const definitions = simulation.q3Source() === null ? content.catalog.product("q3-baseq3").id : content.recipe.map.entities.content;
     const files = await loadMountedBotAssetFiles(await content.forContent(definitions), content.catalog);
     const navigation = await createApplicationBotNavigation({ content, simulation });
+    const configuration = simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
     return new ApplicationBots({ session: this.session, simulation, files, navigation, clients, restart, automaticFrame: true,
-      ...(this.q2Console === null ? {} : { configuration: this.q2Console.cvars }),
+      ...(configuration === undefined ? {} : { configuration }),
       leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
       insertConsoleCommand: text => {
         if (this.sourceCommands === null) throw new Error("Bot console has no source command buffer");
@@ -252,6 +254,14 @@ export class Application {
       } else await this.q2Console.bindCurrent();
       this.sourceCommands = this.q2Console.commands;
       return;
+    }
+    const q1 = this.simulation.q1Source();
+    if (q1 !== null) {
+      const commands = new CommandBuffer({ dialect: "q1-netquake", cvars: q1.cvars,
+        context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
+      commands.register("quit", () => this.requestQuit());
+      for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      q1.cvars.register("bot_minplayers", "0"); this.sourceCommands = commands; return;
     }
     const source = this.simulation.q3Source();
     if (source === null) { this.sourceCommands = null; return; }
@@ -503,13 +513,15 @@ export class Application {
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
     const settings = save === undefined ? null : savedSimulationSettings(save);
     let options = { ...this.options, map: mapResourcePath(map) };
-    const content = await loadApplicationContent(options, save?.recipe);
+    const recipe = save?.recipe ?? await resolveApplicationTravel(this.content, options.map);
+    const content = await loadApplicationContent(options, recipe);
     const previousContent = this.content, previous = this.graphical;
     const q3 = this.simulation.q3Source();
     const previousBotClients = this.bots?.clients() ?? [];
     const preserveBots = initialSourceMilliseconds !== 0 || q3?.gameType !== 2;
     const botClients = preserveBots ? previousBotClients : [];
     const previousBots = this.bots;
+    const q1BotCvars = this.simulation.q1Source()?.cvars.snapshots().filter(variable => variable.name.startsWith("bot_") || variable.name === "g_spSkill");
     const q3Session = q3?.captureSession();
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
@@ -538,6 +550,10 @@ export class Application {
         ...(save === undefined ? { ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
+      const nextQ1 = nextSimulation.q1Source();
+      if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
+        nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
+      }
       const admissions = new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
         const actor = nextSimulation.players().find(actor => nextSimulation.movementPlayer(actor)?.client.equals(client));
@@ -782,8 +798,12 @@ export class Application {
         this.dedicatedConsole?.drain(this.dedicatedCommands);
         this.dedicatedCommands.execute();
       }
-      if (this.bots === null && this.simulation.q2Source() !== null && (this.q2Console?.cvars.variableValue("bot_minplayers") ?? 0) > 0)
-        this.bots = await this.createBots(this.content, this.simulation, [], false, true);
+      const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
+      if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
+        const unsupported = botAdmissionError(this.simulation);
+        if (unsupported === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);
+        else { this.host.print(`${unsupported}\n`); botConfiguration?.set("bot_minplayers", "0", true); }
+      }
       this.elapsed += elapsedMilliseconds;
       const remote = await this.network?.server.poll(performance.now()) ?? [];
       for (const [seat, source] of this.graphical?.q3 ?? []) {

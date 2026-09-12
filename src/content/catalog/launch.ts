@@ -1,7 +1,7 @@
 import type { CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, EquipmentSelection, ExecutableRecipe, ExecutionSelection, LaunchChoice, LaunchSelection, MapSelection, MountId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceRequest } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import { openMountPlan } from "../mounts/index.ts";
-import type { OpenMountOptions } from "../mounts/index.ts";
+import type { MountedContent, OpenMountOptions } from "../mounts/index.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import type { InstalledCatalog } from "./index.ts";
 import { EQUIPMENT_PROVIDERS, equipmentProviders, equipmentResources, equipmentTiming, validateEquipment } from "./equipment.ts";
@@ -56,6 +56,17 @@ function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
 
 function mountPath(mount: ContentMount): string { return mount.kind === "archive" ? mount.archivePath : mount.rootPath; }
 
+export async function resolveLaunchResource(catalog: InstalledCatalog, mounted: MountedContent,
+  request: ResourceRequest, kind: "map" | "artifact"): Promise<ResolvedResourceReference> {
+  const resolved = await mounted.resolve(request.path);
+  if (resolved === null) throw new Error(`Required resource is missing: ${request.content}/${request.path}`);
+  const allowed = await catalog.mountsFor(request.content);
+  if (!allowed.some(mount => mountPath(mount) === mountPath(resolved.provenance.mount))) {
+    throw new Error(`Required ${kind} is absent from its selected content and base: ${request.content}/${request.path}`);
+  }
+  return resolved;
+}
+
 async function orderForContent(catalog: InstalledCatalog, plan: ResolvedMountPlan, content: ContentId): Promise<readonly MountId[]> {
   const first = await catalog.mountsFor(content);
   const byPath = new Map(plan.mounts.map(mount => [mountPath(mount), mount.identity.id]));
@@ -97,12 +108,7 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   using mounted = await openMountPlan(plan, options.mounts);
   const resources = new Map<ResolvedResourceReference["id"], ResolvedResourceReference>();
   const resolveResource = async (request: ResourceRequest, kind: "map" | "artifact"): Promise<ResolvedResourceReference> => {
-    const resolved = await mounted.resolve(request.path);
-    if (resolved === null) throw new Error(`Required resource is missing: ${request.content}/${request.path}`);
-    const allowed = await options.catalog.mountsFor(request.content);
-    if (!allowed.some(mount => mountPath(mount) === mountPath(resolved.provenance.mount))) {
-      throw new Error(`Required ${kind} is absent from its selected content and base: ${request.content}/${request.path}`);
-    }
+    const resolved = await resolveLaunchResource(options.catalog, mounted, request, kind);
     resources.set(resolved.id, resolved);
     return resolved;
   };
