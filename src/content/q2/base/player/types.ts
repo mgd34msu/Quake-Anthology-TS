@@ -56,6 +56,7 @@ export type Q2PlayerEvent =
   | { readonly kind: "chase"; readonly actor: ActorId; readonly target: ActorId | null };
 
 export interface Q2PlayerHooks {
+  weaponState?(actor: ActorId): Q2CharacterWeapon | null;
   movement(actor: ActorId): Q2PlayerMovement;
   setMovement(actor: ActorId, change: Q2PlayerMovementChange): undefined;
   emit(event: Q2PlayerEvent): undefined;

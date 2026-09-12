@@ -11,6 +11,7 @@ import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/ind
 import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../content/catalog/equipment.ts";
 import { monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
+import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
 import { applicationPreset } from "./content.ts";
 import type { ApplicationOptions } from "./options.ts";
 
@@ -20,6 +21,10 @@ export interface StartupSelectionRow { readonly id: StartupSelectionField; reado
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
 const baseProduct = (family: GameFamily): string => family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
+function baseQ2ArsenalPair(map: CatalogProduct, weapon: CatalogProduct): boolean {
+  return [map, weapon].every(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2"
+    && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease"));
+}
 function unavailable(product: CatalogProduct): string | null {
   const state = product.availability;
   return state.kind === "installed" ? null : state.kind === "unresolved" ? state.reason : `Missing: ${state.requirements.join(", ")}`;
@@ -158,7 +163,7 @@ export class StartupSelectionModel {
       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
       row("weapons", "Weapons", [nativeWeapons, ...this.baseChoices().map(option => {
         const product = this.catalog.product(option.id), current = this.product("product");
-        return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id
+        return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseQ2ArsenalPair(current, product)
           ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
       })]), row("enemies", "Monsters", [nativeMonsters, ...monsters]),
       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
@@ -225,9 +230,10 @@ export class StartupSelectionModel {
     selections = { ...selections, campaign: { kind: "selected", value: campaign } };
     if (this.values.weapons !== "native") {
       const product = this.catalog.require(this.values.weapons);
-      if (product.expectation.family === this.product("product").expectation.family && product.id !== base.map.entities.content)
+      if (product.expectation.family === this.product("product").expectation.family && product.id !== base.map.entities.content
+        && !baseQ2ArsenalPair(this.product("product"), product))
         throw new Error("Selecting another edition's weapons within the same game family is not implemented; choose campaign weapons or a different family.");
-      selections = { ...selections, weapons: { kind: "selected", value: [{ provider: `${product.expectation.family}:official`, content: product.id }] } };
+      selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
     }
     if (this.values.enemies !== "native") {
       const source = monsterSources.find(source => this.values.enemies.startsWith(`${source.provider}/`));

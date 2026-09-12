@@ -1,3 +1,7 @@
+import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
+import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
+import { encodeSaveImage, decodeSaveImage } from "../../../src/persistence/index.ts";
+import { SaveReader, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import type { Q2Edition } from "../../../src/content/q2/foundation/host.ts";
 import { expect, test } from "bun:test";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
@@ -292,5 +296,114 @@ for (const edition of armorEditions) test(`Q3 application bridge resolves ${edit
       expect(simulation.combat.read(victim.actor.id)?.health).toBe(100 - amount + saved);
       expect(simulation.combat.read(victim.actor.id)?.armor).toEqual({ kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0, powerArmor: { kind: "screen", cells: 100 - saved } });
     }
+  } finally { simulation.close(); await content.close(); }
+}, 30000);
+
+for (const mapEdition of armorEditions) test(`base1 ${mapEdition} map runs the other Q2 edition arsenal with native supplies and fresh save continuation`, async () => {
+  const weaponEdition: Q2Edition = mapEdition === 'classic' ? 'rerelease' : 'classic';
+  const command = parseApplicationCommand(['--game', `q2-${mapEdition}-baseq2`, '--map', 'base1', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'singleplayer']);
+  if (command.kind !== 'run') throw new Error('Expected Q2 launch');
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: 'selected', value: [
+    { provider: 'q2:official', content: catalog.require(`q2-${weaponEdition}-baseq2`).id },
+  ] } } });
+  const reference = recipe.weapons[0]; if (reference === undefined) throw new Error('Missing selected source');
+  expect(reference.provider).toBe(`q2:weapons/${weaponEdition}/baseq2`);
+  const content = await loadApplicationContent(command.options, recipe), identity = createIdentityOwner(`same-family-${mapEdition}`), client = identity.client(0, 0);
+  const options: Parameters<typeof createSimulation>[0] = { identity, recipe, world: content.world, mounts: content.mounts, skill: 1, mode: 'singleplayer', seed: 17, maxClients: 1, playerIdentity: value => ({ seat: value.slot, socialId: '' }) };
+  const simulation = createSimulation(options);
+  const step = (world: ReturnType<typeof createSimulation>, actor: ActorId, owner: ClientId, sequence: number, attack: boolean, turns = mapEdition === 'rerelease' ? 4 : 1) => {
+    for (let turn = 0; turn < turns; turn++) world.step({ elapsedMilliseconds: mapEdition === 'rerelease' ? 25 : 100, commands: [{
+    actor, source: { kind: 'remote-client', client: owner }, sequence: sequence * 4 + turn,
+    command: world.movementPlayer(actor)?.profile.kind === 'q2-classic' ? { kind: 'q2-classic', milliseconds: mapEdition === 'rerelease' ? 25 : 100, angleShorts: [0, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse: 0, lightLevel: 0 }
+      : { kind: 'q2-rerelease', milliseconds: mapEdition === 'rerelease' ? 25 : 100, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, buttons: Number(attack), serverFrame: sequence * 4 + turn },
+    arsenal: { provider: reference.provider, weapon: null, useHoldable: false },
+  }] });
+  };
+  try {
+    const actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor), map = simulation.q2Source(), selected = simulation.q2WeaponSource();
+    if (player === null || map === null || selected === null) throw new Error('Missing actual Q2 player or source');
+    expect(selected.game).not.toBe(map.game); expect(selected.game.options.edition).toBe(weaponEdition); expect(map.game.options.edition).toBe(mapEdition);
+    expect(map.weapons.states.has(actor)).toBe(false); expect(selected.weapons.states.has(actor)).toBe(true);
+    expect(simulation.playerUi(actor).activeWeapon).toBe('q2:weapon_blaster');
+    step(simulation, actor, client, 0, false);
+    const clock = new SaveReader(decodeCheckpointValue(simulationProviderCheckpoint(simulation.checkpoint(), 'world:simulation').bytes)).field('selectedWeaponSource').field('frame');
+    expect(clock.field('frame').integer()).toBe(weaponEdition === 'rerelease' ? 4 : 1);
+    expect(selected.game.host.frameSeconds()).toBe(weaponEdition === 'rerelease' ? 0.025 : 0.1);
+    for (let frame = 1; frame < 4; frame++) step(simulation, actor, client, frame, false);
+    const shotgun = [...map.game.entities.values()].find(entity => entity.classname === 'weapon_shotgun');
+    if (shotgun?.touch == null) throw new Error('Missing authored base1 shotgun');
+    const shells = simulation.inventory.count(actor, 'q2:ammo_shells');
+    shotgun.touch(shotgun, map.game, { self: shotgun.actor, other: actor, plane: null, surface: null });
+    expect(simulation.inventory.count(actor, 'q2:ammo_shells')).toBe(shells + 10);
+    expect(simulation.inventory.count(actor, 'q2:weapon_shotgun')).toBe(1);
+    for (let frame = 4; frame < 20; frame++) step(simulation, actor, client, frame, false);
+    expect(simulation.playerUi(actor).activeWeapon).toBe('q2:weapon_shotgun');
+    simulation.inventory.give(player.actor, 'q2:item_silencer', 1);
+    expect(map.items.use(player.actor, 'q2:item_silencer', map.game)).toBe(true);
+    expect(selected.weapons.silencerShots(actor)).toBe(30); expect(map.weapons.silencerShots(actor)).toBe(0);
+    const nativePlayer = map.game.entity(actor);
+    if (nativePlayer === null) throw new Error('Missing native map player');
+    let observedKick = false;
+    for (let frame = 20; frame < 30; frame++) {
+      step(simulation, actor, client, frame, true);
+      const weapon = map.players.context(nativePlayer, map.game).weaponState(), actual = selected.weapons.states.get(actor);
+      expect(weapon?.kickAngles).toEqual(actual?.kickAngles);
+      expect(weapon?.kickOrigin).toEqual(actual?.kickOrigin);
+      if (weapon !== null && Math.hypot(weapon.kickAngles.x, weapon.kickAngles.y, weapon.kickAngles.z) > 0) observedKick = true;
+    }
+    expect(observedKick).toBe(true);
+    expect(simulation.inventory.count(actor, 'q2:ammo_shells')).toBeLessThan(shells + 10);
+    expect(selected.weapons.silencerShots(actor)).toBeLessThan(30);
+    selected.weapons.resetSilencer(actor);
+    for (let frame = 30; frame < 40; frame++) step(simulation, actor, client, frame, true);
+    expect(map.monsters.capture().perception.noises.some(noise => noise.actor.slot === actor.slot)).toBe(true);
+    let grenades = [...map.game.entities.values()].find(entity => entity.classname === 'ammo_grenades');
+    if (grenades === undefined) {
+      // If this map edition lacks authored grenades, exercise an explicitly synthetic native item spawn.
+      grenades = map.game.create('ammo_grenades'); expect(map.items.spawn(grenades, map.game)).toBe(true);
+    }
+    const grenadesBefore = simulation.inventory.count(actor, 'q2:ammo_grenades');
+    map.items.touch(grenades, map.game, actor);
+    expect(simulation.inventory.count(actor, 'q2:ammo_grenades')).toBe(grenadesBefore + 5);
+    expect(simulation.inventory.entries(actor).find(entry => entry.item === 'q2:ammo_grenades')?.capacity).toBe(50);
+    expect(simulation.playerUi(actor).items.find(item => item.id === 'q2:ammo_grenades')?.owned).toBe(true);
+    simulation.inventory.give(player.actor, 'q2:item_silencer', 1);
+    expect(map.items.use(player.actor, 'q2:item_silencer', map.game)).toBe(true);
+    simulation.inventory.give(player.actor, 'q2:weapon_hyperblaster', 1); simulation.inventory.give(player.actor, 'q2:ammo_cells', 20);
+    expect(simulation.requestWeapon(actor, { provider: reference.provider, item: 'q2:weapon_hyperblaster' })).toBe(true);
+    for (let frame = 40; frame < 55; frame++) step(simulation, actor, client, frame, false);
+    let sourceActor = [...selected.game.entities.values()].find(entity => entity.classname === 'bolt');
+    for (let frame = 55; frame < 63 && sourceActor === undefined; frame++) {
+      step(simulation, actor, client, frame, true, 1);
+      sourceActor = [...selected.game.entities.values()].find(entity => entity.classname === 'bolt');
+    }
+    if (sourceActor === undefined) throw new Error('Actual selected hyperblaster has no live source projectile');
+    expect(map.players.context(nativePlayer, map.game).weaponState()?.loopSound).toBe(selected.weapons.states.get(actor)?.loopSound);
+    expect(map.players.context(nativePlayer, map.game).weaponState()?.loopSound).not.toBe('');
+    expect(simulation.actors.sourceOf(sourceActor.actor.id)?.provider).toBe(reference.provider);
+    const save = decodeSaveImage(encodeSaveImage(simulation.checkpoint())), restoredIdentity = createIdentityOwner(`restored-same-family-${mapEdition}`), restoredClient = restoredIdentity.client(0, 0);
+    const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [restoredClient], restore: save });
+    try {
+      const restoredActor = restored.players()[0], restoredSource = restored.q2WeaponSource();
+      if (restoredActor === undefined || restoredSource === null) throw new Error('Missing restored selected source');
+      expect(restoredSource.game.options.provider).toBe(reference.provider);
+      expect(restoredSource.weapons.silencerShots(restoredActor)).toBe(selected.weapons.silencerShots(actor));
+      expect(restoredSource.weapons.silencerShots(restoredActor)).toBeGreaterThan(0);
+      const restoredProjectile = restored.actors.resolveSaved(sourceActor.actor.id);
+      if (restoredProjectile === null) throw new Error('Missing restored actual hyperblaster projectile');
+      expect(restored.actors.sourceOf(restoredProjectile.id)).toEqual(simulation.actors.sourceOf(sourceActor.actor.id));
+      expect(restored.bodies.read(restoredProjectile.id)?.origin).toEqual(simulation.bodies.read(sourceActor.actor.id)?.origin);
+      expect(restored.bodies.read(restoredProjectile.id)?.velocity).toEqual(simulation.bodies.read(sourceActor.actor.id)?.velocity);
+      expect(restored.actors.sourceOf(restored.actors.referenceSaved({ slot: sourceActor.actor.id.slot, generation: sourceActor.actor.id.generation }))?.provider).toBe(reference.provider);
+      for (let frame = 64; frame < 68; frame++) { step(simulation, actor, client, frame, true); step(restored, restoredActor, restoredClient, frame, true); }
+      expect(restored.playerUi(restoredActor)).toEqual(simulation.playerUi(actor));
+      expect(restoredSource.weapons.capture(restoredSource.game).states.map(state => state.state)).toEqual(selected.weapons.capture(selected.game).states.map(state => state.state));
+      expect(restoredSource.game.host.now()).toBe(selected.game.host.now());
+      const projectiles = (world: ReturnType<typeof createSimulation>, source: NonNullable<typeof selected>) => [...source.game.entities.values()].map(entity => ({
+        address: world.actors.sourceOf(entity.actor.id), classname: entity.classname, origin: world.bodies.read(entity.actor.id)?.origin, velocity: world.bodies.read(entity.actor.id)?.velocity,
+      }));
+      expect(projectiles(restored, restoredSource)).toEqual(projectiles(simulation, selected));
+    } finally { restored.close(); }
   } finally { simulation.close(); await content.close(); }
 }, 30000);

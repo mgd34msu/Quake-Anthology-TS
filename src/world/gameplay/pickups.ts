@@ -33,7 +33,7 @@ export function previewPickupGrants(inventory: readonly InventoryEntry[], plan: 
   }
   const ammo = plan.ammo.map(give), accepted = ammo.some(grant => plan.acceptance === "positive" ? grant.given > 0 : grant.given !== 0);
   const weapons = plan.weapons;
-  return { accepted, ammo, weapons: !accepted ? [] : weapons.kind === "grant" ? weapons.grants.map(give)
+  return { accepted, ammo, weapons: !accepted ? [] : weapons.kind === "grant" ? weapons.grants.map(grant => ammo.find(receipt => receipt.item === grant.item) ?? give(grant))
     : ammo.filter(receipt => weapons.items.includes(receipt.item)) };
 }
 
@@ -108,7 +108,7 @@ export class SharedPickupAdmission implements PickupAdmission {
     this.requireEntries(actor.id, [...weapons, ...ammo.map(grant => grant.item)]);
     const receipt = this.giveAmmo(actor, ammo);
     if (!receipt.some(grant => grant.given > 0)) return false;
-    for (const weapon of weapons) this.options.inventory.give(actor, weapon, 1);
+    for (const weapon of weapons) if (!ammo.some(grant => grant.item === weapon)) this.options.inventory.give(actor, weapon, 1);
     const select = selection.when === "always" || receipt.some(grant => grant.before === 0 && grant.given > 0);
     this.options.weaponGranted(actor, weapons, select ? selection.mode : "never");
     return true;

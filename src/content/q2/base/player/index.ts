@@ -109,7 +109,8 @@ export class Q2Players implements Q2SpawnModule {
     if (state === undefined) throw new Error("Q2 player has not been admitted");
     return { entity, game, state, movement: this.hooks.movement(entity.actor.id), rules: this.rules, hooks: this.hooks, items: this.items, weapons: this.weapons,
       powerups: () => this.items.playerPowerups(entity.actor.id),
-      weaponState: () => { const weapon = this.weapons.states.get(entity.actor.id); return weapon === undefined ? null : {
+      weaponState: () => { if (this.hooks.weaponState !== undefined) return this.hooks.weaponState(entity.actor.id);
+        const weapon = this.weapons.states.get(entity.actor.id); return weapon === undefined ? null : {
         q2Name: weapon.weapon, ammo: weapon.weapon === null ? null : this.weapons.definition(weapon.weapon).ammo, kickAngles: weapon.kickAngles, kickOrigin: weapon.kickOrigin, loopSound: weapon.loopSound }; },
       environmentDamage: (amount, means, flags) => {
         const world = game.host.worldActor();
