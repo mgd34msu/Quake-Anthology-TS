@@ -1,4 +1,4 @@
-import { statSchema } from "../../../src/content/q3/base/shared/definitions.ts";
+import { statSchema, PersistentIndex } from "../../../src/content/q3/base/shared/definitions.ts";
 import { teleportPlayer } from "../../../src/content/q3/base/game/misc.ts";
 import { SimulationBotServices } from "../../../src/app/bootstrap/simulation/bots.ts";
 import { expect, test } from "bun:test";
@@ -89,6 +89,7 @@ retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsen
     world.combat.setHealth(target.actor, 100);
     world.inventory.consume(bot.actor, "q2:ammo_bullets", world.inventory.count(bot.actor.id, "q2:ammo_bullets"));
     let shotgunHit = false;
+    const hitsBefore = native.client.ps.persistant.get(PersistentIndex.PERS_HITS);
     expect(transport.game.entity(1).player?.state.weapon).toBeGreaterThan(0);
     expect(transport.game.entity(1).player?.state.weapon).not.toBe(target.client.ps.weapon);
     const shells = world.inventory.count(bot.actor.id, "q2:ammo_shells");
@@ -103,6 +104,9 @@ retail("Q3 map bots pursue mapped Q2 supplies and fire the actual selected arsen
     }
     expect(world.combat.read(human.actor)?.health).toBeLessThan(100);
     expect(shotgunHit).toBe(true);
+    expect(native.client.ps.persistant.get(PersistentIndex.PERS_HITS)).toBeGreaterThan(hitsBefore);
+    expect(target.client.lastHurtClient).toBe(bot.sourceClient);
+    expect(target.client.lastHurtMod).toBe(0);
     expect(world.inventory.count(bot.actor.id, "q2:ammo_shells")).toBeLessThan(shells);
     expect(selectedShotgun).toBe(true);
     const firedWeapon = arsenal.weapons.states.get(bot.actor.id)?.weapon;
@@ -162,6 +166,35 @@ retail("Q2 map bots select and fire actual Q1 weapons and collect mapped source 
     expect(source.items.use(bot.actor, "q2:item_quad", source.game)).toBe(true);
     transport.game.knowledge.updateInventory(bot.state);
     expect(bot.state.inventory[BotInventory.QUAD]).toBe(1);
+    world.inventory.give(bot.actor, "q2:item_enviro", 1);
+    expect(source.items.use(bot.actor, "q2:item_enviro", source.game)).toBe(true);
+    transport.game.knowledge.updateInventory(bot.state);
+    expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+    const powerups = source.items.playerPowerups(bot.actor.id), readNow = source.game.host.now;
+    try {
+      source.game.host.now = () => Math.min(powerups.quadUntil, powerups.enviroUntil) - 0.001;
+      transport.game.knowledge.updateInventory(bot.state);
+      expect(bot.state.inventory[BotInventory.QUAD]).toBe(1);
+      expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+      source.game.host.now = () => Math.max(powerups.quadUntil, powerups.enviroUntil);
+      transport.game.knowledge.updateInventory(bot.state);
+      expect(bot.state.inventory[BotInventory.QUAD]).toBe(0);
+      expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(0);
+    } finally { source.game.host.now = readNow; }
+    await application.step(100);
+    world.inventory.give(bot.actor, "q2:item_breather", 1);
+    expect(source.items.use(bot.actor, "q2:item_breather", source.game)).toBe(true);
+    transport.game.knowledge.updateInventory(bot.state);
+    expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+    const breathing = source.items.playerPowerups(bot.actor.id);
+    try {
+      source.game.host.now = () => breathing.enviroUntil;
+      transport.game.knowledge.updateInventory(bot.state);
+      expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+      source.game.host.now = () => breathing.breatherUntil;
+      transport.game.knowledge.updateInventory(bot.state);
+      expect(bot.state.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(0);
+    } finally { source.game.host.now = readNow; }
     const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id), nativeHuman = source.game.entity(human.actor);
     if (nativeHuman === null) throw new Error("Missing actual target");
     source.players.teleportPlayer(nativeBot, source.game, start, { x: 0, y: 180, z: 0 });
@@ -299,6 +332,23 @@ retail("Q1 deathmatch bots use selected Q2 weapons through application commands 
     await application.step(100);
     expect(brain.viewangles.y).toBe(respawnView); expect(brain.idealViewangles.y).toBe(respawnView);
     await application.step(100);
+    const mapPlayer = source.game.player(actor), transport = transports[0];
+    if (mapPlayer === null || transport === undefined) throw new Error("Missing map-owned Q1 powerup recipient");
+    source.game.givePowerup(mapPlayer, "quad", 0.25); source.game.givePowerup(mapPlayer, "suit", 0.25);
+    transport.game.knowledge.updateInventory(brain);
+    expect(brain.inventory[BotInventory.QUAD]).toBe(1);
+    expect(brain.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+    const sourceTime = source.game.time, expires = source.game.powerupExpires(actor, "quad");
+    try {
+      source.game.time = expires - 0.001;
+      transport.game.knowledge.updateInventory(brain);
+      expect(brain.inventory[BotInventory.QUAD]).toBe(1);
+      expect(brain.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(1);
+      source.game.time = expires;
+      transport.game.knowledge.updateInventory(brain);
+      expect(brain.inventory[BotInventory.QUAD]).toBe(0);
+      expect(brain.inventory[BotInventory.ENVIRONMENTSUIT]).toBe(0);
+    } finally { source.game.time = sourceTime; }
     const configuration = world.botServices.configuration; if (configuration === null) throw new Error("Missing bot configuration");
     expect(configuration).toBe(source.cvars); configuration.set("bot_thinktime", "150", true);
     await application.changeLevel("dm5");

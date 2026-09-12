@@ -78,7 +78,9 @@ export interface DamageDecision {
   readonly appliedDamage: number;
   readonly reaction: "none" | "pain" | "death";
   /** Source savings, including protection credited as armor; never infer these from spent inventory. */
-  readonly feedback?: { readonly kind: "q2"; readonly powerArmor: number; readonly armor: number; readonly blood: number; readonly knockback: number };
+  readonly feedback?:
+    | { readonly kind: "q2"; readonly powerArmor: number; readonly armor: number; readonly blood: number; readonly knockback: number }
+    | { readonly kind: "q3"; readonly knockback: number; readonly battlesuit: boolean };
   /** Source TeamHealthDam runs after armor/momentum commit and before health is read again. */
   readonly continuation?: { readonly kind: "q1-health"; readonly damage: number; readonly take: number };
 }

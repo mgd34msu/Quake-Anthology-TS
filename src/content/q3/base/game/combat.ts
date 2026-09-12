@@ -145,7 +145,6 @@ export function q3DamageFeedback(context: CombatContext, call: Q3DamageCall, dec
   const { target, owner, direction, flags, methodOfDeath } = call;
   const nativeOwner = owner instanceof GameEntity ? owner : null;
   const ownerClient = nativeOwner?.client ?? null;
-  const ownerNumber = nativeOwner?.s.number ?? ENTITYNUM_NONE;
   const client = target.client;
   let incoming = Math.trunc(call.amount);
   if (ownerClient !== null && owner !== target) {
@@ -171,13 +170,35 @@ export function q3DamageFeedback(context: CombatContext, call: Q3DamageCall, dec
     context.entities.addEvent(target, EntityEvent.EV_POWERUP_BATTLESUIT);
     if ((flags & DamageFlags.RADIUS) !== 0 || methodOfDeath === 19) return;
   }
+  q3CommittedDamageFeedback(context, target, nativeOwner, direction, knockback, methodOfDeath, decision);
+}
+
+export function q3ForeignDamageFeedback(context: CombatContext, target: GameEntity, owner: GameEntity | null, decision: DamageDecision): void {
+  const feedback = decision.feedback;
+  if (feedback?.kind !== "q3") return;
+  const incoming = decision.request.direction;
+  const direction = incoming.x === 0 && incoming.y === 0 && incoming.z === 0 ? null : normalize3(incoming);
+  const client = target.client;
+  if (feedback.knockback !== 0 && client !== null && direction !== null && client.ps.pmTime === 0) {
+    client.ps.pmTime = Math.min(200, Math.max(50, Math.imul(feedback.knockback, 2))); client.ps.pmFlags |= 64;
+  }
+  if (feedback.battlesuit) context.entities.addEvent(target, EntityEvent.EV_POWERUP_BATTLESUIT);
+  q3CommittedDamageFeedback(context, target, owner, direction, feedback.knockback,
+    decision.request.attack.cause.kind === "q3" ? decision.request.attack.cause.meansOfDeath : 0, decision);
+}
+
+function q3CommittedDamageFeedback(context: CombatContext, target: GameEntity, nativeOwner: GameEntity | null,
+  direction: Vec3 | null, knockback: number, methodOfDeath: number, decision: DamageDecision): void {
+  const ownerClient = nativeOwner?.client ?? null;
+  const ownerNumber = nativeOwner?.s.number ?? ENTITYNUM_NONE;
+  const client = target.client;
   if (decision.appliedDamage === 0 && decision.mutations.every(mutation => mutation.kind !== "armor")) return;
   let armor = 0;
   for (const mutation of decision.mutations) {
     if (mutation.kind === "armor" && mutation.before.kind !== "none" && mutation.after.kind !== "none") armor += mutation.before.points - mutation.after.points;
   }
   const previousHealth = decision.mutations.find(mutation => mutation.kind === "health")?.before ?? target.health;
-  if (ownerClient !== null && target !== owner && previousHealth > 0 && target.s.eType !== EntityType.ET_MISSILE && target.s.eType !== EntityType.ET_GENERAL) {
+  if (ownerClient !== null && target !== nativeOwner && previousHealth > 0 && target.s.eType !== EntityType.ET_MISSILE && target.s.eType !== EntityType.ET_GENERAL) {
     const persistent = ownerClient.ps.persistant;
     persistent.set(PersistentIndex.PERS_HITS, persistent.get(PersistentIndex.PERS_HITS) + (nativeOwner !== null && onSameTeam(context, target, nativeOwner) ? -1 : 1));
     const previousArmor = (client?.ps.stats.get(statSchema(context.product).armor) ?? 0) + armor;

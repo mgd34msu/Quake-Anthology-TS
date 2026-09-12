@@ -14,9 +14,10 @@ import { EntityPool, initGameEntity, setOrigin } from "../../../../src/content/q
 import { Q3CombatBridge } from "../../../../src/content/q3/base/combat-bridge.ts";
 import { Q3WorldAdapter } from "../../../../src/content/q3/base/world-adapter.ts";
 import { damage, DamageFlags } from "../../../../src/content/q3/base/game/combat.ts";
+import { GameFlags } from "../../../../src/content/q3/base/game/state.ts";
 import { logAccuracyHit } from "../../../../src/content/q3/base/game/weapon.ts";
 import { MissileRuntime } from "../../../../src/content/q3/base/game/missile.ts";
-import { GameType, Powerup, Team, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
+import { EntityType, GameType, Powerup, Team, PersistentIndex, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 
@@ -85,6 +86,64 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   damage(bridge.context, victim, attacker, attacker, { x: 1, y: 0, z: 0 }, null, 100, DamageFlags.RADIUS, 7);
   expect(combat.read(victim.actor.id)?.health).toBe(83);
   expect(pool.clientAt(1).ps.externalEvent & 255).toBe(62);
+  attacker.s.eType = victim.s.eType = EntityType.ET_PLAYER;
+  const sourceAttacker = pool.clientAt(0), sourceVictim = pool.clientAt(1);
+  sourceVictim.ps.powerups.set(Powerup.PW_BATTLESUIT, 0);
+  const foreignHit = (amount: number, flags = 0, radius = false) => combat.apply({
+    attack: { sequence: 12, time: { kind: "seconds", value: 0.1 }, attacker: attacker.actor.id,
+      inflictor: attacker.actor.id, weapon: "q2:weapon_shotgun", weaponProvider: "q2:official",
+      combatProvider: "q3:combat", inventoryProvider: "q3:inventory", movementProvider: "q3:movement",
+      cause: { kind: "q2", meansOfDeath: 2, damageFlags: flags } },
+    target: victim.actor.id, amount, knockback: 2, direction: { x: 2, y: 0, z: 0 },
+    point: victim.r.currentOrigin, normal: { x: 0, y: 0, z: 0 }, delivery: radius ? "radius" : "direct",
+  });
+  sourceVictim.ps.stats.set(statSchema("baseq3").armor, 0);
+  sourceVictim.ps.pmTime = 0;
+  const hits = sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS);
+  const blood = sourceVictim.damageBlood, knockback = sourceVictim.damageKnockback;
+  foreignHit(8);
+  expect(victim.health).toBe(75);
+  expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 1);
+  expect(sourceVictim.damageBlood).toBe(blood + 8);
+  expect(sourceVictim.damageKnockback).toBe(knockback + 8);
+  expect(sourceVictim.ps.pmTime).toBe(50);
+  expect(sourceVictim.lastHurtClient).toBe(attacker.s.number);
+  expect(sourceVictim.lastHurtMod).toBe(0);
+  expect(sourceVictim.damageFrom).toEqual({ x: 1, y: 0, z: 0 });
+  sourceVictim.ps.pmTime = 0;
+  const velocity = bodies.read(victim.actor.id)?.velocity.x;
+  foreignHit(8, 8);
+  expect(sourceVictim.ps.pmTime).toBe(0);
+  expect(sourceVictim.damageKnockback).toBe(knockback + 8);
+  expect(bodies.read(victim.actor.id)?.velocity.x).toBe(velocity);
+  sourceVictim.ps.stats.set(statSchema("baseq3").armor, 100);
+  const armorBlood = sourceVictim.damageBlood, armorSaved = sourceVictim.damageArmor;
+  foreignHit(1);
+  expect(sourceVictim.damageBlood).toBe(armorBlood);
+  expect(sourceVictim.damageArmor).toBe(armorSaved + 1);
+  expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 3);
+  victim.flags |= GameFlags.GODMODE;
+  sourceVictim.ps.powerups.set(Powerup.PW_BATTLESUIT, 10000);
+  sourceVictim.ps.pmTime = 0;
+  const event = sourceVictim.ps.externalEvent;
+  foreignHit(30);
+  expect(sourceVictim.ps.pmTime).toBe(60);
+  expect(sourceVictim.ps.externalEvent).toBe(event);
+  expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 3);
+  victim.flags &= ~GameFlags.GODMODE;
+  sourceVictim.ps.pmTime = 0;
+  foreignHit(100, 1, true);
+  expect(sourceVictim.ps.pmTime).toBe(200);
+  expect(sourceVictim.ps.externalEvent & 255).toBe(62);
+  expect(sourceVictim.damageBlood).toBe(armorBlood);
+  expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 3);
+  sourceVictim.ps.powerups.set(Powerup.PW_BATTLESUIT, 0);
+  sourceVictim.ps.pmTime = 0;
+  bridge.context.dispatch({ target: victim, source: attacker, owner: attacker, direction: null, point: null,
+    amount: 1, flags: DamageFlags.NO_KNOCKBACK, methodOfDeath: 7 }, () => foreignHit(8));
+  expect(sourceVictim.ps.pmTime).toBe(50);
+  expect(sourceVictim.lastHurtMod).toBe(0);
+  expect(sourceAttacker.ps.persistant.get(PersistentIndex.PERS_HITS)).toBe(hits + 4);
   const context = bridge.context;
   if (context.product !== "baseq3") throw new Error("Unexpected product");
   const missiles = new MissileRuntime({ world, bodies, actors, previousTime: 0, combat: context, missionpack: null });

@@ -234,24 +234,30 @@ export function createQ3CombatPolicy(options: PolicyOptions<Q3CombatContext>): C
       damage = Math.trunc(Math.imul(damage, maximum) / 100);
     }
     const mutations: DamageMutation[] = [];
+    const knockback = context.noKnockback || target.noKnockback === true || flags.noKnockback ? 0 : Math.min(damage, 200);
+    let battlesuit = false;
+    const result = (applied: number, reaction: DamageDecision["reaction"]): DamageDecision => ({
+      ...decision(request, mutations, applied, reaction), feedback: { kind: "q3", knockback, battlesuit },
+    });
     if (context.player && !context.noKnockback && target.noKnockback !== true && !flags.noKnockback) {
-      addImpulse(request, mutations, request.direction, Math.fround(Math.fround(Math.fround(context.knockbackScale) * Math.fround(Math.min(damage, 200))) / 200), "binary32");
+      addImpulse(request, mutations, request.direction, Math.fround(Math.fround(Math.fround(context.knockbackScale) * Math.fround(knockback)) / 200), "binary32");
     }
     if (!flags.noProtection) {
       const checkTeam = context.product === "baseq3" || (!context.juiced && !flags.noTeamProtection);
-      if ((checkTeam && !selfDamage(request) && sameTeam(target, attacker) && !context.friendlyFire) || context.proximityProtected || target.invulnerable) return decision(request, mutations, 0, "none");
+      if ((checkTeam && !selfDamage(request) && sameTeam(target, attacker) && !context.friendlyFire) || context.proximityProtected || target.invulnerable) return result(0, "none");
     }
     if (context.battlesuit) {
-      if (request.delivery === "radius" || context.falling) return decision(request, mutations, 0, "none");
+      battlesuit = true;
+      if (request.delivery === "radius" || context.falling) return result(0, "none");
       damage = Math.trunc(damage * 0.5);
     }
     if (selfDamage(request)) damage = Math.trunc(damage * 0.5);
     damage = Math.max(1, damage);
     const take = (damage - saveArmor(request, target, damage, mutations, options.armor)) | 0;
-    if (take === 0) return decision(request, mutations, 0, "none");
+    if (take === 0) return result(0, "none");
     const health = Math.max(-999, (target.health - take) | 0);
     mutations.push({ kind: "health", before: target.health, after: health });
-    return decision(request, mutations, take, health <= 0 ? "death" : "pain");
+    return result(take, health <= 0 ? "death" : "pain");
   } };
 }
 

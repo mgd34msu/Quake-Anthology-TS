@@ -103,7 +103,7 @@ export class Q2CharacterActor {
   recordDamage(decision: DamageDecision): undefined {
     this.entity.lastAttack = decision.request.attack;
     if (decision.reaction === "death") return undefined;
-    const feedback = decision.feedback;
+    const feedback = decision.feedback?.kind === "q2" ? decision.feedback : undefined;
     this.state.damageBlood += feedback?.blood ?? decision.appliedDamage;
     this.state.damageArmor += feedback?.armor ?? 0; this.state.damagePowerArmor += feedback?.powerArmor ?? 0;
     this.state.damageKnockback += feedback?.knockback ?? decision.request.knockback; this.state.damageFrom = decision.request.point;

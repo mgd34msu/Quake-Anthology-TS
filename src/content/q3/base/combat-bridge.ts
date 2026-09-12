@@ -7,7 +7,7 @@ import type { Q3EntityRecords } from "./records.ts";
 import type { ActorSpatialQueries, ServerWorld } from "./world.ts";
 import type { EntityPool } from "./game/entities.ts";
 import type { CombatContext, DamageDiagnostic, Q3DamageCall } from "./game/combat.ts";
-import { q3DamageFeedback } from "./game/combat.ts";
+import { q3DamageFeedback, q3ForeignDamageFeedback } from "./game/combat.ts";
 import { GameEntity } from "./game/state.ts";
 import type { UseParticipant, DamageParticipant } from "./game/state.ts";
 import { useActor } from "./game/use-participant.ts";
@@ -95,7 +95,13 @@ export class Q3CombatBridge {
   /** The shared GameplayAuthority beforeReaction hook calls this before dispatching actor callbacks. */
   beforeReaction(decision: DamageDecision): void {
     const call = this.currentCall;
-    if (call !== null && call.target.actor.id.equals(decision.request.target)) q3DamageFeedback(this.context, call, decision);
+    if (decision.request.attack.cause.kind === "q3" && call !== null && call.target.actor.id.equals(decision.request.target)) {
+      q3DamageFeedback(this.context, call, decision);
+      return;
+    }
+    const target = this.host.records.nativeByActor(decision.request.target);
+    const attacker = decision.request.attack.attacker;
+    if (target !== null) q3ForeignDamageFeedback(this.context, target, attacker === null ? null : this.host.records.nativeByActor(attacker), decision);
   }
 
   /** Register this once under the selected combat provider; victims retain their own armor policy. */

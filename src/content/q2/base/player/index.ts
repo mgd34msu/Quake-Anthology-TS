@@ -476,7 +476,7 @@ export class Q2Players implements Q2SpawnModule {
     if (state === undefined) return undefined;
     entity.lastAttack = decision.request.attack;
     if (decision.reaction === "death") return undefined;
-    const feedback = decision.feedback;
+    const feedback = decision.feedback?.kind === "q2" ? decision.feedback : undefined;
     state.damageBlood += feedback?.blood ?? decision.appliedDamage;
     state.damageArmor += feedback?.armor ?? 0;
     state.damagePowerArmor += feedback?.powerArmor ?? 0;

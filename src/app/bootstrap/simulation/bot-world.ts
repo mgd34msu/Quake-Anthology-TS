@@ -1,3 +1,4 @@
+import { BotInventory } from "../../../bots/behavior/q3/ai-definitions.ts";
 import { observeQ1Supply, previewQ1Supply } from "../../../content/q1/foundation/pickups.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
@@ -117,7 +118,18 @@ export function createSharedBotWorld(options: Options) {
     get entityCount() { return nextEntity; },
     random: { random: () => source.game.host.random(), crandom: () => source.game.host.random() * 2 - 1 },
     clock: { get time() { return Math.trunc(simulation.timeSeconds * 1000); }, startTime: 0, get intermissionTime() { return source.kind === "q2" ? source.players.intermission.kind === "playing" ? 0 : Math.trunc(source.players.intermission.started * 1000) : source.game.intermission === null ? 0 : Math.trunc((source.game.intermission.exitAfter - 5) * 1000); } },
-    memory: new GameMemory(() => 0, options.print), knowledge: knowledge.knowledge,
+    memory: new GameMemory(() => 0, options.print), knowledge: { ...knowledge.knowledge, updateInventory: state => {
+      knowledge.knowledge.updateInventory(state);
+      const actor = actorForId(state.client);
+      if (source.kind === "q2") {
+        const powers = actor === null ? null : source.items.playerPowerups(actor), now = source.game.host.now();
+        state.inventory[BotInventory.QUAD] = Number(powers !== null && powers.quadUntil > now);
+        state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(powers !== null && (powers.breatherUntil > now || powers.enviroUntil > now));
+      } else {
+        state.inventory[BotInventory.QUAD] = Number(actor !== null && source.game.powerupExpires(actor, "quad") > source.game.time);
+        state.inventory[BotInventory.ENVIRONMENTSUIT] = Number(actor !== null && source.game.powerupExpires(actor, "suit") > source.game.time);
+      }
+    } },
     entity: number => {
       const actor = actorForId(number), entity = metadata(actor), state = new EntityState(); state.number = number;
       const body = actor === null ? null : simulation.bodies.read(actor), movement = actor === null ? null : simulation.movementPlayer(actor);
