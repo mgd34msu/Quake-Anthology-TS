@@ -1,3 +1,4 @@
+import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/identity.ts";
@@ -19,6 +20,6 @@ export interface SelectedArsenal {
   handoff(actor: ActorId): PrimaryWeaponHandoff;
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult;
   remove(actor: ActorId): undefined;
-  ui(actor: ActorId): Pick<PlayerUi, "activeWeapon" | "ammo" | "items">;
+  ui(actor: ActorId, source: ProviderReference): Pick<PlayerUi, "activeWeapon" | "ammo" | "items" | "weaponStatus" | "arsenalWarning">;
   view(actor: ActorId): { readonly path: string; readonly frame: number } | null;
 }

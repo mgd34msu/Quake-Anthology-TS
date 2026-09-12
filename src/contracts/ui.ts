@@ -1,3 +1,5 @@
+import type { ContentId, ProviderReference, ResourceRequest } from "./content.ts";
+import type { ItemId } from "./gameplay.ts";
 /* Client module calls follow Q2 rerelease game.h and Q3 cg_public.h/ui_public.h.
  * Copyright (C) id Software. GPL-2.0-or-later. */
 import type { PresentationSelection, ResourceId } from "./content.ts";
@@ -208,3 +210,22 @@ export interface Q3UiExports {
   readonly drawConnectScreen: (overlay: boolean) => undefined;
   readonly hasUniqueCdKey: () => boolean;
 }
+
+export type ArsenalAmmoWarning = "none" | "low" | "empty";
+export interface WeaponHudStatus {
+  readonly source: ProviderReference;
+  readonly item: ItemId;
+  readonly label: string;
+  readonly ammo: { readonly kind: "unmetered" } | {
+    readonly kind: "finite";
+    readonly item: ItemId;
+    readonly count: number;
+    readonly hasAmmoToStart: boolean;
+    readonly low: boolean;
+  };
+}
+
+export type WeaponHudIcon =
+  | { readonly kind: "wad-picture"; readonly resource: ResourceRequest; readonly lump: string }
+  | { readonly kind: "image"; readonly resource: ResourceRequest }
+  | { readonly kind: "shader"; readonly content: ContentId; readonly name: string };

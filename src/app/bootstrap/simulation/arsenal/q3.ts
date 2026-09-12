@@ -1,3 +1,5 @@
+import { q3WeaponStatus, q3ArsenalWarning } from "./weapon-status.ts";
+import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/identity.ts";
@@ -166,9 +168,10 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     return undefined;
   }
 
-  ui(actor: ActorId): Pick<PlayerUi, "activeWeapon" | "ammo" | "items"> {
+  ui(actor: ActorId, source: ProviderReference): Pick<PlayerUi, "activeWeapon" | "ammo" | "items" | "weaponStatus" | "arsenalWarning"> {
     const arsenal = this.read(actor), weapon = arsenal.state.kind === "q3" ? q3WeaponItem(arsenal.state.sourceWeapon) : null;
-    return { activeWeapon: arsenal.activeWeapon,
+    return { weaponStatus: q3WeaponStatus(arsenal.activeWeapon, this.options.product, item => this.options.inventory.count(actor, item), source),
+      arsenalWarning: q3ArsenalWarning(this.options.product, item => this.options.inventory.count(actor, item)), activeWeapon: arsenal.activeWeapon,
       ammo: weapon?.ammo == null ? null : { item: weapon.ammo, count: this.options.inventory.count(actor, weapon.ammo) },
       items: Q3_WEAPON_ITEMS.filter(entry => this.options.product === "missionpack" || entry.weapon <= 10).map(entry => {
         const count = entry.ammo === null ? null : this.options.inventory.count(actor, entry.ammo);

@@ -1,0 +1,91 @@
+import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
+import type { ProviderReference, ResourceRequest } from "../../contracts/content.ts";
+import type { ItemId } from "../../contracts/gameplay.ts";
+import type { WeaponHudIcon } from "../../contracts/ui.ts";
+import { q2BaseItemIcons } from "../q2/foundation/items.ts";
+import { Q3_WEAPON_ITEMS } from "../q3/foundation/arsenal.ts";
+import { ItemType } from "../q3/base/shared/definitions.ts";
+import { itemList } from "../q3/base/shared/items.ts";
+import type { ProductExpectation } from "./products.ts";
+
+export interface WeaponHudIcons {
+  readonly weapon: WeaponHudIcon | null;
+  readonly selectedWeapon: WeaponHudIcon | null;
+  readonly ammo: WeaponHudIcon | null;
+}
+
+// id1 sbar pictures and rerelease id1/wwheel.txt slots, including the axe slot.
+const q1Pictures: readonly { readonly item: ItemId; readonly classic: string | null; readonly wheel: string; readonly ammo: string | null }[] = [
+  { item: "q1:weapon/axe", classic: null, wheel: "axe", ammo: null },
+  { item: "q1:weapon/shotgun", classic: "shotgun", wheel: "shotgun1", ammo: "sb_shells" },
+  { item: "q1:weapon/supershotgun", classic: "sshotgun", wheel: "shotgun2", ammo: "sb_shells" },
+  { item: "q1:weapon/nailgun", classic: "nailgun", wheel: "nail1", ammo: "sb_nails" },
+  { item: "q1:weapon/supernailgun", classic: "snailgun", wheel: "nail2", ammo: "sb_nails" },
+  { item: "q1:weapon/grenadelauncher", classic: "rlaunch", wheel: "rocket1", ammo: "sb_rocket" },
+  { item: "q1:weapon/rocketlauncher", classic: "srlaunch", wheel: "rocket2", ammo: "sb_rocket" },
+  { item: "q1:weapon/lightning", classic: "lightng", wheel: "light", ammo: "sb_cells" },
+];
+
+function image(source: ProviderReference, path: string): WeaponHudIcon {
+  return { kind: "image", resource: { content: source.content, path } };
+}
+function wad(source: ProviderReference, lump: string): WeaponHudIcon {
+  return { kind: "wad-picture", resource: { content: source.content, path: "gfx.wad" }, lump };
+}
+
+export function weaponHudIcons(source: ProviderReference, product: ProductExpectation, item: ItemId): WeaponHudIcons | null {
+  if (product.family === "q1" && product.campaign === "id1" && (product.edition === "classic" || product.edition === "rerelease")) {
+    const pictures = q1Pictures.find(entry => entry.item === item);
+    if (pictures === undefined) return null;
+    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/ww_${pictures.wheel}_1.lmp`) : pictures.classic === null ? null : wad(source, `inv_${pictures.classic}`),
+      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/ww_${pictures.wheel}_2.lmp`) : pictures.classic === null ? null : wad(source, `inv2_${pictures.classic}`),
+      ammo: pictures.ammo === null ? null : wad(source, pictures.ammo) };
+  }
+  if (product.family === "q2" && product.campaign === "baseq2" && (product.edition === "classic" || product.edition === "rerelease")) {
+    const pictures = q2BaseItemIcons(), picture = pictures.find(entry => entry.item === item);
+    const weapon = Q2_BASE_WEAPONS.find(entry => entry.item === item);
+    if (picture === undefined || weapon === undefined) return null;
+    const ammo = pictures.find(entry => entry.item === weapon.ammo);
+    return { weapon: image(source, `pics/${picture.icon}.pcx`), selectedWeapon: image(source, `pics/${picture.icon}.pcx`),
+      ammo: ammo === undefined ? null : image(source, `pics/${ammo.icon}.pcx`) };
+  }
+  if (product.family === "q3" && (product.campaign === "baseq3" || product.campaign === "missionpack")) {
+    const definition = Q3_WEAPON_ITEMS.find(entry => entry.item === item);
+    if (definition === undefined) return null;
+    const items = itemList(product.campaign), weapon = items.find(entry => entry.type === ItemType.IT_WEAPON && entry.tag === definition.weapon);
+    if (weapon === undefined) return null;
+    const ammo = items.find(entry => entry.type === ItemType.IT_AMMO && entry.tag === definition.weapon);
+    const icon = (name: string | null): WeaponHudIcon | null => name === null ? null : { kind: "shader", content: source.content, name };
+    return { weapon: icon(weapon.icon), selectedWeapon: icon(weapon.icon), ammo: icon(ammo?.icon ?? null) };
+  }
+  return null;
+}
+
+
+// Retail missionpack scripts/gfx.shader maps these shader names to these images.
+const teamArenaImages: Readonly<Record<string, string>> = {
+  "icons/iconw_nailgun": "icons/nailgun128.tga", "icons/iconw_chaingun": "icons/chaingun128.tga",
+  "icons/iconw_proxlauncher": "icons/proxmine.tga", "icons/icona_nailgun": "icons/ammo_nailgun.tga",
+  "icons/icona_chaingun": "icons/ammo_chaingun.tga", "icons/icona_proxlauncher": "icons/ammo_proxmine.tga",
+};
+
+export function weaponHudResources(source: ProviderReference, product: ProductExpectation): readonly ResourceRequest[] {
+  const items = product.family === "q1" ? q1Pictures.map(entry => entry.item) : product.family === "q2" ? Q2_BASE_WEAPONS.map(entry => entry.item) : Q3_WEAPON_ITEMS.map(entry => entry.item);
+  const paths = new Set<string>();
+  for (const item of items) {
+    const icons = weaponHudIcons(source, product, item);
+    if (icons === null) continue;
+    for (const icon of [icons.weapon, icons.selectedWeapon, icons.ammo]) {
+      if (icon === null) continue;
+      if (icon.kind === "shader") paths.add(teamArenaImages[icon.name] ?? `${icon.name}.tga`);
+      else paths.add(icon.resource.path);
+    }
+  }
+  if (paths.size > 0 && product.family === "q1") {
+    paths.add("gfx/palette.lmp");
+    if (product.edition === "rerelease") paths.add("wwheel.txt");
+  }
+  if (paths.size > 0 && product.family === "q2") paths.add("pics/colormap.pcx");
+  if (paths.size > 0 && product.family === "q3" && product.campaign === "missionpack") paths.add("scripts/gfx.shader");
+  return [...paths].map(path => ({ content: source.content, path }));
+}

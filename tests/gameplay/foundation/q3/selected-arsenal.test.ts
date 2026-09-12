@@ -1,3 +1,7 @@
+import type { ProviderReference } from "../../../../src/contracts/content.ts";
+import type { ItemId } from "../../../../src/contracts/gameplay.ts";
+import { q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "../../../../src/app/bootstrap/simulation/arsenal/weapon-status.ts";
+import { Q2_BASE_WEAPONS } from "../../../../src/content/q2/foundation/weapons/definitions.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { WeaponStepInput } from "../../../../src/contracts/movement.ts";
@@ -32,9 +36,36 @@ test("selected Q3 arsenal consumes shared inventory for a Q1 actor and restores 
   authority.restore(actor, checkpoint);
   expect(authority.step(attack, undefined)).toEqual(expected);
   expect(shots).toEqual([2]);
-  expect(authority.ui(actor.id).activeWeapon).toBe("q3:weapon/machinegun");
+  expect(authority.ui(actor.id, { provider: "q3:official", content: "q3:classic:baseq3:fixture" }).activeWeapon).toBe("q3:weapon/machinegun");
   expect(authority.view(actor.id)?.path).toBe("models/weapons2/machinegun/machinegun.md3");
+  inventory.configure(actor, { item: "q3:ammo/machinegun", count: -1, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "int32" } });
+  expect(authority.ui(actor.id, { provider: "q3:official", content: "q3:classic:baseq3:fixture" }).weaponStatus?.ammo).toEqual({ kind: "unmetered" });
+  for (let frame = 0; frame < 10; frame++) authority.step(attack, undefined);
+  expect(shots.length).toBeGreaterThan(1);
+  expect(inventory.count(actor.id, "q3:ammo/machinegun")).toBe(-1);
   expect(authority.select(actor.id, "q1:weapon/shotgun")).toBe(false);
   expect(authority.select(actor.id, "q3:weapon/gauntlet")).toBe(true);
   expect(() => authority.step(input, { provider: "q1:official", weapon: null, useHoldable: false })).toThrow("different provider");
+});
+
+test("weapon status distinguishes source ammo thresholds, unmetered weapons and owned Q3 aggregate", () => {
+  const amounts = new Map<ItemId, number>([["q3:weapon/machinegun", 1], ["q3:ammo/machinegun", 0], ["q3:ammo/rocketlauncher", 100]]);
+  const count = (item: ItemId) => amounts.get(item) ?? 0;
+  const source: ProviderReference = { provider: "q3:official", content: "q3:classic:baseq3:fixture" };
+  expect(q3WeaponStatus("q3:weapon/machinegun", "baseq3", count, source)?.ammo).toEqual({ kind: "finite", item: "q3:ammo/machinegun", count: 0, hasAmmoToStart: false, low: false });
+  expect(q3ArsenalWarning("baseq3", count)).toBe("empty");
+  amounts.set("q3:ammo/machinegun", 24);
+  expect(q3ArsenalWarning("baseq3", count)).toBe("low");
+  amounts.set("q3:ammo/machinegun", 25);
+  expect(q3ArsenalWarning("baseq3", count)).toBe("none");
+  expect(q3WeaponStatus("q3:weapon/gauntlet", "baseq3", count, source)?.ammo).toEqual({ kind: "unmetered" });
+  const q2Source: ProviderReference = { provider: "q2:official", content: "q2:classic:baseq2:fixture" };
+  const bfg = Q2_BASE_WEAPONS.find(weapon => weapon.name === "bfg");
+  const blaster = Q2_BASE_WEAPONS.find(weapon => weapon.name === "blaster");
+  if (bfg === undefined || blaster === undefined) throw new Error("Base source weapons absent");
+  amounts.set("q2:ammo_cells", 49);
+  expect(q2WeaponStatus(bfg, count, q2Source)?.ammo).toEqual({ kind: "finite", item: "q2:ammo_cells", count: 49, hasAmmoToStart: false, low: true });
+  amounts.set("q2:ammo_cells", 50);
+  expect(q2WeaponStatus(bfg, count, q2Source)?.ammo).toEqual({ kind: "finite", item: "q2:ammo_cells", count: 50, hasAmmoToStart: true, low: true });
+  expect(q2WeaponStatus(blaster, count, q2Source)?.ammo).toEqual({ kind: "unmetered" });
 });

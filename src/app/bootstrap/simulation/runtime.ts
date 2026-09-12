@@ -1,3 +1,4 @@
+import { q1WeaponStatus, q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "./arsenal/weapon-status.ts";
 import { Q1ClientVisibility } from "../../../world/gameplay/q1-client-visibility.ts";
 import type { Q1ClientEye } from "../../../world/gameplay/q1-client-visibility.ts";
 import { selectedMonsterDefinitions } from "../../../content/catalog/monsters.ts";
@@ -115,7 +116,7 @@ import type { ClientMovementOptions, ClientMovementResult } from "./q3/types.ts"
 import { Q3SourceRuntime, createQ3SourceHost, readQ3MovementState, writeQ3MovementState, writeQ3CharacterAnimation,
   readQ3MovementEnvironment, readQ3ArsenalRuntime, writeQ3ArsenalRuntime, applyQ3CommandPolicy } from "./q3/index.ts";
 import { CommandButtons, MoveFlags, MoveType, PlayerAnimation } from "../../../movement/q3/constants.ts";
-import { q3SourceCommand, selectedQ3Command } from "./q3-commands.ts";
+import { q3SourceCommand, relativeQ3SourceCommand, selectedQ3Command } from "./q3-commands.ts";
 import { q3SourceAnimation, q3SourceTorso, runQ3TorsoOperation } from "../../../movement/q3/animation.ts";
 import { createQ1MonsterMovement } from "../../../movement/q1/index.ts";
 import type { Q1MonsterMovement } from "../../../movement/q1/monsters.ts";
@@ -1191,7 +1192,7 @@ export class SharedSimulation implements Simulation {
           if (client == null) throw new Error("Q3 source command has no actual client");
           const command = q3SourceCommand(input, this.requirePlayer(input.actor), this.sourceSchedulingMilliseconds, client.ps.weapon);
           const delta = client.ps.deltaAngles;
-          return input.source.kind === "local-seat" && delta !== undefined ? { ...command, angles: subtract(command.angles, delta) } : command;
+          return relativeQ3SourceCommand(input.source, command, delta);
         },
         spawnPlayer: (entity, pose) => this.spawnQ3Player(entity, pose), moveClient: (entity, command, options) => this.moveQ3Client(entity, command, options),
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
@@ -1637,7 +1638,7 @@ export class SharedSimulation implements Simulation {
     const pending = this.q3Commands.get(player.actor);
     const converted = selectedQ3Command(player.profile.kind === "q3" ? command : { ...command, angles: add(command.angles, client.ps.deltaAngles) }, player, elapsed);
     const before = pending === undefined ? command : q3SourceCommand(pending, player, this.sourceSchedulingMilliseconds, client.ps.weapon);
-    const sourceBefore = pending?.source.kind === "local-seat" ? { ...before, angles: subtract(before.angles, client.ps.deltaAngles) } : before;
+    const sourceBefore = pending === undefined ? before : relativeQ3SourceCommand(pending.source, before, client.ps.deltaAngles);
     const input: ActorCommand = pending === undefined ? { actor: player.actor.id, sequence: player.lastSequence + 1,
       source: { kind: "bot", provider: this.recipe.map.entities.provider }, command: converted,
       ...(this.selectedArsenal === null ? {} : { arsenal: { provider: this.weaponProvider.provider, weapon: null,
@@ -2348,7 +2349,7 @@ export class SharedSimulation implements Simulation {
       path: gear.path, frame: gear.frame, oldFrame: gear.frame, skin: 0, effects: 0, renderFlags: 0,
       origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), gear.kickOrigin), angles: add(view.angles, { x: gear.kickPitch, y: 0, z: 0 }),
       scale: 1, visible: ui.health > 0 && !player.intermission && player.cutscene === null, viewWeapon: true };
-    return projectWeaponSlot(slot.snapshot(), primary, { weapon, item: { id: weapon.item, label: grapple.selection.mechanic === "q2-lmctf" ? "Hook" : "Grapple", kind: "weapon",
+    return projectWeaponSlot(slot.snapshot(), primary, { source: grapple.selection.source, weapon, item: { id: weapon.item, label: grapple.selection.mechanic === "q2-lmctf" ? "Hook" : "Grapple", kind: "weapon",
       sourceOrdinal: ui.items.length, owned: this.inventory.count(actor, weapon.item) > 0, hasAmmo: true, count: null, warningCount: 0 }, model: gearModel });
   }
   playerUi(actor: ActorId): PlayerUi { return this.slotProjection(actor, null).ui; }
@@ -2359,16 +2360,18 @@ export class SharedSimulation implements Simulation {
   private primaryUi(actor: ActorId): PlayerUi {
     const player = this.requirePlayer(actor), combat = this.combat.read(actor);
     if (combat === null) throw new Error("Player has no combat state");
-    if (this.selectedArsenal !== null) return { health: combat.health, armor: combat.armor, inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor) };
+    if (this.selectedArsenal !== null) return { health: combat.health, armor: combat.armor, inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor, this.weaponProvider) };
     const arsenal = this.arsenal(player), inventory = this.inventory.entries(actor), items: PlayerUiItem[] = [];
-    let ammo: PlayerUi["ammo"] = null;
+    let ammo: PlayerUi["ammo"] = null, weaponStatus: PlayerUi["weaponStatus"] = null;
+    let arsenalWarning: PlayerUi["arsenalWarning"] = "none";
     if (this.source.kind === "q1") {
       for (const [sourceOrdinal, weapon] of [...Q1_WEAPONS, ...this.source.game.registeredWeapons.keys()].entries()) {
         const item = this.source.game.weaponAmmo(weapon), count = item === null ? null : this.inventory.count(actor, item);
         items.push({ id: this.source.game.weaponItem(weapon), label: weapon, kind: "weapon", sourceOrdinal,
           owned: this.inventory.count(actor, this.source.game.weaponItem(weapon)) > 0, hasAmmo: count === null || count >= (this.source.game.registeredWeapons.get(weapon)?.ammoPerShot ?? (weapon === "supernailgun" || weapon === "supershotgun" ? 2 : 1)), count, warningCount: 0 });
       }
-      const weapon = this.source.game.player(actor)?.weapon;
+      const state = this.source.game.player(actor), weapon = state?.weapon;
+      if (state !== null) weaponStatus = q1WeaponStatus(this.source.game, state, this.weaponProvider);
       if (weapon !== undefined) { const item = this.source.game.weaponAmmo(weapon); if (item !== null) ammo = { item, count: this.inventory.count(actor, item) }; }
     } else if (this.source.kind === "q2") {
       for (const [sourceOrdinal, definition] of this.source.items.list().entries()) {
@@ -2379,6 +2382,7 @@ export class SharedSimulation implements Simulation {
           owned: quantity > 0, hasAmmo: count === null || count >= (weapon?.quantity ?? 1), count, warningCount: weapon?.warning ?? 0 });
       }
       const weapon = this.source.weapons.registeredDefinitions().find(value => value.item === arsenal.activeWeapon);
+      weaponStatus = q2WeaponStatus(weapon ?? null, item => this.inventory.count(actor, item), this.weaponProvider);
       if (weapon !== undefined && weapon.ammo !== null) ammo = { item: weapon.ammo, count: this.inventory.count(actor, weapon.ammo) };
     } else if (this.source.kind === "q3") {
       for (const definition of Q3_WEAPON_ITEMS) {
@@ -2388,8 +2392,11 @@ export class SharedSimulation implements Simulation {
       }
       const definition = arsenal.state.kind === "q3" ? q3WeaponItem(arsenal.state.sourceWeapon) : null;
       if (definition?.ammo != null) ammo = { item: definition.ammo, count: this.inventory.count(actor, definition.ammo) };
+      const product = this.source.game.options.product;
+      weaponStatus = q3WeaponStatus(arsenal.activeWeapon, product, item => this.inventory.count(actor, item), this.weaponProvider);
+      arsenalWarning = q3ArsenalWarning(product, item => this.inventory.count(actor, item));
     }
-    return { health: combat.health, armor: combat.armor, activeWeapon: arsenal.activeWeapon, ammo, inventory, items };
+    return { health: combat.health, armor: combat.armor, activeWeapon: arsenal.activeWeapon, ammo, inventory, items, weaponStatus, arsenalWarning };
   }
 
   playerView(actor: ActorId): PlayerView {
@@ -2545,7 +2552,7 @@ export class SharedSimulation implements Simulation {
       if (name !== "use") return undefined;
     }
     if (this.selectedArsenal !== null && (name === "weapnext" || name === "weapprev" || name === "use")) {
-      const ui = this.selectedArsenal.ui(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
+      const ui = this.selectedArsenal.ui(actor, this.weaponProvider), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
       const requested = args.join("").toLowerCase().replaceAll(" ", "");
       const weapon = name === "use" ? owned.find(item => item.id === requested || item.label.replaceAll(" ", "") === requested)
         : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];

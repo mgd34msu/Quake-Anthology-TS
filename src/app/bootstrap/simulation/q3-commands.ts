@@ -1,8 +1,16 @@
+import type { Vec3 } from "../../../contracts/math.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import type { UserCommand as SelectedCommand } from "../../../contracts/protocol.ts";
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import type { MovementPlayer } from "./players.ts";
+
+/** Local input owns absolute aim; source PMove adds its spawn/teleport angle words. */
+export function relativeQ3SourceCommand(source: ActorCommand["source"], command: UserCommand, delta: Vec3): UserCommand {
+  return source.kind === "local-seat" ? { ...command, angles: {
+    x: command.angles.x - delta.x, y: command.angles.y - delta.y, z: command.angles.z - delta.z
+  } } : command;
+}
 
 /** Source client policy receives command units independently of the selected PMove input. */
 export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, milliseconds: number, nativeWeapon: number): UserCommand {

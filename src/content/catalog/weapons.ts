@@ -1,3 +1,4 @@
+import { weaponHudResources } from "./weapon-hud.ts";
 import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
 import type { ProviderReference, ProviderTiming, ResourceRequest } from "../../contracts/content.ts";
 import { precacheQ1World } from "../q1/foundation/precache-world.ts";
@@ -76,10 +77,11 @@ export function selectedWeaponResources(map: ProviderReference, weapons: readonl
     const product = catalog.require(weapon.content).expectation;
     if (weapon.provider.startsWith("q2:") && product.family === "q2" && product.campaign === "baseq2" &&
       (product.edition === "classic" || product.edition === "rerelease"))
-      return q2BaseWeaponPaths(product.edition === "rerelease").map(path => ({ content: weapon.content, path }));
+      return [...q2BaseWeaponPaths(product.edition === "rerelease").map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
+    if (weapon.provider.startsWith("q3:") && product.family === "q3") return weaponHudResources(weapon, product);
     if (!weapon.provider.startsWith("q1:") || product.family !== "q1" || product.campaign !== "id1" ||
       product.edition !== "classic" && product.edition !== "rerelease") return [];
-    return q1BaseWeaponPaths.map(path => ({ content: weapon.content, path }));
+    return [...q1BaseWeaponPaths.map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
   });
 }
 

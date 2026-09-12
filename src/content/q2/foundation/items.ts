@@ -670,3 +670,9 @@ function pickupQ2Armor(item: Extract<Item, { readonly kind: "armor" | "shard" }>
 }
 
 export function createQ2ItemModule(hooks: Q2ItemHooks): Q2ItemModule { return new Q2ItemModule(hooks); }
+
+/** Base item HUD names come from the same descriptors used by native item precaches. */
+export function q2BaseItemIcons(): readonly { readonly item: ItemId; readonly icon: string }[] {
+  return [...ammunition.map(item => ({ item: id(item), icon: item.icon })),
+    ...Q2_BASE_WEAPONS.map(weapon => ({ item: weapon.item, icon: weaponNames[weapon.name].icon }))];
+}

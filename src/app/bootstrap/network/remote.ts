@@ -15,6 +15,7 @@ import { createSceneQueries } from '../../../world/collision/index.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q2ApplicationClientHost, Q2ApplicationGameState, Q2ApplicationPlayer, RemotePresentationAccess } from './types.ts';
+import { q2WeaponStatus } from "../simulation/arsenal/weapon-status.ts";
 import { q2ApplicationLayout } from './q2-layout.ts';
 import { q2EffectFromWire } from './q2-effects.ts';
 import { SelectedMovementPrediction } from '../simulation/prediction.ts';
@@ -163,11 +164,14 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     }
     playerUi(actor: ActorId): PlayerUi {
         const { frame } = this.requirePlayer(actor), weaponModel = this.configs.get(this.layout.models + frame.player.gunindex), weapon = Q2_BASE_WEAPONS.find(item => item.viewModel === weaponModel);
+        const source = this.content.recipe.weapons[0];
+        if (source === undefined) throw new Error("Remote Q2 presentation requires its selected weapon provider");
         const entries = this.inventory.flatMap((count, ordinal) => {
             const label = this.configs.get(this.layout.items + ordinal), definition = Q2_BASE_WEAPONS.find(item => item.name === label?.toLowerCase().replaceAll(' ', ''));
             return count === 0 || definition === undefined ? [] : [{ item: definition.item, count, capacity: count }];
         });
         return { health: readElement(frame.player.stats, 1), armor: readElement(frame.player.stats, 5) === 0 ? { kind: 'none' } : { kind: 'q2', points: readElement(frame.player.stats, 5), normalProtection: 0, energyProtection: 0, item: 'q2:remote-armor', powerArmor: { kind: 'none' } },
+            weaponStatus: q2WeaponStatus(weapon ?? null, () => readElement(frame.player.stats, 3), source), arsenalWarning: "none",
             activeWeapon: weapon?.item ?? null, ammo: weapon?.ammo === undefined || weapon.ammo === null ? null : { item: weapon.ammo, count: readElement(frame.player.stats, 3) }, inventory: entries,
             items: Q2_BASE_WEAPONS.map((definition, sourceOrdinal) => ({ id: definition.item, label: definition.name, kind: 'weapon', sourceOrdinal, owned: entries.some(entry => entry.item === definition.item) || weapon === definition, hasAmmo: definition.ammo === null || readElement(frame.player.stats, 3) >= definition.quantity, count: definition.ammo === null ? null : readElement(frame.player.stats, 3), warningCount: definition.warning })) };
     }

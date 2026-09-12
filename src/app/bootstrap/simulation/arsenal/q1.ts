@@ -1,3 +1,5 @@
+import { q1WeaponStatus } from "./weapon-status.ts";
+import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ArsenalIntent, InventoryEntry, ItemId } from "../../../../contracts/gameplay.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import { q1AmmoPickupSelection, q1WeaponPickupSelection } from "../../../../content/q1/foundation/pickups.ts";
@@ -127,9 +129,9 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     return undefined;
   }
 
-  ui(actor: ActorId): Pick<PlayerUi, "activeWeapon" | "ammo" | "items"> {
+  ui(actor: ActorId, source: ProviderReference): Pick<PlayerUi, "activeWeapon" | "ammo" | "items" | "weaponStatus" | "arsenalWarning"> {
     const player = this.require(actor), game = this.options.game, ammo = game.weaponAmmo(player.weapon);
-    return { activeWeapon: game.weaponItem(player.weapon), ammo: ammo === null ? null : { item: ammo, count: game.host.inventory.count(actor, ammo) },
+    return { weaponStatus: q1WeaponStatus(game, player, source), arsenalWarning: "none", activeWeapon: game.weaponItem(player.weapon), ammo: ammo === null ? null : { item: ammo, count: game.host.inventory.count(actor, ammo) },
       items: WEAPONS.map((weapon, index) => {
         const item = game.weaponItem(weapon), ammo = game.weaponAmmo(weapon), count = ammo === null ? null : game.host.inventory.count(actor, ammo);
         return { id: item, label: weapon, kind: "weapon", sourceOrdinal: index + 1, owned: game.host.inventory.count(actor, item) > 0,

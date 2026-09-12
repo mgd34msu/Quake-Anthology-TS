@@ -1,3 +1,4 @@
+import { relativeQ3SourceCommand } from "../q3-commands.ts";
 import type { ActorId, SeatId } from "../../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../../contracts/session.ts";
 import type { SceneQueries } from "../../../../contracts/scene.ts";
@@ -64,7 +65,9 @@ export class PresentationPredictionAdapter implements PresentationMovementHost {
     const weapon = arsenal.state.kind === "q3" && runtime !== null
       ? resolveQ3ArsenalControls(arsenal, input.arsenal, input.command, runtime.product).requestedWeapon : 0;
     if (input.arsenal !== undefined && (arsenal.state.kind !== "q3" || runtime === null)) throw new Error("Cgame has no selected arsenal owner for this intent");
-    const source = presentationSourceCommand(input, milliseconds, weapon);
+    const presented = presentationSourceCommand(input, milliseconds, weapon), state = this.latest.state;
+    const source = state.kind === "q3" ? relativeQ3SourceCommand(input.source, presented,
+      { x: state.deltaAngleWords[0], y: state.deltaAngleWords[1], z: state.deltaAngleWords[2] }) : presented;
     this.commands.set(source.serverTime, { sequence: input.sequence, timeMilliseconds: source.serverTime, command: copyPredictionCommand(input.command),
       ...(input.arsenal === undefined ? {} : { arsenal: { ...input.arsenal } }) });
     if (this.commands.size > 64) { const first = this.commands.keys().next(); if (!first.done) this.commands.delete(first.value); }

@@ -1,3 +1,5 @@
+import { q2WeaponStatus } from "./weapon-status.ts";
+import type { ProviderReference } from "../../../../contracts/content.ts";
 import { latchQ2WeaponButtons, earlyQ2WeaponTurn, beginQ2WeaponTurn } from "../../../../content/q2/foundation/weapons/turn.ts";
 import type { Q2WeaponTurnState } from "../../../../content/q2/foundation/weapons/turn.ts";
 import { q1Q2PickupSelect } from "../../../../content/composition/q1-q2-supply.ts";
@@ -137,10 +139,10 @@ export class Q2SelectedArsenal implements SelectedArsenal {
     if (state !== undefined && this.options.game.host.actors.isLive(actor)) this.options.weapons.setLoop(this.options.observe(actor).owner, this.options.game, state, "");
     this.options.weapons.states.delete(actor); this.options.weapons.inputs.delete(actor); this.turns.delete(actor);
   }
-  ui(actor: ActorId): Pick<PlayerUi, "activeWeapon" | "ammo" | "items"> {
+  ui(actor: ActorId, source: ProviderReference): Pick<PlayerUi, "activeWeapon" | "ammo" | "items" | "weaponStatus" | "arsenalWarning"> {
     const state = this.require(actor), inventory = this.options.game.host.inventory;
     const active = state.weapon === null ? null : this.options.weapons.definition(state.weapon);
-    return { activeWeapon: active?.item ?? null, ammo: active?.ammo == null ? null : { item: active.ammo, count: inventory.count(actor, active.ammo) },
+    return { weaponStatus: q2WeaponStatus(active, item => inventory.count(actor, item), source), arsenalWarning: "none", activeWeapon: active?.item ?? null, ammo: active?.ammo == null ? null : { item: active.ammo, count: inventory.count(actor, active.ammo) },
       items: Q2_BASE_WEAPONS.map((definition, index) => ({ id: definition.item, label: definition.name, kind: "weapon", sourceOrdinal: index + 1,
         owned: inventory.count(actor, definition.item) > 0, hasAmmo: definition.ammo === null || inventory.count(actor, definition.ammo) >= definition.quantity,
         count: definition.ammo === null ? null : inventory.count(actor, definition.ammo), warningCount: definition.warning })) };
