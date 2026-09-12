@@ -1,5 +1,6 @@
 /* quakec_mg1/lights.qc and quakec_mg3/lights.qc.
  * Copyright (C) 1996-2026 id Software LLC. GPL-2.0-or-later. */
+import { makeStatic } from "../base/map-entities.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1AddonContext } from "./context.ts";
 
@@ -48,9 +49,12 @@ export function registerAddonLights(context: Q1AddonContext): undefined {
   });
   const flame = (_game: typeof game, entity: Q1Actor): undefined => {
     entity.model = entity.classname === "light_torch_small_walltorch" ? "progs/flame.mdl" : "progs/flame2.mdl";
-    entity.frame = entity.classname === "light_flame_large_yellow" ? 1 : 0;
+    game.precacheModel(entity.model);
+    if (entity.classname === "light_flame_large_yellow") entity.frame = 1;
     if ((entity.spawnflags & 4) !== 0) game.setBody(entity, { angles: { x: 180, y: 0, z: 0 } });
-    return game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
+    game.precacheSound("ambience/fire1.wav");
+    game.host.emit({ kind: "ambient", origin: { ...game.body(entity).origin }, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
+    return makeStatic(game, entity);
   };
   for (const classname of ["light_torch_small_walltorch", "light_flame_large_yellow", "light_flame_small_yellow", "light_flame_small_white"]) game.replaceSpawn(classname, flame);
   game.registerSpawn("light_flame_gas", (_game, entity) => {
@@ -58,6 +62,6 @@ export function registerAddonLights(context: Q1AddonContext): undefined {
     const second = game.create("gas_flame"); second.model = entity.model; second.frame = 1;
     game.setOrigin(second, game.body(entity).origin); context.alpha(second, 0.4); return game.link(second);
   });
-  game.registerSpawn("light_candle", (_game, entity) => { entity.model = "progs/candle.mdl"; return undefined; });
+  game.registerSpawn("light_candle", (_game, entity) => { entity.model = game.precacheModel("progs/candle.mdl"); return makeStatic(game, entity); });
   return undefined;
 }

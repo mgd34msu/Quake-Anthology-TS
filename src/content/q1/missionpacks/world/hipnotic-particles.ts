@@ -1,4 +1,5 @@
 /* hip_part.qc / hipholes.qc. Copyright id Software. GPL-2.0-or-later. */
+import { makeStatic } from "../../base/map-entities.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, vadd, vsub, vscale, vectors } from "../../foundation/types.ts";
@@ -46,9 +47,10 @@ export function registerHipnoticParticles(game: Q1EntityServices): undefined {
     number(e, "toggle_state", 1); return g.sound(e, e.text("noise1"), "voice");
   });
   game.registerSpawn("wallsprite", (g, e) => {
-    e.model ||= "progs/s_blood1.spr"; e.solid = "none"; e.movement = "none";
-    let angles = g.body(e).angles; if (angles.y === -1) angles = { x: -90, y: 0, z: 0 }; else if (angles.y === -2) angles = { x: 90, y: 0, z: 0 };
-    return g.setBody(e, { angles, origin: vsub(g.body(e).origin, vscale(vectors(angles).forward, 0.2)) });
+    e.model ||= "progs/s_blood1.spr"; g.precacheModel(e.model); e.solid = "none"; e.movement = "none";
+    let angles = g.body(e).angles; if (angles.x === 0 && angles.y === -1 && angles.z === 0) angles = { x: -90, y: 0, z: 0 }; else if (angles.x === 0 && angles.y === -2 && angles.z === 0) angles = { x: 90, y: 0, z: 0 };
+    g.setBody(e, { angles, origin: vsub(g.body(e).origin, vscale(vectors(angles).forward, 0.2)) });
+    return makeStatic(g, e);
   });
   return undefined;
 }

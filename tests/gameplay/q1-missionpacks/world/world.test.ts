@@ -8,6 +8,7 @@ import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
+import { spawnMapActor } from "../../../../src/content/q1/foundation/spawns.ts";
 import { Q1Foundation } from "../../../../src/content/q1/foundation/index.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../../src/content/q1/foundation/index.ts";
 import { PLAYER_BOUNDS, ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
@@ -16,7 +17,7 @@ import { registerQ1MissionPack } from "../../../../src/content/q1/missionpacks/i
 import type { Q1MissionPack } from "../../../../src/content/q1/missionpacks/index.ts";
 
 const root = "/home/buzzkill/Projects/qfiles/q1/rerelease";
-async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, mapName = pack === "hipnotic" ? "hip1m1" : "r2m8") {
+async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, mapName = pack === "hipnotic" ? "hip1m1" : "r2m8", atWorldSpawn?: (game: Q1Foundation) => undefined) {
   const archive = await openArchive(`${root}/${pack}/pak0.pak`);
   const entry = archive.findEntries(`maps/${mapName}.bsp`)[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");
   const map = readQ1Bsp(await archive.readEntry(entry), { source: `maps/${mapName}.bsp` }); archive.close();
@@ -46,6 +47,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
   const base = registerQ1Base(game);
   const colors = new Map<ActorId, number>(), scores = new Map<ActorId, number>();
   const runtime = registerQ1MissionPack(game, base, pack, { gamecfg: () => 8, teamColor: actor => colors.get(actor) ?? 5, setTeamColor: (actor, team) => { colors.set(actor, team); return undefined; }, addFrags: (actor, delta) => { scores.set(actor, (scores.get(actor) ?? 0) + delta); return undefined; }, frags: actor => scores.get(actor) ?? 0, playerName: actor => `player${actor.slot}`, playerFrame: () => 0, disconnect: () => undefined, presentFinale: () => undefined });
+  if (atWorldSpawn !== undefined) game.registerSpawn("worldspawn", (source, entity) => { spawnMapActor(source, entity); return atWorldSpawn(game); });
   game.spawnMap(map);
   const start = [...game.entities.values()].find(entity => entity.classname === "info_player_start"), origin = start === undefined ? ZERO : game.body(start).origin;
   function player(slot: number) {
@@ -85,4 +87,48 @@ test.skipIf(!existsSync(`${root}/rogue/pak0.pak`))("Rogue retail ending world, t
   runtime.world.crashTimeMachine(); expect(machine.movement).toBe("fly"); expect(machine.solid).toBe("none");
   think(machine); expect(game.body(machine).velocity.z).toBe(-55);
   expect(game.capture()).toBeDefined(); actors.close();
+});
+
+test.skipIf(!existsSync(`${root}/hipnotic/pak0.pak`))("Hipnotic static wallsprite preserves source angle correction and wall offset", async () => {
+  const state = await session("hipnotic", "rerelease", 0, 0, "hip1m1", game => {
+    const sprite = game.create("wallsprite"); sprite.skin = 2; sprite.frame = 3;
+    game.setBody(sprite, { origin: { x: 10, y: 20, z: 30 }, angles: { x: 0, y: -1, z: 0 } });
+    game.spawnEntity(sprite); expect(game.live(sprite)).toBe(false);
+    return undefined;
+  });
+  try {
+    const event = state.events.find(event => event.kind === "static-model" && event.path === "progs/s_blood1.spr");
+    if (event?.kind !== "static-model") throw new Error("Missing wallsprite static record");
+    expect(event.angles).toEqual({ x: -90, y: 0, z: 0 });
+    expect(event.origin.x).toBeCloseTo(10); expect(event.origin.y).toBe(20); expect(event.origin.z).toBeCloseTo(29.8);
+    expect(event.frame).toBe(3); expect(event.skin).toBe(2);
+    expect(state.game.precaches.models).toContain(event.path);
+  } finally { state.actors.close(); }
+});
+
+test.skipIf(!existsSync(`${root}/rogue/pak0.pak`))("Rogue authored candle and source lantern become persistent model records", async () => {
+  const state = await session("rogue", "rerelease", 0, 0, "ctf1", game => {
+    for (const flags of [0, 1]) {
+      const torch = game.create("light_torch_small_walltorch"); torch.spawnflags = flags;
+      game.setOrigin(torch, { x: 100 + flags, y: 200, z: 300 }); game.spawnEntity(torch);
+      expect(game.live(torch)).toBe(false);
+    }
+    const lantern = game.create("light_lantern");
+    game.setBody(lantern, { origin: { x: 1.125, y: 2.25, z: 3.5 } }); game.spawnEntity(lantern);
+    expect(game.live(lantern)).toBe(false); return undefined;
+  });
+  try {
+    for (const flags of [0, 1]) {
+      const index = state.events.findIndex(event => event.kind === "static-model" && event.path === "progs/flame.mdl" && event.origin.x === 100 + flags);
+      expect(index).toBeGreaterThanOrEqual(0);
+      const sounds = state.events.filter(event => event.kind === "ambient" && event.origin.x === 100 + flags);
+      expect(sounds.length).toBe(flags === 0 ? 1 : 0);
+      if (flags === 0) expect(state.events[index - 1]).toEqual(sounds[0]);
+    }
+    expect(state.events).toContainEqual({ kind: "static-model", path: "progs/candle.mdl", frame: 0, skin: 0, colorMap: 0,
+      origin: { x: -1308, y: 2140, z: 474 }, angles: ZERO });
+    expect(state.events).toContainEqual({ kind: "static-model", path: "progs/lantern.mdl", frame: 0, skin: 0, colorMap: 0,
+      origin: { x: 1.125, y: 2.25, z: 3.5 }, angles: ZERO });
+    expect([...state.game.entities.values()].some(entity => entity.classname === "light_lantern" || entity.classname === "light_candle")).toBe(false);
+  } finally { state.actors.close(); }
 });

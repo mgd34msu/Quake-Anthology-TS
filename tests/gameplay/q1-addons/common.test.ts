@@ -120,6 +120,11 @@ test("actual MG1 hub and Horde map entities spawn through addon registration", a
         const entities = [...state.game.entities.values()];
         expect(entities.some(entity => entity.classname === (name === "hub" ? "misc_rune_indicator" : "horde_manager"))).toBe(true);
         expect(entities.some(entity => entity.classname === (name === "hub" ? "func_door" : "info_monster_start"))).toBe(true);
+        const candles = map.entityList.filter(entity => entity.properties.some(property => property.key === "classname" && property.value === "light_candle"));
+        const statics = state.events.filter(event => event.kind === "static-model" && event.path === "progs/candle.mdl");
+        expect(statics.length).toBe(candles.length);
+        if (name === "hub") expect(statics.length).toBeGreaterThan(0);
+        expect(entities.some(entity => entity.classname === "light_candle")).toBe(false);
         expect(() => state.game.capture()).not.toThrow();
       } finally { state.actors.close(); }
     }
@@ -283,4 +288,46 @@ test("MG3 path visitation, pause cancellation and switching use saved actor bind
   expect(() => spawn("target_cancelpause", { targetname: "invalid" })).toThrow();
   expect(spawn("path_corner", { targetname: "forever", wait: "-1" }).wait).toBe(999999);
   state.actors.close();
+});
+
+test("addon static overrides preserve raw pose, ambient ordering and dynamic gas lifetime", () => {
+  for (const program of ["mg1", "mg3"] satisfies readonly ("mg1" | "mg3")[]) {
+    const { game, spawn, events, actors } = world(program);
+    try {
+      for (const classname of ["light_torch_small_walltorch", "light_flame_large_yellow", "light_flame_small_yellow", "light_flame_small_white", "light_candle"]) {
+        const first = events.length, entity = game.create(classname);
+        game.setBody(entity, { origin: { x: 12.125, y: 24.25, z: 36.5 }, angles: { x: 0, y: 31.875, z: 0 } });
+        entity.spawnflags = 4; entity.skin = 2; entity.frame = 3; game.spawnEntity(entity);
+        expect(game.live(entity)).toBe(false);
+        const event = events.at(-1);
+        if (event?.kind !== "static-model") throw new Error("Missing static light event");
+        expect(event.origin).toEqual({ x: 12.125, y: 24.25, z: 36.5 });
+        expect(event.skin).toBe(2);
+        expect(event.frame).toBe(classname === "light_flame_large_yellow" ? 1 : 3);
+        expect(game.precaches.models).toContain(event.path);
+        if (classname === "light_candle") {
+          expect(events.length - first).toBe(1);
+          expect(event.angles).toEqual({ x: 0, y: 31.875, z: 0 });
+        } else {
+          expect(events[first]).toEqual({ kind: "ambient", origin: event.origin, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
+          expect(event.angles).toEqual({ x: 180, y: 0, z: 0 });
+        }
+      }
+      for (const classname of ["ambient_suck_wind", "ambient_drone", "ambient_flouro_buzz", "ambient_drip", "ambient_comp_hum", "ambient_thunder", "ambient_light_buzz", "ambient_swamp1", "ambient_swamp2", "ambient_generic"]) {
+        const first = events.length, entity = spawn(classname, { origin: "7.125 8.25 9.5", noise: "ambience/wind2.wav", volume: "0.75", delay: "2" });
+        expect(game.live(entity)).toBe(false);
+        const sound = events[first], model = events[first + 1];
+        if (sound?.kind !== "ambient" || model?.kind !== "static-model") throw new Error("Ambient must precede its static record");
+        expect(model.path).toBe(""); expect(model.origin).toEqual(sound.origin);
+        expect(game.precaches.sounds).toContain(sound.path);
+        if (classname === "ambient_generic") { expect(sound.volume).toBe(0.75); expect(sound.attenuation).toBe(2); }
+      }
+      const beforeMissing = events.length;
+      expect(game.live(spawn("ambient_generic"))).toBe(false); expect(events.length).toBe(beforeMissing);
+      const first = events.length, gas = spawn("light_flame_gas");
+      expect(game.live(gas)).toBe(true);
+      expect([...game.entities.values()].filter(entity => entity.model === "progs/flame3.mdl").map(entity => entity.number("alpha"))).toEqual([Math.fround(0.6), Math.fround(0.4)]);
+      expect(events.slice(first).some(event => event.kind === "static-model")).toBe(false);
+    } finally { actors.close(); }
+  }
 });

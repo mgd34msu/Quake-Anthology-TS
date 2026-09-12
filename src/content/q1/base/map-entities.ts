@@ -20,7 +20,7 @@ function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.movedir = moveDirection(game.body(entity).angles, game); entity.solid = "trigger"; entity.model = ""; game.setBody(entity, { angles: ZERO }); return undefined;
 }
 function later(game: Q1EntityServices, entity: Q1Actor, delay: number, name: string): undefined { return game.schedule(entity, delay, game.named.action(entity, name)); }
-function makeStatic(game: Q1EntityServices, entity: Q1Actor): undefined {
+export function makeStatic(game: Q1EntityServices, entity: Q1Actor): undefined {
   const body = game.body(entity);
   game.host.emit({ kind: "static-model", path: entity.model, frame: Math.trunc(entity.frame), colorMap: Math.trunc(entity.number("colormap")), skin: Math.trunc(entity.skin),
     origin: { ...body.origin }, angles: { ...body.angles } });

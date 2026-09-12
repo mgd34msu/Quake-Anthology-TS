@@ -1,10 +1,19 @@
 /* newmisc.qc. Copyright id Software / Rogue. GPL-2.0-or-later. */
+import { makeStatic } from "../../base/map-entities.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { length, normalize, vscale, vsub } from "../../foundation/types.ts";
 import { later, trigger } from "./common.ts";
 
 export function registerRogueMisc(game: Q1EntityServices): undefined {
-  for (const model of ["lantern", "candle"]) game.registerSpawn(`light_${model}`, (_g, e) => { e.model = `progs/${model}.mdl`; e.solid = "none"; e.movement = "none"; return undefined; });
+  game.replaceSpawn("light_torch_small_walltorch", (source, entity) => {
+    entity.model = source.precacheModel("progs/flame.mdl");
+    if ((entity.spawnflags & 1) === 0) {
+      const path = source.precacheSound("ambience/fire1.wav");
+      source.host.emit({ kind: "ambient", origin: { ...source.body(entity).origin }, path, volume: 0.5, attenuation: 3 });
+    }
+    return makeStatic(source, entity);
+  });
+  for (const model of ["lantern", "candle"]) game.registerSpawn(`light_${model}`, (_g, e) => { e.model = game.precacheModel(`progs/${model}.mdl`); e.solid = "none"; e.movement = "none"; return makeStatic(game, e); });
   game.named.register("rogue:rubble_touch", { touch: (g, e, other) => {
     if ((g.isPlayer(other) || ((g.entity(other)?.movementFlags ?? 0) & 32) !== 0) && length(g.body(e).velocity) > 0) g.damage(other, e.actor.id, e.actor.id, 10); return undefined;
   } });
