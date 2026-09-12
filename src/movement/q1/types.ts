@@ -67,7 +67,7 @@ export interface Q1PhysicsEntity {
 
 /** Source slot order comes from the shared actor registry, not another frame loop. */
 export interface Q1PusherServices {
-  readonly movement: MovementServices;
+  readonly movement: Pick<MovementServices, "numeric">;
   read(actor: ActorId): Q1PhysicsEntity | null;
   candidates(): readonly ActorId[];
   write(entity: Q1PhysicsEntity): undefined;

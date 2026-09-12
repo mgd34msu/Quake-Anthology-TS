@@ -18,6 +18,11 @@ export interface QcEntityStoreObservation {
   readonly before: Uint8Array;
   readonly after: Uint8Array;
 }
+export interface QcCallSite { readonly functionIndex: number; readonly caller: number; readonly statement: number; }
+export interface QcFunctionBoundary {
+  readonly functions: ReadonlySet<number>;
+  run(call: QcCallSite, execute: () => undefined): undefined;
+}
 export interface QcMachineOptions {
   readonly program: QcProgram;
   readonly numeric: NumericOperations;
@@ -28,7 +33,8 @@ export interface QcMachineOptions {
   readonly stackLimit?: number;
   readonly localStackWords?: number;
   readonly trace?: (machine: QcMachine) => undefined;
-  readonly observeCall?: (call: { readonly functionIndex: number; readonly caller: number; readonly statement: number }) => undefined;
+  readonly observeCall?: (call: QcCallSite) => undefined;
+  readonly functionBoundary?: QcFunctionBoundary;
   readonly observeEntityStore?: (store: QcEntityStoreObservation) => undefined;
 }
 export interface QcMachineSnapshot {
@@ -42,6 +48,7 @@ export interface QcMachineSnapshot {
   readonly profiling: readonly number[];
   readonly traceEnabled: boolean;
 }
+interface CallStaging { readonly words: Uint8Array; readonly argumentCount: number; }
 interface Frame { readonly statement: number; readonly functionIndex: number; readonly locals: Uint8Array; }
 export class QcRuntimeError extends Error {
   constructor(message: string, readonly statement: number, readonly functionIndex: number, readonly callStack: readonly { readonly functionIndex: number; readonly statement: number }[]) {
@@ -66,6 +73,8 @@ export class QcMachine {
   private statement = 0;
   private argumentCount = 0;
   private builtinDepth = 0;
+  private boundaryDepth = 0;
+  private readonly boundaryFunctions: ReadonlySet<number>;
   traceEnabled = false;
   constructor(private readonly options: QcMachineOptions) {
     this.program = options.program; this.entities = options.entities; this.numeric = options.numeric;
@@ -73,6 +82,11 @@ export class QcMachine {
     this.globals = new QcWords(this.program.initialGlobals.slice());
     this.strings = new QcStrings(this.program.strings, this.program.api.kind === "q1-quakeworld");
     this.profiling = this.program.functions.map(() => 0);
+    this.boundaryFunctions = new Set(options.functionBoundary?.functions);
+    for (const index of this.boundaryFunctions) {
+      const fn = this.program.functionAt(index);
+      if (fn.namedBuiltin || fn.firstStatement < 0) throw new QcProgramError("function boundary requires an interpreted function");
+    }
     this.statementLimit = options.statementLimit ?? 100000;
     this.stackLimit = options.stackLimit ?? 32;
     this.localStackLimit = options.localStackWords ?? 2048;
@@ -158,21 +172,60 @@ export class QcMachine {
   }
   execute(functionIndex: number, argumentCount = 0): undefined {
     if (!Number.isInteger(argumentCount) || argumentCount < 0 || argumentCount > 8) this.fail("invalid argument count");
-    const exitDepth = this.frames.length;
     const fn = this.program.functionAt(functionIndex);
-    const builtin = this.builtin(fn);
     this.argumentCount = argumentCount;
     this.traceEnabled = false;
-    this.options.observeCall?.({ functionIndex, caller: this.functionIndex, statement: this.statement });
+    const call = { functionIndex, caller: this.functionIndex, statement: this.statement }, staging = this.captureCallStaging();
+    this.options.observeCall?.(call);
+    this.restoreCallStaging(staging);
+    const budget = { remaining: this.statementLimit };
+    this.invokeFunction(fn, call, budget, staging);
+    return undefined;
+  }
+  private captureCallStaging(): CallStaging | null {
+    return this.options.observeCall === undefined && this.boundaryFunctions.size === 0 ? null
+      : { words: this.globals.bytes.slice(4, 112), argumentCount: this.argumentCount };
+  }
+  private restoreCallStaging(staging: CallStaging | null): void {
+    if (staging !== null) { this.globals.bytes.set(staging.words, 4); this.argumentCount = staging.argumentCount; }
+  }
+  private invokeFunction(fn: QcFunction, call: QcCallSite, budget: { remaining: number }, staging: CallStaging | null): void {
+    const boundary = this.options.functionBoundary;
+    if (boundary === undefined || !this.boundaryFunctions.has(fn.index)) { this.runFunction(fn, budget); return; }
+    let active = true, called = false;
+    const failure: { value: { error: unknown } | null } = { value: null };
+    const completed: { value: CallStaging | null } = { value: null };
+    this.boundaryDepth++;
+    try {
+      boundary.run(call, () => {
+        try {
+          if (!active || called) this.fail("function continuation must execute once inside its boundary");
+          called = true;
+          this.restoreCallStaging(staging);
+          this.runFunction(fn, budget);
+          completed.value = { words: this.globals.bytes.slice(4, 16), argumentCount: this.argumentCount };
+          return undefined;
+        } catch (error) { failure.value = { error }; throw error; }
+      });
+      if (failure.value !== null) throw failure.value.error;
+      if (!called) this.fail("function boundary omitted source execution");
+    } finally {
+      active = false; this.boundaryDepth--;
+      // Host confirmation may reenter QC after the callee returned. Preserve its actual return, not guest state.
+      this.restoreCallStaging(completed.value);
+    }
+  }
+  private runFunction(fn: QcFunction, budget: { remaining: number }): void {
+    const exitDepth = this.frames.length;
+    const builtin = this.builtin(fn);
     if (builtin !== null) { this.callBuiltin(builtin); return; }
     this.enter(fn);
     try {
-      let remaining = this.statementLimit;
       while (this.frames.length > exitDepth) {
         this.statement++;
         const statement = this.program.statements[this.statement];
         if (statement === undefined) this.fail("statement outside program");
-        if (--remaining === 0) this.fail("runaway loop error");
+        if (--budget.remaining === 0) this.fail("runaway loop error");
         this.profiling[this.functionIndex] = (this.profiling[this.functionIndex] ?? 0) + 1;
         if (this.traceEnabled) this.options.trace?.(this);
         const { opcode, a, b, c } = statement;
@@ -244,10 +297,15 @@ export class QcMachine {
           case QcOpcode.Call5: case QcOpcode.Call6: case QcOpcode.Call7: case QcOpcode.Call8: {
             this.argumentCount = opcode - QcOpcode.Call0;
             const called = this.program.functionAt(g.int(a));
-            this.options.observeCall?.({ functionIndex: called.index, caller: this.functionIndex, statement: this.statement });
-            const callBuiltin = this.builtin(called);
-            if (callBuiltin === null) this.enter(called);
-            else this.callBuiltin(callBuiltin);
+            const call = { functionIndex: called.index, caller: this.functionIndex, statement: this.statement }, staging = this.captureCallStaging();
+            this.options.observeCall?.(call);
+            this.restoreCallStaging(staging);
+            if (this.boundaryFunctions.has(called.index)) this.invokeFunction(called, call, budget, staging);
+            else {
+              const callBuiltin = this.builtin(called);
+              if (callBuiltin === null) this.enter(called);
+              else this.callBuiltin(callBuiltin);
+            }
             break;
           }
           case QcOpcode.State: {
@@ -267,13 +325,13 @@ export class QcMachine {
     }
   }
   snapshot(): QcMachineSnapshot {
-    if (this.depth !== 0 || this.builtinDepth !== 0) return this.fail("save requires an idle callback boundary");
+    if (this.depth !== 0 || this.builtinDepth !== 0 || this.boundaryDepth !== 0) return this.fail("save requires an idle callback boundary");
     return { globals: this.globals.bytes.slice(), entities: this.entities.bytes.slice(), entityCount: this.entities.count,
       strings: this.strings.snapshot(), statement: this.statement, functionIndex: this.functionIndex, argumentCount: this.argumentCount,
       profiling: [...this.profiling], traceEnabled: this.traceEnabled };
   }
   restore(snapshot: QcMachineSnapshot): void {
-    if (this.depth !== 0 || this.builtinDepth !== 0) this.fail("restore requires an idle callback boundary");
+    if (this.depth !== 0 || this.builtinDepth !== 0 || this.boundaryDepth !== 0) this.fail("restore requires an idle callback boundary");
     if (snapshot.globals.length !== this.globals.bytes.length || snapshot.profiling.length !== this.profiling.length || snapshot.functionIndex !== 0) this.fail("incompatible machine checkpoint");
     this.strings.restore(snapshot.strings);
     this.entities.restore(snapshot.entities, snapshot.entityCount);

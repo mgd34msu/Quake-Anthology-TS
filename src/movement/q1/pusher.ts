@@ -23,30 +23,48 @@ export interface Q1PusherInput {
   readonly movement: "translate" | "rotate";
 }
 
+/** Velocity-driven source entry; displacement callers share the same transaction. */
+export function moveQ1Pusher(input: Q1PusherInput, services: Omit<Q1PusherServices, "think">): Q1PusherResult {
+  const pusher = services.read(input.actor);
+  if (pusher === null) return { actor: input.actor, status: "actor-removed", moved: [] };
+  const m = new MovementMath(services.movement.numeric), zero = m.vec(0, 0, 0);
+  const delta = m.scale(input.movement === "rotate" ? pusher.state.angularVelocity : pusher.state.velocity, input.elapsedSeconds);
+  return pushQ1Pusher({ actor: input.actor, elapsedSeconds: input.elapsedSeconds,
+    displacement: input.movement === "translate" ? delta : zero,
+    angularDisplacement: input.movement === "rotate" ? delta : zero }, services);
+}
+
+export interface Q1PushInput {
+  readonly actor: ActorId;
+  readonly displacement: Vec3;
+  readonly angularDisplacement: Vec3;
+  readonly elapsedSeconds: number;
+}
+
 /** A single source pusher transaction. The shared scheduler chooses its traversal. */
-export function moveQ1Pusher(input: Q1PusherInput, services: Q1PusherServices): Q1PusherResult {
+export function pushQ1Pusher(input: Q1PushInput, services: Omit<Q1PusherServices, "think">): Q1PusherResult {
   let pusher = services.read(input.actor);
   if (pusher === null) return { actor: input.actor, status: "actor-removed", moved: [] };
   if (!Number.isFinite(input.elapsedSeconds) || input.elapsedSeconds < 0) throw new RangeError("Invalid pusher interval");
   const m = new MovementMath(services.movement.numeric), n = m.n;
   const originalOrigin = pusher.state.origin, originalAngles = pusher.state.angles;
   const originalBounds = pusher.absoluteBounds;
-  const velocity = input.movement === "rotate" ? pusher.state.angularVelocity : pusher.state.velocity;
-  const delta = m.scale(velocity, input.elapsedSeconds);
-  if (velocity.x === 0 && velocity.y === 0 && velocity.z === 0) {
+  const delta = input.displacement, angular = input.angularDisplacement;
+  const rotating = angular.x !== 0 || angular.y !== 0 || angular.z !== 0;
+  if (delta.x === 0 && delta.y === 0 && delta.z === 0 && !rotating) {
     services.write({ ...pusher, localTimeSeconds: n.store(n.add(pusher.localTimeSeconds, input.elapsedSeconds)) });
     return { actor: input.actor, status: "moved", moved: [] };
   }
   pusher = { ...pusher, state: { ...pusher.state,
-    origin: input.movement === "translate" ? m.add(pusher.state.origin, delta) : pusher.state.origin,
-    angles: input.movement === "rotate" ? m.add(pusher.state.angles, delta) : pusher.state.angles },
+    origin: m.add(pusher.state.origin, delta),
+    angles: m.add(pusher.state.angles, angular) },
     localTimeSeconds: n.store(n.add(pusher.localTimeSeconds, input.elapsedSeconds)) };
   services.write(pusher); services.link(pusher.actor, false);
   const pushed: { readonly actor: ActorId; readonly origin: Vec3 }[] = [];
-  const axes = m.angles(m.scale(delta, -1));
+  const axes = m.angles(m.scale(angular, -1));
   const linkedPusher = services.read(input.actor);
   if (linkedPusher === null) return { actor: input.actor, status: "actor-removed", moved: [] };
-  const pusherBounds = input.movement === "translate"
+  const pusherBounds = !rotating
     ? { min: m.add(originalBounds.min, delta), max: m.add(originalBounds.max, delta) } : linkedPusher.absoluteBounds;
   for (const actor of services.candidates()) {
     let entity = services.read(actor);
@@ -60,10 +78,10 @@ export function moveQ1Pusher(input: Q1PusherInput, services: Q1PusherServices): 
     const original = entity.state.origin;
     pushed.push({ actor, origin: original });
     let displacement = delta;
-    if (input.movement === "rotate") {
-      const offset = m.sub(entity.state.origin, pusher.state.origin);
+    if (rotating) {
+      const offset = m.sub(m.add(entity.state.origin, delta), pusher.state.origin);
       const rotated = m.vec(m.dot(offset, axes.forward), -m.dot(offset, axes.right), m.dot(offset, axes.up));
-      displacement = m.sub(rotated, offset);
+      displacement = m.add(delta, m.sub(rotated, offset));
     }
     services.collisionEnabled(pusher.actor, false);
     try { entity = services.push(entity, displacement).entity; }
@@ -76,11 +94,11 @@ export function moveQ1Pusher(input: Q1PusherInput, services: Q1PusherServices): 
     pusher = livePusher;
     if (entity === null) continue;
     if (services.testPosition(entity).kind === "none") {
-      if (input.movement === "rotate") services.write({ ...entity, state: { ...entity.state, angles: m.add(entity.state.angles, delta) } });
+      if (rotating) services.write({ ...entity, state: { ...entity.state, angles: m.add(entity.state.angles, angular) } });
       continue;
     }
     if (entity.bounds.min.x === entity.bounds.max.x) continue;
-    if (entity.solid === "not" || entity.solid === "trigger") {
+    if (entity.solid === "not" || entity.solid === "trigger" || entity.solid === "corpse") {
       const minimum = m.vec(0, 0, entity.bounds.min.z);
       services.write({ ...entity, bounds: { min: minimum, max: minimum } });
       continue;
@@ -90,8 +108,8 @@ export function moveQ1Pusher(input: Q1PusherInput, services: Q1PusherServices): 
     const currentPusher = services.read(input.actor);
     if (currentPusher === null) return { actor: input.actor, status: "actor-removed", moved: pushed.map(value => value.actor) };
     services.write({ ...currentPusher, state: { ...currentPusher.state,
-      origin: input.movement === "translate" ? originalOrigin : currentPusher.state.origin,
-      angles: input.movement === "rotate" ? originalAngles : currentPusher.state.angles },
+      origin: originalOrigin,
+      angles: originalAngles },
       localTimeSeconds: n.store(n.subtract(currentPusher.localTimeSeconds, input.elapsedSeconds)) });
     services.link(currentPusher.actor, false);
     services.blocked(currentPusher.actor, actor);
@@ -101,7 +119,7 @@ export function moveQ1Pusher(input: Q1PusherInput, services: Q1PusherServices): 
       const current = services.read(moved.actor);
       if (current === null) continue;
       services.write({ ...current, state: { ...current.state, origin: moved.origin,
-        angles: input.movement === "rotate" ? m.sub(current.state.angles, delta) : current.state.angles } });
+        angles: rotating ? m.sub(current.state.angles, angular) : current.state.angles } });
       services.link(current.actor, false);
     }
     return { actor: input.actor, status: services.read(input.actor) === null ? "actor-removed" : "blocked", moved: pushed.map(value => value.actor) };

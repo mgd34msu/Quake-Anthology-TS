@@ -225,3 +225,27 @@ test.skipIf(!existsSync(pakPath))("shared toss physics settles a Q2 body on the 
     expect(upsideDown?.origin.z).toBeGreaterThan(z + 30);
   } finally { archive.close(); }
 });
+
+test.skipIf(!existsSync(pakPath))("shared Q1 transaction carries a foreign rider on the authored e1m1 platform model", async () => {
+  const archive = await openArchive(pakPath);
+  try {
+    const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1");
+    const map = readQ1Bsp(await archive.readEntry(entry));
+    const source = map.entityList.find(entity => q1EntityValue(entity, "classname") === "func_plat" && q1EntityValue(entity, "model") === "*22");
+    const model = map.models[22]; if (source === undefined || model === undefined) throw new Error("Missing authored platform");
+    const s = setup("q1", map), platform = s.actor("test:authored-platform", zero, "push", model.bounds);
+    s.physics.setSolid(platform, "brush", 22, "q1"); s.physics.bodies.link(platform);
+    // Player-only fixture placement on the unchanged authored brush's upper surface.
+    const origin = { x: (model.bounds.min.x + model.bounds.max.x) / 2, y: (model.bounds.min.y + model.bounds.max.y) / 2, z: model.bounds.max.z + 3 };
+    const rider = s.actor("test:rider", origin, "step"), body = s.physics.bodies.read(rider.id);
+    if (body === null) throw new Error("Missing rider");
+    s.physics.setSolid(rider, "box", null, "q2");
+    s.physics.setFlags(rider, { player: true });
+    s.physics.bodies.write(rider, { ...body, ground: platform.id }); s.physics.bodies.link(rider);
+    expect(s.physics.pushMove(platform, { x: 0, y: 0, z: -1 })).toBeNull();
+    expect(s.physics.bodies.read(platform.id)?.origin.z).toBe(-1);
+    expect(s.physics.bodies.read(rider.id)?.origin.z).toBe(origin.z - 1);
+    expect(s.physics.bodies.read(rider.id)?.ground).toEqual(platform.id);
+    s.actors.close();
+  } finally { archive.close(); }
+});

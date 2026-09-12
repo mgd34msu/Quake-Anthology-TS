@@ -1,3 +1,5 @@
+import { pushQ1Pusher } from "../../../movement/q1/pusher.ts";
+import type { Q1PhysicsEntity, Q1PusherServices } from "../../../movement/q1/types.ts";
 import { touchQ1Triggers } from "../../../world/actors/triggers.ts";
 import { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 /* Shared body physics adapted from Quake sv_phys.c/sv_move.c and Quake II
@@ -290,14 +292,15 @@ export class SharedPhysics {
     if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none") this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
     return undefined;
   }
-  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = []): TraceResult {
+  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = [], publishOrigin?: (origin: Vec3) => undefined): TraceResult {
     const initial = this.bodies.read(actor.id);
     if (initial === null) throw new RangeError("Cannot push an actor without a body");
     const end = this.add(initial.origin, displacement);
     for (;;) {
       const trace = this.bodyTrace(actor, initial.origin, end, exclude), current = this.bodies.read(actor.id);
       if (current === null) return trace;
-      this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor);
+      if (publishOrigin === undefined) { this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor); }
+      else publishOrigin(trace.end);
       if (trace.fraction !== 1) {
         const hit = this.hitActor(trace);
         this.impact(actor, trace);
@@ -334,14 +337,69 @@ export class SharedPhysics {
     return this.options.actors.observations().map(actor => actor.id).sort(this.options.sourceOrder)
       .flatMap(id => { const actor = this.options.actors.resolveOwned(id); return actor === null ? [] : [actor]; });
   }
+  /** Source-owned fields stay in the caller; collision and rider movement stay here. */
+  q1PusherServices(projection: Pick<Q1PusherServices, "read" | "write" | "link" | "blocked">): Omit<Q1PusherServices, "think"> {
+    return { ...projection, movement: { numeric: this.n },
+      candidates: () => this.candidates().map(actor => actor.id),
+      collisionEnabled: (actor, enabled) => {
+        if (enabled) projection.link(actor, false); else this.options.scene.unlink(actor.id);
+        return undefined;
+      },
+      testPosition: entity => this.testPosition(entity.actor)?.hit ?? { kind: "none" },
+      push: (entity, displacement) => {
+        // Publish cleared onground before the synchronous source touch callback.
+        projection.write(entity);
+        const trace = this.pushEntity(entity.actor, displacement, [], origin => {
+          const current = projection.read(entity.actor.id);
+          if (current !== null) { projection.write({ ...current, state: { ...current.state, origin } }); projection.link(entity.actor, false); }
+          return undefined;
+        });
+        return { entity: projection.read(entity.actor.id), trace };
+      },
+    };
+  }
+  private readQ1Pusher(actor: ActorId): Q1PhysicsEntity | null {
+    const owned = this.options.actors.resolveOwned(actor), body = this.bodies.read(actor), linked = this.bodies.linked(actor);
+    if (owned === null || body === null || linked === null) return null;
+    const flags = this.actorFlags(owned), motion = this.motion(owned), solid = this.solid(owned);
+    const moveType = flags.player ? 3 : motion?.kind === "push" || motion?.kind === "stop" ? 7
+      : motion?.kind === "step" ? 4 : motion?.kind === "fly" ? 5 : motion?.kind === "fly-missile" ? 9
+      : motion?.kind === "bounce" || motion?.kind === "wall-bounce" ? 10
+      : motion?.kind === "toss" || motion?.kind === "new-toss" ? 6 : 0;
+    return { actor: owned, bounds: body.bounds, absoluteBounds: linked.absoluteBounds,
+      solid: solid?.deadMonster ? "corpse" : solid?.solid === "brush" ? "bsp" : solid?.solid === "trigger" ? "trigger" : solid?.solid === "box" ? "box" : "not",
+      localTimeSeconds: 0, nextThinkSeconds: 0,
+      state: { kind: "q1-netquake", origin: body.origin, angles: body.angles, velocity: body.velocity,
+        oldOrigin: body.origin, angularVelocity: motion?.angularVelocity ?? zero,
+        flags: (body.ground === null ? 0 : 512) | (flags.fly ? 1 : 0) | (flags.swim ? 2 : 0), moveType,
+        ground: body.ground === null ? { kind: "none" } : { kind: "actor", actor: body.ground },
+        viewAngles: zero, punchAngles: zero, waterLevel: flags.waterLevel ?? 0, waterType: flags.waterType ?? -1,
+        teleportTimeSeconds: 0, waterJumpDirection: zero, idealPitch: 0, fixAngle: false, health: 0 } };
+  }
+  private pushQ1(actor: OwnedActor, displacement: Vec3, angularDisplacement: Vec3): ActorId | null {
+    let obstacle: ActorId | null = null;
+    const services = this.q1PusherServices({ read: id => this.readQ1Pusher(id),
+      write: entity => {
+        this.writeLive(entity.actor, { origin: entity.state.origin, angles: entity.state.angles,
+          bounds: entity.bounds, ground: (entity.state.flags & 512) === 0 ? null
+            : entity.state.ground.kind === "actor" ? entity.state.ground.actor
+            : entity.state.ground.kind === "world" ? this.options.worldActor() : null });
+        return undefined;
+      },
+      link: (owned, touch) => { this.bodies.link(owned); if (touch) this.touchTriggers(owned); return undefined; },
+      blocked: (owned, other) => { obstacle = other; return this.options.onBlocked(owned, other); },
+    });
+    pushQ1Pusher({ actor: actor.id, displacement, angularDisplacement, elapsedSeconds: 0 }, services);
+    return obstacle;
+  }
   pushMove(actor: OwnedActor, displacement: Vec3, angularDisplacement: Vec3 = zero): ActorId | null {
     const original = this.bodies.read(actor.id);
     if (original === null) return null;
-    const family = this.family(actor), q1 = family === "q1";
+    if (this.family(actor) === "q1") return this.pushQ1(actor, displacement, angularDisplacement);
     const snap = (v: number): number => this.n.store(Math.trunc(v * 8 + (v > 0 ? 0.5 : -0.5)) * 0.125);
-    const move = q1 ? displacement : this.vector(snap(displacement.x), snap(displacement.y), snap(displacement.z));
+    const move = this.vector(snap(displacement.x), snap(displacement.y), snap(displacement.z));
     if (!this.moving(move) && !this.moving(angularDisplacement)) return null;
-    const saved: Pushed[] = q1 ? [] : this.pushTransaction ?? [];
+    const saved: Pushed[] = this.pushTransaction ?? [];
     saved.push({ actor, origin: original.origin, angles: original.angles, deltaYaw: this.actorFlags(actor).deltaYaw ?? 0 });
     this.writeLive(actor, { origin: this.add(original.origin, move), angles: this.add(original.angles, angularDisplacement) }, true);
     const bounds = this.bodies.linked(actor.id)?.absoluteBounds;
@@ -356,7 +414,7 @@ export class SharedPhysics {
       if (body === null || linked === null || kind === "push" || kind === "stop" || kind === "stationary" || kind === undefined) continue;
       const rider = body.ground !== null && sameActor(body.ground, actor.id);
       if (!rider && (!boundsIntersect(linked.absoluteBounds, bounds) || this.testPosition(candidate) === null)) continue;
-      let blocked = !q1 && this.motion(actor)?.kind === "stop" && !rider;
+      let blocked = this.motion(actor)?.kind === "stop" && !rider;
       if (!blocked) {
         saved.push({ actor: candidate, origin: body.origin, angles: body.angles, deltaYaw: this.actorFlags(candidate).deltaYaw ?? 0 });
         const pusherOrigin = this.bodies.read(actor.id)?.origin;
@@ -364,51 +422,26 @@ export class SharedPhysics {
         const translated = this.add(body.origin, move), offset = this.sub(translated, pusherOrigin);
         const rotated = this.vector(this.dot(offset, axes.forward), -this.dot(offset, axes.right), this.dot(offset, axes.up));
         const delta = this.add(move, this.sub(rotated, offset));
-        if (q1) {
-          if (!this.actorFlags(candidate).player) this.writeLive(candidate, { ground: null });
-          this.pushEntity(candidate, delta, [actor.id]);
-        }
-        else {
-          this.writeLive(candidate, { origin: this.add(body.origin, delta), ground: rider ? body.ground : null });
-          if (this.actorFlags(candidate).player) this.setFlags(candidate, { deltaYaw: this.n.add(this.actorFlags(candidate).deltaYaw ?? 0, angularDisplacement.y) });
-        }
+        this.writeLive(candidate, { origin: this.add(body.origin, delta), ground: rider ? body.ground : null });
+        if (this.actorFlags(candidate).player) this.setFlags(candidate, { deltaYaw: this.n.add(this.actorFlags(candidate).deltaYaw ?? 0, angularDisplacement.y) });
         if (!this.live(actor)) return null;
         if (!this.live(candidate)) continue;
         blocked = this.testPosition(candidate) !== null;
         if (!blocked) {
-          if (q1 && this.moving(angularDisplacement)) { const state = this.bodies.read(candidate.id); if (state !== null) this.writeLive(candidate, { angles: this.add(state.angles, angularDisplacement) }); }
           this.bodies.link(candidate); continue;
         }
-        if (!q1) {
-          const state = this.bodies.read(candidate.id);
-          if (state !== null) this.writeLive(candidate, { origin: this.sub(state.origin, move) });
-          if (this.testPosition(candidate) === null) { saved.pop(); continue; }
-        } else {
-          const state = this.bodies.read(candidate.id), solid = this.solid(candidate);
-          if (state !== null && state.bounds.min.x === state.bounds.max.x) continue;
-          if (state !== null && (solid?.solid === "none" || solid?.solid === "trigger" || solid?.deadMonster)) {
-            const minimum = { x: 0, y: 0, z: state.bounds.min.z };
-            this.writeLive(candidate, { bounds: { min: minimum, max: minimum } }); continue;
-          }
-        }
+        const state = this.bodies.read(candidate.id);
+        if (state !== null) this.writeLive(candidate, { origin: this.sub(state.origin, move) });
+        if (this.testPosition(candidate) === null) { saved.pop(); continue; }
       }
+
       if (blocked) {
-        if (q1) {
-          this.writeLive(candidate, { origin: body.origin }, true); this.touchTriggers(candidate);
-          this.writeLive(actor, { origin: original.origin, angles: original.angles }, true);
-          if (this.live(actor)) this.options.onBlocked(actor, candidate.id);
-          for (const entry of saved.slice(1)) {
-            const current = this.bodies.read(entry.actor.id);
-            if (current !== null) this.writeLive(entry.actor, { origin: entry.origin, angles: this.moving(angularDisplacement) ? this.sub(current.angles, angularDisplacement) : current.angles }, true);
-          }
-        } else {
-          for (const entry of saved.slice().reverse()) this.restore(entry, true);
-          if (this.live(actor)) this.options.onBlocked(actor, candidate.id);
-        }
+        for (const entry of saved.slice().reverse()) this.restore(entry, true);
+        if (this.live(actor)) this.options.onBlocked(actor, candidate.id);
         return candidate.id;
       }
     }
-    if (!q1 && this.pushTransaction === null) for (const entry of saved.slice().reverse()) if (this.live(entry.actor)) this.touchTriggers(entry.actor);
+    if (this.pushTransaction === null) for (const entry of saved.slice().reverse()) if (this.live(entry.actor)) this.touchTriggers(entry.actor);
     return null;
   }
 

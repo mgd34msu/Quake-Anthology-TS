@@ -213,6 +213,150 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
     }
 
   });
+  test("verified id1 internal door damage enters shared authority without replacing source execution", async () => {
+    const { Id1DamageBinding } = await import("../../../src/content/q1/quakec/id1-damage.ts");
+    const program = await readProgram("id1/PAK0.PAK"), otherProgram = await readProgram("rerelease/id1/pak0.pak");
+    const field = (name: string) => { const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
+    const run = (observed: boolean, variant: "normal" | "exhausted" | "invulnerable" | "nested" | "failure", entry: "internal" | "direct" = "internal") => {
+      const entities = new QcEntityMemory(classicQcEntityLayout(program), 8);
+      const actors = new SessionActorRegistry(createIdentityOwner(`id1-internal-${observed}-${variant}`));
+      const numeric = createNumericOperations(Q1_DONOR_PROFILE);
+      const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => qcLinkBounds(body, 0, numeric), onLink: () => undefined, onUnlink: () => undefined });
+      const callbacks = new ActorCallbackTable(actors);
+      const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 8, lifetime: quakeEdictLifetime(1),
+        storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }),
+        now: () => ({ kind: "seconds", value: 3 }), unlink: actor => bodies.unlink(actor), exhausted: () => { throw new Error("No source edicts"); } });
+      slots.bindExisting(0, "quakec:world");
+      slots.allocate("quakec:door");
+      const target = slots.allocate("quakec:target"), doorWords = entities.at(1), words = entities.at(2);
+      doorWords.setFloat(field("dmg"), 40); doorWords.setFloat(field("wait"), -1);
+      words.setFloat(field("health"), 100); words.setFloat(field("takedamage"), 2); words.setFloat(field("movetype"), 3);
+      words.setFloat(field("armorvalue"), variant === "exhausted" ? 5 : 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field("items"), 8192);
+      words.setInt(field("th_pain"), program.functionNamed(variant === "failure" ? "error" : "SUB_Null").index);
+      words.setInt(field("th_die"), program.functionNamed("SUB_Null").index);
+      words.setVector(field("origin"), { x: 40, y: 12, z: 8 }); words.setVector(field("velocity"), { x: 0.1, y: -0.2, z: 0.3 });
+      if (variant === "invulnerable") { words.setFloat(field("invincible_finished"), 10); words.setFloat(field("invincible_sound"), 10); doorWords.setFloat(field("invincible_sound"), 10); }
+      bodies.bind(target, { read: () => ({ origin: words.vector(field("origin")), angles: words.vector(field("angles")), velocity: words.vector(field("velocity")),
+        bounds: { min: words.vector(field("mins")), max: words.vector(field("maxs")) }, ground: null }), write: () => { throw new Error("Source body replay"); } });
+      const outcomes: DamageOutcome[] = [], calls: number[] = [], order: string[] = [];
+      const painArguments: { readonly attacker: number; readonly damage: number; readonly argc: number }[] = [];
+      let nested = false, sequence = 0;
+      const reenter = () => {
+        if (variant !== "nested" || nested) return undefined;
+        nested = true; words.setFloat(field("movetype"), 0); doorWords.setFloat(field("dmg"), 100);
+        invoke(); return undefined;
+      };
+      const authority = new GameplayAuthority(actors, callbacks, { impulse: () => { throw new Error("Source momentum replay"); },
+        beforeReaction: () => { order.push("reaction"); return reenter(); }, confirmed: outcome => { order.push("confirmed"); outcomes.push(outcome); return undefined; } });
+      const source = { program, entities, actors, slots };
+      const binding = new Id1DamageBinding(source, authority, () => vm, call => {
+        calls.push(call.call.caller);
+        return { target: call.target, amount: call.amount, knockback: call.amount,
+          attack: { sequence: sequence++, time: { kind: "seconds", value: 3 }, attacker: call.attacker, inflictor: call.inflictor,
+            weapon: null, weaponProvider: "test:qc", combatProvider: "test:qc", inventoryProvider: "test:qc", movementProvider: "q1:movement", cause: { kind: "q1", deathType: "squish" } },
+          direction: { x: 40, y: 12, z: 8 }, point: words.vector(field("origin")), normal: { x: 0, y: 0, z: 0 }, delivery: "direct" };
+      });
+      authority.bind(target, { read: () => ({ health: words.float(field("health")), armor: binding.readArmor(words), mass: 200, canTakeDamage: true, invulnerable: false, team: null }),
+        writeHealth: () => { throw new Error("Source health replay"); }, writeArmor: () => { throw new Error("Source armor replay"); } });
+      const vm: QcMachine = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake" }), serverActive: () => true,
+        functionBoundary: { functions: new Set([program.functionNamed("SUB_Null").index, ...(observed ? binding.functionBoundary.functions : [])]),
+          run: (call, execute) => {
+            if (observed && call.functionIndex === 117) return binding.functionBoundary.run(call, execute);
+            if (call.caller === 117 && call.statement === 1568) painArguments.push({ attacker: vm.argInt(0), damage: vm.argFloat(1), argc: vm.argc });
+            execute(); return undefined;
+          } },
+        ...(observed ? { observeEntityStore: (store: import("../../../src/compat/qc/machine.ts").QcEntityStoreObservation) => binding.observeEntityStore(store) } : {}),
+        observeCall: call => {
+          if (observed) binding.observeCall(call);
+          else if (call.caller === 117 && call.statement === 1568) reenter();
+          return undefined;
+        } });
+      const invoke = () => {
+        vm.globals.setFloat(vm.globalOffset("time"), 3);
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(1)); vm.globals.setInt(vm.globalOffset("other"), entities.reference(2));
+        if (entry === "direct") {
+          vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1)); vm.globals.setFloat(13, 40);
+          vm.execute(program.functionNamed("T_Damage").index, 4);
+        } else vm.execute(program.functionNamed("door_blocked").index);
+      };
+      expect(() => new Id1DamageBinding({ ...source, program: otherProgram }, authority, () => vm, () => { throw new Error("Unknown artifact reached resolver"); })).toThrow("verified classic id1");
+      if (variant === "failure") {
+        expect(invoke).toThrow(); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
+        words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
+      }
+      invoke();
+      const result = { bytes: entities.bytes.slice(), outcomes, calls, order, painArguments, doorReference: entities.reference(1), health: words.float(field("health")), armor: binding.readArmor(words), velocity: bodies.read(target.id)?.velocity };
+      actors.close(); return result;
+    };
+    for (const variant of ["normal", "exhausted", "invulnerable", "nested", "failure"] satisfies readonly ("normal" | "exhausted" | "invulnerable" | "nested" | "failure")[]) {
+      const control = run(false, variant), observed = run(true, variant);
+      expect(observed.bytes).toEqual(control.bytes); expect(observed.velocity).toEqual(control.velocity); expect(observed.armor).toEqual(control.armor);
+      expect(observed.outcomes).toHaveLength(variant === "nested" ? 2 : 1);
+      expect(observed.calls.every(caller => caller === program.functionNamed("door_blocked").index)).toBe(true);
+      const outcome = observed.outcomes.at(-1); if (outcome?.kind !== "committed") throw new Error("Missing internal committed damage");
+      expect(outcome.decision.request.attack.cause).toEqual({ kind: "q1", deathType: "squish" });
+      if (variant === "normal") { expect(observed.health).toBe(72); expect(outcome.decision.appliedDamage).toBe(28); }
+      if (variant === "invulnerable") { expect(observed.health).toBe(100); expect(outcome.decision.appliedDamage).toBe(0); }
+      if (variant === "exhausted") { expect(observed.armor).toEqual({ kind: "none" }); expect(outcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(3); }
+      if (variant === "nested") {
+        expect(observed.painArguments).toEqual([{ attacker: observed.doorReference, damage: 28, argc: 2 }]);
+        expect(observed.outcomes.map(value => value.kind === "committed" ? value.decision.request.attack.sequence : -1)).toEqual([1, 0]); expect(outcome.survived).toBe(false); }
+    }
+    const direct = run(true, "normal", "direct");
+    expect(direct.calls).toEqual([0]); expect(direct.health).toBe(72); expect(direct.outcomes).toHaveLength(1);
+  });
+  test("selected function boundaries enforce one synchronous execution and share the interpreter budget", async () => {
+    const program = await readProgram("id1/PAK0.PAK"), idle = program.functionNamed("SUB_Null").index;
+    const make = (run: import("../../../src/compat/qc/machine.ts").QcFunctionBoundary["run"], selected = idle, statementLimit = 100000) => new QcMachine({ program,
+      entities: new QcEntityMemory(classicQcEntityLayout(program), 8, 3), numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: "netquake" }),
+      serverActive: () => true, statementLimit, functionBoundary: { functions: new Set([selected]), run } });
+    const omitted = make(() => undefined);
+    expect(() => omitted.execute(idle)).toThrow("omitted source execution"); omitted.snapshot();
+    const repeated = make((_call, execute) => { execute(); try { execute(); } catch {} return undefined; });
+    expect(() => repeated.execute(idle)).toThrow("once inside its boundary");
+    expect(repeated.profiling[idle]).toBe(1); repeated.snapshot();
+    const retained: { execute: (() => undefined) | null } = { execute: null };
+    const once = make((_call, execute) => { retained.execute = execute; execute(); return undefined; });
+    once.execute(idle);
+    const expired = retained.execute; if (expired === null) throw new Error("Missing continuation");
+    expect(expired).toThrow("once inside its boundary"); expect(once.profiling[idle]).toBe(1);
+    const failing = make((_call, execute) => { try { execute(); } catch {} return undefined; }, program.functionNamed("SUB_CalcMoveDone").index);
+    failing.globals.setInt(failing.globalOffset("self"), failing.entities.reference(1));
+    expect(() => failing.execute(program.functionNamed("SUB_CalcMoveDone").index)).toThrow("unbound builtin setorigin");
+    expect(failing.depth).toBe(0); failing.snapshot();
+    expect(() => make((_call, execute) => execute(), 0)).toThrow("invalid function");
+    const limited = make((_call, execute) => execute(), program.functionNamed("T_Damage").index, 8);
+    const control = new QcMachine({ program, entities: new QcEntityMemory(classicQcEntityLayout(program), 8, 3), numeric: createNumericOperations(Q1_DONOR_PROFILE),
+      builtins: createQcBuiltins({ kind: "netquake" }), serverActive: () => true, statementLimit: 8 });
+    for (const vm of [limited, control]) {
+      vm.globals.setInt(vm.globalOffset("self"), vm.entities.reference(1)); vm.globals.setInt(vm.globalOffset("other"), vm.entities.reference(2));
+      expect(() => vm.execute(program.functionNamed("door_blocked").index)).toThrow("runaway loop");
+      expect(vm.depth).toBe(0); vm.snapshot();
+    }
+    expect(limited.profiling).toEqual(control.profiling); expect(limited.entities.bytes).toEqual(control.entities.bytes);
+  });
+  test("post-boundary source reentry preserves the callee return consumed by its real caller", async () => {
+    const program = await readProgram("id1/PAK0.PAK"), anglemod = program.functionNamed("anglemod").index, movedir = program.functionNamed("SetMovedir").index;
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 2);
+    const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: "netquake" }), serverActive: () => true,
+      functionBoundary: { functions: new Set([anglemod]), run: (_call, execute) => {
+        execute();
+        expect(vm.globals.float(1)).toBe(180);
+        entities.at(1).setVector(vm.fieldOffset("angles"), { x: 0, y: -1, z: 0 });
+        vm.execute(movedir);
+        return undefined;
+      } } });
+    vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+    entities.at(1).setVector(vm.fieldOffset("angles"), { x: 0, y: 180, z: 0 });
+    entities.at(1).setFloat(vm.fieldOffset("ideal_yaw"), 0);
+    vm.execute(program.functionNamed("FacingIdeal").index);
+    expect(vm.globals.float(1)).toBe(0);
+    expect(vm.argc).toBe(1);
+    expect(entities.at(1).vector(vm.fieldOffset("movedir"))).toEqual({ x: 0, y: 0, z: 1 });
+    expect(entities.at(1).vector(vm.fieldOffset("angles"))).toEqual({ x: 0, y: 0, z: 0 });
+    expect(vm.profiling[anglemod]).toBeGreaterThan(0); expect(vm.profiling[movedir]).toBeGreaterThan(0);
+    expect(vm.depth).toBe(0); vm.snapshot();
+  });
   test("loads classic, all rerelease programs and the independent QuakeWorld layout", async () => {
     const classic = await readProgram("id1/PAK0.PAK");
     expect(classic.api.systemCrc).toBe(5927);
@@ -635,5 +779,82 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     checkTime = 0.54; expect(check()).toBe(host.reference(secondClient.id));
     slots.free(secondClient); checkTime = 0.55; expect(check()).toBe(0);
 
+  } finally { archive.close(); }
+});
+
+test.skipIf(!haveCorpus)("retail QC pusher uses shared authored brush movement and raw local-time thinking", async () => {
+  const { SharedPhysics } = await import("../../../src/app/bootstrap/simulation/physics.ts");
+  const { QcWorldHost } = await import("../../../src/compat/qc/world-host.ts");
+  const { createQcPusherServices } = await import("../../../src/compat/qc/pusher-host.ts");
+  const { stepQ1Pusher } = await import("../../../src/movement/q1/pusher.ts");
+  const { createQcTouchCallback } = await import("../../../src/compat/qc/movement-host.ts");
+  const { createSceneQueries } = await import("../../../src/world/collision/index.ts");
+  const { readQ1Bsp, q1EntityValue } = await import("../../../src/formats/q1-map/index.ts");
+  const archive = await openArchive(corpus + "id1/PAK0.PAK");
+  try {
+    const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1");
+    const map = readQ1Bsp(await archive.readEntry(entry)), model = map.models[22];
+    if (model === undefined || !map.entityList.some(entity => q1EntityValue(entity, "classname") === "func_plat" && q1EntityValue(entity, "model") === "*22")) throw new Error("Missing authored platform");
+    const program = await readProgram("id1/PAK0.PAK"), entities = new QcEntityMemory(classicQcEntityLayout(program), 16, 4);
+    const actors = new SessionActorRegistry(createIdentityOwner("qc-pusher")), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
+    const field = (name: string) => { const definition = program.fieldsByName.get(name); if (definition === undefined) throw new Error(`Missing ${name}`); return definition.offset; };
+    const physics: InstanceType<typeof SharedPhysics> = new SharedPhysics({ actors, callbacks, scene, numeric: Q1_DONOR_PROFILE,
+      sourceOrder: (a, b) => (actors.sourceOf(a)?.slot ?? 0) - (actors.sourceOf(b)?.slot ?? 0),
+      worldActor: () => slots.at(0)?.id ?? null,
+      onBlocked: () => { throw new Error("QC pusher must dispatch its source callback"); },
+      getFlags: actor => { const source = actors.sourceOf(actor.id); return { player: source?.slot === 1 }; } });
+    const slots: SourceActorSlots = new SourceActorSlots(actors, { provider: "test:qc-pusher", capacity: entities.capacity, lifetime: quakeEdictLifetime(1),
+      storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }),
+      now: () => ({ kind: "seconds", value: 10 }), unlink: actor => physics.bodies.unlink(actor), exhausted: () => {} });
+    for (let slot = 0; slot < 4; slot++) slots.bindExisting(slot, "quakec:edict");
+    const world = new QcWorldHost({ program, entities, actors, slots, bodies: physics.bodies, scene, numeric: Q1_DONOR_PROFILE,
+      model: name => name === "*22" ? { index: 23, bounds: model.bounds } : null,
+      foreignReference: () => { throw new Error("No foreign QC surrogate in this fixture"); } });
+    world.actor(0);
+    const pusher = world.actor(2), rider = world.actor(1), words = entities.at(2), riderWords = entities.at(1);
+    const zero = { x: 0, y: 0, z: 0 }, origin = { x: (model.bounds.min.x + model.bounds.max.x) / 2, y: (model.bounds.min.y + model.bounds.max.y) / 2, z: model.bounds.max.z + 3 };
+    words.setFloat(field("solid"), 4); words.setFloat(field("movetype"), 7); words.setVector(field("mins"), model.bounds.min); words.setVector(field("maxs"), model.bounds.max);
+    words.setVector(field("velocity"), { x: 0, y: 0, z: -20 }); words.setFloat(field("ltime"), 1); words.setFloat(field("nextthink"), 1.05);
+    const think = program.functionNamed("SUB_Null"); words.setInt(field("think"), think.index);
+    riderWords.setFloat(field("solid"), 3); riderWords.setFloat(field("movetype"), 3); riderWords.setFloat(field("flags"), 512);
+    riderWords.setInt(field("groundentity"), entities.reference(2)); riderWords.setVector(field("origin"), origin);
+    riderWords.setVector(field("mins"), { x: -1, y: -1, z: -1 }); riderWords.setVector(field("maxs"), { x: 1, y: 1, z: 1 });
+    physics.setSolid(pusher, "brush", 22, "q1"); physics.setSolid(rider, "box", null, "q1"); world.link(2); world.link(1);
+    const vm = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: "netquake", host: world.host, isFreeEntity: world.isFreeEntity }), serverActive: () => true });
+    const touch = createQcTouchCallback(world, vm, () => 10);
+    for (const actor of [pusher, rider]) callbacks.bind(actor, { think: null, use: null, pain: null, die: null, touch });
+    const services = createQcPusherServices(world, vm, { physical: projection => physics.q1PusherServices(projection),
+      foreign: { read: actor => { if (!actors.isLive(actor)) return null; throw new Error("Unexpected foreign pusher actor"); }, write: () => { throw new Error("Unexpected foreign pusher write"); } },
+      touchTriggers: actor => physics.touchTriggers(actor), serverTime: () => 10 });
+    const result = stepQ1Pusher({ actor: pusher.id, elapsedSeconds: 0.1, movement: "translate" }, services);
+    expect(result.status).toBe("moved"); expect(result.moved).toEqual([rider.id]);
+    expect(words.float(field("ltime"))).toBe(Math.fround(1.05)); expect(words.float(field("nextthink"))).toBe(0);
+    expect(words.vector(field("origin")).z).toBeCloseTo(-1, 5);
+    expect(riderWords.vector(field("origin")).z).toBeCloseTo(origin.z - 1, 5);
+    expect(riderWords.int(field("groundentity"))).toBe(entities.reference(2));
+    expect(vm.profiling[think.index]).toBeGreaterThan(0); expect(vm.globals.float(vm.globalOffset("time"))).toBe(10);
+    // A stopped source pusher still advances local time when a future think exists.
+    words.setVector(field("velocity"), zero); words.setFloat(field("nextthink"), 2);
+    stepQ1Pusher({ actor: pusher.id, elapsedSeconds: 0.1, movement: "translate" }, services);
+    expect(words.float(field("ltime"))).toBe(Math.fround(Math.fround(1.05) + 0.1));
+    expect(words.float(field("nextthink"))).toBe(2);
+    // Synthetic stationary blocker above the rider isolates rollback on the actual brush.
+    const wall = world.actor(3), wallWords = entities.at(3), riderBefore = riderWords.vector(field("origin"));
+    wallWords.setFloat(field("solid"), 2); wallWords.setFloat(field("movetype"), 0);
+    wallWords.setVector(field("origin"), { ...riderBefore, z: riderBefore.z + 4 });
+    wallWords.setVector(field("mins"), { x: -2, y: -2, z: -1 }); wallWords.setVector(field("maxs"), { x: 2, y: 2, z: 1 });
+    physics.setSolid(wall, "box", null, "q1"); world.link(3);
+    riderWords.setFloat(field("movetype"), 4); riderWords.setFloat(field("flags"), 512);
+    words.setVector(field("velocity"), { x: 0, y: 0, z: 40 }); words.setInt(field("blocked"), think.index);
+    const pusherBefore = words.vector(field("origin")), anglesBefore = words.vector(field("angles")), localBefore = words.float(field("ltime"));
+    const callbacksBefore = vm.profiling[think.index] ?? 0;
+    const blocked = stepQ1Pusher({ actor: pusher.id, elapsedSeconds: 0.1, movement: "translate" }, services);
+    expect(blocked.status).toBe("blocked");
+    expect(words.vector(field("origin"))).toEqual(pusherBefore); expect(words.vector(field("angles"))).toEqual(anglesBefore);
+    expect(words.float(field("ltime"))).toBe(localBefore); expect(words.float(field("nextthink"))).toBe(2);
+    expect(riderWords.vector(field("origin"))).toEqual(riderBefore);
+    expect(riderWords.float(field("flags"))).toBe(0); expect(riderWords.int(field("groundentity"))).toBe(entities.reference(2));
+    expect(vm.profiling[think.index]).toBe(callbacksBefore + 1);
+    actors.close();
   } finally { archive.close(); }
 });
