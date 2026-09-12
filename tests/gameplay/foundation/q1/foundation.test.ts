@@ -131,6 +131,24 @@ test.skipIf(!existsSync(path))("Q1 monster startup preserves failed drop state a
   } finally { actors.close(); }
 });
 
+test.skipIf(!existsSync(path))("Q1 terminal corners give native and selected followers the source pause deadline", async () => {
+  const { runtime, actors } = gameFor(await loadMap(), undefined, "classic");
+  try {
+    const corner = runtime.create("path_corner"); corner.targetname = "terminal"; runtime.spawnEntity(corner);
+    const native = runtime.create("monster_army"); runtime.spawnEntity(native);
+    if (native.monster === null) throw new Error("Missing native monster");
+    native.monster.path = corner.targetname; runtime.time = 1.1;
+    corner.touch?.(native.actor.id, null);
+    expect(native.monster.path).toBe(""); expect(native.monster.mode).toBe("stand"); expect(native.monster.pauseUntil).toBe(1000000.125);
+    const selected = actors.allocate("q2:monsters", "q2:monster_infantry");
+    const advances: { readonly name: string; readonly goal: ActorId | null; readonly pauseUntil: number }[] = [];
+    runtime.authoredPathFollower = actor => actor.equals(selected.id) ? { targetname: corner.targetname, enemy: null,
+      advance: (name, goal, pauseUntil) => { advances.push({ name, goal, pauseUntil }); return undefined; } } : null;
+    corner.touch?.(selected.id, null);
+    expect(advances).toEqual([{ name: "", goal: null, pauseUntil: native.monster.pauseUntil }]);
+  } finally { actors.close(); }
+});
+
 test.skipIf(!existsSync(path))("fresh Q1 arsenal publishes its initial view without replaying attachment", async () => {
   const game = gameFor(await loadMap()), state = game.runtime.player(game.player.id);
   if (state === null) throw new Error("Missing source player");

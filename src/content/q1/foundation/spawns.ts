@@ -9,7 +9,7 @@ import { ZERO, vadd, vsub, vscale, dot, yawFor } from "./types.ts";
 import { precacheQ1World } from "./precache-world.ts";
 import { spawnPickup } from "./pickups.ts";
 import { spawnButton, spawnDoor, spawnPlat, spawnSecretDoor } from "./movers.ts";
-import { spawnMonster } from "./monsters.ts";
+import { pathEndTime, spawnMonster } from "./monsters.ts";
 export { linkDoors } from "./movers.ts";
 
 function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
@@ -167,19 +167,25 @@ function changelevelTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorI
         entity.activator = other; return game.schedule(entity, 0.1, game.named.action(entity, "execute_changelevel"));
 }
 
+function nextPathTarget(game: Q1EntityServices, corner: Q1Actor): { readonly name: string; readonly target: Q1Actor | null; readonly pauseUntil: number } {
+  const target = game.find(corner.target)[0] ?? null;
+  return { name: target === null ? "" : corner.target, target, pauseUntil: target === null ? pathEndTime(game.time) : 0 };
+}
+
 function pathTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
         const actor = game.entity(other), monster = actor?.monster;
         if (actor !== null && game.sourcePathTouch(entity, actor)) return undefined;
         const follower = game.authoredPathFollower?.(other);
         if (follower != null) {
           if (follower.targetname !== entity.targetname || follower.enemy !== null) return undefined;
-          return follower.advance(entity.target, game.find(entity.target)[0]?.actor.id ?? null);
+          const next = nextPathTarget(game, entity);
+          return follower.advance(next.name, next.target?.actor.id ?? null, next.pauseUntil);
         }
         if (actor === null || actor === undefined || monster === null || monster === undefined || monster.path !== entity.targetname || monster.enemy !== null) return undefined;
-        monster.path = entity.target;
-        const target = game.find(monster.path)[0];
-        if (target === undefined) { monster.path = ""; actor.pathEnd?.(); }
-        else actor.idealYaw = yawFor(vsub(game.body(target).origin, game.body(actor).origin));
+        const next = nextPathTarget(game, entity);
+        monster.path = next.name;
+        if (next.target === null) { monster.pauseUntil = next.pauseUntil; actor.pathEnd?.(); }
+        else actor.idealYaw = yawFor(vsub(game.body(next.target).origin, game.body(actor).origin));
         return undefined;
 }
 export function registerSpawnCallbacks(game: Q1EntityServices): undefined {

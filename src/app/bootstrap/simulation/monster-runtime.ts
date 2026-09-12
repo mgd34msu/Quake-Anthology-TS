@@ -108,12 +108,12 @@ export class SelectedMonsters {
     return game.host.actors.isLive(actor);
   }
 
-  q1PathFollower(actor: ActorId): { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null): undefined } | null {
+  q1PathFollower(actor: ActorId): { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null {
     const entry = this.authored.get(actor);
     if (entry === undefined) return null;
-    return { targetname: entry.route, enemy: this.behavior.enemy(actor), advance: (name, goal) => {
+    return { targetname: entry.route, enemy: this.behavior.enemy(actor), advance: (name, goal, pauseUntil) => {
       entry.route = goal === null ? "" : name; entry.routeGoal = goal; entry.routeResolved = true;
-      return this.behavior.setRoute(actor, goal, 0);
+      return this.behavior.setRoute(actor, goal, pauseUntil);
     } };
   }
 

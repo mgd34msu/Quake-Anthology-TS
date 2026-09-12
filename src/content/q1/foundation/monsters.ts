@@ -18,6 +18,7 @@ function setSequence(monster: Q1Monster, mode: Q1Monster["mode"], firstFrame: nu
 function stand(monster: Q1Monster): undefined { return setSequence(monster, "stand", monster.species === "army" ? 0 : 69, stationary(monster.species === "army" ? 8 : 9)); }
 function walk(monster: Q1Monster): undefined { return setSequence(monster, "walk", monster.species === "army" ? 90 : 78, monster.species === "army" ? armyWalk : Array.from({ length: 8 }, () => 8)); }
 function run(monster: Q1Monster): undefined { return setSequence(monster, "run", monster.species === "army" ? 73 : 48, monster.species === "army" ? armyRun : dogRun); }
+export function pathEndTime(time: number): number { return Math.fround(Math.fround(time) + 999999); }
 export function setMonsterRoute(game: Q1EntityServices, entity: Q1Actor, goal: ActorId | null, pauseUntil: number): undefined {
   const monster = requireMonster(entity);
   monster.pauseUntil = pauseUntil;
@@ -304,7 +305,7 @@ function monsterStart(game: Q1EntityServices, entity: Q1Actor): undefined {
 
 export function registerMonsterCallbacks(game: Q1EntityServices): undefined {
   game.named.register("monster_frame", { action: (runtime, entity) => monsterFrame(runtime, entity, requireMonster(entity)) });
-  game.named.register("monster_path_end", { action: (runtime, entity) => { const monster = requireMonster(entity); monster.pauseUntil = runtime.time + 999999; stand(monster); entity.frame = monster.firstFrame; return undefined; } });
+  game.named.register("monster_path_end", { action: (runtime, entity) => { const monster = requireMonster(entity); monster.pauseUntil = pathEndTime(runtime.time); stand(monster); entity.frame = monster.firstFrame; return undefined; } });
   game.named.register("monster_found_target", { action: (runtime, entity) => { const monster = requireMonster(entity); if (monster.enemy === null) return undefined; foundTarget(runtime, entity, monster, monster.enemy); return monsterFrame(runtime, entity, monster); } });
   game.named.register("monster_use", { use: monsterUse });
   game.named.register("monster_pain", { pain: monsterPain });

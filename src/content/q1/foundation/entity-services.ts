@@ -64,7 +64,7 @@ export class Q1EntityServices {
   readonly entities = new Map<OwnedActor, Q1Actor>();
   readonly authoredTargets = new Map<ActorId, AuthoredTarget>();
   readonly monsterMissions = new Map<ActorId, MonsterMission>();
-  authoredPathFollower: ((mover: ActorId) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null): undefined } | null) | null = null;
+  authoredPathFollower: ((mover: ActorId) => { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null) | null = null;
   readonly players = new Map<OwnedActor, Q1PlayerState>();
   time = 0;
   frameSeconds = 0;
