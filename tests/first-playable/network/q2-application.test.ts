@@ -1,3 +1,6 @@
+import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
+import { createQ2ApplicationServerHost } from "../../../src/app/bootstrap/simulation/network.ts";
+import { Q2WireCodec, Q2ServerMessageReader, PlayerStateT, EntityStateT, encodeQ2Frame } from "../../../src/network/q2/index.ts";
 import { expect, test } from 'bun:test';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { loadApplicationContent } from '../../../src/app/bootstrap/content.ts';
@@ -104,4 +107,49 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         session.close();
         await content.close();
     }
+}, 30000);
+
+test('lower-level Q2 host preserves a synthetic unsupported RR model-beam endpoint through protocol 34', async () => {
+    const parsed = parseApplicationCommand(['--game', 'q2-rerelease-baseq2', '--map', 'base1', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'singleplayer']);
+    if (parsed.kind !== 'run') throw new Error('No RR launch');
+    const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner('Q2 model-beam wire');
+    const session = new EngineSession(identity, { kind: 'headless' });
+    const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: 'singleplayer', seed: 1, maxClients: 1, playerIdentity: client => ({ seat: client.slot, socialId: '' }) });
+    try {
+        const client = session.createClient(0), admitted = simulation.admitPlayer(client.id), source = simulation.q2Source();
+        if (source === null) throw new Error('No native RR source');
+        const host = await createQ2ApplicationServerHost({ session, simulation, content, protocol: { kind: 'q2-classic', version: 34 }, print: () => undefined });
+        expect(host.supportsSourceWire().kind).toBe('unsupported');
+        const player = host.carriedPlayer(client.id), body = simulation.bodies.read(admitted.actor);
+        if (body === null) throw new Error('No admitted body');
+        const segment = source.game.create('wire_model_beam_probe');
+        segment.model = 'models/monsters/parasite/segment/tris.md2'; segment.renderFlags = 128; segment.frame = 30;
+        const origin = { x: 16, y: 32, z: 48 }, endpoint = { x: 88.125, y: -24.5, z: 64.75 };
+        source.game.move(segment, { origin }); segment.pos2 = endpoint;
+        const presentation = simulation.presentations().find(value => value.actor.equals(segment.actor.id));
+        expect(presentation?.modelBeam).toEqual({ segmentLength: 30 });
+        expect(presentation?.previousOrigin).toEqual(endpoint);
+        const ordinary = source.game.create('wire_ordinary_probe'); ordinary.model = segment.model; ordinary.pos2 = endpoint;
+        source.game.move(ordinary, { origin });
+        const ordinaryAddress = simulation.actors.sourceOf(ordinary.actor.id);
+        if (ordinaryAddress === null) throw new Error('No ordinary source address');
+        const ordinaryWire = host.gameState(player).baselines.get(ordinaryAddress.slot);
+        if (ordinaryWire === undefined) throw new Error('No ordinary network model');
+        expect(Array.from(ordinaryWire.old_origin)).toEqual([16, 32, 48]);
+        const address = simulation.actors.sourceOf(segment.actor.id);
+        if (address === null) throw new Error('No source address');
+        const wire = host.gameState(player).baselines.get(address.slot);
+        if (wire === undefined) throw new Error('No network segment');
+        expect(Array.from(wire.origin)).toEqual([16, 32, 48]);
+        expect(Array.from(wire.old_origin)).toEqual([88.125, -24.5, 64.75]);
+        const codec = new Q2WireCodec({ kind: 'q2-classic', version: 34 });
+        const reader = new Q2ServerMessageReader({ kind: 'q2-classic', version: 34 }, host.messageOptions);
+        const frame = { serverFrame: 1, deltaFrame: -1, suppressedCount: 0, areaBits: new Uint8Array(), player: new PlayerStateT(), entities: [wire] };
+        const decoded = reader.read(encodeQ2Frame(codec, frame, null, new Map<number, EntityStateT>(), 4)).find(record => record.event.kind === 'frame')?.event;
+        if (decoded?.kind !== 'frame') throw new Error('No decoded frame');
+        const received = decoded.frame.entities.find(entity => entity.number === address.slot);
+        if (received === undefined) throw new Error('No decoded segment');
+        expect(Array.from(received.old_origin)).toEqual([88.125, -24.5, 64.75]);
+        expect(received.renderfx).toBe(128); expect(received.frame).toBe(30); expect(received.modelindex).toBe(wire.modelindex);
+    } finally { simulation.close(); session.close(); await content.close(); }
 }, 30000);

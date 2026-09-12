@@ -72,7 +72,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             const presentation = presentations.get(entity.actor.id), wire = new EntityStateT();
             wire.number = number;
             vector(wire.origin, body.origin);
-            vector(wire.old_origin, body.origin);
+            vector(wire.old_origin, presentation?.previousOrigin ?? body.origin);
             vector(wire.angles, body.angles);
             wire.modelindex = model(presentation?.path ?? entity.model);
             wire.modelindex2 = model(entity.model2);
