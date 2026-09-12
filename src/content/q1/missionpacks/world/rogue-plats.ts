@@ -3,7 +3,7 @@ import type { Q1Actor } from "../../foundation/entity.ts";
 import { moveDirection } from "../../foundation/entity.ts";
 import type { Q1EntityServices } from "../../foundation/entity-services.ts";
 import { ZERO, dot, vadd, vsub, vscale } from "../../foundation/types.ts";
-import { brush, later, number } from "./common.ts";
+import { brush, number } from "./common.ts";
 
 function move(game: Q1EntityServices, entity: Q1Actor, up: boolean): undefined {
   game.sound(entity, entity.text("noise"), "voice"); entity.state = up ? "up" : "down";
@@ -22,11 +22,11 @@ export function registerRoguePlats(game: Q1EntityServices): undefined {
     game.named.register(up ? "rogue:plat_up" : "rogue:plat_down", { action: (g, e) => move(g, e, up) });
     game.named.register(up ? "rogue:plat_top" : "rogue:plat_bottom", { action: (g, e) => {
       g.sound(e, e.text("noise1"), "voice"); e.state = up ? "top" : "bottom";
-      if ((e.spawnflags & 1) !== 0 && !up) return later(g, e, g.health(e.actor.id), "rogue:plat_up");
+      if ((e.spawnflags & 1) !== 0 && !up) return g.scheduleAt(e, Math.fround(e.number("ltime") + g.health(e.actor.id)), g.named.action(e, "rogue:plat_up"));
       if ((e.spawnflags & 16) === 0) return undefined;
       number(e, "plat2LastMove", g.time);
-      if (e.number("plat2Called") === 1) { number(e, "plat2Called", 0); number(e, "plat2LastMove", 0); return later(g, e, 1.5, up ? "rogue:plat_down" : "rogue:plat_up"); }
-      if (up !== ((e.spawnflags & 8) !== 0)) { number(e, "plat2Called", 0); return later(g, e, e.delay, up ? "rogue:plat_down" : "rogue:plat_up"); } return undefined;
+      if (e.number("plat2Called") === 1) { number(e, "plat2Called", 0); number(e, "plat2LastMove", 0); return g.scheduleAt(e, Math.fround(e.number("ltime") + 1.5), g.named.action(e, up ? "rogue:plat_down" : "rogue:plat_up")); }
+      if (up !== ((e.spawnflags & 8) !== 0)) { number(e, "plat2Called", 0); return g.scheduleAt(e, Math.fround(e.number("ltime") + e.delay), g.named.action(e, up ? "rogue:plat_down" : "rogue:plat_up")); } return undefined;
     } });
   }
   game.named.register("rogue:plat_blocked", { blocked: (g, e, other) => { g.damage(other, e.actor.id, e.actor.id, 1); if (e.state !== "up" && e.state !== "down") throw new Error("plat_new_crush: bad self.state"); return move(g, e, e.state === "down"); } });
@@ -69,7 +69,7 @@ export function registerRoguePlats(game: Q1EntityServices): undefined {
     }
     return undefined;
   });
-  game.named.register("rogue:elvbutton_wait", { action: (g, e) => { if (g.world !== null) number(g.world, "rogue:elvButnDir", (e.spawnflags & 1) !== 0 ? -1 : 1); e.state = "top"; later(g, e, e.wait, "rogue:elvbutton_return"); g.useTargets(e, e.activator); e.frame = 1; return undefined; } });
+  game.named.register("rogue:elvbutton_wait", { action: (g, e) => { if (g.world !== null) number(g.world, "rogue:elvButnDir", (e.spawnflags & 1) !== 0 ? -1 : 1); e.state = "top"; g.scheduleAt(e, Math.fround(e.number("ltime") + e.wait), g.named.action(e, "rogue:elvbutton_return")); g.useTargets(e, e.activator); e.frame = 1; return undefined; } });
   game.named.register("rogue:elvbutton_done", { action: (_g, e) => { e.state = "bottom"; return undefined; } });
   game.named.register("rogue:elvbutton_return", { action: (g, e) => { e.state = "down"; e.frame = 0; if (g.health(e.actor.id) !== 0) e.damageable = true; return g.calcMove(e, e.pos1, e.speed, g.named.action(e, "rogue:elvbutton_done")); } });
   game.named.register("rogue:elvbutton_fire", { use: (g, e, _other, a) => { e.activator = a; return buttonFire(g, e); }, touch: (g, e, other) => { if (!g.isPlayer(other)) return undefined; e.activator = other; return buttonFire(g, e); }, die: (g, e, a) => { e.activator = a; g.host.combat.setHealth(e.actor, e.maxHealth); e.damageable = false; return buttonFire(g, e); } });

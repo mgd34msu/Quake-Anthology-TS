@@ -15,7 +15,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
   game.named.register(prefix + "bob_tick", { action: (_game, entity) => game.setOrigin(entity, bobPosition(entity, Math.fround(entity.angularVelocity.x * context.frameTime))) });
   game.named.register(prefix + "bob_think", { action: (_game, entity) => {
     const position = bobPosition(entity, Math.fround(entity.angularVelocity.x * 0.05));
-    game.setBody(entity, { velocity: vscale(vsub(position, game.body(entity).origin), 20) }); return schedule(entity, "bob_think", 0.05);
+    game.setBody(entity, { velocity: vscale(vsub(position, game.body(entity).origin), 20) }); return game.scheduleAt(entity, Math.fround(entity.number("ltime") + 0.05), game.named.action(entity, prefix + "bob_think"));
   } });
   game.named.register(prefix + "bob_use", { use: (_game, entity) => {
     const solid = entity.solid !== "none";
@@ -52,7 +52,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
     game.link(entity); return schedule(entity, "toss_think", 0.25);
   } });
   game.named.register(prefix + "toss_use", { use: (_game, entity) => {
-    entity.use = null; return entity.delay !== 0 ? schedule(entity, "toss", entity.delay) : game.named.action(entity, prefix + "toss")();
+    entity.use = null; return entity.delay !== 0 ? game.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.delay), game.named.action(entity, prefix + "toss")) : game.named.action(entity, prefix + "toss")();
   } });
   game.named.register(prefix + "toss_cascade", { action: (_game, entity) => {
     const bounds = game.body(entity).bounds, position = vscale(vadd(bounds.min, bounds.max), 0.5); let nearest = 16384;
@@ -69,7 +69,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
     if (length(variance) !== 0) entity.movedir = vadd(entity.movedir, { x: (game.host.random() * 2 - 1) * variance.x, y: (game.host.random() * 2 - 1) * variance.y, z: (game.host.random() * 2 - 1) * variance.z });
     entity.use = game.named.use(entity, prefix + "toss_use");
     if ((entity.spawnflags & 1) !== 0) { entity.fields.set("netname", "_toss_origin"); entity.speed ||= 200; return undefined; }
-    return entity.delay === 0 ? schedule(entity, "toss_cascade", 0.2) : undefined;
+    return entity.delay === 0 ? game.scheduleAt(entity, Math.fround(entity.number("ltime") + 0.2), game.named.action(entity, prefix + "toss_cascade")) : undefined;
   });
   game.named.register(prefix + "shatter", { use: (_game, entity) => {
     entity.use = null; entity.solid = "none"; entity.movement = "toss"; game.setBody(entity, { velocity: entity.movedir }); return game.link(entity);
@@ -98,7 +98,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
     game.setBody(entity, { velocity: { ...game.body(entity).velocity, x: (game.host.random() * 2 - 1) * 8, y: (game.host.random() * 2 - 1) * 8 } });
     game.link(entity); return schedule(entity, "debris_fade", entity.delay);
   } });
-  game.named.register(prefix + "debris_wait", { use: (_game, entity) => schedule(entity, "debris_wake", game.host.random()) });
+  game.named.register(prefix + "debris_wait", { use: (_game, entity) => game.scheduleAt(entity, Math.fround(entity.number("ltime") + game.host.random()), game.named.action(entity, prefix + "debris_wake")) });
   game.registerSpawn("func_debris", (_game, entity) => {
     pushBrush(entity); context.setVector(entity, "oldorigin", game.body(entity).origin); entity.delay ||= 1.5; entity.wait ||= 0.1;
     entity.movedir = { x: 0, y: 0, z: 200 }; entity.use = game.named.use(entity, prefix + "debris_wait"); return context.alpha(entity, 1);
@@ -109,7 +109,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
     game.sound(entity, "weapons/r_exp3.wav"); game.effect("explosion", position); game.useTargets(entity, entity.activator); return game.remove(entity);
   } });
   game.named.register(prefix + "explode_die", { die: (_game, entity, attacker) => {
-    entity.damageable = false; entity.activator = attacker; return schedule(entity, "explode", 0.15);
+    entity.damageable = false; entity.activator = attacker; return game.scheduleAt(entity, Math.fround(entity.number("ltime") + 0.15), game.named.action(entity, prefix + "explode"));
   } });
   game.registerSpawn("func_explode", (_game, entity) => {
     pushBrush(entity); game.setBody(entity, { angles: ZERO }); game.host.combat.setHealth(entity.actor, 20); entity.damageable = true; entity.aimedDamage = true;
@@ -181,7 +181,7 @@ export function registerAddonBrushes(context: Q1AddonContext): undefined {
   if (context.program === "mg3") {
     game.named.register(prefix + "breakable_stop", { action: (_game, entity) => game.setBody(entity, { velocity: ZERO }) });
     game.named.register(prefix + "breakable_pain", { pain: (_game, entity) => {
-      game.host.combat.setHealth(entity.actor, 10000); game.setBody(entity, { velocity: { x: 0, y: 0, z: -20 } }); return schedule(entity, "breakable_stop", entity.number("ltime") + 1 - game.time);
+      game.host.combat.setHealth(entity.actor, 10000); game.setBody(entity, { velocity: { x: 0, y: 0, z: -20 } }); return game.scheduleAt(entity, Math.fround(entity.number("ltime") + 1), game.named.action(entity, prefix + "breakable_stop"));
     } });
     game.named.register(prefix + "breakable_die", { die: (_game, entity) => game.remove(entity) });
     game.registerSpawn("func_breakable", (_game, entity) => {

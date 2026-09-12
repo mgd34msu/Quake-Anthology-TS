@@ -1,3 +1,4 @@
+import { stepQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
 import { createMutableVectorMath } from "../../../core/math.ts";
 /* Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
@@ -197,7 +198,7 @@ export class Q1EntityServices {
     if (options.scheduleThinks ?? true) this.resumeThinks(); return undefined;
   }
   resumeThinks(): undefined {
-    for (const entity of this.entities.values()) if (entity.think !== null && entity.nextThink >= 0) this.host.scheduleThink(entity.actor, entity.nextThink);
+    for (const entity of this.entities.values()) if (entity.movement !== "push" && entity.think !== null && entity.nextThink >= 0) this.host.scheduleThink(entity.actor, entity.nextThink);
     return undefined;
   }
   registerStateExtension(extension: Q1StateExtension): undefined {
@@ -271,7 +272,7 @@ export class Q1EntityServices {
     target.pathEnd = callbacks.pathEnd === null ? null : this.named.action(target, callbacks.pathEnd);
     target.move = source.move === null || done === null ? null : { ...source.move, destination: { ...source.move.destination }, done: this.named.action(target, done) };
     for (const extension of this.stateExtensions.values()) extension.clone?.(source, target);
-    if (target.think !== null && target.nextThink >= 0) this.host.scheduleThink(target.actor, target.nextThink);
+    if (target.movement !== "push" && target.think !== null && target.nextThink >= 0) this.host.scheduleThink(target.actor, target.nextThink);
     return target;
   }
   bindActorCallbacks(entity: Q1Actor): undefined {
@@ -334,7 +335,11 @@ export class Q1EntityServices {
   setBounds(entity: Q1Actor, bounds: Bounds): undefined { this.setBody(entity, { bounds }); return this.link(entity); }
   remove(entity: Q1Actor): undefined { if (this.live(entity)) this.host.actors.release(entity.actor); return undefined; }
   schedule(entity: Q1Actor, delay: number, callback: () => undefined): undefined {
-    entity.nextThink = Math.fround(this.time + delay); entity.think = callback;
+    return this.scheduleAt(entity, Math.fround(this.time + delay), callback);
+  }
+  scheduleAt(entity: Q1Actor, dueSeconds: number, callback: () => undefined): undefined {
+    entity.nextThink = Math.fround(dueSeconds); entity.think = callback;
+    if (entity.movement === "push") return this.host.cancelThink(entity.actor);
     return this.host.scheduleThink(entity.actor, entity.nextThink);
   }
   cancel(entity: Q1Actor): undefined { entity.nextThink = -1; entity.think = null; return this.host.cancelThink(entity.actor); }
@@ -423,9 +428,11 @@ export class Q1EntityServices {
 
   calcMove(entity: Q1Actor, destination: Vec3, speed: number, done: () => undefined): undefined {
     if (!(speed > 0)) throw new RangeError("Q1 mover speed must be positive");
-    this.cancel(entity); const delta = vsub(destination, this.body(entity).origin); const travel = length(delta) / speed;
-    entity.move = { destination, speed, remaining: Math.max(0.1, travel), done };
-    return this.setBody(entity, { velocity: travel < 0.1 ? ZERO : vscale(delta, 1 / travel) });
+    this.cancel(entity); const delta = vsub(destination, this.body(entity).origin);
+    const travel = Math.fround(length(delta) / speed);
+    entity.move = { destination, done };
+    this.setBody(entity, { velocity: travel < 0.1 ? ZERO : vscale(delta, Math.fround(1 / travel)) });
+    return this.scheduleAt(entity, Math.fround(entity.number("ltime") + Math.max(0.1, travel)), this.named.action(entity, "SUB_CalcMoveDone"));
   }
 
   /** Convenience for direct provider use. The unified session calls physicsEntity in source-slot order. */
@@ -437,22 +444,14 @@ export class Q1EntityServices {
   physicsEntity(actor: OwnedActor, seconds: number, elapsedSeconds: number): undefined {
     this.time = seconds; this.frameSeconds = elapsedSeconds; const entity = this.entities.get(actor);
     if (entity === undefined || !this.live(entity)) return undefined;
-    const move = entity.move;
-    if (move !== null) {
-      const body = this.body(entity); const duration = Math.min(elapsedSeconds, move.remaining);
-      const final = duration >= move.remaining;
-      const displacement = final ? vsub(move.destination, body.origin) : vscale(body.velocity, duration);
-      const blocker = this.host.pushMove(entity.actor, displacement);
-      if (blocker !== null) return undefined;
-      move.remaining -= duration;
-      if (final) { entity.move = null; this.setBody(entity, { velocity: ZERO }); move.done(); }
-    } else if (entity.movement === "push") {
-      const velocity = this.body(entity).velocity;
+    if (entity.movement === "push") {
       const angular = entity.angularVelocity;
-      if (velocity.x !== 0 || velocity.y !== 0 || velocity.z !== 0 || angular.x !== 0 || angular.y !== 0 || angular.z !== 0) this.host.pushMove(entity.actor, vscale(velocity, elapsedSeconds));
+      stepQ1Pusher({ actor: actor.id, elapsedSeconds,
+        movement: angular.x !== 0 || angular.y !== 0 || angular.z !== 0 ? "rotate" : "translate" }, this.host.pusherServices(this));
     } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
     return undefined;
   }
+
   /** Weapon/powerup/environment state; jumping belongs to the independently selected movement provider. */
   playerFrame(actor: OwnedActor, seconds: number, waterLevel?: number): undefined {
     this.time = seconds; const player = this.players.get(actor);

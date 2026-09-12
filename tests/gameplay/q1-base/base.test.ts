@@ -71,7 +71,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePr
     },
     // This smoke exercises registration, shared mutations and animation, not step movement.
     walkMove: () => false, moveToGoal: () => undefined, changeYaw: actor => movement.changeYaw(actor), checkBottom: () => false,
-    pushMove: (actor, displacement) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing body"); bodies.write(actor, { ...body, origin: vadd(body.origin, displacement) }); bodies.link(actor); return null; },
+    pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
     scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,

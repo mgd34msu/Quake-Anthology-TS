@@ -111,7 +111,7 @@ function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>,
       physics.step(actor, elapsed);
     } else services.physicsEntity(actor, context.timeSeconds, elapsed);
   }
-  if ((pusher || step) && actors.isLive(actor.id)) scheduler.run(actor.id, frame, "during-physics");
+  if (step && actors.isLive(actor.id)) scheduler.run(actor.id, frame, "during-physics");
   if (step && actors.isLive(actor.id)) services.checkWaterTransition(entity);
   return undefined;
 }

@@ -1,13 +1,18 @@
+import { SharedPhysics } from "../../../src/app/bootstrap/simulation/physics.ts";
+import { createNativeQ1PusherServices } from "../../../src/app/bootstrap/simulation/native-q1-pusher.ts";
+import { actorCollision, actorMotion, actorFlags } from "../../../src/app/bootstrap/simulation/actor-execution.ts";
+import { createSceneQueries } from "../../../src/world/collision/index.ts";
+import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
 import type { TransitionIntent } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable } from "../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/runtime.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/types.ts";
-import { ZERO, PLAYER_BOUNDS, vadd } from "../../../src/content/q1/foundation/types.ts";
+import { ZERO, PLAYER_BOUNDS } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
 import { registerQ1CampaignAddons, registerQ1Horde, mg1LastSigil, mg3RuneCount, handleQ1AddonImpulse, frameQ1AddonPlayer } from "../../../src/content/q1/addons/index.ts";
 import type { Q1AddonEvent } from "../../../src/content/q1/addons/index.ts";
@@ -17,15 +22,28 @@ import type { Q1Entity } from "../../../src/formats/q1-map/index.ts";
 
 function world(program: "mg1" | "mg3", withHorde = false, walkable = false) {
   const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")), callbacks = new ActorCallbackTable(actors);
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  let runtime: Q1Foundation | null = null;
+  const bounds = { min: { x: -1024, y: -1024, z: -1024 }, max: { x: 1024, y: 1024, z: 1024 } };
+  const scene = createSceneQueries({ kind: "q1-bsp", format: "bsp29", entities: "", planes: [], vertices: [], edges: [], surfaceEdges: [], nodes: [],
+    leaves: [-2, -1].map(contents => ({ contents, bounds, faces: { first: 0, count: 0 }, visibilityOffset: null, ambientSound: [0, 0, 0, 0] })),
+    leafFaces: [], textures: [], textureInfo: [], faces: [], models: [{ bounds, origin: ZERO, headnodes: [-2, -1, -1, -1], visibleLeaves: 1, faces: { first: 0, count: 0 } }],
+    clipnodes: [], visibility: new Uint8Array(), lighting: { kind: "luminance8", samples: new Uint8Array() }, decoupledLightmaps: null, brushList: null, extensions: [] });
+  const execution = (actor: OwnedActor) => { const entity = runtime?.entity(actor.id); return entity == null || runtime === null ? null :
+    { kind: "q1", entity, services: runtime, content: "q1:rerelease:mg3:test" } satisfies import("../../../src/app/bootstrap/simulation/actor-execution.ts").ActorExecution; };
+  const physics: SharedPhysics = new SharedPhysics({ actors, callbacks, scene, numeric: Q1_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
+    worldActor: () => runtime?.world?.actor.id ?? null, onBlocked: (actor, other) => runtime?.entity(actor.id)?.blocked?.(other),
+    getCollision: actor => { const entry = execution(actor); return entry === null ? null : actorCollision(entry); },
+    getMotion: actor => { const entry = execution(actor), body = physics.bodies.read(actor.id); return entry === null || body === null ? null : actorMotion(entry, body); },
+    getFlags: actor => { const entry = execution(actor); return entry === null ? { player: true } : actorFlags(entry); } });
+  const bodies = physics.bodies;
+
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], addonEvents: Q1AddonEvent[] = [], pending = new Map<OwnedActor, number>(), players: ActorId[] = [];
   const cvars = new Map<string, number>(), transitions: TransitionIntent[] = [];
-  let runtime: Q1Foundation | null = null;
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => ({ fraction: 1, end: request.end, normal: ZERO, actor: null, startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }),
     contents: () => "empty", walkMove: () => walkable, moveToGoal: () => undefined, changeYaw: () => { throw new Error("This check does not drive monster turning"); }, checkBottom: () => false,
-    pushMove: (actor, displacement) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing brush body"); bodies.write(actor, { ...body, origin: vadd(body.origin, displacement) }); return null; },
+    pusherServices: game => createNativeQ1PusherServices(game, physics),
     scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: intent => { transitions.push(intent); return undefined; }, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
@@ -79,9 +97,11 @@ test("timed counters reset their count, and multitouch fires occupied then empty
 
 test("MG3 breakable pain and light ramp use shared bodies and named saved callbacks", () => {
   const state = world("mg3"), { game, context, spawn, think, player } = state;
-  const brush = spawn("func_breakable"); game.damage(brush.actor.id, player.id, player.id, 10);
+  const brush = spawn("func_breakable"); game.time = 10; brush.fields.set("ltime", "2"); game.damage(brush.actor.id, player.id, player.id, 10);
   expect(game.health(brush.actor.id)).toBe(10000); expect(game.body(brush).velocity.z).toBe(-20);
-  game.physicsEntity(brush.actor, 0.05, 0.05); expect(game.body(brush).origin.z).toBe(-1);
+  expect(brush.nextThink).toBe(3);
+  game.physicsEntity(brush.actor, 10.05, 0.05); expect(game.body(brush).origin.z).toBe(-1);
+  expect(brush.number("ltime")).toBe(Math.fround(2.05));
   spawn("light", { targetname: "ramp_light", style: "32", spawnflags: "1" });
   const ramp = spawn("target_lightramp", { targetname: "ramp", target: "ramp_light", delay: "2" }); think(ramp, 0.1);
   ramp.use?.(null, player.id); context.frame(1); expect(ramp.number("cnt")).toBe(0.5);

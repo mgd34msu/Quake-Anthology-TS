@@ -10,8 +10,6 @@ import { ZERO, vectors } from "./types.ts";
 
 export interface Q1Move {
   readonly destination: Vec3;
-  readonly speed: number;
-  remaining: number;
   readonly done: () => undefined;
 }
 export type Q1MonsterSpecies = "army" | "dog" | "knight" | "enforcer" | "demon" | "ogre" | "hellknight" | "shambler" | "wizard" | "shalrath" | "tarbaby" | "fish" | "zombie" | "boss" | "oldone" | "gremlin" | "scourge" | "armagon" | "spikemine" | "decoy" | "eel" | "sword" | "wrath" | "super-wrath" | "mummy" | "lava-man" | "morph" | "dragon";

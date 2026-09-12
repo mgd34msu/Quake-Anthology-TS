@@ -36,7 +36,7 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
     trace: request => ({ fraction: hit === null || !request.monsters ? 1 : 0.5, end: request.end, normal: { x: -1, y: 0, z: 0 }, actor: request.monsters ? hit : null,
       startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }), contents: () => "empty", walkMove: () => false,
-    changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, moveToGoal: () => undefined, checkBottom: () => false, pushMove: () => null,
+    changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, moveToGoal: () => undefined, checkBottom: () => false, pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
     scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined };

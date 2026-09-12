@@ -50,7 +50,7 @@ function equipment(map: Q1Map, saved?: Saved) {
         startSolid: result.startSolid, allSolid: result.allSolid, sky: false, inOpen: result.inOpen, inWater: result.inWater };
     },
     contents: () => contents, walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false,
-    changeYaw: () => { throw new Error("Equipment does not run monster yaw"); }, pushMove: () => { throw new Error("Equipment does not run map pushers"); },
+    changeYaw: () => { throw new Error("Equipment does not run monster yaw"); }, pusherServices: () => { throw new Error("Equipment does not run map pushers"); },
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => [], checkClient: () => null, classname: () => "", powerup: () => undefined,
   };

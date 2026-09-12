@@ -1,3 +1,7 @@
+import { encodeCheckpointValue } from "../../../../src/persistence/value.ts";
+import { SharedPhysics } from "../../../../src/app/bootstrap/simulation/physics.ts";
+import { createNativeQ1PusherServices } from "../../../../src/app/bootstrap/simulation/native-q1-pusher.ts";
+import { actorCollision, actorMotion, actorFlags } from "../../../../src/app/bootstrap/simulation/actor-execution.ts";
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
@@ -7,7 +11,7 @@ import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import type { Q1Map } from "../../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
-import { SessionActorRegistry, SharedBodyTable, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../../src/core/numeric.ts";
 import { createQ1MonsterMovement } from "../../../../src/movement/q1/index.ts";
@@ -39,13 +43,15 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources), callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
   const pending = new Map<OwnedActor, number>(), events: Q1Event[] = [], players: ActorId[] = [];
   let game: Q1Foundation | null = null;
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
-    const entity = game?.entity(body.actor);
-    if (entity === null || entity === undefined || entity.solid === "none" || entity.classname === "worldspawn") { scene.unlink(body.actor); return undefined; }
-    const model = entity.model.startsWith("*") ? Number(entity.model.slice(1)) : null;
-    scene.link(body, { family: "q1", shape: model === null ? { kind: "box" } : { kind: "model", model }, contents: -2, owner: entity.owner,
-      role: entity.solid === "trigger" ? "trigger" : "solid", monster: entity.monster !== null, deadMonster: false }); return undefined;
-  } });
+  const execution = (actor: OwnedActor) => { const entity = game?.entity(actor.id); return entity == null || game === null ? null :
+    { kind: "q1", entity, services: game, content: "q1:rerelease:id1:test" } satisfies import("../../../../src/app/bootstrap/simulation/actor-execution.ts").ActorExecution; };
+  const physics: SharedPhysics = new SharedPhysics({ actors, callbacks, scene, numeric: Q1_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot,
+    worldActor: () => game?.world?.actor.id ?? null, onBlocked: (actor, other) => game?.entity(actor.id)?.blocked?.(other),
+    getCollision: actor => { const entry = execution(actor); return entry === null ? null : actorCollision(entry); },
+    getMotion: actor => { const entry = execution(actor), body = physics.bodies.read(actor.id); return entry === null || body === null ? null : actorMotion(entry, body); },
+    getFlags: actor => { const entry = execution(actor); return entry === null ? { player: true } : actorFlags(entry); } });
+  const bodies = physics.bodies;
+
   const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors);
   const monsterMovement = createQ1MonsterMovement({ scene, numeric: createNumericOperations(Q1_DONOR_PROFILE), random: { nextInteger: () => 1 },
@@ -72,7 +78,7 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
     },
     // These tests drive pickups/targets and unobstructed mover completion, not the source movement engine.
     walkMove: () => false, moveToGoal: () => undefined, checkBottom: () => false, changeYaw: actor => monsterMovement.changeYaw(actor),
-    pushMove: (actor, displacement) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing mover body"); bodies.write(actor, { ...body, origin: vadd(body.origin, displacement) }); bodies.link(actor); return null; },
+    pusherServices: game => createNativeQ1PusherServices(game, physics),
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined,
     players: () => players, checkClient: () => null, classname: actor => game?.entity(actor)?.classname ?? "player",
@@ -249,6 +255,7 @@ test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, me
   expect(runtime.totalMonsters).toBe(total);
   expect(runtime.body(clone)).toEqual(runtime.body(template));
   const checkpoint = runtime.capture();
+  expect(() => decodeQ1FoundationCheckpoint(encodeCheckpointValue({ ...checkpoint, version: 4 }))).toThrow();
   expect(checkpoint.entities.some(entity => entity.move !== null && entity.move.done === "door_hit_top")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "health_rot")).toBe(true);
   expect(checkpoint.entities.some(entity => entity.callbacks.think === "DelayThink")).toBe(true);

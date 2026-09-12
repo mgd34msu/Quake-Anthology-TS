@@ -593,3 +593,60 @@ test("common camera kick preserves zero basis and raises a pitched yawed view wi
   }
   expect(camera.axis).toEqual(anglesToAxis(aim));
 });
+
+test("authored Q1 platform pauses local time when blocked and restores its source deadline", async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q2", "--character", "q2"]);
+  if (command.kind !== "run") throw new Error("Expected native Q1 map");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("native-pusher-time");
+  const options = { recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 0, mode: "singleplayer", seed: 17, maxClients: 1 } satisfies Omit<Parameters<typeof createSimulation>[0], "identity">;
+  const simulation = createSimulation({ ...options, identity });
+  try {
+    const actor = simulation.admitPlayer(identity.client(0, 0)).actor, source = simulation.q1Source();
+    if (source === null) throw new Error("Missing native Q1 source");
+    for (let i = 0; i < 4; i++) simulation.step({ elapsedMilliseconds: 100, commands: [] });
+    const platform = [...source.game.entities.values()].find(entity => entity.model === "*22");
+    if (platform === undefined) throw new Error("Missing authored platform");
+    const trigger = [...source.game.entities.values()].find(entity => entity.owner?.equals(platform.actor.id) && entity.touch !== null);
+    if (trigger === undefined) throw new Error("Missing authored e1m1 platform and trigger");
+    const initial = source.game.body(platform).origin;
+    // A synthetic tall rider deliberately intersects the authored ceiling; the brush stays authored.
+    const blocker = source.game.create("info_notnull"); blocker.movement = "step"; blocker.solid = "bbox"; blocker.movementFlags = 512;
+    source.game.setBody(blocker, { origin: { x: 792, y: 512, z: -296 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 400 } }, ground: platform.actor.id });
+    source.game.link(blocker);
+    simulation.callbacks.touch({ self: trigger.actor, other: actor, plane: null, surface: null });
+    expect(platform.state).toBe("up");
+    simulation.step({ elapsedMilliseconds: 100, commands: [] });
+    expect(source.game.body(platform).origin).toEqual(initial);
+    expect(platform.number("ltime")).toBe(Math.fround(Math.fround(0.1) - 0.1));
+    expect(platform.state).toBe("down");
+    expect(platform.nextThink).toBe(Math.fround(0.1));
+    const saved = decodeSaveImage(encodeSaveImage(simulation.checkpoint()));
+    const restoredIdentity = createIdentityOwner("native-pusher-time-restored"), client = restoredIdentity.client(0, 0);
+    const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [client], restore: saved });
+    try {
+      const other = restored.q1Source(), restoredActor = restored.players()[0];
+      if (other === null || restoredActor === undefined) throw new Error("Missing restored native source/player");
+      const samePlatform = other.game.entity(restored.actors.referenceSaved(platform.actor.id));
+      const sameBlocker = other.game.entity(restored.actors.referenceSaved(blocker.actor.id));
+      const sameTrigger = other.game.entity(restored.actors.referenceSaved(trigger.actor.id));
+      if (samePlatform === null || sameBlocker === null || sameTrigger === null) throw new Error("Missing saved pusher actors");
+      expect(samePlatform.number("ltime")).toBe(platform.number("ltime")); expect(samePlatform.nextThink).toBe(platform.nextThink);
+      expect(other.game.capture().version).toBe(5);
+      source.game.remove(blocker); other.game.remove(sameBlocker);
+      simulation.step({ elapsedMilliseconds: 100, commands: [] }); restored.step({ elapsedMilliseconds: 100, commands: [] });
+      expect(platform.state).toBe("bottom"); expect(samePlatform.state).toBe("bottom");
+      simulation.callbacks.touch({ self: trigger.actor, other: actor, plane: null, surface: null });
+      restored.callbacks.touch({ self: sameTrigger.actor, other: restoredActor, plane: null, surface: null });
+      let reachedTop = false;
+      for (let i = 0; i < 55; i++) {
+        simulation.step({ elapsedMilliseconds: 100, commands: [] }); restored.step({ elapsedMilliseconds: 100, commands: [] });
+        expect(other.game.body(samePlatform)).toEqual(source.game.body(platform));
+        expect(samePlatform.number("ltime")).toBe(platform.number("ltime")); expect(samePlatform.nextThink).toBe(platform.nextThink);
+        expect(samePlatform.state).toBe(platform.state);
+        reachedTop ||= platform.state === "top";
+      }
+      expect(reachedTop).toBe(true); expect(platform.number("ltime")).toBeLessThan(source.game.time);
+      expect(simulation.playerUi(actor)).toEqual(restored.playerUi(restoredActor));
+    } finally { restored.close(); }
+  } finally { simulation.close(); await content.close(); }
+});

@@ -855,6 +855,24 @@ test.skipIf(!haveCorpus)("retail QC pusher uses shared authored brush movement a
     expect(riderWords.vector(field("origin"))).toEqual(riderBefore);
     expect(riderWords.float(field("flags"))).toBe(0); expect(riderWords.int(field("groundentity"))).toBe(entities.reference(2));
     expect(vm.profiling[think.index]).toBe(callbacksBefore + 1);
+    // Ordinary shared toss writes retain a stale source ground word while airborne.
+    const start = map.entityList.find(entity => q1EntityValue(entity, "classname") === "info_player_start");
+    const position = start === undefined ? [] : (q1EntityValue(start, "origin") ?? "").split(/\s+/).map(Number);
+    const x = position[0], y = position[1], z = position[2];
+    if (x === undefined || y === undefined || z === undefined) throw new Error("Missing actual player lane");
+    riderWords.setVector(field("origin"), { x, y, z: z + 20 }); riderWords.setFloat(field("flags"), 0);
+    riderWords.setVector(field("velocity"), { x: 0, y: 0, z: -20 });
+    riderWords.setFloat(field("movetype"), 6); world.link(1);
+    physics.setMotion({ actor: rider, kind: "toss", velocity: { x: 0, y: 0, z: -20 }, angularVelocity: zero,
+      gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null });
+    physics.step(rider, 0.05);
+    expect(riderWords.vector(field("origin")).z).toBeLessThan(z + 20);
+    expect(riderWords.float(field("flags")) & 512).toBe(0);
+    expect(riderWords.int(field("groundentity"))).toBe(entities.reference(2));
+    for (let frame = 0; frame < 30 && (riderWords.float(field("flags")) & 512) === 0; frame++) physics.step(rider, 0.05);
+    expect(riderWords.float(field("flags")) & 512).toBe(512);
+    expect(riderWords.int(field("groundentity"))).toBe(0);
+    expect(physics.bodies.read(rider.id)?.ground).toEqual(slots.at(0)?.id ?? null);
     actors.close();
   } finally { archive.close(); }
 });

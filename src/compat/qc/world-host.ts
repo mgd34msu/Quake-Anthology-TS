@@ -140,7 +140,8 @@ export class QcWorldHost {
         fields.setVector(origin, state.origin); fields.setVector(angles, state.angles); fields.setVector(velocity, state.velocity);
         fields.setVector(mins, state.bounds.min); fields.setVector(maxs, state.bounds.max);
         fields.setFloat(flags, state.ground === null ? Math.trunc(fields.float(flags)) & ~512 : Math.trunc(fields.float(flags)) | 512);
-        fields.setInt(ground, state.ground === null ? 0 : this.reference(state.ground));
+        // Source airborne motion clears onground without erasing the previous ground word.
+        if (state.ground !== null) fields.setInt(ground, this.reference(state.ground));
         return undefined;
       },
     };

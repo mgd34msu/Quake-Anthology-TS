@@ -100,8 +100,7 @@ export interface Q1FoundationHost {
   changeYaw(actor: OwnedActor): undefined;
   moveToGoal(actor: OwnedActor, goal: ActorId, distance: number, mode?: "range" | "contact"): undefined;
   checkBottom(actor: ActorId): boolean;
-  /** Calls the source blocked callback before rolling riders back, then returns the blocking actor. */
-  pushMove(actor: OwnedActor, displacement: Vec3): ActorId | null;
+  pusherServices(game: Q1EntityServices): import("../../../movement/q1/types.ts").Q1PusherServices;
   scheduleThink(actor: OwnedActor, dueSeconds: number): undefined;
   cancelThink(actor: OwnedActor): undefined;
   emit(event: Q1Event): undefined;

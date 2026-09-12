@@ -1,3 +1,4 @@
+import { createNativeQ1PusherServices } from "./native-q1-pusher.ts";
 import { q1WeaponStatus, q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "./arsenal/weapon-status.ts";
 import { Q1ClientVisibility } from "../../../world/gameplay/q1-client-visibility.ts";
 import type { Q1ClientEye } from "../../../world/gameplay/q1-client-visibility.ts";
@@ -880,9 +881,7 @@ export class SharedSimulation implements Simulation {
         checkBottom: actor => movement.checkBottom(actor),
         moveToGoal: (actor, goal, distance, mode) => movement.moveToGoal(actor, goal, distance, mode),
         changeYaw: actor => { movement.changeYaw(actor); return undefined; },
-        pushMove: (actor, displacement) => { const entry = this.actorExecutions.get(actor.id), entity = entry?.kind === "q1" ? entry.entity : null;
-          const angular = entity?.angularVelocity ?? zero, elapsed = runtime.frameSeconds();
-          return this.physics.pushMove(actor, displacement, { x: angular.x * elapsed, y: angular.y * elapsed, z: angular.z * elapsed }); },
+        pusherServices: game => createNativeQ1PusherServices(game, this.physics),
         scheduleThink: (actor, due) => runtime.schedule(actor, due), cancelThink: actor => runtime.schedule(actor, null),
         emit: event => {
           if (event.kind === "weapon") {

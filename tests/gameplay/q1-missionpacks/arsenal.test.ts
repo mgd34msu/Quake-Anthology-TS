@@ -46,7 +46,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
   }, walkMove: () => false, moveToGoal: () => undefined, changeYaw: actor => {
     const body = bodies.read(actor.id), entity = active?.entity(actor.id); if (body === null || entity === null || entity === undefined) return undefined;
     const delta = ((entity.idealYaw - body.angles.y + 540) % 360) - 180; bodies.write(actor, { ...body, angles: { ...body.angles, y: Math.fround((body.angles.y + Math.max(-entity.yawSpeed, Math.min(entity.yawSpeed, delta)) + 360) % 360) } }); return undefined;
-  }, checkBottom: () => false, pushMove: () => null,
+  }, checkBottom: () => false, pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
     scheduleThink: (actor, due) => { pending.set(actor, due); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; }, emit: event => { events.push(event); return undefined; }, transition: () => undefined,
     players: () => players, checkClient: () => null, classname: actor => active?.entity(actor)?.classname ?? "player", powerup: () => undefined, setGravity: (actor, scale) => { gravity.set(actor, scale); return undefined; } };
   const game = new Q1Foundation(host, { edition, skill: 1, deathmatch, teamplay, coop: false, maxClients: 2, gravity: 800, campaign: `q1:${pack}`, combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q3:movement" }); active = game;

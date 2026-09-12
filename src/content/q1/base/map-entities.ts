@@ -37,7 +37,7 @@ function train(game: Q1EntityServices, entity: Q1Actor): undefined {
   else entity.classname = "train";
   entity.state = "bottom"; entity.activated = false;
   entity.use = game.named.use(entity, "base:train_use"); entity.blocked = game.named.blocked(entity, "base:train_blocked");
-  return later(game, entity, 0.1, "base:train_find");
+  return game.scheduleAt(entity, Math.fround(entity.number("ltime") + (0.1)), game.named.action(entity, "base:train_find"));
 }
 function sigilTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
   if (entity.solid !== "trigger" || !game.isPlayer(other) || game.health(other) <= 0) return undefined;
@@ -94,13 +94,13 @@ function fireballFly(game: Q1EntityServices, entity: Q1Actor): undefined {
 }
 export function registerMapCallbacks(game: Q1EntityServices): undefined {
   game.named.register("base:train_next", { action: trainNext });
-  game.named.register("base:train_wait", { action: (runtime, entity) => { if (entity.wait !== 0) runtime.sound(entity, entity.sounds === 1 ? "plats/train2.wav" : "misc/null.wav"); return later(runtime, entity, entity.wait || 0.1, "base:train_next"); } });
+  game.named.register("base:train_wait", { action: (runtime, entity) => { if (entity.wait !== 0) runtime.sound(entity, entity.sounds === 1 ? "plats/train2.wav" : "misc/null.wav"); return runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + (entity.wait || 0.1)), runtime.named.action(entity, "base:train_next")); } });
   game.named.register("base:train_use", { use: (runtime, entity) => entity.state === "top" && !entity.activated ? trainNext(runtime, entity) : undefined });
   game.named.register("base:train_blocked", { blocked: (runtime, entity, other) => { if (runtime.time < entity.attackFinished) return undefined; entity.attackFinished = runtime.time + 0.5; runtime.damage(other, entity.actor.id, entity.actor.id, entity.damage, null, "direct", "crush"); return undefined; } });
   game.named.register("base:train_find", { action: (runtime, entity) => {
     const corner = runtime.find(entity.target)[0]; if (corner === undefined) throw new Error(`Train first target not found: ${entity.target}`);
     entity.target = corner.target; runtime.setOrigin(entity, vsub(runtime.body(corner).origin, runtime.body(entity).bounds.min)); entity.state = "top";
-    return entity.targetname === "" ? later(runtime, entity, 0.1, "base:train_next") : undefined;
+    return entity.targetname === "" ? runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + (0.1)), runtime.named.action(entity, "base:train_next")) : undefined;
   } });
   game.named.register("base:sigil_touch", { touch: sigilTouch });
   game.named.register("base:sigil_place", { action: (runtime, entity) => {

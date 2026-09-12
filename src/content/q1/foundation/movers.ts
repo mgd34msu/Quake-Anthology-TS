@@ -20,7 +20,7 @@ export function doorDown(game: Q1EntityServices, entity: Q1Actor): undefined {
 export function doorUp(game: Q1EntityServices, entity: Q1Actor): undefined {
   if (entity.state === "up") return undefined;
   if (entity.state === "top") {
-    if (entity.wait >= 0 && (entity.spawnflags & 32) === 0) game.schedule(entity, entity.wait, game.named.action(entity, "door_go_down")); return undefined;
+    if (entity.wait >= 0 && (entity.spawnflags & 32) === 0) game.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.wait), game.named.action(entity, "door_go_down")); return undefined;
   }
   game.sound(entity, doorSound(entity, true)); entity.state = "up";
   game.calcMove(entity, entity.pos2, entity.speed, game.named.action(entity, "door_hit_top"));
@@ -174,11 +174,16 @@ function platUp(game: Q1EntityServices, entity: Q1Actor): undefined {
   return game.calcMove(entity, entity.pos1, entity.speed, game.named.action(entity, "plat_hit_top"));
 }
 export function registerMoverCallbacks(game: Q1EntityServices): undefined {
+  game.named.register("SUB_CalcMoveDone", { action: (runtime, entity) => {
+    const move = entity.move; if (move === null) throw new Error("Q1 mover completion has no destination");
+    runtime.setOrigin(entity, move.destination); runtime.setBody(entity, { velocity: ZERO });
+    entity.nextThink = -1; entity.move = null; return move.done();
+  } });
   game.named.register("door_go_down", { action: doorDown });
   game.named.register("door_hit_bottom", { action: (runtime, entity) => { entity.state = "bottom"; return runtime.sound(entity, doorSound(entity, false)); } });
   game.named.register("door_hit_top", { action: (runtime, entity) => {
     entity.state = "top"; runtime.sound(entity, doorSound(entity, false));
-    if (entity.wait >= 0 && (entity.spawnflags & 32) === 0) runtime.schedule(entity, entity.wait, runtime.named.action(entity, "door_go_down")); return undefined;
+    if (entity.wait >= 0 && (entity.spawnflags & 32) === 0) runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.wait), runtime.named.action(entity, "door_go_down")); return undefined;
   } });
   game.named.register("door_use", { use: (runtime, entity, _other, activator) => doorUse(runtime, entity, activator) });
   game.named.register("door_blocked", { blocked: (runtime, entity, other) => {
@@ -196,7 +201,7 @@ export function registerMoverCallbacks(game: Q1EntityServices): undefined {
   game.named.register("button_touch", { touch: (runtime, entity, other) => runtime.isPlayer(other) ? buttonFire(runtime, entity, other) : undefined });
   game.named.register("button_killed", { die: (runtime, entity, attacker) => { runtime.host.combat.setHealth(entity.actor, entity.maxHealth); entity.damageable = false; return buttonFire(runtime, entity, attacker); } });
   game.named.register("button_wait", { action: (runtime, entity) => {
-    entity.state = "top"; if (entity.wait >= 0) runtime.schedule(entity, entity.wait, runtime.named.action(entity, "button_return"));
+    entity.state = "top"; if (entity.wait >= 0) runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.wait), runtime.named.action(entity, "button_return"));
     runtime.useTargets(entity, entity.activator); entity.frame = 1; return undefined;
   } });
   game.named.register("button_return", { action: (runtime, entity) => {
@@ -205,27 +210,27 @@ export function registerMoverCallbacks(game: Q1EntityServices): undefined {
   } });
   game.named.register("button_done", { action: (_runtime, entity) => { entity.state = "bottom"; return undefined; } });
   game.named.register("fd_secret_use", { use: (runtime, entity, _other, activator) => secretFire(runtime, entity, activator), pain: secretFire, die: secretFire });
-  game.named.register("fd_secret_move1", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, false)); return runtime.schedule(entity, 1, runtime.named.action(entity, "fd_secret_move2")); } });
+  game.named.register("fd_secret_move1", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, false)); return runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + 1), runtime.named.action(entity, "fd_secret_move2")); } });
   game.named.register("fd_secret_move2", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, true)); return runtime.calcMove(entity, entity.dest2, entity.speed, runtime.named.action(entity, "fd_secret_move3")); } });
   game.named.register("fd_secret_move3", { action: (runtime, entity) => {
     entity.state = "top"; runtime.sound(entity, secretSound(entity, false));
-    if ((entity.spawnflags & 1) === 0) runtime.schedule(entity, entity.wait, runtime.named.action(entity, "fd_secret_move4")); return undefined;
+    if ((entity.spawnflags & 1) === 0) runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + entity.wait), runtime.named.action(entity, "fd_secret_move4")); return undefined;
   } });
   game.named.register("fd_secret_move4", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, true)); entity.state = "down"; return runtime.calcMove(entity, entity.dest1, entity.speed, runtime.named.action(entity, "fd_secret_move5")); } });
-  game.named.register("fd_secret_move5", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, false)); return runtime.schedule(entity, 1, runtime.named.action(entity, "fd_secret_move6")); } });
+  game.named.register("fd_secret_move5", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, false)); return runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + 1), runtime.named.action(entity, "fd_secret_move6")); } });
   game.named.register("fd_secret_move6", { action: (runtime, entity) => { runtime.sound(entity, secretSound(entity, true)); return runtime.calcMove(entity, entity.pos1, entity.speed, runtime.named.action(entity, "fd_secret_done")); } });
   game.named.register("fd_secret_done", { action: (runtime, entity) => { entity.state = "bottom"; entity.damageable = secretShootable(entity); runtime.host.combat.setHealth(entity.actor, 10000); return runtime.sound(entity, secretSound(entity, false)); } });
   game.named.register("fd_secret_blocked", { blocked: (runtime, entity, other) => { if (entity.attackFinished > runtime.time) return undefined; entity.attackFinished = runtime.time + 0.5; runtime.damage(other, entity.actor.id, entity.actor.id, entity.damage, null, "direct", "crush"); return undefined; } });
   game.named.register("fd_secret_touch", { touch: (runtime, entity, other) => { if (!runtime.isPlayer(other) || entity.attackFinished > runtime.time) return undefined; entity.attackFinished = runtime.time + 2; return runtime.message(other, entity.message); } });
   game.named.register("plat_go_down", { action: platDown });
   game.named.register("plat_hit_bottom", { action: (runtime, entity) => { entity.state = "bottom"; return runtime.sound(entity, platSound(entity, false)); } });
-  game.named.register("plat_hit_top", { action: (runtime, entity) => { entity.state = "top"; runtime.sound(entity, platSound(entity, false)); return runtime.schedule(entity, 3, runtime.named.action(entity, "plat_go_down")); } });
+  game.named.register("plat_hit_top", { action: (runtime, entity) => { entity.state = "top"; runtime.sound(entity, platSound(entity, false)); return runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + 3), runtime.named.action(entity, "plat_go_down")); } });
   game.named.register("plat_crush", { blocked: (runtime, entity, other) => { runtime.damage(other, entity.actor.id, entity.actor.id, 1, null, "direct", "crush"); return entity.state === "up" ? platDown(runtime, entity) : platUp(runtime, entity); } });
   game.named.register("plat_use", { use: (runtime, entity) => { if (entity.activated) return undefined; entity.activated = true; return platDown(runtime, entity); } });
   game.named.register("plat_center_touch", { touch: (runtime, trigger, other) => {
     if (!runtime.isPlayer(other) || runtime.health(other) <= 0) return undefined;
     const entity = runtime.entity(trigger.owner); if (entity === null) return undefined;
-    if (entity.state === "bottom") return platUp(runtime, entity); if (entity.state === "top") return runtime.schedule(entity, 1, runtime.named.action(entity, "plat_go_down")); return undefined;
+    if (entity.state === "bottom") return platUp(runtime, entity); if (entity.state === "top") return runtime.scheduleAt(entity, Math.fround(entity.number("ltime") + 1), runtime.named.action(entity, "plat_go_down")); return undefined;
   } });
   return undefined;
 }

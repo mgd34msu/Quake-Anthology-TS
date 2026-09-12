@@ -15,7 +15,7 @@ function trainNext(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.references.set("goalentity", corner.actor.id);
   const next = corner.wait !== 0 ? "hip:train_wait" : "hip:train_next";
   const destination = vsub(game.body(corner).origin, game.body(entity).bounds.min);
-  if (current === -1) { game.setOrigin(entity, destination); return later(game, entity, 0.01, next); }
+  if (current === -1) { game.setOrigin(entity, destination); return game.scheduleAt(entity, Math.fround(entity.number("ltime") + 0.01), game.named.action(entity, next)); }
   if (current > 0) entity.speed = current;
   return game.calcMove(entity, destination, entity.speed, game.named.action(entity, next));
 }
@@ -26,11 +26,11 @@ export function registerHipnoticTrain(game: Q1EntityServices): undefined {
     const corner = g.find(e.target)[0]; if (corner === undefined) throw new Error(`hip_func_train_find: missing ${e.target}`);
     e.references.set("goalentity", corner.actor.id); number(e, "cnt", corner.speed); e.target = corner.target;
     g.setOrigin(e, vsub(g.body(corner).origin, g.body(e).bounds.min));
-    return e.targetname === "" ? later(g, e, 0.1, "hip:train_next") : undefined;
+    return e.targetname === "" ? g.scheduleAt(e, Math.fround(e.number("ltime") + 0.1), g.named.action(e, "hip:train_next")) : undefined;
   } });
   game.named.register("hip:train_wait", { action: (g, e) => {
-    if (e.wait !== 0) { g.sound(e, e.text("noise")); if (e.wait === -1) return undefined; const wait = e.wait; e.wait = 0; return later(g, e, wait, "hip:train_next"); }
-    return later(g, e, 0.1, "hip:train_next");
+    if (e.wait !== 0) { g.sound(e, e.text("noise")); if (e.wait === -1) return undefined; const wait = e.wait; e.wait = 0; return g.scheduleAt(e, Math.fround(e.number("ltime") + wait), g.named.action(e, "hip:train_next")); }
+    return g.scheduleAt(e, Math.fround(e.number("ltime") + 0.1), g.named.action(e, "hip:train_next"));
   } });
   game.named.register("hip:train_use", { use: (g, e, _other, activator) => {
     const velocity = g.body(e).velocity; if (velocity.x !== 0 || velocity.y !== 0 || velocity.z !== 0) return undefined;
@@ -45,7 +45,7 @@ export function registerHipnoticTrain(game: Q1EntityServices): undefined {
     e.speed ||= 100; e.damage ||= 2; brush(g, e); number(e, "cnt", 1);
     if (e.text("noise") === "") e.fields.set("noise", e.sounds === 1 ? "plats/train2.wav" : "misc/null.wav");
     if (e.text("noise1") === "") e.fields.set("noise1", e.sounds === 1 ? "plats/train1.wav" : "misc/null.wav");
-    e.use = g.named.use(e, "hip:train_use"); e.blocked = g.named.blocked(e, "hip:train_blocked"); return later(g, e, 0.1, "hip:train_find");
+    e.use = g.named.use(e, "hip:train_use"); e.blocked = g.named.blocked(e, "hip:train_blocked"); return g.scheduleAt(e, Math.fround(e.number("ltime") + 0.1), g.named.action(e, "hip:train_find"));
   });
   game.named.register("hip:bobbing_water", { action: (g, e) => {
     e.count = Math.fround(e.count + e.speed * (g.time - e.number("ltime"))); if (e.count > 360) e.count -= 360;

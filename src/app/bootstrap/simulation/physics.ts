@@ -292,15 +292,14 @@ export class SharedPhysics {
     if (other !== null && this.live(actor) && this.live(other) && this.solid(other)?.solid !== "none") this.options.callbacks.touch({ self: other, other: actor.id, plane: null, surface: null });
     return undefined;
   }
-  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = [], publishOrigin?: (origin: Vec3) => undefined): TraceResult {
+  private pushEntity(actor: OwnedActor, displacement: Vec3, exclude: readonly ActorId[] = []): TraceResult {
     const initial = this.bodies.read(actor.id);
     if (initial === null) throw new RangeError("Cannot push an actor without a body");
     const end = this.add(initial.origin, displacement);
     for (;;) {
       const trace = this.bodyTrace(actor, initial.origin, end, exclude), current = this.bodies.read(actor.id);
       if (current === null) return trace;
-      if (publishOrigin === undefined) { this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor); }
-      else publishOrigin(trace.end);
+      this.bodies.write(actor, { ...current, origin: trace.end }); this.bodies.link(actor);
       if (trace.fraction !== 1) {
         const hit = this.hitActor(trace);
         this.impact(actor, trace);
@@ -349,16 +348,12 @@ export class SharedPhysics {
       push: (entity, displacement) => {
         // Publish cleared onground before the synchronous source touch callback.
         projection.write(entity);
-        const trace = this.pushEntity(entity.actor, displacement, [], origin => {
-          const current = projection.read(entity.actor.id);
-          if (current !== null) { projection.write({ ...current, state: { ...current.state, origin } }); projection.link(entity.actor, false); }
-          return undefined;
-        });
+        const trace = this.pushEntity(entity.actor, displacement);
         return { entity: projection.read(entity.actor.id), trace };
       },
     };
   }
-  private readQ1Pusher(actor: ActorId): Q1PhysicsEntity | null {
+  readQ1Pusher(actor: ActorId): Q1PhysicsEntity | null {
     const owned = this.options.actors.resolveOwned(actor), body = this.bodies.read(actor), linked = this.bodies.linked(actor);
     if (owned === null || body === null || linked === null) return null;
     const flags = this.actorFlags(owned), motion = this.motion(owned), solid = this.solid(owned);
@@ -376,16 +371,17 @@ export class SharedPhysics {
         viewAngles: zero, punchAngles: zero, waterLevel: flags.waterLevel ?? 0, waterType: flags.waterType ?? -1,
         teleportTimeSeconds: 0, waterJumpDirection: zero, idealPitch: 0, fixAngle: false, health: 0 } };
   }
+  writeQ1Pusher(entity: Q1PhysicsEntity): undefined {
+    this.writeLive(entity.actor, { origin: entity.state.origin, angles: entity.state.angles,
+      bounds: entity.bounds, ground: (entity.state.flags & 512) === 0 ? null
+        : entity.state.ground.kind === "actor" ? entity.state.ground.actor
+        : entity.state.ground.kind === "world" ? this.options.worldActor() : null });
+    return undefined;
+  }
   private pushQ1(actor: OwnedActor, displacement: Vec3, angularDisplacement: Vec3): ActorId | null {
     let obstacle: ActorId | null = null;
     const services = this.q1PusherServices({ read: id => this.readQ1Pusher(id),
-      write: entity => {
-        this.writeLive(entity.actor, { origin: entity.state.origin, angles: entity.state.angles,
-          bounds: entity.bounds, ground: (entity.state.flags & 512) === 0 ? null
-            : entity.state.ground.kind === "actor" ? entity.state.ground.actor
-            : entity.state.ground.kind === "world" ? this.options.worldActor() : null });
-        return undefined;
-      },
+      write: entity => this.writeQ1Pusher(entity),
       link: (owned, touch) => { this.bodies.link(owned); if (touch) this.touchTriggers(owned); return undefined; },
       blocked: (owned, other) => { obstacle = other; return this.options.onBlocked(owned, other); },
     });

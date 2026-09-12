@@ -40,7 +40,7 @@ function world(map: Q1Map, coop = false) {
     },
     contents: () => "empty", walkMove: () => false, moveToGoal: () => undefined,
     changeYaw: () => { throw new Error("CTF fixture removes monsters before their yaw phase"); }, checkBottom: () => false,
-    pushMove: (actor, displacement) => { const body = bodies.read(actor.id); if (body === null) throw new Error("Missing CTF brush"); bodies.write(actor, { ...body, origin: vadd(body.origin, displacement) }); return null; },
+    pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null, classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
   };
