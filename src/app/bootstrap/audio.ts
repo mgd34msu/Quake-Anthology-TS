@@ -249,7 +249,7 @@ export class ApplicationAudio {
     }
   }
 
-  async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[]): Promise<void> {
+  async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now()): Promise<void> {
     this.snapshot = snapshot;
     this.listeners = listeners;
     for (const body of snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
@@ -313,7 +313,7 @@ export class ApplicationAudio {
     }
     this.engine.endLoopFrame();
     this.engine.updateMusic();
-    this.engine.pump();
+    this.engine.pump(undefined, performance.now() - frameStartedAt);
   }
 
   close(): undefined {

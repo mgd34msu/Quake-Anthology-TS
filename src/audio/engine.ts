@@ -46,7 +46,7 @@ function add(output: Float64Array, input: Float64Array | Int16Array, gain: numbe
         output[i] = a + b * gain;
     }
 }
-/** One output device, independent source mixers and acoustic state for each listener. */
+/** One output device; each listener owns a shared voice core and acoustic state. */
 export class UnifiedAudio {
     readonly sampleRate: number;
     private readonly seats: SeatAudio[] = [];
@@ -315,16 +315,18 @@ export class UnifiedAudio {
         this.device = SdlAudioDevice.open({ ...options, sampleRate: this.sampleRate, channels: 2, sampleBits: 16 });
     }
     /** Cover recent frame times plus SDL's block consumption and scheduling jitter. */
-    pump(aheadFrames?: number): number {
+    pump(aheadFrames?: number, measuredWorkMilliseconds = 0): number {
         this.check();
         const device = this.device;
         if (device === null)
             throw new Error("Audio output is not open");
         if (this.paused)
             return 0;
+        if (!Number.isFinite(measuredWorkMilliseconds) || measuredWorkMilliseconds < 0) throw new RangeError("Invalid measured audio frame work");
+        const workFrames = Math.ceil(measuredWorkMilliseconds * this.sampleRate / 1000);
         const playbackFrame = device.playbackFrames;
         const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
-        this.pumpIntervals.push(interval);
+        this.pumpIntervals.push(Math.max(interval, workFrames));
         if (this.pumpIntervals.length > 8)
             this.pumpIntervals.shift();
         const target = aheadFrames ?? Math.min(device.maxQueuedFrames,

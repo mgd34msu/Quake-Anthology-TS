@@ -833,6 +833,7 @@ export class Application {
     if (this.stepping) throw new Error("Application step is already in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Application step requires positive elapsed milliseconds");
     this.stepping = true;
+    const frameStartedAt = performance.now();
     try {
       await this.applyTransition();
       this.graphical?.input.pump();
@@ -905,7 +906,7 @@ export class Application {
           return { seat: presentation.local.player.seat.id, actor: presentation.local.player.actor, origin: camera.origin,
             axis: camera.axis, gain: 1 / graphical.presentations.length, underwater: this.underwater(camera, presentation.local.player.actor) };
         });
-        await graphical.audio.frame(output.snapshot, listeners, commonEvents);
+        await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
       await this.commands();
       await this.sourceActions();

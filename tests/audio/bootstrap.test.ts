@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { UnifiedAudio } from "../../src/audio/engine.ts";
 import { ApplicationAudio } from "../../src/app/bootstrap/audio.ts";
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -103,4 +104,21 @@ test("Q2 monster muzzle sounds preserve native variants, channels and silent fla
     expect(q2MonsterMuzzleSounds(flash, () => 0, false)).toBeNull();
   }
 
+});
+
+
+test("measured audio work respects explicit lookahead and the device queue limit", () => {
+  {
+    using audio = new UnifiedAudio({ sampleRate: 44100, milliseconds: () => 0, random: () => 0 });
+    audio.openDevice();
+    expect(audio.pump(400, 5000)).toBe(400);
+    expect(audio.sampleClock).toBe(400);
+  }
+  {
+    using audio = new UnifiedAudio({ sampleRate: 44100, milliseconds: () => 0, random: () => 0 });
+    audio.openDevice();
+    expect(audio.pump(undefined, 5000)).toBe(88200);
+    expect(audio.sampleClock).toBe(88200);
+    expect(() => audio.pump(undefined, -1)).toThrow("Invalid measured audio frame work");
+  }
 });
