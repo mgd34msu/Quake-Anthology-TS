@@ -57,6 +57,7 @@ export interface WorldSceneOptions {
   readonly q1LightmapEncoding?: Q1LightmapEncoding;
   readonly q1WaterAlpha?: number;
   readonly q2SkyName?: string;
+  readonly q2LightModulate?: number;
 }
 export interface WorldViewInput extends WorldVisibilityOptions {
   readonly camera: SceneCamera;
@@ -205,7 +206,7 @@ export class WorldScene {
         let lighting: SurfaceLighting = { kind: "unlit" };
         if (!sky && !warp && prepared.lightmap.lighting !== null) {
           const built = map.kind === "q1-bsp" ? buildQ1Lightmap(prepared.lightmap, q1DefaultStyles, { encoding: options.q1LightmapEncoding ?? "rgb" })
-            : buildQ2Lightmap(prepared.lightmap, q2DefaultStyles);
+            : buildQ2Lightmap(prepared.lightmap, q2DefaultStyles, { modulate: options.q2LightModulate ?? 1 });
           const image = generated(`*${map.kind}-lightmap-${index}`, built.image), direct = generated(`*${map.kind}-direct-lightmap-${index}`, directLightmapPixels(built));
           lightmap = { face: prepared.lightmap, image, direct, encoding: map.kind === "q1-bsp" ? options.q1LightmapEncoding ?? "rgb" : "rgb" };
           const mapping = map.decoupledLightmaps?.[index];
@@ -362,7 +363,7 @@ export class WorldScene {
         return { ...light, origin: { x: dot3(relative, model.axis[0]), y: dot3(relative, model.axis[1]), z: dot3(relative, model.axis[2]) } };
       });
       const built = material.kind === "q1" ? buildQ1Lightmap(lightmap.face, input.q1Styles ?? q1DefaultStyles, { encoding: lightmap.encoding, dynamicLights: lights })
-        : buildQ2Lightmap(lightmap.face, input.q2Styles ?? q2DefaultStyles, { dynamicLights: lights });
+        : buildQ2Lightmap(lightmap.face, input.q2Styles ?? q2DefaultStyles, { dynamicLights: lights, modulate: this.options.q2LightModulate ?? 1 });
       this.shaders.textures.images.update(lightmap.image, 0, built.image);
       this.shaders.textures.images.update(lightmap.direct, 0, directLightmapPixels(built));
     }
@@ -375,7 +376,7 @@ export class WorldScene {
       alternateAnimation: input.alternateAnimation ?? false, fullbright: surface.fullbright, q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined || material.kind !== "q2" ? {} : { fragmentLighting: { kind: "q2-world",
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
-        normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights, atlas: fragmentLighting.atlas } }),
+        normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror ? "back" : "front", depthRange: context.depthRange, project: context.project });
     return [{ kind: "draw", batches }];
   }

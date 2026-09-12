@@ -101,12 +101,17 @@ export class ApplicationAssets {
     return pending;
   }
 
+  private q2LightModulate(content: ContentId): number {
+    const product = this.content.catalog.product(content).expectation;
+    return product.family === "q2" && product.edition === "rerelease" ? 2 : 1;
+  }
+
   async loadWorld(): Promise<WorldScene> {
     if (this.currentWorld !== null) return this.currentWorld;
     const provider = await this.provider(this.content.recipe.presentation.assets);
     const worldspawn = parseEntities(this.content.world.entities).find(entity => entity.get("classname") === "worldspawn");
     this.currentWorld = await WorldScene.load(this.content.world, provider.shaders,
-      this.content.world.kind === "q2-bsp" ? { q2SkyName: worldspawn?.get("sky") ?? "unit1_" } : {});
+      this.content.world.kind === "q2-bsp" ? { q2SkyName: worldspawn?.get("sky") ?? "unit1_", q2LightModulate: this.q2LightModulate(this.content.recipe.map.geometry.provenance.mount.identity.content) } : {});
     return this.currentWorld;
   }
 
@@ -147,7 +152,7 @@ export class ApplicationAssets {
       if (path.toLowerCase().endsWith(".bsp")) {
         const world = provider.family === "q1" ? readQ1Bsp(asset.bytes, { source: path })
           : provider.family === "q2" ? toQ2WorldGeometry(readQ2Bsp(asset.bytes, path)) : decodeQ3World(asset.bytes, path);
-        const brushScene = await WorldScene.load(world, provider.shaders);
+        const brushScene = await WorldScene.load(world, provider.shaders, world.kind === "q2-bsp" ? { q2LightModulate: this.q2LightModulate(asset.reference.provenance.mount.identity.content) } : {});
         this.brushScenes.push(brushScene);
         return { resource: asset.reference, model: { kind: "brush-model", world, model: 0 }, provider, brushScene };
       }

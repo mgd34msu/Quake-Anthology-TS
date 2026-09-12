@@ -89,7 +89,8 @@ export class ModelLightSampler {
     };
     const hit = map.nodes.length === 0 ? null : trace({ kind: "node", index: 0 }, point, { ...point, z: point.z - 2048 });
     const grid = map.kind === "q2-bsp" && map.lightgrid !== null ? q2LightGridPoint(map.lightgrid, point, input.q2Styles ?? q2DefaultStyles) : null;
-    const color = grid ?? hit?.color ?? black;
+    const rawColor = grid ?? hit?.color ?? black;
+    const color = map.kind === "q2-bsp" ? scale3(rawColor, this.world.options.q2LightModulate ?? 1) : rawColor;
     return { color: includeDynamic ? this.dynamic(color, point, input) : color, floor: hit?.floor ?? null };
   }
 

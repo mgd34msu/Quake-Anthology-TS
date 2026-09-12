@@ -204,6 +204,23 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     expect(dynamicVertex.color.x / dynamicVertex.color.z).toBeCloseTo(64 / 49.5, 2);
     const once = cache1.prepare([gun], { ...dynamicInput, lights: [{ ...dynamic, minimum: 0 }] }, () => ({ viewModel: true }));
     expect(once[0]?.vertices.map(value => value.color)).toEqual(dynamicBatches[0]?.vertices.map(value => value.color));
+    const modulatedWorld = await WorldScene.load(map, shaders2, { q2LightModulate: 2, q2SkyName: "unit1_" });
+    try {
+      const modulated = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, modulatedWorld);
+      await modulated.preload([gun], () => ({ viewModel: true }));
+      const worldBatches = modulatedWorld.prepareView(dynamicInput).view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+      const fragment = worldBatches.find(batch => batch.lighting.kind === "q2-world")?.lighting;
+      if (fragment === undefined || fragment.kind !== "q2-world") throw new Error("Missing actual Q2 world fragment lighting");
+      expect(fragment.lights[0]?.scale).toBe(2);
+      expect(dynamic.scale).toBe(1);
+      const staticSample = modulated.lighting.sample(gunOrigin, gunInput, false).color;
+      expect(staticSample).toEqual({ x: sampled.x * 2, y: sampled.y * 2, z: sampled.z * 2 });
+      const withDynamic = modulated.lighting.sample(gunOrigin, { ...gunInput, lights: [{ ...dynamic, minimum: 0 }] }).color;
+      expect(withDynamic.z).toBeCloseTo(staticSample.z + 0.1, 6);
+      const lit = modulated.prepare([gun], dynamicInput, () => ({ viewModel: true }))[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.z > 0 && value.color.z < 250);
+      if (lit === undefined) throw new Error("Missing modulated Q1 gun");
+      expect(lit.color.x / lit.color.z).toBeCloseTo(64 / 61.5, 2);
+    } finally { modulatedWorld.close(); }
     const q3Map = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "maps/q3dm1.bsp", "q3");
     const world3 = await WorldScene.load(decodeQ3World(q3Map.bytes), shaders3);
     try {
