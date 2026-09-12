@@ -308,8 +308,8 @@ export function openApplicationBotLog(filename: string): BotLogOpenResult {
 export function botAdmissionError(simulation: SharedSimulation): string | null {
   const q3 = simulation.q3Source();
   if (q3 !== null) return simulation.recipe.weapons[0]?.provider.startsWith("q3:") === true
-    || q3.options.product === "baseq3" && simulation.q2WeaponSource() !== null && simulation.options.mode === "deathmatch" && q3.gameType === 0
-    ? null : "Q3-map bots support native Q3 weapons or selected Q2 weapons in base Q3 deathmatch";
+    || q3.options.product === "baseq3" && (simulation.q2WeaponSource() !== null || simulation.q1WeaponSource() !== null) && simulation.options.mode === "deathmatch" && q3.gameType === 0
+    ? null : "Q3-map bots support native Q3 weapons or selected Q1/Q2 weapons in base Q3 deathmatch";
   const q1 = simulation.q1Source(), q2 = simulation.q2Source();
   if (simulation.q2WeaponSource() === null && simulation.q1WeaponSource() === null && simulation.selectedQ3WeaponSource() === null) return "Shared bot arsenal observation is unavailable";
   if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)

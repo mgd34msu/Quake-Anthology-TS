@@ -193,7 +193,10 @@ export class MovementPlayer {
       beforePhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
       afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
     } };
-    const provider = createPlayerMovementProvider(this, { q1: q1Options, q2: this.host.rereleaseMovement, q3: this.host.q3Hooks });
+    const provider = createPlayerMovementProvider(this, { q1: q1Options, q2: this.host.rereleaseMovement, q3: {
+      ...this.host.q3Hooks,
+      weapon: context => { this.viewAngles = context.motion.viewangles; return this.host.q3Hooks.weapon(context); },
+    } });
     let result: MovementResult;
     if (provider.kind === "q1-netquake" && profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
       result = provider.move({ ...base, kind: "q1-netquake", profile, state, command }, this.services);
