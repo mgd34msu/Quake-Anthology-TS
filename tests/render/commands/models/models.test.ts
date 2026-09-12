@@ -13,7 +13,7 @@ import { ParticleSystem, loadParticleAnimations, prepareParticleGeometry, q2Beam
 import type { ParticleClientState } from "../../../../src/render/scene/particles/index.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
-import { parseEntities } from "../../../../src/formats/q3-map/index.ts";
+import { decodeQ3World, parseEntities } from "../../../../src/formats/q3-map/index.ts";
 import { parseSkin } from "../../../../src/formats/q3-model/md3.ts";
 import { decodePcx } from "../../../../src/formats/images/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene, perspectiveProjection } from "../../../../src/render/scene/index.ts";
@@ -121,7 +121,7 @@ test("Q3 particle pool submits registered animation geometry and retires expired
   expect(system.activeCount).toBe(0);
 });
 
-test("retained Q2 and Q3 model resources draw with the actual Q2 map light sample", async () => {
+test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lighting", async () => {
   const q2 = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
   const q3 = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
   const identity = createIdentityOwner("model-render-cache");
@@ -167,6 +167,49 @@ test("retained Q2 and Q3 model resources draw with the actual Q2 map light sampl
       && batch.texture.image.source.name.startsWith("models/players/sarge/"))).toBe(true);
     expect(cache2.lighting.sample(origin, input).floor).not.toBeNull();
     expect(batches3.flatMap(batch => batch.vertices).some(vertex => vertex.color.x > 0)).toBe(true);
+    const q1Asset = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/v_shot.mdl", "q1");
+    const q1Palette = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "gfx/palette.lmp", "q1");
+    const palette1 = { colors: q1Palette.bytes, source: q1Palette.resource };
+    const textures1 = new SceneTextureLoader(images, { read: async () => null }, palette1);
+    const cache1 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, world);
+    const q1Entity = entity(parseMdl(q1Asset.bytes), q1Asset.resource, "q1"), gunOrigin = { x: -392, y: 840, z: -69.96875 };
+    const gun = { ...q1Entity, transform: { ...q1Entity.transform, origin: gunOrigin }, previousOrigin: gunOrigin, lightingOrigin: gunOrigin };
+    const gunInput = { ...input, camera: { ...view, origin: gunOrigin } };
+    await cache1.preload([gun], () => ({ viewModel: true }));
+    const sampled = cache1.lighting.sample(gunOrigin, gunInput).color;
+    const gunBatches = cache1.prepare([gun], gunInput, () => ({ viewModel: true }));
+    const vertex = gunBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
+    if (vertex === undefined) throw new Error("Expected a lit Q1 gun vertex on the actual Q2 map");
+    expect(sampled.x).toBeGreaterThan(sampled.y);
+    expect(vertex.color.x / vertex.color.y).toBeCloseTo(sampled.x / sampled.y, 2);
+    const dynamic = { origin: gunOrigin, radius: 25.6, color: { x: 0, y: 0, z: 1 }, scale: 1, cone: null, shadow: { kind: "none" } } satisfies import("../../../../src/contracts/render.ts").Q2FragmentLight;
+    const dynamicInput = { ...gunInput, q2FragmentLighting: { lights: [dynamic], atlas: null } };
+    const dynamicBatches = cache1.prepare([gun], dynamicInput, () => ({ viewModel: true }));
+    const dynamicVertex = dynamicBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
+    if (dynamicVertex === undefined) throw new Error("Expected Q2 dynamic lighting on the Q1 gun");
+    expect(dynamicVertex.color.x / dynamicVertex.color.z).toBeCloseTo(sampled.x / (sampled.z + 0.1), 2);
+    const once = cache1.prepare([gun], { ...dynamicInput, lights: [{ ...dynamic, minimum: 0 }] }, () => ({ viewModel: true }));
+    expect(once[0]?.vertices.map(value => value.color)).toEqual(dynamicBatches[0]?.vertices.map(value => value.color));
+    const q3Map = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "maps/q3dm1.bsp", "q3");
+    const world3 = await WorldScene.load(decodeQ3World(q3Map.bytes), shaders3);
+    try {
+      const cache13 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, world3);
+      const origin3 = { x: 212, y: 2360, z: 82.125 };
+      const gun3 = { ...gun, transform: { ...gun.transform, origin: origin3 }, previousOrigin: origin3, lightingOrigin: origin3 };
+      const input3 = { ...input, camera: { ...view, origin: origin3 } };
+      await cache13.preload([gun3], () => ({ viewModel: true }));
+      const current = cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true }))[0];
+      const previous = cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true }))[0];
+      const halfway = cache13.prepare([gun3], input3, () => ({ viewModel: true }))[0];
+      if (current === undefined || previous === undefined || halfway === undefined) throw new Error("Expected Q1 gun geometry on the Q3 map");
+      expect(current.vertices.some(vertex => vertex.color.x !== vertex.color.y)).toBe(true);
+      expect(current.vertices.some((vertex, index) => vertex.color.x !== previous.vertices[index]?.color.x)).toBe(true);
+      for (const [index, vertex] of halfway.vertices.entries()) {
+        const a = current.vertices[index], b = previous.vertices[index];
+        if (a === undefined || b === undefined) throw new Error("Q1 pose changed triangle topology");
+        expect(vertex.color.x).toBeCloseTo((a.color.x + b.color.x) / 2, 5);
+      }
+    } finally { world3.close(); }
     const uploads = images.drainOperations().length;
     expect(uploads).toBeGreaterThan(0);
     cache2.prepare([body2], input); cache3.prepare([body3], input, options);

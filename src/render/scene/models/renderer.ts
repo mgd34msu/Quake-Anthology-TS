@@ -6,6 +6,8 @@ import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../..
 import { decodePcx, indexedRenderImage, q1PlayerTranslation } from "../../../formats/images/index.ts";
 import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/index.ts";
 import type { CompiledMaterial } from "../../../materials/compile.ts";
+import { diffuseColor } from "../../../materials/color.ts";
+import type { EntityLighting } from "../../../materials/q3-lighting.ts";
 import type { FogVolume } from "../../../materials/fog.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
@@ -187,6 +189,7 @@ export class SceneModelRenderer {
   prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({})): readonly DrawBatch[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
+    const entityLights = new Map<SceneEntity, EntityLighting>();
     const optionCache = new Map<SceneEntity, ModelSourceOptions>();
     const vertexLights = new Map<SceneEntity, Map<Vec3, Vec3>>();
     const options: SourceOptions = entity => {
@@ -194,16 +197,32 @@ export class SceneModelRenderer {
       if (value === undefined) { value = sourceOptions(entity); optionCache.set(entity, value); }
       return value;
     };
-    const lightingInput = this.provider.family === "q2" && input.lights === undefined && input.q2FragmentLighting !== undefined
+    const q2Lighting = this.provider.family === "q2" || this.provider.family === "q1" && this.world.map.kind === "q2-bsp";
+    const lightingInput = q2Lighting && input.lights === undefined && input.q2FragmentLighting !== undefined
       ? { ...input, lights: input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 })) } : input;
     const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number, source: ModelSourceOptions): Vec3 => {
       if (this.provider.family === "q3") return unit;
+      let previousNormalIndex: number | undefined;
+      if (this.provider.family === "q1" && entity.model.kind === "q1-mdl" && entity.pose.kind === "frame") {
+        const triangle = entity.model.triangles[Math.trunc(corner / 3)], vertex = triangle?.vertices[corner % 3];
+        const oldFrames = entity.model.frames[entity.pose.previousFrame];
+        if (vertex !== undefined && oldFrames !== undefined) previousNormalIndex = sampleTimedFrame(oldFrames, time, source.syncBase ?? 0).compressedVertices[vertex]?.normalIndex;
+      }
+      if (this.provider.family === "q1" && this.world.map.kind === "q3-bsp") {
+        let lighting = entityLights.get(entity);
+        if (lighting === undefined) { lighting = this.lighting.entityLighting(entity, input); entityLights.set(entity, lighting); }
+        const current = diffuseColor(normal, lighting), previous = previousNormalIndex === undefined ? undefined : ALIAS_NORMALS[previousNormalIndex];
+        const color = previous === undefined || entity.pose.kind !== "frame" ? current
+          : add3(scale3(current, 1 - entity.pose.backLerp), scale3(diffuseColor(previous, lighting), entity.pose.backLerp));
+        return scale3(color, 1 / 255);
+      }
       const cached = vertexLights.get(entity)?.get(normal);
       if (cached !== undefined) return cached;
       let light = lightCache.get(entity);
       if (light === undefined) {
-        const sampled = this.lighting.sample(entity.transform.origin, lightingInput, this.provider.family !== "q1").color;
+        const sampled = this.lighting.sample(entity.transform.origin, lightingInput, q2Lighting).color;
         if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
+        else if (this.world.map.kind === "q2-bsp") light = sampled;
         else {
           const channel = (value: number): number => {
             let ambient = value * 255, shade = ambient;
@@ -225,14 +244,9 @@ export class SceneModelRenderer {
       const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
       const index = normalIndices.get(`${normal.x},${normal.y},${normal.z}`);
       let shade = index === undefined ? null : r_avertexnormal_dots[row * 256 + index] ?? null;
-      if (this.provider.family === "q1" && entity.model.kind === "q1-mdl" && entity.pose.kind === "frame") {
-        const triangle = entity.model.triangles[Math.trunc(corner / 3)], vertex = triangle?.vertices[corner % 3];
-        const oldFrames = entity.model.frames[entity.pose.previousFrame];
-        if (vertex !== undefined && oldFrames !== undefined && shade !== null) {
-          const old = sampleTimedFrame(oldFrames, time, source.syncBase ?? 0).compressedVertices[vertex];
-          const oldShade = old === undefined ? shade : r_avertexnormal_dots[row * 256 + old.normalIndex] ?? shade;
-          shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
-        }
+      if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
+        const oldShade = r_avertexnormal_dots[row * 256 + previousNormalIndex] ?? shade;
+        shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
       }
       if (shade === null) {
         const direction = normalize3({ x: Math.cos(-yaw), y: Math.sin(-yaw), z: 1 }), d = dot3(normal, direction);
