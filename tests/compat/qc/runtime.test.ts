@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
-import { QcEntityMemory, QcMachine, QcStrings, QuakeCExecutor, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
+import { QcEntityMemory, QcMachine, QcStrings, QuakeCExecutor, applyQcEntityPairs, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage, describeQcHost, loadQcProgram, qcLinkBounds, saveQcEntityPairs } from "../../../src/compat/qc/index.ts";
 import type { QcBuiltin, QcHostBuiltinName, QcProgram } from "../../../src/compat/qc/index.ts";
 import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import { SessionActorRegistry, SourceActorSlots, quakeEdictLifetime } from "../../../src/world/actors/index.ts";
+import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, SourceActorSlots, quakeEdictLifetime } from "../../../src/world/actors/index.ts";
+import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
+import type { SourceDamageObserver, SourceDamageResult } from "../../../src/world/gameplay/authority.ts";
+import type { ArmorState, DamageOutcome, DamageRequest } from "../../../src/contracts/gameplay.ts";
 
 const corpus = new URL("../../../../qfiles/q1/", import.meta.url).pathname;
 async function readProgram(path: string): Promise<QcProgram> {
@@ -23,6 +26,193 @@ function machineFor(program: QcProgram, host?: ReadonlyMap<QcHostBuiltinName, Qc
 }
 const haveCorpus = await Bun.file(corpus + "rerelease/id1/pak0.pak").exists();
 describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
+  test("verified id1 bytecode damage reports source stores through the same authority without replay", async () => {
+    const program = await readProgram("id1/PAK0.PAK");
+    expect(program.digest).toBe("sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580");
+    const damage = program.functionNamed("T_Damage"), pain = program.functionNamed("SUB_Null");
+    expect(damage.index).toBe(117);
+    expect(damage.firstStatement).toBe(1421);
+    const field = (name: string): number => {
+      const value = program.fieldsByName.get(name);
+      if (value === undefined) throw new Error(`Missing id1 field ${name}`);
+      return value.offset;
+    };
+    // These sites and the take local belong only to the verified artifact above.
+    const takeWord = 1589, painCall = 1568;
+    const run = (observed: boolean, variant: "normal" | "exhausted" | "invulnerable" = "normal") => {
+      const entities = new QcEntityMemory(classicQcEntityLayout(program), 8);
+      const actors = new SessionActorRegistry(createIdentityOwner(`qc-damage-${observed}`));
+      const bodies = new SharedBodyTable(actors, {
+        absoluteBounds: (_actor, state) => qcLinkBounds(state, 0, createNumericOperations(Q1_DONOR_PROFILE)),
+        onLink: () => undefined, onUnlink: () => undefined,
+      }), callbacks = new ActorCallbackTable(actors);
+      const storage = createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 });
+      const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 8, lifetime: quakeEdictLifetime(1), storage,
+        now: () => ({ kind: "seconds", value: 3 }), unlink: actor => bodies.unlink(actor), exhausted: () => { throw new Error("No test edicts"); } });
+      slots.bindExisting(0, "quakec:world");
+      const attacker = slots.allocate("quakec:attacker"), target = slots.allocate("quakec:target");
+      const words = entities.at(2);
+      words.setFloat(field("health"), 100); words.setFloat(field("takedamage"), 2);
+      words.setFloat(field("armorvalue"), variant === "exhausted" ? 5 : 40); words.setFloat(field("armortype"), 0.3);
+      words.setFloat(field("movetype"), 3); words.setInt(field("th_pain"), pain.index); words.setInt(field("th_die"), pain.index);
+      words.setFloat(field("items"), 8192);
+      if (variant === "invulnerable") {
+        words.setFloat(field("invincible_finished"), 10);
+        words.setFloat(field("invincible_sound"), 10);
+      }
+      words.setVector(field("origin"), { x: 40, y: 12, z: 8 });
+      words.setVector(field("velocity"), { x: 0.1, y: -0.2, z: 0.3 });
+      bodies.bind(target, { read: () => ({ origin: words.vector(field("origin")), angles: words.vector(field("angles")), velocity: words.vector(field("velocity")),
+        bounds: { min: words.vector(field("mins")), max: words.vector(field("maxs")) }, ground: null }),
+        write: value => { words.setVector(field("origin"), value.origin); words.setVector(field("velocity"), value.velocity); return undefined; } });
+      const armor = (): ArmorState => ({ kind: "q1", points: words.float(field("armorvalue")), absorption: words.float(field("armortype")), item: "q1:armor" });
+      const order: string[] = [], outcomes: DamageOutcome[] = [];
+      let onBeforeReaction: (() => undefined) | null = null;
+      const authority = new GameplayAuthority(actors, callbacks, {
+        impulse: () => { throw new Error("Source velocity was replayed"); },
+        beforeReaction: () => { order.push("before-reaction"); onBeforeReaction?.(); return undefined; },
+        confirmed: value => { order.push("confirmed"); outcomes.push(value); return undefined; },
+      });
+      authority.bind(target, { read: () => ({ health: words.float(field("health")), armor: armor(), mass: 200, canTakeDamage: true, invulnerable: variant === "invulnerable", team: null }),
+        writeHealth: () => { throw new Error("Source health was replayed"); }, writeArmor: () => { throw new Error("Source armor was replayed"); } });
+      callbacks.bind(target, { think: null, touch: null, use: null,
+        pain: () => { throw new Error("Source pain was replayed"); }, die: () => { throw new Error("Source death was replayed"); } });
+      const request: DamageRequest = { attack: { sequence: 1, time: { kind: "seconds", value: 3 }, attacker: attacker.id, inflictor: attacker.id,
+        weapon: null, weaponProvider: "test:qc", combatProvider: "test:qc", inventoryProvider: "test:qc", movementProvider: "q1:movement", cause: { kind: "q1", deathType: "" } },
+        target: target.id, amount: 40, knockback: 40, direction: { x: 40, y: 12, z: 8 }, point: { x: 40, y: 12, z: 8 }, normal: { x: 0, y: 0, z: 0 }, delivery: "direct" };
+      const active: { observer: SourceDamageObserver | null; result: SourceDamageResult } = { observer: null, result: { appliedDamage: 0, reaction: "none" } };
+      const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: "netquake" }), serverActive: () => true,
+        observeCall: call => {
+          if (call.caller !== damage.index || (call.statement !== painCall && call.statement !== 1532)) return undefined;
+          const result: SourceDamageResult = { appliedDamage: vm.globals.float(takeWord), reaction: call.statement === painCall ? "pain" : "death" };
+          active.observer?.beforeReaction(result);
+          active.result = result;
+          order.push(`source-${result.reaction}`);
+          return undefined;
+        },
+        observeEntityStore: store => {
+          const observer = active.observer;
+          if (observer === null || store.functionIndex !== damage.index || store.reference !== entities.reference(2)) return undefined;
+          const before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength);
+          const after = new DataView(store.after.buffer, store.after.byteOffset, store.after.byteLength);
+          if (store.word === field("health")) observer.stored({ kind: "health", before: before.getFloat32(0, true), after: after.getFloat32(0, true) });
+          if (store.word === field("armorvalue") || store.word === field("armortype")) {
+            const current = armor();
+            if (current.kind !== "q1") throw new Error("Expected QC armor");
+            observer.stored({ kind: "armor", before: store.word === field("armorvalue") ? { ...current, points: before.getFloat32(0, true) } : { ...current, absorption: before.getFloat32(0, true) }, after: current });
+          }
+          if (store.word === field("velocity")) {
+            const previous = { x: before.getFloat32(0, true), y: before.getFloat32(4, true), z: before.getFloat32(8, true) };
+            const next = { x: after.getFloat32(0, true), y: after.getFloat32(4, true), z: after.getFloat32(8, true) };
+            observer.stored({ kind: "source-velocity", movementProvider: "q1:movement", before: previous, after: next });
+            previous.x = 999; next.x = 999;
+          }
+          store.before.fill(0); store.after.fill(0);
+          return undefined;
+        },
+      });
+      vm.globals.setFloat(vm.globalOffset("time"), 3);
+      vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
+      vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1)); vm.globals.setFloat(13, 40);
+      const execute = (): SourceDamageResult => { vm.execute(damage.index, 4); return active.result; };
+      if (observed) authority.runSourceDamage(request, observer => { active.observer = observer; return execute(); });
+      else execute();
+      const retained = active.observer;
+      if (retained !== null) expect(() => retained.beforeReaction(active.result)).toThrow("closed");
+      const result = { bytes: entities.bytes.slice(), health: words.float(field("health")), armor: armor(), velocity: bodies.read(target.id)?.velocity,
+        order: [...order], outcomes: [...outcomes], painExecutions: vm.profiling[pain.index] ?? 0, request };
+      if (observed && variant === "normal") {
+        active.observer = null;
+        const none: SourceDamageResult = { appliedDamage: 0, reaction: "none" };
+        const nestedRequest = { ...request, attack: { ...request.attack, sequence: 2 } };
+        onBeforeReaction = () => {
+          onBeforeReaction = null;
+          words.setFloat(field("movetype"), 0);
+          authority.runSourceDamage({ ...nestedRequest, amount: 100, knockback: 100 }, observer => {
+            active.observer = observer;
+            try {
+              vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1)); vm.globals.setFloat(13, 100);
+              return execute();
+            } finally { active.observer = null; }
+          });
+          return undefined;
+        };
+        authority.runSourceDamage(request, outer => { outer.beforeReaction(none); return none; });
+        expect(outcomes.slice(1).map(value => value.kind === "committed" ? value.decision.request.attack.sequence : -1)).toEqual([2, 1]);
+        expect(outcomes.slice(1).map(value => value.kind === "committed" && value.survived)).toEqual([false, false]);
+        expect(words.float(field("health"))).toBe(0);
+        const failed: { observer: SourceDamageObserver | null } = { observer: null };
+        const errorText = vm.strings.setEngine("qc-damage-failure", "source execution failure");
+        vm.globals.setInt(4, errorText);
+        expect(() => authority.runSourceDamage(request, observer => {
+          failed.observer = observer;
+          vm.execute(program.functionNamed("error").index, 1);
+          return none;
+        })).toThrow("source execution failure");
+        expect(outcomes).toHaveLength(3);
+        const failedObserver = failed.observer;
+        if (failedObserver === null) throw new Error("Missing failed source observer");
+        expect(() => failedObserver.beforeReaction(none)).toThrow("closed");
+        expect(vm.depth).toBe(0);
+        vm.snapshot();
+        authority.register({ id: "test:qc", decide: incoming => ({ request: incoming, appliedDamage: 1, reaction: "none", mutations: [
+          { kind: "health", before: words.float(field("health")), after: 1 },
+          { kind: "source-velocity", before: words.vector(field("velocity")), after: { x: 0, y: 0, z: 0 }, movementProvider: "q1:movement" },
+        ] }) });
+        expect(() => authority.apply(request)).toThrow("Observed source velocity cannot be replayed");
+        expect(words.float(field("health"))).toBe(0);
+        expect(outcomes).toHaveLength(3);
+        authority.runSourceDamage(request, observer => {
+          actors.release(target);
+          expect(() => observer.stored({ kind: "health", before: result.health, after: result.health })).toThrow();
+          return none;
+        });
+        expect(authority.runSourceDamage(request, () => { throw new Error("Stale source executed"); }).kind).toBe("stale-target");
+      }
+      actors.close();
+      return result;
+    };
+    const control = run(false), observed = run(true);
+    expect(observed.bytes).toEqual(control.bytes);
+    expect(observed.health).toBe(72);
+    expect(observed.armor).toEqual(control.armor);
+    expect(observed.velocity).toEqual(control.velocity);
+    expect(observed.painExecutions).toBeGreaterThan(0);
+    expect(observed.order).toEqual(["before-reaction", "source-pain", "confirmed"]);
+    expect(observed.outcomes).toHaveLength(1);
+    const outcome = observed.outcomes[0];
+    if (outcome?.kind !== "committed") throw new Error("Expected source damage outcome");
+    expect(outcome.decision.request).toEqual(observed.request);
+    expect(outcome.decision.appliedDamage).toBe(28);
+    expect(outcome.decision.mutations.map(value => value.kind)).toEqual(["armor", "source-velocity", "health"]);
+    const velocity = outcome.decision.mutations.find(value => value.kind === "source-velocity");
+    if (velocity?.kind !== "source-velocity") throw new Error("Missing absolute source velocity");
+    expect(velocity.before).toEqual({ x: Math.fround(0.1), y: Math.fround(-0.2), z: Math.fround(0.3) });
+    if (observed.velocity === undefined) throw new Error("Missing shared body velocity");
+    expect(velocity.after).toEqual(observed.velocity);
+    expect(Object.isFrozen(velocity.after)).toBe(true);
+    for (const variant of ["exhausted", "invulnerable"] satisfies readonly ("exhausted" | "invulnerable")[]) {
+      const reference = run(false, variant), checked = run(true, variant);
+      expect(checked.bytes).toEqual(reference.bytes);
+      expect(checked.health).toBe(reference.health);
+      expect(checked.armor).toEqual(reference.armor);
+      expect(checked.velocity).toEqual(reference.velocity);
+      const damageOutcome = checked.outcomes[0];
+      if (damageOutcome?.kind !== "committed") throw new Error("Missing source variant outcome");
+      expect(checked.outcomes).toHaveLength(1);
+      if (variant === "invulnerable") {
+        expect(checked.health).toBe(100);
+        expect(damageOutcome.decision.appliedDamage).toBe(0);
+        expect(damageOutcome.decision.mutations.some(value => value.kind === "source-velocity")).toBe(true);
+        expect(damageOutcome.decision.mutations.some(value => value.kind === "health")).toBe(false);
+      } else {
+        expect(damageOutcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(2);
+        expect(checked.armor).toEqual({ kind: "q1", points: 0, absorption: 0, item: "q1:armor" });
+        expect(damageOutcome.decision.appliedDamage).toBe(35);
+      }
+    }
+
+  });
   test("loads classic, all rerelease programs and the independent QuakeWorld layout", async () => {
     const classic = await readProgram("id1/PAK0.PAK");
     expect(classic.api.systemCrc).toBe(5927);

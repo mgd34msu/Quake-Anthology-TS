@@ -10,6 +10,14 @@ export interface QcBuiltinRegistry {
   readonly numbered: ReadonlyMap<number, QcBuiltin>;
   readonly named: ReadonlyMap<string, QcBuiltin>;
 }
+export interface QcEntityStoreObservation {
+  readonly functionIndex: number;
+  readonly statement: number;
+  readonly reference: number;
+  readonly word: number;
+  readonly before: Uint8Array;
+  readonly after: Uint8Array;
+}
 export interface QcMachineOptions {
   readonly program: QcProgram;
   readonly numeric: NumericOperations;
@@ -20,6 +28,8 @@ export interface QcMachineOptions {
   readonly stackLimit?: number;
   readonly localStackWords?: number;
   readonly trace?: (machine: QcMachine) => undefined;
+  readonly observeCall?: (call: { readonly functionIndex: number; readonly caller: number; readonly statement: number }) => undefined;
+  readonly observeEntityStore?: (store: QcEntityStoreObservation) => undefined;
 }
 export interface QcMachineSnapshot {
   readonly globals: Uint8Array;
@@ -153,6 +163,7 @@ export class QcMachine {
     const builtin = this.builtin(fn);
     this.argumentCount = argumentCount;
     this.traceEnabled = false;
+    this.options.observeCall?.({ functionIndex, caller: this.functionIndex, statement: this.statement });
     if (builtin !== null) { this.callBuiltin(builtin); return; }
     this.enter(fn);
     try {
@@ -218,7 +229,13 @@ export class QcMachine {
           case QcOpcode.StorePF: case QcOpcode.StorePS: case QcOpcode.StorePEnt: case QcOpcode.StorePFld: case QcOpcode.StorePFn: case QcOpcode.StorePV: {
             const words = opcode === QcOpcode.StorePV ? 3 : 1;
             const destination = this.entities.resolvePointer(g.int(b), words);
-            destination.fields.copyWords(g, a, destination.word, words); break;
+            const observe = this.options.observeEntityStore;
+            const before = observe === undefined ? null : destination.fields.bytes.slice(destination.word * 4, (destination.word + words) * 4);
+            destination.fields.copyWords(g, a, destination.word, words);
+            if (observe !== undefined && before !== null) observe({ functionIndex: this.functionIndex, statement: this.statement,
+              reference: g.int(b) - this.entities.layout.variablesOffsetBytes - destination.word * 4,
+              word: destination.word, before, after: destination.fields.bytes.slice(destination.word * 4, (destination.word + words) * 4) });
+            break;
           }
           case QcOpcode.If: if (g.int(a) !== 0) this.statement += signedQcBranch(b) - 1; break;
           case QcOpcode.IfNot: if (g.int(a) === 0) this.statement += signedQcBranch(b) - 1; break;
@@ -227,6 +244,7 @@ export class QcMachine {
           case QcOpcode.Call5: case QcOpcode.Call6: case QcOpcode.Call7: case QcOpcode.Call8: {
             this.argumentCount = opcode - QcOpcode.Call0;
             const called = this.program.functionAt(g.int(a));
+            this.options.observeCall?.({ functionIndex: called.index, caller: this.functionIndex, statement: this.statement });
             const callBuiltin = this.builtin(called);
             if (callBuiltin === null) this.enter(called);
             else this.callBuiltin(callBuiltin);

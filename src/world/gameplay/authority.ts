@@ -7,6 +7,11 @@ import type { SessionActorRegistry } from "../actors/registry.ts";
 
 export type CombatTraits = Pick<CombatState, "canTakeDamage" | "mass" | "invulnerable" | "team" | "noKnockback">;
 export interface PowerArmorCellBinding { read(): number; write(count: number): undefined; }
+export type SourceDamageResult = Pick<DamageDecision, "appliedDamage" | "reaction">;
+export interface SourceDamageObserver {
+  stored(write: Exclude<DamageMutation, { readonly kind: "impulse" }>): undefined;
+  beforeReaction(result: SourceDamageResult): undefined;
+}
 
 export interface CombatStateBinding {
   admitDamage?(request: DamageRequest): "continue" | "handled";
@@ -55,6 +60,7 @@ function captureDecision(proposed: DamageDecision, request: DamageRequest): Dama
   if (proposed.request !== request) throw new Error("Combat policy replaced attack provenance");
   const mutations = proposed.mutations.map((mutation): DamageMutation => {
     switch (mutation.kind) {
+      case "source-velocity": return Object.freeze({ ...mutation, before: copyVector(mutation.before), after: copyVector(mutation.after) });
       case "health": return Object.freeze({ ...mutation });
       case "armor": return Object.freeze({ ...mutation, before: copyArmor(mutation.before), after: copyArmor(mutation.after) });
       case "impulse": return Object.freeze({ ...mutation, impulse: copyVector(mutation.impulse) });
@@ -129,6 +135,64 @@ export class GameplayAuthority implements DamageAuthority {
     const traits = Object.freeze({ canTakeDamage, mass, invulnerable, team, ...(noKnockback === undefined ? {} : { noKnockback }), ...changes });
     if (!Number.isFinite(traits.mass)) throw new RangeError("Actor mass must be finite");
     return binding.writeTraits(traits);
+  }
+
+  runSourceDamage(input: DamageRequest, execute: (observer: SourceDamageObserver) => SourceDamageResult): DamageOutcome {
+    const request = captureRequest(input), target = this.actors.resolveOwned(request.target);
+    if (target === null) return { kind: "stale-target", request };
+    const binding = this.binding(target), initial = this.readState(target, binding);
+    const mutations: DamageMutation[] = [];
+    let health = initial.health, armor = initial.armor, velocity: Vec3 | null = null;
+    let active = true;
+    const observed: { reaction: SourceDamageResult | null } = { reaction: null };
+    const assertActive = (): void => { if (!active) throw new Error("Source damage observer is closed"); };
+    const decision = (result: SourceDamageResult): DamageDecision => {
+      if (!Number.isFinite(result.appliedDamage)) throw new Error("Source applied damage must be finite");
+      return captureDecision({ request, mutations, appliedDamage: result.appliedDamage, reaction: result.reaction }, request);
+    };
+    let result: SourceDamageResult;
+    try {
+      result = execute({
+        stored: write => {
+          assertActive(); this.actors.assertOwned(target);
+          if (observed.reaction !== null) throw new Error("Source damage store follows its reaction boundary");
+          switch (write.kind) {
+            case "health":
+              if (write.before !== health || !Number.isFinite(write.after) || binding.read().health !== write.after) throw new Error("Invalid observed source health store");
+              health = write.after; break;
+            case "armor":
+              if (!armorEqual(write.before, armor) || !armorEqual(this.readState(target, binding).armor, write.after)) throw new Error("Invalid observed source armor store");
+              armor = copyArmor(write.after); break;
+            case "source-velocity":
+              if (![write.before.x, write.before.y, write.before.z, write.after.x, write.after.y, write.after.z].every(Number.isFinite)
+                || velocity !== null && (velocity.x !== write.before.x || velocity.y !== write.before.y || velocity.z !== write.before.z)) throw new Error("Invalid observed source velocity store");
+              velocity = copyVector(write.after); break;
+          }
+          const captured = captureDecision({ request, mutations: [write], appliedDamage: 0, reaction: "none" }, request).mutations[0];
+          if (captured === undefined) throw new Error("Missing source damage store");
+          mutations.push(captured);
+          return undefined;
+        },
+        beforeReaction: value => {
+          assertActive(); this.actors.assertOwned(target);
+          if (observed.reaction !== null) throw new Error("Source damage reaction was already observed");
+          const captured = decision(value);
+          observed.reaction = { appliedDamage: captured.appliedDamage, reaction: captured.reaction };
+          this.hooks.beforeReaction(target, captured);
+          return undefined;
+        },
+      });
+    } finally { active = false; }
+    const completed = decision(result);
+    if (observed.reaction !== null && (observed.reaction.appliedDamage !== completed.appliedDamage || observed.reaction.reaction !== completed.reaction)) throw new Error("Source damage result disagrees with its reaction boundary");
+    if (observed.reaction === null) {
+      if (completed.reaction !== "none") throw new Error("Source damage omitted its reaction boundary");
+      if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, completed);
+    }
+    const current = this.read(target.id);
+    const outcome: DamageOutcome = Object.freeze({ kind: "committed", decision: completed, survived: current !== null && current.health > 0 });
+    this.hooks.confirmed(outcome);
+    return outcome;
   }
 
   apply(input: DamageRequest): DamageOutcome {
@@ -210,6 +274,7 @@ export class GameplayAuthority implements DamageAuthority {
     for (const mutation of mutations) {
       this.actors.assertOwned(target);
       switch (mutation.kind) {
+        case "source-velocity": throw new Error("Observed source velocity cannot be replayed by a combat policy");
         case "health":
           if (binding.read().health !== mutation.before) throw new Error("Combat health changed before its decision committed");
           binding.writeHealth(mutation.after);
@@ -225,6 +290,7 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   private validateMutations(initial: CombatState, mutations: readonly DamageMutation[]): undefined {
+    if (mutations.some(mutation => mutation.kind === "source-velocity")) throw new Error("Observed source velocity cannot be replayed by a combat policy");
     let health = initial.health;
     let armor = initial.armor;
     for (const mutation of mutations) {

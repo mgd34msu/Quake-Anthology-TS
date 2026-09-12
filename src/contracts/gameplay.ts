@@ -70,6 +70,7 @@ export interface CombatState {
 export type DamageMutation =
   | { readonly kind: "health"; readonly before: number; readonly after: number }
   | { readonly kind: "armor"; readonly before: ArmorState; readonly after: ArmorState }
+  | { readonly kind: "source-velocity"; readonly before: Vec3; readonly after: Vec3; readonly movementProvider: ProviderId }
   | { readonly kind: "impulse"; readonly impulse: Vec3; readonly movementProvider: ProviderId };
 
 export interface DamageDecision {
