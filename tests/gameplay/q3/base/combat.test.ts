@@ -87,7 +87,7 @@ test.skipIf(!existsSync(archivePath))("Q3 combat and grenade expiry use shared a
   expect(pool.clientAt(1).ps.externalEvent & 255).toBe(62);
   const context = bridge.context;
   if (context.product !== "baseq3") throw new Error("Unexpected product");
-  const missiles = new MissileRuntime({ world, bodies, previousTime: 0, combat: context, missionpack: null });
+  const missiles = new MissileRuntime({ world, bodies, actors, previousTime: 0, combat: context, missionpack: null });
   setOrigin(attacker, { x: 5000, y: 5000, z: 5000 });
   const grenade = missiles.fireGrenade(attacker, attacker.r.currentOrigin, { x: 1, y: 0, z: 0 });
   expect(scheduler.pending(grenade.actor.id)?.timing.due.value).toBe(2600);

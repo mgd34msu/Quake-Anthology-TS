@@ -37,6 +37,7 @@ interface CombatBridgeServices {
 }
 export type Q3CombatBridgeHost = CombatBridgeServices & ({ readonly product: "baseq3" } |
   { readonly product: "missionpack";
+    projectileParent(actor: ActorId): ActorId | null;
     checkObeliskAttack(target: GameEntity, attacker: GameEntity): boolean;
     invulnerabilityEffect(target: GameEntity, direction: Vec3, point: Vec3): void; });
 
@@ -51,10 +52,7 @@ export class Q3CombatBridge {
       authority: host.authority, entities: host.entities, spatial: host.world,
       actors: {
         participant: (actor: ActorId) => host.records.damageInflictor(actor),
-        parent: (actor: ActorId): ActorId | null => {
-          const parent = host.records.nativeByActor(actor)?.parent;
-          return parent?.inuse === true ? parent.actor.id : null;
-        },
+        parent: (actor: ActorId): ActorId | null => host.product === "missionpack" ? host.projectileParent(actor) : null,
         linkedBounds: (actor: ActorId) => host.records.host.bodies.linked(actor)?.absoluteBounds ?? null,
         isPlayer: (actor: ActorId) => {
           const native = host.records.nativeByActor(actor);

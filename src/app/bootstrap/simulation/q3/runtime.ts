@@ -131,8 +131,8 @@ export class Q3SourceRuntime {
     this.combat = this.bridge.context;
     const combat = this.combat;
     this.missiles = new MissileRuntime(combat.product === "baseq3"
-      ? { combat, world: this.world, bodies: host.bodies, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
-      : { combat, world: this.world, bodies: host.bodies, get previousTime() { return runtime.level.previousTime; }, missionpack: {
+      ? { combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
+      : { combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
@@ -221,7 +221,7 @@ export class Q3SourceRuntime {
       checkHurtCarrier: (target: GameEntity, attacker: GameEntity) => this.team.checkHurtCarrier(target, attacker),
       logAccuracyHit: (target: GameEntity, attacker: GameEntity) => logAccuracyHit(this.gameType, target, attacker) };
     return new Q3CombatBridge(this.options.product === "baseq3" ? { ...services, product: "baseq3" } : {
-      ...services, product: "missionpack", checkObeliskAttack: (target, attacker) => this.team.checkObeliskAttack(target, attacker),
+      ...services, product: "missionpack", projectileParent: actor => this.missiles.ownerOf(actor), checkObeliskAttack: (target, attacker) => this.team.checkObeliskAttack(target, attacker),
       invulnerabilityEffect: (target, direction, point) => { invulnerabilityEffect(this.pool, target, direction, point); } });
   }
   private createTeam(): TeamRuntime {

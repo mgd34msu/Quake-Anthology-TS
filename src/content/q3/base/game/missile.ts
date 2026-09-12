@@ -1,4 +1,5 @@
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
+import type { SessionActorRegistry } from "../../../../world/actors/registry.ts";
 import type { SharedBodyTable } from "../../../../world/actors/body.ts";
 import { q3AccuracyHit } from "./hitscan.ts";
 import { q3BounceProjectile, q3ExplodeProjectile, q3ImpactProjectile, q3LaunchProjectile, q3StepProjectile } from "./projectile.ts";
@@ -40,7 +41,7 @@ export interface MissionpackMissileServices {
 }
 
 /** Time and cvar properties must be live across scheduled think/touch callbacks. */
-export type MissileHost = { readonly world: ServerWorld; readonly bodies: SharedBodyTable; readonly previousTime: number } & (
+export type MissileHost = { readonly actors: Pick<SessionActorRegistry, "onRelease">; readonly world: ServerWorld; readonly bodies: SharedBodyTable; readonly previousTime: number } & (
   | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
   | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: MissionpackMissileServices }
 );
@@ -79,12 +80,57 @@ function center(entity: GameEntity): Vec3 {
   return add3(entity.r.currentOrigin, scale3(add3(entity.r.mins, entity.r.maxs), 0.5));
 }
 
+interface NativeProjectile extends Q3Projectile {
+  attachment: { readonly kind: "none" } | { readonly kind: "player"; readonly actor: ActorId };
+  trigger: ActorId | null;
+}
+
 export class MissileRuntime {
-  private readonly projectiles = new Map<GameEntity, Q3Projectile>();
+  private readonly projectiles = new Map<GameEntity, NativeProjectile>();
   private readonly proximityTouch: EntityTouch = (self, other) => { if (other instanceof GameEntity) this.proximityTrigger(self, other); };
 
   constructor(readonly host: MissileHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Missile product does not match its entity pool");
+    host.actors.onRelease(actor => { this.released(actor.id); return undefined; });
+  }
+
+  ownerOf(actor: ActorId): ActorId | null {
+    const entity = this.host.combat.entities.options.records.nativeByActor(actor);
+    const projectile = entity === null ? undefined : this.projectiles.get(entity);
+    return projectile?.actor.id.equals(actor) === true ? projectile.owner : null;
+  }
+
+  private ownerClient(projectile: Q3Projectile): GameClient | null {
+    return this.host.combat.entities.options.records.nativeByActor(projectile.owner)?.client ?? null;
+  }
+
+  private releaseProjectile(projectile: NativeProjectile): void {
+    const entity = this.host.combat.entities.options.records.nativeByActor(projectile.actor.id);
+    if (entity !== null) this.host.combat.entities.free(entity);
+  }
+
+  private released(actor: ActorId): void {
+    const pool = this.host.combat.entities, records = pool.options.records;
+    for (const [entity, projectile] of [...this.projectiles]) {
+      if (this.projectiles.get(entity) !== projectile) continue;
+      if (projectile.actor.id.equals(actor)) {
+        this.projectiles.delete(entity);
+        if (projectile.weapon === Weapon.WP_GRAPPLING_HOOK) {
+          const client = this.ownerClient(projectile);
+          if (client?.hook === entity) { client.hook = null; client.ps.pmFlags &= ~MoveFlags.GRAPPLE_PULL; }
+        }
+        if (projectile.attachment.kind === "player" && projectile.weapon === Weapon.WP_PROX_LAUNCHER) {
+          const target = records.nativeByActor(projectile.attachment.actor);
+          if (target?.client != null && target.activator === entity) { target.client.ps.eFlags &= ~EF_TICKING; target.activator = null; }
+        }
+        if (projectile.trigger !== null) { const trigger = records.nativeByActor(projectile.trigger); if (trigger !== null) pool.free(trigger); }
+      } else if (projectile.weapon === Weapon.WP_GRAPPLING_HOOK && projectile.owner.equals(actor)
+        || projectile.attachment.kind === "player" && projectile.attachment.actor.equals(actor)) this.releaseProjectile(projectile);
+      else if (projectile.trigger?.equals(actor) === true) {
+        projectile.trigger = null;
+        if (records.nativeByActor(projectile.actor.id) === entity) entity.activator = null;
+      }
+    }
   }
 
   private owned(entity: GameEntity): void {
@@ -103,7 +149,7 @@ export class MissileRuntime {
 
   private accuracy(owner: GameEntity): void { const client = clientOf(owner); client.accuracyHits = (client.accuracyHits + 1) | 0; }
 
-  private projectile(entity: GameEntity): Q3Projectile {
+  private projectile(entity: GameEntity): NativeProjectile {
     const projectile = this.projectiles.get(entity);
     if (projectile === undefined || this.host.combat.entities.options.records.nativeByActor(projectile.actor.id) !== entity)
       throw new Error("Missile continuation does not own this actor lifetime");
@@ -131,7 +177,7 @@ export class MissileRuntime {
       eventTime: () => entity.eventTime, clearEvent: () => { entity.s.event = 0; }, origin: () => entity.r.currentOrigin,
       move: (origin, velocity) => { const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, origin, velocity }); },
       setOrigin: origin => { setOrigin(entity, origin); const body = runtime.host.bodies.read(projectile.actor.id); if (body !== null) runtime.host.bodies.write(projectile.actor, { ...body, velocity: vec3(0, 0, 0) }); }, link: () => { runtime.host.world.link(entity); },
-      release: () => { this.projectiles.delete(entity); pool.free(entity); },
+      release: () => { pool.free(entity); },
       trace: (start, end, passActor) => combat.spatial.traceActor({ start, end, passActor,
         shape: { kind: "box", mins: entity.r.mins, maxs: entity.r.maxs }, mask: entity.clipmask }),
       worldActor: () => pool.at(1022).actor.id,
@@ -203,7 +249,7 @@ export class MissileRuntime {
       let position: Vec3;
       if (other !== null && other.takedamage && other.client !== null) {
         pool.addEvent(event, EntityEvent.EV_MISSILE_HIT, directionToByte(normal)); event.s.otherEntityNum = other.s.number;
-        entity.enemy = other; position = snapVectorTowards(center(other), entity.s.pos.base);
+        this.projectile(entity).attachment = { kind: "player", actor: other.actor.id }; position = snapVectorTowards(center(other), entity.s.pos.base);
       } else {
         position = trace.end; pool.addEvent(event, EntityEvent.EV_MISSILE_MISS, directionToByte(normal)); entity.enemy = null;
       }
@@ -211,7 +257,7 @@ export class MissileRuntime {
       event.freeAfterEvent = true; event.s.eType = EntityType.ET_GENERAL; entity.s.eType = EntityType.ET_GRAPPLE;
       setOrigin(entity, position); setOrigin(event, position);
       entity.think = self => { this.hookThink(self); }; entity.nextthink = (combat.time + 100) | 0;
-      const client = clientOf(parentOf(entity)); client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
+      const client = this.ownerClient(this.projectile(entity)); if (client === null) { pool.free(entity); pool.free(event); return true; } client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
       client.ps.grapplePoint = { ...entity.r.currentOrigin };
       this.host.world.link(entity); this.host.world.link(event); return true;
     }
@@ -220,19 +266,24 @@ export class MissileRuntime {
 
   hookFree(entity: GameEntity): void {
     this.owned(entity);
-    const client = clientOf(parentOf(entity)); client.hook = null; client.ps.pmFlags &= ~MoveFlags.GRAPPLE_PULL;
-    this.host.combat.entities.free(entity);
+    this.releaseProjectile(this.projectile(entity));
   }
 
   hookThink(entity: GameEntity): void {
-    this.owned(entity);
-    if (entity.enemy !== null) setOrigin(entity, snapVectorTowards(center(entity.enemy), entity.r.currentOrigin));
-    clientOf(parentOf(entity)).ps.grapplePoint = { ...entity.r.currentOrigin };
+    const projectile = this.projectile(entity), client = this.ownerClient(projectile);
+    if (client === null) { this.releaseProjectile(projectile); return; }
+    if (projectile.attachment.kind === "player") {
+      const target = this.host.combat.entities.options.records.nativeByActor(projectile.attachment.actor);
+      if (target === null) { this.releaseProjectile(projectile); return; }
+      setOrigin(entity, snapVectorTowards(center(target), entity.r.currentOrigin));
+    }
+    client.ps.grapplePoint = { ...entity.r.currentOrigin };
   }
 
   private proximityExplode(mine: GameEntity): void {
+    const projectile = this.projectile(mine), trigger = projectile.trigger;
     this.explode(mine);
-    if (mine.activator !== null) { this.host.combat.entities.free(mine.activator); mine.activator = null; }
+    if (trigger !== null) { const entity = this.host.combat.entities.options.records.nativeByActor(trigger); if (entity !== null) this.host.combat.entities.free(entity); }
   }
 
   private proximityDie(mine: GameEntity): void {
@@ -258,16 +309,20 @@ export class MissileRuntime {
     trigger.classname = "proxmine_trigger"; trigger.r.mins = vec3(-radius, -radius, -radius); trigger.r.maxs = vec3(radius, radius, radius);
     setOrigin(trigger, mine.s.pos.base); trigger.parent = mine; trigger.r.contents = 0x40000000;
     trigger.touch = this.proximityTouch;
-    this.host.world.link(trigger); mine.activator = trigger;
+    this.host.world.link(trigger); mine.activator = trigger; this.projectile(mine).trigger = trigger.actor.id;
   }
 
   private proximityExplodeOnPlayer(mine: GameEntity): void {
-    const player = mine.enemy;
-    if (player === null) throw new Error("Attached proximity mine requires its player");
+    const projectile = this.projectile(mine);
+    if (projectile.attachment.kind !== "player") throw new Error("Attached proximity mine requires its player lifetime");
+    const player = this.host.combat.entities.options.records.nativeByActor(projectile.attachment.actor);
+    if (player === null) { this.releaseProjectile(projectile); return; }
     const client = clientOf(player), combat = this.host.combat;
     client.ps.eFlags &= ~EF_TICKING;
     if (client.invulnerabilityTime > combat.time) {
-      damage(combat, player, parentOf(mine), parentOf(mine), vec3(0, 0, 0), mine.s.origin, 1000, DamageFlags.NO_KNOCKBACK, 27);
+      const owner = combat.actors.participant(projectile.owner);
+      damage(combat, player, owner, owner, vec3(0, 0, 0), mine.s.origin, 1000, DamageFlags.NO_KNOCKBACK, 27, projectile.actor.id);
+      if (combat.entities.options.records.nativeByActor(projectile.attachment.actor) !== player) return;
       client.invulnerabilityTime = 0; combat.entities.tempEntity(client.ps.origin, EntityEvent.EV_JUICED);
     } else {
       setOrigin(mine, player.s.pos.base); mine.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
@@ -287,7 +342,7 @@ export class MissileRuntime {
     const client = clientOf(player); client.ps.eFlags |= EF_TICKING; player.activator = mine;
     mine.s.eFlags |= EF_NODRAW; mine.r.svFlags |= ServerEntityFlags.NOCLIENT;
     mine.s.pos = { ...mine.s.pos, type: TrajectoryType.TR_LINEAR, delta: vec3(0, 0, 0) };
-    mine.enemy = player; mine.think = self => { this.proximityExplodeOnPlayer(self); };
+    this.projectile(mine).attachment = { kind: "player", actor: player.actor.id }; mine.think = self => { this.proximityExplodeOnPlayer(self); };
     mine.nextthink = (combat.time + (client.invulnerabilityTime > combat.time ? 2000 : 10000)) | 0;
   }
 
@@ -304,7 +359,7 @@ export class MissileRuntime {
     bolt.r.currentOrigin = vec3(start.x, start.y, start.z);
     const actor = bolt.actor;
     this.projectiles.set(bolt, {
-      actor, owner, get weapon() { return bolt.s.weapon; }, get direct() { return bolt.damage; }, get splash() { return bolt.splashDamage; },
+      actor, owner, attachment: { kind: "none" }, trigger: null, get weapon() { return bolt.s.weapon; }, get direct() { return bolt.damage; }, get splash() { return bolt.splashDamage; },
       get radius() { return bolt.splashRadius; }, get method() { return bolt.methodOfDeath; }, get splashMethod() { return bolt.splashMethodOfDeath; },
       get damagePoint() { return bolt.s.origin; },
       get trajectory() { return bolt.s.pos; }, set trajectory(value) { bolt.s.pos = value; },
