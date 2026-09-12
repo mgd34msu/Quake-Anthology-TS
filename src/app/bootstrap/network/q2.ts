@@ -8,6 +8,7 @@ import { Q2Channel, Q2ChallengeTable, Q2ClientHandshake, Q2CommandReplay, Q2Serv
 import type { Q2ChannelReceive, Q2ServerRecord, Q2ServerWriteEvent, Q2WireFrame, ServerDataParamsT } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase, Q2ApplicationGameState, Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ClientNetworkOptions, Q2ServerNetworkOptions } from './types.ts';
+import { Q2PeerDownload } from './q2-downloads.ts';
 function tokens(text: string): readonly string[] {
     const cursor = { data: text, index: 0 }, result: string[] = [];
     while (cursor.index < text.length) {
@@ -36,6 +37,8 @@ function joinPackets(packets: readonly Uint8Array[]): Uint8Array {
     return bytes;
 }
 interface ServerPeer<TAddress extends NetworkAddress> {
+    readonly download: Q2PeerDownload;
+    downloadFailure: string | null;
     remote: TAddress;
     player: Q2ApplicationPlayer;
     readonly channel: Q2Channel;
@@ -82,6 +85,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         this.serverGeneration++;
         this.pending = [];
         for (const { peer, player } of players) {
+            this.closeDownload(peer);
             peer.player = player;
             this.host.userinfo(player, peer.userinfo);
             peer.active = false;
@@ -104,6 +108,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         return true;
     }
     private drop(peer: ServerPeer<TAddress>, reason: string): void {
+        this.closeDownload(peer);
         this.peers.delete(addressKey(peer.remote));
         this.pending = this.pending.filter(command => command.source.kind !== 'remote-client' || !command.source.client.equals(peer.player.client));
         this.host.disconnect(peer.player, reason);
@@ -144,7 +149,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     break;
                 }
                 const protocol = request.protocol;
-                const peer: ServerPeer<TAddress> = { remote, player: admitted.player,
+                const peer: ServerPeer<TAddress> = { remote, player: admitted.player, download: new Q2PeerDownload(), downloadFailure: null,
                     channel: new Q2Channel({ side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
                     wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
                 this.peers.set(addressKey(remote), peer);
@@ -157,7 +162,21 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     }
     private reliable(peer: ServerPeer<TAddress>, event: Q2ServerWriteEvent): void { peer.channel.queueReliable(encodeQ2ServerEvent(peer.wire, event)); }
     private stuff(peer: ServerPeer<TAddress>, text: string): void { this.reliable(peer, { kind: 'command-text', text }); }
+    private closeDownload(peer: ServerPeer<TAddress>): void { peer.download.close(); peer.downloadFailure = null; }
+    private beginDownload(peer: ServerPeer<TAddress>, name: string, offset: string | undefined): void {
+        const generation = this.serverGeneration;
+        const pending = peer.download.begin(this.host.downloads, name, offset), revision = peer.download.revision;
+        const current = (): boolean => !this.ended && this.serverGeneration === generation && peer.download.revision === revision
+            && this.peers.get(addressKey(peer.remote)) === peer;
+        const failed = (error: unknown): void => { if (current()) peer.downloadFailure = error instanceof Error ? error.message : String(error); };
+        // File completion can queue bounded wire bytes; only poll may drop an admitted player.
+        void pending.then(event => {
+            if (event === null || !current()) return;
+            try { this.reliable(peer, event); } catch (error) { failed(error); }
+        }, failed);
+    }
     private newClient(peer: ServerPeer<TAddress>): void {
+        this.closeDownload(peer);
         peer.active = false;
         peer.frames.clear();
         peer.replay = new Q2CommandReplay();
@@ -206,6 +225,15 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             this.newClient(peer);
             return;
         }
+        if (name === 'download') {
+            this.beginDownload(peer, words[1] ?? '', words[2]);
+            return;
+        }
+        if (name === 'nextdl') {
+            const event = peer.download.next();
+            if (event !== null) this.reliable(peer, event);
+            return;
+        }
         if (name === 'configstrings' || name === 'baselines' || name === 'begin') {
             const state = peer.gameState;
             if (state === null || integer(words[1]) !== state.data.servercount) {
@@ -235,6 +263,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     break;
                 case 'command':
                     this.clientCommand(peer, event.text);
+                    if (this.peers.get(addressKey(peer.remote)) !== peer) return;
                     break;
                 case 'userinfo':
                     this.host.userinfo(peer.player, event.text);
@@ -253,6 +282,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     async poll(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
         if (this.ended)
             return [];
+        for (const peer of this.peers.values()) if (peer.downloadFailure !== null) this.drop(peer, peer.downloadFailure);
         for (;;) {
             const packet = this.options.transport.poll();
             if (packet === null)
@@ -352,6 +382,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         if (this.ended)
             return;
         this.ended = true;
+        for (const peer of this.peers.values()) this.closeDownload(peer);
         for (const peer of this.peers.values()) {
             try {
                 this.reliable(peer, { kind: 'disconnect' });

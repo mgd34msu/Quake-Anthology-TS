@@ -290,7 +290,7 @@ export class Q2DownloadSender {
             return null;
         const bytes = this.source.read(this.offset, Math.min(this.blockBytes, this.source.byteLength - this.offset));
         this.offset += bytes.length;
-        const percent = this.source.byteLength === 0 ? 100 : Math.floor(this.offset * 100 / this.source.byteLength);
+        const percent = Math.floor(this.offset * 100 / (this.source.byteLength || 1));
         if (this.offset === this.source.byteLength) {
             this.ended = true;
             this.source.close();

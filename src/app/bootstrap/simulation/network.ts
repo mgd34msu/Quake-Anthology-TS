@@ -13,6 +13,7 @@ import type { LoadedApplicationContent } from '../content.ts';
 import type { Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ApplicationServerEvent } from '../network/types.ts';
 import { q2ApplicationLayout } from '../network/q2-layout.ts';
 import { q2EffectToWire } from '../network/q2-effects.ts';
+import { createQ2ApplicationDownloads } from '../network/q2-downloads.ts';
 import type { SharedSimulation } from './runtime.ts';
 export interface Q2ApplicationServerBindingOptions {
     readonly session: EngineSession;
@@ -28,6 +29,9 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     const simulation = options.simulation, source = simulation.q2Source();
     if (source === null)
         throw new Error('Q2 server network host requires the Q2 source game provider');
+    const cvars = simulation.q2ServerCvars();
+    if (cvars === null) throw new Error('Q2 server network host requires the source cvar registry');
+    const downloads = createQ2ApplicationDownloads(await options.content.forContent(options.content.recipe.map.entities.content), cvars, source.game.options.edition);
     const layout = q2ApplicationLayout(options.protocol), models = new Map<string, number>(), sounds = new Map<string, number>(), images = new Map<string, number>();
     const configs = new Map<number, string>(), clients = new Map<number, Q2ApplicationPlayer>();
     const entityEvents = new Map<ActorId, number>();
@@ -191,6 +195,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     };
     const knownConfigs = new Map<number, Map<number, string>>();
     return {
+        downloads,
         protocol: options.protocol, messageOptions: { maxConfigStrings: layout.maxConfigStrings, inventorySlots: 256 }, maxClients: source.game.options.maxClients,
         observe: (output, events) => {
             if (eventFrame !== output.snapshot.frame.frame) {
