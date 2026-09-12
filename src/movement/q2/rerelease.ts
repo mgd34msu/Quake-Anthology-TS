@@ -1,3 +1,4 @@
+import { sweepQ2Body } from "./swept.ts";
 /* Copyright (c) ZeniMax Media Inc.
  * Licensed under the GNU General Public License 2.0.
  * Ported through quake-2-re-ts and checked against rerelease/p_move.cpp. */
@@ -29,7 +30,6 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     const pm_waterspeed = 400;
     const pm_laddermod = sourceFloat(0.5);
     const MIN_STEP_NORMAL = sourceFloat(0.7);
-    const MAX_CLIP_PLANES = 5;
     interface SideCheck {
         readonly normal: readonly [
             number,
@@ -162,94 +162,29 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     /** Native duplicate-plane recovery addresses pml.origin even when origin is
      * a server entity or a temporary water-jump probe. Keep that source alias. */
     function PM_StepSlideMove_Generic(origin: Vec3, velocity: Vec3, frametime: number, mins: Vec3, maxs: Vec3, touch: KexTouchListT, has_time: boolean, trace_func: PmTraceFn): void {
-        const numbumps = 4;
         const primal_velocity = vec3(element(velocity, 0), element(velocity, 1), element(velocity, 2));
-        let numplanes = 0;
-        const planes: Vec3[] = [];
-        let time_left = frametime;
-        for (let bumpcount = 0; bumpcount < numbumps; bumpcount++) {
-            const end = vec3(numericOps.add(element(origin, 0), numericOps.multiply(time_left, element(velocity, 0))), numericOps.add(element(origin, 1), numericOps.multiply(time_left, element(velocity, 1))), numericOps.add(element(origin, 2), numericOps.multiply(time_left, element(velocity, 2))));
-            let trace = trace_func(origin, mins, maxs, end);
-            if (trace.allsolid) {
-                velocity[2] = numericOps.store(0);
-                PM_RecordTrace(touch, trace);
-                return;
-            }
-            if (trace.surface2) {
-                const clipped_a = SlideClipVelocity(velocity, trace.plane.normal, sourceFloat(1.01));
-                const clipped_b = SlideClipVelocity(velocity, trace.plane2.normal, sourceFloat(1.01));
-                let better = false;
-                for (const i of axes) {
-                    if (Math.abs(element(clipped_a, i)) < Math.abs(element(clipped_b, i))) {
-                        better = true;
-                        break;
+        const stop = sweepQ2Body({ origin, velocity, elapsed: frametime, numeric: numericOps,
+            trace: (start, end) => trace_func(start, mins, maxs, end),
+            clip: (speed, normal) => SlideClipVelocity(speed, normal, sourceFloat(1.01)),
+            touch: trace => PM_RecordTrace(touch, trace), solid: trace => PM_RecordTrace(touch, trace),
+            prepareTrace: trace => {
+                if (trace.surface2) {
+                    const clipped_a = SlideClipVelocity(velocity, trace.plane.normal, sourceFloat(1.01));
+                    const clipped_b = SlideClipVelocity(velocity, trace.plane2.normal, sourceFloat(1.01));
+                    if (axes.some(i => Math.abs(element(clipped_a, i)) < Math.abs(element(clipped_b, i)))) {
+                        trace.plane = trace.plane2; trace.surface = trace.surface2;
                     }
                 }
-                if (better) {
-                    trace.plane = trace.plane2;
-                    trace.surface = trace.surface2;
-                }
-            }
-            if (trace.fraction > 0) {
-                VectorCopy(trace.endpos, origin);
-                numplanes = 0;
-            }
-            if (trace.fraction === 1)
-                break;
-            PM_RecordTrace(touch, trace);
-            time_left = numericOps.subtract(time_left, numericOps.multiply(time_left, trace.fraction));
-            if (numplanes >= MAX_CLIP_PLANES) {
-                velocity[0] = numericOps.store(velocity[1] = numericOps.store(velocity[2] = numericOps.store(0)));
-                break;
-            }
-            let i = 0;
-            let hitDuplicate = false;
-            for (i = 0; i < numplanes; i++) {
-                if (vec3_dot(trace.plane.normal, element(planes, i)) > sourceFloat(0.99)) {
-                    context.pmlOrigin[0] = numericOps.store(numericOps.add(element(context.pmlOrigin, 0), numericOps.multiply(element(trace.plane.normal, 0), sourceFloat(0.01))));
-                    context.pmlOrigin[1] = numericOps.store(numericOps.add(element(context.pmlOrigin, 1), numericOps.multiply(element(trace.plane.normal, 1), sourceFloat(0.01))));
-                    G_FixStuckObject_Generic(context.pmlOrigin, mins, maxs, trace_func);
-                    hitDuplicate = true;
-                    break;
-                }
-            }
-            if (hitDuplicate)
-                continue;
-            planes[numplanes] = vec3(element(trace.plane.normal, 0), element(trace.plane.normal, 1), element(trace.plane.normal, 2));
-            numplanes++;
-            for (i = 0; i < numplanes; i++) {
-                const clipped = SlideClipVelocity(velocity, element(planes, i), sourceFloat(1.01));
-                VectorCopy(clipped, velocity);
-                let j = 0;
-                for (j = 0; j < numplanes; j++) {
-                    if (j !== i) {
-                        if (vec3_dot(velocity, element(planes, j)) < 0)
-                            break;
-                    }
-                }
-                if (j === numplanes)
-                    break;
-            }
-            if (i !== numplanes) {
-            }
-            else {
-                if (numplanes !== 2) {
-                    velocity[0] = numericOps.store(velocity[1] = numericOps.store(velocity[2] = numericOps.store(0)));
-                    break;
-                }
-                const dir = vec3_cross(element(planes, 0), element(planes, 1));
-                const d = vec3_dot(dir, velocity);
-                VectorCopy(vec3_muls(dir, d), velocity);
-            }
-            if (vec3_dot(velocity, primal_velocity) <= 0) {
-                velocity[0] = numericOps.store(velocity[1] = numericOps.store(velocity[2] = numericOps.store(0)));
-                break;
-            }
-        }
-        if (has_time) {
-            VectorCopy(primal_velocity, velocity);
-        }
+            },
+            duplicatePlane: { threshold: sourceFloat(0.99), recover: normal => {
+                context.pmlOrigin[0] = numericOps.store(numericOps.add(element(context.pmlOrigin, 0), numericOps.multiply(element(normal, 0), sourceFloat(0.01))));
+                context.pmlOrigin[1] = numericOps.store(numericOps.add(element(context.pmlOrigin, 1), numericOps.multiply(element(normal, 1), sourceFloat(0.01))));
+                G_FixStuckObject_Generic(context.pmlOrigin, mins, maxs, trace_func);
+            } },
+        });
+        if (stop !== "solid" && has_time) VectorCopy(primal_velocity, velocity);
     }
+
     interface PmlT {
         origin: Vec3;
         velocity: Vec3;

@@ -1,3 +1,7 @@
+import { sweepQ2Body } from "../../../src/movement/q2/swept.ts";
+import { createMovementMath } from "../../../src/movement/q2/math.ts";
+import { plane } from "../../../src/movement/q2/types.ts";
+import type { Vec3 as SourceVector } from "../../../src/movement/q2/types.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { Vec3 } from "../../../src/contracts/math.ts";
@@ -203,4 +207,32 @@ test.skipIf(!await Bun.file(q3ArchivePath).exists())("Q2 rerelease movement uses
     expect(jump.state.velocity.z).toBeGreaterThan(0);
     expect(jump.jumpSound).toBe(true);
   } finally { archive.close(); }
+});
+
+
+test("Q2 shared sweep clips rejected candidates sequentially and only writes z on allsolid", () => {
+  const math = createMovementMath(numeric);
+  for (const allsolid of [false, true]) {
+    const origin: SourceVector = [0, 0, 0], velocity: SourceVector = allsolid ? [1 / 3, 2 / 3, 7] : [10, 10, 10];
+    let traces = 0, touches = 0;
+    const stop = sweepQ2Body({ origin, velocity, elapsed: 1, numeric,
+      trace: (_start, end) => {
+        traces++;
+        return { allsolid, startsolid: allsolid, fraction: traces <= 2 ? 0 : 1, endpos: traces <= 2 ? [...origin] : end,
+          plane: { ...plane(), normal: traces === 1 ? [-1, 0, 0] : [Math.fround(-0.6), Math.fround(-0.8), 0] },
+          surface: null, contents: 0, ent: { kind: "world", model: 0 }, plane2: plane(), surface2: null,
+          source: { kind: "q1", fraction: 0, end: zero, allSolid: allsolid, startSolid: allsolid, contact: { kind: "none" },
+            hit: { kind: "world", model: 0 }, inOpen: true, inWater: false, sourcePlane: { normal: zero, distance: 0 } } };
+      },
+      clip: (speed, normal) => math.SlideClipVelocity(speed, normal, 1.01), touch: () => { touches++; },
+    });
+    expect(stop).toBe(allsolid ? "solid" : "complete");
+    expect(touches).toBe(allsolid ? 0 : 2);
+    if (allsolid) expect(velocity).toEqual([1 / 3, 2 / 3, 0]);
+    else {
+      expect(velocity[0]).toBeLessThan(-4);
+      expect(velocity[1]).toBeGreaterThan(3);
+      expect(velocity[2]).toBe(10);
+    }
+  }
 });

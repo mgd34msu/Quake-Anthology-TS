@@ -97,14 +97,14 @@ test("server duplicate-plane recovery changes shared pml scratch without nudging
       const trace = s.trace(start, end, bounds);
       if (start.x === end.x && start.y === end.y && start.z === end.z) { probes.push(start); return trace; }
       if (trace.kind !== "q2") throw new Error("Expected Q2 trace");
-      const plane = { normal: { x: -1, y: 0, z: 0 }, distance: -4, type: 0, signbits: 1 };
+      const plane = { normal: { x: -0.8, y: 0, z: 0.6 }, distance: -4, type: 0, signbits: 1 };
       return { ...trace, fraction: 0, end: start, allSolid: false, startSolid: false,
         sourcePlane: plane, contact: { kind: "plane", plane }, hit: { kind: "actor", actor: s.wallX.id } };
     }, impact: () => undefined, takeKillVelocity: () => false };
   s.fly(s.mover, 0.2, services);
   expect(s.bodies.read(s.mover.id)?.origin).toEqual(zero);
   expect(probes).toHaveLength(3);
-  expect(probes[0]).toEqual({ x: Math.fround(50 - Math.fround(0.01)), y: 60, z: 70 });
+  expect(probes[0]).toEqual({ x: Math.fround(50 + Math.fround(Math.fround(-0.8) * Math.fround(0.01))), y: 60, z: 70 });
   expect(s.context.capture().x).toBeLessThan(saved.x);
   const continued = s.context.capture();
   s.context.restore(saved);
@@ -112,4 +112,26 @@ test("server duplicate-plane recovery changes shared pml scratch without nudging
   s.bodies.write(s.mover, { ...body, velocity: { x: 100, y: 100, z: 0 } });
   s.fly(s.mover, 0.2, services);
   expect(s.context.capture()).toEqual(continued);
+});
+
+
+test("rerelease chooses the secondary plane before buffering a contact", () => {
+  const s = fixture(), touched: TraceResult[] = [];
+  let traces = 0;
+  s.fly(s.mover, 0.2, { actors: s.actors, bodies: s.bodies, hitActor: s.hitActor,
+    trace: (start, end, bounds) => {
+      const trace = s.trace(start, end, bounds);
+      if (trace.kind !== "q2") throw new Error("Expected Q2 trace");
+      traces++;
+      const primary = { normal: { x: -1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 1 };
+      const secondary = { normal: { x: 0, y: -1, z: 0 }, distance: 0, type: 1, signbits: 2 };
+      return { ...trace, fraction: traces === 1 ? 0 : 1, end: traces === 1 ? start : end, allSolid: false, startSolid: false,
+        sourcePlane: primary, hit: traces === 1 ? { kind: "actor", actor: s.wallX.id } : { kind: "none" },
+        secondary: { plane: secondary, surface: { name: "secondary", flags: 0, value: 0, material: "" } } };
+    }, impact: trace => { touched.push(trace); return undefined; }, takeKillVelocity: () => false });
+  expect(traces).toBe(2);
+  expect(touched).toHaveLength(1);
+  expect(touched[0]?.sourcePlane.normal).toEqual({ x: 0, y: -1, z: 0 });
+  expect(s.bodies.read(s.mover.id)?.velocity.x).toBe(100);
+  expect(s.bodies.read(s.mover.id)?.velocity.y).toBeLessThan(0);
 });

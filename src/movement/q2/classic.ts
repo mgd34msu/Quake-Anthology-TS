@@ -1,3 +1,4 @@
+import { sweepQ2Body } from "./swept.ts";
 /* Quake II movement, id Software / ZeniMax. GPL-2.0-or-later.
  * Ported from quake-2-re-ts and checked against the original pmove sources. */
 import type { NumericOperations } from "../../contracts/numeric.ts";
@@ -5,7 +6,7 @@ import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
 import { type Vec3, type TraceT, type CsurfaceT, type CplaneT, type ClassicPmove, plane, PmTypeT, PMF_DUCKED, PMF_JUMP_HELD, PMF_ON_GROUND, PMF_TIME_WATERJUMP, PMF_TIME_LAND, PMF_TIME_TELEPORT, MAXTOUCH, PITCH, YAW, ROLL, CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_SLIME, CONTENTS_LADDER, MASK_WATER, MASK_CURRENT, CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270, CONTENTS_CURRENT_UP, CONTENTS_CURRENT_DOWN, SURF_SLICK, axes, element } from "./types.ts";
 export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0): void {
-    const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, CrossProduct, AngleVectors, SHORT2ANGLE } = createMovementMath(numericOps);
+    const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, AngleVectors, SHORT2ANGLE } = createMovementMath(numericOps);
     const STEPSIZE = 18;
     class PmlT {
         origin: Vec3 = vec3();
@@ -51,76 +52,18 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
         }
     }
     const MIN_STEP_NORMAL = 0.7;
-    const MAX_CLIP_PLANES = 5;
     function PM_StepSlideMove_(): void {
-        const numbumps = 4;
-        const dir = vec3();
-        const planes: Vec3[] = [];
-        for (let p = 0; p < MAX_CLIP_PLANES; p++)
-            planes.push(vec3());
-        const primal_velocity = vec3();
-        const end = vec3();
-        let i = 0;
-        let j = 0;
-        VectorCopy(pml.velocity, primal_velocity);
-        let numplanes = 0;
-        let time_left = pml.frametime;
-        for (let bumpcount = 0; bumpcount < numbumps; bumpcount++) {
-            for (const k of axes)
-                end[k] = numericOps.store(numericOps.add(element(pml.origin, k), numericOps.multiply(time_left, element(pml.velocity, k))));
-            const trace = pm.trace(pml.origin, pm.mins, pm.maxs, end);
-            if (trace.allsolid) {
-                pml.velocity[2] = numericOps.store(0);
-                return;
-            }
-            if (trace.fraction > 0) {
-                VectorCopy(trace.endpos, pml.origin);
-                numplanes = 0;
-            }
-            if (trace.fraction === 1)
-                break;
-            if (pm.numtouch < MAXTOUCH && trace.ent) {
-                pm.touchents[pm.numtouch] = trace.ent;
-                pm.touchtraces[pm.numtouch] = trace;
-                pm.numtouch++;
-            }
-            time_left = numericOps.subtract(time_left, numericOps.multiply(time_left, trace.fraction));
-            if (numplanes >= MAX_CLIP_PLANES) {
-                VectorClear(pml.velocity);
-                break;
-            }
-            VectorCopy(trace.plane.normal, element(planes, numplanes));
-            numplanes++;
-            for (i = 0; i < numplanes; i++) {
-                PM_ClipVelocity(pml.velocity, element(planes, i), pml.velocity, 1.01);
-                for (j = 0; j < numplanes; j++) {
-                    if (j !== i) {
-                        if (DotProduct(pml.velocity, element(planes, j)) < 0)
-                            break;
-                    }
+        const primal_velocity = vec3(); VectorCopy(pml.velocity, primal_velocity);
+        const stop = sweepQ2Body({ origin: pml.origin, velocity: pml.velocity, elapsed: pml.frametime, numeric: numericOps,
+            trace: (start, end) => pm.trace(start, pm.mins, pm.maxs, end),
+            clip: (velocity, normal) => { const out = vec3(); PM_ClipVelocity(velocity, normal, out, 1.01); return out; },
+            touch: trace => {
+                if (pm.numtouch < MAXTOUCH && trace.ent) {
+                    pm.touchents[pm.numtouch] = trace.ent; pm.touchtraces[pm.numtouch] = trace; pm.numtouch++;
                 }
-                if (j === numplanes)
-                    break;
-            }
-            if (i !== numplanes) {
-            }
-            else {
-                if (numplanes !== 2) {
-                    VectorClear(pml.velocity);
-                    break;
-                }
-                CrossProduct(element(planes, 0), element(planes, 1), dir);
-                const d = DotProduct(dir, pml.velocity);
-                VectorScale(dir, d, pml.velocity);
-            }
-            if (DotProduct(pml.velocity, primal_velocity) <= 0) {
-                VectorClear(pml.velocity);
-                break;
-            }
-        }
-        if (pm.s.pm_time) {
-            VectorCopy(primal_velocity, pml.velocity);
-        }
+            },
+        });
+        if (stop !== "solid" && pm.s.pm_time) VectorCopy(primal_velocity, pml.velocity);
     }
     function PM_StepSlideMove(): void {
         const start_o = vec3();

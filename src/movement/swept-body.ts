@@ -2,19 +2,25 @@ import type { Vec3 } from "../contracts/math.ts";
 import type { TraceResult } from "../contracts/scene.ts";
 
 export interface SweptBodyState { readonly origin: Vec3; readonly velocity: Vec3; }
-export interface SweptBodyServices {
+export interface SweptBodyTrace { readonly fraction: number; readonly end: Vec3; readonly allSolid: boolean; readonly startSolid: boolean; }
+export interface SweptBodyServices<Trace extends SweptBodyTrace = TraceResult> {
   read(): SweptBodyState | null;
   writeOrigin(origin: Vec3): void;
-  writeVelocity(velocity: Vec3): void;
-  trace(start: Vec3, end: Vec3): TraceResult;
-  normal(trace: TraceResult): Vec3;
-  impact(trace: TraceResult, normal: Vec3): void;
+  writeVelocity(velocity: Vec3, components?: "all" | "vertical"): void;
+  trace(start: Vec3, end: Vec3): Trace;
+  prepareTrace?(trace: Trace): void;
+  solid?(trace: Trace): void;
+  normal(trace: Trace): Vec3;
+  impact(trace: Trace, normal: Vec3): void;
   readonly stopWhenStill: boolean;
   readonly collisionPolicy?: {
     readonly stopOnStartSolid: boolean;
     readonly originalVelocity: "initial" | "last-progress";
+    readonly allSolidVelocity?: "zero" | "zero-z";
+    readonly candidateVelocity?: "original" | "sequential";
     readonly creaseVelocity: "last-candidate" | "current";
   };
+  readonly duplicatePlane?: { readonly threshold: number; recover(normal: Vec3): void };
   samePlane(first: Vec3, second: Vec3): boolean;
   readonly math: {
     advance(origin: Vec3, time: number, velocity: Vec3): Vec3;
@@ -29,7 +35,7 @@ export type SweepStop = "complete" | "removed" | "solid" | "plane-limit" | "crea
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** Classic swept movement; source adapters own state access, contact effects and arithmetic. */
-export function sweepBody(services: SweptBodyServices, elapsed: number): SweepStop {
+export function sweepBody<Trace extends SweptBodyTrace>(services: SweptBodyServices<Trace>, elapsed: number): SweepStop {
   const initial = services.read();
   if (initial === null) return "removed";
   const math = services.math, primal = initial.velocity, planes: Vec3[] = [];
@@ -39,7 +45,13 @@ export function sweepBody(services: SweptBodyServices, elapsed: number): SweepSt
     if (state === null) return "removed";
     if (services.stopWhenStill && state.velocity.x === 0 && state.velocity.y === 0 && state.velocity.z === 0) break;
     const trace = services.trace(state.origin, math.advance(state.origin, remaining, state.velocity));
-    if (trace.allSolid || services.collisionPolicy?.stopOnStartSolid === true && trace.startSolid) { services.writeVelocity(zero); return "solid"; }
+    if (trace.allSolid || services.collisionPolicy?.stopOnStartSolid === true && trace.startSolid) {
+      if (services.collisionPolicy?.allSolidVelocity === "zero-z") services.writeVelocity({ ...state.velocity, z: 0 }, "vertical");
+      else services.writeVelocity(zero);
+      services.solid?.(trace);
+      return "solid";
+    }
+    services.prepareTrace?.(trace);
     if (trace.fraction > 0) { services.writeOrigin(trace.end); if (services.collisionPolicy?.originalVelocity !== "initial") original = state.velocity; planes.length = 0; }
     if (trace.fraction === 1) break;
     const normal = services.normal(trace);
@@ -48,11 +60,16 @@ export function sweepBody(services: SweptBodyServices, elapsed: number): SweepSt
     if (current === null) return "removed";
     remaining = math.remaining(remaining, trace.fraction);
     if (planes.length >= 5) { services.writeVelocity(zero); return "plane-limit"; }
+    const duplicate = services.duplicatePlane;
+    if (duplicate !== undefined && planes.some(plane => math.dot(normal, plane) > duplicate.threshold)) {
+      duplicate.recover(normal);
+      continue;
+    }
     planes.push(normal);
     let velocity: Vec3 | null = null;
     let lastCandidate = current.velocity;
     for (const plane of planes) {
-      const candidate = math.clip(original, plane);
+      const candidate = math.clip(services.collisionPolicy?.candidateVelocity === "sequential" ? lastCandidate : original, plane);
       lastCandidate = candidate;
       if (planes.every(other => services.samePlane(other, plane) || math.dot(candidate, other) >= 0)) { velocity = candidate; break; }
     }
