@@ -4,6 +4,7 @@ import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
+import { EntityEvent, EV_EVENT_BITS } from "../../../src/content/q3/base/shared/definitions.ts";
 import type { ItemId } from "../../../src/contracts/gameplay.ts";
 
 test("Q1 force_retouch links players without a source entity and runs the actual map pickup", async () => {
@@ -164,3 +165,99 @@ test("selected Q1 repeated desired weapon intents preserve native continuous fir
     expect(once.some(frame => frame.weapon === "lightning" && frame.continuous && frame.frame > 1)).toBe(true);
   } finally { await content.close(); }
 });
+
+test("Q3 selected supply observations preview actual authored grants and source lifecycle without mutation", async () => {
+  const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch"]);
+  if (command.kind !== "run") throw new Error("Expected Q3 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q2:official", content: catalog.require("q2-classic-baseq2").id },
+  ] } } });
+  const content = await loadApplicationContent(command.options, recipe), identity = createIdentityOwner("q3-supply-observation");
+  const simulation = createSimulation({ identity, recipe, world: content.world, mounts: content.mounts,
+    skill: 0, mode: "deathmatch", seed: 17, maxClients: 1 });
+  try {
+    const actor = simulation.admitPlayer(identity.client(0, 0)).actor, source = simulation.q3Source();
+    if (source === null) throw new Error("Missing Q3 source");
+    const player = source.records.nativeByActor(actor), movement = simulation.movementPlayer(actor);
+    if (player?.client == null || movement === null) throw new Error("Missing actual Q3 player");
+    for (let frame = 0; frame < 5; frame++) simulation.step({ elapsedMilliseconds: 100, commands: [] });
+    const entities = Array.from({ length: source.pool.numEntities }, (_, index) => source.pool.at(index));
+    const gun = entities.find(entity => entity.inuse && entity.classname === "weapon_shotgun");
+    const ammo = entities.find(entity => entity.inuse && entity.classname === "ammo_shells");
+    if (gun === undefined || ammo === undefined) throw new Error("Missing authored q3dm1 supplies");
+    player.client.ps.ammo.set(3, 200);
+    simulation.drainPresentationEvents();
+    const inventory = simulation.inventory.entries(actor), state = player.client.ps.copy(), seed = source.random.seed;
+    const sharedSeed = simulation.random.checkpoint(), itemState = { contents: gun.r.contents, flags: gun.s.eFlags, nextthink: gun.nextthink, think: gun.think, touch: gun.touch };
+    const observed = source.observeSupply(gun.actor.id, actor);
+    if (observed === null) throw new Error("Missing selected Q3 supply observation");
+    expect(observed.observation.availability).toEqual({ kind: "ready", eligible: true });
+    expect(observed.preview.weapons).toEqual([{ item: "q2:weapon_shotgun", before: 0, given: 1 }, { item: "q2:weapon_supershotgun", before: 0, given: 1 }]);
+    expect(observed.preview.ammo).toEqual([{ item: "q2:ammo_shells", before: 0, given: 10 }]);
+    expect(simulation.inventory.entries(actor)).toEqual(inventory); expect(player.client.ps.copy()).toEqual(state);
+    expect(source.random.seed).toBe(seed); expect(simulation.random.checkpoint()).toEqual(sharedSeed);
+    expect({ contents: gun.r.contents, flags: gun.s.eFlags, nextthink: gun.nextthink, think: gun.think, touch: gun.touch }).toEqual(itemState);
+    expect(simulation.drainPresentationEvents()).toEqual([]);
+    gun.touch?.(gun, player, { self: gun.actor, other: actor, plane: null, surface: null });
+    for (const receipt of [...observed.preview.weapons, ...observed.preview.ammo]) expect(simulation.inventory.count(actor, receipt.item)).toBe(receipt.before + receipt.given);
+    expect(player.client.ps.ammo.get(3)).toBe(200);
+    expect(player.client.ps.externalEvent & ~EV_EVENT_BITS).toBe(EntityEvent.EV_ITEM_PICKUP);
+    expect(player.client.ps.externalEventParm).toBe(gun.s.modelindex);
+    expect(gun.r.contents).toBe(0);
+    expect(source.observeSupply(gun.actor.id, actor)?.observation.availability).toEqual({ kind: "respawning", atSeconds: gun.nextthink / 1000 });
+    const respawn = gun.think;
+    gun.think = () => undefined;
+    expect(source.observeSupply(gun.actor.id, actor)?.observation.availability).toEqual({ kind: "inactive" });
+    gun.think = respawn;
+    gun.team = "ambiguous";
+    expect(source.observeSupply(gun.actor.id, actor)?.observation.availability).toEqual({ kind: "inactive" });
+    gun.team = null;
+    simulation.inventory.give(movement.actor, "q2:ammo_shells", 1000);
+    const full = source.observeSupply(ammo.actor.id, actor);
+    expect(full?.preview.accepted).toBe(false);
+    const beforeFull = simulation.inventory.count(actor, "q2:ammo_shells");
+    ammo.touch?.(ammo, player, { self: ammo.actor, other: actor, plane: null, surface: null });
+    expect(simulation.inventory.count(actor, "q2:ammo_shells")).toBe(beforeFull);
+    expect(source.observeSupply(ammo.actor.id, actor)?.observation.availability).toEqual({ kind: "ready", eligible: true });
+    const touch = ammo.touch; ammo.touch = () => undefined;
+    expect(source.observeSupply(ammo.actor.id, actor)).toBeNull(); ammo.touch = touch;
+    simulation.inventory.consume(movement.actor, "q2:ammo_shells", beforeFull);
+    player.health = 0.5;
+    expect(source.observeSupply(ammo.actor.id, actor)?.observation.availability).toEqual({ kind: "ready", eligible: false });
+    expect(source.observeSupply(ammo.actor.id, actor)?.preview.accepted).toBe(true);
+    ammo.touch?.(ammo, player, { self: ammo.actor, other: actor, plane: null, surface: null });
+    expect(simulation.inventory.count(actor, "q2:ammo_shells")).toBe(0);
+    expect(ammo.r.contents).not.toBe(0);
+    player.health = 100;
+    const available = source.observeSupply(ammo.actor.id, actor);
+    if (available === null) throw new Error("Missing restored-health ammo observation");
+    expect(available.observation.availability).toEqual({ kind: "ready", eligible: true });
+    expect(available.preview.accepted).toBe(true);
+    expect(player.client.ps.ammo.get(3)).toBe(200);
+    ammo.touch?.(ammo, player, { self: ammo.actor, other: actor, plane: null, surface: null });
+    for (const receipt of available.preview.ammo) expect(simulation.inventory.count(actor, receipt.item)).toBe(receipt.before + receipt.given);
+    expect(simulation.inventory.count(actor, "q2:ammo_shells")).toBeGreaterThan(0);
+    expect(player.client.ps.ammo.get(3)).toBe(200);
+    expect(ammo.r.contents).toBe(0);
+    const removed = ammo.actor.id; source.pool.free(ammo);
+    expect(source.observeSupply(removed, actor)).toBeNull();
+  } finally { simulation.close(); await content.close(); }
+  const nativeContent = await loadApplicationContent(command.options), nativeIdentity = createIdentityOwner("native-q3-no-supply-override");
+  const native = createSimulation({ identity: nativeIdentity, recipe: nativeContent.recipe, world: nativeContent.world, mounts: nativeContent.mounts,
+    skill: 0, mode: "deathmatch", seed: 17, maxClients: 1 });
+  try {
+    const actor = native.admitPlayer(nativeIdentity.client(0, 0)).actor, source = native.q3Source();
+    if (source === null) throw new Error("Missing native Q3 source");
+    for (let frame = 0; frame < 5; frame++) native.step({ elapsedMilliseconds: 100, commands: [] });
+    const gun = Array.from({ length: source.pool.numEntities }, (_, index) => source.pool.at(index)).find(entity => entity.inuse && entity.classname === "weapon_shotgun");
+    if (gun === undefined) throw new Error("Missing native Q3 shotgun");
+    expect(source.observeSupply(gun.actor.id, actor)).toBeNull();
+    const player = source.records.nativeByActor(actor);
+    if (player?.client == null) throw new Error("Missing native Q3 recipient");
+    gun.touch?.(gun, player, { self: gun.actor, other: actor, plane: null, surface: null });
+    expect(player.client.ps.ammo.get(3)).toBe(10);
+    expect(gun.r.contents).toBe(0);
+  } finally { native.close(); await nativeContent.close(); }
+}, 60000);

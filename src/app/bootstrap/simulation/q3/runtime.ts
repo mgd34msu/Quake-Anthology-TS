@@ -33,7 +33,7 @@ import { GameCommandRuntime } from "../../../../content/q3/team-arena/commands.t
 import { DeathRuntime } from "../../../../content/q3/base/game/death.ts";
 import { EntityPool, runThink } from "../../../../content/q3/base/game/entities.ts";
 import { gameFormat } from "../../../../content/q3/base/game/format.ts";
-import { ItemRegistry, respawnItem, spawnItem, touchItem } from "../../../../content/q3/base/game/item-lifecycle.ts";
+import { ItemRegistry, respawnItem, spawnItem, touchItem, observeQ3Supply } from "../../../../content/q3/base/game/item-lifecycle.ts";
 import type { ItemLifecycleContext } from "../../../../content/q3/base/game/item-lifecycle.ts";
 import { runItem } from "../../../../content/q3/base/game/item-motion.ts";
 import type { DropItemContext } from "../../../../content/q3/base/game/item-motion.ts";
@@ -138,14 +138,18 @@ export class Q3SourceRuntime {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
-    this.itemLifecycle = { admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
+    const itemCallbacks: NonNullable<ItemLifecycleContext["callbacks"]> = {
+      touch: (entity, other, contact) => { touchItem(entity, other, contact, this.itemLifecycle); },
+      respawn: entity => { respawnItem(entity, this.itemLifecycle); },
+    };
+    this.itemLifecycle = { callbacks: itemCallbacks, previewPickup: item => host.previewPickup?.(item) ?? { kind: "native" }, admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
       get gameType() { return runtime.gameType; }, get weaponRespawnSeconds() { return runtime.integer("g_weaponrespawn"); },
       get teamWeaponRespawnSeconds() { return runtime.integer("g_weaponTeamRespawn"); }, handicapForClient: number => this.userinfo(number, "handicap"),
       teamPickup: (item, player) => this.team.pickupTeam(item, player), useTargets: (item, player) => useTargets(this.targets(), item, player),
       soundIndex: path => this.config.soundIndex(path), random: this.random, registry: this.registeredItems,
       log: text => this.log(text), warn: host.engine.print };
     this.drops = { entities: this.pool, product: options.product, get gameType() { return runtime.gameType; }, get time() { return runtime.level.time; },
-      touchItem: (entity, other, trace) => touchItem(entity, other, trace, this.itemLifecycle),
+      touchItem: itemCallbacks.touch,
       droppedFlagThink: entity => this.team.droppedFlagThink(entity), checkDroppedTeamItem: entity => this.team.checkDroppedItem(entity), random: () => this.random.random() };
     this.team = this.createTeam();
     this.death = this.createDeath();
@@ -314,6 +318,10 @@ export class Q3SourceRuntime {
   private createPersonalPortal(): PersonalPortalRuntime | null {
     const combat = this.combat;
     return combat.product === "baseq3" ? null : new PersonalPortalRuntime({ combat, world: this.world, models: this.config, random: this.random, items: this.drops });
+  }
+  observeSupply(pickup: ActorId, recipient: ActorId): ReturnType<typeof observeQ3Supply> {
+    const entity = this.records.nativeByActor(pickup), player = this.records.nativeByActor(recipient);
+    return entity === null || player === null ? null : observeQ3Supply(entity, player, this.itemLifecycle);
   }
   quadDamageFactor(): number { return this.number("g_quadfactor"); }
 

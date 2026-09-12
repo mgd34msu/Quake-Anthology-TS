@@ -2,6 +2,7 @@
 // RespawnItem, FinishSpawningItem, and G_SpawnItem.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
+import type { PickupSupplyOffer, PickupSupplyObservation, PickupSupplyPreview } from "../../../../contracts/pickups.ts";
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
@@ -97,7 +98,13 @@ export type SourcePickupAdmission =
   | { readonly kind: "rejected" }
   | { readonly kind: "picked"; readonly respawnSeconds: number };
 
+export type SourcePickupPreview =
+  | { readonly kind: "native" | "rejected" }
+  | { readonly kind: "selected"; readonly offer: PickupSupplyOffer; readonly preview: PickupSupplyPreview };
+
 export interface ItemLifecycleContext {
+  readonly callbacks?: { readonly touch: NonNullable<GameEntity["touch"]>; readonly respawn: NonNullable<GameEntity["think"]> };
+  readonly previewPickup?: (item: SourcePickupDescriptor) => SourcePickupPreview;
   readonly admitPickup?: (item: SourcePickupDescriptor) => SourcePickupAdmission;
   readonly entities: EntityPool;
   readonly world: ServerWorld & Pick<ActorSpatialQueries, "traceActor">;
@@ -256,6 +263,32 @@ export function respawnItem(entity: GameEntity, context: ItemLifecycleContext): 
   selected.nextthink = 0;
 }
 
+function pickupDescriptor(entity: GameEntity, recipient: GameEntity, item: ItemDefinition, context: ItemLifecycleContext): SourcePickupDescriptor {
+  return { itemActor: entity.actor.id, playerActor: recipient.actor.id, item,
+    count: entity.count, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
+    weaponRespawnSeconds: context.weaponRespawnSeconds, teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds };
+}
+
+export function observeQ3Supply(entity: GameEntity, recipient: GameEntity, context: ItemLifecycleContext): {
+  readonly observation: PickupSupplyObservation; readonly preview: PickupSupplyPreview;
+} | null {
+  if (context.product !== "baseq3" || !entity.inuse || !recipient.inuse || context.entities.get(entity.slot) !== entity
+    || context.entities.get(recipient.slot) !== recipient || recipient.client === null || context.callbacks === undefined
+    || entity.touch !== context.callbacks.touch || entity.item === null
+    || (entity.item.type !== ItemType.IT_WEAPON && entity.item.type !== ItemType.IT_AMMO)) return null;
+  const item = requirePublishedItem(context, entity);
+  const supplied = context.previewPickup?.(pickupDescriptor(entity, recipient, item, context));
+  if (supplied?.kind !== "selected") return null;
+  const ready = (entity.r.contents & CONTENTS_TRIGGER) !== 0 && (entity.s.eFlags & EF_NODRAW) === 0
+    && (entity.r.svFlags & ServerEntityFlags.NOCLIENT) === 0 && !entity.freeAfterEvent && !entity.unlinkAfterEvent;
+  const respawning = entity.team === null && entity.teammaster === null && entity.teamchain === null
+    && (entity.flags & (GameFlags.DROPPED_ITEM | GameFlags.TEAMSLAVE)) === 0 && !entity.freeAfterEvent && !entity.unlinkAfterEvent
+    && entity.think === context.callbacks.respawn && entity.nextthink > 0;
+  return { observation: { actor: entity.actor.id, offer: supplied.offer, availability: ready
+    ? { kind: "ready", eligible: recipient.health >= 1 }
+    : respawning ? { kind: "respawning", atSeconds: entity.nextthink / 1000 } : { kind: "inactive" } }, preview: supplied.preview };
+}
+
 /** Touch_Item validates eligibility, applies pickup rules, emits events, and hides or schedules the item. */
 export function touchItem(entity: GameEntity, other: DamageParticipant, _contact: TouchContact, context: ItemLifecycleContext): void {
   checkContext(context);
@@ -268,9 +301,7 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
   const item = requirePublishedItem(context, entity);
   const pickupState = { modelIndex: entity.s.modelindex, modelIndex2: entity.s.modelindex2, generic1: entity.s.generic1 };
   const itemActor = entity.actor.id, playerActor = other.actor.id;
-  const admission = context.admitPickup?.({ itemActor, playerActor, item,
-    count: entity.count, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
-    weaponRespawnSeconds: context.weaponRespawnSeconds, teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds }) ?? { kind: "native" };
+  const admission = context.admitPickup?.(pickupDescriptor(entity, other, item, context)) ?? { kind: "native" };
   if (!entity.inuse || !other.inuse || context.entities.get(entity.slot) !== entity || context.entities.get(other.slot) !== other
     || !entity.actor.id.equals(itemActor) || !other.actor.id.equals(playerActor)) return;
   if (admission.kind === "rejected") return;
@@ -326,7 +357,7 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     entity.think = null;
   } else {
     entity.nextthink = (now + Math.imul(respawn, 1_000)) | 0;
-    entity.think = self => { respawnItem(self, context); };
+    entity.think = context.callbacks?.respawn ?? (self => { respawnItem(self, context); });
   }
   context.entities.options.link(entity);
 }
@@ -347,7 +378,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
   entity.s.modelindex = tableIndex(context, item);
   entity.s.modelindex2 = 0;
   entity.r.contents = CONTENTS_TRIGGER;
-  entity.touch = (self, other, trace) => { touchItem(self, other, trace, context); };
+  entity.touch = context.callbacks?.touch ?? ((self, other, trace) => { touchItem(self, other, trace, context); });
   entity.use = self => { respawnItem(self, context); };
 
   if ((entity.spawnflags & 1) !== 0) {
@@ -382,7 +413,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
     entity.s.eFlags |= EF_NODRAW;
     entity.r.contents = 0;
     entity.nextthink = sourceFloatSchedule(gameTime(context), delay);
-    entity.think = self => { respawnItem(self, context); };
+    entity.think = context.callbacks?.respawn ?? (self => { respawnItem(self, context); });
     return;
   }
   context.entities.options.link(entity);

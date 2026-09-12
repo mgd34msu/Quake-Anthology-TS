@@ -30,7 +30,7 @@ import { Q2Ballistics } from "../../../content/q2/foundation/weapons/ballistics.
 import { Q2HandGrenadeEquipment } from "../../../content/q2/equipment/hand-grenades.ts";
 import { projectQ2Actor } from "../../../content/q2/foundation/weapons/projection.ts";
 import { q3WeaponPickupQuantity, q3WeaponRespawnSeconds, RESPAWN_AMMO } from "../../../content/q3/base/game/item-pickup.ts";
-import type { SourcePickupDescriptor, SourcePickupAdmission } from "../../../content/q3/base/game/item-lifecycle.ts";
+import type { SourcePickupDescriptor, SourcePickupAdmission, SourcePickupPreview } from "../../../content/q3/base/game/item-lifecycle.ts";
 import { Powerup, ItemType } from "../../../content/q3/base/shared/definitions.ts";
 import { HandGrenadeRuntime } from "./equipment-runtime.ts";
 import { readHandGrenadeRuntimeCheckpoint } from "./equipment-checkpoint.ts";
@@ -63,7 +63,7 @@ import { playerMovementEnvironment } from "./player-movement.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ContentId, ExecutableRecipe, MonsterDefinitionReference, ProviderReference, ResolvedResourceReference } from "../../../contracts/content.ts";
-import type { PickupSupplyProfile } from "../../../contracts/pickups.ts";
+import type { PickupSupplyProfile, PickupSupplyOffer } from "../../../contracts/pickups.ts";
 import type { AttackProvenance, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { ActorId, ClientId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
@@ -681,25 +681,45 @@ export class SharedSimulation implements Simulation {
       }, link: (actor, triggers) => { this.physics.bodies.link(actor); if (triggers) this.physics.touchTriggers(actor); return undefined; } });
   }
 
-  private admitSelectedQ3Pickup(pickup: SourcePickupDescriptor): SourcePickupAdmission {
-    const arsenal = this.selectedArsenal, admission = this.selectedSupply;
-    if (arsenal === null || arsenal.family === "q3" || admission === null) return { kind: "native" };
+  private selectedQ3Supply(pickup: SourcePickupDescriptor):
+    | { readonly kind: "native" | "rejected" }
+    | { readonly kind: "selected"; readonly offer: PickupSupplyOffer; readonly respawnSeconds: number } {
+    const arsenal = this.selectedArsenal;
+    if (arsenal === null || arsenal.family === "q3" || this.selectedSupply === null) return { kind: "native" };
     if (pickup.item.type !== ItemType.IT_WEAPON && pickup.item.type !== ItemType.IT_AMMO) return { kind: "native" };
-    const weapon = q3WeaponItem(pickup.item.tag), actor = this.actors.resolveOwned(pickup.playerActor);
-    if (weapon == null || actor === null) return { kind: "rejected" };
+    const weapon = q3WeaponItem(pickup.item.tag);
+    if (weapon == null || !this.actors.isLive(pickup.playerActor)) return { kind: "rejected" };
     if (pickup.item.type === ItemType.IT_AMMO) {
       if (weapon.ammo === null) return { kind: "rejected" };
-      return admission.ammo(actor, { item: weapon.ammo, amount: pickup.count !== 0 ? pickup.count : pickup.item.quantity })
-        ? { kind: "picked", respawnSeconds: RESPAWN_AMMO } : { kind: "rejected" };
+      return { kind: "selected", offer: { kind: "ammo", offer: { item: weapon.ammo,
+        amount: pickup.count !== 0 ? pickup.count : pickup.item.quantity } }, respawnSeconds: RESPAWN_AMMO };
     }
     const profile = arsenal.family === "q1" ? Q3_Q1_SUPPLY_PROFILE : Q3_Q2_SUPPLY_PROFILE;
     const destination = weapon.ammo === null ? null : profile.ammo.find(entry => entry.source === weapon.ammo)?.destinations[0];
     if (weapon.ammo !== null && destination == null) return { kind: "rejected" };
     const quantity = q3WeaponPickupQuantity({ count: pickup.count, quantity: pickup.item.quantity, dropped: pickup.dropped,
-      gameType: pickup.gameType, currentAmmo: destination == null ? 0 : this.inventory.count(actor.id, destination) });
-    const accepted = admission.weapon(actor, { item: weapon.item, ammo: weapon.ammo === null ? [] : [{ item: weapon.ammo, amount: quantity }] },
-      this.options.mode === "deathmatch" ? "better" : "always");
-    return accepted ? { kind: "picked", respawnSeconds: q3WeaponRespawnSeconds(pickup) } : { kind: "rejected" };
+      gameType: pickup.gameType, currentAmmo: destination == null ? 0 : this.inventory.count(pickup.playerActor, destination) });
+    return { kind: "selected", offer: { kind: "weapon", offer: { item: weapon.item,
+      ammo: weapon.ammo === null ? [] : [{ item: weapon.ammo, amount: quantity }] } }, respawnSeconds: q3WeaponRespawnSeconds(pickup) };
+  }
+
+  private previewSelectedQ3Pickup(pickup: SourcePickupDescriptor): SourcePickupPreview {
+    const supplied = this.selectedQ3Supply(pickup);
+    if (supplied.kind !== "selected") return supplied;
+    const admission = this.selectedSupply;
+    if (admission === null) throw new Error("Selected source supply lost its admission");
+    return { kind: "selected", offer: supplied.offer, preview: admission.preview(pickup.playerActor, supplied.offer) };
+  }
+
+  private admitSelectedQ3Pickup(pickup: SourcePickupDescriptor): SourcePickupAdmission {
+    const supplied = this.selectedQ3Supply(pickup);
+    if (supplied.kind !== "selected") return supplied;
+    const admission = this.selectedSupply, actor = this.actors.resolveOwned(pickup.playerActor);
+    if (admission === null || actor === null) return { kind: "rejected" };
+    const offer = supplied.offer;
+    const accepted = offer.kind === "ammo" ? admission.ammo(actor, offer.offer)
+      : offer.kind === "weapon" && admission.weapon(actor, offer.offer, this.options.mode === "deathmatch" ? "better" : "always");
+    return accepted ? { kind: "picked", respawnSeconds: supplied.respawnSeconds } : { kind: "rejected" };
   }
 
   private q1CombatSource(): Q1EntityServices {
@@ -1098,6 +1118,7 @@ export class SharedSimulation implements Simulation {
         collision: (actor, collision) => this.physics.setCollision(actor, collision), armorContext: () => ({ screenFacingDot: 0, arithmetic: "binary32" }),
         primaryAttackAllowed: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
         admitPickup: item => this.admitSelectedQ3Pickup(item),
+        previewPickup: item => this.previewSelectedQ3Pickup(item),
         foreign: actor => { if (this.actors.isLive(actor)) throw new Error("Foreign Q3 actor projection is not attached"); return null; },
         isPlayer: actor => this.player(actor) !== null,
         moverActors: {
