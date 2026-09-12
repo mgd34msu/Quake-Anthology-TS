@@ -10,6 +10,7 @@ import type { MovementPlayer } from "./players.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import { capturePlayerLocomotion, playerLocomotionMatches, createPlayerMovementPrediction, locomotionTemplate, movementObservation, playerCrouchedBounds, playerTracePolicy, selectedMovementProfile } from "./player-movement.ts";
 import type { LocomotionPlayer } from "./player-movement.ts";
+import { MoverState } from "../../../content/q3/base/game/state.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function profileFor(player: LocomotionPlayer): NavigationProfile {
@@ -51,15 +52,57 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
       entity: binding => {
         for (const { body, collision } of simulation.scene.queryActors(simulation.scene.modelBounds(0))) {
           if (collision.shape.kind !== "model" || collision.shape.model !== binding.model) continue;
-          return { actor: body.actor, enabled: true, locked: false, bounds: body.absoluteBounds, velocity: body.state.velocity, destination: null };
+          const common = { actor: body.actor, bounds: body.absoluteBounds, velocity: body.state.velocity };
+          const q1 = simulation.q1Source()?.game.entity(body.actor);
+          if (q1 !== undefined && q1 !== null) {
+            const master = q1.doorGroup[0] ?? q1;
+            const key = (master.spawnflags & 8) !== 0 ? "q1:key/gold" : (master.spawnflags & 16) !== 0 ? "q1:key/silver" : null;
+            const player = selectedPlayer ?? firstPlayer();
+            const needsKey = key !== null && master.touch !== null && (player === null || simulation.inventory.count(player.actor.id, key) === 0);
+            return { ...common, enabled: q1.solid === "bsp", destination: q1.move?.destination ?? null,
+              locked: q1.classname === "func_plat" ? !q1.activated : q1.classname === "func_door"
+                && (master.state === "bottom" || master.state === "down")
+                && (master.targetname !== "" || master.maxHealth > 0 || (master.spawnflags & 4) !== 0 || needsKey) };
+          }
+          const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
+          if (q2 !== null && entity !== undefined && entity !== null)
+            return { ...common, enabled: entity.solid === "brush", ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)) };
+          const q3 = simulation.q3Source()?.records.nativeByActor(body.actor);
+          if (q3 !== undefined && q3 !== null) {
+            const master = q3.teammaster ?? q3;
+            const source = simulation.q3Source();
+            const automatic = simulation.scene.queryActors(simulation.scene.modelBounds(0), "trigger").some(({ body: trigger }) => {
+              const entity = source?.records.nativeByActor(trigger.actor);
+              return entity?.classname === "door_trigger" && entity.parent === master && entity.r.linked && entity.touch !== null;
+            });
+            return { ...common, enabled: q3.r.linked,
+              locked: master.moverState === MoverState.POS1 && (q3.classname === "func_door" && !automatic
+                || q3.classname === "func_plat" && master.targetname !== null),
+              destination: q3.moverState === MoverState.ONE_TO_TWO ? q3.pos2 : q3.moverState === MoverState.TWO_TO_ONE ? q3.pos1 : null };
+          }
+          return null;
         }
         return null;
-      }, hazard: () => false };
+      }, hazard: bounds => {
+        for (const { body } of simulation.scene.queryActors(bounds)) {
+          const q1 = simulation.q1Source()?.game.entity(body.actor);
+          if (q1?.classname === "trigger_hurt" && q1.solid === "trigger" && q1.damage > 0 && q1.touch !== null) return true;
+          const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
+          if (entity?.classname === "trigger_hurt" && entity.solid === "trigger" && entity.damage > 0 && entity.touch !== null
+            && q2 !== null && entity.timestamp <= q2.game.host.now()) return true;
+          const q3 = simulation.q3Source(), native = q3?.records.nativeByActor(body.actor);
+          if (native?.classname === "trigger_hurt" && native.r.linked && native.damage > 0 && native.touch !== null
+            && q3 !== null && native.timestamp <= q3.level.time) return true;
+        }
+        return false;
+      } };
   };
   const profile = profileFor(first), world = worldFor(firstPlayer());
   const loaded = await loadNavigation({ geometry: simulation.options.world, map: { name: content.recipe.map.geometry.requestedPath,
     format: simulation.options.world.kind, digest: content.recipe.map.geometry.digest }, profile, world,
-    resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content), mapBytes: await content.mounts.read(content.recipe.map.geometry) });
+    resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content),
+    navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
+    mapBytes: await content.mounts.read(content.recipe.map.geometry) });
   const clients = new Map<number, { readonly player: Readonly<MovementPlayer>; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer }>();
   const forClient = (client: number): NavigationRuntime => {
     const player = playerFor(client), cached = clients.get(client);

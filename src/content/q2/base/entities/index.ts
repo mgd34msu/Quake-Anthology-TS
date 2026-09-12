@@ -46,6 +46,8 @@ export class Q2BaseEntityModule implements Q2SpawnModule {
     this.scenery = new Q2BaseScenery(hooks);
   }
 
+  moverTraversal(entity: Q2Entity): ReturnType<Q2BaseMoverEntities["traversal"]> { return this.movers.traversal(entity); }
+
   get callbacks(): Q2CallbackDefinitions {
     const sources = [this.movers.callbacks, this.targets.callbacks, this.triggers.callbacks, this.scenery.callbacks, this.turrets.callbacks];
     return { think: Object.fromEntries(sources.flatMap(source => Object.entries(source.think ?? {}))),

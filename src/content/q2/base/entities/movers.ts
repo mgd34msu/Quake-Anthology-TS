@@ -89,6 +89,13 @@ export class Q2BaseMoverEntities {
 
   platformState(entity: Q2Entity): Readonly<Q2PlatformState> | null { return this.platforms.get(entity) ?? null; }
 
+  traversal(entity: Q2Entity): { readonly locked: boolean; readonly destination: Vec3 | null } | null {
+    const platform = this.platforms.get(entity), destination = this.linear.destination(entity);
+    if (platform === undefined && !this.secrets.has(entity)) return null;
+    return { locked: platform !== undefined && platform.phase === "up" && entity.targetname !== ""
+      && destination === null && entity.think === null, destination };
+  }
+
   private platform(entity: Q2Entity): Q2PlatformState {
     const state = this.platforms.get(entity);
     if (state === undefined) throw new Error("Platform callback without platform state");

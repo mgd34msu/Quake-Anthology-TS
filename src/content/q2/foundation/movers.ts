@@ -47,6 +47,14 @@ export class Q2MoverModule implements Q2SpawnModule {
   private trains = new WeakMap<Q2Entity, TrainState>();
   constructor(private readonly hooks: Q2MoverHooks) {}
 
+  traversal(entity: Q2Entity): { readonly locked: boolean; readonly destination: Vec3 | null } {
+    const state = this.doors.get(entity);
+    const master = state?.master ?? entity, door = this.doors.get(master);
+    return { locked: door !== undefined && (door.phase === "bottom" || door.phase === "down")
+      && (master.use === this.doorActivate || !door.button && (master.maxHealth > 0 || master.targetname !== "" && !door.activated)),
+      destination: this.linear.destination(entity) };
+  }
+
   get callbacks(): Q2CallbackDefinitions {
     return { think: { ...this.linear.callbacks.think, ...this.angular.callbacks.think, door_hit_bottom: this.bottom, door_go_down: this.down, door_hit_top: this.top,
       Think_SpawnDoorTrigger: this.prepareDoor, smart_water_go_up: this.smartWater, train_wait: this.trainWait, train_next: this.trainNext,

@@ -27,6 +27,8 @@ export class Q2LinearMotion {
   private moves = new WeakMap<Q2Entity, LinearMove>();
   constructor(private readonly callbackPrefix = "q2:linear") {}
 
+  destination(entity: Q2Entity): Vec3 | null { return this.moves.get(entity)?.destination ?? null; }
+
   get callbacks(): Q2CallbackDefinitions {
     return { think: { [`${this.callbackPrefix}/Move_Done`]: this.done, [`${this.callbackPrefix}/Move_Final`]: this.final,
       [`${this.callbackPrefix}/Move_Begin`]: this.begin, [`${this.callbackPrefix}/Think_AccelMove`]: this.accelerate, [`${this.callbackPrefix}/Move_Accel_Curve`]: this.curve } };
