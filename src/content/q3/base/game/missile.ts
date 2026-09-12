@@ -186,10 +186,10 @@ export class MissileRuntime {
 
   private specialImpact(entity: GameEntity, trace: ActorTraceResult, actor: ActorId): boolean {
     const combat = this.host.combat, pool = combat.entities, other = pool.options.records.nativeByActor(actor), normal = normalOf(trace);
-    if (other === null) throw new Error("Native Q3 grapple/proximity target requires its admitted source continuation");
+    if (other === null && combat.actors.isPlayer(actor)) throw new Error("Admitted Q3 map player has no native client behavior record");
     if (this.host.missionpack !== null && entity.s.weapon === Weapon.WP_PROX_LAUNCHER) {
       if (entity.s.pos.type !== TrajectoryType.TR_GRAVITY) return true;
-      if (other.s.eType === EntityType.ET_PLAYER && other.health > 0) { this.proximityPlayer(entity, other); return true; }
+      if (other !== null && other.s.eType === EntityType.ET_PLAYER && other.health > 0) { this.proximityPlayer(entity, other); return true; }
       setOrigin(entity, snapVectorTowards(trace.end, entity.s.pos.base));
       pool.addEvent(entity, EntityEvent.EV_PROXIMITY_MINE_STICK, trace.surfaceFlags);
       entity.think = self => { this.proximityActivate(self); }; entity.nextthink = (combat.time + 2000) | 0;
@@ -201,7 +201,7 @@ export class MissileRuntime {
     if (entity.classname === "hook") {
       const event = pool.spawn();
       let position: Vec3;
-      if (other.takedamage && other.client !== null) {
+      if (other !== null && other.takedamage && other.client !== null) {
         pool.addEvent(event, EntityEvent.EV_MISSILE_HIT, directionToByte(normal)); event.s.otherEntityNum = other.s.number;
         entity.enemy = other; position = snapVectorTowards(center(other), entity.s.pos.base);
       } else {
