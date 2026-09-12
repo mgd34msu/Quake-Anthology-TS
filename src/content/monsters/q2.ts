@@ -401,8 +401,35 @@ const flipper = { resources: [
   "sound/misc/udeath.wav",
 ] };
 
+const brain = { resources: [
+  ...environmentResources,
+  "models/monsters/brain/pain.pcx",
+  "models/monsters/brain/skin.pcx",
+  "models/monsters/brain/tris.md2",
+  "models/objects/gibs/bone/skin.pcx",
+  "models/objects/gibs/bone/tris.md2",
+  "models/objects/gibs/head2/player.pcx",
+  "models/objects/gibs/head2/skin.pcx",
+  "models/objects/gibs/head2/tris.md2",
+  "models/objects/gibs/sm_meat/skin.pcx",
+  "models/objects/gibs/sm_meat/tris.md2",
+  "sound/brain/brnatck1.wav",
+  "sound/brain/brnatck3.wav",
+  "sound/brain/brndeth1.wav",
+  "sound/brain/brnlens1.wav",
+  "sound/brain/brnpain1.wav",
+  "sound/brain/brnpain2.wav",
+  "sound/brain/brnsght1.wav",
+  "sound/brain/brnsrch1.wav",
+  "sound/brain/melee1.wav",
+  "sound/brain/melee2.wav",
+  "sound/brain/melee3.wav",
+  "sound/misc/udeath.wav",
+] };
+
 export const q2MonsterSources: readonly MonsterSourceDefinition[] = [
   { provider: "q2:monsters/classic/baseq2", family: "q2", edition: "classic", program: "baseq2", creatures: {
+    monster_brain: brain,
     monster_flipper: flipper,
     monster_infantry: { resources: [...classicInfantry.resources, ...environmentResources] },
     monster_berserk: { resources: [...classicBerserk.resources, ...environmentResources] },

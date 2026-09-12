@@ -1304,9 +1304,14 @@ export class SharedSimulation implements Simulation {
   private registerCombat(): undefined {
     const id = this.recipe.combat.provider;
     const armor = nativeVictimArmor(request => {
-      const body = this.bodies.read(request.target), direction = body === null ? zero : subtract(request.point, body.origin);
+      const target = this.actorExecutions.get(request.target);
+      const product = target?.kind === "q2" ? target.services.options.edition : this.recipe.inventory.content.includes(":rerelease:") ? "rerelease" : "classic";
+      const body = this.bodies.read(request.target), contact = body === null ? zero : subtract(request.point, body.origin);
+      const direction = request.attack.cause.kind === "q1" && body !== null && contact.x === 0 && contact.y === 0 && contact.z === 0
+        && request.attack.inflictor !== null && this.worldActor()?.equals(request.attack.inflictor) !== true
+        ? { x: -request.direction.x, y: -request.direction.y, z: -request.direction.z } : contact;
       const length = Math.hypot(direction.x, direction.y, direction.z), yaw = (body?.angles.y ?? 0) * Math.PI / 180;
-      return { arithmetic: "binary32", q2: { product: this.recipe.inventory.content.includes(":rerelease:") ? "rerelease" : "classic", ctf: this.recipe.match.provider === "q2:ctf", alive: (this.combat.read(request.target)?.health ?? 0) > 0 }, screenFacingDot: length === 0 ? 0 : (direction.x * Math.cos(yaw) + direction.y * Math.sin(yaw)) / length };
+      return { arithmetic: "binary32", q2: { product, ctf: this.recipe.match.provider === "q2:ctf", alive: (this.combat.read(request.target)?.health ?? 0) > 0 }, screenFacingDot: length === 0 ? 0 : (direction.x * Math.cos(yaw) + direction.y * Math.sin(yaw)) / length };
     });
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {

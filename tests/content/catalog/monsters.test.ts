@@ -124,3 +124,23 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("aquat
     if (family === "q2" && edition === "rerelease") for (const path of ["models/objects/gibs/head2/tris.md2", "models/objects/gibs/head2/skin.pcx", "models/objects/gibs/head2/player.pcx"]) expect(paths.has(path)).toBe(true);
   }
 }, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("Q2 brain resolves edition-specific gibs, tongue and eye-beam resources", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  for (const edition of ["classic", "rerelease"]) {
+    const command = parseApplicationCommand(["--game", `q2-${edition}-baseq2`, "--map", "fact1"]);
+    if (command.kind !== "run") throw new Error("Expected brain launch command");
+    const preset = applicationPreset(catalog, command.options);
+    const source: ProviderReference = { provider: `q2:monsters/${edition}/baseq2`, content: catalog.require(`q2-${edition}-baseq2`).id };
+    const enemies: EnemySelection = { kind: "replace", default: { source, classname: "monster_brain" }, byClassname: {} };
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    expect(recipe.enemies).toEqual(enemies);
+    expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
+    const paths = new Set(recipe.resources.map(resource => resource.requestedPath));
+    for (const path of ["models/monsters/brain/tris.md2", "models/monsters/brain/pain.pcx", "models/objects/gibs/bone/skin.pcx",
+      "models/objects/gibs/sm_meat/skin.pcx", "sound/brain/brnatck1.wav", "sound/brain/brnatck3.wav", "sound/brain/melee3.wav"]) expect(paths.has(path)).toBe(true);
+    for (const path of edition === "classic" ? ["models/objects/gibs/head2/tris.md2", "models/objects/gibs/head2/player.pcx"]
+      : ["models/monsters/brain/gibs/arm.pcx", "models/monsters/brain/gibs/boot.pcx", "models/monsters/brain/gibs/door.pcx", "models/monsters/brain/gibs/pelvis.pcx",
+        "models/monsters/brain/gibs/chest.pcx", "models/monsters/brain/gibs/head.pcx", "models/monsters/parasite/segment/tris.md2", "models/monsters/parasite/segment/skin.pcx", "sound/misc/lasfly.wav"]) expect(paths.has(path)).toBe(true);
+  }
+}, 60000);

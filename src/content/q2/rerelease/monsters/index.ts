@@ -46,6 +46,7 @@ function ordinaryDefinitions(monsters: Q2Monsters) {
     flyer: createRereleaseFlyerDefinition(monsters),
     mutant: createRereleaseMutantDefinition(monsters),
     parasite: createRereleaseParasiteDefinition(monsters),
+    brain: createRereleaseBrainDefinition(monsters),
   };
 }
 
@@ -76,7 +77,7 @@ export function registerQ2RereleaseMonsters(monsters: Q2Monsters, options: Q2Rer
   monsters.register(rereleaseBoss2Definition, "rerelease");
   monsters.register(rereleaseMakronDefinition, "rerelease");
   monsters.register(createRereleaseJorgDefinition(monsters, options.transferHealthbarTarget), "rerelease");
-  monsters.register(createRereleaseBrainDefinition(monsters), "rerelease");
+  monsters.register(ordinary.brain, "rerelease");
   monsters.register(ordinary.parasite, "rerelease");
   for (const definition of createRereleaseMedicDefinitions(monsters, options.weapons, options.source)) monsters.register(definition, "rerelease");
   const actor = createRereleaseActorModule(monsters);
