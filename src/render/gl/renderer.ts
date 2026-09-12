@@ -10,6 +10,8 @@ import { StageProgram } from "./programs.ts";
 import { GlTextures, withPixelStore } from "./textures.ts";
 import { DepthAtlasTarget } from "./depth-atlas.ts";
 import { Q2FogPass } from "./fog.ts";
+import { GlOutputGamma } from "./output-gamma.ts";
+import { outputGammaTable } from "../output-gamma.ts";
 
 const blendFactors: Record<BlendFactor, number> = {
   zero: 0, one: 1, "src-color": 0x300, "one-minus-src-color": 0x301,
@@ -30,6 +32,10 @@ export class GlRenderer implements RendererBackend {
   private activeArrays: GeometryArrays | null = null;
   private depthAtlas: DepthAtlasTarget | null = null;
   private fog: Q2FogPass | null = null;
+  private outputGamma: GlOutputGamma | null = null;
+  private gamma = 1;
+  private gammaFinished = false;
+  private drawBuffer = drawBuffers.back;
   private alphaTest: RenderState["alphaTest"] = "none";
   private closed = false;
   readonly stencilBits: number;
@@ -99,6 +105,32 @@ export class GlRenderer implements RendererBackend {
     this.window.makeCurrent();
   }
 
+  setOutputGamma(gamma: number): undefined {
+    const table = outputGammaTable(gamma); this.opened();
+    if (gamma === this.gamma) return undefined;
+    if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
+    if (table === null) {
+      this.outputGamma?.restore(this.drawBuffer); this.outputGamma?.close(); this.outputGamma = null;
+    } else {
+      if (this.outputGamma === null) {
+        const pass = new GlOutputGamma(this.window, this.gl, this, table);
+        try { pass.bind(this.drawBuffer, this.width, this.height); }
+        catch (error) { pass.close(); throw error; }
+        this.outputGamma = pass;
+      } else this.outputGamma.update(table);
+    }
+    this.gamma = gamma; this.gammaFinished = false;
+    return undefined;
+  }
+
+  private drawTarget(rendering = true): void {
+    if (this.outputGamma !== null) {
+      if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL gamma target exceeds maximum texture size");
+      const changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height);
+      if (rendering || changed) this.gammaFinished = false;
+    }
+  }
+
   private integer(name: number): number {
     const result = new Int32Array(1);
     this.gl.glGetIntegerv(name, result);
@@ -163,12 +195,13 @@ export class GlRenderer implements RendererBackend {
     this.opened();
     if (buffer === "back-right" && !this.stereoEnabled)
       throw new Error("OpenGL stereo draw buffer requires a stereo context");
-    this.gl.glDrawBuffer(drawBuffers[buffer]);
+    this.drawBuffer = drawBuffers[buffer];
+    if (this.outputGamma === null) this.gl.glDrawBuffer(this.drawBuffer); else this.drawTarget();
     if (clear) { this.gl.glClearColor(1, 0, 0.5, 1); this.gl.glClear(0x4000 | 0x100); }
   }
 
   beginView(view: RenderViewState): undefined {
-    this.opened();
+    this.opened(); this.drawTarget();
     const { x, y, width, height } = view.viewport;
     const bottom = this.height - y - height;
     if (![x, y, width, height, bottom].every(value => Number.isInteger(value) && value >= -0x80000000 && value <= 0x7fffffff)
@@ -216,6 +249,7 @@ export class GlRenderer implements RendererBackend {
         const atlas = batch.lighting.kind !== "vertex" && batch.lighting.atlas !== null
           ? this.textures.registered(batch.lighting.atlas.image) : null;
         if (atlas !== null && atlas.content.kind !== "depth32f") throw new Error("Q2 shadow atlas requires a depth32f image");
+        this.drawTarget();
         this.state(state);
         this.identityMatrices();
         this.program.use(environment, state.alphaTest, batch.lighting);
@@ -281,7 +315,7 @@ export class GlRenderer implements RendererBackend {
   }
 
   drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" }>): undefined {
-    this.opened();
+    this.opened(); this.drawTarget();
     const gl = this.gl;
     switch (operation.kind) {
       case "q2-fog": {
@@ -376,10 +410,10 @@ export class GlRenderer implements RendererBackend {
     }
   }
 
-  clearColorBuffer(): undefined { this.opened(); this.gl.glClear(0x4000); }
+  clearColorBuffer(): undefined { this.opened(); this.drawTarget(); this.gl.glClear(0x4000); }
 
   drawShowImage(image: RendererImage, rect: Rect, proportional: boolean): undefined {
-    this.opened();
+    this.opened(); this.drawTarget();
     this.textures.registered(image);
     const width = Math.fround(rect.width * (proportional ? image.width / 512 : 1));
     const height = Math.fround(rect.height * (proportional ? image.height / 512 : 1));
@@ -401,7 +435,7 @@ export class GlRenderer implements RendererBackend {
   }
 
   setOverdrawMeasurement(enabled: boolean): undefined {
-    this.opened();
+    this.opened(); this.drawTarget();
     const gl = this.gl;
     if (!enabled) { gl.glDisable(0xb90); return; }
     if (this.stencilBits === 0) throw new Error("OpenGL overdraw measurement requires a stencil framebuffer");
@@ -413,7 +447,7 @@ export class GlRenderer implements RendererBackend {
   }
 
   readStencilOverdraw(destination: Uint8Array): undefined {
-    this.opened();
+    this.opened(); this.drawTarget(false);
     const width = this.width, height = this.height;
     if (destination.length < width * height) throw new RangeError("OpenGL stencil destination is too small");
     withPixelStore(this.gl, "pack", () => this.gl.glReadPixels(0, 0, width, height, 0x1901, 0x1401, destination));
@@ -421,7 +455,7 @@ export class GlRenderer implements RendererBackend {
 
   /** Absolute window coordinates use OpenGL's bottom-left origin, matching Q3 flares. */
   readDepthPixel(windowX: number, windowY: number): number {
-    this.opened();
+    this.opened(); this.drawTarget(false);
     if (!Number.isInteger(windowX) || !Number.isInteger(windowY) || windowX < 0 || windowY < 0 || windowX >= this.width || windowY >= this.height)
       throw new RangeError("OpenGL depth coordinates are outside the framebuffer");
     const pixel = new Float32Array(1);
@@ -434,6 +468,7 @@ export class GlRenderer implements RendererBackend {
   /** Returned RGBA pixels use top-left origin for SDL and captures. */
   readPixels(): Uint8Array {
     this.opened();
+    if (this.outputGamma !== null) this.finish();
     const width = this.width, height = this.height;
     const pixels = new Uint8Array(width * height * 4), topDown = new Uint8Array(pixels.length);
     withPixelStore(this.gl, "pack", () => this.gl.glReadPixels(0, 0, width, height, 0x1908, 0x1401, pixels));
@@ -455,7 +490,16 @@ export class GlRenderer implements RendererBackend {
     return { width: image.width, height: image.height, pixels };
   }
 
-  finish(): undefined { this.opened(); this.gl.glFinish(); }
+  finish(): undefined {
+    this.opened();
+    if (this.outputGamma !== null) {
+      if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
+      this.drawTarget(false);
+      if (!this.gammaFinished) { this.outputGamma.finish(this.drawBuffer); this.gammaFinished = true; }
+      else this.outputGamma.selectDefault(this.drawBuffer);
+    }
+    this.gl.glFinish();
+  }
   getError(): number { this.opened(); return this.gl.glGetError(); }
   present(): void { this.opened(); this.window.swap(); }
 
@@ -464,6 +508,7 @@ export class GlRenderer implements RendererBackend {
     this.window.setRenderingEnabled(true);
     this.window.makeCurrent();
     this.disableArrays();
+    this.outputGamma?.close(); this.outputGamma = null;
     this.depthAtlas?.close(); this.depthAtlas = null;
     this.fog?.close(); this.fog = null;
     this.textures.close();

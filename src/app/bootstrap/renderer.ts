@@ -19,19 +19,21 @@ export class NativeRenderer {
   private closed = false;
   private readonly captures: { readonly resolve: (pixels: Uint8Array) => void; readonly reject: (reason: Error) => void }[] = [];
 
-  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer) {
+  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private readonly gamma: number) {
     this.current = backend;
   }
 
-  static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden">, owner: RendererResourceOwner): NativeRenderer {
+  static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma">, owner: RendererResourceOwner): NativeRenderer {
     const window = SdlWindow.open({ title: "Quake TypeScript", backend: options.renderer, width: options.width, height: options.height,
       hidden: options.hidden, resizable: true });
+    let backend: SoftwareRenderer | GlRenderer | null = null;
     try {
-      const backend = options.renderer === "cpu" ? new SoftwareRenderer(window.width, window.height, owner) : new GlRenderer(window, owner);
+      backend = options.renderer === "cpu" ? new SoftwareRenderer(window.width, window.height, owner) : new GlRenderer(window, owner);
+      backend.setOutputGamma(options.gamma);
       if (options.renderer === "gl") window.setSwapInterval(1);
-      return new NativeRenderer(window, owner, backend);
+      return new NativeRenderer(window, owner, backend, options.gamma);
     } catch (error) {
-      window.close();
+      try { backend?.close(); } finally { window.close(); }
       throw error;
     }
   }
@@ -43,6 +45,7 @@ export class NativeRenderer {
     const { width, height } = this.window.drawableSize;
     if (width === this.current.width && height === this.current.height) return;
     const replacement = new SoftwareRenderer(width, height, this.owner);
+    replacement.setOutputGamma(this.gamma);
     try {
       for (const record of this.resident.values()) {
         replacement.applyImageResource(record.creation);
@@ -135,6 +138,7 @@ export class NativeRenderer {
 
   readPixels(): Uint8Array {
     if (!(this.current instanceof SoftwareRenderer)) throw new Error("GL captures must be requested before presentation with captureNextFrame()");
+    this.current.finish();
     return this.current.pixels.slice();
   }
 

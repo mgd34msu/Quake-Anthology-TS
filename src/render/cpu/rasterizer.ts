@@ -2,6 +2,7 @@
  * Fixed-function state follows id Software tr_backend.c and tr_shadows.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
  * Clipping and rasterization algorithms are from the TypeScript donor. */
+import { outputGammaTable } from "../output-gamma.ts";
 import type { Mat4, Vec2, Vec3, Vec4 } from "../../contracts/math.ts";
 import type { DrawBatch, ImageLevel, ImageResourceOperation, PreparedBackendDraw,
   Rect, RendererBackend, RendererDrawBuffer, RendererImage, RendererResourceOwner,
@@ -239,7 +240,9 @@ function lowerLeft(a: ScreenVertex, b: ScreenVertex): boolean {
 
 /** RGBA rows are top to bottom; positions are homogeneous clip coordinates. */
 export class SoftwareRenderer implements RendererBackend {
-  readonly pixels: Uint8Array;
+  private readonly drawPixels: Uint8Array;
+  private outputPixels: Uint8Array | null = null;
+  private gammaTable: Uint8Array | null = null;
   readonly capabilities = { textureUnits: 2, textureEnvAdd: true };
   private readonly colorWords: Int32Array;
   private readonly framebuffer: Framebuffer;
@@ -291,15 +294,15 @@ export class SoftwareRenderer implements RendererBackend {
       throw new RangeError("CPU stencil precision must be between 0 and 32 bits");
     this.subpixelScale = 2 ** subpixelBits;
     this.viewport = { x: 0, y: 0, width, height };
-    this.pixels = new Uint8Array(width * height * 4);
-    this.colorWords = new Int32Array(this.pixels.buffer);
+    this.drawPixels = new Uint8Array(width * height * 4);
+    this.colorWords = new Int32Array(this.drawPixels.buffer);
     if (alphaBits === 0) this.colorWords.fill(colorWord(0, 0, 0, 1));
     this.depth = new Float64Array(width * height);
     this.depth.fill(1);
     this.stencil = stencilBits === 0 ? null : new Uint32Array(width * height);
     this.stencilMaximum = 2 ** stencilBits - 1;
     this.images = new CpuImages(owner);
-    this.framebuffer = { width, height, pixels: this.pixels, colorWords: this.colorWords,
+    this.framebuffer = { width, height, pixels: this.drawPixels, colorWords: this.colorWords,
       depth: this.depth, stencil: this.stencil, originX: 0, originY: 0, stride: width };
   }
 
@@ -307,10 +310,27 @@ export class SoftwareRenderer implements RendererBackend {
     if (this.closed) throw new Error("CPU renderer is closed");
   }
 
-  finish(): undefined { this.assertOpen(); }
+  get pixels(): Uint8Array { return this.outputPixels ?? this.drawPixels; }
+
+  setOutputGamma(gamma: number): undefined {
+    this.assertOpen();
+    this.gammaTable = outputGammaTable(gamma);
+    this.outputPixels = this.gammaTable === null ? null : new Uint8Array(this.drawPixels.length);
+    this.finish();
+  }
+
+  finish(): undefined {
+    this.assertOpen();
+    if (this.gammaTable === null || this.outputPixels === null) return;
+    for (let offset = 0; offset < this.drawPixels.length; offset++) {
+      const value = this.drawPixels[offset] ?? 0;
+      this.outputPixels[offset] = offset % 4 === 3 ? value : this.gammaTable[value] ?? 0;
+    }
+  }
 
   readRgba(): ImageLevel {
     this.assertOpen();
+    this.finish();
     return { width: this.width, height: this.height, pixels: this.pixels.slice() };
   }
 
@@ -1044,10 +1064,10 @@ export class SoftwareRenderer implements RendererBackend {
     const db = ((destination >>> (LITTLE_ENDIAN ? 16 : 8)) & 255) / 255;
     const da = this.alphaBits === 0 ? 1 : (LITTLE_ENDIAN ? destination >>> 24 : destination & 255) / 255;
     const offset = index * 4;
-    this.pixels[offset] = blend(r, dr, alpha, da, state, false);
-    this.pixels[offset + 1] = blend(g, dg, alpha, da, state, false);
-    this.pixels[offset + 2] = blend(b, db, alpha, da, state, false);
-    this.pixels[offset + 3] = this.alphaBits === 0 ? 255 : blend(alpha, da, alpha, da, state, true);
+    this.drawPixels[offset] = blend(r, dr, alpha, da, state, false);
+    this.drawPixels[offset + 1] = blend(g, dg, alpha, da, state, false);
+    this.drawPixels[offset + 2] = blend(b, db, alpha, da, state, false);
+    this.drawPixels[offset + 3] = this.alphaBits === 0 ? 255 : blend(alpha, da, alpha, da, state, true);
     if (state.depthWrite) this.depth[index] = depth;
   }
 

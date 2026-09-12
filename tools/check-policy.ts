@@ -231,7 +231,7 @@ const glSymbols = new Set([
   "glCreateShader", "glShaderSource", "glCompileShader", "glGetShaderiv", "glGetShaderInfoLog", "glDeleteShader",
   "glCreateProgram", "glAttachShader", "glLinkProgram", "glGetProgramiv", "glGetProgramInfoLog", "glDeleteProgram",
   "glUseProgram", "glGetUniformLocation", "glUniform1i", "glUniform1f", "glUniform3f", "glUniform4f", "glUniformMatrix4fv",
-  "glGenFramebuffers", "glDeleteFramebuffers", "glBindFramebuffer", "glFramebufferTexture2D", "glCheckFramebufferStatus", "glReadBuffer",
+  "glGenFramebuffers", "glDeleteFramebuffers", "glBindFramebuffer", "glFramebufferTexture2D", "glCheckFramebufferStatus", "glReadBuffer", "glBlitFramebuffer", "glGetFramebufferAttachmentParameteriv",
 ]);
 
 function linkedGlPointer(node: ts.Expression, symbolName: string, checker: ts.TypeChecker, projectRoot: string, projectPath: string): boolean {

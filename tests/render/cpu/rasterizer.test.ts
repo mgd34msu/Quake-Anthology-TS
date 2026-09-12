@@ -166,3 +166,24 @@ test("Q2 fog commands blend global then height at scene depth and gate the flat 
   expect(pixel(renderer)).toEqual([89, 37, 87, 159]);
   expect(renderer.readDepthPixel(4, 3)).toBe(depth);
 });
+
+test("output gamma preserves raw rendering and repeated completion", () => {
+  const { renderer } = fixture();
+  const clear = (value: number) => renderer.beginView({ viewport: { x: 0, y: 0, width: 8, height: 8 }, clipPlane: null,
+    clear: { color: { x: value, y: value, z: value, w: 0.25 }, depth: 1, stencil: false } });
+  clear(64 / 255);
+  const neutral = renderer.pixels;
+  renderer.setOutputGamma(1); renderer.finish();
+  expect(renderer.pixels).toBe(neutral);
+  expect([...renderer.pixels.slice(0, 4)]).toEqual([64, 64, 64, 64]);
+  renderer.setOutputGamma(2); renderer.finish();
+  expect([...renderer.pixels.slice(0, 4)]).toEqual([128, 128, 128, 64]);
+  renderer.finish(); expect(renderer.readRgba().pixels).toEqual(renderer.pixels);
+  clear(16 / 255); new CpuRenderTarget(renderer).present();
+  expect([...renderer.pixels.slice(0, 4)]).toEqual([64, 64, 64, 64]);
+  renderer.setOutputGamma(1);
+  expect(renderer.pixels).toBe(neutral);
+  expect([...renderer.pixels.slice(0, 4)]).toEqual([16, 16, 16, 64]);
+  expect(() => renderer.setOutputGamma(Number.NaN)).toThrow();
+  renderer.close();
+});

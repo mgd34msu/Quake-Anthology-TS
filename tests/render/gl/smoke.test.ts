@@ -6,6 +6,7 @@ import type { DrawBatch, Q2FogOperation, RendererImage, RendererResourceOwner, R
 import { perspectiveMat4 } from "../../../src/core/math.ts";
 import { SdlWindow } from "../../../src/platform/sdl.ts";
 import { GlRenderer } from "../../../src/render/gl/renderer.ts";
+import { outputGammaTable } from "../../../src/render/output-gamma.ts";
 
 const white = { x: 1, y: 1, z: 1, w: 1 };
 const state: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal",
@@ -145,4 +146,65 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   expect(pixels.length).toBe(12 * 8 * 4);
   expect(pixels.slice(0, 4)).toEqual(new Uint8Array([0, 0, 0, 255]));
   expect(restarted.getError()).toBe(0);
+});
+
+test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL output gamma follows blending and preserves raw buffers across capture, resize and disable", () => {
+  using window = SdlWindow.open({ title: "Offscreen gamma smoke", width: 16, height: 16, backend: "gl", hidden: true, resizable: true, stencilBits: 8 });
+  const owner: RendererResourceOwner = { identity: Symbol("GL gamma"), session: createIdentityOwner("GL gamma").session, generation: 0 };
+  using renderer = new GlRenderer(window, owner);
+  const image: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "gamma sample" }, width: 1, height: 1 };
+  renderer.applyImageResource({ kind: "create-image", image,
+    content: { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([64, 128, 192, 128]) }], borderColor: white },
+    sampling: { wrap: "repeat", filter: "nearest" } });
+  const batch: DrawBatch = { texturing: "single", primitive: "triangles", vertices, indices: [0, 1, 2, 0, 2, 3],
+    texture: { kind: "bind-image", image }, state: { ...state, blend: { source: "src-alpha", destination: "one-minus-src-alpha" } }, lighting: { kind: "vertex" } };
+  const clear = { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: true };
+  renderer.selectDrawBuffer("back", false);
+  renderer.setOverdrawMeasurement(true);
+  renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: null });
+  draw(renderer, batch);
+  const raw = renderer.readPixels(), stencil = new Uint8Array(16 * 16);
+  renderer.readStencilOverdraw(stencil);
+  expect(stencil.every(value => value === 1)).toBe(true);
+  renderer.setOutputGamma(1); renderer.finish();
+  expect(renderer.readPixels()).toEqual(raw);
+  expect(() => renderer.setOutputGamma(0)).toThrow("0.5 and 3");
+  renderer.setOutputGamma(2); renderer.finish();
+  expect(renderer.getError()).toBe(0);
+  const table = outputGammaTable(2); if (table === null) throw new Error("Gamma table missing");
+  const corrected = raw.map((component, index) => index % 4 === 3 ? component : table[component] ?? 0);
+  expect(renderer.readPixels()).toEqual(corrected);
+  renderer.finish(); renderer.finish();
+  expect(renderer.readPixels()).toEqual(corrected);
+  expect(renderer.readDepthPixel(12, 8)).toBeCloseTo(0.5, 5);
+  renderer.readStencilOverdraw(stencil);
+  expect(stencil.every(value => value === 1)).toBe(true);
+  renderer.beginView({ viewport: { x: 0, y: 0, width: 8, height: 16 }, clear: { depth: 0.75, color: { x: 0.25, y: 0, z: 0, w: 1 }, stencil: true }, clipPlane: null });
+  renderer.finish();
+  const partial = renderer.readPixels();
+  expect(partial.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4)).toEqual(corrected.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4));
+  expect(partial.slice(0, 3)).toEqual(new Uint8Array([table[64] ?? 0, table[0] ?? 0, table[0] ?? 0]));
+  expect(renderer.readDepthPixel(4, 8)).toBeCloseTo(0.75, 5);
+  expect(renderer.readDepthPixel(12, 8)).toBeCloseTo(0.5, 5);
+  renderer.setOutputGamma(1);
+  const restored = renderer.readPixels();
+  expect(restored.slice(0, 3)).toEqual(new Uint8Array([64, 0, 0]));
+  expect(restored.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4)).toEqual(raw.slice((8 * 16 + 12) * 4, (8 * 16 + 12) * 4 + 4));
+  expect(renderer.readDepthPixel(4, 8)).toBeCloseTo(0.75, 5);
+  renderer.setOutputGamma(2);
+  window.setSize(12, 8); window.pollEvents();
+  renderer.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear: { ...clear, color: { x: 0.25, y: 0.5, z: 0.75, w: 1 } }, clipPlane: null });
+  renderer.finish();
+  const resized = renderer.readPixels();
+  renderer.setOutputGamma(1);
+  const resizedRaw = renderer.readPixels();
+  expect(resized).toEqual(resizedRaw.map((component, index) => index % 4 === 3 ? component : table[component] ?? 0));
+  expect(resized.length).toBe(12 * 8 * 4);
+  renderer.setOutputGamma(2); renderer.finish();
+  expect(renderer.getError()).toBe(0);
+  renderer.present(); renderer.close();
+  using restarted = new GlRenderer(window, { ...owner, identity: Symbol("gamma restart"), generation: 1 });
+  restarted.setOutputGamma(2);
+  restarted.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear, clipPlane: null });
+  restarted.finish(); expect(restarted.getError()).toBe(0);
 });

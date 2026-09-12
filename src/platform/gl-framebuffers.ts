@@ -11,6 +11,9 @@ export function loadGlFramebuffers(context: Pick<SdlRenderContext, "getGlProcAdd
     glBindFramebuffer: { args: ["u32", "u32"], returns: "void", ptr: context.getGlProcAddress("glBindFramebuffer") },
     glFramebufferTexture2D: { args: ["u32", "u32", "u32", "u32", "i32"], returns: "void", ptr: context.getGlProcAddress("glFramebufferTexture2D") },
     glCheckFramebufferStatus: { args: ["u32"], returns: "u32", ptr: context.getGlProcAddress("glCheckFramebufferStatus") },
+    glTexImage2D: { args: ["u32", "i32", "i32", "i32", "i32", "i32", "u32", "u32", "ptr"], returns: "void", ptr: context.getGlProcAddress("glTexImage2D") },
+    glBlitFramebuffer: { args: ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "u32", "u32"], returns: "void", ptr: context.getGlProcAddress("glBlitFramebuffer") },
+    glGetFramebufferAttachmentParameteriv: { args: ["u32", "u32", "u32", "buffer"], returns: "void", ptr: context.getGlProcAddress("glGetFramebufferAttachmentParameteriv") },
     glReadBuffer: { args: ["u32"], returns: "void", ptr: context.getGlProcAddress("glReadBuffer") },
   });
   let release: () => void;

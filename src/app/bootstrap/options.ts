@@ -10,6 +10,7 @@ export interface ApplicationOptions {
   readonly character: GameFamily;
   readonly characterModel: string;
   readonly renderer: "cpu" | "gl";
+  readonly gamma: number;
   readonly dedicated: boolean;
   readonly width: number;
   readonly height: number;
@@ -41,6 +42,7 @@ Usage: bun run src/main.ts [options]
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
   --renderer cpu|gl          Renderer (default gl)
+  --gamma N                 Display gamma, 0.5 through 3 (default 1; higher is brighter)
   --width N --height N       Window dimensions (default 960 by 600)
   --seats N                  Local seats, 1 through 4
   --mode singleplayer|coop|deathmatch
@@ -82,7 +84,7 @@ export function mapResourcePath(name: string): string {
 export function parseApplicationCommand(argv: readonly string[]): ApplicationCommand {
   let options: ApplicationOptions = {
     corpusRoot: resolve(homedir(), "Projects/qfiles"), product: "q2-classic-baseq2", map: "maps/base1.bsp",
-    movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", dedicated: false,
+    movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", gamma: 1, dedicated: false,
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
   let list = false;
@@ -118,6 +120,11 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (value !== "cpu" && value !== "gl") throw new Error(`Unknown renderer: ${value}`);
         options = { ...options, renderer: value }; break;
       case "--width": options = { ...options, width: integer(value, flag, 64, 16384) }; break;
+      case "--gamma": {
+        const gamma = Number(value);
+        if (!Number.isFinite(gamma) || gamma < 0.5 || gamma > 3) throw new RangeError("Display gamma must be between 0.5 and 3");
+        options = { ...options, gamma }; break;
+      }
       case "--height": options = { ...options, height: integer(value, flag, 64, 16384) }; break;
       case "--seats": options = { ...options, seats: integer(value, flag, 1, 4) }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;

@@ -39,3 +39,10 @@ test("native listener chooses its wire from the retained game recipe", () => {
   expect(() => parseApplicationCommand(["--listen", "0", "--listen-q2", "0"])).toThrow();
   expect(() => parseApplicationCommand(["--listen", "0", "--connect-q2", "localhost"])).toThrow();
 });
+
+test("display gamma is shared, neutral by default, and range checked", () => {
+  const defaults = parseApplicationCommand([]), configured = parseApplicationCommand(["--renderer", "cpu", "--gamma", "1.5"]);
+  if (defaults.kind !== "run" || configured.kind !== "run") throw new Error("Expected run commands");
+  expect(defaults.options.gamma).toBe(1); expect(configured.options.gamma).toBe(1.5);
+  for (const value of ["NaN", "Infinity", "0", "0.49", "3.01"]) expect(() => parseApplicationCommand(["--gamma", value])).toThrow();
+});
