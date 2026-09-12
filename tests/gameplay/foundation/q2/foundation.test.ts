@@ -147,6 +147,7 @@ describe("Q2 permanent gameplay foundation", () => {
         if (observation === null) throw new Error("Actual shotgun supply missing");
         expect(observation.availability).toEqual({ kind: "ready", eligible: true });
         const preview = admission.preview(player.id, observation.offer);
+        expect(items.previewSupply(game, shotgun.actor.id, player.id)).toEqual(preview);
         expect(preview.ammo).toEqual([{ item: "q3:ammo/shotgun", before: 0, given: 10 }]);
         expect({ inventory: host.inventory.entries(player.id), items: items.capture(game), events: events.length, selected: [...selected] }).toEqual(beforeObservation);
         items.touch(shotgun, game, player.id);
@@ -201,16 +202,21 @@ describe("Q2 permanent gameplay foundation", () => {
         expect(host.inventory.count(player.id, "q3:ammo/plasmagun")).toBe(50);
       }
       const native = targetGame(options);
+      const grenade = native.game.create("ammo_grenades"); native.items.spawn(grenade, native.game);
+      const beforeGrenade = { inventory: native.host.inventory.entries(native.player.id), source: native.items.capture(native.game), events: native.events.length };
+      const grenadePreview = native.items.previewSupply(native.game, grenade.actor.id, native.player.id);
+      expect(grenadePreview).toEqual({ accepted: true, ammo: [{ item: "q2:ammo_grenades", before: 0, given: 5 }], weapons: [{ item: "q2:ammo_grenades", before: 0, given: 5 }] });
+      expect(grenadePreview?.weapons[0]).toBe(grenadePreview?.ammo[0]);
+      expect({ inventory: native.host.inventory.entries(native.player.id), source: native.items.capture(native.game), events: native.events.length }).toEqual(beforeGrenade);
+      native.items.touch(grenade, native.game, native.player.id);
+      expect(native.host.inventory.count(native.player.id, "q2:ammo_grenades")).toBe(5);
+
       const nativeShotgun = native.game.create(authored.classname, authored.values); native.items.spawn(nativeShotgun, native.game);
       const nativeObservation = native.items.observeSupply(native.game, nativeShotgun.actor.id, native.player.id);
       if (nativeObservation === null) throw new Error("Native shotgun supply missing");
-      const preview = new SharedPickupAdmission({ inventory: native.host.inventory,
-        profile: { id: "q2:test-identity", weaponOwnership: "all-destinations",
-          ammo: [{ source: "q2:ammo_shells", destinations: ["q2:ammo_shells"] }],
-          weapons: [{ source: "q2:weapon_shotgun", destinations: ["q2:weapon_shotgun"] }] },
-        ammoGranted: () => { throw new Error("Preview invoked ammo callback"); }, weaponGranted: () => { throw new Error("Preview selected weapon"); } });
       const before = native.host.inventory.entries(native.player.id);
-      const expected = preview.preview(native.player.id, nativeObservation.offer);
+      const expected = native.items.previewSupply(native.game, nativeShotgun.actor.id, native.player.id);
+      if (expected === null) throw new Error("Native shotgun preview missing");
       expect(native.host.inventory.entries(native.player.id)).toEqual(before);
       native.items.touch(nativeShotgun, native.game, native.player.id);
       for (const receipt of [...expected.weapons, ...expected.ammo]) expect(native.host.inventory.count(native.player.id, receipt.item)).toBe(receipt.before + receipt.given);

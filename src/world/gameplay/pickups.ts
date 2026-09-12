@@ -3,6 +3,40 @@ import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gam
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyOffer, PickupSupplyPreview, PickupSupplyProfile } from "../../contracts/pickups.ts";
 
+export type PickupGrantPlan =
+  | { readonly kind: "weapon"; readonly weapons: readonly PickupAmmoGrant[]; readonly ammo: readonly PickupAmmoGrant[] }
+  | { readonly kind: "ammo"; readonly acceptance: "positive" | "nonzero"; readonly ammo: readonly PickupAmmoGrant[]; readonly weapons:
+      | { readonly kind: "grant"; readonly grants: readonly PickupAmmoGrant[] }
+      | { readonly kind: "shared-ammo"; readonly items: readonly ItemId[] } };
+
+/** A source-resolved grant plan; eligibility and missing-entry admission remain source-owned. */
+export function previewPickupGrants(inventory: readonly InventoryEntry[], plan: PickupGrantPlan): PickupSupplyPreview {
+  const weaponItems = plan.kind === "weapon" ? plan.weapons.map(grant => grant.item)
+    : plan.weapons.kind === "grant" ? plan.weapons.grants.map(grant => grant.item) : plan.weapons.items;
+  const entries = new Map(inventory.map(entry => [entry.item, entry]));
+  for (const item of [...weaponItems, ...plan.ammo.map(grant => grant.item)]) {
+    if (!entries.has(item)) throw new Error(`Pickup destination ${item} was not admitted`);
+  }
+  if (plan.kind === "ammo" && plan.weapons.kind === "shared-ammo") {
+    for (const item of plan.weapons.items) if (!plan.ammo.some(grant => grant.item === item)) throw new Error(`Shared weapon ${item} has no ammo grant`);
+  }
+  const give = (grant: PickupAmmoGrant): PickupAmmoReceipt => {
+    const entry = entries.get(grant.item);
+    if (entry === undefined) throw new Error(`Pickup destination ${grant.item} was not admitted`);
+    const transition = inventoryGive(entry, grant.amount);
+    if (transition.kind === "write") entries.set(grant.item, transition.entry);
+    return { item: grant.item, before: entry.count, given: transition.given };
+  };
+  if (plan.kind === "weapon") {
+    const weapons = plan.weapons.map(give);
+    return { accepted: true, weapons, ammo: plan.ammo.map(give) };
+  }
+  const ammo = plan.ammo.map(give), accepted = ammo.some(grant => plan.acceptance === "positive" ? grant.given > 0 : grant.given !== 0);
+  const weapons = plan.weapons;
+  return { accepted, ammo, weapons: !accepted ? [] : weapons.kind === "grant" ? weapons.grants.map(give)
+    : ammo.filter(receipt => weapons.items.includes(receipt.item)) };
+}
+
 export interface SharedPickupAdmissionOptions {
   readonly inventory: InventoryTable;
   readonly profile: PickupSupplyProfile;
@@ -38,20 +72,9 @@ export class SharedPickupAdmission implements PickupAdmission {
   preview(actor: ActorId, offer: PickupSupplyOffer): PickupSupplyPreview {
     const weapons = offer.kind === "ammo" ? [] : this.destinations("weapons", offer.kind === "weapon" ? offer.offer.item : offer.offer.weapon);
     const ammo = this.resolveAmmo(offer.kind === "weapon" ? offer.offer.ammo : [offer.offer]);
-    const entries = new Map(this.requireEntries(actor, [...weapons, ...ammo.map(grant => grant.item)]).map(entry => [entry.item, entry]));
-    const give = (item: ItemId, amount: number): PickupAmmoReceipt => {
-      const entry = entries.get(item);
-      if (entry === undefined) throw new Error(`Pickup destination ${item} was not admitted`);
-      const transition = inventoryGive(entry, amount);
-      if (transition.kind === "write") entries.set(item, transition.entry);
-      return { item, before: entry.count, given: transition.given };
-    };
-    if (offer.kind === "weapon") {
-      const weaponReceipts = weapons.map(item => give(item, 1));
-      return { accepted: true, weapons: weaponReceipts, ammo: ammo.map(grant => give(grant.item, grant.amount)) };
-    }
-    const receipts = ammo.map(grant => give(grant.item, grant.amount)), accepted = receipts.some(grant => grant.given > 0);
-    return { accepted, ammo: receipts, weapons: accepted ? weapons.map(item => give(item, 1)) : [] };
+    return previewPickupGrants(this.options.inventory.entries(actor), offer.kind === "weapon"
+      ? { kind: "weapon", weapons: weapons.map(item => ({ item, amount: 1 })), ammo }
+      : { kind: "ammo", acceptance: "positive", ammo, weapons: { kind: "grant", grants: weapons.map(item => ({ item, amount: 1 })) } });
   }
 
   owns(actor: ActorId, sourceWeapon: ItemId): boolean {

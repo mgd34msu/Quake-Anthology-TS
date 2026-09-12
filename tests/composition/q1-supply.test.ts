@@ -1,3 +1,4 @@
+import type { PickupGrantPlan } from "../../src/world/gameplay/pickups.ts";
 import type { ItemId, InventoryEntry } from "../../src/contracts/gameplay.ts";
 import type { PickupAmmoGrant, PickupAmmoReceipt, PickupSupplyOffer } from "../../src/contracts/pickups.ts";
 import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect } from "../../src/content/composition/q1-q2-supply.ts";
@@ -8,7 +9,7 @@ import { Q2_Q1_SUPPLY_PROFILE } from "../../src/content/composition/q2-q1-supply
 import { Q3_Q1_SUPPLY_PROFILE } from "../../src/content/composition/q3-q1-supply.ts";
 import { SessionActorRegistry } from "../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../src/world/gameplay/inventory.ts";
-import { SharedPickupAdmission } from "../../src/world/gameplay/pickups.ts";
+import { SharedPickupAdmission, previewPickupGrants } from "../../src/world/gameplay/pickups.ts";
 
 test("Q1 to Q2 composition pickup rank retains stronger current weapons", () => {
   expect(q1Q2PickupSelect("q2:weapon_hyperblaster", "q2:weapon_shotgun", "better")).toBe(false);
@@ -39,6 +40,7 @@ test("foreign Q1 supply clamps shared pools and preserves native Q2 equipment am
     { mode: "better", when: "empty-ammo" })).toBe(true);
   expect(inventory.count(actor.id, "q1:ammo/rockets")).toBe(100);
   expect(inventory.count(actor.id, "q2:ammo_grenades")).toBe(5);
+
   expect(q2.owns(actor.id, "q2:ammo_grenades")).toBe(true);
   const q3 = new SharedPickupAdmission({ inventory, profile: Q3_Q1_SUPPLY_PROFILE,
     ammoGranted: () => undefined, weaponGranted: () => undefined });
@@ -170,4 +172,31 @@ test("preview replays repeated destinations and source counter arithmetic in gra
     }
     actors.close();
   }
+});
+
+
+test("native shared ammo weapon preview grants once and preserves sequential receipts", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("native-grenade-preview")), actor = actors.allocate("q2:official", "q2:player");
+  const inventory = new SharedInventoryTable(actors);
+  inventory.create(actor, [{ item: "q2:ammo_grenades", count: 0, capacity: 50 }]);
+  const entries = inventory.entries(actor.id);
+  const preview = previewPickupGrants(entries, { kind: "ammo", acceptance: "nonzero", ammo: [{ item: "q2:ammo_grenades", amount: 5 }],
+    weapons: { kind: "shared-ammo", items: ["q2:ammo_grenades"] } });
+  expect(preview.accepted).toBe(true);
+  expect(preview.ammo).toEqual([{ item: "q2:ammo_grenades", before: 0, given: 5 }]);
+  expect(preview.weapons[0]).toBe(preview.ammo[0]);
+  expect(inventory.entries(actor.id)).toEqual(entries);
+  const given = inventory.give(actor, "q2:ammo_grenades", 5);
+  const receipt = preview.ammo[0];
+  if (receipt === undefined) throw new Error("Missing grenade receipt");
+  expect(given).toBe(receipt.given);
+  expect(inventory.count(actor.id, "q2:ammo_grenades")).toBe(5);
+  const overflow: InventoryEntry = { item: "q2:ammo_grenades", count: 2147483647, capacity: 4294967295, countPolicy: { kind: "source-counter", arithmetic: "int32" } };
+  const grants = { ammo: [{ item: overflow.item, amount: 1 }], weapons: { kind: "shared-ammo", items: [overflow.item] } } satisfies Pick<Extract<PickupGrantPlan, { readonly kind: "ammo" }>, "ammo" | "weapons">;
+  expect(previewPickupGrants([overflow], { kind: "ammo", acceptance: "nonzero", ...grants }).accepted).toBe(true);
+  expect(previewPickupGrants([overflow], { kind: "ammo", acceptance: "positive", ...grants }).accepted).toBe(false);
+
+  inventory.give(actor, "q2:ammo_grenades", 45);
+  expect(previewPickupGrants(inventory.entries(actor.id), { kind: "ammo", acceptance: "nonzero", ammo: [{ item: "q2:ammo_grenades", amount: 5 }],
+    weapons: { kind: "shared-ammo", items: ["q2:ammo_grenades"] } })).toEqual({ accepted: false, ammo: [{ item: "q2:ammo_grenades", before: 50, given: 0 }], weapons: [] });
 });

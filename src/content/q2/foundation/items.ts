@@ -1,7 +1,8 @@
+import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 /* Pickup and inventory behaviors adapted from Quake II game/g_items.c and p_weapon.c. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { ArmorState, ItemId } from "../../../contracts/gameplay.ts";
-import type { PickupAdmission, PickupAmmoGrant, PickupSupplyObservation, PickupSupplyOffer } from "../../../contracts/pickups.ts";
+import type { ArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
+import type { PickupAdmission, PickupAmmoGrant, PickupSupplyObservation, PickupSupplyOffer, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import { add, movedir, scale, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "./host.ts";
 import { Q2_BASE_WEAPONS } from "./weapons/definitions.ts";
@@ -306,6 +307,32 @@ export class Q2ItemModule implements Q2SpawnModule {
   }
 
   itemDefinition(entity: Q2Entity): Q2ItemDefinition | null { return this.pickups.get(entity)?.item ?? null; }
+
+  previewSupply(game: Q2GameServices, pickupActor: ActorId, recipient: ActorId): PickupSupplyPreview | null {
+    const observation = this.observeSupply(game, pickupActor, recipient);
+    if (observation === null) return null;
+    const offer = observation.offer;
+    if (this.pickupAdmission !== null) {
+      if (offer.kind === "weapon" && offer.offer.item === "q2:weapon_blaster") return { accepted: false, ammo: [], weapons: [] };
+      return this.pickupAdmission.preview(recipient, offer);
+    }
+    const inventory: InventoryEntry[] = [...game.host.inventory.entries(recipient)];
+    const ensure = (item: ItemId, capacity: number): void => {
+      if (!inventory.some(entry => entry.item === item)) inventory.push({ item, count: 0, capacity });
+    };
+    const ammo = offer.kind === "weapon" ? offer.offer.ammo : [offer.offer];
+    for (const grant of ammo) {
+      const descriptor = this.catalog.get(grant.item.slice(3));
+      if (descriptor?.kind !== "ammo") throw new Error("Weapon grant has no source ammo descriptor");
+      ensure(grant.item, descriptor.capacity);
+    }
+    if (offer.kind === "weapon") {
+      ensure(offer.offer.item, 32767);
+      return previewPickupGrants(inventory, { kind: "weapon", weapons: [{ item: offer.offer.item, amount: 1 }], ammo });
+    }
+    return previewPickupGrants(inventory, { kind: "ammo", acceptance: "nonzero", ammo,
+      weapons: { kind: "shared-ammo", items: offer.kind === "ammoWeapon" ? [offer.offer.weapon] : [] } });
+  }
 
   observeSupply(game: Q2GameServices, pickupActor: ActorId, recipient: ActorId): PickupSupplyObservation | null {
     const entity = game.entity(pickupActor), item = entity === null ? undefined : this.pickups.get(entity)?.item;
