@@ -1,3 +1,4 @@
+import { createTextureResolver } from "../commands/dynamic-texture.ts";
 /* Quake III CPU backend adapted from quake-3-ts/src/render/cpu/rasterizer.ts.
  * Fixed-function state follows id Software tr_backend.c and tr_shadows.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -435,6 +436,7 @@ export class SoftwareRenderer implements RendererBackend {
 
   prepareGeometry(input: DrawBatch): PreparedBackendDraw {
     this.assertOpen();
+    const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
     const batch = snapshotBatch(input);
     if (batch.lighting.kind !== "vertex") {
       if (batch.lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
@@ -470,7 +472,7 @@ export class SoftwareRenderer implements RendererBackend {
         this.assertOpen();
         if (phase !== "begun" || unit !== nextUnit || unit !== 0 && unit !== 1
           || unit === 1 && batch.texturing !== "pair") throw new Error("CPU texture slots must execute in order");
-        this.images.bind(unit, operation);
+        this.images.bind(unit, resolveTexture(operation));
         this.currentUnit = unit;
         if (unit === 0) this.primaryEnabled = true;
         else this.secondaryEnabled = true;
@@ -728,6 +730,7 @@ export class SoftwareRenderer implements RendererBackend {
 
   private prepareSourceDraw(input: DrawBatch, source: SourceStageData | null): PreparedSourceDraw {
     this.assertOpen();
+    const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
     let batch = source === null ? snapshotBatch(input) : snapshotSourceBatch(source.batch, this.retainedState);
     this.prepareGeometry(batch);
     const paired = batch.texturing === "pair";
@@ -806,7 +809,7 @@ export class SoftwareRenderer implements RendererBackend {
         this.assertOpen();
         if (sourceKind === null) prepareTexture(unit);
         if (phase !== "begun" || pendingUnit !== unit) throw new Error("CPU prepared texture slot has not begun");
-        this.images.bind(this.currentUnit, operation);
+        this.images.bind(this.currentUnit, resolveTexture(operation));
         pendingUnit = null;
         nextUnit++;
       },

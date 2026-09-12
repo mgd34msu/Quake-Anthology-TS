@@ -1,3 +1,4 @@
+import { resolveDrawTextures } from "../../render/commands/dynamic-texture.ts";
 import type { Vec4 } from "../../contracts/math.ts";
 import type { DrawBatch, ImageResourceOperation, RenderCommand, RendererBackend, RendererResourceOwner, RenderFrame, RenderOperation } from "../../contracts/render.ts";
 import { SdlWindow } from "../../platform/sdl.ts";
@@ -74,7 +75,8 @@ export class NativeRenderer {
     }
   }
 
-  private draw(batch: DrawBatch): void {
+  private draw(input: DrawBatch): void {
+    const batch = resolveDrawTextures(input, operation => this.image(operation));
     const prepared = this.current.prepareGeometry(batch);
     try {
       prepared.begin();

@@ -1,19 +1,21 @@
+import { SoftwareRenderer, CpuRenderTarget } from "../../src/render/cpu/index.ts";
+import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { BinaryWriter } from "../../src/core/binary/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { RendererImage } from "../../src/contracts/render.ts";
+import type { DrawBatch, ImageResourceOperation, RenderCommand, RendererImage, TextureBinding } from "../../src/contracts/render.ts";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { CinDecoder, cinRgba, cinSampleRange } from "../../src/media/cin.ts";
 import { CinPlayback } from "../../src/media/cin-playback.ts";
 import { CinematicPlayback, cinematicBytes } from "../../src/media/playback.ts";
-import { cinematicDimensions, FullscreenCinematic } from "../../src/media/presentation.ts";
+import { cinematicDimensions, FullscreenCinematic, CinematicImage } from "../../src/media/presentation.ts";
 import { MaterialCinematic } from "../../src/media/material.ts";
 import { RoqDecoder } from "../../src/media/roq.ts";
 import { RoqPlayback } from "../../src/media/roq-playback.ts";
 import { openMediaFile } from "../../src/media/source.ts";
 import { cinematicTransition } from "../../src/media/transitions.ts";
-import type { CinematicAudio, CinematicEndReason, CinematicOptions } from "../../src/media/types.ts";
+import type { CinematicAudio, CinematicEndReason, CinematicFrame, CinematicOptions } from "../../src/media/types.ts";
 
 function shortCin(sampleRate = 22051): Uint8Array {
   const writer = new BinaryWriter(100000);
@@ -101,7 +103,7 @@ test("fullscreen CIN pauses its clock and audio, targets a second seat, and comp
   const playback = new CinematicPlayback(source, options);
   const image: RendererImage = { owner: { identity: Symbol("render"), session: identity.session, generation: 0 },
     ordinal: 1, source: { kind: "generated", name: "cinematic:test" }, width: 2, height: 1 };
-  const fullscreen = new FullscreenCinematic(playback, image);
+  const fullscreen = new FullscreenCinematic(playback, image, (width, height, source) => ({ ...image, ordinal: image.ordinal + 1, width, height, source }));
   const viewport = { x: 400, y: 0, width: 400, height: 300 };
   const draw = fullscreen.prepare(viewport);
   expect(draw.seat.equals(seat)).toBe(true);
@@ -126,12 +128,14 @@ test("material uploads acknowledge execution and OGV reports the missing decoder
   const playback = new CinematicPlayback(cinematicBytes("cin", shortCin()), options);
   const image: RendererImage = { owner: { identity: Symbol("render"), session: identity.session, generation: 0 }, ordinal: 0,
     source: { kind: "generated", name: "wall" }, width: 2, height: 1 };
-  const material = new MaterialCinematic(playback, image);
-  const call = material.prepareAtExecution();
-  if (call === null) throw new Error("Missing first cinematic upload");
-  expect(call.upload.kind).toBe("create-image");
-  call.afterShaderUpload();
-  expect(material.prepareAtExecution()).toBeNull();
+  const registry = new SceneImageRegistry(image.owner);
+  const first = registry.allocate(image.width, image.height, image.source);
+  const material = new MaterialCinematic(playback, first, (width, height, source) => registry.allocate(width, height, source));
+  const operations: string[] = [];
+  material.resolve(operation => { operations.push(operation.kind); });
+  expect(operations).toEqual(["create-image"]);
+  material.resolve(operation => { operations.push(operation.kind); });
+  expect(operations).toEqual(["create-image"]);
   expect(material.close()?.kind).toBe("release-image");
   expect(() => new CinematicPlayback({ format: "ogv", source: "intro.ogv" }, options)).toThrow("not implemented yet");
 });
@@ -186,3 +190,165 @@ test.skipIf(!existsSync(roqArchive))("Team Arena RoQ reads from PK3 and decodes 
     ]);
   } finally { archive.close(); }
 });
+
+
+
+function movieQuad(texture: TextureBinding): DrawBatch {
+  return { primitive: "triangles", texturing: "single", lighting: { kind: "vertex" }, texture,
+    vertices: [{ position: { x: -1, y: -1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 0 } },
+      { position: { x: 1, y: -1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 1, y: 0 } },
+      { position: { x: 1, y: 1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 1, y: 1 } },
+      { position: { x: -1, y: 1, z: 0, w: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, texCoord: { x: 0, y: 1 } }], indices: [0, 1, 2, 0, 2, 3],
+    state: { blend: { source: "one", destination: "zero" }, depthTest: "always", depthWrite: false, alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null } };
+}
+
+test("dynamic movie textures resolve in draw order, resize once and retry a failed creation", () => {
+  const identity = createIdentityOwner("cinematic-resize"), owner = { identity: Symbol("cinematic-resize"), session: identity.session, generation: 0 };
+  const images = new SceneImageRegistry(owner), initial = images.allocate(1, 1, { kind: "generated", name: "resize" });
+  const texture = new CinematicImage(initial, (width, height, source) => images.allocate(width, height, source));
+  const backend = new SoftwareRenderer(8, 8, owner), target = new CpuRenderTarget(backend);
+  const operations: ImageResourceOperation[] = [];
+  const apply = (operation: ImageResourceOperation): void => { backend.applyImageResource(operation); images.commit(operation); operations.push(operation); };
+  const frame = (width: number, red: boolean): CinematicFrame => ({ width, height: 1, index: width, loop: 0, sourceTime: 0, time: 0,
+    rgba: Uint8Array.from(Array.from({ length: width }, () => red ? [255, 0, 0, 255] : [0, 255, 0, 255]).flat()) });
+  let sourceFrame = frame(1, true), revision = 0;
+  let nextDraw = 0;
+  const source = { resolve: (upload: (operation: ImageResourceOperation) => void) => {
+    sourceFrame = frame(nextDraw + 1, nextDraw === 0); revision = nextDraw++;
+    return texture.resolve(sourceFrame, revision, operation => { upload(operation); images.commit(operation); operations.push(operation); });
+  } };
+  const batch = movieQuad({ kind: "dynamic-image", source });
+  try {
+    const queued = [batch, batch];
+    expect(operations).toHaveLength(0);
+    target.execute({ owner, sequence: 0, commands: queued.map((draw, index): RenderCommand => ({ kind: "view", view: {
+      target: { kind: "preview", id: `resize-${index}` }, time: { kind: "milliseconds", value: 0 },
+      viewport: { x: index * 4, y: 0, width: 4, height: 8 }, clear: { color: null, depth: 1, stencil: false }, clipPlane: null,
+      beforeView: [], operations: [{ kind: "draw", batches: [draw] }] } })) });
+    for (const index of [0, 1]) {
+      const pixel = (4 * 8 + index * 4 + 2) * 4;
+      expect(backend.pixels[pixel + index]).toBeGreaterThan(0);
+      expect(backend.pixels[pixel + 1 - index]).toBe(0);
+      expect(backend.pixels[pixel + 2]).toBe(0);
+    }
+    expect(operations.map(operation => operation.kind)).toEqual(["create-image", "release-image", "create-image"]);
+    expect(texture.image.ordinal).not.toBe(initial.ordinal);
+    sourceFrame = frame(3, true); revision = 2;
+    let fail = true;
+    const flaky = (operation: ImageResourceOperation): void => {
+      if (operation.kind === "create-image" && fail) { fail = false; throw new Error("injected upload failure"); }
+      apply(operation);
+    };
+    expect(() => texture.resolve(sourceFrame, revision, flaky)).toThrow("injected upload failure");
+    const releases = operations.filter(operation => operation.kind === "release-image").length;
+    texture.resolve(sourceFrame, revision, flaky);
+    expect(operations.filter(operation => operation.kind === "release-image")).toHaveLength(releases);
+    expect(texture.image.width).toBe(3);
+    sourceFrame = frame(3, false); revision = 3;
+    expect(() => texture.resolve(sourceFrame, revision, operation => {
+      expect(() => texture.resolve(sourceFrame, revision, apply)).toThrow("cannot reenter");
+      expect(() => texture.release()).toThrow("during upload");
+      apply(operation);
+    })).not.toThrow();
+    expect(() => images.require(initial)).toThrow();
+    const release = texture.release(); if (release !== null) apply(release);
+    expect(texture.release()).toBeNull();
+    images.close(); expect(images.drainOperations()).toHaveLength(0);
+  } finally { target.close(); }
+});
+
+for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync("../qfiles/q3a/missionpack/pak0.pk3"))(`shipped Team Arena videoMap executes through shared ${rendererKind} world materials`, async () => {
+  const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
+  const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
+  const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
+  const { NativeRenderer } = await import("../../src/app/bootstrap/renderer.ts");
+  const { SceneFrameBuilder } = await import("../../src/render/commands/frame.ts");
+  const { anglesToAxis, vectorToAngles } = await import("../../src/core/math.ts");
+  const { perspectiveProjection } = await import("../../src/render/scene/view.ts");
+  const { encodePng } = await import("../../src/formats/images/png.ts");
+  const parsed = parseApplicationCommand(["--content-root", "../qfiles", "--game", "q3-missionpack", "--map", "mpteam1", "--dedicated"]);
+  if (parsed.kind !== "run") throw new Error("Missing Team Arena selection");
+  const content = await loadApplicationContent(parsed.options);
+  const identity = createIdentityOwner(`world-video-${rendererKind}`), owner = { identity: Symbol("world-video"), session: identity.session, generation: 0 };
+  let now = 0;
+  const assets = new ApplicationAssets(content, owner, { sample: () => now });
+  const renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+  const frames = new SceneFrameBuilder(assets.images);
+  try {
+    const world = content.world;
+    if (world.kind !== "q3-bsp") throw new Error("Expected Q3 world");
+    const surface = world.surfaces.find(surface => world.shaders[surface.shader]?.name === "textures/proto2/mpteam1");
+    if (surface === undefined) throw new Error("Shipped movie surface missing");
+    const vertices = world.vertices.slice(surface.vertices.first, surface.vertices.first + surface.vertices.count), first = vertices[0];
+    if (first === undefined) throw new Error("Movie surface has no vertices");
+    const center = vertices.reduce((sum, vertex) => ({ x: sum.x + vertex.position.x / vertices.length, y: sum.y + vertex.position.y / vertices.length,
+      z: sum.z + vertex.position.z / vertices.length }), { x: 0, y: 0, z: 0 });
+    const normal = first.normal;
+    const camera = { origin: { x: center.x + normal.x * 180, y: center.y + normal.y * 180, z: center.z + normal.z * 180 },
+      axis: anglesToAxis(vectorToAngles({ x: -normal.x, y: -normal.y, z: -normal.z })), viewport: { x: 0, y: 0, width: 640, height: 400 },
+      projection: perspectiveProjection(80, 55.41, 4096), clip: { kind: "none" } } satisfies import("../../src/contracts/render.ts").SceneCamera;
+    const scene = await assets.loadWorld();
+    const hashes: string[] = [];
+    const decodedFrames: number[] = [];
+    let sharedMovie: MaterialCinematic | null = null;
+    for (const time of [0, 34, 68, 102, 136]) {
+      now = time;
+      frames.begin();
+      const prepared = scene.prepareView({ camera, target: { kind: "preview", id: "authored-videoMap" }, time: { kind: "milliseconds", value: time },
+        clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } });
+      const movies = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+        .filter(batch => batch.texture.kind === "dynamic-image" || batch.texturing === "pair" && batch.secondTexture.binding.kind === "dynamic-image");
+      expect(movies.length).toBeGreaterThan(0);
+      const source = movies.flatMap(batch => [batch.texture, ...(batch.texturing === "pair" ? [batch.secondTexture.binding] : [])])
+        .find(binding => binding.kind === "dynamic-image");
+      if (source?.kind !== "dynamic-image" || !(source.source instanceof MaterialCinematic)) throw new Error("Missing actual shared material movie");
+      if (sharedMovie === null) sharedMovie = source.source; else expect(source.source).toBe(sharedMovie);
+      frames.world(prepared);
+      const capture = renderer.captureNextFrame();
+      try { renderer.execute(frames.finish(true)); } catch (error: unknown) { renderer.close(); await capture.catch(() => undefined); throw error; }
+      const pixels = await capture;
+      if (time === 68 || time === 136) {
+        hashes.push(new Bun.CryptoHasher("sha256").update(pixels).digest("hex"));
+        const decoded = sharedMovie.playback.currentFrame;
+        if (decoded === null) throw new Error("Actual movie frame was not decoded");
+        decodedFrames.push(decoded.index);
+        const provenance = sharedMovie.image.source;
+        if (provenance.kind !== "resource") throw new Error("Material movie lost resource provenance");
+        expect(provenance.resource.requestedPath).toBe("video/mpteam1.roq");
+        expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
+      }
+      if (process.env["QUAKE_SCENE_CAPTURE"] === "1" && (time === 68 || time === 136)) {
+        await Bun.write(`.artifacts/tmp/world-video/${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
+        await Bun.write(`.artifacts/tmp/world-video/${rendererKind}.json`, JSON.stringify({ source: content.recipe.presentation.assets, shader: "textures/proto2/mpteam1",
+          movie: "video/mpteam1.roq", camera, center, normal, times: [68, 136], decodedFrames }, null, 2));
+      }
+    }
+    expect(hashes[0]).not.toBe(hashes[1]);
+    expect(decodedFrames[0]).not.toBe(decodedFrames[1]);
+    // The standalone prepared-draw API must preserve its primary binding while uploading unit 1.
+    const primary = assets.images.register("paired-primary", { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) }],
+      borderColor: { x: 1, y: 0, z: 0, w: 1 } }, { wrap: "clamp", filter: "nearest" });
+    renderer.execute({ owner, sequence: 6, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
+    const initial = assets.images.allocate(1, 1, { kind: "generated", name: "paired-secondary" });
+    const image = new CinematicImage(initial, (width, height, source) => assets.images.allocate(width, height, source));
+    const source = { resolve: (apply: (operation: ImageResourceOperation) => void) => image.resolve({ width: 1, height: 1,
+      rgba: new Uint8Array([0, 255, 0, 255]), index: 0, loop: 0, sourceTime: 0, time: 0 }, 0, operation => { apply(operation); assets.images.commit(operation); }) };
+    const quad = movieQuad({ kind: "bind-image", image: primary });
+    if (quad.primitive !== "triangles" || quad.texturing !== "single") throw new Error("Expected quad geometry");
+    const paired: DrawBatch = { ...quad, texturing: "pair", vertices: quad.vertices.map(vertex => ({ ...vertex, texCoord2: vertex.texCoord })),
+      secondTexture: { binding: { kind: "dynamic-image", source }, environment: "add" } };
+    renderer.backend.beginView({ viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null });
+    const draw = renderer.backend.prepareGeometry(paired);
+    try { draw.begin(); draw.applyTexture(0, paired.texture); draw.applyTexture(1, paired.secondTexture.binding); draw.draw(); }
+    finally { draw.cleanup(); }
+    const pairCapture = renderer.captureNextFrame(); renderer.execute({ owner, sequence: 7, commands: [{ kind: "swap-buffers" }] });
+    const pairPixels = await pairCapture, centerPixel = (200 * 640 + 320) * 4;
+    expect(pairPixels[centerPixel]).toBeGreaterThan(200);
+    expect(pairPixels[centerPixel + 1]).toBeGreaterThan(200);
+    expect(pairPixels[centerPixel + 2]).toBe(0);
+    image.release();
+    assets.close();
+    renderer.execute({ owner, sequence: 3, commands: assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
+    expect(assets.images.drainOperations()).toHaveLength(0);
+  } finally { assets.close(); renderer.close(); await content.close(); }
+}, 60000);

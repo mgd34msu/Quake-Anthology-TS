@@ -84,7 +84,7 @@ test("parsed Q3 material evaluates into CPU pixels", async () => {
     shaderTexCoord: { x: 0, y: 0 }, projectionShadow: null, renderText: [], depthRange: [0, 1], polygonOffset: null, fog: null,
     deformView: { axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }],
       mirror: false, entityAxis: null, nonNormalizedAxis: null },
-    project: position => ({ ...position, w: 1 }), uploadCinematic: () => { throw new Error("Unexpected cinematic"); },
+    project: position => ({ ...position, w: 1 }),
   });
   for (const batch of batches) renderer.draw(batch);
   expect(pixel(renderer)).toEqual([63, 127, 255, 255]);

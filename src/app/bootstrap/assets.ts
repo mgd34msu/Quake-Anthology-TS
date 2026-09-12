@@ -1,3 +1,9 @@
+import { CinematicPlayback, cinematicBytes } from "../../media/playback.ts";
+import { cinematicDimensions } from "../../media/presentation.ts";
+import { MaterialCinematic } from "../../media/material.ts";
+import type { MediaClock } from "../../media/types.ts";
+import type { RegisteredShaderVideo } from "../../materials/material.ts";
+import { DEFAULT_SHADER_PROFILE } from "../../materials/compile.ts";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ContentId, GameFamily, ResolvedResourceReference } from "../../contracts/content.ts";
@@ -62,6 +68,9 @@ async function shaderPaths(content: LoadedApplicationContent, mounts: MountedCon
 /** Presentation caches are distinct from authoritative map and game state. */
 export class ApplicationAssets {
   readonly images: SceneImageRegistry;
+  private readonly movies = new Map<string, Promise<RegisteredShaderVideo | null>>();
+  private readonly activeMovies = new Set<MaterialCinematic>();
+  private closed = false;
   private readonly providers = new Map<ContentId, Promise<ProviderSceneAssets>>();
   private readonly models = new Map<string, Promise<ModelAsset>>();
   private readonly brushScenes: WorldScene[] = [];
@@ -71,7 +80,7 @@ export class ApplicationAssets {
   private typography: Promise<Awaited<ReturnType<typeof loadMenuTypography>>> | null = null;
   private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
 
-  constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner) {
+  constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() }) {
     this.images = new SceneImageRegistry(owner);
   }
 
@@ -81,6 +90,7 @@ export class ApplicationAssets {
   }
 
   provider(content: ContentId): Promise<ProviderSceneAssets> {
+    if (this.closed) throw new Error("Application assets are closed");
     const existing = this.providers.get(content);
     if (existing !== undefined) return existing;
     const pending = (async (): Promise<ProviderSceneAssets> => {
@@ -90,7 +100,7 @@ export class ApplicationAssets {
         const asset = await mounts.open(path);
         return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
       } }, palette);
-      const shaders = new SceneShaderRegistry(textures);
+      const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path));
       if (family === "q3") for (const path of await shaderPaths(this.content, mounts)) {
         const asset = await mounts.open(path);
         if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
@@ -98,6 +108,33 @@ export class ApplicationAssets {
       return { family, mounts, palette, textures, shaders };
     })();
     this.providers.set(content, pending);
+    return pending;
+  }
+
+  private materialMovie(content: ContentId, mounts: MountedContent, argument: string): Promise<RegisteredShaderVideo | null> {
+    if (this.closed) throw new Error("Application assets are closed");
+    const end = argument.indexOf("\0"), name = end < 0 ? argument : argument.slice(0, end);
+    const path = name.includes("/") || name.includes("\\") ? name : `video/${name}`;
+    const key = `${content}\0${path}`;
+    const previous = this.movies.get(key);
+    if (previous !== undefined) return previous;
+    const pending = (async (): Promise<RegisteredShaderVideo | null> => {
+      const asset = await mounts.open(path);
+      if (this.closed) throw new Error("Material movie loaded after assets closed");
+      if (asset === null) throw new Error(`Material movie is absent from selected content: ${content}/${path}`);
+      const extension = path.toLowerCase().split(".").at(-1);
+      if (extension !== "roq" && extension !== "cin") throw new Error(`Unsupported material movie format: ${path}`);
+      const source = cinematicBytes(extension, asset.bytes, path), dimensions = cinematicDimensions(source);
+      const image = this.images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: asset.reference });
+      const playback = new CinematicPlayback(source, { clock: this.mediaClock, target: { kind: "material", id: key }, loop: true, silent: true,
+        onAudio: () => { throw new Error("Silent material movie produced audio"); }, onAudioReset: () => undefined,
+        onAudioPause: () => undefined, onComplete: () => undefined });
+      const movie = new MaterialCinematic(playback, image, (width, height, provenance) => this.images.allocate(width, height, provenance),
+        operation => this.images.commit(operation));
+      this.activeMovies.add(movie);
+      return { source: movie, image: { frame: { image }, tmu: 0 } };
+    })();
+    this.movies.set(key, pending);
     return pending;
   }
 
@@ -163,6 +200,10 @@ export class ApplicationAssets {
   }
 
   close(): undefined {
+    if (this.closed) return;
+    this.closed = true;
+    for (const movie of this.activeMovies) movie.close();
+    this.activeMovies.clear(); this.movies.clear();
     this.loadedTypography?.close();
     this.loadedTypography = null; this.typography = null;
     this.fonts?.close();

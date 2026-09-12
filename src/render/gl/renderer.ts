@@ -1,3 +1,4 @@
+import { createTextureResolver } from "../commands/dynamic-texture.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q3 tr_backend.c, tr_shade.c, tr_sky.c and tr_shadows.c backend operations.
 // Copyright (C) 1999-2005 Id Software, Inc.
@@ -188,7 +189,13 @@ export class GlRenderer implements RendererBackend {
   applyImageResource(operation: ImageResourceOperation): undefined {
     this.opened();
     this.selectTexture(0);
-    this.textures.apply(operation);
+    const saved = new Int32Array(1);
+    this.gl.glGetIntegerv(0x8069, saved);
+    const previous = saved[0];
+    if (previous === undefined) throw new Error("OpenGL texture binding is unavailable");
+    const released = operation.kind === "release-image" ? this.textures.registered(operation.image).name : null;
+    try { this.textures.apply(operation); }
+    finally { this.gl.glBindTexture(0xde1, previous === released ? 0 : previous); }
   }
 
   selectDrawBuffer(buffer: RendererDrawBuffer, clear: boolean): undefined {
@@ -232,6 +239,7 @@ export class GlRenderer implements RendererBackend {
 
   prepareGeometry(batch: DrawBatch): PreparedBackendDraw {
     this.opened();
+    const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
     const arrays = packGeometry(batch);
     const state: RenderState = { ...batch.state, blend: { ...batch.state.blend },
       depthRange: [batch.state.depthRange[0], batch.state.depthRange[1]],
@@ -280,8 +288,9 @@ export class GlRenderer implements RendererBackend {
         this.opened();
         if (phase !== "active" || unit !== nextUnit || unit !== 0 && unit !== 1 || unit === 1 && !paired)
           throw new Error("OpenGL prepared texture order is invalid");
+        const binding = resolveTexture(operation);
         this.selectTexture(unit);
-        this.textures.bind(operation);
+        this.textures.bind(binding);
         const coordinates = unit === 0 ? arrays.coordinates : arrays.coordinates2;
         this.gl.glEnableClientState(0x8078);
         if (coordinates.length > 0) this.gl.glTexCoordPointer(2, 0x1406, 0, coordinates);

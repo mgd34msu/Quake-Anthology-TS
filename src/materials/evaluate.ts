@@ -3,7 +3,6 @@
 import type { Vec2, Vec3, Vec4 } from "../contracts/math.ts";
 import type { DrawBatch, RenderState, TextureBinding, RendererImage } from "../contracts/render.ts";
 import type { CompiledMaterial } from "./compile.ts";
-import type { ShaderCinematicCall } from "./cinematic.ts";
 import { animatedPictureIndex, evaluateStageColor } from "./color.ts";
 import type { StageColorContext } from "./color.ts";
 import { projectDlightTexture, receivesProjectedDlights } from "./dlight.ts";
@@ -33,17 +32,13 @@ export interface MaterialDrawContext extends Omit<StageColorContext, "time" | "p
   readonly polygonOffset: RenderState["polygonOffset"];
   readonly fog: { readonly coordinates: (position: Vec3) => Vec2; readonly texture: TextureBinding; readonly color: Vec4 } | null;
   project(position: Vec3): Vec4;
-  /** Apply immediately when preparing at the renderer execution boundary. */
-  uploadCinematic(call: ShaderCinematicCall): void;
 }
 
-function textureBinding(bundle: Extract<FinishedIteratorStage, { readonly active: true }>, time: number, context: MaterialDrawContext): TextureBinding {
+function textureBinding(bundle: Extract<FinishedIteratorStage, { readonly active: true }>, time: number): TextureBinding {
   const binding = bundle.binding;
   if (binding.kind === "retain-current-texture") return binding;
   if (binding.kind === "video") {
-    const call = binding.source.prepareAtExecution();
-    if (call !== null) { context.uploadCinematic(call); call.afterShaderUpload(); }
-    return { kind: "bind-image", image: binding.source.image };
+    return { kind: "dynamic-image", source: binding.source };
   }
   const playback = binding.playback;
   if (playback.kind === "single") return { kind: "bind-image", image: playback.image.image };
@@ -108,7 +103,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
     if (!first.active) continue;
     const renderState = retainedState(pass.stateBits, { ...stageState(pass.stage, definition.cull), depthRange: context.depthRange,
       polygonOffset: definition.polygonOffset ? context.polygonOffset : null });
-    const texture = textureBinding(first, time, context);
+    const texture = textureBinding(first, time);
     const adjustment: FogAdjustment = pass.fogAdjustment;
     const vertices = geometry.vertices.map((vertex, index) => {
       const previousColor = previousColors[index] ?? { x: 0, y: 0, z: 0, w: 0 };
@@ -121,7 +116,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
     } else {
       if (!second.active) throw new Error("Collapsed stage lost its second registered texture");
-      const secondTexture = textureBinding(second, time, context);
+      const secondTexture = textureBinding(second, time);
       const paired = vertices.map((vertex, index) => {
         const source = geometry.vertices[index];
         if (source === undefined) throw new Error("Material vertex indexing escaped the source geometry");

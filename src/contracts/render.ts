@@ -147,7 +147,11 @@ export type RenderMaterial = {
 
 export interface RenderVertex { readonly position: Vec4; readonly texCoord: Vec2; readonly color: Vec4; }
 export interface MultitextureVertex extends RenderVertex { readonly texCoord2: Vec2; }
-export type TextureBinding = { readonly kind: "bind-image"; readonly image: RendererImage }
+export interface DynamicImageSource {
+  resolve(apply: (operation: ImageResourceOperation) => void): RendererImage;
+}
+export type TextureBinding = { readonly kind: "dynamic-image"; readonly source: DynamicImageSource }
+  | { readonly kind: "bind-image"; readonly image: RendererImage }
   | { readonly kind: "retain-current-texture" };
 export interface TextureBundle { readonly binding: TextureBinding; readonly environment: "modulate" | "add" | "replace"; }
 /** Atlas rectangles are normalized xy origins and zw sizes, as in Q2 gl_shader.ts. */

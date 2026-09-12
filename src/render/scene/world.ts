@@ -79,7 +79,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly operations?: readonly RenderOperation[];
   readonly beforeView?: readonly RenderOperation[];
   /** Entity lighting, video upload, shadows and private game overlays join here. */
-  readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow" | "uploadCinematic">>;
+  readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow">>;
   readonly inlineModels?: readonly { readonly model: number; readonly transform: ModelTransform; readonly animationFrame?: number; readonly alternateAnimation?: boolean; readonly castsShadow?: boolean }[];
   readonly prepareFlare?: (surface: WorldSurface, context: MaterialDrawContext) => readonly RenderOperation[];
 }
@@ -255,8 +255,7 @@ export class WorldScene {
       deformView: { axis: input.camera.axis, mirror: input.camera.clip.kind === "portal" && input.camera.clip.mirror, entityAxis: model?.axis ?? null, nonNormalizedAxis: null },
       projectionShadow: input.materialContext?.projectionShadow ?? null, renderText: input.renderText ?? [], depthRange: [0, 1], polygonOffset: { factor: -1, units: -2 },
       fog: fog === null || coordinate === null ? null : { coordinates: model === undefined ? coordinate : point => coordinate(worldPoint(point, model)),
-        texture: { kind: "bind-image", image: this.fogImage }, color: fog.color }, project: createViewProjector(input.camera, model),
-      uploadCinematic: input.materialContext?.uploadCinematic ?? (() => { throw new Error("Shader video upload requires a cinematic execution owner"); }) };
+        texture: { kind: "bind-image", image: this.fogImage }, color: fog.color }, project: createViewProjector(input.camera, model) };
   }
 
   /** Inline and external BSP models share surface preparation and upload ownership. */

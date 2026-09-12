@@ -60,6 +60,7 @@ export class GlTextures {
   }
 
   bind(binding: TextureBinding): void {
+    if (binding.kind === "dynamic-image") throw new Error("Dynamic texture must resolve before binding");
     if (binding.kind === "bind-image") this.gl.glBindTexture(0xde1, this.registered(binding.image).name);
   }
 

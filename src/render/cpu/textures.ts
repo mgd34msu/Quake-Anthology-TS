@@ -135,6 +135,7 @@ export class CpuImages {
   }
 
   bind(unit: 0 | 1, operation: TextureBinding): void {
+    if (operation.kind === "dynamic-image") throw new Error("Dynamic texture must resolve before binding");
     if (operation.kind === "retain-current-texture") return;
     this.require(operation.image);
     this.units[unit] = operation.image.ordinal;

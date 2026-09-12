@@ -33,39 +33,74 @@ export function cinematicDimensions(source: CinematicSource): { readonly width: 
   } finally { stream.close(); }
 }
 
+export type CinematicImageAllocator = (width: number, height: number, source: RendererImage["source"]) => RendererImage;
 export interface CinematicImageUpload {
-  readonly operation: ImageResourceOperation;
+  readonly operations: readonly ImageResourceOperation[];
   complete(): undefined;
 }
+interface PendingUpload {
+  readonly upload: CinematicImageUpload;
+  readonly target: RendererImage;
+  next: number;
+}
 
-/** Upload acknowledgments follow backend execution, including deferred material draws. */
+/** Backend success advances uploads; a failed operation remains pending for retry. */
 export class CinematicImage {
   private uploaded = false;
   private uploadedRevision = -1;
   private closed = false;
-  constructor(readonly image: RendererImage) {}
+  private executing = false;
+  private pending: PendingUpload | null = null;
+  constructor(private current: RendererImage, private readonly allocate: CinematicImageAllocator) {}
+  get image(): RendererImage { return this.pending?.target ?? this.current; }
 
   prepare(frame: CinematicFrame, revision: number): CinematicImageUpload | null {
     if (this.closed) throw new Error("Cinematic image is closed");
+    if (this.pending !== null) return this.pending.upload;
     if (revision === this.uploadedRevision) return null;
-    if (frame.width !== this.image.width || frame.height !== this.image.height) throw new RangeError("Cinematic image dimensions changed");
+    const resized = frame.width !== this.current.width || frame.height !== this.current.height;
+    const target = resized ? this.allocate(frame.width, frame.height, this.current.source) : this.current;
     const content = { width: frame.width, height: frame.height, pixels: frame.rgba.slice() };
-    const operation: ImageResourceOperation = this.uploaded
-      ? { kind: "update-image", image: this.image, level: 0, content }
-      : { kind: "create-image", image: this.image, content: { kind: "rgba8", levels: [content], borderColor: { x: 0, y: 0, z: 0, w: 1 } }, sampling: { filter: "linear", wrap: "clamp" } };
+    const operations: ImageResourceOperation[] = [];
+    if (resized && this.uploaded) operations.push({ kind: "release-image", image: this.current });
+    operations.push(this.uploaded && !resized
+      ? { kind: "update-image", image: target, level: 0, content }
+      : { kind: "create-image", image: target, content: { kind: "rgba8", levels: [content], borderColor: { x: 0, y: 0, z: 0, w: 1 } }, sampling: { filter: "linear", wrap: "clamp" } });
     let completed = false;
-    return { operation, complete: () => {
+    const upload: CinematicImageUpload = { operations, complete: () => {
       if (completed) throw new Error("Cinematic upload completion was already used");
       if (this.closed) throw new Error("Cinematic upload completed after image release");
-      completed = true; this.uploaded = true; this.uploadedRevision = revision;
+      completed = true; this.current = target; this.uploaded = true; this.uploadedRevision = revision; this.pending = null;
       return undefined;
     } };
+    this.pending = { upload, target, next: 0 };
+    return upload;
+  }
+
+  resolve(frame: CinematicFrame, revision: number, apply: (operation: ImageResourceOperation) => void): RendererImage {
+    if (this.executing) throw new Error("Cinematic upload cannot reenter");
+    this.executing = true;
+    try {
+      this.prepare(frame, revision);
+      const pending = this.pending;
+      if (pending !== null) {
+        for (; pending.next < pending.upload.operations.length; pending.next++) {
+          const operation = pending.upload.operations[pending.next];
+          if (operation === undefined) throw new Error("Missing cinematic upload operation");
+          apply(operation);
+          if (operation.kind === "release-image") this.uploaded = false;
+        }
+        pending.upload.complete();
+      }
+      return this.current;
+    } finally { this.executing = false; }
   }
 
   release(): ImageResourceOperation | null {
+    if (this.executing) throw new Error("Cannot release a cinematic during upload");
     if (this.closed) return null;
-    this.closed = true;
-    return this.uploaded ? { kind: "release-image", image: this.image } : null;
+    this.closed = true; this.pending = null;
+    return this.uploaded ? { kind: "release-image", image: this.current } : null;
   }
 }
 
@@ -82,10 +117,10 @@ export class FullscreenCinematic {
   readonly seat: SeatId;
   private readonly image: CinematicImage;
   private focusPaused = false;
-  constructor(readonly playback: CinematicPlayback, image: RendererImage) {
+  constructor(readonly playback: CinematicPlayback, image: RendererImage, allocate: CinematicImageAllocator) {
     if (playback.target.kind !== "seat") throw new Error("Fullscreen cinematic requires a seat target");
     this.seat = playback.target.seat;
-    this.image = new CinematicImage(image);
+    this.image = new CinematicImage(image, allocate);
   }
 
   prepare(viewport: Rect, focus: "game" | "console" | "menu" = "game"): FullscreenCinematicDraw {
@@ -100,13 +135,13 @@ export class FullscreenCinematic {
     const visible = focus !== "menu" && tick.status !== "ended" && tick.status !== "stopped" && tick.frame !== null;
     const upload = visible && tick.frame !== null ? this.image.prepare(tick.frame, this.playback.revision) : null;
     const commands: RenderCommand[] = [];
-    if (upload !== null) commands.push({ kind: "image-resource", operation: upload.operation });
+    if (upload !== null) for (const operation of upload.operations) commands.push({ kind: "image-resource", operation });
     if (visible) commands.push({ kind: "set-color", color: { x: 1, y: 1, z: 1, w: 1 } },
       { kind: "stretch-pic", rect: viewport, uv: { s1: 0, t1: 0, s2: 1, t2: 1 }, image: this.image.image });
     return { seat: this.seat, viewport, blank: !visible, commands, complete: () => { upload?.complete(); return undefined; } };
   }
 
-  close(): ImageResourceOperation | null { this.playback.close(); return this.image.release(); }
+  close(): ImageResourceOperation | null { const release = this.image.release(); this.playback.close(); return release; }
 }
 
 /** Q3's source SCR_AdjustFrom640 stretches within the selected seat's viewport. */

@@ -34,7 +34,7 @@ const context: MaterialDrawContext = {
   lighting: null, viewOrigin: { x: 0, y: 0, z: 10 }, localViewOrigin: { x: 0, y: 0, z: 10 }, noise: new RendererNoise(),
   shaderTexCoord: { x: 0, y: 0 }, deformView: { axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }],
     mirror: false, entityAxis: null, nonNormalizedAxis: null }, projectionShadow: null, renderText: [], depthRange: [0, 1], polygonOffset: null,
-  fog: null, project(position) { return { ...position, w: 1 }; }, uploadCinematic() {},
+  fog: null, project(position) { return { ...position, w: 1 }; },
 };
 
 const script = `textures/example/stone
