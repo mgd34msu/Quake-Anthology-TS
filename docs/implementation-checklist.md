@@ -2,13 +2,13 @@
 
 This checklist compares the three donors with the unified engine. It records which implementation is retained, why, which useful features must be added to the common system, and which differences remain selectable. A source port is not proof that its full behavior is joined or verified.
 
-Source basis: pushed code through `703cc0a50757043833149290143e816540c1ddd4`; the Brain, Shambler, shared Q3 armor, failed-floor placement, execution-boundary, network-endpoint and authored inhibition snapshots passed independent review and strict/policy gates. Family audit documents identify their own source paths and evidence. In-flight changes are not treated as pushed or installed.
+Source basis: pushed code through `36c450bd1fdbf00ad3f1332c56ca5e8707029c01`; the Brain, Shambler, shared Q3 armor, failed-floor placement, execution-boundary, network-endpoint and authored inhibition snapshots passed independent review and strict/policy gates. Family audit documents identify their own source paths and evidence. In-flight changes are not treated as pushed or installed.
 
 The target is one engine exposing the useful feature union across content. Source-specific movement, weapon, monster and mode policies remain deliberate choices. Authored lava, jump pads, triggers, objectives and mission scripts stay with their map; surgical mixing of map mechanics is deferred. Compatibility requirements are distinct from historical implementation limits. Preserve formats, units, mod/API contracts and intentional movement, weapon, damage, monster and mode rules. Old voice caps, global-device assumptions and low-quality intermediate audio clipping may be replaced by stronger common defaults. Classic reproduction, where wanted, is a deliberate optional mode rather than a reason to retain separate engines. A donor is not the default winner for every subsystem. Choices without comparative fidelity or performance evidence are provisional.
 
 ## Audited source baselines
 
-Root verified these donor HEAD revisions and clean working trees during this comparison. Family documents retain their audit-time execution and installation evidence; the current installed build is recorded in [execution status](execution-status.md#installed-build). Family authors' statements that they did not run Git refer to their own audit steps; this central check supplies the revision evidence. The unified source basis is recorded above, separately from the installed `43924e3` executable.
+Root verified these donor HEAD revisions and clean working trees during this comparison. Family documents retain their audit-time execution and installation evidence; the current installed build is recorded in [execution status](execution-status.md#installed-build). Family authors' statements that they did not run Git refer to their own audit steps; this central check supplies the revision evidence. The unified source basis is recorded above, separately from the installed `36c450b` executable.
 
 | Donor | Verified revision | Working tree |
 | --- | --- | --- |
@@ -103,7 +103,7 @@ The adopted mechanisms below are distinct from planned additions. Where the comp
 
 These findings distinguish implemented joins from missing joins. They are not a checklist-wide acceptance count. The detailed family rows must still identify source-only additions, expansion/rerelease differences, actual evidence and unknowns for their own scope.
 
-Canonical weapon-status checkpoint `703cc0a` supplies source-aware ammo/weapon data and icon resources, with actual retail and remote evidence. Its display consumer remains separate work; false displayed inventory is not marked resolved.
+Canonical weapon-status checkpoint `703cc0a` supplies source-aware ammo/weapon data and icon resources, with actual retail and remote evidence. Checkpoint `68c33b9` joins the common display/radial consumer, with actual one-shell/zero-shell/axe replay evidence. Head/gun overlap and broader layout/content coverage remain open. Native pusher and geometry-edition lighting checkpoints `365634a`/`36c450b` add bounded actual evidence; formal inventory acceptance is unchanged.
 
 ## Universal additions and selectable differences
 
