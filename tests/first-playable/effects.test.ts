@@ -1,3 +1,6 @@
+import { q2MonsterMuzzle } from "../../src/app/bootstrap/effects/q2-muzzle.ts";
+import { SourceParticles } from "../../src/app/bootstrap/effects/particles.ts";
+import { SourceRandom } from "../../src/app/bootstrap/simulation/random.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -161,6 +164,61 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     expect(effects.playerView(actor.id, camera).infrared).toBe(false);
     expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     expect(effects.drainUnhandled()).toEqual([]);
+    const rerelease = content.catalog.require("q2-rerelease-baseq2").id;
+    effects.receive([
+      { kind: "q2", content: rerelease, seconds: 15, sequence: 19, event: { kind: "effect", effect: "q2:berserk-slam", origin: { x: 80, y: -20, z: 0 }, direction: { x: 0, y: 0, z: 1 }, count: 1, color: 0 } },
+      { kind: "q2", content: rerelease, seconds: 15, sequence: 20, event: { kind: "effect", effect: "q2:plain-explosion", origin: { x: 80, y: 20, z: 0 }, direction: { x: 0, y: 0, z: 0 }, count: 1, color: 0 } },
+    ]);
+    await effects.prepare(snapshot(15), []);
+    expect(effects.drainUnhandled()).toEqual([]);
+    expect(effects.drainSounds().map(sound => [sound.path, sound.channel, sound.volume])).toEqual([["weapons/rocklx1a.wav", 0, 1]]);
+    const slam = effects.frame(camera);
+    expect(slam.operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
+    expect(slam.lights.some(light => light.radius > 0 && light.color.x === 1 && light.color.y === 0.5 && light.color.z === 0.5)).toBe(true);
+    frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: snapshot(15).frame.time, viewport: camera.viewport,
+      clear: { color: { x: 0.2, y: 0.2, z: 0.2, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: slam.operations });
+    target.execute(frames.finish(false));
+    expect(new Set(renderer.pixels).size).toBeGreaterThan(16);
+    await effects.prepare(snapshot(17), []);
+    expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    effects.receive([232, 233, 234, 235, 236, 237, 238, 239, 260, 251, 252, 253, 256, 257, 258, 259, 263, 74, 134].map((flash, index) => ({
+      kind: "q2", content: rerelease, seconds: 18, sequence: 21 + index,
+      event: { kind: "monster-muzzleflash", actor: actor.id, flash, origin: { x: 80, y: 0, z: 0 }, direction: { x: 1, y: 0, z: 0 } },
+    })));
+    await effects.prepare(snapshot(18), []);
+    expect(effects.drainUnhandled()).toEqual([]);
+    expect(effects.frame(camera).operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
+    await effects.prepare(snapshot(20), []);
+    expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     effects.close(); target.close();
   } finally { assets.close(); await content.close(); }
 }, 60000);
+
+test("rerelease berserk slam particles use source colors, velocity and lifetime", () => {
+  const particles = new SourceParticles(new SourceRandom(1)), origin = { x: 10, y: 20, z: 30 };
+  particles.q2BerserkSlam(origin, { x: 0, y: 0, z: 1 }, 1);
+  const first = particles.sample(1, 0).q2;
+  expect(first).toHaveLength(700);
+  expect(first.every(particle => particle.kind === "indexed" && [110, 112, 114, 116].includes(particle.paletteIndex) && particle.alpha === 1)).toBe(true);
+  expect(first.every(particle => particle.origin.x === 10 && particle.origin.y === 20 && particle.origin.z === 30)).toBe(true);
+  const moved = particles.sample(1.1, 0.1).q2;
+  expect(moved).toHaveLength(700);
+  expect(moved.every(particle => Math.abs(particle.origin.x - 10) <= 19.21 && Math.abs(particle.origin.y - 20) <= 19.21 && particle.origin.z >= 30 && particle.origin.z <= 49.21)).toBe(true);
+  expect(particles.sample(1.81, 0).q2).toHaveLength(0);
+  const bounded = new SourceParticles(new SourceRandom(1), 5);
+  bounded.q2BerserkSlam(origin, { x: 0, y: 0, z: 1 }, 1);
+  expect(bounded.sample(1, 0).q2).toHaveLength(5);
+});
+
+test("rerelease monster muzzle profiles cover extended ordinary IDs and boss blaster changes", () => {
+  for (const [flash, classic] of [[232, 26], [233, 26], [234, 26], [235, 26], [236, 26], [237, 26], [238, 26], [239, 26], [260, 26], [251, 39], [252, 41], [253, 43], [256, 53], [257, 53], [258, 53], [259, 53], [263, 62]] satisfies readonly (readonly [number, number])[]) {
+    expect(q2MonsterMuzzle(flash, true)).toEqual(q2MonsterMuzzle(classic, false));
+    expect(q2MonsterMuzzle(flash, false)).toBeUndefined();
+  }
+  for (const flash of [74, 134]) {
+    expect(q2MonsterMuzzle(flash, true)?.smoke).toBe(false);
+    expect(q2MonsterMuzzle(flash, true)?.particles).toBe(false);
+    expect(q2MonsterMuzzle(flash, false)?.smoke).toBe(true);
+    expect(q2MonsterMuzzle(flash, false)?.particles).toBe(true);
+  }
+});

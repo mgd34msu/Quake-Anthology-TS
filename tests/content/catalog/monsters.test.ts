@@ -55,3 +55,29 @@ test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("classic Q2 ordi
     "sound/misc/fhit3.wav", "sound/player/watr_in.wav", "sound/mutant/step3.wav"]) expect(paths.has(path)).toBe(true);
   expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
 }, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("ordinary Q2 creature presentation resolves classic and rerelease models, skins and muzzle sounds", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  for (const edition of ["classic", "rerelease"]) {
+    const command = parseApplicationCommand(["--game", `q2-${edition}-baseq2`, "--map", "base1"]);
+    if (command.kind !== "run") throw new Error("Expected Q2 launch command");
+    const preset = applicationPreset(catalog, command.options), content = catalog.require(`q2-${edition}-baseq2`).id;
+    const source: ProviderReference = { provider: `q2:monsters/${edition}/baseq2`, content };
+    const classnames = ["monster_infantry", "monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_berserk", "monster_gunner",
+      "monster_floater", "monster_hover", "monster_flyer", "monster_mutant", "monster_parasite"];
+    const enemies: EnemySelection = { kind: "replace", default: { source, classname: "monster_infantry" },
+      byClassname: Object.fromEntries(classnames.map(classname => [classname, { source, classname }])) };
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    expect(recipe.enemies).toEqual(enemies);
+    const paths = new Set(recipe.resources.map(resource => resource.requestedPath));
+    for (const path of ["models/objects/smoke/tris.md2", "models/objects/flash/skin.pcx", "models/objects/explode/tris.md2",
+      "models/objects/r_explode/skin7.pcx", "sound/soldier/solatck1.wav", "sound/soldier/solatck2.wav", "sound/soldier/solatck3.wav",
+      "sound/gunner/gunatck2.wav", "sound/gunner/gunatck3.wav", "sound/hover/hovatck1.wav", "sound/floater/fltatck1.wav", "sound/flyer/flyatck3.wav"]) expect(paths.has(path)).toBe(true);
+    if (edition === "rerelease") {
+      for (const path of ["models/monsters/parasite/tip/tris.md2", "models/monsters/parasite/tip/base.pcx", "models/monsters/parasite/segment/tris.md2",
+        "models/monsters/parasite/segment/skin.pcx", "models/monsters/parasite/gibs/fleg.pcx", "models/monsters/soldier/gibs/arm_lt.pcx",
+        "models/monsters/infantry/gibs/arm.pcx", "models/monsters/infantry/gibs/chest.pcx", "models/monsters/infantry/gibs/foot.pcx", "models/monsters/infantry/gibs/head.pcx",
+        "models/monsters/mutant/gibs/hand.pcx", "sound/berserk/jump.wav", "sound/world/explod2.wav", "sound/weapons/rocklx1a.wav"]) expect(paths.has(path)).toBe(true);
+    }
+  }
+}, 60000);

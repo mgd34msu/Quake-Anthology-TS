@@ -1,20 +1,29 @@
+import { q2RereleaseCreatures } from "./q2-rerelease.ts";
 import type { MonsterSourceDefinition } from "./definitions.ts";
 
 const classicBerserk = { resources: ["models/monsters/berserk/tris.md2", "models/monsters/berserk/skin.pcx", "models/monsters/berserk/pain.pcx",
   "models/objects/gibs/bone/tris.md2", "models/objects/gibs/sm_meat/tris.md2", "models/objects/gibs/head2/tris.md2",
   "models/objects/gibs/bone/skin.pcx", "models/objects/gibs/sm_meat/skin.pcx", "models/objects/gibs/head2/skin.pcx", "models/objects/gibs/head2/player.pcx",
   ...["berserk/sight.wav", "berserk/bersrch1.wav", "berserk/berpain2.wav", "berserk/berdeth2.wav", "berserk/beridle1.wav", "berserk/attack.wav", "misc/udeath.wav"].map(path => `sound/${path}`)] };
-const infantryResources = ["models/monsters/infantry/tris.md2", "models/monsters/infantry/skin.pcx", "models/monsters/infantry/pain.pcx",
+const infantryResources = [
+  "models/objects/smoke/tris.md2", "models/objects/smoke/skin.pcx", "models/objects/flash/tris.md2", "models/objects/flash/skin.pcx",
+  "models/monsters/infantry/tris.md2", "models/monsters/infantry/skin.pcx", "models/monsters/infantry/pain.pcx",
   "models/objects/gibs/bone/tris.md2", "models/objects/gibs/sm_meat/tris.md2",
   "models/objects/gibs/bone/skin.pcx", "models/objects/gibs/sm_meat/skin.pcx",
   ...["infantry/infsght1.wav", "infantry/infsrch1.wav", "infantry/infpain1.wav", "infantry/infpain2.wav", "infantry/infdeth1.wav", "infantry/infdeth2.wav",
     "infantry/infatck1.wav", "infantry/infatck2.wav", "infantry/infatck3.wav", "infantry/infidle1.wav", "infantry/melee2.wav", "misc/udeath.wav", "misc/fhit3.wav"].map(path => `sound/${path}`)];
 const classicInfantry = { resources: [...infantryResources, "models/objects/gibs/head2/tris.md2", "models/objects/gibs/head2/skin.pcx", "models/objects/gibs/head2/player.pcx"] };
-const rereleaseInfantry = { resources: [...infantryResources, "models/monsters/infantry/gibs/gun.pcx", ...["arm", "chest", "foot", "gun", "head"].map(part => `models/monsters/infantry/gibs/${part}.md2`)] };
+const rereleaseInfantry = { resources: [...infantryResources, ...["arm", "chest", "foot", "head"].map(part => `models/monsters/infantry/gibs/${part}.pcx`), "models/monsters/infantry/gibs/gun.pcx", ...["arm", "chest", "foot", "gun", "head"].map(part => `models/monsters/infantry/gibs/${part}.md2`)] };
 
 const environmentResources = ["sound/infantry/inflies1.wav", "sound/misc/fhit3.wav", "sound/player/watr_in.wav", "sound/player/watr_out.wav", "sound/player/lava1.wav", "sound/player/lava2.wav"];
 
 const soldier = { resources: [
+  "models/objects/smoke/tris.md2",
+  "models/objects/smoke/skin.pcx",
+  "models/objects/flash/tris.md2",
+  "models/objects/flash/skin.pcx",
+  "models/objects/explode/tris.md2",
+  "models/objects/explode/skin.pcx",
   ...environmentResources,
   "models/monsters/soldier/pain.pcx",
   "models/monsters/soldier/skin.pcx",
@@ -77,6 +86,18 @@ const gladiator = { resources: [
 ] };
 
 const gunner = { resources: [
+  "models/objects/smoke/tris.md2",
+  "models/objects/smoke/skin.pcx",
+  "models/objects/flash/tris.md2",
+  "models/objects/flash/skin.pcx",
+  "models/objects/r_explode/tris.md2",
+  "models/objects/r_explode/skin1.pcx",
+  "models/objects/r_explode/skin2.pcx",
+  "models/objects/r_explode/skin3.pcx",
+  "models/objects/r_explode/skin4.pcx",
+  "models/objects/r_explode/skin5.pcx",
+  "models/objects/r_explode/skin6.pcx",
+  "models/objects/r_explode/skin7.pcx",
   ...environmentResources,
   "models/monsters/gunner/pain.pcx",
   "models/monsters/gunner/skin.pcx",
@@ -130,6 +151,16 @@ const parasite = { resources: [
 ] };
 
 const flyer = { resources: [
+  "models/objects/explode/tris.md2",
+  "models/objects/explode/skin.pcx",
+  "models/objects/r_explode/tris.md2",
+  "models/objects/r_explode/skin1.pcx",
+  "models/objects/r_explode/skin2.pcx",
+  "models/objects/r_explode/skin3.pcx",
+  "models/objects/r_explode/skin4.pcx",
+  "models/objects/r_explode/skin5.pcx",
+  "models/objects/r_explode/skin6.pcx",
+  "models/objects/r_explode/skin7.pcx",
   ...environmentResources,
   "models/monsters/flyer/pain.pcx",
   "models/monsters/flyer/skin.pcx",
@@ -157,6 +188,16 @@ const flyer = { resources: [
 ] };
 
 const floater = { resources: [
+  "models/objects/explode/tris.md2",
+  "models/objects/explode/skin.pcx",
+  "models/objects/r_explode/tris.md2",
+  "models/objects/r_explode/skin1.pcx",
+  "models/objects/r_explode/skin2.pcx",
+  "models/objects/r_explode/skin3.pcx",
+  "models/objects/r_explode/skin4.pcx",
+  "models/objects/r_explode/skin5.pcx",
+  "models/objects/r_explode/skin6.pcx",
+  "models/objects/r_explode/skin7.pcx",
   ...environmentResources,
   "models/monsters/float/pain.pcx",
   "models/monsters/float/skin.pcx",
@@ -184,6 +225,8 @@ const floater = { resources: [
 ] };
 
 const hover = { resources: [
+  "models/objects/explode/tris.md2",
+  "models/objects/explode/skin.pcx",
   ...environmentResources,
   "models/monsters/hover/pain.pcx",
   "models/monsters/hover/skin.pcx",
@@ -239,6 +282,14 @@ const mutant = { resources: [
 ] };
 
 const chick = { resources: [
+  "models/objects/r_explode/tris.md2",
+  "models/objects/r_explode/skin1.pcx",
+  "models/objects/r_explode/skin2.pcx",
+  "models/objects/r_explode/skin3.pcx",
+  "models/objects/r_explode/skin4.pcx",
+  "models/objects/r_explode/skin5.pcx",
+  "models/objects/r_explode/skin6.pcx",
+  "models/objects/r_explode/skin7.pcx",
   ...environmentResources,
   "models/monsters/bitch/pain.pcx",
   "models/monsters/bitch/skin.pcx",
@@ -274,6 +325,20 @@ const chick = { resources: [
 ] };
 
 const tank = { resources: [
+  "models/objects/smoke/tris.md2",
+  "models/objects/smoke/skin.pcx",
+  "models/objects/flash/tris.md2",
+  "models/objects/flash/skin.pcx",
+  "models/objects/explode/tris.md2",
+  "models/objects/explode/skin.pcx",
+  "models/objects/r_explode/tris.md2",
+  "models/objects/r_explode/skin1.pcx",
+  "models/objects/r_explode/skin2.pcx",
+  "models/objects/r_explode/skin3.pcx",
+  "models/objects/r_explode/skin4.pcx",
+  "models/objects/r_explode/skin5.pcx",
+  "models/objects/r_explode/skin6.pcx",
+  "models/objects/r_explode/skin7.pcx",
   ...environmentResources,
   "models/monsters/ctank/pain.pcx",
   "models/monsters/ctank/skin.pcx",
@@ -337,5 +402,5 @@ export const q2MonsterSources: readonly MonsterSourceDefinition[] = [
     monster_soldier_ss: soldier,
     monster_tank_commander: tank,
   } },
-  { provider: "q2:monsters/rerelease/baseq2", family: "q2", edition: "rerelease", program: "baseq2", creatures: { monster_infantry: { resources: [...rereleaseInfantry.resources, ...environmentResources] } } },
+  { provider: "q2:monsters/rerelease/baseq2", family: "q2", edition: "rerelease", program: "baseq2", creatures: { monster_infantry: { resources: [...rereleaseInfantry.resources, ...environmentResources] }, ...q2RereleaseCreatures } },
 ];

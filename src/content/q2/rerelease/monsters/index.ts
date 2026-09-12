@@ -36,25 +36,43 @@ export interface Q2RereleaseMonsterOptions {
   readonly transferHealthbarTarget?: (oldActor: ActorId, newActor: ActorId, game: Q2GameServices) => undefined;
 }
 
+function ordinaryDefinitions(monsters: Q2Monsters) {
+  return {
+    berserk: createRereleaseBerserkDefinition(monsters),
+    gunner: rereleaseGunnerDefinition,
+    floater: rereleaseFloaterDefinition,
+    hover: createRereleaseHoverDefinition(monsters),
+    flyer: createRereleaseFlyerDefinition(monsters),
+    mutant: createRereleaseMutantDefinition(monsters),
+    parasite: createRereleaseParasiteDefinition(monsters),
+  };
+}
+
+export function registerQ2RereleaseOrdinaryMonsters(monsters: Q2Monsters): undefined {
+  for (const definition of Object.values(ordinaryDefinitions(monsters))) monsters.register(definition, "rerelease");
+  return undefined;
+}
+
 export function registerQ2RereleaseMonsters(monsters: Q2Monsters, options: Q2RereleaseMonsterOptions): Q2SpawnModule {
+  const ordinary = ordinaryDefinitions(monsters);
   monsters.register(arachnidDefinition, "rerelease");
-  monsters.register(createRereleaseBerserkDefinition(monsters), "rerelease");
+  monsters.register(ordinary.berserk, "rerelease");
   monsters.register(createGuardianDefinition(monsters), "rerelease");
   monsters.register(shamblerDefinition, "rerelease");
   monsters.register(createGunCommanderDefinition(options.weapons), "rerelease");
-  monsters.register(rereleaseGunnerDefinition, "rerelease");
+  monsters.register(ordinary.gunner, "rerelease");
   monsters.register(rereleaseFlipperDefinition, "rerelease");
-  monsters.register(rereleaseFloaterDefinition, "rerelease");
-  monsters.register(createRereleaseHoverDefinition(monsters), "rerelease");
-  monsters.register(createRereleaseFlyerDefinition(monsters), "rerelease");
+  monsters.register(ordinary.floater, "rerelease");
+  monsters.register(ordinary.hover, "rerelease");
+  monsters.register(ordinary.flyer, "rerelease");
   for (const definition of createRereleaseChickDefinitions(options.weapons)) monsters.register(definition, "rerelease");
-  monsters.register(createRereleaseMutantDefinition(monsters), "rerelease");
+  monsters.register(ordinary.mutant, "rerelease");
   monsters.register(rereleaseInsaneDefinition, "rerelease");
   monsters.register(rereleaseBoss2Definition, "rerelease");
   monsters.register(rereleaseMakronDefinition, "rerelease");
   monsters.register(createRereleaseJorgDefinition(monsters, options.transferHealthbarTarget), "rerelease");
   monsters.register(createRereleaseBrainDefinition(monsters), "rerelease");
-  monsters.register(createRereleaseParasiteDefinition(monsters), "rerelease");
+  monsters.register(ordinary.parasite, "rerelease");
   for (const definition of createRereleaseMedicDefinitions(monsters, options.weapons, options.source)) monsters.register(definition, "rerelease");
   const actor = createRereleaseActorModule(monsters);
   monsters.register(actor.definition, "rerelease");

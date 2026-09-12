@@ -85,6 +85,17 @@ export class SourceParticles {
         acceleration: gravity, color: shade, alpha: 1, alphaVelocity: -0.4 / (0.6 + this.unit() * 0.2) });
     }
   }
+  /** q2repro newfx.c CL_BerserkSlamParticles. */
+  q2BerserkSlam(origin: Vec3, direction: Vec3, seconds: number): void {
+    const initial = { x: direction.z, y: -direction.x, z: direction.y };
+    const right = normalize3OrZero(sub3(initial, scale3(direction, dot3(initial, direction)))), up = cross3(right, direction);
+    for (let i = 0; i < 700 && this.q2.length < this.capacity; i++) {
+      const color = 110 + 2 * (this.rand() & 3);
+      const velocity = add3(add3(scale3(direction, this.unit() * 192), scale3(right, this.signed() * 192)), scale3(up, this.signed() * 192));
+      this.second({ spawnMilliseconds: seconds * 1000, origin, velocity, acceleration: zero, color, alpha: 1,
+        alphaVelocity: -1 / (0.5 + this.unit() * 0.3) });
+    }
+  }
   q2Steam(origin: Vec3, direction: Vec3, color: number, count: number, magnitude: number, seconds: number, smoke = false): boolean {
     const initial = { x: direction.z, y: -direction.x, z: direction.y };
     const right = normalize3OrZero(sub3(initial, scale3(direction, dot3(initial, direction)))), up = cross3(right, direction);

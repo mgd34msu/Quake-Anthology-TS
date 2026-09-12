@@ -7,7 +7,7 @@ import type { SimulationPresentationEvent } from "../../src/app/bootstrap/simula
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { AudioListener } from "../../src/audio/types.ts";
 import { EntityEvent } from "../../src/movement/q3/constants.ts";
-import { q2MuzzleSounds } from "../../src/app/bootstrap/audio/q2-events.ts";
+import { q2MuzzleSounds, q2MonsterMuzzleSounds } from "../../src/app/bootstrap/audio/q2-events.ts";
 
 // Run with SDL_AUDIODRIVER=dummy; this exercises the normal shared mixer/device path.
 test("bootstrap plays source player events, filters a wet listener, replaces music and closes world audio", async () => {
@@ -61,6 +61,17 @@ test("bootstrap plays source player events, filters a wet listener, replaces mus
       await audioWet.receive([{ ...source, content: q3, kind: "q3-character", event: { actor: identity.ownedActor(actor, "q3:character"),
         sequence: 2, timeMilliseconds: 1200, event: EntityEvent.EV_PAIN, parameter: 20 } }]);
       expect(audioWet.engine.mix(128).every(sample => sample === 0)).toBe(true);
+      for (const flash of [26, 39, 41, 43, 45, 53, 58, 62, 82, 1, 4, 23, 57]) {
+        audioWet.engine.stopAll();
+        await audioWet.receive([{ ...source, kind: "q2", event: { kind: "monster-muzzleflash", actor, flash, origin, direction: { x: 1, y: 0, z: 0 } } }]);
+        expect(audioWet.engine.mix(4096).some(sample => sample !== 0)).toBe(true);
+      }
+      const rerelease = content.catalog.require("q2-rerelease-baseq2").id;
+      for (const flash of [39, 41, 43, 251, 252, 253, 232, 233, 234, 235, 236, 237, 238, 239, 260, 256, 257, 258, 259, 263]) {
+        audioWet.engine.stopAll();
+        await audioWet.receive([{ ...source, content: rerelease, kind: "q2", event: { kind: "monster-muzzleflash", actor, flash, origin, direction: { x: 1, y: 0, z: 0 } } }]);
+        expect(audioWet.engine.mix(4096).some(sample => sample !== 0)).toBe(true);
+      }
       await audioWet.playMusic(source.content, "2");
       expect(audioWet.engine.mix(22050).some(sample => sample !== 0)).toBe(true);
       await audioWet.playMusic(source.content, "03.ogg");
@@ -75,3 +86,21 @@ test("bootstrap plays source player events, filters a wet listener, replaces mus
     expect(messages).toEqual([]);
   } finally { simulation.close(); await content.close(); }
 }, 120000);
+
+test("Q2 monster muzzle sounds preserve native variants, channels and silent flashes", () => {
+  expect(q2MonsterMuzzleSounds(39, () => 0, false)).toEqual([{ path: "soldier/solatck2.wav", channel: 1, volume: 1, attenuation: 1, delaySeconds: 0 }]);
+  expect(q2MonsterMuzzleSounds(41, () => 0, true)?.map(sound => sound.path)).toEqual(["soldier/solatck1.wav"]);
+  expect(q2MonsterMuzzleSounds(43, () => 0, true)?.map(sound => sound.path)).toEqual(["soldier/solatck3.wav"]);
+  for (let variant = 0; variant < 5; variant++) expect(q2MonsterMuzzleSounds(4, () => variant, false)?.map(sound => sound.path)).toEqual([`tank/tnkatk2${String.fromCharCode(97 + variant)}.wav`]);
+  expect(q2MonsterMuzzleSounds(74, () => 0, false)).toEqual([{ path: "infantry/infatck1.wav", channel: 1, volume: 1, attenuation: 0, delaySeconds: 0 }]);
+  expect(q2MonsterMuzzleSounds(74, () => 0, true)?.map(sound => sound.path)).toEqual(["flyer/flyatck3.wav"]);
+  expect(q2MonsterMuzzleSounds(134, () => 0, false)).toEqual([]);
+  expect(q2MonsterMuzzleSounds(134, () => 0, true)?.map(sound => sound.path)).toEqual(["flyer/flyatck3.wav"]);
+  expect(q2MonsterMuzzleSounds(61, () => 0, false)).toEqual([]);
+  expect(q2MonsterMuzzleSounds(9999, () => 0, true)).toBeNull();
+  for (const [flash, path] of [[251, "soldier/solatck2.wav"], [252, "soldier/solatck1.wav"], [253, "soldier/solatck3.wav"], [260, "infantry/infatck1.wav"], [256, "gunner/gunatck3.wav"], [263, "hover/hovatck1.wav"]] satisfies readonly (readonly [number, string])[]) {
+    expect(q2MonsterMuzzleSounds(flash, () => 0, true)).toEqual([{ path, channel: 1, volume: 1, attenuation: 1, delaySeconds: 0 }]);
+    expect(q2MonsterMuzzleSounds(flash, () => 0, false)).toBeNull();
+  }
+
+});

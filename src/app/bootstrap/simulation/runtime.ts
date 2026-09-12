@@ -1,4 +1,5 @@
 import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
+import { registerQ2RereleaseOrdinaryMonsters } from "../../../content/q2/rerelease/monsters/index.ts";
 import { WeaponSlot } from "./weapon-slot.ts";
 import type { PrimaryWeaponHandoff, WeaponReference, WeaponSlotState } from "./weapon-slot.ts";
 import { projectWeaponSlot } from "./weapon-slot-projection.ts";
@@ -473,6 +474,7 @@ export class SharedSimulation implements Simulation {
         ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
         lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) });
       monsters = new Q2Monsters(weapons, { mission: actor => this.monsterMissions.get(actor) ?? null });
+      if (registered.edition === "rerelease") registerQ2RereleaseOrdinaryMonsters(monsters);
       const modules = registered.edition === "classic" ? [registerQ2ClassicBaseMonsters(monsters), monsters] : [monsters];
       const game = new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
         { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, modules);

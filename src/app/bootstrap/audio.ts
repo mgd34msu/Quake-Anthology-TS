@@ -15,7 +15,7 @@ import type { LoadedApplicationContent } from "./content.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
 import { ApplicationMusic } from "./audio/music.ts";
-import { q2EntitySound, q2MuzzleSounds } from "./audio/q2-events.ts";
+import { q2EntitySound, q2MuzzleSounds, q2MonsterMuzzleSounds } from "./audio/q2-events.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
 
@@ -228,6 +228,10 @@ export class ApplicationAudio {
             const live = event.actor !== null && this.snapshot?.actors.some(actor => event.actor?.equals(actor.id));
             await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation);
           }
+        } else if (event.kind === "monster-muzzleflash") {
+          const sounds = q2MonsterMuzzleSounds(event.flash, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease");
+          if (sounds === null) this.print(`Unresolved Quake II monster muzzle sound ${event.flash}\n`);
+          else for (const sound of sounds) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds);
         } else if (event.kind === "entity-event") {
           const sound = q2EntitySound(event.event, () => this.random.rand());
           if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation);

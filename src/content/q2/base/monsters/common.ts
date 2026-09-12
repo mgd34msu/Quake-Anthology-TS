@@ -18,7 +18,7 @@ export function damagedSkin(context: MonsterContext): undefined {
   return undefined;
 }
 export function muzzle(context: MonsterContext, flash: number, direction: Vec3, origin: Vec3): undefined {
-  return context.game.host.emit({ kind: "effect", effect: "q2:muzzleflash2", origin, direction, count: flash, color: 0 });
+  return context.game.host.emit({ kind: "monster-muzzleflash", actor: context.entity.actor.id, flash, origin, direction });
 }
 export function shot(context: MonsterContext, flash: number, lead = 0): { readonly start: Vec3; readonly direction: Vec3 } | null {
   const enemy = enemyBody(context), eye = enemyEye(context);

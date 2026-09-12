@@ -19,7 +19,7 @@ import type { ApplicationAssets, ProviderSceneAssets } from "./assets.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import { SourceRandom } from "./simulation/random.ts";
 import { SourceParticles } from "./effects/particles.ts";
-import { q2MonsterMuzzles } from "./effects/q2-muzzle.ts";
+import { q2MonsterMuzzle } from "./effects/q2-muzzle.ts";
 import { Q3ApplicationEffects } from "./effects/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
 import type { Q2MissionPackEntityEvent } from "../../content/q2/missionpacks/entities/types.ts";
@@ -344,7 +344,7 @@ export class ApplicationEffects {
     return true;
   }
   private async monsterMuzzle(source: SimulationPresentationEvent, origin: Vec3, flash: number): Promise<void> {
-    const profile = q2MonsterMuzzles.get(flash);
+    const profile = q2MonsterMuzzle(flash, this.assets.content.catalog.product(source.content).expectation.edition === "rerelease");
     if (profile === undefined) { this.reject(source, `Quake II monster muzzle flash ${flash} has no source definition`); return; }
     const group = await this.group(source.content);
     this.light(origin, source.seconds, profile.radius + (this.random.nextInteger() & profile.mask), profile.radius === 300 ? 0.2 : 0, profile.color, 0, 32,
@@ -395,6 +395,14 @@ export class ApplicationEffects {
       case "item-respawn": p.q2Respawn(event.origin, time, "item"); break;
       case "logout": p.q2Respawn(event.origin, time, "logout"); break;
       case "bfg-bigexplosion": p.q2Explosion(event.origin, time, true); break;
+      case "berserk-slam": p.q2BerserkSlam(event.origin, event.direction, time); break;
+      case "plain-explosion":
+        this.explosions.push({ content: source.content, origin: event.origin, angles: { x: 0, y: this.random.nextInteger() % 360, z: 0 },
+          start: time - 0.1, frames: 15, baseFrame: this.random.nextUnit() < 0.5 ? 15 : 0,
+          path: "models/objects/r_explode/tris.md2", kind: "poly", flags: 8, skin: 0, light: { radius: 350, color: orange } });
+        this.sounds.push({ content: source.content, path: "weapons/rocklx1a.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
+        break;
+
       case "explosion1": case "explosion2": case "rocket-explosion": case "rocket-explosion-water": case "grenade-explosion": case "grenade-explosion-water": case "bfg-explosion": {
         const grenade = name === "explosion2" || name.startsWith("grenade"), bfg = name === "bfg-explosion";
         if (!bfg) p.q2Explosion(event.origin, time, false);
@@ -405,7 +413,6 @@ export class ApplicationEffects {
           light: { radius: 350, color: bfg ? { x: 0, y: 1, z: 0 } : orange } });
         break;
       }
-      case "muzzleflash2": await this.monsterMuzzle(source, event.origin, event.count); break;
       case "footstep": case "monster-footstep": case "fall": case "fall-short": case "fall-far": break;
       default: this.reject(source, `Unresolved Quake II source effect ${original}`);
     }
