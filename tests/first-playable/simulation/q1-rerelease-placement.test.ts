@@ -130,3 +130,46 @@ test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("retail r
     } finally { await selected.close(); }
   } finally { await native.close(); }
 }, 30000);
+
+
+test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("retail rerelease e1m5 selected Shambler preserves difficulty and deathmatch inhibition", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const rr = q1MonsterSources.find(entry => entry.edition === "rerelease");
+  if (rr === undefined) throw new Error("Missing rerelease monsters");
+  const source = { provider: rr.provider, content: catalog.require("q1-rerelease-id1").id };
+  for (const scenario of [{ mode: "singleplayer", skill: "1", present: true }, { mode: "singleplayer", skill: "2", present: false }, { mode: "deathmatch", skill: "1", present: false }]) {
+    const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "e1m5", "--dedicated", "--mode", scenario.mode, "--skill", scenario.skill]);
+    if (command.kind !== "run") throw new Error("Missing launch options");
+    const preset = applicationPreset(catalog, command.options);
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: {
+      kind: "replace", default: { source, classname: "monster_army" },
+      byClassname: Object.fromEntries(Object.keys(rr.creatures).map(classname => [classname, { source, classname }])),
+    } } } });
+    const native = await Application.open(command.options, { print: () => undefined });
+    try {
+      const selected = await Application.open(command.options, { print: () => undefined }, recipe);
+      try {
+        for (let frame = 0; frame < 10; frame++) { await native.step(100); await selected.step(100); }
+        const nativeGame = native.simulation.q1Source()?.game, selectedGame = selected.simulation.q1Source()?.game;
+        if (nativeGame === undefined || selectedGame === undefined) throw new Error("Missing Q1 map source");
+        const entity = [...nativeGame.entities.values()].find(entity => entity.sourceOrdinal === 490);
+        const checkpoint = simulationProviderCheckpoint(selected.simulation.checkpoint(), "world:simulation");
+        const monsters = readSelectedMonstersCheckpoint(new SaveReader(decodeCheckpointValue(checkpoint.bytes)).field("selectedMonsters"));
+        const entry = monsters.authored.find(entry => entry.sourceOrdinal === 490);
+        expect(entity !== undefined).toBe(scenario.present); expect(entry !== undefined).toBe(scenario.present);
+        expect(selectedGame.totalMonsters).toBe(nativeGame.totalMonsters);
+        if (scenario.present) {
+          if (entity === undefined || entry === undefined) throw new Error("Missing authored Shambler");
+          expect(entity.spawnflags).toBe(3072); expect(entry.spawnflags).toBe(3072);
+          expect(entry.classname).toBe("monster_shambler");
+          const actor = selected.simulation.actors.resolveSaved(entry.actor);
+          if (actor === null) throw new Error("Missing selected Shambler actor");
+          expect(selected.simulation.bodies.read(actor.id)).toEqual(nativeGame.body(entity));
+          const invalid = parseQ1Entities('{ "classname" "monster_shambler" "spawnflags" "4096" }')[0];
+          if (invalid === undefined) throw new Error("Missing unsupported flag fixture");
+          expect(() => selectedGame.monsterAdmission?.resolve("monster_shambler", invalid)).toThrow("spawn flags 4096");
+        }
+      } finally { await selected.close(); }
+    } finally { await native.close(); }
+  }
+}, 60000);

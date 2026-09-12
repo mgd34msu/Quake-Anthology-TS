@@ -52,7 +52,7 @@ export class SelectedMonsters {
     const supported = this.map.kind === "q1" ? q1Ordinary : q2Ordinary;
     if (!supported.has(classname)) throw new Error(`Selected monster admission does not yet preserve authored ${classname} obligations`);
     const flags = Number(fields.get("spawnflags") ?? 0);
-    const inhibition = this.map.kind === "q1" ? 0x700 : this.map.game.options.edition === "rerelease" ? 0xff00 : 0x1f00;
+    const inhibition = this.map.kind === "q1" ? 0xf00 : this.map.game.options.edition === "rerelease" ? 0xff00 : 0x1f00;
     if ((flags & ~inhibition & ~(this.map.kind === "q2" ? 3 : 1)) !== 0 || classname === "monster_zombie" && (flags & 1) !== 0) throw new Error(`Selected monster admission does not yet preserve ${classname} spawn flags ${flags}`);
     return this.selection.byClassname[classname] ?? this.selection.default;
   }
