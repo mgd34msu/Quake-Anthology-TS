@@ -716,7 +716,7 @@ test("dedicated actual id1 QuakeC application traverses authored pushers and liv
       }
     }
     expect(simulation.actors.observations().length).toBeGreaterThan(initial.length);
-    expect(() => source.machine.execute(source.prepared.program.functionNamed("door_blocked").index)).toThrow("Unsupported QuakeC damage provenance");
+    expect(() => source.machine.execute(source.prepared.program.functionNamed("door_blocked").index)).toThrow("Unmatched id1 environmental callback");
     const door = pushers.find(actor => source.classname(actor.id) === "door"), victim = simulation.actors.observations().find(actor => source.classname(actor.id) === "monster_army");
     if (door === undefined || victim === undefined) throw new Error("Authored crusher callback actors missing");
     const owner = simulation.actors.resolveOwned(door.id), before = simulation.combat.read(victim.id)?.health;
@@ -809,6 +809,48 @@ test("dedicated actual id1 QC client reuses its raw actor, retains movement and 
         expect(source.entities.at(slot).vector(absmin.offset)).toEqual(linked.absoluteBounds.min);
         expect(source.entities.at(slot).vector(absmax.offset)).toEqual(linked.absoluteBounds.max);
         expect(() => simulation.checkpoint()).toThrow('complete saved-game checkpoint');
+        const door = simulation.actors.observations().find(actor => source.classname(actor.id) === "door");
+        const crusher = door === undefined ? null : simulation.actors.resolveOwned(door.id);
+        const healthBeforeCrush = simulation.combat.read(admitted.actor)?.health;
+        if (crusher === null || healthBeforeCrush === undefined) throw new Error("Missing authored crusher/player");
+        // Explicit blocked callback proves the application join; it does not claim a physical collision.
+        source.pusherServices.blocked(crusher, admitted.actor);
+        expect(simulation.combat.read(admitted.actor)?.health).toBeLessThan(healthBeforeCrush);
+        const crush = simulation.events.take().map(event => event.payload).find(event => event.kind === "damage" && event.outcome.kind === "committed"
+          && event.outcome.decision.request.attack.cause.kind === "environment" && event.outcome.decision.request.attack.cause.hazard === "crush");
+        if (crush?.kind !== "damage" || crush.outcome.kind !== "committed") throw new Error("Missing observed crusher decision");
+        expect(crush.outcome.decision.request.attack.attacker).toBe(crusher.id);
+        expect(crush.outcome.decision.mutations.some(value => value.kind === "source-velocity")).toBe(true);
+        expect(source.currentPhysicsCallback).toBeNull();
+        // Synthetic trigger inputs exercise the actual hurt_touch function through the shared touch dispatcher.
+        const trigger = source.slots.allocate("quakec:fixture-trigger"), triggerSlot = source.sourceSlot(trigger.id);
+        if (triggerSlot === null) throw new Error("Missing synthetic trigger slot");
+        source.worldHost.actor(triggerSlot);
+        const triggerWords = source.entities.at(triggerSlot);
+        const field = (name: string): number => {
+          const value = source.prepared.program.fieldsByName.get(name);
+          if (value === undefined) throw new Error(`Missing source field ${name}`);
+          return value.offset;
+        };
+        triggerWords.setFloat(field("solid"), 1); triggerWords.setFloat(field("dmg"), 4);
+        triggerWords.setInt(field("touch"), source.prepared.program.functionNamed("hurt_touch").index);
+        const healthBeforeHurt = simulation.combat.read(admitted.actor)?.health;
+        if (healthBeforeHurt === undefined) throw new Error("Missing hurt target");
+        simulation.callbacks.touch({ self: trigger, other: admitted.actor, plane: null, surface: null });
+        expect(simulation.combat.read(admitted.actor)?.health).toBe(healthBeforeHurt - 4);
+        expect(triggerWords.float(field("solid"))).toBe(0);
+        const hurt = simulation.events.take().map(event => event.payload).find(event => event.kind === "damage");
+        if (hurt?.kind !== "damage" || hurt.outcome.kind !== "committed") throw new Error("Missing observed hurt decision");
+        expect(hurt.outcome.decision.request.attack.cause).toEqual({ kind: "environment", hazard: "trigger" });
+        expect(hurt.outcome.decision.request.attack.attacker).toBe(trigger.id);
+        expect(source.currentPhysicsCallback).toBeNull();
+        const clientWords = source.entities.at(slot), pain = clientWords.int(field("th_pain"));
+        clientWords.setInt(field("th_pain"), source.prepared.program.functionNamed("error").index);
+        triggerWords.setFloat(field("solid"), 1);
+        expect(() => simulation.callbacks.touch({ self: trigger, other: admitted.actor, plane: null, surface: null })).toThrow();
+        expect(source.currentPhysicsCallback).toBeNull();
+        expect(source.machine.depth).toBe(0);
+        clientWords.setInt(field("th_pain"), pain);
         simulation.disconnectPlayer(admitted.actor);
         expect(source.isActiveClient(admitted.actor)).toBe(false);
         expect(simulation.players()).toEqual([]);

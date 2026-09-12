@@ -877,8 +877,9 @@ test.skipIf(!haveCorpus)("retail QC pusher uses shared authored brush movement a
   } finally { archive.close(); }
 });
 
-test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identity and actual BSP hit facts", async () => {
+test.skipIf(!haveCorpus)("verified id1 attacks and environmental callbacks preserve actual source execution", async () => {
   const { Id1SynchronousAttacks } = await import("../../../src/content/q1/quakec/id1-attacks.ts");
+  const { Id1Environment } = await import("../../../src/content/q1/quakec/id1-environment.ts");
   const { Id1DamageBinding } = await import("../../../src/content/q1/quakec/id1-damage.ts");
   const { QcWorldHost } = await import("../../../src/compat/qc/world-host.ts");
   const { createQcPresentationBindings } = await import("../../../src/compat/qc/presentation-host.ts");
@@ -894,7 +895,7 @@ test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identit
   ] });
   const sounds = new Map<string, import("../../../src/compat/qc/presentation-host.ts").QcPrecachedResource>();
   try {
-    for (const path of ["weapons/guncock.wav", "weapons/shotgn2.wav"]) {
+    for (const path of ["weapons/guncock.wav", "weapons/shotgn2.wav", "player/land2.wav", "plats/plat1.wav", "items/protect3.wav"]) {
       const asset = await mount.open(`sound/${path}`); if (asset === null) throw new Error(`Missing actual ${path}`);
       sounds.set(path, { index: sounds.size + 1, resource: asset.reference });
     }
@@ -907,7 +908,8 @@ test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identit
     const coordinates = start?.get("origin")?.split(/\s+/).map(Number), x = coordinates?.[0], y = coordinates?.[1], z = coordinates?.[2];
     if (x === undefined || y === undefined || z === undefined) throw new Error("Missing actual start pose");
     const field = (name: string): number => { const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
-    const run = (observed: boolean, weapon: "axe" | "shotgun" | "supershotgun" | "fallback") => {
+    type HazardCase = "drown" | "lava" | "slime" | "fall" | "hurt" | "door" | "secret" | "plat" | "train" | "hurt-invulnerable";
+    const run = (observed: boolean, weapon: "axe" | "shotgun" | "supershotgun" | "fallback" | HazardCase) => {
       const scene = createSceneQueries(map), numeric = createNumericOperations(Q1_DONOR_PROFILE);
       const actors = new SessionActorRegistry(createIdentityOwner(`qc-attack-${observed}`)), callbacks = new ActorCallbackTable(actors);
       const entities = new QcEntityMemory(classicQcEntityLayout(program), 16);
@@ -926,14 +928,25 @@ test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identit
       world.actor(0); world.actor(1); world.actor(2);
       const events = new SimulationEvents(bodies, () => ({ kind: "seconds", value: 3 }), () => null, actor => actors.sourceOf(actor)?.slot ?? null);
       const presentation = createQcPresentationBindings(world, { content: "q1:classic:id1:retail", events, loading: () => false,
-        print: () => { throw new Error("Unexpected missing source resource"); }, lookup: (_kind, path) => sounds.get(path) ?? null,
+        print: text => { throw new Error(`Unexpected missing source resource: ${text}`); }, lookup: (_kind, path) => sounds.get(path) ?? null,
         precache: () => { throw new Error("No source precache during attack"); } });
       const outcomes: DamageOutcome[] = [];
       const authority = new GameplayAuthority(actors, callbacks, { impulse: () => { throw new Error("Source impulse replay"); },
         beforeReaction: () => undefined, confirmed: outcome => { outcomes.push(outcome); return undefined; } });
       const attacks = new Id1SynchronousAttacks(world.options, () => vm);
+      const environment = new Id1Environment(world.options, () => vm);
+      let environmentalCallback: import("../../../src/content/q1/quakec/id1-environment.ts").Id1PhysicsCallback | null = null;
       const damage = new Id1DamageBinding(world.options, authority, () => vm, call => {
-        const attack = attacks.resolve(call); if (attack === null) throw new Error("Unexpected damage source");
+        const attack = attacks.resolve(call);
+        if (attack === null) {
+          const hazard = environment.resolve(call, environmentalCallback);
+          if (hazard === null) throw new Error("Unexpected damage source");
+          if (hazard.cause.hazard === "fall") expect(vm.strings.get(entities.at(2).int(field("deathtype")))).toBe("");
+          return { target: call.target, amount: call.amount, knockback: hazard.knockback, direction: hazard.direction, point: hazard.point,
+            normal: { x: 0, y: 0, z: 0 }, delivery: "direct", attack: { sequence: outcomes.length, time: { kind: "seconds", value: hazard.time },
+              attacker: call.attacker, inflictor: call.inflictor, weapon: null, weaponProvider: "test:qc", combatProvider: "test:qc",
+              inventoryProvider: "test:qc", movementProvider: "test:qc", cause: hazard.cause } };
+        }
         return { target: call.target, amount: call.amount, knockback: attack.knockback, direction: attack.direction, point: attack.point, normal: attack.normal, delivery: "direct",
           attack: { sequence: outcomes.length, time: { kind: "seconds", value: attack.time }, attacker: attack.actor, inflictor: call.inflictor, weapon: attack.weapon,
             weaponProvider: "test:qc", combatProvider: "test:qc", inventoryProvider: "test:qc", movementProvider: "test:qc", cause: { kind: "q1", deathType: "" } } };
@@ -960,6 +973,50 @@ test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identit
       world.link(1); world.link(2);
       vm.globals.setInt(vm.globalOffset("self"), entities.reference(1)); vm.globals.setFloat(vm.globalOffset("time"), 3);
       vm.globals.setVector(4, owner.vector(field("v_angle"))); vm.execute(program.functionNamed("makevectors").index, 1);
+      if (weapon !== "axe" && weapon !== "shotgun" && weapon !== "supershotgun" && weapon !== "fallback") {
+        const worldHazard = weapon === "drown" || weapon === "lava" || weapon === "slime" || weapon === "fall";
+        const name = weapon === "drown" || weapon === "lava" || weapon === "slime" ? "WaterMove" : weapon === "fall" ? "PlayerPostThink"
+          : weapon === "hurt" || weapon === "hurt-invulnerable" ? "hurt_touch" : weapon === "door" ? "door_blocked"
+          : weapon === "secret" ? "secret_blocked" : weapon === "plat" ? "plat_crush" : "train_blocked";
+        const hazard = worldHazard ? weapon : weapon.startsWith("hurt") ? "trigger" : "crush";
+        victim.setFloat(field("flags"), weapon === "fall" ? 512 : 16);
+        victim.setFloat(field("air_finished"), weapon === "drown" ? 0 : 20);
+        victim.setFloat(field("waterlevel"), weapon === "drown" ? 3 : weapon === "fall" ? 0 : 1);
+        victim.setFloat(field("watertype"), weapon === "lava" ? -5 : weapon === "slime" ? -4 : weapon === "fall" ? -1 : -3);
+        victim.setVector(field("view_ofs"), { x: 0, y: 0, z: 22 });
+        victim.setFloat(field("dmg"), 2); victim.setFloat(field("jump_flag"), -700); victim.setFloat(field("attack_finished"), 10);
+        owner.setFloat(field("dmg"), 10); owner.setFloat(field("wait"), -1); owner.setFloat(field("state"), 2); owner.setFloat(field("speed"), 150);
+        owner.setInt(field("noise"), vm.strings.allocate("plats/plat1.wav")); owner.setFloat(field("super_damage_finished"), 10);
+        if (weapon === "hurt-invulnerable") { victim.setFloat(field("invincible_finished"), 10); victim.setFloat(field("invincible_sound"), 10); }
+        vm.globals.setInt(vm.globalOffset("self"), entities.reference(worldHazard ? 2 : 1));
+        vm.globals.setInt(vm.globalOffset("other"), entities.reference(2));
+        const functionIndex = program.functionNamed(name).index;
+        environmentalCallback = worldHazard ? null : { kind: weapon.startsWith("hurt") ? "touch" : "blocked", actor: shooter.id, other: target.id, functionIndex };
+        vm.execute(functionIndex);
+        const bytes = entities.bytes.slice(), velocity = bodies.read(target.id)?.velocity;
+        if (observed) {
+          expect(outcomes, weapon).toHaveLength(1); const outcome = outcomes[0];
+          if (outcome?.kind !== "committed") throw new Error("Missing environmental decision");
+          expect(outcome.decision.request.attack.cause).toEqual({ kind: "environment", hazard });
+          expect(outcome.decision.request.attack.weapon).toBeNull();
+          const expectedInflictor = worldHazard ? slots.at(0)?.id : shooter.id;
+          if (expectedInflictor === undefined) throw new Error("Missing environmental inflictor");
+          expect(outcome.decision.request.attack.inflictor).toEqual(expectedInflictor);
+          expect(outcome.decision.mutations.some(value => value.kind === "source-velocity")).toBe(!worldHazard);
+          expect(outcome.decision.mutations.some(value => value.kind === "impulse")).toBe(false);
+          expect(outcome.decision.request.knockback).toBe(worldHazard ? 0 : weapon === "plat" ? 4 : 40);
+          const momentum = outcome.decision.mutations.find(value => value.kind === "source-velocity");
+          if (momentum?.kind === "source-velocity") for (const axis of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[])
+            expect(momentum.after[axis]).toBe(Math.fround(numeric.add(momentum.before[axis], Math.fround(numeric.multiply(Math.fround(numeric.multiply(outcome.decision.request.direction[axis], outcome.decision.request.knockback)), 8)))));
+          if (weapon === "hurt-invulnerable") expect(victim.float(field("health"))).toBe(100);
+          if (weapon === "fall") expect(vm.strings.get(victim.int(field("deathtype")))).toBe("falling");
+          if (!worldHazard) {
+            environmentalCallback = null; owner.setFloat(field("attack_finished"), 0);
+            expect(() => vm.execute(functionIndex)).toThrow("Unmatched id1 environmental callback");
+          }
+        }
+        actors.close(); return { bytes, velocity };
+      }
       vm.execute(program.functionNamed(weapon === "axe" ? "W_FireAxe" : weapon === "shotgun" ? "W_FireShotgun" : "W_FireSuperShotgun").index);
       const bytes = entities.bytes.slice(), velocity = bodies.read(target.id)?.velocity;
       if (observed) {
@@ -983,5 +1040,7 @@ test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identit
       actors.close(); return { bytes, velocity };
     };
     for (const weapon of ["axe", "shotgun", "supershotgun", "fallback"] satisfies readonly ("axe" | "shotgun" | "supershotgun" | "fallback")[]) expect(run(true, weapon)).toEqual(run(false, weapon));
+    for (const hazard of ["drown", "lava", "slime", "fall", "hurt", "door", "secret", "plat", "train", "hurt-invulnerable"] satisfies readonly HazardCase[])
+      expect(run(true, hazard)).toEqual(run(false, hazard));
   } finally { archive.close(); }
 }, 45000);

@@ -1,3 +1,4 @@
+import { Id1Environment, type Id1PhysicsCallback } from "../../../content/q1/quakec/id1-environment.ts";
 import { QcBroadcastMessages } from "../../../compat/qc/presentation-host.ts";
 import { Id1SynchronousAttacks } from "../../../content/q1/quakec/id1-attacks.ts";
 import type { Q1UserCommand } from "../../../contracts/protocol.ts";
@@ -82,9 +83,7 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   return { execution, program, resources };
 }
 
-export interface QuakeCPhysicsCallback {
-  readonly kind: "blocked"; readonly actor: ActorId; readonly other: ActorId; readonly functionIndex: number;
-}
+export type QuakeCPhysicsCallback = Id1PhysicsCallback;
 
 export interface QuakeCSourceOptions {
   readonly recipe: ExecutableRecipe;
@@ -110,6 +109,7 @@ export interface QuakeCSourceOptions {
 export class QuakeCSource {
   readonly machine: QcMachine;
   readonly attacks: Id1SynchronousAttacks;
+  readonly environment: Id1Environment;
   readonly messages: QcBroadcastMessages;
   readonly entities: QcEntityMemory;
   readonly slots: SourceActorSlots;
@@ -156,6 +156,7 @@ export class QuakeCSource {
     host.set("cvar_set", vm => { const name = vm.argString(0); this.cvars.set(name, vm.argString(1)); if (name === "sv_gravity") options.physics.setWorldGravity(this.cvars.variableValue(name)); });
     host.set("aim", createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay") }));
     this.attacks = new Id1SynchronousAttacks(this.worldHost.options, () => this.machine);
+    this.environment = new Id1Environment(this.worldHost.options, () => this.machine);
     const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, options.damageRequest);
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
       builtins: createQcBuiltins({ kind: "netquake", random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
@@ -321,7 +322,12 @@ export class QuakeCSource {
       touch: contact => {
         const current = this.sourceSlot(contact.self.id); if (current === null) return undefined;
         const source = this.entities.at(current), callback = source.int(this.field("touch"));
-        if (callback !== 0 && source.float(this.field("solid")) !== 0) this.invoke(callback, current, this.reference(contact.other), this.currentTime);
+        if (callback !== 0 && source.float(this.field("solid")) !== 0) {
+          const prior = this.physicsCallback;
+          this.physicsCallback = { kind: "touch", actor: contact.self.id, other: contact.other, functionIndex: callback };
+          try { this.invoke(callback, current, this.reference(contact.other), this.currentTime); }
+          finally { this.physicsCallback = prior; }
+        }
         return undefined;
       } });
     return this.options.admit(actor, slot, this);

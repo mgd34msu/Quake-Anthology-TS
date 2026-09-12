@@ -1190,18 +1190,13 @@ export class SharedSimulation implements Simulation {
             attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: attack.time }, attacker: call.attacker, inflictor: call.inflictor,
               weapon: attack.weapon, weaponProvider: this.weaponProvider.provider, combatProvider: recipe.combat.provider,
               inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: "" } } };
-          const callback = game.currentPhysicsCallback, site = call.call;
-          const crusher = site.caller === 448 && site.statement === 10736 || site.caller === 451 && site.statement === 10877
-            || site.caller === 375 && site.statement === 8690 || site.caller === 397 && site.statement === 9589;
-          if (!crusher || callback === null || callback.functionIndex !== site.caller || game.machine.globals.int(520) !== 117
-            || !call.target.equals(callback.other) || !call.inflictor.equals(callback.actor) || !call.attacker.equals(callback.actor)
-            || game.readMoveType(call.target) === 3)
-            throw new Error(`Unsupported QuakeC damage provenance: ${game.prepared.program.functionAt(site.caller).name} statement ${site.statement}`);
-          const body = this.bodies.read(call.target); if (body === null) throw new Error("QC damage target has no body");
-          return { target: call.target, amount: call.amount, knockback: 0, direction: zero, point: body.origin, normal: zero, delivery: "direct",
-            attack: { sequence: this.attackSequence++, time: this.sourceFrame.time, attacker: call.attacker, inflictor: call.inflictor,
+          const environment = game.environment.resolve(call, game.currentPhysicsCallback);
+          if (environment === null) throw new Error(`Unsupported QuakeC damage provenance: ${game.prepared.program.functionAt(call.call.caller).name} statement ${call.call.statement}`);
+          return { target: call.target, amount: call.amount, knockback: environment.knockback, direction: environment.direction,
+            point: environment.point, normal: zero, delivery: "direct",
+            attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: environment.time }, attacker: call.attacker, inflictor: call.inflictor,
               weapon: null, weaponProvider: this.weaponProvider.provider, combatProvider: recipe.combat.provider,
-              inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: "" } } };
+              inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: environment.cause } };
         }, print: text => this.events.message({ kind: "print", level: 2, text }) });
       return { kind: "quakec", game };
     }
