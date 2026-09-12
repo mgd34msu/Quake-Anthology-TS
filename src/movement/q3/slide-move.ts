@@ -1,3 +1,4 @@
+import { sweepBody } from "../swept-body.ts";
 // Ported from id Software's code/game/bg_slidemove.c and PM_ClipVelocity.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -41,61 +42,32 @@ export function slideMove(context: SlideMoveContext, gravity: boolean): boolean 
     primalVelocity = vec3(primalVelocity.x, primalVelocity.y, endVelocity.z);
     if (context.groundNormal !== null) ps.velocity = clipVelocity(ps.velocity, context.groundNormal);
   }
-  let timeLeft = context.frameTime;
   const planes: Vec3[] = [];
   if (context.groundNormal !== null) planes.push(context.groundNormal);
   planes.push(normalize3OrZero(ps.velocity));
-  let bumpCount = 0;
-  for (; bumpCount < 4; bumpCount++) {
-    const end = add3(ps.origin, scale3(ps.velocity, timeLeft));
-    const trace = context.trace(ps.origin, end, context.bounds, ps.actor, context.mask);
-    if (trace.allSolid) {
-      ps.velocity = vec3(ps.velocity.x, ps.velocity.y, 0);
-      return true;
-    }
-    if (trace.fraction > 0) ps.origin = trace.end;
-    if (trace.fraction === 1) break;
-    context.touch(trace);
-    timeLeft = Math.fround(timeLeft - Math.fround(timeLeft * trace.fraction));
-    if (planes.length >= 5) { ps.velocity = vec3(0, 0, 0); return true; }
-    if (trace.contact.kind !== "plane") {
-      throw new Error("Movement impact trace requires a collision plane");
-    }
-    const normal = trace.contact.plane.normal;
-    if (planes.some(plane => dot3(normal, plane) > Math.fround(0.99))) {
-      ps.velocity = add3(ps.velocity, normal);
-      continue;
-    }
-    planes.push(normal);
-    for (const [i, first] of planes.entries()) {
-      const into = dot3(ps.velocity, first);
-      if (into >= 0.1) continue;
-      context.impactSpeed = Math.max(context.impactSpeed, -into);
-      let clipped = clipVelocity(ps.velocity, first);
-      let endClipped = clipVelocity(endVelocity, first);
-      for (const [j, second] of planes.entries()) {
-        if (j === i || dot3(clipped, second) >= 0.1) continue;
-        clipped = clipVelocity(clipped, second);
-        endClipped = clipVelocity(endClipped, second);
-        if (dot3(clipped, first) >= 0) continue;
-        const direction = normalize3(cross3(first, second));
-        clipped = scale3(direction, dot3(direction, ps.velocity));
-        endClipped = scale3(direction, dot3(direction, endVelocity));
-        for (const [k, third] of planes.entries()) {
-          if (k !== i && k !== j && dot3(clipped, third) < 0.1) {
-            ps.velocity = vec3(0, 0, 0);
-            return true;
-          }
-        }
-      }
-      ps.velocity = clipped;
-      endVelocity = endClipped;
-      break;
-    }
-  }
+  let contacts = 0;
+  const stop = sweepBody({
+    read: () => ps, writeOrigin: origin => { ps.origin = origin; }, writeVelocity: (velocity, components) => { ps.velocity = components === "vertical" ? vec3(velocity.x, velocity.y, velocity.z) : velocity; },
+    trace: (start, end) => context.trace(start, end, context.bounds, ps.actor, context.mask),
+    touch: trace => { contacts++; context.touch(trace); }, impact: () => undefined,
+    normal: trace => {
+      if (trace.contact.kind !== "plane") throw new Error("Movement impact trace requires a collision plane");
+      return trace.contact.plane.normal;
+    },
+    stopWhenStill: false, samePlane: (first, second) => first === second,
+    collisionPolicy: { stopOnStartSolid: false, originalVelocity: "initial", creaseVelocity: "current", allSolidVelocity: "zero-z" },
+    duplicatePlane: { threshold: Math.fround(0.99), recover: normal => { ps.velocity = add3(ps.velocity, normal); } },
+    planeResponse: { kind: "paired", seeds: planes, enterThreshold: 0.1,
+      endVelocity: () => endVelocity, writeEndVelocity: value => { endVelocity = value; }, normalize: normalize3,
+      impactSpeed: speed => { context.impactSpeed = Math.max(context.impactSpeed, speed); } },
+    math: { advance: (origin, time, velocity) => add3(origin, scale3(velocity, time)),
+      remaining: (time, fraction) => Math.fround(time - Math.fround(time * fraction)), clip: clipVelocity,
+      dot: dot3, cross: cross3, scale: scale3 },
+  }, context.frameTime);
+  if (stop !== "complete") return true;
   if (gravity) ps.velocity = endVelocity;
   if (ps.pmTime !== 0) ps.velocity = primalVelocity;
-  return bumpCount !== 0;
+  return contacts !== 0;
 }
 
 export function stepSlideMove(context: SlideMoveContext, gravity: boolean): void {

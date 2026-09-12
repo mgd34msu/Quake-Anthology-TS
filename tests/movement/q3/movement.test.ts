@@ -1,3 +1,7 @@
+import { clipVelocity, slideMove } from "../../../src/movement/q3/slide-move.ts";
+import type { SlideMoveContext } from "../../../src/movement/q3/slide-move.ts";
+import type { Vec3 } from "../../../src/contracts/math.ts";
+import type { TraceResult } from "../../../src/contracts/scene.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -96,4 +100,64 @@ test.skipIf(!existsSync(archivePath))("retail q3dm1 movement uses shared collisi
     expect(crouch.state.commandTimeMilliseconds).toBe(198);
     expect(crouch.state.predictableEventSequence).toBeGreaterThan(0);
   } finally { archive.close(); }
+});
+
+
+function slideFixture(velocity: Vec3, normal: Vec3, fraction = 0.5) {
+  const owner = createIdentityOwner("q3-slide-policy");
+  const zero: Vec3 = { x: 0, y: 0, z: 0 };
+  let traces = 0, touches = 0;
+  const context: SlideMoveContext = {
+    state: { commandTime: 0, pmType: 0, bobCycle: 0, pmFlags: 0, pmTime: 0, origin: zero, velocity, gravity: 800, speed: 320,
+      deltaAngles: zero, ground: { kind: "none" }, movementDir: 0, grapplePoint: zero, eFlags: 0, viewangles: zero, viewheight: 26,
+      pmoveFramecount: 0, eventSequence: 0, actor: owner.actor(1, 1), health: 100, flight: false, invulnerable: false, product: "baseq3" },
+    frameTime: 0.1, bounds: Q3_SOURCE_STANDING_BOUNDS, mask: 1, groundNormal: null, impactSpeed: 0,
+    trace: (start, end): TraceResult => {
+      traces++;
+      const step = traces === 1 ? fraction : 1;
+      const plane = { normal, distance: 0, type: 3, signbits: 0 };
+      return { kind: "q3", fraction: step, end: { x: Math.fround(start.x + Math.fround((end.x - start.x) * step)),
+        y: Math.fround(start.y + Math.fround((end.y - start.y) * step)), z: Math.fround(start.z + Math.fround((end.z - start.z) * step)) },
+        allSolid: false, startSolid: false, contact: { kind: "plane", plane }, sourcePlane: plane,
+        hit: step === 1 ? { kind: "none" } : { kind: "world", model: 0 }, contents: 1, surfaceFlags: 0 };
+    }, touch: () => { touches++; }, event: () => undefined,
+  };
+  return { context, touches: () => touches, traces: () => traces };
+}
+
+test("Q3 shared sweep clips gravity end velocity separately and restores timed primal velocity", () => {
+  const wall = { x: -1, y: 0, z: 0 };
+  for (const timer of [0, 10]) {
+    const fixture = slideFixture({ x: 100, y: 0, z: 100 }, wall), context = fixture.context;
+    context.state.pmTime = timer;
+    expect(slideMove(context, true)).toBe(true);
+    expect(context.state.velocity).toEqual(timer === 0 ? clipVelocity({ x: 100, y: 0, z: 20 }, wall) : { x: 100, y: 0, z: 20 });
+    expect(context.state.origin.z).toBe(6);
+    expect(context.impactSpeed).toBe(100);
+    expect(fixture.touches()).toBe(1);
+  }
+});
+
+test("Q3 retains seeded planes after progress and nudges velocity on a duplicate ground plane", () => {
+  const normal = { x: 0, y: 0, z: 1 }, fixture = slideFixture({ x: 5, y: 0, z: 0 }, normal);
+  const context = { ...fixture.context, groundNormal: normal };
+  expect(slideMove(context, false)).toBe(true);
+  expect(context.state.velocity).toEqual({ x: 5, y: 0, z: 1 });
+  expect(fixture.traces()).toBe(2);
+});
+
+test("Q3 triple-plane stop bypasses timed velocity restoration", () => {
+  const fixture = slideFixture({ x: 0, y: -1, z: 0 }, { x: -0.5, y: Math.fround(Math.sqrt(0.75)), z: 0 });
+  const context = { ...fixture.context, groundNormal: { x: 1, y: 0, z: 0 } };
+  context.state.pmTime = 10;
+  expect(slideMove(context, false)).toBe(true);
+  expect(context.state.velocity).toEqual({ x: 0, y: 0, z: 0 });
+  expect(fixture.traces()).toBe(1);
+});
+
+test("Q3 records a touch before rejecting a missing collision plane", () => {
+  const fixture = slideFixture({ x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 });
+  const context: SlideMoveContext = { ...fixture.context, trace: (...args) => ({ ...fixture.context.trace(...args), contact: { kind: "none" } }) };
+  expect(() => slideMove(context, false)).toThrow("Movement impact trace requires a collision plane");
+  expect(fixture.touches()).toBe(1);
 });
