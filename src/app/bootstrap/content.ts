@@ -50,7 +50,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     map: { geometry: { content: product.id, path: options.map }, entities: provider },
     campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
     character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, provider, match), enemies: { kind: "map-defined" },
-    presentation: { assets: product.id, hud: provider, effects: provider, audio: provider },
+    presentation: { environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
     execution: [execution(provider, family, rerelease)],
     timing: [providerTiming, nativeProviderTiming(movement, options.movement, false), nativeProviderTiming(character, options.character, false)],

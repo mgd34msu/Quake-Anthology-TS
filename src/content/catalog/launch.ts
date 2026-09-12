@@ -50,7 +50,7 @@ function requiredContent(launch: SelectedLaunch): readonly ContentId[] {
     launch.presentation.hud, launch.presentation.effects, launch.presentation.audio, ...launch.execution.map(module => module.owner)];
   if (launch.campaign.kind === "campaign") references.push(launch.campaign.mission, launch.campaign.gamecode);
   references.push(...selectedMonsterDefinitions(launch.enemies).map(definition => definition.source));
-  return [...new Set([launch.map.geometry.content, launch.presentation.assets, ...references.map(reference => reference.content),
+  return [...new Set([launch.map.geometry.content, launch.presentation.assets, ...(launch.presentation.environment.kind === "selected" ? [launch.presentation.environment.resource.content] : []), ...references.map(reference => reference.content),
     ...launch.execution.flatMap(module => module.kind === "typescript" ? [] : [module.artifact.content])])];
 }
 
@@ -118,6 +118,7 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
     { kind: "weapon", requests: selectedWeaponResources(selected.map.entities, selected.weapons, options.catalog) },
     { kind: "equipment", requests: equipmentResources(selected.equipment) },
     { kind: "monster", requests: monsterResources(selected.enemies) },
+    { kind: "environment", requests: selected.presentation.environment.kind === "selected" ? [selected.presentation.environment.resource] : [] },
   ];
   for (const group of sourceResources) {
     for (const content of new Set(group.requests.map(request => request.content))) {

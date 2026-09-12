@@ -15,7 +15,7 @@ function preset(catalog: InstalledCatalog, product: string, map: string): Launch
   return { id: "recipe:equipment:1", map: { geometry: { content, path: map }, entities: provider },
     campaign: { kind: "campaign", mission: provider, gamecode: provider }, movement: provider,
     character: { definition: provider, appearance: provider }, weapons: [provider], equipment: disabledEquipment(), enemies: { kind: "map-defined" },
-    presentation: { assets: content, hud: provider, effects: provider, audio: provider }, engineBehavior: provider,
+    presentation: { environment: { kind: "audio-content" }, assets: content, hud: provider, effects: provider, audio: provider }, engineBehavior: provider,
     combat: provider, inventory: provider, match: provider, transition: provider, execution: [], timing: [],
     ordering: { kind: "mixed", providers: [provider.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }

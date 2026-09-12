@@ -213,7 +213,13 @@ export interface EquipmentSelection {
   readonly handGrenades: HandGrenadeSelection;
 }
 
+export type EnvironmentSelection =
+  | { readonly kind: "audio-content" }
+  | { readonly kind: "disabled" }
+  | { readonly kind: "selected"; readonly resource: ResourceRequest };
+
 export interface PresentationSelection {
+  readonly environment: EnvironmentSelection;
   readonly assets: ContentId;
   readonly hud: ProviderReference;
   readonly effects: ProviderReference;

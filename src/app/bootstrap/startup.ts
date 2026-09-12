@@ -106,7 +106,7 @@ export class StartupApplication {
       router.attachWindow(native.window);
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
       const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
-      const presentation: PresentationSelection = { assets: product.id, hud: provider, effects: provider, audio: provider };
+      const presentation: PresentationSelection = { environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider };
       this.graphics = { display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads,
         draw: () => {
           const viewport = { x: 0, y: 0, ...native.window.drawableSize };

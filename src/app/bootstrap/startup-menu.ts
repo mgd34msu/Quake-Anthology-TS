@@ -92,8 +92,9 @@ export class StartupMenu {
       this.button("apply-display", "Apply display settings", 5, options.applyDisplay, true), this.back(),
     ]);
     for (const [id, category] of [[soundMenu, "audio"], [controlsMenu, "input"]] satisfies readonly (readonly [UiMenuId, string])[])
-      this.register(id, () => [...(options.settings ?? []).filter(binding => binding.category === category)
-        .map((binding, index) => settingControl(binding, { x: 64, y: 118 + index * 38, width: 512, height: 34 }, options.seat)), this.back()]);
+      this.register(id, () => [...(category === "audio" ? this.rows(["environment"]).map((row, index) => this.row(row, index)) : []),
+        ...(options.settings ?? []).filter(binding => binding.category === category)
+          .map((binding, index) => settingControl(binding, { x: 64, y: 118 + (index + (category === "audio" ? 1 : 0)) * 38, width: 512, height: 34 }, options.seat)), this.back()]);
     this.register(selectMenu, () => {
       const row = this.selectionRow();
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));

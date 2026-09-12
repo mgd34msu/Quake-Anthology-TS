@@ -16,7 +16,7 @@ import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
 import { applicationPreset } from "./content.ts";
 import type { ApplicationOptions } from "./options.ts";
 
-export type StartupSelectionField = "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer" | "gamma" | "resolution";
+export type StartupSelectionField = "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer" | "gamma" | "resolution";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
@@ -54,7 +54,7 @@ export class StartupSelectionModel {
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, map: initial.map,
       movement: baseProduct(initial.movement), character: baseProduct(initial.character), model: initial.characterModel,
-      weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
+      environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer, gamma: String(initial.gamma), resolution: `${initial.width}x${initial.height}` };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
@@ -237,7 +237,9 @@ export class StartupSelectionModel {
         for (const binding of ["slot", "offhand"]) grapples.push(choice(`${id}/${binding}`, `${product.expectation.title} — ${binding === "slot" ? "weapon slot" : "offhand"}`, unavailable(product)));
       }
     }
-    return [row("product", "Campaign / map pack", this.catalog.products.map(productChoice)),
+    const environmentProduct = this.catalog.product("q2-rerelease-baseq2");
+    return [row("environment", "Environment", [choice("disabled", "Off"), choice("audio-content", "Game default"),
+      choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("product", "Campaign / map pack", this.catalog.products.map(productChoice)),
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))]),
       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
@@ -306,7 +308,10 @@ export class StartupSelectionModel {
     const timing = base.timing.map(profile => profile.provider === movement.provider
       ? movementProduct.expectation.id === "q1-quakeworld" ? { ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number] : movementTiming
       : profile.provider === character.provider ? nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease") : profile);
-    const preset = { ...base, timing };
+    const environment: ExecutableRecipe["presentation"]["environment"] = this.values.environment === "audio-content" || this.values.environment === "disabled"
+      ? { kind: this.values.environment }
+      : { kind: "selected", resource: { content: this.catalog.require(this.values.environment).id, path: "sound/default.environments" } };
+    const preset = { ...base, timing, presentation: { ...base.presentation, environment } };
     let selections: LaunchChoice = { ...presetChoice(preset.id), map: { kind: "selected", value: { geometry: { content: mapContent.id, path: options.map }, entities: base.map.entities } },
       movement: { kind: "selected", value: movement }, character: { kind: "selected", value: { definition: character, appearance: { provider: `${options.character}:model/${options.characterModel}`, content: character.content } } } };
     const campaign: CampaignSelection = options.mode === "deathmatch" ? { kind: "none" } : base.campaign;

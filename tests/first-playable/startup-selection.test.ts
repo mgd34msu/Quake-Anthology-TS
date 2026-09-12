@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
+import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
+import { openMountPlan } from "../../src/content/mounts/index.ts";
+import { applicationPreset } from "../../src/app/bootstrap/content.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 
 const corpus = resolve(import.meta.dir, "../../../qfiles");
@@ -59,7 +61,6 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   const { StartupMenu } = await import("../../src/app/bootstrap/startup-menu.ts");
   const { createIdentityOwner } = await import("../../src/contracts/identity.ts");
   const { createMountPlanId } = await import("../../src/contracts/content.ts");
-  const { openMountPlan } = await import("../../src/content/mounts/index.ts");
   const { SceneImageRegistry } = await import("../../src/render/scene/resources.ts");
   const { loadMenuFont } = await import("../../src/app/bootstrap/menu-font.ts");
   const { loadNativeUiArt } = await import("../../src/ui/common/index.ts");
@@ -93,6 +94,19 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
   try {
+    click(3); click(1);
+    expect(menu.controller.activeMenu).toBe("menu:startup:sound");
+    click(0); click(2);
+    expect(menu.controller.activeMenu).toBe("menu:startup:sound");
+    expect(model.rows().find(row => row.id === "environment")?.value).toBe("q2-rerelease-baseq2");
+    const soundRecipe = (await model.resolve()).recipe;
+    expect(soundRecipe.presentation.audio.content).toBe(catalog.require("q1-classic-id1").id);
+    expect(soundRecipe.presentation.environment).toEqual({ kind: "selected", resource: { content: catalog.require("q2-rerelease-baseq2").id, path: "sound/default.environments" } });
+    click(0); click(0);
+    expect((await model.resolve()).recipe.presentation.environment).toEqual({ kind: "disabled" });
+    click(0); click(1);
+    expect((await model.resolve()).recipe.presentation.environment).toEqual({ kind: "audio-content" });
+    menu.controller.closeMenu(); menu.controller.closeMenu();
     click(0); click(2); click(1); click(1);
     await model.prepareMonsterRoster();
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
@@ -129,3 +143,36 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     expect(model.rows().find(row => row.id === "enemies")?.value).toBe("native");
   } finally { menu.close(); art.close(); font.close(); mounted.close(); }
 }, 60000);
+
+
+test.skipIf(!existsSync(corpus))("environment resources retain native sound selection and reject missing selected data", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const environmentContent = catalog.require("q2-rerelease-baseq2").id;
+  for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q3-baseq3", "q3dm1"]]) {
+    if (game === undefined || map === undefined) throw new Error("Missing actual map pair");
+    const command = parseApplicationCommand(["--content-root", corpus, "--game", game, "--map", map]);
+    if (command.kind !== "run") throw new Error("Expected actual map command");
+    const preset = applicationPreset(catalog, command.options);
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation,
+      environment: { kind: "selected", resource: { content: environmentContent, path: "sound/default.environments" } } } } } });
+    expect(recipe.presentation.audio).toEqual(preset.presentation.audio);
+    const baseline = await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
+    using nativeMounts = await openMountPlan(baseline.mounts);
+    using selectedMounts = await openMountPlan(recipe.mounts);
+    const entries = catalog.require(game).archives.flatMap(archive => archive.entries);
+    const patterns = game === "q1-classic-id1" ? [/^progs\/.*\.mdl$/i, /^gfx\.wad$/i, /^sound\/.*\.wav$/i]
+      : [/^models\/.*\.md3$/i, /^textures\/.*\.(tga|jpg)$/i, /^sound\/.*\.wav$/i];
+    for (const pattern of patterns) {
+      const path = entries.find(entry => pattern.test(entry.path))?.path;
+      if (path === undefined) throw new Error("Missing actual native media category");
+      const original = await nativeMounts.resolve(path), selected = await selectedMounts.resolve(path);
+      if (original === null || selected === null) throw new Error(`Missing native media ${path}`);
+      expect(original.provenance.mount.identity.content).toBe(preset.presentation.audio.content);
+      expect(selected.provenance).toEqual(original.provenance);
+      expect(selected.digest).toEqual(original.digest);
+    }
+    expect(recipe.resources.find(resource => resource.requestedPath === "sound/default.environments")?.provenance.mount.identity.content).toBe(environmentContent);
+    await expect(resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation, effects: { provider: "q2:official", content: environmentContent },
+      environment: { kind: "selected", resource: { content: preset.presentation.audio.content, path: "sound/default.environments" } } } } } })).rejects.toThrow("Required environment resource is absent from its selected content and base");
+  }
+}, 30000);

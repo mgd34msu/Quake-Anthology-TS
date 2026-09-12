@@ -69,9 +69,16 @@ export class ApplicationAudio {
   }
 
   async prepareEnvironment(scene: SceneQueries): Promise<void> {
-    const mounts = await this.content.forContent(this.content.recipe.presentation.audio.content);
-    const resource = await mounts.resolve("sound/default.environments");
-    if (resource === null) return;
+    const selection = this.content.recipe.presentation.environment;
+    if (selection.kind === "disabled") return;
+    const request = selection.kind === "selected" ? selection.resource
+      : { content: this.content.recipe.presentation.audio.content, path: "sound/default.environments" };
+    const mounts = await this.content.forContent(request.content);
+    const resource = await mounts.resolve(request.path);
+    if (resource === null) {
+      if (selection.kind === "selected") throw new Error(`Required environment resource is missing: ${request.content}/${request.path}`);
+      return;
+    }
     const definitions = parseEnvironments(new TextDecoder().decode(await mounts.read(resource)), text => this.print(text));
     const timing = this.content.recipe.timing.find(value => value.provider === this.content.recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Audio geometry has no numeric profile");

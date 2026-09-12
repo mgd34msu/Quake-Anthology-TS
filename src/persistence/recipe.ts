@@ -1,4 +1,4 @@
-import type { ArchiveMount, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
+import type { ArchiveMount, EnvironmentSelection, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
 import { readApi, readNativeAbi } from "./execution.ts";
 import { readClock, readDigest, readNumeric, readOrdering } from "./shared.ts";
@@ -66,8 +66,15 @@ function readEnemies(reader: SaveReader): EnemySelection {
   return { kind: "replace", default: definition(reader.field("default")),
     byClassname: Object.fromEntries(Object.keys(overrides.value).map(name => [name, definition(overrides.field(name))])) };
 }
+function readEnvironment(reader: SaveReader): EnvironmentSelection {
+  if (reader.value === undefined) return { kind: "audio-content" };
+  const kind = reader.field("kind").choice("audio-content", "disabled", "selected");
+  if (kind !== "selected") return { kind };
+  const resource = reader.field("resource");
+  return { kind, resource: { content: readContentId(resource.field("content")), path: resource.field("path").string() } };
+}
 function readPresentation(reader: SaveReader): PresentationSelection {
-  return { assets: readContentId(reader.field("assets")), hud: readProvider(reader.field("hud")), effects: readProvider(reader.field("effects")), audio: readProvider(reader.field("audio")) };
+  return { environment: readEnvironment(reader.field("environment")), assets: readContentId(reader.field("assets")), hud: readProvider(reader.field("hud")), effects: readProvider(reader.field("effects")), audio: readProvider(reader.field("audio")) };
 }
 function readExecution(reader: SaveReader): ResolvedExecutionModule {
   const owner = readProvider(reader.field("owner"));

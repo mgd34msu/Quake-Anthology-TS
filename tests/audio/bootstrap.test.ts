@@ -131,7 +131,7 @@ test("measured audio work respects explicit lookahead and the device queue limit
 });
 
 
-test("actual Q2 rerelease reverb uses native and foreign geometry without tracing the listener", async () => {
+test("explicit Quake II environments preserve native Q1 and Q3 audio and trace actual geometry", async () => {
   const corpus = join(import.meta.dir, "../../../qfiles");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   const audioContent = catalog.require("q2-rerelease-baseq2").id;
@@ -150,12 +150,14 @@ test("actual Q2 rerelease reverb uses native and foreign geometry without tracin
     original.call(this, seat, definitions, trace);
   };
   try {
-    for (const [game, map] of [["q2-rerelease-baseq2", "base1"], ["q1-classic-id1", "e1m1"]]) {
+    for (const [game, map] of [["q2-rerelease-baseq2", "base1"], ["q1-classic-id1", "e1m1"], ["q3-baseq3", "q3dm1"]]) {
       if (game === undefined || map === undefined) throw new Error("Missing actual map pair");
       const command = parseApplicationCommand(["--content-root", corpus, "--game", game, "--map", map, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200"]);
       if (command.kind !== "run") throw new Error("Expected actual map command");
       const preset = applicationPreset(catalog, command.options);
-      const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation, audio: { provider: "q2:official", content: audioContent } } } } });
+      const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), presentation: { kind: "selected", value: { ...preset.presentation, environment: { kind: "selected", resource: { content: audioContent, path: "sound/default.environments" } } } } } });
+      expect(recipe.presentation.audio).toEqual(preset.presentation.audio);
+      expect(recipe.resources.find(resource => resource.requestedPath === "sound/default.environments")?.provenance.mount.identity.content).toBe(audioContent);
       const application = await Application.open(command.options, { print: () => undefined }, recipe);
       try {
         await application.step(100);
@@ -175,7 +177,7 @@ test("actual Q2 rerelease reverb uses native and foreign geometry without tracin
         expect(air.fraction).toBe(1);
         expect(air.material).toBeNull();
         const world = application.content.world;
-        if (world.kind === "q3-bsp") throw new Error("Unexpected fixture geometry");
+        if (world.kind !== "q3-bsp") {
         let skyHits = 0;
         for (const face of world.faces) {
           const info = world.textureInfo[face.textureInfo];
@@ -198,11 +200,12 @@ test("actual Q2 rerelease reverb uses native and foreign geometry without tracin
           if (hit.sky && hit.fraction < 1) { skyHits++; break; }
         }
         expect(skyHits).toBeGreaterThan(0);
+        }
         const configurations = traces.length;
         await application.step(100);
         expect(traces).toHaveLength(configurations);
       } finally { await application.close(); }
     }
-    expect(traces).toHaveLength(2);
+    expect(traces).toHaveLength(3);
   } finally { UnifiedAudio.prototype.setEnvironment = original; EnvironmentReverb.prototype.update = update; }
-}, 30000);
+}, 45000);
