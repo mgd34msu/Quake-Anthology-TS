@@ -16,16 +16,17 @@ import { ConnectionState } from "../../../src/content/q3/base/game/state.ts";
 import { EngineSession } from "../../../src/world/session/session.ts";
 import { tokenizeCommand } from "../../../src/core/commands/text.ts";
 import { navigationWorld, profile } from "../navigation/prediction.ts";
-import { BotCharacteristic, BotInventory } from "../../../src/bots/behavior/q3/ai-definitions.ts";
+import { BotCharacteristic, BotInventory, BotModelIndex } from "../../../src/bots/behavior/q3/ai-definitions.ts";
 import { arenaPrediction } from "./arena-prediction.ts";
 import { GameAiContext } from "../../../src/bots/behavior/q3/ai-context.ts";
 import { BotState } from "../../../src/bots/behavior/q3/ai-state.ts";
 import { botAttackMove } from "../../../src/bots/behavior/q3/ai-navigation.ts";
-import { botChooseWeapon } from "../../../src/bots/behavior/q3/ai-combat.ts";
+import { botChooseWeapon, botBattleUseItems, updateQ3BotItemInventory } from "../../../src/bots/behavior/q3/ai-combat.ts";
 import { createBotArsenalKnowledge } from "../../../src/bots/behavior/q3/arsenal-knowledge.ts";
 import { q3BotGame } from "../../../src/bots/behavior/q3/source-game.ts";
 import { createQ2BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q2-knowledge.ts";
-import { WeaponState } from "../../../src/content/q3/base/shared/definitions.ts";
+import { WeaponState, Powerup, statSchema } from "../../../src/content/q3/base/shared/definitions.ts";
+import { BotActionFlag } from "../../../src/bots/behavior/library/actions.ts";
 import { BotMoveFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
@@ -102,6 +103,26 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       if (q2Content !== null) q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
         world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
       const library = bots.director.library, original = bots.director.ai.context;
+      const items = new BotState("baseq3"); items.client = brain.client; items.curPs.copyFrom(player.ps);
+      items.inventory[65] = 1; items.inventory[97] = 13;
+      const schema = statSchema("baseq3");
+      items.curPs.stats.set(schema.health, 35);
+      items.curPs.powerups.set(Powerup.PW_QUAD, 1);
+      for (const model of [BotModelIndex.MEDKIT, BotModelIndex.TELEPORTER, 0]) {
+        items.curPs.stats.set(schema.holdableItem, model);
+        updateQ3BotItemInventory(items);
+        expect(items.inventory[BotInventory.HEALTH]).toBe(35);
+        expect(items.inventory[BotInventory.MEDKIT]).toBe(Number(model === BotModelIndex.MEDKIT));
+        expect(items.inventory[BotInventory.TELEPORTER]).toBe(Number(model === BotModelIndex.TELEPORTER));
+        expect(items.inventory[BotInventory.QUAD]).toBe(1);
+        expect(items.inventory[65]).toBe(1); expect(items.inventory[97]).toBe(13);
+        library.actions.resetInput(items.client);
+        botBattleUseItems(original, items);
+        expect(library.actions.getInput(items.client, 0).actionFlags & BotActionFlag.USE).toBe(model === 0 ? 0 : BotActionFlag.USE);
+      }
+      items.curPs.powerups.set(Powerup.PW_QUAD, 0); updateQ3BotItemInventory(items);
+      expect(items.inventory[BotInventory.QUAD]).toBe(0);
+      library.actions.resetInput(items.client);
       const walkEdge = graph.edges.find(edge => edge.mode === "walk");
       if (walkEdge === undefined) throw new Error("Retail arena has no walking reachability");
       const moveHandle = library.moveStates.allocate(), moveState = library.moveStates.fromHandle(moveHandle);

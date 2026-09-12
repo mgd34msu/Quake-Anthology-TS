@@ -183,6 +183,11 @@ export function updateQ3BotInventory(state: BotState): void {
     if (state.product === "baseq3" && weapon > Weapon.WP_GRAPPLING_HOOK) continue;
     state.inventory[index] = ps.ammo.get(weapon);
   }
+  updateQ3BotItemInventory(state);
+}
+
+export function updateQ3BotItemInventory(state: BotState): void {
+  const ps = state.curPs, schema = statSchema(state.product);
   state.inventory[BotInventory.HEALTH] = ps.stats.get(schema.health);
   for (const [index, model] of holdableInventory) {
     if (state.product === "baseq3" && index > BotInventory.MEDKIT) continue;
