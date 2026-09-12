@@ -1,3 +1,4 @@
+import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { BotArsenalData, BotArsenalKnowledge, BotWeaponKnowledge, BotWeaponTactics } from "./game-host.ts";
 import type { BotLibrary } from "./library.ts";
 import type { BotState } from "./ai-state.ts";
@@ -72,6 +73,23 @@ export function createBotArsenalKnowledge(data: BotArsenalData): BotArsenalKnowl
   const refresh = (library: BotLibrary, handle: number): readonly BotWeaponKnowledge[] => { candidates = data.candidates(library, handle); return candidates; };
   return {
     updateInventory: state => data.updateInventory(state),
+    pickupUtility(library, state, preview) {
+      if (!preview.accepted) return 0;
+      const supplies = refresh(library, state.ws).flatMap(candidate => candidate.info.valid && candidate.supply !== null ? [candidate.supply] : []);
+      const newWeapons = new Set<ItemId>();
+      for (const receipt of preview.weapons) if (receipt.before <= 0 && receipt.given > 0
+        && supplies.some(supply => supply.weapon === receipt.item)) newWeapons.add(receipt.item);
+      const ammoCosts = new Map<ItemId, number>();
+      for (const supply of supplies) {
+        if ((!supply.owned && !newWeapons.has(supply.weapon)) || supply.ammo === null || supply.ammo.perShot <= 0) continue;
+        ammoCosts.set(supply.ammo.item, Math.min(ammoCosts.get(supply.ammo.item) ?? Infinity, supply.ammo.perShot));
+      }
+      const ammoGiven = new Map<ItemId, number>();
+      for (const receipt of preview.ammo) if (receipt.given > 0) ammoGiven.set(receipt.item, (ammoGiven.get(receipt.item) ?? 0) + receipt.given);
+      let utility = newWeapons.size * 100;
+      for (const [item, given] of ammoGiven) { const cost = ammoCosts.get(item); if (cost !== undefined) utility += given / cost; }
+      return utility;
+    },
     weaponInfo(library, handle, weapon) { return refresh(library, handle).find(candidate => candidate.info.number === weapon)?.info; },
     tactics: weapon => tactics(candidates.find(candidate => candidate.info.number === weapon)),
     activationWeapon(library, state) {

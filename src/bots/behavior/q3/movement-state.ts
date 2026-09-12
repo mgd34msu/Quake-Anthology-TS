@@ -4,6 +4,7 @@ import { vec3 } from "../../../core/math.ts";
 import type { Vec3 } from "../../../core/math.ts";
 import { BotMemory } from "../library/memory.ts";
 import type { BotMemoryAllocation } from "../library/memory.ts";
+import type { NavigationEdge } from "../../navigation/types.ts";
 
 export const MAX_MOVE_STATES = 64;
 export const MAX_AVOID_REACH = 1;
@@ -117,6 +118,7 @@ export class BotAvoidSpot {
 
 /** The source bot_movestate_t record, shared with subsequent travel execution. */
 export class BotMoveState {
+  walkProgress: { readonly edge: NavigationEdge; readonly phase: "traverse" } | null = null;
   readonly #memory: BotMemory;
   readonly #allocation: MoveStorage;
   readonly #origin;
@@ -166,7 +168,10 @@ export class BotMoveState {
   get lastGoalArea(): number { return moveData(this.#allocation).getInt32(72, true); }
   set lastGoalArea(value: number) { moveData(this.#allocation).setInt32(72, value, true); }
   get lastReachability(): number { return moveData(this.#allocation).getInt32(76, true); }
-  set lastReachability(value: number) { moveData(this.#allocation).setInt32(76, value, true); }
+  set lastReachability(value: number) {
+    if (value !== this.lastReachability) this.walkProgress = null;
+    moveData(this.#allocation).setInt32(76, value, true);
+  }
   get lastOrigin(): ReturnType<typeof moveVector> { return this.#lastOrigin; }
   set lastOrigin(value: Vec3) { writeMoveVector(this.#allocation, 80, value); }
   get reachArea(): number { return moveData(this.#allocation).getInt32(92, true); }
@@ -186,6 +191,7 @@ export class BotMoveState {
 
   /** Memset of the existing record preserves slot/array ownership. */
   reset(): void {
+    this.walkProgress = null;
     this.#allocation.allocation.bytes.fill(0);
   }
 
@@ -238,6 +244,7 @@ export class BotMoveStateStore {
   }
   initialize(handle: number, input: BotInitMove): void {
     const state = this.fromHandle(handle); if (state === null) return;
+    if ((input.orMoveFlags & BotMoveFlag.TELEPORTED) !== 0) state.walkProgress = null;
     state.origin = vec3(input.origin.x, input.origin.y, input.origin.z);
     state.velocity = vec3(input.velocity.x, input.velocity.y, input.velocity.z);
     state.viewOffset = vec3(input.viewOffset.x, input.viewOffset.y, input.viewOffset.z);

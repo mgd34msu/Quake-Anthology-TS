@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+import type { ActorId } from "../../../contracts/identity.ts";
 import { add3, sub3, scale3, length3, type Vec3, type Bounds } from "../../../core/math.ts";
 import { float32ToBits } from "../../../core/numeric.ts";
 import { ScriptLanguageError, type ScriptDiagnostic, type ScriptToken, type SourceLocation } from "../../../ui/common/legacy/script/lexer.ts";
@@ -336,7 +337,29 @@ export interface GoalNavigation {
     { readonly kind: "found"; readonly travelTime: number } | { readonly kind: "unreachable" };
 }
 
+export const SOURCE_GOAL_NUMBER_MIN = 0x40000000;
+export function isSourceGoalNumber(number: number): boolean {
+  return Number.isInteger(number) && number >= SOURCE_GOAL_NUMBER_MIN && number <= 0x7fffffff;
+}
+export type SourceGoalStatus = "native" | "available" | "unavailable";
+export interface SourcePickupGoal {
+  readonly actor: ActorId;
+  readonly entity: number;
+  readonly origin: Vec3;
+  readonly bounds: Bounds;
+  readonly name: string;
+  readonly utility: number;
+}
+export interface SourcePickupGoals {
+  candidates(client: number): readonly SourcePickupGoal[];
+  inspect(client: number, actor: ActorId): SourcePickupGoal | null;
+}
+interface SourceGoalBinding { readonly actor: ActorId; name: string; goal: BotGoal; }
+type ItemCandidate = { readonly kind: "native"; readonly item: LevelItem }
+  | { readonly kind: "source"; readonly goal: BotGoal; readonly utility: number };
+
 export interface GoalWorld {
+  readonly sourcePickups?: SourcePickupGoals;
   readonly bspEntities: AasBspEntities;
   readonly navigation: GoalNavigation | null;
   readonly host: GoalWorldHost;
@@ -611,6 +634,8 @@ export class BotGoalLibrary {
   private config: ItemConfig | null = null;
   private configuredGameType = 0;
   private world: GoalWorld | null = null;
+  private readonly sourceGoals = new Map<number, SourceGoalBinding>();
+  private nextSourceGoal = 0x7fffffff;
   private levelItemHeap: BotMemoryAllocation | null = null;
   // Source globals: levelitems, freelevelitems, numlevelitems, maplocations, campspots.
   private readonly mapWords = new DataView(new ArrayBuffer(20));
@@ -858,6 +883,7 @@ export class BotGoalLibrary {
     this.config?.free();
     this.config = null;
     this.world = null;
+    this.sourceGoals.clear();
     if (this.levelItemHeap !== null) this.memory.free(this.levelItemHeap);
     this.levelItemHeap = null;
     this.levelHead = 0;
@@ -939,6 +965,7 @@ export class BotGoalLibrary {
   initLevelItems(world: GoalWorld | null = this.world): void {
     if (world === null) throw new Error("BotInitLevelItems requires a retained goal world");
     this.world = world;
+    this.sourceGoals.clear();
     const revision = this.mapRevision + 1;
     this.initInfoEntities(world);
     if (revision !== this.mapRevision) return;
@@ -997,6 +1024,7 @@ export class BotGoalLibrary {
       const item = this.allocLevelItem();
       if (item === null) return;
       item.number = ++this.initialItemCount;
+      this.validateSourceGoalRange();
       item.timeout = 0; item.entity = 0; item.flags = 0;
       if (bsp.int(entity, "notfree").value !== 0) item.flags |= 1;
       if (bsp.int(entity, "notteam").value !== 0) item.flags |= 2;
@@ -1026,9 +1054,16 @@ export class BotGoalLibrary {
     this.report("message", `found ${this.initialItemCount} level items\n`);
   }
 
-  goalName(number: number): string { return this.config === null ? "" : this.findLevelItem(item => item.number === number)?.info.name ?? ""; }
+  goalName(number: number): string {
+    if (isSourceGoalNumber(number)) return this.sourceGoals.get(number)?.name ?? "";
+    return this.config === null ? "" : this.findLevelItem(item => item.number === number)?.info.name ?? ""; }
 
   writeGoalName(number: number, found: (name: string) => undefined, missing: () => undefined): void {
+    if (isSourceGoalNumber(number)) {
+      const source = this.sourceGoals.get(number);
+      if (source === undefined) missing(); else found(source.name);
+      return;
+    }
     if (this.config === null) return;
     const item = this.findLevelItem(candidate => candidate.number === number);
     if (item === undefined) missing();
@@ -1039,6 +1074,7 @@ export class BotGoalLibrary {
   getLevelItemGoal(index: number, name: string | ((candidate: string) => boolean), prior: BotGoal = blankGoal()): BotGoal | null {
     if (this.config === null) return null;
     let pointer = this.levelHead;
+    if (isSourceGoalNumber(index)) return this.nextSourceItemGoal(index, name, prior);
     if (index >= 0) {
       const previous = this.findLevelItem(item => item.number === index);
       if (previous === undefined) return null;
@@ -1051,7 +1087,7 @@ export class BotGoalLibrary {
       }
       pointer = item.next;
     }
-    return null;
+    return this.nextSourceItemGoal(null, name, prior);
   }
 
   /** Map and camp queries preserve prior number/flags/itemInfo, or initialize them to zero. */
@@ -1135,6 +1171,8 @@ export class BotGoalLibrary {
   }
 
   itemGoalInVisButNotVisible(viewer: number, eye: Vec3, _viewAngles: Vec3, goal: BotGoal): boolean {
+    const source = this.sourceGoalStatus(viewer, goal);
+    if (source !== "native") return source === "unavailable";
     if ((goal.flags & GoalFlags.Item) === 0 || this.world === null) return false;
     // be_ai_goal.c:1647 adds mins to mins, not mins to maxs. Preserve its corner target.
     const middle = add3(goal.origin, scale3(add3(goal.mins, goal.mins), 0.5));
@@ -1153,35 +1191,94 @@ export class BotGoalLibrary {
     if (area === 0) return false;
     const longTermTime = choice.kind === "nearby" && choice.longTermGoal !== null ? this.travelTime(navigation, area, origin, choice.longTermGoal.area, travelFlags) : 99999;
     if (this.config === null) return false;
-    let bestWeight = 0, best: LevelItem | null = null;
-    for (const item of this.levelItems()) {
-      if (!this.allowed(item.flags) || (item.flags & 8) !== 0 || item.goalArea === 0 || (item.entity === 0 && (item.flags & 16) === 0)) continue;
-      const indexes = state.weightIndexes;
-      if (indexes === null) throw new RangeError("item weight indexes have not been initialized");
-      const indexView = allocationView(indexes), offset = item.info.number * 4;
-      if (!Number.isInteger(offset) || offset < 0 || offset + 4 > indexView.byteLength) throw new RangeError("item weight index is stale for the current item configuration");
-      const index = indexView.getInt32(offset, true);
-      if (index < 0) continue;
-      let weight = state.weightConfig.evaluateUndecided(index, inventory, this.options.random);
-      if (item.timeout !== 0) weight = Math.fround(weight + Math.fround(this.options.droppedWeight?.() ?? 1000));
-      if ((item.flags & 16) !== 0) weight = Math.fround(weight * item.weight);
+    let bestWeight = 0, best: ItemCandidate | null = null;
+    for (const candidate of this.itemCandidates(state.client)) {
+      let weight: number;
+      if (candidate.kind === "native") {
+        const item = candidate.item;
+        if (!this.allowed(item.flags) || (item.flags & 8) !== 0 || item.goalArea === 0 || (item.entity === 0 && (item.flags & 16) === 0)) continue;
+        const indexes = state.weightIndexes;
+        if (indexes === null) throw new RangeError("item weight indexes have not been initialized");
+        const indexView = allocationView(indexes), offset = item.info.number * 4;
+        if (!Number.isInteger(offset) || offset < 0 || offset + 4 > indexView.byteLength) throw new RangeError("item weight index is stale for the current item configuration");
+        const index = indexView.getInt32(offset, true);
+        if (index < 0) continue;
+        weight = state.weightConfig.evaluateUndecided(index, inventory, this.options.random);
+        if (item.timeout !== 0) weight = Math.fround(weight + Math.fround(this.options.droppedWeight?.() ?? 1000));
+        if ((item.flags & 16) !== 0) weight = Math.fround(weight * item.weight);
+      } else weight = Math.fround(candidate.utility);
       if (!(weight > 0)) continue;
-      const time = this.travelTime(navigation, area, origin, item.goalArea, travelFlags);
+      const goalArea = candidate.kind === "native" ? candidate.item.goalArea : candidate.goal.area;
+      const number = candidate.kind === "native" ? candidate.item.number : candidate.goal.number;
+      const time = this.travelTime(navigation, area, origin, goalArea, travelFlags);
       if (time <= 0 || (choice.kind === "nearby" && !(time < Math.fround(choice.maxTime)))) continue;
-      if (this.avoidGoalTime(handle, item.number) - time * 0.009 > 0) continue;
+      if (this.avoidGoalTime(handle, number) - time * 0.009 > 0) continue;
       weight = Math.fround(weight / (Math.fround(time) * 0.01));
       if (!(weight > bestWeight)) continue;
       if (choice.kind === "nearby") {
-        // Source accepts an unreachable return leg (zero); dropped items skip the leg entirely.
-        const back = choice.longTermGoal !== null && item.timeout === 0 ? this.travelTime(navigation, item.goalArea, item.goalOrigin, choice.longTermGoal.area, travelFlags) : 0;
+        const goalOrigin = candidate.kind === "native" ? candidate.item.goalOrigin : candidate.goal.origin;
+        const returnLeg = candidate.kind === "source" || candidate.item.timeout === 0;
+        const back = choice.longTermGoal !== null && returnLeg ? this.travelTime(navigation, goalArea, goalOrigin, choice.longTermGoal.area, travelFlags) : 0;
         if (back > longTermTime) continue;
       }
-      best = item; bestWeight = weight;
+      best = candidate; bestWeight = weight;
     }
     if (best === null) return false;
-    this.addAvoid(state, best.number, best.timeout !== 0 ? 10 : defaultAvoidTime(best.info));
-    this.pushGoal(handle, this.itemGoal(best));
+    if (best.kind === "native") this.addAvoid(state, best.item.number, best.item.timeout !== 0 ? 10 : defaultAvoidTime(best.item.info));
+    this.pushGoal(handle, best.kind === "native" ? this.itemGoal(best.item) : best.goal);
     return true;
+  }
+
+  sourceGoalStatus(client: number, goal: BotGoal): SourceGoalStatus {
+    if (!isSourceGoalNumber(goal.number)) return "native";
+    const binding = this.sourceGoals.get(goal.number), pickups = this.world?.sourcePickups;
+    if (binding === undefined || pickups === undefined) return "unavailable";
+    const current = pickups.inspect(client, binding.actor);
+    return this.sourceGoals.get(goal.number) === binding && current !== null && current.actor.equals(binding.actor) && current.entity === goal.entity && current.utility > 0 ? "available" : "unavailable";
+  }
+
+  private validateSourceGoalRange(): void {
+    if (this.world?.sourcePickups !== undefined && this.initialItemCount + 1_000_000 >= SOURCE_GOAL_NUMBER_MIN)
+      throw new RangeError("Native item goal numbers overlap the reserved source pickup range");
+  }
+  private *itemCandidates(client: number): Generator<ItemCandidate, void, unknown> {
+    for (const item of this.levelItems()) yield { kind: "native", item };
+    const world = this.world, pickups = world?.sourcePickups, navigation = world?.navigation;
+    if (pickups === undefined || navigation === null || navigation === undefined) return;
+    this.validateSourceGoalRange();
+    const revision = this.mapRevision, candidates = pickups.candidates(client);
+    if (revision !== this.mapRevision) return;
+    for (const candidate of candidates) {
+      const current = pickups.inspect(client, candidate.actor);
+      if (revision !== this.mapRevision) return;
+      if (current === null || !current.actor.equals(candidate.actor) || !(current.utility > 0)) continue;
+      let binding = [...this.sourceGoals.values()].find(binding => binding.actor.equals(current.actor));
+      const worldMin = add3(current.origin, current.bounds.min), worldMax = add3(current.origin, current.bounds.max);
+      const center = scale3(add3(worldMin, worldMax), 0.5);
+      const position = navigation.bestReachableArea(center, { min: sub3(worldMin, center), max: sub3(worldMax, center) });
+      if (revision !== this.mapRevision) return;
+      if (position.area === 0) continue;
+      const mins = sub3(worldMin, position.origin), maxs = sub3(worldMax, position.origin);
+      if (binding === undefined) {
+        if (!isSourceGoalNumber(this.nextSourceGoal)) throw new RangeError("Source pickup goal number range exhausted");
+        const number = this.nextSourceGoal--;
+        binding = { actor: current.actor, name: current.name, goal: blankGoal() };
+        this.sourceGoals.set(number, binding);
+        binding.goal = copyGoal({ origin: position.origin, area: position.area, mins, maxs,
+          entity: current.entity, number, flags: GoalFlags.Item, itemInfo: -1 });
+      } else binding.goal = copyGoal({ ...binding.goal, origin: position.origin, area: position.area,
+        mins, maxs, entity: current.entity });
+      binding.name = current.name;
+      yield { kind: "source", goal: binding.goal, utility: current.utility };
+    }
+  }
+  private nextSourceItemGoal(after: number | null, name: string | ((candidate: string) => boolean), prior: BotGoal): BotGoal | null {
+    let next = after === null;
+    for (const [number, binding] of this.sourceGoals) {
+      if (!next) { if (number === after) next = true; continue; }
+      if (goalNameMatches(name, binding.name)) return copyGoal({ ...binding.goal, itemInfo: prior.itemInfo });
+    }
+    return null;
   }
 
   private travelTime(navigation: GoalNavigation, area: number, origin: Vec3, goalArea: number, travelFlags: number): number {

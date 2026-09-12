@@ -4,8 +4,9 @@ import { BotActionBuffer, BotActionFlag } from "../../../../src/bots/behavior/li
 import { AasBspEntities } from "../../../../src/bots/behavior/library/bsp-entities.ts";
 import type { CallSteps } from "../../../../src/bots/behavior/library/call-steps.ts";
 import { BotChatLibrary, ChatDestination } from "../../../../src/bots/behavior/library/chat.ts";
-import { BotGoalLibrary, GoalError } from "../../../../src/bots/behavior/library/goals.ts";
-import type { GoalEntityInfo, GoalNavigation, GoalWorldHost } from "../../../../src/bots/behavior/library/goals.ts";
+import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
+import { BotGoalLibrary, GoalError, isSourceGoalNumber } from "../../../../src/bots/behavior/library/goals.ts";
+import type { GoalEntityInfo, GoalNavigation, GoalWorldHost, SourcePickupGoals } from "../../../../src/bots/behavior/library/goals.ts";
 import { BotMemory } from "../../../../src/bots/behavior/library/memory.ts";
 import { BotScriptSources } from "../../../../src/bots/behavior/library/script-sources.ts";
 import { WeightConfigStore } from "../../../../src/bots/behavior/library/weights.ts";
@@ -122,6 +123,75 @@ test("item goals combine source weights, borrowed route costs, and source respaw
     expect(library.getTopGoal(state)?.entity).toBe(1);
     expect(library.avoidGoalTime(state, 1)).toBe(35);
     expect(routes).toEqual([3, 2, 3, 2]);
+    const identity = createIdentityOwner("source-pickup-goals");
+    let generation = 0, useful = true;
+    const sourcePickups: SourcePickupGoals = {
+      candidates: () => [{ actor: identity.actor(50, generation), entity: 50, origin: { x: 200, y: 0, z: 15 },
+        bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } }, name: "Shell supply", utility: 100 }],
+      inspect: (_client, actor) => useful && actor.equals(identity.actor(50, generation)) ? {
+        actor: identity.actor(50, generation), entity: 50, origin: { x: 200, y: 0, z: 15 },
+        bounds: { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } }, name: "Shell supply", utility: 100,
+      } : null,
+    };
+    const world = { bspEntities, navigation, host, pointArea: () => 1, sourcePickups };
+    library.initLevelItems(world); library.updateEntityItems();
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    const source = library.getTopGoal(state);
+    if (source === null) throw new Error("Source pickup was not pushed on the common stack");
+    expect(source.number).toBe(0x7fffffff);
+    expect(isSourceGoalNumber(source.number)).toBe(true);
+    expect(library.goalName(source.number)).toBe("Shell supply");
+    expect(library.getLevelItemGoal(-1, "Shell supply")?.number).toBe(source.number);
+    expect(library.getLevelItemGoal(source.number, "Shell supply")).toBeNull();
+    expect(library.avoidGoalTime(state, source.number)).toBe(0);
+    expect(library.sourceGoalStatus(0, source)).toBe("available");
+    expect(library.itemGoalInVisButNotVisible(0, source.origin, source.origin, source)).toBe(false);
+    library.setAvoidGoalTime(state, source.number, 5);
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(false);
+    library.removeFromAvoidGoals(state, source.number);
+    expect(library.chooseNBGItem(state, { x: 0, y: 0, z: 0 }, [0], 0, null, 201)).toBe(true);
+    expect(library.getTopGoal(state)?.number).toBe(source.number);
+    useful = false;
+    expect(library.sourceGoalStatus(0, source)).toBe("unavailable");
+    expect(library.itemGoalInVisButNotVisible(0, source.origin, source.origin, source)).toBe(true);
+    useful = true; generation++;
+    expect(library.sourceGoalStatus(0, source)).toBe("unavailable");
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    const replacement = library.getTopGoal(state);
+    if (replacement === null) throw new Error("Replacement pickup missing");
+    expect(replacement.number).toBe(source.number - 1);
+    library.initLevelItems(world); library.updateEntityItems();
+    expect(library.sourceGoalStatus(0, replacement)).toBe("unavailable");
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    expect(library.getTopGoal(state)?.number).toBe(replacement.number - 1);
+    let retireDuringReach = false;
+    library.initLevelItems({ ...world, navigation: { ...navigation, bestReachableArea: (origin, bounds) => {
+      if (retireDuringReach) { retireDuringReach = false; library.initLevelItems(world); }
+      return navigation.bestReachableArea(origin, bounds);
+    } } });
+    library.updateEntityItems(); retireDuringReach = true;
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(false);
+    expect(library.getLevelItemGoal(-1, "Shell supply")).toBeNull();
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    expect(library.getTopGoal(state)?.number).toBe(replacement.number - 2);
+    library.emptyGoalStack(state);
+    let projectingSource = false;
+    library.initLevelItems({ ...world, sourcePickups: { ...sourcePickups, inspect: (client, actor) => {
+      const pickup = sourcePickups.inspect(client, actor);
+      return pickup === null ? null : { ...pickup, bounds: { min: { x: -8, y: -8, z: 0 }, max: { x: 8, y: 8, z: 56 } } };
+    } }, navigation: { ...navigation, bestReachableArea: (origin, bounds) => {
+      if (!projectingSource) return navigation.bestReachableArea(origin, bounds);
+      expect(origin).toEqual({ x: 200, y: 0, z: 43 });
+      expect(bounds).toEqual({ min: { x: -8, y: -8, z: -28 }, max: { x: 8, y: 8, z: 28 } });
+      return { area: 3, origin: { ...origin, z: 39 } };
+    } } });
+    library.updateEntityItems(); projectingSource = true;
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    const anchored = library.getTopGoal(state);
+    if (anchored === null) throw new Error("Bottom-anchored source pickup missing");
+    expect(anchored.origin).toEqual({ x: 200, y: 0, z: 39 });
+    expect(anchored.mins).toEqual({ x: -8, y: -8, z: -24 });
+    expect(anchored.maxs).toEqual({ x: 8, y: 8, z: 32 });
   } finally { library.shutdown(); weightStore.shutdown(); reader.disposeResources(); memory.dispose(); }
 });
 

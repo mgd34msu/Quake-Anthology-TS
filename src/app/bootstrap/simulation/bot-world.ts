@@ -1,10 +1,11 @@
+import { observeQ1Supply } from "../../../content/q1/foundation/pickups.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import { EntityState } from "../../../content/q3/base/shared/entity-state.ts";
 import { PlayerState } from "../../../content/q3/base/shared/player-state.ts";
 import { EntityType, MoveType, WeaponState, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { GameMemory } from "../../../content/q3/base/game/memory.ts";
-import type { BotObservedEntity, SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
+import type { BotObservedEntity, BotObservedPickup, SourceBotGame } from "../../../bots/behavior/q3/game-host.ts";
 import { createQ2BotKnowledge } from "./bot-q2-knowledge.ts";
 import type { SharedSimulation } from "./runtime.ts";
 
@@ -87,7 +88,26 @@ export function createSharedBotWorld(options: Options) {
     if (player === null) return "";
     return `\\n\\${player.name}\\t\\${player.spectator ? 3 : 0}\\model\\${player.skin}`;
   };
+  const inspectPickup = (client: number, actor: ActorId): BotObservedPickup | null => {
+    const recipient = actorForId(client);
+    if (recipient === null || !simulation.actors.isLive(actor)) return null;
+    const body = simulation.bodies.read(actor);
+    if (body === null) return null;
+    const observation = source.kind === "q1" ? observeQ1Supply(source.game, actor, recipient) : source.items.observeSupply(source.game, actor, recipient);
+    if (observation === null) return null;
+    const preview = source.kind === "q1" ? source.game.pickupAdmission?.preview(recipient, observation.offer) ?? null
+      : source.items.previewSupply(source.game, actor, recipient);
+    if (preview === null) return null;
+    const entity = metadata(actor);
+    return { observation, preview, entity: entityId(actor), origin: { ...body.origin },
+      bounds: { min: { ...body.bounds.min }, max: { ...body.bounds.max } }, name: entity?.classname ?? observation.offer.kind };
+  };
   const game: SourceBotGame = {
+    pickups: { inspect: inspectPickup, candidates: client => {
+      const pickups: BotObservedPickup[] = [];
+      for (const actor of actors.values()) { const pickup = inspectPickup(client, actor); if (pickup !== null) pickups.push(pickup); }
+      return pickups;
+    } },
     options: { product: "baseq3", cvars, configstrings: { get: index => index >= 544 && index < 608 ? playerInfo(index - 544) : strings.get(index) ?? "", set: (index, value) => { strings.set(index, value); } },
       engine: { print: options.print, getUserinfo: client => userinfos.get(client) ?? "", setUserinfo: (client, info) => { userinfos.set(client, info); },
         sendServerCommand: options.message, dropClient: (client, reason) => { options.print(reason); options.drop(client); },

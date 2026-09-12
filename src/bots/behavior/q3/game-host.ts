@@ -1,3 +1,6 @@
+import type { ActorId } from "../../../contracts/identity.ts";
+import type { ItemId } from "../../../contracts/gameplay.ts";
+import type { PickupSupplyObservation, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { GameRandom } from "../../../core/game-numeric.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
@@ -54,6 +57,7 @@ export interface BotWeaponKnowledge {
   readonly maximumRange: number | null;
   readonly melee: boolean;
   readonly personalityRole: number | null;
+  readonly supply: { readonly weapon: ItemId; readonly owned: boolean; readonly ammo: { readonly item: ItemId; readonly perShot: number } | null } | null;
 }
 export interface BotArsenalData {
   updateInventory(state: BotState): void;
@@ -68,6 +72,7 @@ export interface BotWeaponTactics {
   readonly predictOccludedSplash: boolean;
 }
 export interface BotArsenalKnowledge {
+  pickupUtility(library: BotLibrary, state: BotState, preview: PickupSupplyPreview): number;
   chooseWeapon(library: BotLibrary, state: BotState): number;
   activationWeapon(library: BotLibrary, state: BotState): number;
   tactics(weapon: number): BotWeaponTactics;
@@ -76,7 +81,21 @@ export interface BotArsenalKnowledge {
   weaponInfo(library: BotLibrary, handle: number, weapon: number): WeaponInfo | undefined;
 }
 
+export interface BotObservedPickup {
+  readonly observation: PickupSupplyObservation;
+  readonly preview: PickupSupplyPreview;
+  readonly entity: number;
+  readonly origin: Vec3;
+  readonly bounds: Bounds;
+  readonly name: string;
+}
+export interface BotPickupObservations {
+  candidates(client: number): readonly BotObservedPickup[];
+  inspect(client: number, actor: ActorId): BotObservedPickup | null;
+}
+
 export interface SourceBotGame {
+  readonly pickups: BotPickupObservations | null;
   readonly options: {
     readonly product: "baseq3" | "missionpack";
     readonly cvars: CvarRegistry;

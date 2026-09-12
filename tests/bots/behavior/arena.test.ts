@@ -1,3 +1,5 @@
+import { createQ1BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q1-knowledge.ts";
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -24,6 +26,7 @@ import { createBotArsenalKnowledge } from "../../../src/bots/behavior/q3/arsenal
 import { q3BotGame } from "../../../src/bots/behavior/q3/source-game.ts";
 import { createQ2BotKnowledge } from "../../../src/app/bootstrap/simulation/bot-q2-knowledge.ts";
 import { WeaponState } from "../../../src/content/q3/base/shared/definitions.ts";
+import { BotMoveFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
 
@@ -99,6 +102,29 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       if (q2Content !== null) q2Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-attack-distance"), recipe: q2Content.recipe,
         world: q2Content.world, mounts: q2Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
       const library = bots.director.library, original = bots.director.ai.context;
+      const walkEdge = graph.edges.find(edge => edge.mode === "walk");
+      if (walkEdge === undefined) throw new Error("Retail arena has no walking reachability");
+      const moveHandle = library.moveStates.allocate(), moveState = library.moveStates.fromHandle(moveHandle);
+      if (moveState === null) throw new Error("Retail movement state allocation failed");
+      try {
+        moveState.lastReachability = walkEdge.id;
+        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+        moveState.lastReachability = walkEdge.id;
+        expect(moveState.walkProgress?.edge).toBe(walkEdge);
+        moveState.lastReachability = walkEdge.id + 1;
+        expect(moveState.walkProgress).toBeNull();
+        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+        const moveInput = { origin: brain.origin, velocity: brain.velocity, viewOffset: { x: 0, y: 0, z: brain.curPs.viewheight },
+          entityNum: brain.entityNum, client: brain.client, thinkTime: 0.1, presenceType: 2, viewAngles: brain.viewangles };
+        library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.ONGROUND });
+        expect(moveState.walkProgress?.edge).toBe(walkEdge);
+        library.moveStates.initialize(moveHandle, { ...moveInput, orMoveFlags: BotMoveFlag.TELEPORTED });
+        expect(moveState.walkProgress).toBeNull();
+        moveState.walkProgress = { edge: walkEdge, phase: "traverse" };
+        library.moveStates.reset(moveHandle);
+        expect(moveState.walkProgress).toBeNull();
+        expect(moveState.lastReachability).toBe(0);
+      } finally { library.moveStates.free(moveHandle); }
       const gauntlet = library.weapons.getWeaponInfo(brain.ws, 1);
       if (gauntlet === undefined || !gauntlet.valid) throw new Error("Native gauntlet knowledge missing");
       const activation = new BotState("baseq3"); activation.ws = brain.ws;
@@ -122,8 +148,8 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       activation.inventory[BotInventory.GRENADELAUNCHER] = 1; activation.inventory[BotInventory.GRENADES] = 20;
       expect(nativeKnowledge.activationWeapon(library, activation)).toBe(-1);
       for (const candidate of [
-        { info: { ...gauntlet, number: 7, weaponInventoryIndex: 64 }, melee: true, maximumRange: 60, personalityRole: null },
-        { info: { ...gauntlet, number: 8, weaponInventoryIndex: 64, projectileInfo: { ...gauntlet.projectileInfo, gravity: 1 } }, melee: false, maximumRange: null, personalityRole: null },
+        { info: { ...gauntlet, number: 7, weaponInventoryIndex: 64 }, melee: true, maximumRange: 60, personalityRole: null, supply: null },
+        { info: { ...gauntlet, number: 8, weaponInventoryIndex: 64, projectileInfo: { ...gauntlet.projectileInfo, gravity: 1 } }, melee: false, maximumRange: null, personalityRole: null, supply: null },
       ]) {
         activation.inventory[64] = 1;
         expect(createBotArsenalKnowledge({ updateInventory: () => undefined, candidates: () => [candidate] }).activationWeapon(library, activation)).toBe(-1);
@@ -145,13 +171,56 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
         q2Simulation.inventory.give(owner, "q2:weapon_machinegun", 1); q2Simulation.inventory.give(owner, "q2:ammo_bullets", 1);
         expect(select()).toBe("q2:weapon_machinegun");
         expect(state.curPs.weaponState).toBe(WeaponState.WEAPON_RAISING);
+        q2Simulation.inventory.give(owner, "q2:weapon_shotgun", 1);
+        knowledge.knowledge.updateInventory(state);
+        const utility = (preview: import("../../../src/contracts/pickups.ts").PickupSupplyPreview) => knowledge.knowledge.pickupUtility(library, state, preview);
+        expect(utility({ accepted: true, weapons: [], ammo: [] })).toBe(0);
+        expect(utility({ accepted: true, weapons: [{ item: "q2:weapon_shotgun", before: 1, given: 1 }], ammo: [] })).toBe(0);
+        const admission = new SharedPickupAdmission({ inventory: q2Simulation.inventory,
+          profile: { id: "test:sequential-supply", weaponOwnership: "all-destinations",
+            ammo: [{ source: "q1:ammo/shells", destinations: ["q2:ammo_shells"] }, { source: "q1:ammo/nails", destinations: ["q2:ammo_shells"] }],
+            weapons: [{ source: "q1:weapon/shotgun", destinations: ["q2:weapon_shotgun"] }] },
+          ammoGranted: () => { throw new Error("Preview mutated ammo"); }, weaponGranted: () => { throw new Error("Preview selected weapon"); } });
+        const beforePreview = q2Simulation.inventory.entries(actor);
+        const sequential = admission.preview(actor, { kind: "weapon", offer: { item: "q1:weapon/shotgun",
+          ammo: [{ item: "q1:ammo/shells", amount: 10 }, { item: "q1:ammo/nails", amount: 10 }] } });
+        expect(sequential.ammo.map(receipt => receipt.before)).toEqual([2, 12]);
+        expect(utility(sequential)).toBe(20);
+        expect(q2Simulation.inventory.entries(actor)).toEqual([...beforePreview]);
+        expect(utility({ accepted: true, weapons: [], ammo: [{ item: "q2:ammo_cells", before: 0, given: 10 }] })).toBe(0);
+        expect(utility({ accepted: true, weapons: [{ item: "q2:weapon_rocketlauncher", before: 0, given: 1 }], ammo: [{ item: "q2:ammo_rockets", before: 0, given: 5 }] })).toBe(105);
+        expect(utility({ accepted: false, weapons: [{ item: "q2:weapon_rocketlauncher", before: 0, given: 1 }], ammo: [] })).toBe(0);
+        expect(utility({ accepted: true, weapons: [{ item: "q2:ammo_grenades", before: 0, given: 5 }], ammo: [{ item: "q2:ammo_grenades", before: 0, given: 5 }] })).toBe(0);
+
+      }
+      if (existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak"))) {
+        const q1Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4", "--dedicated"]);
+        if (q1Launch.kind !== "run") throw new Error("Expected Q1 source ownership fixture");
+        const q1Content = await loadApplicationContent(q1Launch.options);
+        const q1Simulation = new SharedSimulation({ identity: createIdentityOwner("bot-q1-supply"), recipe: q1Content.recipe,
+          world: q1Content.world, mounts: q1Content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4 });
+        try {
+          const actor = q1Simulation.admitPlayer(q1Simulation.options.identity.client(0, 1)).actor;
+          const owner = q1Simulation.actors.resolveOwned(actor);
+          if (owner === null) throw new Error("Q1 source ownership fixture lost actor");
+          q1Simulation.inventory.consume(owner, "q1:ammo/shells", q1Simulation.inventory.count(actor, "q1:ammo/shells"));
+          const knowledge = createQ1BotKnowledge({ simulation: q1Simulation, actorForClient: () => actor });
+          const state = new BotState("baseq3"); state.ws = brain.ws;
+          knowledge.knowledge.updateInventory(state);
+          const selectedBefore = knowledge.knowledge.chooseWeapon(library, state);
+          expect(knowledge.resolveWeapon(0, selectedBefore)).toBe("q1:weapon/axe");
+          expect(knowledge.knowledge.pickupUtility(library, state, { accepted: true, weapons: [],
+            ammo: [{ item: "q1:ammo/shells", before: 0, given: 10 }] })).toBe(10);
+          expect(knowledge.knowledge.chooseWeapon(library, state)).toBe(selectedBefore);
+          expect(q1Simulation.inventory.count(actor, "q1:ammo/shells")).toBe(0);
+        } finally { q1Simulation.close(); await q1Content.close(); }
       }
       const cases = [
         ...(q2Simulation === null ? [] : [{ name: "Q2 blaster", active: 1, melee: false, knowledge: createQ2BotKnowledge({ simulation: q2Simulation, actorForClient: () => null }).knowledge }]),
         { name: "Q3 gauntlet", active: 1, melee: true, knowledge: q3BotGame(game, () => undefined).knowledge },
         { name: "Q3 machinegun", active: 2, melee: false, knowledge: q3BotGame(game, () => undefined).knowledge },
         { name: "remapped melee", active: 7, melee: true, knowledge: createBotArsenalKnowledge({ updateInventory: () => undefined,
-          candidates: () => [{ info: { ...gauntlet, number: 7 }, melee: true, maximumRange: 60, personalityRole: null }] }) },
+          candidates: () => [{ info: { ...gauntlet, number: 7 }, melee: true, maximumRange: 60, personalityRole: null, supply: null }] }) },
       ];
       for (const entry of cases) {
         const directions: number[] = [];
@@ -257,5 +326,21 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
     expect(replacement.actor.equals(human.actor)).toBe(false);
     expect(bots.director.options.host.game.entity(0).generation).not.toBe(followedGeneration);
     expect(bots.population.goalStatus(botActor)).toBe(0);
+    const sourceClient = brain.client, settings = { ...brain.settings };
+    for (const number of [0x40000000, 37]) {
+      const current = bots.director.ai.context.states.get(sourceClient);
+      if (current === null || current === undefined) throw new Error("Session test lost real bot state");
+      current.lastGoalTeamGoal.number = number; current.lastGoalTeamGoal.area = 12;
+      current.lastGoalLtgType = 5; current.lastGoalDecisionmaker = 2; current.lastGoalTeammate = 3;
+      expect(bots.director.ai.shutdownClient(sourceClient, true)).toBe(true);
+      expect(bots.director.ai.setupClient(sourceClient, settings, true)).toBe(true);
+      const restored = bots.director.ai.context.states.get(sourceClient);
+      if (restored === null || restored === undefined) throw new Error("Session test failed to restore real bot");
+      expect(restored.lastGoalTeamGoal.number).toBe(number === 37 ? 37 : 0);
+      expect(restored.lastGoalTeamGoal.area).toBe(number === 37 ? 12 : 0);
+      expect(restored.lastGoalLtgType).toBe(number === 37 ? 5 : 0);
+      expect(restored.lastGoalDecisionmaker).toBe(number === 37 ? 2 : 0);
+      expect(restored.lastGoalTeammate).toBe(number === 37 ? 3 : 0);
+    }
   } finally { bots?.close(); session.close(); archive.close(); await content.close(); }
 }, 30000);

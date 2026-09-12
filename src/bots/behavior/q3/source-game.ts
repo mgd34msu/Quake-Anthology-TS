@@ -10,6 +10,7 @@ import type { SourceBotGame } from "./game-host.ts";
 /** Reads detach source state; every mutation is an explicit call to its existing owner. */
 export function q3BotGame(source: Q3SourceRuntime, insertConsoleCommand: (text: string) => void): SourceBotGame {
   return {
+    pickups: null,
     options: { product: source.options.product, cvars: source.host.cvars, configstrings: source.host.configstrings,
       engine: { ...source.host.engine, insertConsoleCommand } },
     get gameType() { return source.gameType; },
@@ -19,7 +20,7 @@ export function q3BotGame(source: Q3SourceRuntime, insertConsoleCommand: (text: 
     knowledge: createBotArsenalKnowledge({ updateInventory: updateQ3BotInventory,
       candidates: (library, handle) => Array.from({ length: source.options.product === "missionpack" ? 14 : 11 }, (_, weapon) => weapon).flatMap(weapon => {
         const info = library.weapons.getWeaponInfo(handle, weapon); return info === undefined || !info.valid ? [] : [{ info, maximumRange: weapon === Weapon.WP_GAUNTLET ? 60 : null,
-          melee: weapon === Weapon.WP_GAUNTLET, personalityRole: weapon }];
+          melee: weapon === Weapon.WP_GAUNTLET, personalityRole: weapon, supply: null }];
       }) }),
     entity: number => {
       const entity = source.pool.at(number), client = entity.client;

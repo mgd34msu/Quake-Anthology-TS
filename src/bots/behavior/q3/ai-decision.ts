@@ -140,6 +140,8 @@ export function botNearbyGoal(context: GameAiContext, state: BotState, flags: nu
 }
 
 export function botReachedGoal(context: GameAiContext, state: BotState, goal: BotGoal): boolean {
+  const sourceStatus = context.library.goals.sourceGoalStatus(state.client, goal);
+  if (sourceStatus !== "native") return sourceStatus === "unavailable";
   if ((goal.flags & GoalFlags.Item) !== 0) {
     if (touchingGoal(state.origin, goal)) {
       if ((goal.flags & GoalFlags.Dropped) === 0) context.library.goals.setAvoidGoalTime(state.gs, goal.number, -1);
@@ -468,6 +470,9 @@ export function botGetLongTermGoal(context: GameAiContext, state: BotState, flag
     if (state.teamMessageTime !== 0 && state.teamMessageTime < context.time) acknowledge(context, state, "getitem_start", context.library.goals.goalName(state.teamGoal.number));
     goal.copyFrom(state.teamGoal);
     if (state.teamGoalTime < context.time) state.ltgType = BotLongTermGoal.NONE;
+    const sourceStatus = context.library.goals.sourceGoalStatus(state.client, goal);
+    if (sourceStatus === "unavailable") { state.ltgType = BotLongTermGoal.NONE; return false; }
+    if (sourceStatus === "available") return true;
     if (context.library.goals.itemGoalInVisButNotVisible(state.entityNum, state.eye, state.viewangles, goal)) {
       botInitialChat(context, state, "getitem_notthere", context.library.goals.goalName(state.teamGoal.number));
       context.library.chat.enterChat(state.cs, state.decisionmaker, CHAT_TELL); state.ltgType = BotLongTermGoal.NONE;

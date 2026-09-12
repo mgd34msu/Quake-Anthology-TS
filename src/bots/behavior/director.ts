@@ -10,11 +10,11 @@ import { CvarFlag } from "../../core/cvars/index.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
 import type { BotSourceFiles } from "./assets.ts";
 import { AasBspEntities } from "./library/bsp-entities.ts";
-import type { GoalNavigation } from "./library/goals.ts";
+import type { GoalNavigation, SourcePickupGoal, SourcePickupGoals } from "./library/goals.ts";
 import { GameAi } from "./q3/ai-main.ts";
 import type { BotSettings, BotState } from "./q3/ai-state.ts";
 import { GameBotCatalog } from "./q3/catalog.ts";
-import type { SourceBotGame } from "./q3/game-host.ts";
+import type { SourceBotGame, BotObservedPickup } from "./q3/game-host.ts";
 import type { BotNavigation } from "./q3/navigation-types.ts";
 import { BotLibrary } from "./q3/library.ts";
 import type { SourceBotLibraryOptions } from "./q3/library.ts";
@@ -71,6 +71,7 @@ export class SourceBotDirector {
       insertConsoleCommand: text => game.options.engine.insertConsoleCommand(text),
       checkBotSpawn: () => this.catalog.checkSpawn(),
       loadMap: () => this.library.loadMap({ bspEntities: this.bspEntities, navigation: this.navigation,
+        ...(game.pickups === null ? {} : { sourcePickups: this.sourcePickupGoals(game) }),
         pointArea: origin => this.navigation.pointArea(origin), host: {
           trace: (start, end, bounds, passEntity, mask) => game.world.trace({ start, end, passEntityNum: passEntity, mask,
             shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max } }),
@@ -90,6 +91,24 @@ export class SourceBotDirector {
       allocateClient: () => host.allocateClient(), setupClient: (client, settings, restart) => this.ai.setupClient(client, settings, restart),
       shutdownClient: (client, restart) => { this.ai.shutdownClient(client, restart); const actor = host.actor(client); if (actor !== null) this.sequences.delete(actor); },
     });
+  }
+
+  private sourcePickupGoals(game: SourceBotGame): SourcePickupGoals {
+    const goal = (client: number, pickup: BotObservedPickup | null): SourcePickupGoal | null => {
+      const state = this.ai.context.states.get(client);
+      if (pickup === null || state === undefined || state === null || pickup.observation.availability.kind !== "ready" || !pickup.observation.availability.eligible) return null;
+      const utility = game.knowledge.pickupUtility(this.library, state, pickup.preview);
+      return utility > 0 ? { actor: pickup.observation.actor, entity: pickup.entity, origin: pickup.origin,
+        bounds: pickup.bounds, name: pickup.name, utility } : null;
+    };
+    return { candidates: client => {
+      const candidates: SourcePickupGoal[] = [];
+      for (const pickup of game.pickups?.candidates(client) ?? []) {
+        const candidate = goal(client, pickup);
+        if (candidate !== null) candidates.push(candidate);
+      }
+      return candidates;
+    }, inspect: (client, actor) => goal(client, game.pickups?.inspect(client, actor) ?? null) };
   }
 
   load(restart = false): void {

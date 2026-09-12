@@ -76,9 +76,11 @@ export function createQ2BotKnowledge(options: { readonly simulation: Pick<Shared
   const inventory = options.simulation.inventory;
   const canUse = (actor: ActorId, entry: Entry): boolean => inventory.count(actor, entry.definition.item) > 0
     && (entry.definition.ammo === null || inventory.count(actor, entry.definition.ammo) >= entry.definition.quantity);
+  const actorsForHandle = new Map<number, ActorId>();
   const knowledge = createBotArsenalKnowledge({
     updateInventory(state: BotState): void {
       const actor = options.actorForClient(state.client), combat = actor === null ? null : options.simulation.combat.read(actor);
+      if (actor === null) actorsForHandle.delete(state.ws); else actorsForHandle.set(state.ws, actor);
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
       state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points;
@@ -87,7 +89,12 @@ export function createQ2BotKnowledge(options: { readonly simulation: Pick<Shared
         state.inventory[entry.info.ammoInventoryIndex] = actor === null || entry.definition.ammo === null ? 0 : inventory.count(actor, entry.definition.ammo);
       }
     },
-    candidates: () => [...entries.values()].map(entry => ({ info: entry.info, maximumRange: entry.ballistics.range, melee: false, personalityRole: null })),
+    candidates: (_library, handle) => {
+      const actor = actorsForHandle.get(handle);
+      return [...entries.values()].map(entry => ({ info: entry.info, maximumRange: entry.ballistics.range, melee: false, personalityRole: null,
+        supply: { weapon: entry.definition.item, owned: actor !== undefined && inventory.count(actor, entry.definition.item) > 0,
+          ammo: entry.definition.ammo === null ? null : { item: entry.definition.ammo, perShot: entry.definition.quantity } } }));
+    },
   });
   return { knowledge, uncoveredWeapons,
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {

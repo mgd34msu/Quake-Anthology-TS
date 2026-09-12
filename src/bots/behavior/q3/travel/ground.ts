@@ -18,12 +18,16 @@ export function travelWalk(context: BotTravelContext, state: BotMoveState, reach
   const result = new BotMoveResult();
   let direction = horizontal(state.origin, reach.start), distance = length3(direction);
   direction = normalize3(direction);
-  context.checkBlocked(state, direction, true, result);
-  if (distance < 10) {
+  const waypoint = reach.graphEdge.source.kind !== "aas";
+  if (!waypoint) context.checkBlocked(state, direction, true, result);
+  if (waypoint && state.walkProgress?.edge !== reach.graphEdge) state.walkProgress = null;
+  if (waypoint && distance < 10) state.walkProgress = { edge: reach.graphEdge, phase: "traverse" };
+  if (distance < 10 || (waypoint && state.walkProgress !== null)) {
     direction = horizontal(state.origin, reach.end);
     distance = length3(direction);
     direction = normalize3(direction);
   }
+  if (waypoint) context.checkBlocked(state, direction, true, result);
   if ((context.areaPresence(reach.area) & 2) === 0 && distance < 20) context.actions.crouch(state.client);
   const gap = context.gapDistance(state.origin, direction, state.entityNum);
   let speed: number;

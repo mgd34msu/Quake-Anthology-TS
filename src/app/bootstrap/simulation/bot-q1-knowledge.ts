@@ -81,7 +81,9 @@ export function createQ1BotKnowledge(options: {
           reload: values.cycle, spinUp: 0, spinDown: 0,
           projectileInfo: { name: entry.weapon, model: "", flags: 0, gravity: 0, damage: values.damage, radius: values.radius, visibleDamage: 0,
             damageType: DAMAGE_TYPE_IMPACT | (values.radius > 0 ? DAMAGE_TYPE_RADIAL : 0), healthIncrease: 0, push: 0, detonation: 0, bounce: 0, bounceFriction: 0, bounceStop: 0 } };
-        return { info, maximumRange: values.range, melee: entry.weapon === "axe", personalityRole: null };
+        return { info, maximumRange: values.range, melee: entry.weapon === "axe", personalityRole: null,
+          supply: { weapon: entry.item, owned: actor !== undefined && inventory.count(actor, entry.item) > 0,
+            ammo: entry.ammo === null ? null : { item: entry.ammo, perShot: values.ammo } } };
       });
     },
   });

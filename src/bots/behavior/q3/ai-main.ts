@@ -3,6 +3,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
+import { isSourceGoalNumber } from "../library/goals.ts";
 import { Characteristic } from "../library/character.ts";
 import { ChatDestination, ChatGender } from "../library/chat.ts";
 import type { BotEntityUpdate } from "./observations.ts";
@@ -191,6 +192,10 @@ function readSession(context: GameAiContext, state: BotState): void {
     Object.assign(vector, { x: next() });
     Object.assign(vector, { y: next() });
     Object.assign(vector, { z: next() });
+  }
+  if (isSourceGoalNumber(goal.number)) {
+    goal.clear(); state.lastGoalLtgType = BotLongTermGoal.NONE;
+    state.lastGoalDecisionmaker = 0; state.lastGoalTeammate = 0;
   }
 }
 

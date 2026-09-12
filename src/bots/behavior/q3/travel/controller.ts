@@ -334,6 +334,7 @@ class TravelStep implements BotTravelContext {
       }
       let resultFlags = 0;
       if (number === 0) {
+        state.walkProgress = null;
         const selected = this.graph.select(state, goal, travelFlags); number = selected.reachability; resultFlags = selected.flags;
         state.reachArea = state.area; state.jumpReach = 0; state.moveFlags &= ~BotMoveFlag.GRAPPLERESET;
         const reach = this.reachability(number);
