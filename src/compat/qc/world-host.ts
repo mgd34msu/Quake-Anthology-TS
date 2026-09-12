@@ -145,7 +145,7 @@ export class QcWorldHost {
       },
     };
   }
-  private link(slot: number): void {
+  link(slot: number): void {
     const actor = this.actor(slot);
     if (slot === 0) return;
     this.options.bodies.link(actor);

@@ -382,10 +382,12 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     const sourceSlot = (actor: import("../../../src/contracts/identity.ts").ActorId) => {
       const source = actors.sourceOf(actor); if (source === null) throw new Error("Missing source slot"); return source.slot;
     };
+    const linkedOrigins: { readonly actor: import("../../../src/contracts/identity.ts").ActorId; readonly origin: import("../../../src/contracts/math.ts").Vec3 }[] = [];
     const bodies = new SharedBodyTable(actors, {
       absoluteBounds: (actor, state) => qcLinkBounds(state, entities.at(sourceSlot(actor.id)).float(field("flags")), numeric),
       onUnlink: actor => { scene.unlink(actor); return undefined; },
       onLink: body => {
+        linkedOrigins.push({ actor: body.actor, origin: body.state.origin });
         const words = entities.at(sourceSlot(body.actor)), solid = words.float(field("solid"));
         if (solid === 0) { scene.unlink(body.actor); return undefined; }
         const owner = actors.atSource("test:qc-world", entities.slot(words.int(field("owner"))))?.id ?? null;
@@ -426,7 +428,14 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
         const resource = media.get(kind === "sound" ? `sound/${name}` : name); if (resource === undefined) throw new Error(`Unprepared test media ${name}`);
         const value = { index: cache.size + 1, resource }; cache.set(key, value); return value;
       } });
-    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: new Map([...host.host, ...presentation]), isFreeEntity: host.isFreeEntity }), serverActive: () => true });
+    const { createQcMovementBindings, createQcTouchCallback } = await import("../../../src/compat/qc/movement-host.ts");
+    const { touchQ1Triggers } = await import("../../../src/world/actors/triggers.ts");
+    const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
+    const movement = createQcMovementBindings(host, { scene, random: new SourceRandom(1),
+      touchTriggers: moving => touchQ1Triggers({ actors, bodies, spatial: scene.spatial,
+        isTrigger: trigger => entities.at(sourceSlot(trigger.id)).float(field("solid")) === 1,
+        touch: contact => createQcTouchCallback(host, vm, () => 3)(contact) }, moving) });
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: new Map([...host.host, ...presentation, ...movement]), isFreeEntity: host.isFreeEntity }), serverActive: () => true });
     const call = (name: string, argc: number) => vm.execute(program.functionNamed(name).index, argc);
     call("spawn", 0);
     const reference = vm.globals.int(1), slot = entities.slot(reference), actor = host.actor(slot), fields = entities.at(slot);
@@ -460,6 +469,59 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     expect(vm.globals.int(vm.globalOffset("trace_ent"))).toBe(0);
     vm.globals.setInt(vm.globalOffset("self"), reference); call("droptofloor", 0);
     expect(vm.globals.float(1)).toBe(1); expect(bodies.read(actor.id)?.ground).toEqual(slots.at(0)?.id ?? null);
+    const beforeWalk = bodies.read(actor.id); if (beforeWalk === null) throw new Error("Missing body before walkmove");
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 1); call("walkmove", 2);
+    expect(vm.globals.float(1)).toBe(1);
+    expect(bodies.read(actor.id)?.origin.x).toBe(numeric.add(beforeWalk.origin.x, 1));
+    const expiredGround = slots.allocate("quakec:expired-ground"), retainedGround = host.reference(expiredGround.id);
+    slots.free(expiredGround);
+    const walkingFlags = fields.float(field("flags"));
+    fields.setFloat(field("flags"), 0); fields.setInt(field("groundentity"), retainedGround);
+    const airborneOrigin = fields.vector(field("origin"));
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 1); call("walkmove", 2);
+    expect(vm.globals.float(1)).toBe(0); expect(fields.vector(field("origin"))).toEqual(airborneOrigin);
+    expect(fields.int(field("groundentity"))).toBe(retainedGround);
+    fields.setFloat(field("flags"), 1);
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 1); call("walkmove", 2);
+    expect(vm.globals.float(1)).toBe(1);
+    expect(fields.vector(field("origin")).x).toBe(numeric.add(airborneOrigin.x, 1));
+    expect(fields.int(field("groundentity"))).toBe(retainedGround);
+    fields.setFloat(field("flags"), walkingFlags); fields.setInt(field("groundentity"), 0);
+    // Synthetic trigger at the real BSP player lane; actual QC moves and removes it during walkmove.
+    const trigger = slots.allocate("quakec:test-trigger"), triggerSlot = sourceSlot(trigger.id), triggerWords = entities.at(triggerSlot);
+    host.actor(triggerSlot);
+    const grounded = bodies.read(actor.id); if (grounded === null) throw new Error("Missing grounded QC actor");
+    triggerWords.setFloat(field("solid"), 1);
+    triggerWords.setVector(field("origin"), grounded.origin);
+    triggerWords.setVector(field("mins"), bounds.min); triggerWords.setVector(field("maxs"), bounds.max);
+    const destination = { ...grounded.origin, x: grounded.origin.x + 256 };
+    triggerWords.setVector(field("finaldest"), destination);
+    triggerWords.setInt(field("touch"), program.functionNamed("SUB_CalcMoveDone").index);
+    triggerWords.setInt(field("think1"), program.functionNamed("SUB_Remove").index);
+    host.link(triggerSlot);
+    vm.globals.setInt(vm.globalOffset("other"), reference);
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 0); call("walkmove", 2);
+    expect(vm.globals.float(1)).toBe(1);
+    expect(linkedOrigins.filter(link => link.actor.equals(trigger.id)).at(-1)?.origin).toEqual(destination);
+    expect(actors.isLive(trigger.id)).toBe(false);
+    expect(vm.globals.int(vm.globalOffset("self"))).toBe(reference);
+    expect(vm.globals.int(vm.globalOffset("other"))).toBe(reference);
+    expect(vm.globals.float(vm.globalOffset("time"))).toBe(3);
+    const failing = slots.allocate("quakec:failing-trigger"), failingSlot = sourceSlot(failing.id), failingWords = entities.at(failingSlot);
+    host.actor(failingSlot);
+    failingWords.setFloat(field("solid"), 1); failingWords.setVector(field("origin"), grounded.origin);
+    failingWords.setVector(field("mins"), bounds.min); failingWords.setVector(field("maxs"), bounds.max);
+    failingWords.setVector(field("finaldest"), grounded.origin);
+    failingWords.setInt(field("touch"), program.functionNamed("SUB_CalcMoveDone").index);
+    failingWords.setInt(field("think1"), program.functionNamed("objerror").index);
+    host.link(failingSlot);
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 0);
+    expect(() => call("walkmove", 2)).toThrow();
+    expect(vm.globals.int(vm.globalOffset("self"))).toBe(reference);
+    expect(vm.globals.int(vm.globalOffset("other"))).toBe(reference);
+    failingWords.setInt(field("touch"), program.functionNamed("SUB_Remove").index);
+    vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 0); call("walkmove", 2);
+    expect(vm.globals.float(1)).toBe(1); expect(actors.isLive(failing.id)).toBe(false);
     vm.globals.setInt(4, reference); call("remove", 1);
     expect(scene.spatial.get(actor.id)).toBeNull(); expect(bodies.read(actor.id)).toBeNull();
     call("spawn", 0); expect(vm.globals.int(1)).toBe(reference);

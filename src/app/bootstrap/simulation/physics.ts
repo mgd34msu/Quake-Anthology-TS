@@ -1,3 +1,4 @@
+import { touchQ1Triggers } from "../../../world/actors/triggers.ts";
 import { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 /* Shared body physics adapted from Quake sv_phys.c/sv_move.c and Quake II
  * g_phys.c/m_move.c. Copyright (C) 1996-2005 Id Software. GPL-2.0-or-later. */
@@ -256,7 +257,10 @@ export class SharedPhysics {
     const linked = this.bodies.linked(actor.id);
     if (linked === null || !this.live(actor)) return undefined;
     const flags = this.actorFlags(actor), family = this.family(actor);
-    if (family !== "q1" && flags.dead && (flags.player || this.solid(actor)?.monster)) return undefined;
+    if (family === "q1") return touchQ1Triggers({ actors: this.options.actors, bodies: this.bodies,
+      spatial: this.options.scene.spatial, isTrigger: trigger => this.solid(trigger)?.solid === "trigger",
+      touch: contact => { this.options.callbacks.touch(contact); return undefined; } }, actor);
+    if (flags.dead && (flags.player || this.solid(actor)?.monster)) return undefined;
     const touch = (id: ActorId): void => {
       if (!this.live(actor)) return;
       const trigger = this.options.actors.resolveOwned(id), current = this.bodies.linked(id), moving = this.bodies.linked(actor.id);
@@ -264,11 +268,7 @@ export class SharedPhysics {
       if (!boundsIntersect(current.absoluteBounds, moving.absoluteBounds)) return;
       this.options.callbacks.touch({ self: trigger, other: actor.id, plane: null, surface: null });
     };
-    if (family === "q1") this.options.scene.spatial.visit(linked.absoluteBounds, candidate => {
-      if (candidate.collision.role === "trigger") touch(candidate.body.actor);
-      return this.live(actor) ? "continue" : "stop";
-    });
-    else for (const candidate of this.options.scene.queryActors(linked.absoluteBounds, "trigger")) { if (!this.live(actor)) break; touch(candidate.body.actor); }
+    for (const candidate of this.options.scene.queryActors(linked.absoluteBounds, "trigger")) { if (!this.live(actor)) break; touch(candidate.body.actor); }
     return undefined;
   }
   private impact(actor: OwnedActor, trace: TraceResult): undefined {
