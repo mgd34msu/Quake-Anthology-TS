@@ -431,11 +431,12 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     const { createQcMovementBindings, createQcTouchCallback } = await import("../../../src/compat/qc/movement-host.ts");
     const { touchQ1Triggers } = await import("../../../src/world/actors/triggers.ts");
     const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
-    const movement = createQcMovementBindings(host, { scene, random: new SourceRandom(1),
+    const movementRandom = new SourceRandom(1);
+    const movement = createQcMovementBindings(host, { scene, random: movementRandom,
       touchTriggers: moving => touchQ1Triggers({ actors, bodies, spatial: scene.spatial,
         isTrigger: trigger => entities.at(sourceSlot(trigger.id)).float(field("solid")) === 1,
         touch: contact => createQcTouchCallback(host, vm, () => 3)(contact) }, moving) });
-    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", host: new Map([...host.host, ...presentation, ...movement]), isFreeEntity: host.isFreeEntity }), serverActive: () => true });
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "rerelease", random: movementRandom, host: new Map([...host.host, ...presentation, ...movement]), isFreeEntity: host.isFreeEntity }), serverActive: () => true });
     const call = (name: string, argc: number) => vm.execute(program.functionNamed(name).index, argc);
     call("spawn", 0);
     const reference = vm.globals.int(1), slot = entities.slot(reference), actor = host.actor(slot), fields = entities.at(slot);
@@ -473,8 +474,35 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     vm.globals.setFloat(4, 0); vm.globals.setFloat(7, 1); call("walkmove", 2);
     expect(vm.globals.float(1)).toBe(1);
     expect(bodies.read(actor.id)?.origin.x).toBe(numeric.add(beforeWalk.origin.x, 1));
+    // Both builtins consume the same source random stream; world is a valid unlinked goal.
+    fields.setInt(field("goalentity"), 0); fields.setInt(field("enemy"), 0);
+    fields.setFloat(field("ideal_yaw"), 0); fields.setFloat(field("yaw_speed"), 20); fields.setVector(field("angles"), { x: 0, y: 0, z: 0 });
+    const beforeGoal = fields.vector(field("origin")), randomBeforeGoal = movementRandom.checkpoint();
+    if (randomBeforeGoal.kind !== "glibc-random") throw new Error("Expected source glibc random");
+    vm.globals.setFloat(1, 73); vm.globals.setFloat(4, 1); call("movetogoal", 1);
+    expect(vm.globals.float(1)).toBe(73);
+    expect(fields.vector(field("origin")).x).toBe(numeric.add(beforeGoal.x, 1));
+    const randomAfterGoal = movementRandom.checkpoint();
+    if (randomAfterGoal.kind !== "glibc-random") throw new Error("Expected source glibc random");
+    expect(randomAfterGoal.draws - randomBeforeGoal.draws).toBe(1);
+    const groundedFlags = fields.float(field("flags")); fields.setFloat(field("flags"), 0);
+    const beforeAirborneGoal = fields.vector(field("origin"));
+    vm.globals.setFloat(1, 73); vm.globals.setFloat(4, 1); call("movetogoal", 1);
+    expect(vm.globals.float(1)).toBe(0); expect(fields.vector(field("origin"))).toEqual(beforeAirborneGoal);
+    expect(movementRandom.checkpoint()).toEqual(randomAfterGoal);
+    fields.setFloat(field("flags"), groundedFlags); fields.setInt(field("enemy"), reference);
+    // The world goal's raw abs bounds participate in CloseEnough despite having no shared link.
+    expect(bodies.linked(host.actor(0).id)).toBeNull();
+    vm.globals.setFloat(1, 73); vm.globals.setFloat(4, 10000); call("movetogoal", 1);
+    expect(vm.globals.float(1)).toBe(73); expect(fields.vector(field("origin"))).toEqual(beforeAirborneGoal);
+    expect(movementRandom.checkpoint()).toEqual(randomAfterGoal);
+    fields.setInt(field("enemy"), 0);
     const expiredGround = slots.allocate("quakec:expired-ground"), retainedGround = host.reference(expiredGround.id);
     slots.free(expiredGround);
+    fields.setInt(field("goalentity"), retainedGround); vm.globals.setFloat(4, 1);
+    expect(() => call("movetogoal", 1)).toThrow("free source edict");
+    expect(movementRandom.checkpoint()).toEqual(randomAfterGoal);
+    fields.setInt(field("goalentity"), 0);
     const walkingFlags = fields.float(field("flags"));
     fields.setFloat(field("flags"), 0); fields.setInt(field("groundentity"), retainedGround);
     const airborneOrigin = fields.vector(field("origin"));

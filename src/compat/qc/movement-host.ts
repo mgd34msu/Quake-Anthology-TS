@@ -44,8 +44,14 @@ export function createQcMovementBindings(world: QcWorldHost, services: {
         enemy: enemyReference === 0 ? null : slots.at(entities.slot(enemyReference))?.id ?? null };
     },
     readTarget: actor => {
-      const body = bodies.read(actor), linked = bodies.linked(actor);
-      return body === null || linked === null ? null : { origin: body.origin, absoluteBounds: linked.absoluteBounds };
+      const body = bodies.read(actor), slot = sourceSlot(actor);
+      if (body === null) return null;
+      if (slot !== null) {
+        const words = entities.at(slot);
+        return { origin: body.origin, absoluteBounds: { min: words.vector(field("absmin")), max: words.vector(field("absmax")) } };
+      }
+      const linked = bodies.linked(actor);
+      return linked === null ? null : { origin: body.origin, absoluteBounds: linked.absoluteBounds };
     },
     write: (actor, state) => {
       const slot = sourceSlot(actor.id), body = bodies.read(actor.id);
@@ -73,7 +79,15 @@ export function createQcMovementBindings(world: QcWorldHost, services: {
     try { vm.returnFloat(movement.walkMove(world.actor(entities.slot(savedSelf)), vm.argFloat(0), vm.argFloat(1)) ? 1 : 0); }
     finally { vm.globals.setInt(self, savedSelf); }
   };
-  return new Map<QcHostBuiltinName, QcBuiltin>([["walkmove", walkmove]]);
+  const movetogoal: QcBuiltin = vm => {
+    if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
+    const self = entities.slot(vm.globals.int(vm.globalOffset("self"))), words = entities.at(self);
+    const actor = world.actor(self), goal = world.actor(entities.slot(words.int(field("goalentity"))));
+    const distance = vm.argFloat(0);
+    if ((Math.trunc(words.float(field("flags"))) & (512 | 1 | 2)) === 0) { vm.returnFloat(0); return; }
+    movement.moveToGoal(actor, goal.id, distance);
+  };
+  return new Map<QcHostBuiltinName, QcBuiltin>([["walkmove", walkmove], ["movetogoal", movetogoal]]);
 }
 
 /** Resolve mutable source touch words at dispatch, including newly spawned edicts. */
