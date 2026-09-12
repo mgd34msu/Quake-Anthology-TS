@@ -20,6 +20,12 @@ function initTrigger(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.movedir = moveDirection(game.body(entity).angles, game); entity.solid = "trigger"; entity.model = ""; game.setBody(entity, { angles: ZERO }); return undefined;
 }
 function later(game: Q1EntityServices, entity: Q1Actor, delay: number, name: string): undefined { return game.schedule(entity, delay, game.named.action(entity, name)); }
+function makeStatic(game: Q1EntityServices, entity: Q1Actor): undefined {
+  const body = game.body(entity);
+  game.host.emit({ kind: "static-model", path: entity.model, frame: Math.trunc(entity.frame), colorMap: Math.trunc(entity.number("colormap")), skin: Math.trunc(entity.skin),
+    origin: { ...body.origin }, angles: { ...body.angles } });
+  return game.remove(entity);
+}
 function trainNext(game: Q1EntityServices, entity: Q1Actor): undefined {
   entity.activated = true; const corner = game.find(entity.target)[0]; if (corner === undefined) throw new Error(`Train target not found: ${entity.target}`);
   entity.target = corner.target; if (entity.target === "") throw new Error("train_next: no next target");
@@ -150,18 +156,19 @@ export function spawnRemainingMapActor(base: Q1Base, entity: Q1Actor): undefined
       if (entity.classname === "func_episodegate" ? (flags & entity.spawnflags) === 0 : (flags & 15) === 15) { entity.model = ""; return undefined; }
       entity.solid = "bsp"; entity.movement = "push"; game.setBody(entity, { angles: ZERO }); entity.use = game.named.use(entity, "base:wall_use"); return undefined;
     }
-    case "func_illusionary": game.setBody(entity, { angles: ZERO }); entity.solid = "none"; entity.movement = "none"; return undefined;
+    case "func_illusionary": game.setBody(entity, { angles: ZERO }); entity.solid = "none"; entity.movement = "none"; return makeStatic(game, entity);
     case "trigger_setskill": initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:setskill_touch"); return undefined;
     case "trigger_onlyregistered": if (game.usesId1Precaches) game.precacheSound("misc/talk.wav"); initTrigger(game, entity); entity.touch = game.named.touch(entity, "base:registered_touch"); return undefined;
     case "trigger_monsterjump": if (game.body(entity).angles.y === 0) game.setBody(entity, { angles: { x: 0, y: 360, z: 0 } }); initTrigger(game, entity); entity.speed ||= 200; entity.touch = game.named.touch(entity, "base:monsterjump_touch"); return undefined;
     case "trap_spikeshooter": case "trap_shooter": return shooter(game, entity);
     case "misc_fireball": if (game.usesId1Precaches) game.precacheModel("progs/lavaball.mdl"); entity.classname = "fireball"; entity.fields.set("killstring", "$qc_ks_lavaball"); entity.speed ||= 1000; return later(game, entity, game.host.random() * 5, "base:fireball_fly");
     case "air_bubbles": if (game.options.deathmatch !== 0) return game.remove(entity); if (game.usesId1Precaches) game.precacheModel("progs/s_bubble.spr"); return later(game, entity, 1, "base:make_bubbles");
-    case "light_globe": if (game.usesId1Precaches) game.precacheModel("progs/s_light.spr"); entity.model = "progs/s_light.spr"; return undefined;
+    case "light_globe": if (game.usesId1Precaches) game.precacheModel("progs/s_light.spr"); entity.model = "progs/s_light.spr"; return makeStatic(game, entity);
     case "light_torch_small_walltorch": case "light_flame_large_yellow": case "light_flame_small_yellow": case "light_flame_small_white":
       entity.model = entity.classname === "light_torch_small_walltorch" ? "progs/flame.mdl" : "progs/flame2.mdl"; entity.frame = entity.classname === "light_flame_large_yellow" ? 1 : 0;
       if (game.usesId1Precaches) game.precacheModel(entity.model); if (game.usesId1Precaches) game.precacheSound("ambience/fire1.wav");
-      return game.host.emit({ kind: "ambient", origin: game.body(entity).origin, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
+      game.host.emit({ kind: "ambient", origin: { ...game.body(entity).origin }, path: "ambience/fire1.wav", volume: 0.5, attenuation: 3 });
+      return makeStatic(game, entity);
     case "ambient_suck_wind": case "ambient_flouro_buzz": case "ambient_drip": case "ambient_thunder": case "ambient_light_buzz": case "ambient_swamp1": case "ambient_swamp2": {
       const name = entity.classname;
       const path = name === "ambient_suck_wind" ? "suck1" : name === "ambient_flouro_buzz" ? "buzz1" : name === "ambient_drip" ? "drip1" : name === "ambient_thunder" ? "thunder1" : name === "ambient_light_buzz" ? "fl_hum1" : name === "ambient_swamp1" ? "swamp1" : "swamp2";

@@ -39,6 +39,9 @@ export class SimulationEvents {
   }
 
   emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now()): undefined {
+    if (source.kind === "q1" && source.event.kind === "static-model") source = { kind: "q1", event: { ...source.event,
+      frame: Math.trunc(source.event.frame), colorMap: Math.trunc(source.event.colorMap), skin: Math.trunc(source.event.skin),
+      origin: { ...source.event.origin }, angles: { ...source.event.angles } } };
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
     const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
     const reference = "actor" in event ? event.actor : null;
@@ -46,6 +49,7 @@ export class SimulationEvents {
     const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
     this.source.push(presentation);
     if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
+    if (source.kind === "q1" && source.event.kind === "static-model") this.persistent.set(`static-model:${this.presentationSequence}`, presentation);
     if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
     if (source.kind === "q2" && source.event.kind === "sound" && source.event.loop !== "once") {
       const key = `sound:${source.event.actor?.slot ?? -1}:${source.event.channel}:${source.event.path}`;
@@ -84,7 +88,7 @@ export class SimulationEvents {
     return { sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
       persistent: [...this.persistent].map(([key, value]) => {
         if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
-        if (value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && value.event.kind === "ambient") return { key, ...value };
+        if (value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model")) return { key, ...value };
         throw new Error("Unsupported persistent source event");
       }) };
   }
@@ -93,10 +97,12 @@ export class SimulationEvents {
     this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.persistent.clear();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     reader.field("persistent").list(value => {
-      const event = value.field("event"), family = value.field("kind").choice("q1", "q2"), kind = event.field("kind").choice("ambient", "music", "sound");
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model");
       const base = { sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
       let restored: SimulationPresentationEvent;
       if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
+      else if (family === "q1" && kind === "static-model") restored = { ...base, kind: "q1", event: { kind, path: event.field("path").string(), frame: event.field("frame").integer(),
+        colorMap: event.field("colorMap").integer(), skin: event.field("skin").integer(), origin: readVector(event.field("origin")), angles: readVector(event.field("angles")) } };
       else if (family === "q2" && kind === "music") restored = { ...base, kind: "q2", event: { kind, track: event.field("track").string() } };
       else if (family === "q2" && kind === "sound") restored = { ...base, kind: "q2", event: { kind, actor: event.field("actor").nullable(v => reference(readSavedActor(v))), origin: readVector(event.field("origin")), path: event.field("path").string(), channel: event.field("channel").number(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number(), reliable: event.field("reliable").boolean(), loop: event.field("loop").literal("start") } };
       else return event.fail("Invalid persistent source event family");

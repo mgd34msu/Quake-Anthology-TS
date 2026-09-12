@@ -57,6 +57,7 @@ export type Q1Event =
   | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[] }
   | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray" | "wizard-spike" | "knight-spike"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number }
   | { readonly kind: "colored-explosion"; readonly origin: Vec3; readonly colorStart: number; readonly colorLength: number }
+  | { readonly kind: "static-model"; readonly path: string; readonly frame: number; readonly colorMap: number; readonly skin: number; readonly origin: Vec3; readonly angles: Vec3 }
   | { readonly kind: "particles"; readonly origin: Vec3; readonly direction: Vec3; readonly color: number; readonly count: number }
   | { readonly kind: "server-command"; readonly text: string }
   | { readonly kind: "camera"; readonly player: ActorId; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset?: Vec3 }

@@ -194,6 +194,12 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
         for (const peer of peers) {
             expect(peer.signon.active).toBe(true);
             expect(peer.messages.some(message => message.kind === 'server-info' && message.models[0] === 'maps/e1m2.bsp')).toBe(true);
+            const statics = peer.deliveries.filter(value => value.kind === 'reliable' && value.message.kind === 'static').flatMap(value => value.message.kind === 'static' ? [value.message.state] : []);
+            expect(statics).toHaveLength(24);
+            expect(statics[0]?.origin).toEqual({ x: 932, y: 640, z: 340 });
+            expect(statics.every(state => state.effects === 0 && state.colorMap === 0 && state.skin === 0)).toBe(true);
+            const firstStatic = statics[0]; if (firstStatic === undefined) throw new Error('Missing authored static signon');
+            expect(peer.models[firstStatic.modelIndex - 1]).toBe('progs/flame.mdl');
         }
         first.transport.send(address, first.channel.unreliable(new Uint8Array([2])));
         await exchange();

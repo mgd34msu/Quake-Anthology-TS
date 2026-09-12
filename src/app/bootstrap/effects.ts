@@ -5,7 +5,9 @@ import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { DrawBatch, RenderOperation, RendererImage, SceneCamera } from "../../contracts/render.ts";
-import type { SceneEntity, SceneLight, SceneParticle, SceneQueries } from "../../contracts/scene.ts";
+import type { SceneEntity, SceneLight, SceneParticle, SceneQueries, SceneLightStyle } from "../../contracts/scene.ts";
+import type { WorldScene } from "../../render/scene/world.ts";
+import type { ModelTransform } from "../../render/scene/view.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterView } from "../../content/q3/foundation/presentation.ts";
 import type { Q1BeamStyle } from "../../content/q1/foundation/types.ts";
@@ -37,6 +39,7 @@ interface Group {
   readonly particles: SourceParticles;
   readonly renderer: SceneModelRenderer;
   models: SceneEntity[];
+  readonly statics: SceneEntity[];
   beams: { readonly actor: ActorId; readonly remote: readonly SceneEntity[]; readonly local: readonly SceneEntity[] | null }[];
   sampled: readonly SceneParticle[];
 }
@@ -75,6 +78,8 @@ export class ApplicationEffects {
   private unhandled: UnhandledApplicationEffect[] = [];
   private beams: Beam[] = [];
   private explosions: Explosion[] = [];
+  private readonly staticBrushes: { readonly scene: WorldScene; readonly model: number; readonly transform: ModelTransform; readonly frame: number }[] = [];
+  private styles: readonly SceneLightStyle[] = [];
   private lights: TimedLight[] = [];
   private sampledLights: SurfaceDynamicLight[] = [];
   private readonly shadowLights = new Map<ActorId, Q2ShadowLightState>();
@@ -103,7 +108,7 @@ export class ApplicationEffects {
   private async group(content: ContentId): Promise<Group> {
     const prior = this.groups.get(content); if (prior !== undefined) return prior;
     const provider = await this.assets.provider(content);
-    const group: Group = { provider, particles: new SourceParticles(this.random), renderer: new SceneModelRenderer(provider, this.assets.world), models: [], beams: [], sampled: [] };
+    const group: Group = { provider, particles: new SourceParticles(this.random), renderer: new SceneModelRenderer(provider, this.assets.world), models: [], statics: [], beams: [], sampled: [] };
     this.groups.set(content, group);
     if (provider.family !== "q3" && !this.images.has(provider.family)) this.images.set(provider.family,
       this.assets.images.register(`*${provider.family}-source-particles`, legacyParticleImage(provider.family), { wrap: "clamp", filter: "linear" }));
@@ -126,6 +131,7 @@ export class ApplicationEffects {
     const now = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
     const elapsed = this.time === null ? 0 : now - this.time;
+    this.styles = snapshot.scene.lightStyles;
     this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon)];
     for (const group of this.groups.values()) { group.models = []; group.beams = []; }
     const pending = this.pending; this.pending = [];
@@ -160,7 +166,7 @@ export class ApplicationEffects {
     for (const group of this.groups.values()) {
       const samples = group.particles.sample(now, elapsed);
       group.sampled = group.provider.family === "q1" ? samples.q1 : samples.q2;
-      await group.renderer.preload([...group.models, ...group.beams.flatMap(beam => [...beam.remote, ...(beam.local ?? [])])]);
+      await group.renderer.preload([...group.statics, ...group.models, ...group.beams.flatMap(beam => [...beam.remote, ...(beam.local ?? [])])]);
     }
     for (const effects of this.q3.values()) await effects.prepare(Math.trunc(now * 1000), Math.trunc(elapsed * 1000));
     for (const [content, effects] of this.q3Weapons) {
@@ -182,7 +188,7 @@ export class ApplicationEffects {
         const image = this.images.get(family); if (image === undefined) throw new Error("Particles have no source texture");
         batches.push(prepareParticleBatch(group.sampled, { camera, indexedProfile: family, paletteColor: index => this.palette(group, index) }, image, project));
       }
-      const models = [...group.models, ...group.beams.flatMap(beam => viewer?.equals(beam.actor) && beam.local !== null ? beam.local : beam.remote)];
+      const models = [...group.statics, ...group.models, ...group.beams.flatMap(beam => viewer?.equals(beam.actor) && beam.local !== null ? beam.local : beam.remote)];
       batches.push(...group.renderer.prepare(models, { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights }));
     }
     for (const beam of this.beams) if (beam.model === null) {
@@ -192,7 +198,9 @@ export class ApplicationEffects {
         { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "less-equal", depthWrite: false,
           alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null }));
     }
-    const operations: RenderOperation[] = [{ kind: "draw", batches }];
+    const q1Styles = Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
+    const operations: RenderOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
+      { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), { kind: "draw", batches }];
     const sourceLights: SurfaceDynamicLight[] = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
       const frame = effects.frame(camera, viewer); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
@@ -275,6 +283,21 @@ export class ApplicationEffects {
     }
     if (source.kind === "q1") {
       const event = source.event;
+      if (event.kind === "static-model") {
+        if (event.path === "") return;
+        const asset = await this.assets.model(source.content, event.path);
+        if (asset.model.kind === "brush-model") {
+          if (asset.brushScene === null) throw new Error(`Static brush ${event.path} has no prepared world scene`);
+          this.staticBrushes.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: { ...event.origin }, axis: anglesToAxis(event.angles) }, frame: event.frame });
+          return;
+        }
+        const group = await this.group(source.content);
+        group.statics.push({ actor: null, resource: asset.resource, model: asset.model,
+          transform: { origin: { ...event.origin }, axis: anglesToAxis(event.angles), scale: white }, previousOrigin: { ...event.origin },
+          pose: { kind: "frame", frame: event.frame, previousFrame: event.frame, backLerp: 0 }, skin: event.skin, color: { ...white, w: 1 },
+          shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q1", bits: 0 }, lightingOrigin: { ...event.origin }, shadowPlane: 0, attachments: [] });
+        return;
+      }
       if (event.kind !== "effect" && event.kind !== "beam" && event.kind !== "colored-explosion") return;
       const group = await this.group(source.content), particles = group.particles, seconds = source.seconds;
       if (event.kind === "beam") { this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end, die: seconds + 0.2, width: 0, color: 0, model: q1BeamModels[event.style], family: "q1" }); return; }
@@ -513,6 +536,7 @@ export class ApplicationEffects {
   close(): void {
     if (this.closed) return;
     this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];
+    this.staticBrushes.length = 0; this.styles = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) effects.close();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();

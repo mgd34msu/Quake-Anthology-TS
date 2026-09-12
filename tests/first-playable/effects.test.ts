@@ -21,6 +21,65 @@ import type { Q3CharacterView } from "../../src/content/q3/foundation/presentati
 import { EntityEvent } from "../../src/movement/q3/constants.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "../../src/app/bootstrap/simulation/types.ts";
 import type { Q1BeamStyle } from "../../src/content/q1/foundation/types.ts";
+import { createSimulation } from "../../src/app/bootstrap/simulation/index.ts";
+
+for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4", 1]] satisfies readonly (readonly [string, string, number])[]) test(`authored Q1 static ${map} model uses genuine content and the shared renderer after its gameplay actor is freed`, async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", map, "--movement", "q1", "--character", "q1", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Expected native static map");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("static-model-render");
+  const owner: RendererResourceOwner = { identity: Symbol("static-model-render"), session: identity.session, generation: 0 };
+  const assets = new ApplicationAssets(content, owner), simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "singleplayer", seed: 1, maxClients: 1 });
+  try {
+    await assets.loadWorld();
+    const events = simulation.drainPresentationEvents(), statics = events.filter(event => event.kind === "q1" && event.event.kind === "static-model");
+    expect(statics).toHaveLength(count);
+    const first = statics[0]; if (first?.kind !== "q1" || first.event.kind !== "static-model") throw new Error("Missing authored flame");
+    const asset = await assets.model(first.content, first.event.path);
+    expect(asset.resource.provenance.mount.identity.content).toBe(content.recipe.map.entities.content);
+    expect(first.event.path).toBe(path);
+    expect(asset.resource.requestedPath).toBe(path.startsWith("*") ? `maps/${map}.bsp` : path);
+    const effects = new ApplicationEffects(assets, simulation.scene, () => false);
+    const renderer = new SoftwareRenderer(160, 120, owner), target = new CpuRenderTarget(renderer), frames = new SceneFrameBuilder(assets.images);
+    try {
+      effects.receive([first]);
+      const output = simulation.step({ elapsedMilliseconds: 100, commands: [] });
+      await effects.prepare(output.snapshot, []);
+      const bounds = asset.model.kind === "brush-model" ? asset.model.world.models[asset.model.model]?.bounds : null;
+      const camera: SceneCamera = { origin: bounds == null ? { x: first.event.origin.x - 48, y: first.event.origin.y, z: first.event.origin.z }
+        : { x: bounds.min.x - 48, y: (bounds.min.y + bounds.max.y) / 2, z: (bounds.min.z + bounds.max.z) / 2 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+        viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
+      const frame = effects.frame(camera);
+      expect(frame.operations.some(operation => operation.kind === "draw" && operation.batches.some(batch => batch.indices.length > 0))).toBe(true);
+      frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: output.snapshot.frame.time, viewport: camera.viewport,
+        clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: frame.operations });
+      target.execute(frames.finish(false));
+      expect(new Set(renderer.pixels).size).toBeGreaterThan(8);
+      effects.receive([first]);
+      effects.receive([{ ...first, sequence: first.sequence + 1, event: { ...first.event, path: "" } }]);
+      await effects.prepare({ ...output.snapshot, frame: { ...output.snapshot.frame, time: { kind: "seconds", value: 10 } } }, []);
+      expect(effects.frame(camera).operations.filter(operation => operation.kind === "draw").flatMap(operation => operation.batches).length)
+        .toBe(frame.operations.filter(operation => operation.kind === "draw").flatMap(operation => operation.batches).length);
+      expect(effects.drainSounds()).toEqual([]);
+      if (path.startsWith("*")) {
+        const external = await assets.model(first.content, "maps/b_bh10.bsp");
+        expect(external.brushScene).not.toBe(assets.world);
+        if (external.model.kind !== "brush-model" || external.brushScene === null) throw new Error("Missing genuine external brush model");
+        const externalEffects = new ApplicationEffects(assets, simulation.scene, () => false);
+        try {
+          externalEffects.receive([{ ...first, event: { ...first.event, path: "maps/b_bh10.bsp" } }]);
+          await externalEffects.prepare(output.snapshot, []);
+          const externalCamera = { ...camera, origin: { x: -48, y: 0, z: 8 } };
+          const expected = external.brushScene.prepareModel(external.model.model, { origin: first.event.origin, axis: anglesToAxis(first.event.angles) },
+            { camera: externalCamera, time: output.snapshot.frame.time, target: { kind: "preview", id: "effects" }, animationFrame: first.event.frame });
+          const actual = externalEffects.frame(externalCamera).operations;
+          const batches = (operations: readonly import("../../src/contracts/render.ts").RenderOperation[]) => operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+          expect(batches(actual).length).toBeGreaterThan(0);
+          expect(batches(actual)).toEqual(batches(expected));
+        } finally { externalEffects.close(); }
+      }
+    } finally { effects.close(); target.close(); }
+  } finally { assets.close(); simulation.close(); await content.close(); }
+}, 30000);
 
 test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--renderer", "cpu"]);

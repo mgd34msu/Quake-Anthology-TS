@@ -86,10 +86,13 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         readonly colors: number;
         readonly frags: number;
     }>();
-    const ambientSignon = (): readonly Q1ApplicationMessage[] => simulation.events.capture().persistent.flatMap(record => {
-        if (record.kind !== 'q1' || record.event.kind !== 'ambient')
-            return [];
-        return [{ kind: 'static-sound', entity: 0, channel: 0, index: index(record.event.path, sounds), volume: Math.trunc(record.event.volume * 255), attenuation: record.event.attenuation, origin: record.event.origin } satisfies Q1ApplicationMessage];
+    const persistentSignon = (): readonly Q1ApplicationMessage[] => simulation.events.capture().persistent.flatMap((record): Q1ApplicationMessage[] => {
+        if (record.kind !== 'q1') return [];
+        const event = record.event;
+        if (event.kind === 'ambient') return [{ kind: 'static-sound', entity: 0, channel: 0, index: index(event.path, sounds), volume: Math.trunc(event.volume * 255), attenuation: event.attenuation, origin: event.origin }];
+        if (event.kind === 'static-model') return [{ kind: 'static', state: { number: 0, modelIndex: index(event.path, models), frame: event.frame,
+            colorMap: event.colorMap, skin: event.skin, effects: 0, origin: event.origin, angles: event.angles, alpha: 0, scale: 16, lerpFinishSeconds: 0, step: false } }];
+        return [];
     });
     const observe = (output: SimulationOutput, events: readonly SimulationPresentationEvent[]): void => {
         routed = [];
@@ -246,7 +249,7 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         carriedPlayer: client => { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client)); if (actor === undefined)
             throw new Error('Carried Q1 player has not been admitted'); const player = { client, actor, sourceEntity: number(actor) }; clients.set(client.slot, player); return player; },
         disconnect: player => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); clients.delete(player.client.slot); },
-        gameState: player => { const states = entities(); clientData(player); return { info: { kind: 'server-info', protocol: options.protocol, maxClients, gameType: game.options.deathmatch === 0 ? 0 : 1, level: game.world?.message || game.mapName, models: [...models.keys()], sounds: [...sounds.keys()] }, baselines: new Map(states.map(state => [state.number, state])), signon: ambientSignon() }; },
+        gameState: player => { const states = entities(); clientData(player); return { info: { kind: 'server-info', protocol: options.protocol, maxClients, gameType: game.options.deathmatch === 0 ? 0 : 1, level: game.world?.message || game.mapName, models: [...models.keys()], sounds: [...sounds.keys()] }, baselines: new Map(states.map(state => [state.number, state])), signon: persistentSignon() }; },
         spawn: player => [{ kind: 'time', seconds: game.time }, ...Array.from({ length: 64 }, (_, index) => ({ kind: 'light-style', index, value: simulation.events.lightStyle(index) } satisfies Q1ApplicationMessage)), ...[...source.composition.clients.records.values()].flatMap(client => [{ kind: 'name', slot: client.slot, value: client.name }, { kind: 'colors', slot: client.slot, value: client.shirt * 16 + client.pants }, { kind: 'frags', slot: client.slot, value: client.frags }] satisfies Q1ApplicationMessage[]), { kind: 'stat', index: 11, value: game.totalSecrets }, { kind: 'stat', index: 12, value: game.totalMonsters }, { kind: 'stat', index: 13, value: game.foundSecrets }, { kind: 'stat', index: 14, value: game.killedMonsters }, { kind: 'set-angle', angles: simulation.playerView(player.actor).angles }, clientData(player)],
         frame: (player, _output) => { const origin = simulation.playerView(player.actor).origin, cluster = simulation.scene.leafCluster(simulation.scene.pointLeaf(origin)); return { seconds: game.time, messages: [clientData(player)], reliable: routed.filter(event => event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), datagram: routed.filter(event => !event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), entities: entities().filter(state => state.number === player.sourceEntity || simulation.scene.clusterVisible(cluster, simulation.scene.leafCluster(simulation.scene.pointLeaf(state.origin)), 'pvs')) }; },
         input: (player, command, sequence) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command }),
