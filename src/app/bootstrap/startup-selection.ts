@@ -3,9 +3,10 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { openArchive } from "../../content/archive/index.ts";
 import type { ArchiveHandle } from "../../content/archive/index.ts";
+import { parseQ2Entities } from "../../content/q2/foundation/fields.ts";
 import { FileSource } from "../../content/archive/source.ts";
 import { parseQ1Entities, q1EntityValue, Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION } from "../../formats/q1-map/index.ts";
-import type { CampaignSelection, EquipmentSelection, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
+import type { CampaignSelection, EquipmentSelection, MonsterSelectionTarget, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/index.ts";
 import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../content/catalog/equipment.ts";
@@ -18,8 +19,13 @@ import type { ApplicationOptions } from "./options.ts";
 export type StartupSelectionField = "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer" | "gamma" | "resolution";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
+export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
+const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
+function monsterLabel(classname: string): string {
+  return monsterNames[classname] ?? classname.replace("monster_", "").split("_").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
 const baseProduct = (family: GameFamily): string => family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
 function baseArsenalPair(map: CatalogProduct, weapon: CatalogProduct): boolean {
   const family = map.expectation.family, program = family === "q1" ? "id1" : "baseq2";
@@ -39,6 +45,8 @@ export class StartupSelectionModel {
   private readonly values: Record<StartupSelectionField, string>;
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
   private readonly looseModels = new Map<string, readonly string[]>();
+  private readonly monsterClasses = new Map<string, ReadonlyMap<string, number>>();
+  private readonly rosters = new Map<string, { default: string; readonly byClassname: Map<string, string> }>();
   private readonly selectedModels = new Map<string, string>();
   private readonly modelChoices = new Map<string, readonly StartupSelectionChoice[]>();
   constructor(readonly catalog: InstalledCatalog, private readonly initial: ApplicationOptions) {
@@ -86,7 +94,9 @@ export class StartupSelectionModel {
             const start = view.getUint32(4, true), size = view.getUint32(8, true);
             if (start > length || size > length - start) throw new Error(`Invalid map entity lump: ${map.path}`);
             const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size);
-            accepted = parseQ1Entities(new TextDecoder().decode(bytes)).some(entity => {
+            const entities = parseQ1Entities(new TextDecoder().decode(bytes));
+            this.cacheMonsterClasses(key, entities.map(entity => q1EntityValue(entity, "classname") ?? ""));
+            accepted = entities.some(entity => {
               const classname = q1EntityValue(entity, "classname");
               return classname === "info_player_start" || classname === "info_player_deathmatch" || classname === "info_player_coop" || classname === "info_player_start2";
             });
@@ -131,6 +141,79 @@ export class StartupSelectionModel {
     }
     return [...models].sort().map(name => choice(name));
   }
+  private roster() {
+    let roster = this.rosters.get(this.values.product);
+    if (roster === undefined) { roster = { default: "native", byClassname: new Map<string, string>() }; this.rosters.set(this.values.product, roster); }
+    return roster;
+  }
+  private cacheMonsterClasses(key: string, classnames: readonly string[]): void {
+    const counts = new Map<string, number>();
+    for (const classname of classnames) if (classname.startsWith("monster_")) counts.set(classname, (counts.get(classname) ?? 0) + 1);
+    this.monsterClasses.set(key, counts);
+  }
+  async prepareMonsterRoster(): Promise<void> {
+    const product = this.geometry();
+    if (product.expectation.family === "q3") throw new Error("This map has no supported authored monster roster");
+    const map = this.catalog.mapsFor(product.id).find(map => map.path === this.values.map);
+    if (map === undefined) throw new Error("Selected map is unavailable");
+    const key = `${map.source}:${map.memberIndex}`;
+    if (this.monsterClasses.has(key)) return;
+    const file = new FileSource(map.source);
+    let archive: ArchiveHandle | null = null;
+    try {
+      let offset = 0, length = file.byteLength, decoded: Uint8Array | null = null;
+      if (map.memberIndex !== null) {
+        archive = await openArchive(map.source);
+        const entry = archive.entries[map.memberIndex];
+        if (entry === undefined) throw new Error("Selected map archive entry is unavailable");
+        length = entry.byteLength;
+        if (entry.format === "pak") offset = entry.dataOffset; else decoded = await archive.readEntry(entry);
+      }
+      const q2 = product.expectation.family === "q2", headerLength = q2 ? 16 : 12;
+      const header = decoded?.subarray(0, headerLength) ?? await file.read(offset, Math.min(length, headerLength));
+      if (header.byteLength < headerLength) throw new Error("Truncated map header");
+      const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+      if (q2 ? !["IBSP", "QBSP"].includes(new TextDecoder().decode(header.subarray(0, 4))) || view.getUint32(4, true) !== 38
+        : ![Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION].includes(view.getUint32(0, true))) throw new Error("Unsupported map header");
+      const start = view.getUint32(q2 ? 8 : 4, true), size = view.getUint32(q2 ? 12 : 8, true);
+      if (start > length || size > length - start) throw new Error("Invalid map entity lump");
+      const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size), text = new TextDecoder().decode(bytes).replace(/\0+$/, "");
+      this.cacheMonsterClasses(key, q2 ? parseQ2Entities(text, product.expectation.edition === "rerelease" ? "rerelease" : "classic").map(entity => entity.classname)
+        : parseQ1Entities(text).map(entity => q1EntityValue(entity, "classname") ?? ""));
+    } finally { archive?.close(); file.close(); }
+  }
+  private monsterChoices(): readonly StartupSelectionChoice[] {
+    return [choice("native", "Keep native"), ...monsterSources.flatMap(source => {
+      const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
+      const paths = product === undefined ? new Set<string>() : this.files(product);
+      return Object.entries(source.creatures).map(([classname, creature]) => choice(`${source.provider}/${classname}`,
+        `${monsterLabel(classname)} (${source.family.toUpperCase()}, ${source.edition})`,
+        product === undefined ? "Source content unavailable" : unavailable(product) ?? (creature.resources.every(path => paths.has(path.toLowerCase())) ? null : "Creature resources are not installed")));
+    })];
+  }
+  monsterRosterRows(): readonly MonsterRosterRow[] {
+    const map = this.catalog.mapsFor(this.geometry().id).find(map => map.path === this.values.map);
+    const counts = map === undefined ? undefined : this.monsterClasses.get(`${map.source}:${map.memberIndex}`), roster = this.roster(), choices = this.monsterChoices();
+    return [{ classname: null, label: "Default", value: roster.default, choices }, ...[...(counts ?? [])].sort(([a], [b]) => a.localeCompare(b)).map(([classname, count]) => ({
+      classname, label: `${monsterLabel(classname)} (${count})`, value: roster.byClassname.get(classname) ?? "default", choices: [choice("default", "Use default"), ...choices],
+    }))];
+  }
+  selectMonster(classname: string | null, id: string): void {
+    const row = this.monsterRosterRows().find(row => row.classname === classname), selected = row?.choices.find(choice => choice.id === id);
+    if (selected === undefined) throw new Error("Unknown monster roster choice");
+    if (selected.unavailable !== null) throw new Error(selected.unavailable);
+    const roster = this.roster();
+    if (classname === null) roster.default = id;
+    else if (id === "default") roster.byClassname.delete(classname); else roster.byClassname.set(classname, id);
+  }
+  private monsterTarget(id: string): MonsterSelectionTarget {
+    if (id === "native") return { kind: "map-defined" };
+    const source = monsterSources.find(source => id.startsWith(`${source.provider}/`));
+    if (source === undefined) throw new Error("Unknown monster source");
+    const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
+    if (product === undefined) throw new Error("Monster source content unavailable");
+    return { source: { provider: source.provider, content: product.id }, classname: id.slice(source.provider.length + 1) };
+  }
   private baseChoices(): readonly StartupSelectionChoice[] {
     return this.catalog.products.filter(product => (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
       && (product.expectation.family === "q1" && product.expectation.campaign === "id1" || product.expectation.family === "q2" && product.expectation.campaign === "baseq2")
@@ -147,10 +230,6 @@ export class StartupSelectionModel {
     const nativeMonsters = choice("native", `${currentLabel} authored monsters`);
     const nativeGrapple = choice("native", defaults.grapple.kind === "disabled" ? "Off (campaign default)" : `${defaults.grapple.mechanic} (${defaults.grapple.binding})`);
     const nativeGrenades = choice("native", defaults.handGrenades.kind === "disabled" ? "Off (campaign default)" : `Q2 ${defaults.handGrenades.edition} offhand grenades`);
-    const monsters = monsterSources.flatMap(source => {
-      const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
-      return Object.keys(source.creatures).map(classname => choice(`${source.provider}/${classname}`, `${classname.replace("monster_", "")} (${source.family}, ${source.edition})`, product === undefined ? "Source content unavailable" : unavailable(product)));
-    });
     const grapples: StartupSelectionChoice[] = [nativeGrapple, choice("disabled", "Disabled")];
     for (const product of this.catalog.products) {
       const { family, campaign, edition, id } = product.expectation;
@@ -166,7 +245,7 @@ export class StartupSelectionModel {
         const product = this.catalog.product(option.id), current = this.product("product");
         return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseArsenalPair(current, product)
           ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
-      })]), row("enemies", "Monsters", [nativeMonsters, ...monsters]),
+      })]), row("enemies", "Monsters", [nativeMonsters, choice("custom", "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null)]),
       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
         ...this.catalog.products.filter(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2").map(productChoice)]),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
@@ -184,7 +263,10 @@ export class StartupSelectionModel {
     if (selected === undefined) throw new Error(`Unknown ${field} selection: ${id}`);
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
     this.values[field] = id;
-    if (field === "product") this.values.map = this.defaultMap();
+    if (field === "product") {
+      this.values.map = this.defaultMap();
+      if (this.product("product").expectation.family === "q3") this.values.enemies = "native";
+    }
     if (field === "mode" || field === "product") {
       const product = this.product("product");
       if (this.values.mode !== "deathmatch" || product.expectation.family !== "q2" || product.expectation.edition !== "classic") this.values.rules = "standard";
@@ -236,12 +318,10 @@ export class StartupSelectionModel {
         throw new Error("Selecting another edition's weapons within the same game family is not implemented; choose campaign weapons or a different family.");
       selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
     }
-    if (this.values.enemies !== "native") {
-      const source = monsterSources.find(source => this.values.enemies.startsWith(`${source.provider}/`));
-      if (source === undefined) throw new Error("Unknown monster source");
-      const product = this.catalog.products.find(product => product.expectation.family === source.family && product.expectation.edition === source.edition && product.expectation.campaign === source.program);
-      if (product === undefined) throw new Error("Monster source content unavailable");
-      selections = { ...selections, enemies: { kind: "selected", value: { kind: "replace", default: { source: { provider: source.provider, content: product.id }, classname: this.values.enemies.slice(source.provider.length + 1) }, byClassname: {} } } };
+    if (this.values.enemies === "custom") {
+      const roster = this.roster();
+      selections = { ...selections, enemies: { kind: "selected", value: { kind: "replace", default: this.monsterTarget(roster.default),
+        byClassname: Object.fromEntries([...roster.byClassname].map(([classname, id]) => [classname, this.monsterTarget(id)])) } } };
     }
     let equipment: EquipmentSelection = base.equipment;
     if (this.values.grapple === "disabled") equipment = { ...equipment, grapple: disabledEquipment().grapple };

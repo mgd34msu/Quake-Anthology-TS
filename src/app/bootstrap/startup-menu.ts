@@ -37,6 +37,7 @@ const displayMenu: UiMenuId = "menu:startup:display";
 const soundMenu: UiMenuId = "menu:startup:sound";
 const controlsMenu: UiMenuId = "menu:startup:controls";
 const selectMenu: UiMenuId = "menu:startup:select";
+const rosterMenu: UiMenuId = "menu:startup:roster";
 const categoryMenu: UiMenuId = "menu:startup:category";
 const loadMenu: UiMenuId = "menu:startup:load";
 const groups: readonly { readonly title: string; readonly fields: readonly StartupSelectionField[] }[] = [
@@ -55,6 +56,8 @@ export class StartupMenu {
   private group = groups[0];
   private field: StartupSelectionField = "product";
   private page = 0;
+  private rosterPage = 0;
+  private monsterField: { readonly kind: "none" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
   private savePage = 0;
   private multiplayer = false;
   private multiplayerMode: "coop" | "deathmatch" = "deathmatch";
@@ -92,17 +95,33 @@ export class StartupMenu {
       this.register(id, () => [...(options.settings ?? []).filter(binding => binding.category === category)
         .map((binding, index) => settingControl(binding, { x: 64, y: 118 + index * 38, width: 512, height: 34 }, options.seat)), this.back()]);
     this.register(selectMenu, () => {
-      const row = options.model.rows().find(row => row.id === this.field);
+      const row = this.selectionRow();
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
       this.page = Math.min(this.page, pages - 1);
       const controls = choices.slice(this.page * 7, this.page * 7 + 7).map((choice, index) => {
         const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(choice.label, 466, 2.6)}`, index, () => {
-          options.model.select(this.field, choice.id); this.status = ""; this.controller.closeMenu();
+          if (this.monsterField.kind === "class") options.model.selectMonster(this.monsterField.classname, choice.id);
+          else options.model.select(this.field, choice.id);
+          this.status = ""; this.controller.closeMenu();
+          if (this.monsterField.kind === "none" && this.field === "enemies" && choice.id === "custom") this.openRoster();
         }, true);
         return { ...control, enabled: choice.unavailable === null && !this.busy };
       });
       if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.page = (this.page + pages - 1) % pages; }, true),
         this.button("next", "Next page", 8, () => { this.page = (this.page + 1) % pages; }, true));
+      return [...controls, this.back()];
+    });
+    this.register(rosterMenu, () => {
+      const rows = options.model.monsterRosterRows(), pages = Math.max(1, Math.ceil(rows.length / 7));
+      this.rosterPage = Math.min(this.rosterPage, pages - 1);
+      const controls = rows.slice(this.rosterPage * 7, this.rosterPage * 7 + 7).map((row, index) => {
+        const label = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
+        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${label}`, 486, 2.6), index, () => {
+          this.monsterField = { kind: "class", classname: row.classname }; this.page = 0; this.controller.openMenu(selectMenu);
+        }, true);
+      });
+      if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.rosterPage = (this.rosterPage + pages - 1) % pages; }, true),
+        this.button("next", "Next page", 8, () => { this.rosterPage = (this.rosterPage + 1) % pages; }, true));
       return [...controls, this.back()];
     });
     this.register(loadMenu, () => {
@@ -135,9 +154,20 @@ export class StartupMenu {
       visible: true, enabled: !this.busy, activate: () => { activate(); return undefined; } };
   }
   private back(): UiControl { return this.button("back", "Back", 9, () => this.controller.closeMenu(), true); }
+  private selectionRow() {
+    const selected = this.monsterField;
+    return selected.kind === "class" ? this.options.model.monsterRosterRows().find(row => row.classname === selected.classname)
+      : this.options.model.rows().find(row => row.id === this.field);
+  }
+  private openRoster(): void {
+    this.setStatus("Reading this map's monster roster...", true);
+    void this.options.model.prepareMonsterRoster().then(() => {
+      this.rosterPage = 0; this.setStatus(""); this.controller.openMenu(rosterMenu);
+    }).catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
+  }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.field = row.id; this.page = 0; this.controller.openMenu(selectMenu); }, true);
+    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.page = 0; this.controller.openMenu(selectMenu); }, true);
   }
   private measure(text: string, scale: number): number {
     return layoutText({ text, font: this.options.font, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
@@ -153,8 +183,12 @@ export class StartupMenu {
   input(event: SeatInputEvent): boolean {
     if (this.busy) return true;
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === selectMenu) {
-      const choices = this.options.model.rows().find(row => row.id === this.field)?.choices ?? [];
+      const choices = this.selectionRow()?.choices ?? [];
       this.page = Math.max(0, Math.min(Math.ceil(choices.length / 7) - 1, this.page + (event.delta.y < 0 ? 1 : -1)));
+      return true;
+    }
+    if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === rosterMenu) {
+      this.rosterPage = Math.max(0, Math.min(Math.ceil(this.options.model.monsterRosterRows().length / 7) - 1, this.rosterPage + (event.delta.y < 0 ? 1 : -1)));
       return true;
     }
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === loadMenu) {
@@ -179,10 +213,11 @@ export class StartupMenu {
     };
     const backdrop = menuBackdrop(context), panel = menuPanel(context, active === main);
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
-      : active === categoryMenu ? this.group?.title ?? "Session" : active === selectMenu ? this.options.model.rows().find(row => row.id === this.field)?.label ?? "Choose"
+      : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     text(title, 64, 44, active === main ? 6 : 4, true, true);
 
+    if (active === rosterMenu) text("Counts: this map. Choices apply across this campaign.", 64, 82, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {

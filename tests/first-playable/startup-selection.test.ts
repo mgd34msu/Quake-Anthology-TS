@@ -54,3 +54,78 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   const inferred = new StartupSelectionModel(catalog, { ...command.options, product: "q2-classic-ctf", mode: "deathmatch" });
   expect(inferred.options.rules).toBe("ctf");
 }, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup roster edits actual map classes with native defaults and exceptions", async () => {
+  const { StartupMenu } = await import("../../src/app/bootstrap/startup-menu.ts");
+  const { createIdentityOwner } = await import("../../src/contracts/identity.ts");
+  const { createMountPlanId } = await import("../../src/contracts/content.ts");
+  const { openMountPlan } = await import("../../src/content/mounts/index.ts");
+  const { SceneImageRegistry } = await import("../../src/render/scene/resources.ts");
+  const { loadMenuFont } = await import("../../src/app/bootstrap/menu-font.ts");
+  const { loadNativeUiArt } = await import("../../src/ui/common/index.ts");
+  const { readMenuArt } = await import("../../src/app/bootstrap/menu-art.ts");
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m2"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  const identity = createIdentityOwner("startup-roster-mouse"), seat = identity.seat(0), images = new SceneImageRegistry({ identity: Symbol("roster-ui"), session: identity.session, generation: 0 });
+  const mounts = await catalog.mountsFor(catalog.require("q1-classic-id1").id), mounted = await openMountPlan({ id: createMountPlanId("roster", "menu"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+  const font = await loadMenuFont({ mounts: mounted, family: "q1", rerelease: false, images });
+  const fontSource = font.font.classic.picture.image.source;
+  if (fontSource.kind !== "resource") throw new Error("Missing actual font resource");
+  const art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);
+  const menu = new StartupMenu({ seat, model, art, font: font.font, titleFont: font.font, now: () => 0, play: () => undefined, load: () => undefined,
+    saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined, quit: () => undefined, applyDisplay: () => undefined });
+  const click = (row: number) => {
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 130 + row * 34 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
+  };
+  const choose = (classname: string | null, id: string) => {
+    const rows = model.monsterRosterRows(), rowIndex = rows.findIndex(row => row.classname === classname);
+    if (rowIndex < 0) throw new Error("Missing authored roster row");
+    for (let page = 0; page < Math.floor(rowIndex / 7); page++) click(8);
+    click(rowIndex % 7);
+    const row = rows[rowIndex], index = row?.choices.findIndex(choice => choice.id === id) ?? -1;
+    if (index < 0) throw new Error("Missing replacement choice");
+    for (let page = 0; page < Math.floor(index / 7); page++) click(8);
+    click(index % 7);
+    expect(menu.controller.activeMenu).toBe("menu:startup:roster");
+  };
+  try {
+    click(0); click(2); click(1); click(1);
+    await model.prepareMonsterRoster();
+    expect(menu.controller.activeMenu).toBe("menu:startup:roster");
+    expect(model.monsterRosterRows()[0]?.value).toBe("native");
+    expect(model.monsterRosterRows().some(row => row.classname === "monster_ogre" && /\([1-9][0-9]*\)/.test(row.label))).toBe(true);
+    choose("monster_ogre", "q2:monsters/classic/baseq2/monster_berserk");
+    let selected = await model.resolve();
+    expect(selected.recipe.enemies).toMatchObject({ kind: "replace", default: { kind: "map-defined" }, byClassname: { monster_ogre: { classname: "monster_berserk" } } });
+    expect(selected.recipe.map.geometry.requestedPath).toBe("maps/e1m2.bsp");
+    choose(null, "q1:monsters/classic/id1/monster_army");
+    choose("monster_ogre", "native");
+    selected = await model.resolve();
+    expect(selected.recipe.enemies).toMatchObject({ kind: "replace", default: { classname: "monster_army" }, byClassname: { monster_ogre: { kind: "map-defined" } } });
+    choose("monster_ogre", "default");
+    expect((await model.resolve()).recipe.enemies).toMatchObject({ byClassname: {} });
+    choose("monster_ogre", "native");
+    model.select("map", "maps/e1m1.bsp"); await model.prepareMonsterRoster();
+    expect((await model.resolve()).recipe.enemies).toMatchObject({ byClassname: { monster_ogre: { kind: "map-defined" } } });
+    expect(model.monsterRosterRows()[0]?.value).toBe("q1:monsters/classic/id1/monster_army");
+    model.select("product", "q2-classic-baseq2"); await model.prepareMonsterRoster();
+    expect(model.monsterRosterRows()[0]?.value).toBe("native");
+    expect(model.monsterRosterRows().some(row => row.classname === "monster_soldier_light")).toBe(true);
+    model.select("product", "q1-classic-id1"); await model.prepareMonsterRoster();
+    expect(model.monsterRosterRows()[0]?.value).toBe("q1:monsters/classic/id1/monster_army");
+    model.select("map", "maps/e1m2.bsp"); await model.prepareMonsterRoster();
+    expect(model.monsterRosterRows().find(row => row.classname === "monster_ogre")?.value).toBe("native");
+    model.select("map", "maps/e2m6.bsp"); await model.prepareMonsterRoster();
+    const finalClass = model.monsterRosterRows()[7];
+    if (finalClass === undefined || finalClass.classname === null) throw new Error("Missing actual second page class");
+    choose(finalClass.classname, "native");
+    expect(model.monsterRosterRows()[7]?.value).toBe("native");
+    model.select("product", "q3-baseq3");
+    expect(() => model.select("enemies", "custom")).toThrow("authored monster roster");
+    expect(model.rows().find(row => row.id === "enemies")?.value).toBe("native");
+  } finally { menu.close(); art.close(); font.close(); mounted.close(); }
+}, 60000);
