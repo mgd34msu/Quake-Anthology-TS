@@ -260,11 +260,12 @@ test.skipIf(!existsSync(resolve(root, q1.path)))("NetQuake client think follows 
 
 test("shared sweep uses stored source planes and rereads impact velocity for the crease", () => {
   const m = new MovementMath(createNumericOperations(Q1_DONOR_PROFILE));
-  for (const remove of [false, true]) {
+  for (const { remove, quakeworld } of [{ remove: false, quakeworld: false }, { remove: true, quakeworld: false }, { remove: false, quakeworld: true }]) {
     let origin: Vec3 = zero, velocity: Vec3 = { x: 2, y: 2, z: 2 }, live = true, traces = 0, writes = 0;
     const stop = sweepBody({
       read: () => live ? { origin, velocity } : null,
       writeOrigin: value => { origin = value; }, writeVelocity: value => { velocity = value; writes++; },
+      collisionPolicy: { stopOnStartSolid: quakeworld, originalVelocity: quakeworld ? "initial" : "last-progress", creaseVelocity: quakeworld ? "last-candidate" : "current" },
       stopWhenStill: true, samePlane: (a, b) => a === b,
       trace: (start, end) => {
         traces++;
@@ -282,7 +283,35 @@ test("shared sweep uses stored source planes and rereads impact velocity for the
     expect(stop).toBe(remove ? "removed" : "complete");
     expect(traces).toBe(remove ? 1 : 3);
     expect(writes).toBe(remove ? 0 : 2);
-    expect(origin).toEqual(remove ? { x: 0.5, y: 0.5, z: 0.5 } : { x: 0.5, y: 0.5, z: 5.75 });
-    expect(velocity).toEqual(remove ? { x: 2, y: 2, z: 2 } : { x: 0, y: 0, z: 7 });
+    expect(origin).toEqual(remove ? { x: 0.5, y: 0.5, z: 0.5 } : { x: 0.5, y: 0.5, z: quakeworld ? 2 : 5.75 });
+    expect(velocity).toEqual(remove ? { x: 2, y: 2, z: 2 } : { x: 0, y: 0, z: quakeworld ? 2 : 7 });
+  }
+});
+
+
+test("QuakeWorld sweep keeps initial clip velocity across progress and stops on startsolid", () => {
+  const m = new MovementMath(createNumericOperations(Q1_DONOR_PROFILE));
+  for (const startSolid of [false, true]) {
+    let origin: Vec3 = zero, velocity: Vec3 = { x: 2, y: 2, z: 2 }, traces = 0, touches = 0;
+    const stop = sweepBody({
+      read: () => ({ origin, velocity }), writeOrigin: value => { origin = value; }, writeVelocity: value => { velocity = value; },
+      stopWhenStill: false, samePlane: (a, b) => a === b,
+      collisionPolicy: { stopOnStartSolid: true, originalVelocity: "initial", creaseVelocity: "last-candidate" },
+      trace: (start, end) => {
+        traces++;
+        const fraction = traces <= 2 ? 0.25 : 1;
+        return { kind: "q1", fraction, end: m.ma(start, fraction, m.sub(end, start)), startSolid, allSolid: false,
+          hit: fraction === 1 ? { kind: "none" } : { kind: "world", model: 0 }, inOpen: true, inWater: false, contact: { kind: "none" },
+          sourcePlane: { normal: traces === 1 ? { x: -1, y: 0, z: 0 } : { x: 0, y: -1, z: 0 }, distance: 0 } };
+      },
+      normal: trace => trace.sourcePlane.normal, impact: () => { touches++; },
+      math: { advance: (start, time, speed) => m.ma(start, time, speed), remaining: (time, fraction) => m.n.subtract(time, m.n.multiply(time, fraction)),
+        clip: (speed, normal) => m.clip(speed, normal, 1), dot: (a, b) => m.dot(a, b), cross: (a, b) => m.cross(a, b), scale: (v, amount) => m.scale(v, amount) },
+    }, 1);
+    expect(stop).toBe(startSolid ? "solid" : "complete");
+    expect(touches).toBe(startSolid ? 0 : 2);
+    expect(traces).toBe(startSolid ? 1 : 3);
+    expect(origin).toEqual(startSolid ? zero : { x: 1.625, y: 0.875, z: 2 });
+    expect(velocity).toEqual(startSolid ? zero : { x: 2, y: 0, z: 2 });
   }
 });

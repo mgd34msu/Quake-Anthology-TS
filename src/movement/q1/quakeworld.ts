@@ -1,3 +1,4 @@
+import { sweepBody } from "../swept-body.ts";
 /* Ported from QuakeWorld/client/pmove.c and server/sv_user.c.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { ProviderId } from "../../contracts/identity.ts";
@@ -36,33 +37,24 @@ class QuakeWorldMove {
   }
   private flyMove(): number {
     const c = this.context, m = c.math, n = m.n, s = this.state;
-    const original = s.velocity, primal = s.velocity;
-    let planes: Vec3[] = [], blocked = 0, timeLeft = this.frameSeconds;
-    for (let bump = 0; bump < 4; bump++) {
-      const trace = c.trace(s.origin, m.ma(s.origin, timeLeft, s.velocity));
-      if (trace.startSolid || trace.allSolid) { s.velocity = ZERO; return 3; }
-      if (trace.fraction > 0) { s.origin = trace.end; planes = []; }
-      if (trace.fraction === 1) break;
-      this.record(trace);
-      const normal = trace.sourcePlane.normal;
-      if (normal.z > 0.7) blocked |= 1;
-      if (normal.z === 0) blocked |= 2;
-      timeLeft = n.subtract(timeLeft, n.multiply(timeLeft, trace.fraction));
-      if (planes.length >= 5) { s.velocity = ZERO; break; }
-      planes.push(normal);
-      let accepted = false;
-      for (const plane of planes) {
-        s.velocity = m.clip(original, plane, 1);
-        if (planes.every(other => other === plane || m.dot(s.velocity, other) >= 0)) { accepted = true; break; }
-      }
-      if (!accepted) {
-        const [first, second] = planes;
-        if (planes.length !== 2 || first === undefined || second === undefined) { s.velocity = ZERO; break; }
-        const direction = m.cross(first, second);
-        s.velocity = m.scale(direction, m.dot(direction, s.velocity));
-      }
-      if (m.dot(s.velocity, primal) <= 0) { s.velocity = ZERO; break; }
-    }
+    const primal = s.velocity;
+    let blocked = 0;
+    const stop = sweepBody({
+      read: () => s, writeOrigin: origin => { s.origin = origin; }, writeVelocity: velocity => { s.velocity = velocity; },
+      trace: (start, end) => c.trace(start, end), normal: trace => trace.sourcePlane.normal,
+      stopWhenStill: false, samePlane: (first, second) => first === second,
+      collisionPolicy: { stopOnStartSolid: true, originalVelocity: "initial", creaseVelocity: "last-candidate" },
+      impact: (trace, normal) => {
+        this.record(trace);
+        if (normal.z > 0.7) blocked |= 1;
+        if (normal.z === 0) blocked |= 2;
+      },
+      math: { advance: (origin, time, velocity) => m.ma(origin, time, velocity),
+        remaining: (time, fraction) => n.subtract(time, n.multiply(time, fraction)),
+        clip: (velocity, normal) => m.clip(velocity, normal, 1), dot: (first, second) => m.dot(first, second),
+        cross: (first, second) => m.cross(first, second), scale: (vector, amount) => m.scale(vector, amount) },
+    }, this.frameSeconds);
+    if (stop === "solid") return 3;
     if (s.waterJumpTimeSeconds !== 0) s.velocity = primal;
     return blocked;
   }

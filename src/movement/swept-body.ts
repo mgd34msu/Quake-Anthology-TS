@@ -10,6 +10,11 @@ export interface SweptBodyServices {
   normal(trace: TraceResult): Vec3;
   impact(trace: TraceResult, normal: Vec3): void;
   readonly stopWhenStill: boolean;
+  readonly collisionPolicy?: {
+    readonly stopOnStartSolid: boolean;
+    readonly originalVelocity: "initial" | "last-progress";
+    readonly creaseVelocity: "last-candidate" | "current";
+  };
   samePlane(first: Vec3, second: Vec3): boolean;
   readonly math: {
     advance(origin: Vec3, time: number, velocity: Vec3): Vec3;
@@ -34,8 +39,8 @@ export function sweepBody(services: SweptBodyServices, elapsed: number): SweepSt
     if (state === null) return "removed";
     if (services.stopWhenStill && state.velocity.x === 0 && state.velocity.y === 0 && state.velocity.z === 0) break;
     const trace = services.trace(state.origin, math.advance(state.origin, remaining, state.velocity));
-    if (trace.allSolid) { services.writeVelocity(zero); return "solid"; }
-    if (trace.fraction > 0) { services.writeOrigin(trace.end); original = state.velocity; planes.length = 0; }
+    if (trace.allSolid || services.collisionPolicy?.stopOnStartSolid === true && trace.startSolid) { services.writeVelocity(zero); return "solid"; }
+    if (trace.fraction > 0) { services.writeOrigin(trace.end); if (services.collisionPolicy?.originalVelocity !== "initial") original = state.velocity; planes.length = 0; }
     if (trace.fraction === 1) break;
     const normal = services.normal(trace);
     services.impact(trace, normal);
@@ -45,15 +50,17 @@ export function sweepBody(services: SweptBodyServices, elapsed: number): SweepSt
     if (planes.length >= 5) { services.writeVelocity(zero); return "plane-limit"; }
     planes.push(normal);
     let velocity: Vec3 | null = null;
+    let lastCandidate = current.velocity;
     for (const plane of planes) {
       const candidate = math.clip(original, plane);
+      lastCandidate = candidate;
       if (planes.every(other => services.samePlane(other, plane) || math.dot(candidate, other) >= 0)) { velocity = candidate; break; }
     }
     if (velocity === null) {
       const first = planes[0], second = planes[1];
       if (planes.length !== 2 || first === undefined || second === undefined) { services.writeVelocity(zero); return "crease-blocked"; }
       const direction = math.cross(first, second);
-      velocity = math.scale(direction, math.dot(direction, current.velocity));
+      velocity = math.scale(direction, math.dot(direction, services.collisionPolicy?.creaseVelocity === "last-candidate" ? lastCandidate : current.velocity));
     }
     if (math.dot(velocity, primal) <= 0) { services.writeVelocity(zero); return "reversed"; }
     services.writeVelocity(velocity);
