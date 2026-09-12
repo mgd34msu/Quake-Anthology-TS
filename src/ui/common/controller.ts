@@ -44,6 +44,7 @@ export class NativeUiController implements SeatUiController {
   private readonly listTops = new Map<UiControlId, number>();
   private readonly heldAxes = new Map<string, HeldDirection>();
   private cursor: Vec2 = { x: 320, y: 240 };
+  private pointerPosition: Vec2 | null = null;
   private transform: UiTransform = { x: 0, y: 0, scale: 1 };
   private dragging: UiControlId | null = null;
   private shift = false;
@@ -205,6 +206,7 @@ export class NativeUiController implements SeatUiController {
     return true;
   }
   private pointer(position: Vec2): void {
+    this.pointerPosition = position;
     this.cursor = uiPoint(position, this.transform);
     const active = this.active(); if (active === null) return;
     const drag = active.menu.controls.find(control => control.id === this.dragging);
@@ -285,6 +287,7 @@ export class NativeUiController implements SeatUiController {
     if (!context.binding.seat.equals(this.seat)) throw new Error("UI draw delivered to another seat");
     const appearance = this.options.appearance?.() ?? { menuScale: 1, textScale: 1, highContrast: false };
     this.transform = fitUi(context.binding.safeArea, appearance.menuScale);
+    if (this.pointerPosition !== null) this.cursor = uiPoint(this.pointerPosition, this.transform);
     for (const held of this.heldAxes.values()) if (context.timeMilliseconds >= held.next) {
       this.key(held.code, true); held.next = context.timeMilliseconds + 80;
     }
@@ -303,7 +306,9 @@ export class NativeUiController implements SeatUiController {
     const panel = { x: 32, y: 24, width: 576, height: 432 };
     commands.push({ kind: "fill", rect: panel, color: skin.colors.panel });
     if (skin.panel !== null) commands.push(...nineSlice(skin.panel, panel, white));
-    text(active.menu.title, 320, 48, skin.colors.accent, "center");
+    if (skin.titleFont === undefined) text(active.menu.title, 320, 48, skin.colors.accent, "center");
+    else commands.push({ kind: "text", origin: { x: 64, y: 44 }, text: this.options.localize?.(active.menu.title) ?? active.menu.title,
+      font: skin.titleFont, scale: skin.titleScale ?? skin.fontScale, color: skin.colors.accent, align: "left", shadow: true });
     for (const control of active.menu.controls) {
       if (!control.visible) continue;
       const focused = control.id === active.cursor.focus;

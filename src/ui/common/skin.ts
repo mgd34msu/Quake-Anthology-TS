@@ -15,6 +15,8 @@ export interface UiImageSlice {
 }
 export interface UiSkin {
   readonly font: ResourceId;
+  readonly titleFont?: ResourceId;
+  readonly titleScale?: number;
   readonly fontScale: number;
   readonly lineHeight: number;
   readonly panel: UiImageSlice | null;

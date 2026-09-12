@@ -232,7 +232,7 @@ const BANNER: readonly AtlasMetric[] = [
     [12, 97, 31], [48, 97, 31], [82, 97, 30], [118, 97, 30], [153, 97, 30], [185, 97, 25], [213, 97, 30],
     [11, 139, 32], [42, 139, 51], [93, 139, 32], [126, 139, 31], [158, 139, 25],
 ];
-function propMetric(code: number): AtlasMetric {
+export function propMetric(code: number): AtlasMetric {
     let ch = code & 127;
     if (ch < 32 || ch === 127)
         return INVALID_METRIC;

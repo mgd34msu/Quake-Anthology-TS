@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { menuBackground, menuFocus, menuPanel } from "./art-manifest.ts";
+import { mainMenuBackground, menuBackground, menuFocus, menuPanel } from "./art-manifest.ts";
 import type { MenuArtFile, MenuArtFrame } from "./art-manifest.ts";
 import type { ResourceId } from "../../contracts/content.ts";
 import type { RendererImage } from "../../contracts/render.ts";
@@ -20,6 +20,7 @@ export interface NativeUiArt {
 export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<Uint8Array>): Promise<NativeUiArt> {
   const assets: readonly { readonly resource: ResourceId; readonly file: MenuArtFile }[] = [
     { resource: "resource:engine-menu:background", file: menuBackground },
+    { resource: "resource:engine-menu:main-background", file: mainMenuBackground },
     { resource: "resource:engine-menu:panel", file: menuPanel },
     { resource: "resource:engine-menu:focus", file: menuFocus },
   ];

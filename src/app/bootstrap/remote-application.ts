@@ -206,7 +206,7 @@ export class RemoteApplication {
     const input = this.controls, local = input.locals[0];
     if (local === undefined) throw new Error("Remote input has no local seat");
     const ui = new ApplicationSeatUi(local, frontend.art, input, this.remote, frontend.font, frontend.audio,
-      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id));
+      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), await frontend.assets.loadMenuTypography());
     if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
     const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects);
     local.player.seat.attachPresentation(presentation, () => presentation.close());

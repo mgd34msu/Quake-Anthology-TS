@@ -62,6 +62,11 @@ export class InputRouter {
     const playing = this.keyboard !== null && this.keyboard.focused && this.keyboard.focus.kind === "game";
     this.lease?.setRelativeMouse(playing);
   }
+  private pointerPosition(x: number, y: number): { readonly x: number; readonly y: number } {
+    if (this.window === null) return { x, y };
+    const logical = this.window.logicalSize, drawable = this.window.drawableSize;
+    return { x: x * drawable.width / logical.width, y: y * drawable.height / logical.height };
+  }
   private time(timestamp: number): number { return sdlEventTime(timestamp, this.options.ticks(), this.options.now(), this.options.subframe); }
   handlePlatform(event: SdlEvent): void {
     if (this.closed) throw new Error("Input router is closed");
@@ -82,8 +87,10 @@ export class InputRouter {
         translated = { ...common, kind: "key", code, down: event.down, repeat: event.repeat }; break;
       }
       case "text": translated = { ...common, kind: "text", text: event.text }; break;
-      case "mouse-motion": translated = { ...common, kind: "mouse-motion", position: { x: event.x, y: event.y }, delta: { x: event.dx, y: event.dy } }; break;
-      case "mouse-button": translated = { ...common, kind: "mouse-button", button: event.button, down: event.down }; break;
+      case "mouse-motion": translated = { ...common, kind: "mouse-motion", position: this.pointerPosition(event.x, event.y), delta: { x: event.dx, y: event.dy } }; break;
+      case "mouse-button":
+        if (seat.focus.kind !== "game") seat.input({ ...common, kind: "mouse-motion", position: this.pointerPosition(event.x, event.y), delta: { x: 0, y: 0 } });
+        translated = { ...common, kind: "mouse-button", button: event.button, down: event.down }; break;
       case "mouse-wheel": translated = { ...common, kind: "mouse-wheel", delta: { x: event.preciseX * (event.flipped ? -1 : 1), y: event.preciseY * (event.flipped ? -1 : 1) } }; break;
       default: this.options.unhandled(event); return;
     }

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { openArchive } from "../../src/content/archive/index.ts";
+import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import { SceneImageRegistry, SceneTextureLoader } from "../../src/render/scene/index.ts";
 import { BinaryReader } from "../../src/core/binary/index.ts";
 import type { Palette } from "../../src/contracts/render.ts";
 import { decodePcx, encodePcx, decodeQ1MipTexture, decodeWal, decodeLit } from "../../src/formats/images/indexed.ts";
@@ -115,6 +117,27 @@ describe("installed Quake image smoke", () => {
     const path = `${qfiles}q2/baseq2/pak0.pak`, pcx = decodePcx(await member(path, "pics/colormap.pcx"));
     expect(pcx.palette?.length).toBe(768);
     expect(pcx.indices.length).toBe(pcx.width * pcx.height);
+    const charsetBytes = await member(path, "pics/conchars.pcx"), charset = decodePcx(charsetBytes);
+    const identity = createIdentityOwner("pcx-charset"), images = new SceneImageRegistry({ identity: Symbol("pcx"), session: identity.session, generation: 0 });
+    const textures = new SceneTextureLoader(images, { read: async name => name === "pics/conchars.pcx"
+      ? { bytes: charsetBytes, source: { kind: "generated", name } } : null });
+    const loaded = await textures.load("pics/conchars.pcx", { family: "q2", mipmap: false });
+    if (loaded === null || loaded.content.kind !== "rgba8") throw new Error("Q2 charset was not uploaded as RGBA");
+    const transparent = charset.indices.indexOf(255), solid = charset.indices.findIndex(index => index !== 255);
+    expect(transparent).toBeGreaterThanOrEqual(0); expect(solid).toBeGreaterThanOrEqual(0);
+    expect(loaded.content.levels[0].pixels[transparent * 4 + 3]).toBe(0);
+    expect(loaded.content.levels[0].pixels[solid * 4 + 3]).toBe(255);
+    expect(loaded.content.levels[0].pixels.filter((_, index) => index % 4 === 3 && loaded.content.levels[0].pixels[index] === 0).length)
+      .toBe(charset.indices.filter(index => index === 255).length);
+    if (charset.palette === null) throw new Error("Retail Q2 charset has no embedded palette");
+    const transparentRgb = charset.palette.slice(255 * 3, 256 * 3);
+    for (const family of ["q1", "q3", undefined] satisfies readonly ("q1" | "q3" | undefined)[]) {
+      const opaque = await textures.load("pics/conchars.pcx", family === undefined ? { mipmap: false } : { family, mipmap: false });
+      if (opaque === null || opaque.content.kind !== "rgba8") throw new Error("Opaque PCX was not uploaded as RGBA");
+      expect(opaque.content.levels[0].pixels[transparent * 4 + 3]).toBe(255);
+      expect(opaque.content.levels[0].pixels.slice(transparent * 4, transparent * 4 + 3)).toEqual(transparentRgb);
+    }
+    images.close();
     const archive = await openArchive(path);
     try {
       const entry = archive.entries.find(candidate => candidate.path.endsWith(".wal"));

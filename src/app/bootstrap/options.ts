@@ -28,12 +28,13 @@ export interface ApplicationOptions {
 
 export type ApplicationCommand = { readonly kind: "help" }
   | { readonly kind: "list-content"; readonly corpusRoot: string }
-  | { readonly kind: "run"; readonly options: ApplicationOptions };
+  | { readonly kind: "run" | "menu"; readonly options: ApplicationOptions };
 
-export const applicationHelp = `Quake TypeScript
+export const applicationHelp = `Quake
 
 Usage: bun run src/main.ts [options]
 
+  --menu                     Open the startup menu (default without launch selections)
   --preset q2-q1-q3|q1-q2     Select an initial mixed-game profile
   --content-root PATH        Game data root (default ~/Projects/qfiles)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
@@ -87,11 +88,13 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", gamma: 1, dedicated: false,
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
-  let list = false;
+  let list = false, menu = false, explicitLaunch = false;
   let listenKind: "native-server" | "q2-server" = "q2-server";
   let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
+    if (flag === "--menu") { menu = true; continue; }
+    if (flag !== undefined && !["--content-root", "--renderer", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
@@ -166,5 +169,6 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   }
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && options.product.startsWith("q3-") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
-  return { kind: "run", options };
+  if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");
+  return { kind: menu || !explicitLaunch ? "menu" : "run", options };
 }

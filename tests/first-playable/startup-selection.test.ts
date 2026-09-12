@@ -1,0 +1,56 @@
+import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
+import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
+import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
+
+const corpus = resolve(import.meta.dir, "../../../qfiles");
+test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("startup choices resolve independent installed source selections without starting a world", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus]);
+  if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  expect(model.rows().find(row => row.id === "model")?.choices.some(choice => choice.id === "sarge")).toBe(true);
+  expect(model.rows().find(row => row.id === "product")?.choices.find(choice => choice.id === "q1-rerelease-quake64")?.unavailable).not.toBeNull();
+  const original = await model.resolve();
+  expect(original.recipe.weapons).toEqual([{ provider: "q2:official", content: catalog.require("q2-classic-baseq2").id }]);
+  model.select("weapons", "q3-baseq3"); model.select("movement", "q2-rerelease-baseq2");
+  model.select("grapple", "q2-classic-ctf/offhand"); model.select("grenades", "q2-classic-baseq2");
+  model.select("product", "q1-rerelease-id1");
+  expect(model.options.map).toBe("maps/start.bsp");
+  expect(model.rows().find(row => row.id === "map")?.choices.some(map => map.id === "maps/b_bh10.bsp")).toBe(false);
+  expect(() => model.select("map", "maps/b_bh10.bsp")).toThrow("Unknown map");
+  model.select("map", "maps/dm4.bsp");
+  model.select("mode", "deathmatch"); model.select("resolution", "1280x720"); model.select("gamma", "1.3");
+  const selected = await model.resolve();
+  expect(selected.recipe.map.geometryContent).toBe(catalog.require("q1-rerelease-id1").id);
+  expect(selected.recipe.map.geometry.requestedPath).toBe("maps/dm4.bsp");
+  expect(selected.options.map).toBe("maps/dm4.bsp");
+  expect(selected.recipe.weapons).toEqual([{ provider: "q3:official", content: catalog.require("q3-baseq3").id }]);
+  expect(selected.recipe.timing.find(profile => profile.provider === selected.recipe.movement.provider)?.clock.kind).toBe("q2-rerelease");
+  expect(selected.recipe.campaign.kind).toBe("none");
+  expect(selected.recipe.equipment.grapple).toMatchObject({ kind: "enabled", mechanic: "q2-ctf", binding: "offhand" });
+  expect(selected.recipe.equipment.handGrenades).toMatchObject({ kind: "enabled", edition: "classic", binding: "offhand" });
+  expect(selected.options).toMatchObject({ width: 1280, height: 720, gamma: 1.3, mode: "deathmatch", movement: "q2", character: "q3", characterModel: "sarge" });
+  expect(model.summary().some(line => line.includes("Independent pickup replacement is not implemented"))).toBe(true);
+  expect(() => model.select("map", "maps/not-installed.bsp")).toThrow("Unknown map");
+  expect(() => model.select("product", "q1-rerelease-quake64")).toThrow();
+  model.select("product", "q2-classic-baseq2");
+  expect(model.options.map).toBe("maps/base1.bsp");
+  model.select("rules", "ctf");
+  expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
+  model.select("mode", "singleplayer");
+  expect(model.options.rules).toBe("standard");
+  expect((await model.resolve()).recipe.match.provider).toBe("q2:official");
+  expect(model.rows().find(row => row.id === "weapons")?.value).toBe("q3-baseq3");
+  for (const [product, appearance] of [["q1-classic-id1", "player"], ["q2-classic-baseq2", "male"], ["q3-baseq3", "sarge"]]) {
+    if (product === undefined || appearance === undefined) throw new Error("Incomplete character case");
+    model.select("character", product);
+    expect(model.options.characterModel).toBe(appearance);
+    expect(model.rows().find(row => row.id === "model")?.choices.some(choice => choice.id === appearance && choice.unavailable === null)).toBe(true);
+  }
+  const inferred = new StartupSelectionModel(catalog, { ...command.options, product: "q2-classic-ctf", mode: "deathmatch" });
+  expect(inferred.options.rules).toBe("ctf");
+}, 60000);

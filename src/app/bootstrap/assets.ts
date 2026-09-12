@@ -1,17 +1,16 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ContentId, GameFamily, ResolvedResourceReference } from "../../contracts/content.ts";
-import type { Palette, RendererImage, RendererResourceOwner } from "../../contracts/render.ts";
+import type { Palette, RendererResourceOwner } from "../../contracts/render.ts";
 import type { DecodedModel } from "../../contracts/scene.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
-import { decodePalette, decodePcx, decodeWad, indexedRenderImage } from "../../formats/images/index.ts";
+import { decodePalette, decodePcx } from "../../formats/images/index.ts";
 import { readQ1Bsp } from "../../formats/q1-map/index.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
 import { decodeQ3World, parseEntities } from "../../formats/q3-map/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene } from "../../render/scene/index.ts";
-import { classicCharset } from "../../text/atlas.ts";
-import type { TextFontRegistry, TextFontSelection } from "../../text/atlas.ts";
-import { createMountedTextFonts } from "../../text/mounted.ts";
+import type { TextFontSelection } from "../../text/atlas.ts";
+import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { loadApplicationModel } from "./model-loader.ts";
 
@@ -68,7 +67,9 @@ export class ApplicationAssets {
   private readonly brushScenes: WorldScene[] = [];
   private currentWorld: WorldScene | null = null;
   private font: Promise<TextFontSelection> | null = null;
-  private fonts: TextFontRegistry | null = null;
+  private fonts: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
+  private typography: Promise<Awaited<ReturnType<typeof loadMenuTypography>>> | null = null;
+  private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner) {
     this.images = new SceneImageRegistry(owner);
@@ -113,32 +114,21 @@ export class ApplicationAssets {
     if (this.font !== null) return this.font;
     this.font = (async (): Promise<TextFontSelection> => {
       const provider = await this.provider(this.content.recipe.presentation.assets);
-      let image: RendererImage;
-      if (provider.family === "q1") {
-        const wad = await provider.mounts.open("gfx.wad");
-        if (wad === null || provider.palette === null) throw new Error("Quake console requires gfx.wad and its palette");
-        const lump = decodeWad(wad.bytes, "gfx.wad").lumps.find(lump => lump.name === "conchars");
-        if (lump === undefined || lump.compression !== 0 || lump.bytes.length !== 128 * 128) throw new Error("Quake conchars is missing or malformed");
-        image = this.images.register("conchars", indexedRenderImage([{ width: 128, height: 128, pixels: lump.bytes }], provider.palette,
-          { kind: "index", index: 0 }), { wrap: "clamp", filter: "nearest" }, { kind: "resource", resource: wad.reference });
-      } else if (provider.family === "q2") {
-        const texture = await provider.textures.load("pics/conchars.pcx", { family: "q2", mipmap: false, wrap: "clamp" });
-        if (texture === null) throw new Error("Quake II console charset is missing");
-        image = texture.image;
-      } else {
-        const texture = await provider.textures.load("gfx/2d/bigchars", { mipmap: false, wrap: "clamp" });
-        if (texture === null) throw new Error("Quake III console charset is missing");
-        image = texture.image;
-      }
-      const classic = classicCharset(image, "conchars", provider.family === "q3" ? "tinted" : "baked");
       const product = this.content.catalog.product(this.content.recipe.presentation.assets);
-      if (provider.family === "q2" && product.expectation.edition === "rerelease") {
-        this.fonts = createMountedTextFonts(provider.mounts, this.images);
-        return this.fonts.select({ kind: "kfont", path: "fonts/qconfont.kfont" }, classic);
-      }
-      return { kind: "classic", classic, unicode: null };
+      this.fonts = await loadMenuFont({ mounts: provider.mounts, family: provider.family,
+        rerelease: product.expectation.edition === "rerelease", images: this.images });
+      return this.fonts.font;
     })();
     return this.font;
+  }
+
+  loadMenuTypography(): Promise<Awaited<ReturnType<typeof loadMenuTypography>>> {
+    this.typography ??= (async () => {
+      const font = await this.loadConsoleFont();
+      this.loadedTypography = await loadMenuTypography(this.content.catalog, this.images, font.classic);
+      return this.loadedTypography;
+    })();
+    return this.typography;
   }
 
   model(content: ContentId, path: string): Promise<ModelAsset> {
@@ -168,6 +158,8 @@ export class ApplicationAssets {
   }
 
   close(): undefined {
+    this.loadedTypography?.close();
+    this.loadedTypography = null; this.typography = null;
     this.fonts?.close();
     this.fonts = null;
     this.font = null;

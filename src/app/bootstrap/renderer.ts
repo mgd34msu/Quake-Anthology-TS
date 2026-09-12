@@ -24,7 +24,7 @@ export class NativeRenderer {
   }
 
   static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma">, owner: RendererResourceOwner): NativeRenderer {
-    const window = SdlWindow.open({ title: "Quake TypeScript", backend: options.renderer, width: options.width, height: options.height,
+    const window = SdlWindow.open({ title: "Quake", backend: options.renderer, width: options.width, height: options.height,
       hidden: options.hidden, resizable: true });
     let backend: SoftwareRenderer | GlRenderer | null = null;
     try {

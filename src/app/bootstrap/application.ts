@@ -1,3 +1,5 @@
+import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
+import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
 import { ApplicationQ2Console } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
 import { botAdmissionError, ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
@@ -8,6 +10,7 @@ import type { ActorId, ClientId, IdentityOwner, SeatId } from "../../contracts/i
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ExecutableRecipe } from "../../contracts/content.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import type { TransitionDecision } from "../../contracts/gameplay.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
@@ -90,6 +93,8 @@ export interface ApplicationHost {
 /** A single authoritative simulation owns every local and remote player's game state. */
 export class Application {
   private graphical: GraphicalApplication | null = null;
+  private frontendOverrides: FrontendPreferenceOverrides = {};
+  private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBots | null = null;
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
@@ -116,9 +121,13 @@ export class Application {
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
     private readonly localSeats: Map<ClientId, SessionSeat>) {}
 
-  static async open(options: ApplicationOptions, host: ApplicationHost): Promise<Application> {
+  static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
     if (options.network.kind === "q2-client") throw new Error("Remote clients require RemoteApplication without a local simulation");
-    const content = await loadApplicationContent(options);
+    const content = await loadApplicationContent(options, recipe);
+    if (recipe !== undefined) {
+      try { options = applicationOptionsForRecipe(options, content); }
+      catch (error) { await content.close(); throw error; }
+    }
     const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
     const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
     const localSeats = new Map<ClientId, SessionSeat>();
@@ -136,6 +145,7 @@ export class Application {
         source.host.cvars.set("g_spSkill", String(options.botSkill), true);
       }
       application = new Application(options, content, session, simulation, host, identity, localSeats);
+      application.frontendOverrides = preferences ?? {};
       await application.bindSourceCommands();
       if (options.dedicated) application.openDedicatedConsole();
       else await application.openGraphical();
@@ -171,6 +181,11 @@ export class Application {
       }, openLog: openApplicationBotLog });
   }
 
+  get frontendSettings(): FrontendPreferenceOverrides {
+    const current = this.graphical === null ? null : readFrontendPreferences(this.graphical.input, this.graphical.audio);
+    return current === null || this.frontendBaseline === null ? this.frontendOverrides : changedFrontendPreferences(this.frontendBaseline, current, this.frontendOverrides);
+  }
+  get frontendValues(): FrontendPreferenceValues | null { return this.graphical === null ? null : readFrontendPreferences(this.graphical.input, this.graphical.audio); }
   get botClients(): readonly ApplicationBotClient[] { return this.bots?.clients() ?? []; }
   get frameCount(): number { return this.frames; }
   get options(): ApplicationOptions { return this.launchOptions; }
@@ -439,7 +454,7 @@ export class Application {
     let effects: ApplicationEffects | null = null;
     try {
       await assets.loadWorld();
-      const font = await assets.loadConsoleFont();
+      const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography();
       const characters = this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
         { model: this.options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
       renderer = NativeRenderer.open(this.options, owner);
@@ -455,6 +470,8 @@ export class Application {
       input = new ApplicationInput(renderer.window, players, this.options, this.simulation,
         this.inputActions(), () => performance.now());
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text));
+      applyFrontendPreferences(this.frontendOverrides, input, audio);
+      this.frontendBaseline = readFrontendPreferences(input, audio);
       const fontSource = font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, assets.images, readMenuArt);
@@ -468,7 +485,7 @@ export class Application {
         const sourceClient = await this.createQ3SeatClient(local, assets, audioOwner, inputOwner, native, this.simulation);
         if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
-          (name, args) => this.queueCommand(name, args, local.player.seat.id));
+          (name, args) => this.queueCommand(name, args, local.player.seat.id), typography);
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -575,7 +592,7 @@ export class Application {
       } else {
         assets = new ApplicationAssets(content, previous.renderer.owner);
         await assets.loadWorld();
-        const font = await assets.loadConsoleFont(), fontSource = font.classic.picture.image.source;
+        const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
         if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
         art = await loadNativeUiArt(fontSource.resource.id, assets.images, readMenuArt);
         const characters = options.character === "q3" ? await loadQ3Character(await content.forContent(content.recipe.character.appearance.content),
@@ -585,6 +602,8 @@ export class Application {
           if (player === undefined) throw new Error("Travel admission is missing a connected local player");
           return { seat: local.player.seat, actor: player };
         });
+        const frontendOverrides = this.frontendSettings;
+        const seatInputPreferences = new Map(previous.input.locals.map(local => [local.player.seat.id, readFrontendInput(local)]));
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
         const cgameSettings = new Map([...previous.q3].map(([seat, source]) => [seat, source.client.cvars.snapshots()]));
         if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
@@ -613,6 +632,15 @@ export class Application {
         nextEffects = effects;
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
+        if (input !== previous.input) {
+          applyFrontendPreferences(frontendOverrides, input, audio);
+          for (const local of input.locals) {
+            const previousSettings = seatInputPreferences.get(local.player.seat.id);
+            if (previousSettings !== undefined) applyFrontendInput(previousSettings, local);
+          }
+        }
+        this.frontendOverrides = frontendOverrides;
+        this.frontendBaseline = readFrontendPreferences(input, audio);
         const current = simulation, worldAssets = assets, menuArt = art;
         const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor })));
         const presentations: WorldSeatPresentation[] = [], q3Clients = new Map<SeatId, Q3SeatClient>();
@@ -620,7 +648,7 @@ export class Application {
           const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id));
           if (sourceClient !== null) q3Clients.set(local.player.seat.id, sourceClient);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
-            (name, args) => this.queueCommand(name, args, local.player.seat.id));
+            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography);
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease);
           local.player.seat.attachPresentation(presentation, () => presentation.close());
@@ -908,4 +936,4 @@ export class Application {
   }
 }
 
-export function openApplication(options: ApplicationOptions, host: ApplicationHost): Promise<Application> { return Application.open(options, host); }
+export function openApplication(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> { return Application.open(options, host, recipe, preferences); }

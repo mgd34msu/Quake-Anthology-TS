@@ -106,7 +106,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
       }));
     }
   }
-  disposers.push(controller.register(root, () => ({ id: root, title: "Settings", fullScreen: false,
+  disposers.push(controller.register(root, () => ({ id: root, title: "Options", fullScreen: false,
     controls: [...categories.filter(category => bindings.some(binding => binding.category === category.id)).map((category, index): UiControl => ({
       id: `ui:settings:category:${category.id}`, kind: "button", label: category.label, rect: menuRow(index), enabled: true, visible: true,
       activate: () => controller.openMenu(`menu:settings:${category.id}:0`),
@@ -120,16 +120,34 @@ function numeric(id: string, label: string, minimum: number, maximum: number, st
 function toggle(id: string, label: string, read: () => boolean, write: (value: boolean) => void): SettingBinding {
   return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
 }
+export interface PrimaryInputSettings { readonly sensitivity: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
+export interface AudioSettings { readonly effectsVolume: number; readonly musicVolume: number; }
+export interface SettingsValueService<T> { read(): T; write(values: Partial<T>): void; }
+export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryInputSettings>): readonly SettingBinding[] {
+  return [numeric("sensitivity", "Mouse sensitivity", 0.1, 20, 0.1, () => service.read().sensitivity, value => service.write({ sensitivity: value })),
+    toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
+    toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
+}
+export function bindAudioSettings(service: SettingsValueService<AudioSettings>): readonly SettingBinding[] {
+  return [{ id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
+    minimum: 0, maximum: 1, step: 0.05, read: () => service.read().effectsVolume, write: value => service.write({ effectsVolume: value }) },
+  { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
+    minimum: 0, maximum: 1, step: 0.05, read: () => service.read().musicVolume, write: value => service.write({ musicVolume: value }) }];
+}
+
 /** These controls change the objects sampled by the next real user command. */
 export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder): readonly SettingBinding[] {
   const mouse = builder.mouse, pad = input.gamepad;
   return [
-    numeric("sensitivity", "Mouse sensitivity", 0.1, 20, 0.1, () => mouse.tuning.sensitivity, value => { mouse.tuning = { ...mouse.tuning, sensitivity: value }; }),
+    ...bindPrimaryInputSettings({ read: () => ({ sensitivity: mouse.tuning.sensitivity, invertMouse: mouse.tuning.invertPitch, alwaysRun: builder.tuning.alwaysRun }),
+      write: values => {
+        mouse.tuning = { ...mouse.tuning, ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
+          ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
+        if (values.alwaysRun !== undefined) builder.tuning = { ...builder.tuning, alwaysRun: values.alwaysRun };
+      } }),
     numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => mouse.tuning.acceleration, value => { mouse.tuning = { ...mouse.tuning, acceleration: value }; }),
-    toggle("invert-mouse", "Invert mouse", () => mouse.tuning.invertPitch, value => { mouse.tuning = { ...mouse.tuning, invertPitch: value }; }),
     toggle("filter", "Mouse smoothing", () => mouse.tuning.filter, value => { mouse.tuning = { ...mouse.tuning, filter: value }; }),
     toggle("freelook", "Free look", () => mouse.tuning.freeLook, value => { mouse.tuning = { ...mouse.tuning, freeLook: value }; }),
-    toggle("always-run", "Always run", () => builder.tuning.alwaysRun, value => { builder.tuning = { ...builder.tuning, alwaysRun: value }; }),
     toggle("invert-controller", "Invert controller", () => pad.tuning.invertPitch, value => { pad.tuning = { ...pad.tuning, invertPitch: value }; }),
     toggle("swap-sticks", "Swap controller sticks", () => pad.tuning.swapSticks, value => { pad.tuning = { ...pad.tuning, swapSticks: value }; }),
     numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad.tuning.yawDegreesPerSecond, value => { pad.tuning = { ...pad.tuning, yawDegreesPerSecond: value }; }),

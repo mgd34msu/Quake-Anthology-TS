@@ -1,0 +1,7 @@
+Tool: built-in image_gen__imagegen, one generation, no reference image inputs.
+Destination: /home/buzzkill/Projects/quake-typescript/assets/ui/main-menu-background.png
+Reviewed context: assets/ui/menu-background.png and /tmp/codex-clipboard-yTontn.png.
+Prompt:
+Use case: stylized-concept. Asset type: polished full-screen main-menu background artwork for a Quake game. Generate one wide 16:9 image, ideally 1920x1080. One coherent architectural space unifies weathered gothic stone, Strogg industrial steel, and restrained arena energy. A monumental angular portal and atmospheric architectural depth occupy the right half. The left third remains quiet, dark charcoal, low contrast and visually uncluttered so a real vertical game menu can be rendered over it. Restrained 1990s Quake identity: heavy honest stonework, worn iron, purposeful industrial integration, strong silhouettes, subtle warm metal and charcoal palette, controlled crimson and amber lighting. Carefully composed, attractive, cinematic environment art with deliberate readable forms and sparing surface detail. Atmospheric depth and light guide the eye toward the right-hand portal. Edge-to-edge scene, no decorative borders. No text, no buttons, no logos, no characters, no weapons, no HUD, no baked user interface, no generic ornate picture frame. Avoid visual noise, excessive greebles, busy particles, neon rainbow colors, glossy modern sci-fi, and overexposed lighting.
+
+Source asset SHA-256: 53630f6ca2d86492e983f7e54b54ce913cbebe58df6bd847c316753ef306a718

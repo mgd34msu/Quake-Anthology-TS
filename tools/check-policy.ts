@@ -397,7 +397,7 @@ export function auditProgram(program: ts.Program, projectFiles: readonly string[
         }
         const attribute = ts.isImportDeclaration(node) ? node.attributes?.elements[0] : undefined;
         const menuFileImport = projectPath === "src/app/bootstrap/menu-art.ts"
-          && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png"].includes(imported)
+          && ["assets/ui/menu-background.png", "assets/ui/menu-panel.png", "assets/ui/menu-focus.png", "assets/ui/main-menu-background.png"].includes(imported)
           && ts.isImportDeclaration(node) && node.attributes?.token === ts.SyntaxKind.WithKeyword
           && node.attributes.elements.length === 1 && attribute?.name.text === "type"
           && ts.isStringLiteral(attribute.value) && attribute.value.text === "file";

@@ -9,6 +9,7 @@ import type { UiDrawContext } from "../../../src/contracts/ui.ts";
 import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
 import { KeyCode } from "../../../src/input/key-codes.ts";
+import { InputRouter } from "../../../src/input/router.ts";
 import { SeatInput } from "../../../src/input/seat.ts";
 import { InputCommandBuilder } from "../../../src/input/user-command.ts";
 import { NativeUiController, defaultUiSkin, loadNativeUiArt, renderUiCommands, uiSkinFont } from "../../../src/ui/common/index.ts";
@@ -138,3 +139,48 @@ test.skipIf(!existsSync(archivePath))("real generated menu art and rerelease gly
     if (process.env["QUAKE_UI_NATIVE_SMOKE"] === "1") await Bun.write(".artifacts/w59-native-menu.png", encodePng(1280, 480, renderer.pixels));
   } finally { art.close(); fonts.close(); archive.close(); target.close(); window?.close(); images.close(); }
 }, 20000);
+
+
+test.skipIf(process.env["QUAKE_UI_NATIVE_SMOKE"] !== "1")("SDL menu clicks use their own coordinates and native motion drags sliders", () => {
+  const owner = createIdentityOwner("native-menu-mouse"), seat = owner.seat(0), context = drawContext(owner, seat);
+  const commandContext: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q3", context: commandContext });
+  let clicked = 0, value = 0;
+  const ui = new NativeUiController({ seat, skin: () => defaultUiSkin(fontId), bindings: () => [], now: () => 1000,
+    focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  ui.register("menu:test:mouse", () => ({ id: "menu:test:mouse", title: "Mouse", fullScreen: false, open: () => undefined, close: () => undefined,
+    controls: [
+      { id: "ui:test:click", kind: "button", label: "Click", rect: { x: 40, y: 80, width: 160, height: 30 }, enabled: true, visible: true, activate: () => { clicked++; return undefined; } },
+      { id: "ui:test:drag", kind: "slider", label: "Drag", rect: { x: 40, y: 140, width: 400, height: 30 }, enabled: true, visible: true,
+        value, minimum: 0, maximum: 100, step: 1, change: (_seat, next) => { value = next; return undefined; } },
+    ] }));
+  ui.openMenu("menu:test:mouse"); ui.draw(context);
+  const input = new SeatInput({ seat, dialect: "q3", context: commandContext, commands, uiEvent: event => ui.input(event) });
+  input.setFocus({ kind: "menu", menu: "menu:test:mouse", control: null }, 1000);
+  const window = SdlWindow.open({ title: "Menu mouse test", width: 640, height: 480, backend: "cpu", hidden: true });
+  const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat, controllers: null,
+    now: () => 1000, ticks: () => window.ticks, subframe: false, unhandled: () => undefined });
+  try {
+    router.attachWindow(window);
+    const pump = (): void => { for (const event of window.pollEvents()) router.handlePlatform(event); };
+    pump();
+    window.pushEvent({ kind: "window", timestamp: 0, event: 12, data1: 0, data2: 0 }); pump();
+    const button = (x: number, y: number, down: boolean): void => {
+      window.pushEvent({ kind: "mouse-button", timestamp: 0, down, button: 1, clicks: 1, x, y }); pump();
+    };
+    expect(window.relativeMouse).toBe(false);
+    button(80, 90, true); button(80, 90, false);
+    expect(clicked).toBe(1);
+    button(280, 150, true);
+    window.pushEvent({ kind: "mouse-motion", timestamp: 0, buttons: 1, x: 408, y: 150, dx: 128, dy: 0 }); pump();
+    button(408, 150, false);
+    expect(value).toBe(100);
+    window.pushEvent({ kind: "window", timestamp: 0, event: 13, data1: 0, data2: 0 }); pump();
+    button(80, 90, true); button(80, 90, false); expect(clicked).toBe(1);
+    window.pushEvent({ kind: "window", timestamp: 0, event: 12, data1: 0, data2: 0 }); pump();
+    window.setSize(1280, 960);
+    const viewport = { x: 0, y: 0, ...window.drawableSize };
+    ui.draw({ ...context, binding: { ...context.binding, viewport, safeArea: viewport } });
+    button(160, 180, true); button(160, 180, false); expect(clicked).toBe(2);
+  } finally { router.close(); ui.closeAll(); window.close(); }
+});

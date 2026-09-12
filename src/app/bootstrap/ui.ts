@@ -6,7 +6,7 @@ import type { SeatInputSample } from "../../input/seat.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { SeatHudMessages, SeatWeaponWheel, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
-import { SeatUiPreferences, bindInputSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
+import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
 import { bindWindowResolution } from "../../ui/settings/services.ts";
 import type { SettingBinding, SettingsMenus } from "../../ui/settings/index.ts";
@@ -17,6 +17,9 @@ import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationInput, ApplicationInputUi, LocalInput } from "./input.ts";
 import type { SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
 
+import type { MenuTypography } from "./menu-font.ts";
+import { menuPanel, menuSkin, menuTitleFont } from "../../ui/common/menu-theme.ts";
+import { layoutText } from "../../text/layout.ts";
 import { Q2MatchUi } from "./q2-match-ui.ts";
 
 export class ApplicationSeatUi implements ApplicationInputUi {
@@ -25,6 +28,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   readonly messages: SeatHudMessages;
   readonly weaponWheel: SeatWeaponWheel;
   readonly text: UiTextRenderer;
+  private readonly menuText: UiTextRenderer;
   private readonly match: Q2MatchUi;
   private readonly settings: SettingsMenus;
   private readonly bindings: ReturnType<typeof registerBindingMenus>;
@@ -34,14 +38,18 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography) {
     const seat = local.player.seat.id;
     this.now = input.now;
     this.preferences = new SeatUiPreferences(seat);
     this.messages = new SeatHudMessages(seat);
     this.text = new UiTextRenderer(seat);
     this.text.bind(art.skin.font, font);
-    this.controller = new NativeUiController({ seat, skin: () => art.skin, now: input.now,
+    this.menuText = new UiTextRenderer(seat);
+    this.menuText.bind(art.skin.font, typography.body);
+    this.menuText.bind(menuTitleFont, typography.title);
+    this.controller = new NativeUiController({ seat, skin: () => menuSkin(art.skin.font),
+      measureText: (text, scale) => layoutText({ text, font: typography.body, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
       bindings: () => local.input.bindings, appearance: () => this.preferences.values,
       focus: (focus, time) => { local.input.setFocus(focus, time); input.router.updateCapture(); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
@@ -58,19 +66,18 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       keys.map(([label, text], index) => ({ id: String(index), label, target: { kind: "command", text } })));
     const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
       activate: () => { this.controller.openMenu(this.bindings.root); } };
-    const volume: SettingBinding = { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
-      minimum: 0, maximum: 1, step: 0.05, read: () => audio.effectsVolume, write: value => { audio.effectsVolume = value; } };
-    const musicVolume: SettingBinding = { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
-      minimum: 0, maximum: 1, step: 0.05, read: () => audio.musicVolume, write: value => { audio.musicVolume = value; } };
+    const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
+      write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
+        if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } });
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
-    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), volume, musicVolume, ...this.preferences.bindings()]);
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
-    this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Quake TypeScript", fullScreen: true,
+    this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Paused", fullScreen: true,
       controls: [button("resume", "Resume game", 1, () => { this.controller.closeAll(); return undefined; }),
-        button("settings", "Settings", 3, () => this.controller.openMenu(this.settings.root)),
+        button("settings", "Options", 3, () => this.controller.openMenu(this.settings.root)),
         button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
-        button("quit", "Quit", 8, quit)], open: () => undefined, close: () => undefined }));
+        button("quit", "End game", 8, quit)], open: () => undefined, close: () => undefined }));
     this.disposeInput = input.attachUi(seat, this);
   }
 
@@ -130,9 +137,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       vitals: [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false },
         ...(player.ammo === null ? [] : [{ label: "Ammo", value: player.ammo.count, icon: null, warning: player.ammo.count <= 5 }])] };
     const commands = [...drawCommonHud(context, hud, { skin: this.art.skin, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
-      ...this.controller.draw({ ...context, timeMilliseconds: this.now() })];
+      ];
     renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
+    renderUiCommands(context, this.controller.activeMenu === null ? [] : [menuPanel(context), ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
+      { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.messages.clear(); }
+  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

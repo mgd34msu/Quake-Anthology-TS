@@ -29,4 +29,8 @@ export const menuFocus: MenuArtFrame = {
   region: { width: 2172, height: 633, uv: [{ x: 0, y: 68 / 724 }, { x: 1, y: 701 / 724 }] },
   border: { left: 96, top: 96, right: 96, bottom: 96 }, borderScale: 0.0625,
 };
-export const menuArtFiles: readonly MenuArtFile[] = [menuBackground, menuPanel, menuFocus];
+export const mainMenuBackground: MenuArtFile = {
+  file: "assets/ui/main-menu-background.png", width: 1672, height: 941,
+  sha256: "53630f6ca2d86492e983f7e54b54ce913cbebe58df6bd847c316753ef306a718",
+};
+export const menuArtFiles: readonly MenuArtFile[] = [menuBackground, menuPanel, menuFocus, mainMenuBackground];

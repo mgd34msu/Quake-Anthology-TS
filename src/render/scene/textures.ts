@@ -107,14 +107,21 @@ export class SceneTextureLoader {
       } else if (suffix === ".pcx") {
         const pcx = decodePcx(asset.bytes, path);
         if (this.palette === null && pcx.palette === null) throw new Error(`PCX has no palette: ${path}`);
-        if (this.palette !== null && pcx.palette === null) content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels: pcx.indices }], this.palette);
-        else {
-          const palette = pcx.palette;
-          if (palette === null) throw new Error(`PCX palette was lost: ${path}`);
-          const pixels = new Uint8Array(pcx.width * pcx.height * 4);
-          for (const [offset, index] of pcx.indices.entries()) pixels.set([palette[index * 3] ?? 0, palette[index * 3 + 1] ?? 0, palette[index * 3 + 2] ?? 0, 255], offset * 4);
-          content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
+        const palette = pcx.palette ?? this.palette?.colors;
+        if (palette === undefined || palette === null) throw new Error(`PCX palette was lost: ${path}`);
+        const pixels = new Uint8Array(pcx.width * pcx.height * 4), count = pcx.indices.length;
+        for (const [offset, index] of pcx.indices.entries()) {
+          let color = index;
+          if (options.family === "q2" && index === 255) {
+            const above = offset > pcx.width ? pcx.indices[offset - pcx.width] : undefined;
+            const below = offset < count - pcx.width ? pcx.indices[offset + pcx.width] : undefined;
+            const left = offset > 0 ? pcx.indices[offset - 1] : undefined;
+            const right = offset < count - 1 ? pcx.indices[offset + 1] : undefined;
+            color = [above, below, left, right].find(value => value !== undefined && value !== 255) ?? 0;
+          }
+          pixels.set([palette[color * 3] ?? 0, palette[color * 3 + 1] ?? 0, palette[color * 3 + 2] ?? 0, options.family === "q2" && index === 255 ? 0 : 255], offset * 4);
         }
+        content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
       } else {
         const decoded = suffix === ".png" ? decodePng(asset.bytes, path) : suffix === ".tga" ? options.family === undefined || options.family === "q3"
           ? decodeQ3Tga(asset.bytes, path) : decodeTga(asset.bytes, path)
