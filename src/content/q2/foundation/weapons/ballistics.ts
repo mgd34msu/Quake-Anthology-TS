@@ -1,3 +1,4 @@
+import type { Q2WeaponOwner } from "./types.ts";
 /* Adapted from id Software Quake II g_weapon.c and rerelease g_weapon.cpp.
  * GPL-2.0-or-later. All damage is admitted by the session combat authority. */
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -87,7 +88,7 @@ export class Q2Ballistics {
     });
   }
 
-  protected shotMask(self: Q2Entity, game: Q2GameServices): number {
+  protected shotMask(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices): number {
     return this.actorShotMask(game, this.inputs.get(self.actor.id)?.playersCollide !== false);
   }
 
@@ -95,12 +96,12 @@ export class Q2Ballistics {
     return q2ActorShotMask(game, playersCollide);
   }
 
-  playerNoise(self: Q2Entity, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
+  playerNoise(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
     return this.playerNoiseForActor(self.actor.id, game, origin, kind);
   }
 
   playerNoiseForActor(owner: ActorId, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
-    if (!game.host.isPlayer(owner)) return undefined;
+    if (!game.host.actors.isLive(owner) || !game.host.isPlayer(owner)) return undefined;
     this.trackActors(game);
     const charges = this.silencerShots(owner);
     if (kind === "weapon") {
@@ -120,7 +121,7 @@ export class Q2Ballistics {
     return projectile.owner === null ? undefined : this.playerNoiseForActor(projectile.owner, game, game.body(projectile).origin, "impact");
   }
 
-  checkDodge(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, speed: number): undefined {
+  checkDodge(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, speed: number): undefined {
     if (game.options.edition !== "classic" || !game.host.isPlayer(self.actor.id)) return undefined;
     if (game.options.skill === 0 && game.host.random() > 0.25) return undefined;
     const trace = game.host.trace({ start, end: add(start, scale(direction, 8192)), bounds: null, ignore: self.actor.id, mask: this.shotMask(self, game) });
@@ -131,16 +132,16 @@ export class Q2Ballistics {
     return this.hooks.dodge(target, game, self.actor.id, (length(subtract(trace.end, start)) - body.bounds.max.x) / speed, trace);
   }
 
-  fireBullet(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number): undefined {
+  fireBullet(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number): undefined {
     return this.fireLead(self, game, start, direction, damage, kick, horizontalSpread, verticalSpread, mod, "gunshot");
   }
 
-  fireShotgun(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, count: number, mod: number): undefined {
+  fireShotgun(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, count: number, mod: number): undefined {
     for (let pellet = 0; pellet < count; pellet++) this.fireLead(self, game, start, direction, damage, kick, horizontalSpread, verticalSpread, mod, "shotgun");
     return undefined;
   }
 
-  private fireLead(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number, impact: string): undefined {
+  private fireLead(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number, impact: string): undefined {
     const rerelease = game.options.edition === "rerelease", shotMask = this.shotMask(self, game);
     const spread = (origin: Vec3, aim: Vec3, factor: number): Vec3 => {
       const axes = angleVectors(vectorAngles(aim));
@@ -175,7 +176,7 @@ export class Q2Ballistics {
       }
       const actor = hit(trace);
       if ((rerelease || !sky(trace)) && canHurt(game, actor)) {
-        game.damage(actor, self, self.actor.id, damage, kick, direction, trace.end, normal(trace), mod, 16, weaponForMod(mod));
+        game.damage(actor, self.actor.id, self.actor.id, damage, kick, direction, trace.end, normal(trace), mod, 16, weaponForMod(mod));
         const state = game.host.combat.read(actor);
         if (rerelease && ((contents(trace) & 0x4000000) !== 0 || game.host.isMonster(actor) && state !== null && state.health <= 0) && !excluded.includes(actor)) {
           if (excluded.length === 16) break;
@@ -196,7 +197,7 @@ export class Q2Ballistics {
     return undefined;
   }
 
-  fireRail(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number): undefined {
+  fireRail(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number): undefined {
     const end = add(start, scale(direction, 8192)), excluded: ActorId[] = [];
     let from = start, ignore: ActorId | null = self.actor.id, water = false;
     let mask = this.shotMask(self, game) | 8 | 16;
@@ -208,7 +209,7 @@ export class Q2Ballistics {
       else {
         const actor = hit(trace);
         if (actor === null) break;
-        if (actor !== self.actor.id && canHurt(game, actor)) game.damage(actor, self, self.actor.id, damage, kick, direction, trace.end, normal(trace), MOD.railgun, 0, "q2:weapon_railgun");
+        if (actor !== self.actor.id && canHurt(game, actor)) game.damage(actor, self.actor.id, self.actor.id, damage, kick, direction, trace.end, normal(trace), MOD.railgun, 0, "q2:weapon_railgun");
         const entity = game.entity(actor);
         const pierce = game.host.isMonster(actor) || game.host.isPlayer(actor) || entity?.solid === "box" || game.options.edition === "rerelease" && (entity?.damageableTarget === true || entity?.solid === "none" || entity?.solid === "trigger" || !game.host.actors.isLive(actor));
         if (!pierce || excluded.includes(actor)) break;
@@ -260,7 +261,7 @@ export class Q2Ballistics {
     return true;
   }
 
-  private projectile(self: Q2Entity, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number): Q2Entity {
+  private projectile(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number): Q2Entity {
     return this.projectileForActor(self.actor.id, game, classname, start, direction, speed, model, effects, this.shotMask(self, game));
   }
 
@@ -280,7 +281,7 @@ export class Q2Ballistics {
     return game.host.emit({ kind: "sound", actor: projectile.actor.id, origin: game.body(projectile).origin, path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: start ? "start" : "stop" });
   }
 
-  fireBlaster(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number, hyper = false, meansOfDeath = hyper ? MOD.hyperblaster : MOD.blaster): Q2Entity {
+  fireBlaster(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number, hyper = false, meansOfDeath = hyper ? MOD.hyperblaster : MOD.blaster): Q2Entity {
     const dir = game.options.edition === "classic" ? normalize(direction) : direction;
     const bolt = this.projectile(self, game, "bolt", start, dir, speed, "models/objects/laser/tris.md2", effects);
     bolt.damage = damage;
@@ -295,7 +296,7 @@ export class Q2Ballistics {
     return bolt;
   }
 
-  fireGrenade(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, hand = false, held = false, monster = false, adjustment?: Q2GrenadeAdjustment): Q2Entity {
+  fireGrenade(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, hand = false, held = false, monster = false, adjustment?: Q2GrenadeAdjustment): Q2Entity {
     return this.launchGrenade(self.actor.id, game, start, direction, damage, speed, timer, radius, hand, held, monster, adjustment?.gravity ?? this.inputs.get(self.actor.id)?.gravity ?? 800, this.shotMask(self, game), adjustment);
   }
 
@@ -333,7 +334,7 @@ export class Q2Ballistics {
     return grenade;
   }
 
-  fireRocket(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity {
+  fireRocket(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity {
     const rocket = this.projectile(self, game, "rocket", start, direction, speed, "models/objects/rocket/tris.md2", 16);
     rocket.damage = damage; rocket.damageRadius = radius; rocket.radiusDamage = radiusDamage;
     rocket.touch = this.rocketTouch;
@@ -353,7 +354,7 @@ export class Q2Ballistics {
     return game.schedule(piece, 5 + game.host.random() * 5, free);
   }
 
-  fireBfg(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number): Q2Entity {
+  fireBfg(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number): Q2Entity {
     const bfg = this.projectile(self, game, "bfg blast", start, direction, speed, "sprites/s_bfg1.sp2", 128 | 8192);
     bfg.dodgeable = false; bfg.damage = damage; bfg.damageRadius = radius;
 

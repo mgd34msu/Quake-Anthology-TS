@@ -96,7 +96,7 @@ export class Q2CtfTechs {
     }
     return undefined;
   }
-  private sound(entity: Q2Entity, game: Q2GameServices, name: string): undefined {
+  private sound(entity: Pick<Q2Entity, "actor">, game: Q2GameServices, name: string): undefined {
     const volume = this.context.hooks.weapons.silencerShots(entity.actor.id) > 0 ? 0.2 : 1;
     return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: `ctf/${name}.wav`, channel: 2, volume, attenuation: 1, reliable: false, loop: "once" });
   }
@@ -106,7 +106,7 @@ export class Q2CtfTechs {
     const entity = game.entity(actor); if (entity !== null) this.sound(entity, game, "tech1"); return Math.trunc(take / 2);
   }
   haste(actor: ActorId, game: Q2GameServices): boolean { return this.has(actor, game, 3); }
-  strengthSound(entity: Q2Entity, game: Q2GameServices): boolean {
+  strengthSound(entity: Pick<Q2Entity, "actor">, game: Q2GameServices): boolean {
     if (!this.has(entity.actor.id, game, 2)) return false;
     const state = ctfPlayer(this.context, entity.actor.id);
     if (state.techSoundTime < game.host.now()) {
@@ -115,7 +115,7 @@ export class Q2CtfTechs {
     }
     return true;
   }
-  hasteSound(entity: Q2Entity, game: Q2GameServices): undefined {
+  hasteSound(entity: Pick<Q2Entity, "actor">, game: Q2GameServices): undefined {
     if (!this.haste(entity.actor.id, game)) return undefined;
     const state = ctfPlayer(this.context, entity.actor.id);
     if (state.techSoundTime < game.host.now()) { state.techSoundTime = game.host.now() + 1; this.sound(entity, game, "tech3"); }

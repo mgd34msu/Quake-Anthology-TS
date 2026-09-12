@@ -1,9 +1,10 @@
+import type { Q2WeaponOwner } from "./types.ts";
 import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound } from "./presentation.ts";
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. The caller supplies the source clock and shared actor state. */
 import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, scale, zero } from "../fields.ts";
-import type { Q2Entity, Q2GameServices } from "../host.ts";
+import type { Q2GameServices } from "../host.ts";
 import { Q2Ballistics } from "./ballistics.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
@@ -19,7 +20,7 @@ import { restoreQ2Actor } from "../checkpoint.ts";
 
 export type Q2WeaponSelection = "selected" | "current" | "not-owned" | "no-ammo" | "not-enough-ammo";
 export interface Q2WeaponContext {
-  readonly self: Q2Entity;
+  readonly self: Q2WeaponOwner;
   readonly game: Q2GameServices;
   readonly state: Q2WeaponState;
   readonly input: Q2WeaponInput;
@@ -34,7 +35,7 @@ export interface Q2WeaponExtension {
   fire(context: Q2WeaponContext, weapons: Q2Weapons): undefined;
   readonly think?: (context: Q2WeaponContext, weapons: Q2Weapons) => undefined;
   readonly held?: (context: Q2WeaponContext, weapons: Q2Weapons, held: boolean) => undefined;
-  readonly selection?: { readonly requested: Q2WeaponName; choose(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState): boolean };
+  readonly selection?: { readonly requested: Q2WeaponName; choose(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState): boolean };
 }
 
 export interface Q2ThrowDefinition {
@@ -89,11 +90,10 @@ export class Q2Weapons extends Q2Ballistics {
     const restoreNoise = (noise: Q2NoiseCheckpoint | null): Q2NoiseRecord | null => noise === null ? null : {
       actor: game.host.actors.resolveSaved(noise.actor)?.id ?? game.host.actors.referenceSaved(noise.actor), origin: { ...noise.origin }, time: noise.time, secondary: noise.secondary };
     for (const saved of checkpoint.states) {
-      const entity = game.entity(restoreQ2Actor(game, saved.actor).id);
-      if (entity === null) throw new Error("Q2 weapon checkpoint has no admitted source player");
+      const actor = restoreQ2Actor(game, saved.actor);
       for (const name of [saved.state.weapon, saved.state.pending, saved.state.lastWeapon]) if (name !== null) this.definition(name);
       const state = Object.assign(new Q2WeaponState(saved.state.weapon), saved.state, { kickAngles: { ...saved.state.kickAngles }, kickOrigin: { ...saved.state.kickOrigin } });
-      this.bind(entity, game, state);
+      this.bind({ actor }, game, state);
     }
     for (const saved of checkpoint.silencerCharges) this.grantSilencer(restoreQ2Actor(game, saved.actor).id, game, saved.charges);
     for (const saved of checkpoint.inputs) this.inputs.set(restoreQ2Actor(game, saved.actor).id, { ...saved.input, angles: { ...saved.input.angles } });
@@ -126,7 +126,7 @@ export class Q2Weapons extends Q2Ballistics {
     for (const name of order) this.definition(name);
     this.fallbackOrder = [...order]; return undefined;
   }
-  bind(self: Q2Entity, game: Q2GameServices, state = new Q2WeaponState()): Q2WeaponState {
+  bind(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, state = new Q2WeaponState()): Q2WeaponState {
     game.host.actors.assertOwned(self.actor);
     if (this.states.has(self.actor.id)) throw new Error("Q2 weapon state already bound to actor");
     this.resetSilencer(self.actor.id); this.trackActors(game);
@@ -138,7 +138,7 @@ export class Q2Weapons extends Q2Ballistics {
     return state;
   }
 
-  requestWeapon(self: Q2Entity, game: Q2GameServices, name: Q2WeaponName, allowEmpty = false): Q2WeaponSelection {
+  requestWeapon(self: Q2WeaponOwner, game: Q2GameServices, name: Q2WeaponName, allowEmpty = false): Q2WeaponSelection {
     const state = this.requireState(self);
     for (const extension of this.extensions.values()) if (extension.selection?.requested === name && extension.selection.choose(self, game, state)) { name = extension.definition.name; break; }
     const definition = this.definition(name);
@@ -153,7 +153,7 @@ export class Q2Weapons extends Q2Ballistics {
     return "selected";
   }
 
-  requestHolster(self: Q2Entity): undefined {
+  requestHolster(self: Q2WeaponOwner): undefined {
     const state = this.requireState(self);
     if (state.primaryHandoff !== "active") return undefined;
     state.primaryHandoff = state.weapon === null ? "holstered" : "holstering";
@@ -161,11 +161,11 @@ export class Q2Weapons extends Q2Ballistics {
     return undefined;
   }
 
-  isHolstered(self: Q2Entity): boolean { return this.requireState(self).primaryHandoff === "holstered"; }
+  isHolstered(self: Q2WeaponOwner): boolean { return this.requireState(self).primaryHandoff === "holstered"; }
 
   continuesAttack(context: Q2WeaponContext): boolean { return context.state.primaryHandoff === "active" && context.input.attack; }
 
-  resumePrimary(self: Q2Entity, game: Q2GameServices, input: Q2WeaponInput, name: Q2WeaponName | null = null): undefined {
+  resumePrimary(self: Q2WeaponOwner, game: Q2GameServices, input: Q2WeaponInput, name: Q2WeaponName | null = null): undefined {
     const state = this.requireState(self);
     if (state.primaryHandoff === "active") return undefined;
     if (state.primaryHandoff !== "holstered") throw new Error("Q2 primary must finish holstering before it resumes");
@@ -184,14 +184,14 @@ export class Q2Weapons extends Q2Ballistics {
     return this.changeWeapon(self, game, state, input);
   }
 
-  canDrop(self: Q2Entity, game: Q2GameServices, name: Q2WeaponName): boolean {
+  canDrop(self: Q2WeaponOwner, game: Q2GameServices, name: Q2WeaponName): boolean {
     if ((game.options.deathmatchFlags & 4) !== 0) return false;
     const state = this.requireState(self), count = game.host.inventory.count(self.actor.id, this.definition(name).item);
     return count > 0 && !((state.weapon === name || state.pending === name) && count === 1);
   }
 
   /** Classic callers invoke this on their 10 Hz weapon turn, including ClientThink's one early thunk. */
-  tick(self: Q2Entity, game: Q2GameServices, input: Q2WeaponInput): undefined {
+  tick(self: Q2WeaponOwner, game: Q2GameServices, input: Q2WeaponInput): undefined {
     const state = this.requireState(self), now = game.host.now();
     this.inputs.set(self.actor.id, input);
     state.latchedAttack ||= input.latchedAttack;
@@ -243,13 +243,13 @@ export class Q2Weapons extends Q2Ballistics {
     return undefined;
   }
 
-  private requireState(self: Q2Entity): Q2WeaponState {
+  private requireState(self: Q2WeaponOwner): Q2WeaponState {
     const state = this.states.get(self.actor.id);
     if (state === undefined) throw new Error("Q2 player weapon state is not bound");
     return state;
   }
 
-  private context(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput, silenced = this.silencerShots(self.actor.id) > 0): Q2WeaponContext | null {
+  private context(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput, silenced = this.silencerShots(self.actor.id) > 0): Q2WeaponContext | null {
     return state.weapon === null ? null : { self, game, state, input, definition: this.definition(state.weapon), now: game.host.now(), rerelease: game.options.edition === "rerelease", silenced };
   }
 
@@ -280,7 +280,7 @@ export class Q2Weapons extends Q2Ballistics {
     return true;
   }
 
-  private cancelHandPreparation(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState): undefined {
+  private cancelHandPreparation(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState): undefined {
     const reservation = state.handReservation;
     state.handReservation = { kind: "none" };
     if (reservation.kind === "finite" && state.grenadeTime === 0 && game.host.actors.isLive(self.actor.id)) {
@@ -322,7 +322,7 @@ export class Q2Weapons extends Q2Ballistics {
     return this.animation(context, "reverse", frames.first, frames.last);
   }
 
-  changeWeapon(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput): undefined {
+  changeWeapon(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput): undefined {
     if (state.primaryHandoff === "active" && game.options.edition === "rerelease" && (game.host.combat.read(self.actor.id)?.health ?? 0) > 0 && !input.instantSwitch && input.holster) return undefined;
     if (state.grenadeTime !== 0 && (state.weapon === "grenades" ? state.handReservation.kind !== "none"
       : game.options.edition === "rerelease" || state.primaryHandoff === "holstering" && state.weapon !== null && this.extensions.get(state.weapon)?.held !== undefined)) {
@@ -413,7 +413,7 @@ export class Q2Weapons extends Q2Ballistics {
     return undefined;
   }
 
-  projectSource(self: Q2Entity, game: Q2GameServices, input: Q2WeaponInput, angles: Vec3, offset: Vec3): { start: Vec3; direction: Vec3 } {
+  projectSource(self: Q2WeaponOwner, game: Q2GameServices, input: Q2WeaponInput, angles: Vec3, offset: Vec3): { start: Vec3; direction: Vec3 } {
     return projectQ2Actor(self.actor.id, game, { hand: input.hand, viewHeight: self.viewHeight,
       playersCollide: this.inputs.get(self.actor.id)?.playersCollide !== false }, angles, offset);
   }
@@ -430,7 +430,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   flash(context: Q2WeaponContext, flash: number): undefined { return this.hooks.emit({ kind: "muzzleflash", actor: context.self.actor.id, flash, silenced: context.silenced }); }
 
-  setLoop(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, path: string): undefined {
+  setLoop(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState, path: string): undefined {
     if (state.loopSound === path) return undefined;
     const origin = game.body(self).origin;
     if (state.loopSound !== "") game.host.emit({ kind: "sound", actor: self.actor.id, origin, path: state.loopSound, channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "stop" });
@@ -439,7 +439,7 @@ export class Q2Weapons extends Q2Ballistics {
     return undefined;
   }
 
-  private present(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState): undefined {
+  private present(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState): undefined {
     const definition = state.weapon === null ? null : this.definition(state.weapon);
     const factor = game.options.edition === "classic" ? 1 : Math.max(0, (state.kickUntil - game.host.now()) / state.kickDuration);
     return this.hooks.emit({ kind: "view-weapon", actor: self.actor.id, weapon: state.weapon, model: state.primaryHandoff === "holstered" ? "" : state.viewModel ?? definition?.viewModel ?? "", playerModel: definition?.playerModel ?? 0, frame: state.frame, skin: state.viewSkin, rate: state.gunRate, kickOrigin: scale(state.kickOrigin, factor), kickAngles: scale(state.kickAngles, factor) });

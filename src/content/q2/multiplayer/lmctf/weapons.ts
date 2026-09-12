@@ -22,7 +22,7 @@ export class LmctfWeapons {
     } } });
   }
   get callbacks(): Q2CallbackDefinitions { return { think: { "lmctf:plasma_free": this.free }, touch: { "lmctf:plasma_reflect_touch": this.reflect, "lmctf:plasma_spread_touch": this.spread } }; }
-  private mode(self: Q2Entity, game: Q2GameServices): undefined { return lmctfPrint(game, lmctfPlayer(this.context, self.actor.id).plasmaMode ? "bounce plasma\n" : "spread plasma\n", self.actor.id); }
+  private mode(self: Pick<Q2Entity, "actor">, game: Q2GameServices): undefined { return lmctfPrint(game, lmctfPlayer(this.context, self.actor.id).plasmaMode ? "bounce plasma\n" : "spread plasma\n", self.actor.id); }
   private readonly think = (current: Q2WeaponContext, weapons: Q2Weapons): undefined => {
     this.context.plasmaQuad = current.input.quadUntil > current.now;
     const { state } = current, activating = state.phase === "activating" && state.frame === 3;
@@ -55,7 +55,7 @@ export class LmctfWeapons {
     }
     state.frame++; return undefined;
   };
-  launch(owner: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, reflect: boolean): undefined {
+  launch(owner: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, reflect: boolean): undefined {
     const angles = vectorAngles(direction);
     for (const yaw of reflect ? [0] : [0, 10, -10]) {
       const goop = game.create("goop"), velocity = scale(yaw === 0 ? direction : angleVectors({ ...angles, y: angles.y + yaw }).forward, 1200);

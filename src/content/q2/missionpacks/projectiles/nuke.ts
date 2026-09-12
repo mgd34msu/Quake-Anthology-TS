@@ -22,8 +22,8 @@ export class Q2MissionPackNuke extends Q2MissionPackMines {
   };
 
   private nukeExplode(entity: Q2Entity, game: Q2GameServices): undefined {
-    const origin = game.body(entity).origin, owner = game.entity(entity.teamMaster), blinded = new Set<ActorId>();
-    if (owner !== null) this.hooks.base.playerNoise(owner, game, origin, "impact");
+    const origin = game.body(entity).origin, owner = entity.teamMaster, blinded = new Set<ActorId>();
+    if (owner !== null) this.hooks.base.playerNoiseForActor(owner, game, origin, "impact");
     for (const actor of game.host.nearby(origin, entity.damageRadius * 2)) {
       if (actor === entity.actor.id || !game.host.actors.isLive(actor) || game.host.combat.read(actor)?.canTakeDamage !== true) continue;
       const target = game.entity(actor), body = game.host.bodies.read(actor);

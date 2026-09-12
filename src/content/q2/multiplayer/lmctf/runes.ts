@@ -137,7 +137,7 @@ export class LmctfRunes {
     } else if (armor.points < 200) { game.host.combat.setArmor(entity.actor, { ...armor, points: Math.min(200, Math.trunc(armor.points + Math.fround(heartRate / 3))) }); sound = true; }
     return sound ? game.sound(entity, "ctf/regen.wav", 3) : undefined;
   }
-  weaponFrame(entity: Q2Entity, game: Q2GameServices, firing: boolean, repeat: () => undefined): undefined {
+  weaponFrame(entity: Pick<Q2Entity, "actor">, game: Q2GameServices, firing: boolean, repeat: () => undefined): undefined {
     const rune = this.held(entity.actor.id, game);
     if (rune === "haste") {
       if (firing) game.sound(entity, "player/lava1.wav", 3);

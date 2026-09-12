@@ -24,7 +24,7 @@ export class Q2CtfGrapple {
   get states() { return this.equipment?.states ?? this.inactiveStates; }
   state(actor: ActorId) { return this.equipment?.state(actor) ?? new CtfGrappleState(); }
   get callbacks() { return this.equipment?.callbacks ?? {}; }
-  reset(player: Q2Entity, game: Q2GameServices): undefined { return this.equipment !== null ? this.equipment.reset(player.actor.id, game) : this.shared?.release(player.actor.id); }
+  reset(player: Pick<Q2Entity, "actor">, game: Q2GameServices): undefined { return this.equipment !== null ? this.equipment.reset(player.actor.id, game) : this.shared?.release(player.actor.id); }
   offhand(player: Q2Entity, game: Q2GameServices, pressed: boolean): undefined { return this.equipment !== null ? this.equipment.offhand(player.actor.id, game, pressed) : this.command(player, pressed); }
   touch(hook: Q2Entity, game: Q2GameServices, contact: TouchContact): undefined { return this.equipment?.touch(hook, game, contact); }
   fireGrapple(player: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage = 10, speed = 650, effects = 0): boolean {

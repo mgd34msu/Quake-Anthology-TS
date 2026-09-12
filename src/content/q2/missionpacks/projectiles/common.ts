@@ -8,7 +8,7 @@ export const shotMask = 0x6000003;
 export function projectileMask(game: Q2GameServices): number { return game.options.edition === "rerelease" ? 0x46004003 : shotMask; }
 export const freeProjectile: Q2Think = (entity, game) => game.remove(entity);
 
-export function projectile(self: Q2Entity, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3,
+export function projectile(self: Pick<Q2Entity, "actor">, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3,
   speed: number, model: string, motion: Q2Motion["kind"], effects: number): Q2Entity {
   const entity = game.create(classname);
   entity.owner = self.actor.id; entity.projectile = true; entity.dodgeable = true;
@@ -41,10 +41,7 @@ export function sight(game: Q2GameServices, from: Q2Entity, target: ActorId): bo
   return trace.fraction === 1;
 }
 
-export function ownerNoise(entity: Q2Entity, game: Q2GameServices, noise: (self: Q2Entity, game: Q2GameServices, origin: Vec3, kind: "impact") => undefined): undefined {
-  const owner = game.entity(entity.owner);
-  return owner !== null && game.host.isPlayer(owner.actor.id) ? noise(owner, game, game.body(entity).origin, "impact") : undefined;
-}
+
 
 export function velocity(game: Q2GameServices, actor: ActorId, value: Vec3, liftGround = false): undefined {
   const body = game.host.bodies.read(actor), owned = game.host.actors.resolveOwned(actor);

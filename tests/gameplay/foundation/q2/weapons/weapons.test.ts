@@ -437,3 +437,25 @@ test("foreign weapon noise observes live Q2 notarget without native weapon input
   expect(noises).toEqual([false, true]);
   scene.actors.close();
 });
+
+test("Q2 weapon ownership fires and restores without a source player entity", () => {
+  const scene = fixture("classic");
+  const actor = scene.actors.allocate("q1:character", "q1:player");
+  const body = scene.bodies.read(scene.player.id);
+  if (body === null) throw new Error("Missing shared body");
+  scene.bodies.create(actor, { ...body, origin: { x: 128, y: 0, z: 0 } });
+  scene.combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  scene.inventory.create(actor, scene.inventory.entries(scene.player.id));
+  const owner = { actor, viewHeight: 22 }, weapons = new Q2Weapons(scene.weapons.hooks);
+  const state = weapons.bind(owner, scene.game, new Q2WeaponState("blaster"));
+  state.phase = "ready"; state.frame = 9;
+  expect(scene.game.entity(actor.id)).toBeNull();
+  weapons.tick(owner, scene.game, input); weapons.tick(owner, scene.game, input);
+  expect([...scene.game.entities.values()].some(entity => entity.classname === "bolt" && entity.owner === actor.id)).toBe(true);
+  const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(weapons.capture(scene.game)));
+  const restored = weapons; restored.restore(scene.game, saved);
+  expect(restored.states.get(actor.id)).toEqual(state);
+  expect(scene.game.entity(actor.id)).toBeNull();
+  scene.actors.release(actor); expect(restored.states.has(actor.id)).toBe(false);
+  scene.actors.close();
+});

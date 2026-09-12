@@ -243,7 +243,7 @@ export class Q2MissionPackWeapons {
       if (!visible) continue;
       const monster = this.projectiles.hooks.monster(actor.id);
       if (monster !== null) monster.state.painTime -= 0.005 + game.host.random() * 0.07;
-      game.damage(actor.id, self, self.actor.id, (game.options.mode === "deathmatch" ? 15 : 7) * weapons.multiplier(context), 50,
+      game.damage(actor.id, self.actor.id, self.actor.id, (game.options.mode === "deathmatch" ? 15 : 7) * weapons.multiplier(context), 50,
         projection.direction, point, scale(projection.direction, -1), mod.chainfist, 64 | 8, "q2:weapon_chainfist");
       hit = true;
     }
@@ -267,7 +267,7 @@ export class Q2MissionPackWeapons {
       const target = trace.hit.kind === "actor" ? trace.hit.actor : null;
       if (target !== null && game.host.combat.read(target)?.canTakeDamage === true) {
         velocity(game, self.actor.id, add(add(game.body(self).velocity, scale(axes.forward, 75)), scale(axes.up, 75)));
-        game.damage(target, self, self.actor.id, (game.options.mode === "deathmatch" ? 30 : 15) * weapons.multiplier(context), 50,
+        game.damage(target, self.actor.id, self.actor.id, (game.options.mode === "deathmatch" ? 30 : 15) * weapons.multiplier(context), 50,
           zero, game.host.bodies.read(target)?.origin ?? trace.end, zero, mod.chainfist, 64 | 8, "q2:weapon_chainfist");
       } else game.host.emit({ kind: "effect", effect: "q2:gunshot", origin: trace.end, direction: trace.contact.kind === "plane" ? trace.contact.plane.normal : zero, count: 0, color: 0 });
     }

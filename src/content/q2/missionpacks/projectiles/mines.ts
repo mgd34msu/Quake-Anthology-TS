@@ -51,7 +51,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
 
   badArea(actor: ActorId, game: Q2GameServices): boolean { return this.badAreaEntity(actor, game) !== null; }
 
-  markTeslaArea(self: Q2Entity, game: Q2GameServices, tesla: Q2Entity): boolean {
+  markTeslaArea(self: Pick<Q2Entity, "actor">, game: Q2GameServices, tesla: Q2Entity): boolean {
     if (!game.host.actors.isLive(self.actor.id) || !game.host.actors.isLive(tesla.actor.id)) return false;
     let tail = tesla, next = game.entity(tesla.teamChain);
     while (next !== null) {
@@ -67,7 +67,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     tail.teamChain = area.actor.id; return true;
   }
 
-  protected throwMine(self: Q2Entity, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number): Q2Entity {
+  protected throwMine(self: Pick<Q2Entity, "actor">, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number): Q2Entity {
     game.sourceCallbacks.register(this.callbacks);
     const mine = projectile(self, game, classname, start, direction, speed, `models/weapons/g_${classname}/tris.md2`, "bounce", 32);
     const axes = angleVectors(vectorAngles(direction));
@@ -82,7 +82,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     const field = game.entity(entity.teamChain);
     if (field !== null && field.owner === entity.actor.id) game.remove(field);
     const owner = game.entity(entity.teamMaster);
-    if (owner !== null) this.hooks.base.playerNoise(owner, game, game.body(entity).origin, "impact");
+    if (entity.teamMaster !== null) this.hooks.base.playerNoiseForActor(entity.teamMaster, game, game.body(entity).origin, "impact");
     if (entity.damage > 90) game.sound(entity, "items/damage3.wav", 3);
     if (game.host.combat.read(entity.actor.id) !== null) game.host.combat.setTraits(entity.actor, { canTakeDamage: false });
     game.radiusDamage(entity, owner?.actor.id ?? entity.actor.id, entity.damage, entity.actor.id, 192, mod.prox, 0, "q2:weapon_proxlauncher");
@@ -166,7 +166,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     return game.schedule(entity, 0, this.proxFlight);
   };
 
-  fireProx(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, multiplier: number, speed: number): Q2Entity {
+  fireProx(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, multiplier: number, speed: number): Q2Entity {
     const mine = this.throwMine(self, game, "prox", start, direction, speed), angles = game.body(mine).angles;
     mine.clipMask |= 24; mine.flags |= 0x2000; mine.damage = 90 * multiplier; mine.touch = this.proxLand;
     game.move(mine, { angles: { ...angles, x: angles.x - 90 }, bounds: { min: { x: -6, y: -6, z: -6 }, max: { x: 6, y: 6, z: 6 } } }, false);
@@ -190,7 +190,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     entity.owner = entity.teamMaster; entity.enemy = null;
     if (blow) { entity.damage *= 50; entity.damageRadius = 200; }
     if (entity.damageRadius !== 0 && entity.damage > 150) game.sound(entity, "items/damage3.wav", 3);
-    const owner = game.entity(entity.owner); if (owner !== null) this.hooks.base.playerNoise(owner, game, game.body(entity).origin, "impact");
+    if (entity.owner !== null) this.hooks.base.playerNoiseForActor(entity.owner, game, game.body(entity).origin, "impact");
     game.radiusDamage(entity, entity.owner, entity.damage, null, entity.damageRadius, 7);
     this.grenadeEffect(entity, game); return game.remove(entity);
   }
@@ -209,7 +209,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     entity.frame++;
     if (entity.frame > 14) { entity.frame = 14; return game.schedule(entity, 0.1, this.teslaActivate); }
     if (entity.frame === 10) {
-      const owner = game.entity(entity.owner); if (owner !== null) this.hooks.base.playerNoise(owner, game, game.body(entity).origin, "weapon");
+      if (entity.owner !== null) this.hooks.base.playerNoiseForActor(entity.owner, game, game.body(entity).origin, "weapon");
       entity.skin = 1;
     } else if (entity.frame === 12) entity.skin = 2;
     else if (entity.frame === 14) entity.skin = 3;
@@ -259,7 +259,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     return game.schedule(entity, game.options.edition === "rerelease" ? 0.1 : game.host.frameSeconds(), this.teslaActive);
   };
 
-  fireTesla(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, multiplier: number, speed: number): Q2Entity {
+  fireTesla(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, multiplier: number, speed: number): Q2Entity {
     const mine = this.throwMine(self, game, "tesla", start, direction, speed);
     mine.damage = 3 * multiplier; mine.clipMask |= 24; mine.flags |= 0x2000; mine.touch = this.teslaLava; mine.die = this.teslaDie;
     if (game.options.edition === "rerelease") { mine.classname = "tesla_mine"; mine.clipMask &= ~0x4000000; mine.flags = (mine.flags | 0x20000) + 2 ** 32; }

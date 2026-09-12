@@ -45,10 +45,10 @@ export class LmctfGrapple {
   state(actor: ActorId) { return this.equipment?.state(actor) ?? new LmctfGrappleState(); }
   get callbacks() { return this.equipment?.callbacks ?? {}; }
   gravityScale(actor: ActorId): 0 | 1 { return this.equipment?.gravityScale(actor) ?? 1; }
-  abort(player: Q2Entity, game: Q2GameServices): undefined {
+  abort(player: Pick<Q2Entity, "actor">, game: Q2GameServices): undefined {
     return this.equipment !== null ? this.equipment.abort(player.actor.id, game) : this.shared?.release(player.actor.id);
   }
-  fire(player: Q2Entity, game: Q2GameServices): undefined {
+  fire(player: Pick<Q2Entity, "actor">, game: Q2GameServices): undefined {
     if (this.equipment === null) return undefined;
     const weapon = this.context.hooks.weapons.states.get(player.actor.id);
     if (weapon === undefined) return this.equipment.fire(player.actor.id, game);

@@ -225,7 +225,7 @@ export class Q2EntityServices implements Q2GameServices {
       invisible: false, lightLevel: entity.lightLevel, hostileUntil: null };
   }
 
-  body(entity: Q2Entity): BodyState {
+  body(entity: Pick<Q2Entity, "actor">): BodyState {
     const body = this.host.bodies.read(entity.actor.id);
     if (body === null) throw new Error("Q2 callback used a released body");
     return body;
@@ -324,7 +324,7 @@ export class Q2EntityServices implements Q2GameServices {
     return this.host.emit({ kind: "visibility", actor: entity.actor.id, visible: entity.visible });
   }
 
-  sound(entity: Q2Entity, path: string, channel = 2, volume = 1, attenuation = 1): undefined {
+  sound(entity: Pick<Q2Entity, "actor">, path: string, channel = 2, volume = 1, attenuation = 1): undefined {
     return this.host.emit({ kind: "sound", actor: entity.actor.id, origin: this.body(entity).origin, path, channel, volume, attenuation, reliable: false, loop: "once" });
   }
 
@@ -340,7 +340,7 @@ export class Q2EntityServices implements Q2GameServices {
       amount, knockback, direction, point, normal, delivery: "direct" });
   }
 
-  canDamage(target: ActorId, inflictor: Q2Entity): boolean {
+  canDamage(target: ActorId, inflictor: Pick<Q2Entity, "actor">): boolean {
     const body = this.host.bodies.read(target);
     if (body === null) return false;
     const source = this.body(inflictor).origin;

@@ -164,7 +164,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
     return game.show(entity);
   };
 
-  fireTrap(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, held: boolean): Q2Entity {
+  fireTrap(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, timer: number, radius: number, held: boolean): Q2Entity {
     const trap = this.throwMine(self, game, "trap", start, direction, speed);
     if (game.options.edition === "rerelease") {
       const axes = angleVectors(vectorAngles(direction)), body = game.body(trap), baseUp = dot(subtract(body.velocity, scale(direction, speed)), axes.up);

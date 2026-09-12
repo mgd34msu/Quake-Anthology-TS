@@ -238,7 +238,7 @@ export interface Q2GameServices {
   entity(actor: ActorId | null): Q2Entity | null;
   itemName(classname: string): string | null;
   pushTeam(actor: ActorId): readonly OwnedActor[];
-  body(entity: Q2Entity): BodyState;
+  body(entity: Pick<Q2Entity, "actor">): BodyState;
   move(entity: Q2Entity, changes: Partial<BodyState>, link?: boolean): undefined;
   link(entity: Q2Entity): undefined;
   solid(entity: Q2Entity, solid: Q2Entity["solid"]): undefined;
@@ -250,10 +250,10 @@ export interface Q2GameServices {
   targets(name: string): readonly Q2Entity[];
   pickTarget(name: string): Q2Entity | null;
   show(entity: Q2Entity): undefined;
-  sound(entity: Q2Entity, path: string, channel?: number, volume?: number, attenuation?: number): undefined;
+  sound(entity: Pick<Q2Entity, "actor">, path: string, channel?: number, volume?: number, attenuation?: number): undefined;
   damage(target: ActorId, inflictor: Q2Entity | ActorId, attacker: ActorId | null, amount: number, knockback: number, direction: Vec3, point: Vec3, normal: Vec3, meansOfDeath: number, flags?: number, weapon?: ItemId | null): DamageOutcome;
   radiusDamage(inflictor: Q2Entity, attacker: ActorId | null, damage: number, ignore: ActorId | null, radius: number, meansOfDeath: number, damageFlags?: number, weapon?: ItemId | null): undefined;
-  canDamage(target: ActorId, inflictor: Q2Entity): boolean;
+  canDamage(target: ActorId, inflictor: Pick<Q2Entity, "actor">): boolean;
   attack(inflictor: Q2Entity | ActorId, attacker: ActorId | null, meansOfDeath: number, flags: number, weapon: ItemId | null): AttackProvenance;
 }
 

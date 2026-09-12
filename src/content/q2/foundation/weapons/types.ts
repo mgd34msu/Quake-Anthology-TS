@@ -1,10 +1,12 @@
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. Weapon animation state is separate from actor and inventory ownership. */
 import type { ItemId } from "../../../../contracts/gameplay.ts";
-import type { ActorId } from "../../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
 import type { Q2Entity, Q2GameServices } from "../host.ts";
+
+export interface Q2WeaponOwner { readonly actor: OwnedActor; readonly viewHeight: number }
 
 export type Q2BaseWeaponName = "blaster" | "shotgun" | "supershotgun" | "machinegun" | "chaingun" | "grenades" | "grenadelauncher" | "rocketlauncher" | "hyperblaster" | "railgun" | "bfg";
 /** Names resolve through the selected session's source weapon registry. */

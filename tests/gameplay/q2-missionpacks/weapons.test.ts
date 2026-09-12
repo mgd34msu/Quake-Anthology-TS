@@ -275,7 +275,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const ammo: readonly InventoryEntry[] = ["shells", "bullets", "grenades", "rockets", "cells", "slugs"].map(kind => ({ item: `q2:ammo_${kind}`, count: 200, capacity: 200 }));
   inventory.create(player, [...ammo, ...Q2_BASE_WEAPONS.filter(weapon => weapon.name !== "grenades").map(weapon => ({ item: weapon.item, count: 1, capacity: 1 }))]);
-  const monsters = new Set<ActorId>();
+  const monsters = new Set<ActorId>(), foreignPlayers = new Set<ActorId>();
   const tracing = { trace: clearTrace };
   const inlineBounds = new Map<number, Bounds>();
   const host: Q2FoundationHost = {
@@ -285,7 +285,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     nearby: (origin, radius) => [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")].map(actor => actor.id).filter(actor => {
       const body = bodies.read(actor);
       return body !== null && Math.hypot(body.origin.x - origin.x, body.origin.y - origin.y, body.origin.z - origin.z) <= radius;
-    }), players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor.equals(player.id), isMonster: actor => monsters.has(actor),
+    }), players: () => [player.id], worldActor: () => world.id, isPlayer: actor => actor.equals(player.id) || foreignPlayers.has(actor), isMonster: actor => monsters.has(actor),
     inlineModelBounds: model => inlineBounds.get(model) ?? { min: zero, max: zero }, setSolid: () => undefined, setMotion: () => undefined, setAreaPortal: () => undefined,
     playerViewState: actor => actor.equals(player.id) ? { viewAngles: input.angles, oldVelocity: bodies.read(actor)?.velocity ?? zero } : null,
     keyConsumed: () => undefined, prepareLevelChange: () => undefined,
@@ -300,7 +300,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const definition = Q2_BASE_WEAPONS.find(weapon => weapon.name === name);
   if (definition === undefined) throw new Error("Missing base weapon");
   state.phase = "ready"; state.frame = definition.fireLast + 1;
-  return { actors, bodies, combat, inventory, player, self, game, weapons, state, events, outcomes, presentation, tracing, monsters, inlineBounds,
+  return { actors, bodies, combat, inventory, player, self, game, weapons, state, events, outcomes, presentation, tracing, monsters, foreignPlayers, inlineBounds,
     setTime(seconds: number) { now = seconds; },
     step(seconds: number, current: Q2WeaponInput = input) { now = seconds; weapons.tick(self, game, current); },
     target(x: number) {
@@ -312,3 +312,33 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     },
   };
 }
+
+
+test("expansion impact noise retains native and foreign owners and rejects released actors", () => {
+  const scene = fixture("classic"), noises: ActorId[] = [];
+  const base = new Q2Weapons({ ...scene.weapons.hooks, noise: (actor, _origin, secondary) => { if (secondary) noises.push(actor); return undefined; } });
+  const projectiles = new Q2MissionPackProjectiles({ base, monster: () => null, playerEffect: () => undefined });
+  const foreign = scene.actors.allocate("q1:character", "q1:player"), body = scene.bodies.read(scene.player.id);
+  if (body === null) throw new Error("Missing shared player body");
+  scene.bodies.create(foreign, { ...body, origin: { x: 128, y: 0, z: 0 } });
+  scene.foreignPlayers.add(foreign.id);
+  expect(scene.game.entity(foreign.id)).toBeNull();
+  const impact = (actor: typeof scene.player) => {
+    const bolt = projectiles.fireIonRipper({ actor }, scene.game, { x: 200, y: 0, z: 0 }, forward, 30, 500, 0);
+    if (bolt.touch === null) throw new Error("Missing actual ion touch");
+    return { bolt, touch: bolt.touch };
+  };
+  for (const actor of [scene.player, foreign]) {
+    const { bolt, touch } = impact(actor);
+    touch(bolt, scene.game, { self: bolt.actor, other: scene.game.host.worldActor(), plane: null, surface: null });
+  }
+  expect(noises).toEqual([scene.player.id, foreign.id]);
+  const pending = impact(foreign);
+  scene.actors.release(foreign);
+  const replacement = scene.actors.allocate("q1:character", "q1:player");
+  scene.foreignPlayers.add(replacement.id);
+  pending.touch(pending.bolt, scene.game, { self: pending.bolt.actor, other: scene.game.host.worldActor(), plane: null, surface: null });
+  expect(noises).toEqual([scene.player.id, foreign.id]);
+  expect(base.noises.has(foreign.id)).toBe(false);
+  scene.actors.close();
+});

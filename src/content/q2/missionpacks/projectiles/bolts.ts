@@ -21,17 +21,17 @@ export class Q2MissionPackBolts {
 
   private register(game: Q2GameServices): undefined { return game.sourceCallbacks.register(this.callbacks); }
 
-  protected playerCollision(self: Q2Entity, game: Q2GameServices, projectile: Q2Entity): undefined {
+  protected playerCollision(self: Pick<Q2Entity, "actor">, game: Q2GameServices, projectile: Q2Entity): undefined {
     if (game.options.edition === "rerelease" && game.host.isPlayer(self.actor.id) && this.hooks.base.inputs.get(self.actor.id)?.playersCollide === false) projectile.clipMask &= ~0x40000000;
     return undefined;
   }
 
   private impactNoise(entity: Q2Entity, game: Q2GameServices): undefined {
-    const owner = game.entity(entity.owner);
-    return owner === null ? undefined : this.hooks.base.playerNoise(owner, game, game.body(entity).origin, "impact");
+    const owner = entity.owner;
+    return owner === null ? undefined : this.hooks.base.playerNoiseForActor(owner, game, game.body(entity).origin, "impact");
   }
 
-  private initialTouch(self: Q2Entity, game: Q2GameServices, bolt: Q2Entity): undefined {
+  private initialTouch(self: Pick<Q2Entity, "actor">, game: Q2GameServices, bolt: Q2Entity): undefined {
     const trace = game.host.trace({ start: game.body(self).origin, end: game.body(bolt).origin,
       bounds: null, ignore: bolt.actor.id, mask: bolt.clipMask });
     if (trace.fraction === 1 || bolt.touch === null) return undefined;
@@ -58,7 +58,7 @@ export class Q2MissionPackBolts {
     return game.remove(entity);
   };
 
-  fireIonRipper(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
+  fireIonRipper(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
     this.register(game);
     const bolt = projectile(self, game, "ion", start, normalize(direction), speed, "models/objects/boomrang/tris.md2", "wall-bounce", effects);
     this.playerCollision(self, game, bolt);
@@ -68,7 +68,7 @@ export class Q2MissionPackBolts {
     return bolt;
   }
 
-  fireBlueBlaster(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
+  fireBlueBlaster(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
     const bolt = this.hooks.base.fireBlaster(self, game, start, direction, damage, speed, effects, false, game.options.edition === "rerelease" ? 58 : 1);
     if (game.host.actors.isLive(bolt.actor.id)) { bolt.model = "models/objects/blaser/tris.md2"; game.show(bolt); }
     return bolt;
@@ -122,7 +122,7 @@ export class Q2MissionPackBolts {
     return game.schedule(entity, game.host.frameSeconds(), this.heatThinkRerelease);
   };
 
-  fireHeatRocket(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number, turnFraction = 0.075): Q2Entity {
+  fireHeatRocket(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number, turnFraction = 0.075): Q2Entity {
     this.register(game);
     const rocket = this.hooks.base.fireRocket(self, game, start, direction, damage, speed, radius, radiusDamage);
     if (game.host.actors.isLive(rocket.actor.id)) {
@@ -144,7 +144,7 @@ export class Q2MissionPackBolts {
     return game.remove(entity);
   };
 
-  firePlasma(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity {
+  firePlasma(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, radius: number, radiusDamage: number): Q2Entity {
     this.register(game);
     const bolt = projectile(self, game, "plasma", start, direction, speed, "sprites/s_photon.sp2", "fly-missile", 0x1000000 | 0x2000);
     this.playerCollision(self, game, bolt);
@@ -163,7 +163,7 @@ export class Q2MissionPackBolts {
     return game.remove(entity);
   };
 
-  fireFlechette(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, kick: number): Q2Entity {
+  fireFlechette(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, kick: number): Q2Entity {
     this.register(game);
     const bolt = projectile(self, game, "flechette", start, normalize(direction), speed, "models/proj/flechette/tris.md2", "fly-missile", 0);
     this.playerCollision(self, game, bolt);
@@ -195,7 +195,7 @@ export class Q2MissionPackBolts {
     return game.remove(entity);
   };
 
-  fireBlaster2(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
+  fireBlaster2(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, effects: number): Q2Entity {
     this.register(game);
     const bolt = projectile(self, game, "bolt", start, normalize(direction), speed, "models/proj/laser2/tris.md2", "fly-missile", effects | (effects === 0 ? 0 : 0x4000000));
     this.playerCollision(self, game, bolt);
@@ -255,7 +255,7 @@ export class Q2MissionPackBolts {
     return explode(entity, game, "tracker_explosion");
   };
 
-  fireTracker(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, enemy: ActorId | null): Q2Entity {
+  fireTracker(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, speed: number, enemy: ActorId | null): Q2Entity {
     this.register(game);
     const bolt = projectile(self, game, "tracker", start, normalize(direction), speed, "models/proj/disintegrator/tris.md2", "fly-missile", 0x4000000);
     this.playerCollision(self, game, bolt);
@@ -264,7 +264,7 @@ export class Q2MissionPackBolts {
     this.hooks.base.checkDodge(self, game, start, bolt.movedir, speed); this.initialTouch(self, game, bolt); return bolt;
   }
 
-  fireHeatBeam(self: Q2Entity, game: Q2GameServices, start: Vec3, direction: Vec3, _offset: Vec3, damage: number, kick: number): undefined {
+  fireHeatBeam(self: Pick<Q2Entity, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, _offset: Vec3, damage: number, kick: number): undefined {
     const waterMask = 56, end = add(start, scale(normalize(direction), 8192)), underwater = (game.host.pointContents(start) & waterMask) !== 0;
     let mask = projectileMask(game);
     if (game.options.edition === "rerelease" && game.host.isPlayer(self.actor.id) && this.hooks.base.inputs.get(self.actor.id)?.playersCollide === false) mask &= ~0x40000000;
@@ -280,7 +280,7 @@ export class Q2MissionPackBolts {
     const actor = trace.hit.kind === "actor" ? trace.hit.actor : null;
     if (!sky && trace.fraction < 1) {
       if (actor !== null && game.host.combat.read(actor)?.canTakeDamage === true)
-        game.damage(actor, self, self.actor.id, water ? Math.trunc(damage / 2) : damage, kick, direction, trace.end, normal, mod.heatbeam, 4, "q2:weapon_plasmabeam");
+        game.damage(actor, self.actor.id, self.actor.id, water ? Math.trunc(damage / 2) : damage, kick, direction, trace.end, normal, mod.heatbeam, 4, "q2:weapon_plasmabeam");
       else if (!water && !(trace.kind === "q2" && trace.surface?.name.startsWith("sky") === true)) {
         game.host.emit({ kind: "effect", effect: "q2:heatbeam_steam", origin: trace.end, direction: normal, count: 0, color: 0 });
         this.hooks.base.playerNoise(self, game, trace.end, "impact");
