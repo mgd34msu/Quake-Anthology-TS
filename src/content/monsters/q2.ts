@@ -384,8 +384,26 @@ const tank = { resources: [
   "sound/weapons/rockfly.wav",
 ] };
 
+const flipper = { resources: [
+  ...environmentResources,
+  "models/monsters/flipper/tris.md2",
+  "models/monsters/flipper/skin.pcx",
+  "models/monsters/flipper/pain.pcx",
+  "models/objects/gibs/bone/tris.md2",
+  "models/objects/gibs/bone/skin.pcx",
+  "models/objects/gibs/sm_meat/tris.md2",
+  "models/objects/gibs/sm_meat/skin.pcx",
+  "sound/flipper/flpsght1.wav",
+  "sound/flipper/flppain1.wav",
+  "sound/flipper/flppain2.wav",
+  "sound/flipper/flpdeth1.wav",
+  "sound/flipper/flpatck1.wav",
+  "sound/misc/udeath.wav",
+] };
+
 export const q2MonsterSources: readonly MonsterSourceDefinition[] = [
   { provider: "q2:monsters/classic/baseq2", family: "q2", edition: "classic", program: "baseq2", creatures: {
+    monster_flipper: flipper,
     monster_infantry: { resources: [...classicInfantry.resources, ...environmentResources] },
     monster_berserk: { resources: [...classicBerserk.resources, ...environmentResources] },
     monster_soldier: soldier,

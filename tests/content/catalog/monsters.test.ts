@@ -104,3 +104,23 @@ test.skipIf(!existsSync(resolve(corpus, "q1/rerelease/id1/pak0.pak")))("rereleas
     "sound/wizard/hit.wav", "sound/zombie/z_hit.wav", "sound/blob/death1.wav"]) expect(paths.has(path)).toBe(true);
   expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
 }, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("aquatic Q1 and Q2 species resolve their edition-specific bodies and corpse resources", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  for (const family of ["q1", "q2"]) for (const edition of ["classic", "rerelease"]) {
+    const program = family === "q1" ? "id1" : "baseq2", classname = family === "q1" ? "monster_fish" : "monster_flipper";
+    const command = parseApplicationCommand(["--game", `${family}-${edition}-${program}`, "--map", family === "q1" ? "e2m3" : "fact1"]);
+    if (command.kind !== "run") throw new Error("Expected aquatic species launch command");
+    const preset = applicationPreset(catalog, command.options);
+    const source: ProviderReference = { provider: `${family}:monsters/${edition}/${program}`, content: catalog.require(`${family}-${edition}-${program}`).id };
+    const enemies: EnemySelection = { kind: "replace", default: { source, classname }, byClassname: {} };
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    expect(recipe.enemies).toEqual(enemies);
+    expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
+    const paths = new Set(recipe.resources.map(resource => resource.requestedPath));
+    for (const path of family === "q1" ? ["progs/fish.mdl", "sound/fish/bite.wav", "sound/fish/death.wav", "sound/fish/idle.wav"]
+      : ["models/monsters/flipper/tris.md2", "models/monsters/flipper/skin.pcx", "models/monsters/flipper/pain.pcx", "models/objects/gibs/bone/skin.pcx",
+        "models/objects/gibs/sm_meat/skin.pcx", "sound/flipper/flpatck1.wav", "sound/flipper/flpdeth1.wav", "sound/player/watr_in.wav"]) expect(paths.has(path)).toBe(true);
+    if (family === "q2" && edition === "rerelease") for (const path of ["models/objects/gibs/head2/tris.md2", "models/objects/gibs/head2/skin.pcx", "models/objects/gibs/head2/player.pcx"]) expect(paths.has(path)).toBe(true);
+  }
+}, 60000);

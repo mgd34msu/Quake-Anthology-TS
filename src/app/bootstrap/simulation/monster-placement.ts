@@ -24,7 +24,7 @@ export function preservesAuthoredQ1Placement(input: {
   readonly body: BodyState;
 }): boolean {
   const { map, authored, definition, entity, body } = input;
-  if (map.entities.provider !== "q1:official" || definition.source.provider !== "q1:monsters/classic/id1"
+  if (map.entities.provider !== "q1:official" || (definition.source.provider !== "q1:monsters/classic/id1" && definition.source.provider !== "q1:monsters/rerelease/id1")
     || map.entities.content !== definition.source.content || map.geometryContent !== definition.source.content || authored === undefined) return false;
   const classname = q1EntityValue(authored, "classname");
   if (classname !== definition.classname || entity.classname !== classname) return false;

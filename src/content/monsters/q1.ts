@@ -151,8 +151,10 @@ const zombie = { resources: [
   "progs/gib3.mdl",
 ] };
 
+const fish = { resources: ["progs/fish.mdl", "sound/fish/death.wav", "sound/fish/bite.wav", "sound/fish/idle.wav"] };
+
 const ordinaryCreatures: MonsterSourceDefinition["creatures"] = {
-  monster_army: army, monster_dog: dog, monster_enforcer: enforcer, monster_knight: knight, monster_demon1: demon,
+  monster_fish: fish, monster_army: army, monster_dog: dog, monster_enforcer: enforcer, monster_knight: knight, monster_demon1: demon,
   monster_ogre: ogre, monster_ogre_marksman: ogre, monster_hell_knight: hellknight, monster_shambler: shambler,
   monster_wizard: wizard, monster_shalrath: shalrath, monster_tarbaby: tarbaby, monster_zombie: zombie,
 };

@@ -543,7 +543,28 @@ const gladiator = { resources: [
   "sound/weapons/rg_hum.wav",
 ] };
 
+const flipper = { resources: [
+  ...environmentResources,
+  "models/monsters/flipper/tris.md2",
+  "models/monsters/flipper/skin.pcx",
+  "models/monsters/flipper/pain.pcx",
+  "models/objects/gibs/bone/tris.md2",
+  "models/objects/gibs/bone/skin.pcx",
+  "models/objects/gibs/sm_meat/tris.md2",
+  "models/objects/gibs/sm_meat/skin.pcx",
+  "sound/flipper/flpsght1.wav",
+  "sound/flipper/flppain1.wav",
+  "sound/flipper/flppain2.wav",
+  "sound/flipper/flpdeth1.wav",
+  "sound/flipper/flpatck1.wav",
+  "sound/misc/udeath.wav",
+  "models/objects/gibs/head2/tris.md2",
+  "models/objects/gibs/head2/skin.pcx",
+  "models/objects/gibs/head2/player.pcx",
+] };
+
 export const q2RereleaseCreatures: MonsterSourceDefinition["creatures"] = {
+  monster_flipper: flipper,
   monster_soldier: soldier,
   monster_soldier_light: soldier,
   monster_soldier_ss: soldier,

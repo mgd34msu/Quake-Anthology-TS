@@ -36,7 +36,7 @@ export type MonsterMap = { readonly kind: "q1"; readonly game: Q1Foundation }
   | { readonly kind: "q2"; readonly game: Q2Foundation; readonly items: Q2ItemModule };
 
 const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie"]);
-const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander"]);
+const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander", "monster_flipper"]);
 
 /** Authored links and counters remain in the map program while behavior attaches to its actual actor. */
 export class SelectedMonsters {

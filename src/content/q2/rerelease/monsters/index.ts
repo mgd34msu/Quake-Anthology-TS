@@ -40,6 +40,7 @@ function ordinaryDefinitions(monsters: Q2Monsters) {
   return {
     berserk: createRereleaseBerserkDefinition(monsters),
     gunner: rereleaseGunnerDefinition,
+    flipper: rereleaseFlipperDefinition,
     floater: rereleaseFloaterDefinition,
     hover: createRereleaseHoverDefinition(monsters),
     flyer: createRereleaseFlyerDefinition(monsters),
@@ -65,7 +66,7 @@ export function registerQ2RereleaseMonsters(monsters: Q2Monsters, options: Q2Rer
   monsters.register(shamblerDefinition, "rerelease");
   monsters.register(createGunCommanderDefinition(options.weapons), "rerelease");
   monsters.register(ordinary.gunner, "rerelease");
-  monsters.register(rereleaseFlipperDefinition, "rerelease");
+  monsters.register(ordinary.flipper, "rerelease");
   monsters.register(ordinary.floater, "rerelease");
   monsters.register(ordinary.hover, "rerelease");
   monsters.register(ordinary.flyer, "rerelease");

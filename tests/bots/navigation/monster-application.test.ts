@@ -103,7 +103,6 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected 
     for (const path of new Set(Object.values(classic.creatures).flatMap(creature => creature.resources))) {
       expect(await resources.open(path)).not.toBeNull();
     }
-    expect(Object.hasOwn(classic.creatures, "monster_fish")).toBe(false);
     expect(Object.hasOwn(classic.creatures, "monster_boss")).toBe(false);
     expect(Object.hasOwn(classic.creatures, "monster_oldone")).toBe(false);
     const marksman = parseQ1Entities('{ "classname" "monster_ogre_marksman" }')[0];
@@ -198,7 +197,7 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves
       expect(preservesAuthoredQ1Placement(input)).toBe(true);
       expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, bounds: { ...body.bounds, max: { ...body.bounds.max, x: 32 } } } })).toBe(false);
       expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, origin: { ...body.origin, x: body.origin.x + 1 } } })).toBe(false);
-      expect(preservesAuthoredQ1Placement({ ...input, definition: { ...definition, source: { ...definition.source, provider: "q1:monsters/rerelease/id1" } } })).toBe(false);
+      expect(preservesAuthoredQ1Placement({ ...input, definition: { ...definition, source: { ...definition.source, provider: "q1:monsters/rerelease/id1", content: application.content.catalog.require("q1-rerelease-id1").id } } })).toBe(false);
     } finally { await native.close(); }
   } finally { await application.close(); }
   const different = await openSelectedId1("e1m3", "monster_ogre");
@@ -295,4 +294,56 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail rere
     expect(map.game.killedMonsters).toBe(kills + 1);
     expect(selectedId1(application).authored.find(entry => entry.actor.slot === ogre.actor.slot)?.countedDeath).toBe(true);
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 60000);
+
+test.skipIf(!existsSync(join(corpus, "q1/rerelease/id1/pak0.pak")))("retail e2m3 selected fish swim, bite and restore in authored water in both editions", async () => {
+  for (const edition of ["classic", "rerelease"]) {
+    const application = await openSelectedId1("e2m3", "monster_wizard", edition === "classic" ? "classic" : "rerelease");
+    const directory = await mkdtemp(join(tmpdir(), "q1-selected-fish-"));
+    try {
+      const map = application.simulation.q1Source();
+      if (map === null) throw new Error("Missing Q1 map source");
+      const selected = selectedId1(application), entry = selected.authored.find(value => value.sourceOrdinal === (edition === "classic" ? 530 : 523));
+      if (entry === undefined || entry.classname !== "monster_fish") throw new Error("Missing authored water-lane fish");
+      const fish = application.simulation.actors.resolveSaved(entry.actor);
+      if (fish === null) throw new Error("Missing shared fish actor");
+      const body = application.simulation.bodies.read(fish.id);
+      if (body === null) throw new Error("Missing fish body");
+      expect(body.origin).toEqual({ x: -48, y: 800, z: -336 });
+      expect(map.game.host.contents(body.origin)).toBe("water");
+      const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
+      const player = application.simulation.actors.resolveOwned(human.actor);
+      if (player === null) throw new Error("Missing player");
+      const playerBody = application.simulation.bodies.read(player.id);
+      if (playerBody === null) throw new Error("Missing player body");
+      const playerOrigin = { ...body.origin, x: body.origin.x + 80 };
+      expect(map.game.host.contents(playerOrigin)).toBe("water");
+      application.simulation.bodies.write(player, { ...playerBody, origin: playerOrigin });
+      application.simulation.bodies.link(player); application.simulation.combat.setHealth(player, 1000);
+      let bites = 0;
+      for (let frame = 0; frame < 40 && bites === 0; frame++) {
+        const output = await application.step(100);
+        for (const event of output.events) if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed") {
+          const decision = event.payload.outcome.decision;
+          if (decision.request.attack.attacker?.equals(fish.id) && decision.request.target.equals(player.id) && decision.appliedDamage > 0) bites++;
+        }
+      }
+      expect(bites).toBeGreaterThan(0);
+      const moved = application.simulation.bodies.read(fish.id);
+      if (moved === null) throw new Error("Missing swimming fish");
+      expect(moved.origin).not.toEqual(body.origin);
+      expect(map.game.host.contents(moved.origin)).toBe("water");
+      const continuation = () => JSON.stringify({ source: selectedId1(application), bodies: application.simulation.checkpoint().bodies }, (key: string, value: unknown) => key === "generation" ? 0 : value instanceof Uint8Array ? decodeCheckpointValue(value) : value);
+      const saved = continuation(), path = join(directory, "swimming.sav");
+      await application.saveGame(path);
+      const frames: string[] = [];
+      for (let frame = 0; frame < 8; frame++) { await application.step(100); frames.push(continuation()); }
+      await application.loadGame(path);
+      expect(continuation()).toEqual(saved);
+      const restored = application.simulation.actors.resolveSaved(entry.actor);
+      if (restored === null) throw new Error("Missing restored fish");
+      expect(restored.id.equals(fish.id)).toBe(false);
+      for (const expected of frames) { await application.step(100); expect(continuation()).toEqual(expected); }
+    } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  }
 }, 60000);
