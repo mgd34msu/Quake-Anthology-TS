@@ -367,3 +367,58 @@ test("pure Q3 effects and unique loops grow independently of initial allocation"
     expect([...loops]).toEqual([...roomy.mix(1)]);
     expect(small.sampleClock).toBe(2);
 });
+
+test("ordinary Q3 Doppler retains its captured source-compatible PCM", () => {
+    const mixer = new AudioMixer(1000, () => 0);
+    const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null,
+        samples: Int16Array.from({ length: 2048 }, (_, index) => (index % 13 - 6) * 3000) };
+    mixer.setListener(1, origin, axis);
+    mixer.updateLoopingSound(sound, { entity: 2, origin: { x: 100, y: 0, z: 0 }, velocity: { x: 1000, y: 0, z: 0 }, frameNumber: 1 });
+    mixer.setListener(1, origin, axis);
+    expect([...mixer.mix(12)]).toEqual([-3474, -3474, -2895, -2895, -2316, -2316, -1737, -1737,
+        -869, -869, 0, 0, 578, 578, 1157, 1157, 1736, 1736, 2605, 2605, 3473, 3473, -3474, -3474]);
+});
+
+test("Doppler singularities and arbitrarily large finite rates have bounded sample work", () => {
+    const cases = [
+        { distance: 0, velocity: 1000, maximumReads: 32 },
+        { distance: 0.000001, velocity: 1000, maximumReads: 2048 },
+        { distance: 1, velocity: Math.sqrt(1023.5 * 100) - 1, maximumReads: 32 * 1024 },
+        { distance: 1, velocity: Math.sqrt(1024.5 * 100) - 1, maximumReads: 2048 },
+        // These finite source vectors produce exactly FLT_MAX, without private-state injection.
+        { distance: 0.09999964386224747, velocity: 18446678103011885000, maximumReads: 2048 },
+    ];
+    for (const entry of cases) for (const value of [12000, -12000]) {
+        const mixer = new AudioMixer(1000, () => 0);
+        const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null, samples: new Int16Array(2048).fill(value) };
+        let reads = 0;
+        mixer.bindSoundMemory({ frameCount: pcm => pcm.frameCount, hasData: () => true, touch: () => undefined,
+            sample: (pcm, index) => { reads++; const sample = pcm.samples[index]; if (sample === undefined) throw new Error("Read beyond prepared PCM"); return sample; } });
+        mixer.setListener(1, origin, axis);
+        mixer.updateLoopingSound(sound, { entity: 2, origin: { x: entry.distance, y: 0, z: 0 }, velocity: { x: entry.velocity, y: 0, z: 0 }, frameNumber: 1 });
+        mixer.setListener(1, origin, axis);
+        const output = mixer.mix(32);
+        expect(reads).toBeGreaterThan(0);
+        expect(reads).toBeLessThanOrEqual(entry.maximumReads);
+        expect(output.every(sample => Number.isFinite(sample) && Math.sign(sample) === Math.sign(value))).toBe(true);
+        expect(mixer.sampleClock).toBe(32);
+        const before = reads;
+        expect(mixer.mix(32).every(sample => Math.sign(sample) === Math.sign(value))).toBe(true);
+        expect(reads - before).toBeLessThanOrEqual(entry.maximumReads);
+    }
+});
+
+test("large finite Doppler averages complete cycles without capping pitch", () => {
+    const mixer = new AudioMixer(1000, () => 0);
+    const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null,
+        samples: Int16Array.from({ length: 2048 }, (_, index) => index < 1024 ? 12000 : -12000) };
+    mixer.setListener(1, origin, axis);
+    // (1 + 639)^2 / (1^2 * 100) = 4096: two complete source cycles per output.
+    mixer.updateLoopingSound(sound, { entity: 2, origin: { x: 1, y: 0, z: 0 }, velocity: { x: 639, y: 0, z: 0 }, frameNumber: 1 });
+    mixer.setListener(1, origin, axis);
+    expect(mixer.mix(32).every(sample => sample === 0)).toBe(true);
+    mixer.setDopplerEnabled(false);
+    mixer.updateLoopingSound(sound, { entity: 2, origin: { x: 1, y: 0, z: 0 }, velocity: { x: 639, y: 0, z: 0 }, frameNumber: 2 });
+    mixer.setListener(1, origin, axis);
+    expect(mixer.mix(32).every(sample => sample > 0)).toBe(true);
+});

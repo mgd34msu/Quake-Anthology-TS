@@ -48,6 +48,7 @@ export interface RealLoopingSoundOptions {
     readonly volume?: number;
 }
 interface PreparedSound {
+    dopplerSums?: Float64Array;
     readonly sound: PcmSound;
     readonly step256: number;
     readonly memory: MixerSoundMemory | null;
@@ -549,6 +550,7 @@ export class AudioMixer {
             if (previous !== undefined && ((previous.frameNumber + 1) | 0) === options.frameNumber)
                 oldDopplerScale = 1;
             dopplerScale = Math.fround(distanceAfter / Math.fround(distanceBefore * Math.fround(100)));
+            if (!Number.isFinite(dopplerScale)) dopplerScale = 1;
             if (dopplerScale <= 1)
                 doppler = false;
         }
@@ -936,6 +938,10 @@ export class AudioMixer {
         }
     }
     private paintDopplerLoop(paint: Float64Array, outputFrame: number, count: number, sourceOffset: number, loop: LoopMix, effectsGain: number): void {
+        if (loop.dopplerScale > SND_CHUNK_SIZE) {
+            this.paintWideDopplerLoop(paint, outputFrame, count, sourceOffset, loop, effectsGain);
+            return;
+        }
         const scaledOffset = Math.trunc(Math.fround(Math.fround(sourceOffset) * loop.oldDopplerScale));
         const chunkCount = Math.ceil(loop.prepared.outputFrames / SND_CHUNK_SIZE);
         let chunk = scaledOffset < 0 ? 0 : Math.trunc(scaledOffset / SND_CHUNK_SIZE) % chunkCount;
@@ -959,6 +965,42 @@ export class AudioMixer {
             const rightContribution = Math.fround(Math.fround(sampleTotal * rightVolume) / divisor);
             addFloatPaint(paint, (outputFrame + index) * 2, leftContribution);
             addFloatPaint(paint, (outputFrame + index) * 2 + 1, rightContribution);
+        }
+    }
+    /** Beyond one source chunk per output, define a periodic box average instead
+     * of the donor's unbounded scan and out-of-range float-to-int conversions.
+     * Complete cycles use range sums: rate is never capped and work is independent
+     * of the number of traversed cycles. Ordinary source spans keep their paint path. */
+    private paintWideDopplerLoop(paint: Float64Array, outputFrame: number, count: number, sourceOffset: number, loop: LoopMix, effectsGain: number): void {
+        const prepared = loop.prepared, period = Math.ceil(prepared.outputFrames / SND_CHUNK_SIZE) * SND_CHUNK_SIZE;
+        let sums = prepared.dopplerSums;
+        if (sums === undefined || sums.length !== period + 1) {
+            sums = new Float64Array(period + 1);
+            let total = 0;
+            for (let frame = 0; frame < period; frame++) {
+                // Retain the common sampler's deterministic zero-filled final chunk.
+                if (frame < prepared.outputFrames) total += this.effectSample(prepared, frame);
+                sums[frame + 1] = total;
+            }
+            prepared.dopplerSums = sums;
+        }
+        const preparedSums = sums;
+        const sum = (index: number): number => {
+            const value = preparedSums[index];
+            if (value === undefined) throw new RangeError("Doppler range exceeds prepared samples");
+            return value;
+        };
+        const cycles = Math.floor(loop.dopplerScale / period), remainder = loop.dopplerScale % period;
+        const cycleSamples = cycles * period, cycleTotal = cycles * sum(period);
+        let offset = sourceOffset % period;
+        for (let index = 0; index < count; index++) {
+            // Reduce the rate before addition, including at the largest finite float.
+            const end = offset + remainder, first = Math.trunc(offset), last = Math.trunc(end);
+            const tail = sum(Math.min(last, period)) - sum(first) + (last > period ? sum(last - period) : 0);
+            const average = (cycleTotal + tail) / (cycleSamples + last - first);
+            addFloatPaint(paint, (outputFrame + index) * 2, average * loop.leftVolume * effectsGain / 256);
+            addFloatPaint(paint, (outputFrame + index) * 2 + 1, average * loop.rightVolume * effectsGain / 256);
+            offset = end % period;
         }
     }
     private dopplerSample(prepared: PreparedSound, chunk: number, sampleOffset: number): number {
