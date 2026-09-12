@@ -253,6 +253,7 @@ export class Q2Players implements Q2SpawnModule {
     const weapon = this.weapons.states.get(entity.actor.id);
     if (state.useQ2Weapons && weapon !== undefined) {
       const selected = game.options.mode === "deathmatch" ? "blaster" : state.coopRespawn?.weapon ?? weapon.weapon ?? "blaster";
+      this.weapons.resetSilencer(entity.actor.id);
       Object.assign(weapon, new Q2WeaponState(selected));
     }
     if (old.movement.animateQ2) game.show(entity);

@@ -40,6 +40,7 @@ interface BulletServices {
   readonly random: Pick<GameRandom, "random" | "crandom">;
   trace(start: Vec3, end: Vec3, pass: ActorId | null): ActorTraceResult;
   target(actor: ActorId): Q3BulletTarget | null;
+  impact?(point: Vec3): void;
   emit(event: { readonly point: Vec3; readonly normal: Vec3; readonly target: ActorId | null; readonly flesh: boolean }): void;
   damage(target: ActorId, direction: Q3BulletAttack["forward"], point: Vec3, amount: number): void;
   creditAccuracyHit(): void;
@@ -56,6 +57,7 @@ export function q3BulletFire(host: Q3BulletHost, shooter: ActorId, attack: Q3Bul
   for (let count = 0; count < 10; count++) {
     const trace = host.trace(attack.muzzle, end, pass);
     if (trace.surfaceFlags & 0x10) return;
+    if (trace.hit.kind !== "none") host.impact?.(trace.end);
     const actor = trace.hit.kind === "actor" ? trace.hit.actor : null;
     const target = actor === null ? null : host.target(actor), point = snapVectorTowards(trace.end, attack.muzzle);
     const flesh = target?.damageable === true && target.player;
@@ -86,6 +88,7 @@ export type Q3ContactEvent =
 interface ContactServices {
   trace(start: Vec3, end: Vec3, pass: ActorId | null): ActorTraceResult;
   target(actor: ActorId): Q3BulletTarget | null;
+  impact?(point: Vec3): void;
   emit(event: Q3ContactEvent): void;
   damage(target: ActorId, direction: Q3BulletAttack["forward"], point: Vec3, amount: number): void;
   creditAccuracyHit(): void;
@@ -112,6 +115,7 @@ export function q3GauntletAttack(host: Q3ContactHost, shooter: ActorId, attack: 
   if (trace.surfaceFlags & 0x10 || trace.hit.kind !== "actor") return false;
   const target = host.target(trace.hit.actor);
   if (target?.damageable !== true) return false;
+  host.impact?.(trace.end);
   if (target.player) host.emit({ kind: "hit", point: trace.end, normal: traceNormal(trace), target: trace.hit.actor });
   if (quadActive) host.emit({ kind: "gauntlet-quad" });
   host.damage(trace.hit.actor, attack.forward, trace.end, scaledDamage(50, attack));
@@ -125,6 +129,7 @@ export function q3LightningFire(host: Q3ContactHost, shooter: ActorId, attack: Q
     if (host.product === "missionpack" && count !== 0) host.emit({ kind: "lightning-reflection", start: attack.muzzle,
       end: snapVector(trace.end) });
     if (trace.hit.kind === "none") return;
+    if (!(trace.surfaceFlags & 0x10)) host.impact?.(trace.end);
     const actor = trace.hit.kind === "actor" ? trace.hit.actor : null;
     const target = actor === null ? null : host.target(actor);
     if (actor !== null && target?.damageable === true) {
@@ -162,7 +167,9 @@ function shotgunPellet(host: Q3ShotgunHost, shooter: ActorId, attack: Q3BulletAt
   let pass: ActorId | null = shooter;
   for (let count = 0; count < 10; count++) {
     const trace = host.trace(start, end, pass);
-    if (trace.surfaceFlags & 0x10 || trace.hit.kind !== "actor") return false;
+    if (trace.surfaceFlags & 0x10) return false;
+    if (trace.hit.kind !== "none") host.impact?.(trace.end);
+    if (trace.hit.kind !== "actor") return false;
     const actor = trace.hit.actor, target = host.target(actor);
     if (target?.damageable !== true) return false;
     if (host.product === "missionpack" && target.player && target.invulnerable) {
@@ -214,6 +221,7 @@ export function q3RailFire(host: Q3RailHost, shooter: ActorId, attack: Q3BulletA
     do {
       if (!host.alive()) break;
       trace = host.trace(attack.muzzle, end, pass);
+      if (trace.hit.kind !== "none" && !(trace.surfaceFlags & 0x10)) host.impact?.(trace.end);
       if (trace.hit.kind !== "actor") break;
       const actor = trace.hit.actor, target = host.target(actor);
       if (target?.damageable === true) {

@@ -28,7 +28,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false) {
+function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false, mode: "singleplayer" | "deathmatch" = "singleplayer") {
   let now = 0;
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-weapons-${edition}-${name}`));
   const callbacks = new ActorCallbackTable(actors);
@@ -67,7 +67,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     keyConsumed: () => undefined, prepareLevelChange: () => undefined,
     emit: event => { presentation.push(event); return undefined; }, transition: () => undefined, diagnostic: message => { throw new Error(message); },
   };
-  const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: infiniteAmmo ? 8192 : 0, maxClients: 1,
+  const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode, deathmatchFlags: infiniteAmmo ? 8192 : 0, maxClients: 1,
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
   const self = game.attachPlayer(player);
   const weapons = new Q2Weapons({ emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
@@ -371,4 +371,69 @@ describe("Q2 base weapons on shared state", () => {
     expect(scene.outcomes.filter(outcome => outcome.kind === "committed")).toHaveLength(2);
     scene.actors.close();
   });
+});
+
+
+test("foreign Q2 noise owns silencer charges without a native weapon and restores by ActorId", () => {
+  const scene = fixture("classic"), noises: boolean[] = [];
+  const weapons = new Q2Weapons({ ...scene.weapons.hooks, noise: (_actor, _origin, secondary) => { noises.push(secondary); return undefined; } });
+  weapons.grantSilencer(scene.player.id, scene.game, 2);
+  expect(weapons.states.size).toBe(0);
+  weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "impact");
+  expect(weapons.silencerShots(scene.player.id)).toBe(2); expect(noises).toEqual([true]);
+  weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
+  expect(weapons.silencerShots(scene.player.id)).toBe(1); expect(noises).toEqual([true]);
+  const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(weapons.capture(scene.game)));
+  expect(saved.formatVersion).toBe(2); expect(saved.states).toEqual([]);
+  const restored = new Q2Weapons(weapons.hooks); restored.restore(scene.game, saved);
+  expect(restored.silencerShots(scene.player.id)).toBe(1); expect(restored.states.size).toBe(0);
+  restored.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
+  expect(restored.silencerShots(scene.player.id)).toBe(0); expect(noises).toEqual([true]);
+  restored.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon"); expect(noises).toEqual([true, false]);
+  restored.grantSilencer(scene.player.id, scene.game, 30); restored.resetSilencer(scene.player.id); expect(restored.silencerShots(scene.player.id)).toBe(0);
+  restored.grantSilencer(scene.player.id, scene.game, 30); scene.actors.release(scene.player);
+  expect(restored.silencerShots(scene.player.id)).toBe(0); expect(weapons.silencerShots(scene.player.id)).toBe(0);
+});
+
+test("native last silencer charge is captured before weapon noise debits it", () => {
+  const scene = fixture("classic");
+  scene.weapons.grantSilencer(scene.player.id, scene.game, 1);
+  scene.step(0); scene.step(0.1);
+  const flash = scene.events.find(event => event.kind === "muzzleflash");
+  expect(flash?.kind === "muzzleflash" && flash.silenced).toBe(true);
+  expect(scene.weapons.silencerShots(scene.player.id)).toBe(0);
+  const saved = decodeQ2WeaponsCheckpoint(encodeQ2WeaponsCheckpoint(scene.weapons.capture(scene.game)));
+  expect(saved.states[0]?.state).not.toHaveProperty("silencerShots");
+});
+
+
+test("silencer debit precedes deathmatch and notarget noise suppression", () => {
+  for (const mode of ["singleplayer", "deathmatch"] satisfies readonly ("singleplayer" | "deathmatch")[]) {
+    const scene = fixture("classic", "blaster", 0.1, false, mode), noises: boolean[] = [];
+    const weapons = new Q2Weapons({ ...scene.weapons.hooks, noise: (_actor, _origin, secondary) => { noises.push(secondary); return undefined; } });
+    weapons.grantSilencer(scene.player.id, scene.game, 2);
+    weapons.inputs.set(scene.player.id, { ...input, notarget: true });
+    weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
+    expect(weapons.silencerShots(scene.player.id)).toBe(1); expect(noises).toEqual([]);
+    weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "self");
+    expect(weapons.silencerShots(scene.player.id)).toBe(1); expect(noises).toEqual([]);
+    weapons.bind(scene.self, scene.game);
+    expect(weapons.silencerShots(scene.player.id)).toBe(0);
+  }
+});
+
+test("foreign weapon noise observes live Q2 notarget without native weapon input", () => {
+  const scene = fixture("classic"), noises: boolean[] = [];
+  const weapons = new Q2Weapons({ ...scene.weapons.hooks, noise: (_actor, _origin, secondary) => { noises.push(secondary); return undefined; } });
+  scene.self.flags |= 32;
+  weapons.grantSilencer(scene.player.id, scene.game, 1);
+  weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
+  expect(weapons.silencerShots(scene.player.id)).toBe(0);
+  for (const kind of ["self", "weapon", "impact"] satisfies readonly ("self" | "weapon" | "impact")[]) weapons.playerNoiseForActor(scene.player.id, scene.game, zero, kind);
+  expect(weapons.inputs.size).toBe(0); expect(weapons.states.size).toBe(0); expect(noises).toEqual([]);
+  scene.self.flags &= ~32;
+  weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "weapon");
+  weapons.playerNoiseForActor(scene.player.id, scene.game, zero, "impact");
+  expect(noises).toEqual([false, true]);
+  scene.actors.close();
 });

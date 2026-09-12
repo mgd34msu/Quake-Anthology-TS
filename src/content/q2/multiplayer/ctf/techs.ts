@@ -97,7 +97,7 @@ export class Q2CtfTechs {
     return undefined;
   }
   private sound(entity: Q2Entity, game: Q2GameServices, name: string): undefined {
-    const volume = (this.context.hooks.weapons.states.get(entity.actor.id)?.silencerShots ?? 0) > 0 ? 0.2 : 1;
+    const volume = this.context.hooks.weapons.silencerShots(entity.actor.id) > 0 ? 0.2 : 1;
     return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: `ctf/${name}.wav`, channel: 2, volume, attenuation: 1, reliable: false, loop: "once" });
   }
   strength(actor: ActorId | null, game: Q2GameServices, damage: number): number { return damage !== 0 && this.has(actor, game, 2) ? damage * 2 : damage; }

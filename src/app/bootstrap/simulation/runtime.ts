@@ -331,6 +331,8 @@ export class SharedSimulation implements Simulation {
       const ballistics = new Q3SharedBallistics({ actors: this.actors, bodies: this.bodies, scene: this.scene, combat: this.combat,
         weaponProvider: this.weaponProvider.provider, numeric: providerTiming(this.recipe, this.weaponProvider.provider).numeric, random: this.selectedRandom,
         time: () => this.selectedMilliseconds,
+        weaponVolume: actor => this.source.kind === "q2" && this.source.weapons.silencerShots(actor) > 0 ? 0.2 : 1,
+        weaponImpact: (actor, origin) => { if (this.source.kind === "q2") this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, "impact"); },
         projectile: (actor, owner, step) => { this.registerActorExecution({ kind: "q3", actor, owner, step, provider: this.weaponProvider.provider, content: this.weaponProvider.content }); },
         // Current foreign match selections do not expose Q3 GT_TEAM; CTF is a distinct mode.
         teamDeathmatch: () => false, isPlayer: actor => this.player(actor) !== null,
@@ -367,6 +369,11 @@ export class SharedSimulation implements Simulation {
       const selectedArsenal = new Q3SelectedArsenal({ ...(supply === undefined ? {} : { supply }), provider: this.weaponProvider.provider, product: "baseq3", inventory: this.inventory,
         fire: (actor, weapon, input) => {
           ballistics.fire(actor, weapon, input);
+          if (this.actors.isLive(actor.id)) {
+            if (this.requirePlayer(actor.id).character === "q2") this.weaponCharacterAnimation(actor.id, "attack", weapon === 1, this.weaponProvider.content, false);
+            const body = this.bodies.read(actor.id);
+            if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor.id, this.source.game, body.origin, "weapon");
+          }
           if (this.source.kind === "q1") this.source.composition.fired(actor.id, q3WeaponItem(weapon)?.item ?? null);
           return undefined;
         },
@@ -649,6 +656,8 @@ export class SharedSimulation implements Simulation {
       return 0;
     };
     const game = new Q1EntityServices({ ...host, powerupExpires,
+      weaponVolume: actor => this.source.kind === "q2" && this.source.weapons.silencerShots(actor) > 0 ? 0.2 : 1,
+      weaponImpact: (actor, origin) => this.source.kind === "q2" ? this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, "impact") : undefined,
       sourceDamageMultiplier: attacker => providerFamily(this.recipe.combat.provider) === "q1" || powerupExpires(attacker, "quad") <= seconds(this.selectedQ1Frame().time) ? 1
         : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4 }, {
       provider: this.weaponProvider.provider, edition: this.weaponProvider.content.includes(":rerelease:") ? "rerelease" : "classic",
@@ -656,6 +665,12 @@ export class SharedSimulation implements Simulation {
       combatProvider: this.recipe.combat.provider, movementProvider: this.recipe.movement.provider, inventoryProvider: this.recipe.inventory.provider, gravity: this.physics.gravity });
     const profile = this.source.kind === "q2" ? Q2_Q1_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE;
     const selected = new Q1SelectedArsenal({ game,
+      fired: (actor, weapon) => {
+        this.weaponCharacterAnimation(actor, "attack", weapon === "axe", this.weaponProvider.content, false);
+        const player = this.requirePlayer(actor), body = this.bodies.read(actor);
+        if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor, this.source.game, body.origin, "weapon");
+        return player.animation;
+      },
       replacedItems: [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
       observe: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, waterLevel: player.waterLevel }; } });
     this.selectedQ1Supply = new SharedPickupAdmission({ inventory: this.inventory, profile,
@@ -822,6 +837,12 @@ export class SharedSimulation implements Simulation {
       haste: input.haste || (q3?.powerups.get(Powerup.PW_HASTE) ?? 0) > this.timeSeconds * 1000 };
   }
   private grappleCharacterAnimation(actor: ActorId, priority: "attack" | "reverse", melee = false): undefined {
+    const equipment = this.recipe.equipment.grapple;
+    if (equipment.kind !== "enabled") throw new Error("Grapple animation has no selected source");
+    return this.weaponCharacterAnimation(actor, priority, melee, equipment.source.content, equipment.edition === "rerelease");
+  }
+
+  private weaponCharacterAnimation(actor: ActorId, priority: "attack" | "reverse", melee: boolean, content: ContentId, resetTime: boolean): undefined {
     const player = this.requirePlayer(actor);
     if (player.animation.state.kind === "q3") {
       const result = runQ3TorsoOperation(priority === "reverse" ? PlayerAnimation.TORSO_DROP : melee ? PlayerAnimation.TORSO_ATTACK2 : PlayerAnimation.TORSO_ATTACK, { animation: player.animation, dead: (this.combat.read(actor)?.health ?? 0) <= 0,
@@ -833,9 +854,7 @@ export class SharedSimulation implements Simulation {
     if (player.character !== "q2") return undefined;
     const ducked = player.bounds.max.z < player.standingBounds.max.z, frames = priority === "attack" ? q2AttackFrames(ducked) : q2ReverseFrames(ducked);
     this.q2Characters.get(player.actor)?.setAnimation(priority, frames.first, frames.last);
-    const equipment = this.recipe.equipment.grapple;
-    if (equipment.kind !== "enabled") throw new Error("Grapple animation has no selected source");
-    return this.weaponEvent(equipment.source.content, { kind: "player-animation", actor, priority, ...frames, resetTime: equipment.edition === "rerelease" });
+    return this.weaponEvent(content, { kind: "player-animation", actor, priority, ...frames, resetTime });
   }
 
   private grappleSlotHost(): GrappleSlotHost {
@@ -884,7 +903,7 @@ export class SharedSimulation implements Simulation {
       previousVelocity: actor => this.grapple?.previousVelocity(actor) ?? zero,
       setPreviousVelocity: (actor, velocity) => { const native = this.source.kind === "q2" ? this.source.players.states.get(actor) : undefined;
         if (native !== undefined) native.oldVelocity = velocity; return this.grapple?.setPreviousVelocity(actor, velocity); },
-      volume: actor => this.source.kind === "q2" && (this.source.weapons.states.get(actor)?.silencerShots ?? 0) > 0 ? 0.2 : 1,
+      volume: actor => this.source.kind === "q2" && this.source.weapons.silencerShots(actor) > 0 ? 0.2 : 1,
       noise: (actor, services, origin, kind) => this.source.kind === "q2" ? this.source.weapons.playerNoiseForActor(actor, services, origin, kind) : undefined,
       setGrapplePrediction: (actor, suppressed) => { this.grapple?.setPrediction(actor, suppressed); const player = this.player(actor);
         if (player !== null && (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease")) player.state = { ...player.state, flags: suppressed ? player.state.flags | 64 : player.state.flags & ~64 }; return undefined; },
@@ -1045,7 +1064,7 @@ export class SharedSimulation implements Simulation {
       const state = weapons.states.get(actor), definition = weapons.registeredDefinitions().find(value => value.item === item);
       if (state !== undefined && definition !== undefined && first) state.pending = definition.name;
       return undefined;
-    }, silencer: (actor, charges) => { const state = weapons.states.get(actor); if (state === undefined) throw new Error("Silencer owner has no weapon state"); state.silencerShots += charges; return undefined; },
+    }, silencer: (actor, charges) => { if (this.source.kind !== "q2") throw new Error("Q2 silencer before source admission"); return weapons.grantSilencer(actor, this.source.game, charges); },
     powerArmor: (actor, kind) => this.events.message({ kind: "print", level: 2, text: `Power armor ${kind}\n` }, actor) };
     const playerHooks: Q2PlayerHooks = {
       movement: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, commandAngles: player.commandAngles,
@@ -1054,6 +1073,7 @@ export class SharedSimulation implements Simulation {
         standingBounds: player.standingBounds, animateQ2: player.character === "q2" }; },
       setMovement: (actor, change) => this.setPlayerMovement(actor, change),
       playerSpawned: entity => {
+        if (this.selectedArsenal !== null) weapons.resetSilencer(entity.actor.id);
         const player = this.requirePlayer(entity.actor.id);
         if (this.selectedArsenal?.has(entity.actor.id)) {
           this.selectedArsenal.remove(entity.actor.id); player.arsenal = this.selectedArsenal.admit(entity.actor, 100, false);

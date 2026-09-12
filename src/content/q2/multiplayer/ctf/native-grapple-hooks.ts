@@ -27,7 +27,7 @@ export function nativeGrappleHooks(hooks: NativeHooks, weaponAim = true): Grappl
     },
     previousVelocity: actor => hooks.player(actor)?.oldVelocity ?? zero,
     setPreviousVelocity: (actor, velocity) => { const player = hooks.player(actor); if (player !== null) player.oldVelocity = velocity; return undefined; },
-    volume: actor => (hooks.weapons.states.get(actor)?.silencerShots ?? 0) > 0 ? 0.2 : 1,
+    volume: actor => hooks.weapons.silencerShots(actor) > 0 ? 0.2 : 1,
     noise: (actor, game, origin, kind) => hooks.weapons.playerNoiseForActor(actor, game, origin, kind),
     setGrapplePrediction: (actor, suppressed) => hooks.setGrapplePrediction(actor, suppressed),
     gravity: () => hooks.gravity(), emit: event => hooks.emit(event),

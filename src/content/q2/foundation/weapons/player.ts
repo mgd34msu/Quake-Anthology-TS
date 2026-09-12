@@ -67,7 +67,7 @@ export class Q2Weapons extends Q2Ballistics {
   capture(game: Q2GameServices): Q2WeaponsCheckpoint {
     const saveNoise = (noise: Q2NoiseRecord | null): Q2NoiseCheckpoint | null => noise === null ? null : {
       actor: { slot: noise.actor.slot, generation: noise.actor.generation }, origin: { ...noise.origin }, time: noise.time, secondary: noise.secondary };
-    return { sourceRules: this.sourceRules?.kind ?? "base", registered: [...this.definitions.keys()], fallbackOrder: this.fallbackOrder === null ? null : [...this.fallbackOrder],
+    return { formatVersion: 2, silencerCharges: [...this.silencerCharges].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, charges]) => ({ actor: { slot: actor.slot, generation: actor.generation }, charges })), sourceRules: this.sourceRules?.kind ?? "base", registered: [...this.definitions.keys()], fallbackOrder: this.fallbackOrder === null ? null : [...this.fallbackOrder],
       states: [...this.states].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, state]) => ({
         actor: { slot: actor.slot, generation: actor.generation }, state: { ...state, kickAngles: { ...state.kickAngles }, kickOrigin: { ...state.kickOrigin } } })),
       inputs: [...this.inputs].filter(([actor]) => game.host.actors.isLive(actor)).map(([actor, input]) => ({
@@ -82,7 +82,8 @@ export class Q2Weapons extends Q2Ballistics {
   restore(game: Q2GameServices, checkpoint: Q2WeaponsCheckpoint): undefined {
     if (checkpoint.sourceRules !== (this.sourceRules?.kind ?? "base")) throw new Error("Q2 weapon checkpoint source rules differ from the selected game module");
     if (checkpoint.registered.length !== this.definitions.size || checkpoint.registered.some(name => !this.definitions.has(name))) throw new Error("Q2 weapon checkpoint arsenal differs from the selected source modules");
-    this.states.clear(); this.inputs.clear(); this.noises.clear(); this.blasterCauses.clear();
+    this.states.clear(); this.inputs.clear(); this.noises.clear(); this.blasterCauses.clear(); this.silencerCharges.clear();
+    this.trackActors(game);
     this.fallbackOrder = checkpoint.fallbackOrder === null ? null : [...checkpoint.fallbackOrder];
     if (this.fallbackOrder !== null) for (const name of this.fallbackOrder) this.definition(name);
     const restoreNoise = (noise: Q2NoiseCheckpoint | null): Q2NoiseRecord | null => noise === null ? null : {
@@ -94,6 +95,7 @@ export class Q2Weapons extends Q2Ballistics {
       const state = Object.assign(new Q2WeaponState(saved.state.weapon), saved.state, { kickAngles: { ...saved.state.kickAngles }, kickOrigin: { ...saved.state.kickOrigin } });
       this.bind(entity, game, state);
     }
+    for (const saved of checkpoint.silencerCharges) this.grantSilencer(restoreQ2Actor(game, saved.actor).id, game, saved.charges);
     for (const saved of checkpoint.inputs) this.inputs.set(restoreQ2Actor(game, saved.actor).id, { ...saved.input, angles: { ...saved.input.angles } });
     for (const saved of checkpoint.noises) this.noises.set(restoreQ2Actor(game, saved.actor).id, { primary: restoreNoise(saved.primary), secondary: restoreNoise(saved.secondary) });
     this.soundEntity = restoreNoise(checkpoint.soundEntity); this.sound2Entity = restoreNoise(checkpoint.sound2Entity);
@@ -127,6 +129,7 @@ export class Q2Weapons extends Q2Ballistics {
   bind(self: Q2Entity, game: Q2GameServices, state = new Q2WeaponState()): Q2WeaponState {
     game.host.actors.assertOwned(self.actor);
     if (this.states.has(self.actor.id)) throw new Error("Q2 weapon state already bound to actor");
+    this.resetSilencer(self.actor.id); this.trackActors(game);
     this.states.set(self.actor.id, state);
     const removeListener = game.host.actors.onRelease(actor => {
       if (actor.id === self.actor.id) { this.states.delete(actor.id); this.inputs.delete(actor.id); this.noises.delete(actor.id); removeListener(); }
@@ -212,9 +215,9 @@ export class Q2Weapons extends Q2Ballistics {
       this.present(self, game, state);
       return undefined;
     }
-    const classicSilenced = state.silencerShots > 0;
+    const classicSilenced = this.silencerShots(self.actor.id) > 0;
     const run = (): undefined => {
-      const context = this.context(self, game, state, input, game.options.edition === "classic" ? classicSilenced : state.silencerShots > 0);
+      const context = this.context(self, game, state, input, game.options.edition === "classic" ? classicSilenced : this.silencerShots(self.actor.id) > 0);
       if (context === null || state.primaryHandoff === "holstered") return undefined;
       const extension = this.extensions.get(context.definition.name);
       if (extension?.think !== undefined) return extension.think(context, this);
@@ -246,7 +249,7 @@ export class Q2Weapons extends Q2Ballistics {
     return state;
   }
 
-  private context(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput, silenced = state.silencerShots > 0): Q2WeaponContext | null {
+  private context(self: Q2Entity, game: Q2GameServices, state: Q2WeaponState, input: Q2WeaponInput, silenced = this.silencerShots(self.actor.id) > 0): Q2WeaponContext | null {
     return state.weapon === null ? null : { self, game, state, input, definition: this.definition(state.weapon), now: game.host.now(), rerelease: game.options.edition === "rerelease", silenced };
   }
 

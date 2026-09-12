@@ -78,6 +78,8 @@ export interface Q1PrecacheTables {
 
 /** Engine builtins operate on the same actor/body/combat tables used by every game. */
 export interface Q1FoundationHost {
+  weaponImpact?(owner: ActorId, origin: Vec3): undefined;
+  weaponVolume?(actor: ActorId): number;
   monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;
   registerEntity?(entity: Q1Actor, services: Q1EntityServices): undefined;
   readonly actors: SessionActorRegistry;

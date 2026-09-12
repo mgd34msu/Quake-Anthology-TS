@@ -55,6 +55,7 @@ export class Q2Ballistics {
   readonly blasterCauses = new Map<ActorId, number>();
   private readonly releaseRegistries = new WeakSet<Q2GameServices["host"]["actors"]>();
   get callbacks(): Q2CallbackDefinitions { return { think: { G_FreeEdict: free, Grenade_Explode: this.grenadeExplode, grenade_think: this.grenadeUpdate, bfg_think: this.bfgThink, bfg_explode: this.bfgExplode }, touch: { blaster_touch: this.blasterTouch, Grenade_Touch: this.grenadeTouch, rocket_touch: this.rocketTouch, bfg_touch: this.bfgTouch }, die: { q2_weapon_debris_die: free } }; }
+  protected readonly silencerCharges = new Map<ActorId, number>();
   readonly states = new Map<ActorId, Q2WeaponState>();
   readonly inputs = new Map<ActorId, Q2WeaponInput>();
   readonly noises = new Map<ActorId, { primary: Q2NoiseRecord | null; secondary: Q2NoiseRecord | null }>();
@@ -62,6 +63,29 @@ export class Q2Ballistics {
   sound2Entity: Q2NoiseRecord | null = null;
 
   constructor(readonly hooks: Q2WeaponHooks) {}
+
+  silencerShots(actor: ActorId): number { return this.silencerCharges.get(actor) ?? 0; }
+
+  grantSilencer(actor: ActorId, game: Q2GameServices, charges: number): undefined {
+    if (!game.host.actors.isLive(actor)) throw new Error("Silencer owner is not live");
+    if (!Number.isSafeInteger(charges) || charges < 0) throw new RangeError("Silencer charges must be a nonnegative integer");
+    this.trackActors(game);
+    this.silencerCharges.set(actor, this.silencerShots(actor) + charges);
+    return undefined;
+  }
+
+  resetSilencer(actor: ActorId): undefined { this.silencerCharges.delete(actor); return undefined; }
+
+  protected trackActors(game: Q2GameServices): void {
+    if (this.releaseRegistries.has(game.host.actors)) return;
+    this.releaseRegistries.add(game.host.actors);
+    game.host.actors.onRelease(actor => {
+      this.blasterCauses.delete(actor.id); this.silencerCharges.delete(actor.id); this.noises.delete(actor.id);
+      if (this.soundEntity?.actor.equals(actor.id)) this.soundEntity = null;
+      if (this.sound2Entity?.actor.equals(actor.id)) this.sound2Entity = null;
+      return undefined;
+    });
+  }
 
   protected shotMask(self: Q2Entity, game: Q2GameServices): number {
     return this.actorShotMask(game, this.inputs.get(self.actor.id)?.playersCollide !== false);
@@ -77,12 +101,13 @@ export class Q2Ballistics {
 
   playerNoiseForActor(owner: ActorId, game: Q2GameServices, origin: Vec3, kind: "self" | "weapon" | "impact"): undefined {
     if (!game.host.isPlayer(owner)) return undefined;
-    const state = this.states.get(owner);
+    this.trackActors(game);
+    const charges = this.silencerShots(owner);
     if (kind === "weapon") {
-      if (game.options.edition === "rerelease") this.hooks.emit({ kind: "invisibility-reveal", actor: owner, until: game.host.now() + (state !== undefined && state.silencerShots > 0 ? 0.4 : 2) });
-      if (state !== undefined && state.silencerShots > 0) { state.silencerShots--; return undefined; }
+      if (game.options.edition === "rerelease") this.hooks.emit({ kind: "invisibility-reveal", actor: owner, until: game.host.now() + (charges > 0 ? 0.4 : 2) });
+      if (charges > 0) { this.silencerCharges.set(owner, charges - 1); return undefined; }
     }
-    if (game.options.mode === "deathmatch" || this.inputs.get(owner)?.notarget === true) return undefined;
+    if (game.options.mode === "deathmatch" || this.inputs.get(owner)?.notarget === true || game.monsterTarget(owner)?.notarget === true) return undefined;
     const record: Q2NoiseRecord = { actor: owner, origin, time: game.host.now(), secondary: kind === "impact" };
     const records = this.noises.get(owner) ?? { primary: null, secondary: null };
     if (kind === "impact") { records.secondary = record; this.sound2Entity = record; }
@@ -241,10 +266,7 @@ export class Q2Ballistics {
 
   private projectileForActor(owner: ActorId, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number, clipMask: number): Q2Entity {
     game.sourceCallbacks.register(this.callbacks);
-    if (!this.releaseRegistries.has(game.host.actors)) {
-      this.releaseRegistries.add(game.host.actors);
-      game.host.actors.onRelease(actor => { this.blasterCauses.delete(actor.id); return undefined; });
-    }
+    this.trackActors(game);
     const projectile = game.create(classname);
     projectile.owner = owner; projectile.model = model; projectile.effects = effects;
     projectile.clipMask = clipMask; projectile.projectile = true;

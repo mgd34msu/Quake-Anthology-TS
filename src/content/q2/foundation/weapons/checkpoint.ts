@@ -4,6 +4,8 @@ import type { Q2WeaponInput, Q2WeaponState } from "./types.ts";
 
 export interface Q2NoiseCheckpoint { readonly actor: SavedActorId; readonly origin: Vec3; readonly time: number; readonly secondary: boolean; }
 export interface Q2WeaponsCheckpoint {
+  readonly formatVersion: 2;
+  readonly silencerCharges: readonly { readonly actor: SavedActorId; readonly charges: number }[];
   readonly sourceRules: "base" | "ctf" | "lmctf";
   readonly registered: readonly string[];
   readonly fallbackOrder: readonly string[] | null;

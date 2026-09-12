@@ -28,7 +28,8 @@ import type { GameRandom } from "../../../content/q3/base/game/numeric.ts";
 export interface Q3BallisticPose { readonly origin: Vec3; readonly angles: Vec3; readonly viewheight: number; readonly quad: number; readonly quadActive: boolean; }
 interface Q3BallisticEventFields { readonly actor: ActorId; readonly weapon: number; readonly origin: Vec3; readonly end: Vec3; readonly normal: Vec3; readonly target: ActorId | null; readonly surfaceFlags: number; }
 type Q3BallisticEventPayload = Q3BallisticEventFields & (
-  | { readonly kind: "fire" | "remove" | "bounce" | "trail" }
+  | { readonly kind: "remove" | "bounce" | "trail" }
+  | { readonly kind: "fire"; readonly volume: number }
   | { readonly kind: "projectile"; readonly trajectory: Trajectory }
   | { readonly kind: "impact"; readonly hitKind: "wall" | "flesh" }
   | { readonly kind: "contact"; readonly contact: Q3ContactEvent }
@@ -48,6 +49,8 @@ export interface Q3SharedBallisticsHost {
   teamGame(): boolean;
   isPlayer(actor: ActorId): boolean;
   worldActor(): ActorId;
+  weaponVolume?(actor: ActorId): number;
+  weaponImpact?(owner: ActorId, origin: Vec3): void;
   attack(actor: ActorId, inflictor: ActorId, weapon: number, method: number, flags: number, originatingProjectile?: ActorId): AttackProvenance;
   event(event: Q3SharedBallisticEvent): undefined;
   projectile(actor: OwnedActor, owner: ActorId, step: (previousTime: number, time: number) => void): void;
@@ -93,7 +96,7 @@ export class Q3SharedBallistics {
   private bullet(actor: OwnedActor, weapon: number, attack: Q3BulletAttack, spread: number, amount: number): void {
     const state = this.host.combat.read(actor.id), attacker = { actor: actor.id, damageable: state?.canTakeDamage ?? false,
       player: this.host.isPlayer(actor.id), health: state?.health ?? 0, team: state?.team ?? null };
-    q3BulletFire({ product: "baseq3", random: this.host.random,
+    q3BulletFire({ product: "baseq3", random: this.host.random, impact: point => this.host.weaponImpact?.(actor.id, point),
       trace: (start, end, pass) => {
         const trace = this.trace(start, end, pass);
         if (trace.kind !== "q3") throw new Error("Q3 bullet trace requires its source collision policy");
@@ -127,6 +130,7 @@ export class Q3SharedBallistics {
   }
   private contactHost(actor: OwnedActor, weapon: number, attack: Q3BulletAttack, method: number): Q3ContactHost {
     return { product: "baseq3",
+      impact: point => this.host.weaponImpact?.(actor.id, point),
       trace: (start, end, pass) => {
         const trace = this.trace(start, end, pass);
         if (trace.kind !== "q3") throw new Error("Q3 contact trace requires its source collision policy");
@@ -159,7 +163,7 @@ export class Q3SharedBallistics {
       this.weaponCounters.set(actor, { ...previous, shots: (previous.shots + (weapon === 11 ? 15 : 1)) | 0 });
     }
     const attack = this.attack(actor);
-    this.event({ kind: "fire", actor: actor.id, weapon, origin: attack.muzzle, end: add3(attack.muzzle, attack.forward), normal: zero, target: null, surfaceFlags: 0 });
+    this.event({ kind: "fire", volume: this.host.weaponVolume?.(actor.id) ?? 1, actor: actor.id, weapon, origin: attack.muzzle, end: add3(attack.muzzle, attack.forward), normal: zero, target: null, surfaceFlags: 0 });
     switch (weapon) {
       case 0: case 1: return undefined;
       case 2: this.bullet(actor, weapon, attack, 200, this.host.teamDeathmatch() ? 5 : 7); return undefined;
@@ -230,7 +234,7 @@ export class Q3SharedBallistics {
       },
       link: () => {
         this.host.bodies.link(projectile.actor);
-        if (pending !== null) { this.impactEvent(projectile, pending, time); pending = null; }
+        if (pending !== null) { this.impactEvent(projectile, pending, time); pending = null; this.host.weaponImpact?.(projectile.owner, body().origin); }
       },
       release: () => { this.host.actors.release(projectile.actor); },
       trace: (start, end, passActor) => {

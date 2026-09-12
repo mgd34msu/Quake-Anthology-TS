@@ -19,6 +19,7 @@ export interface Q1SelectedArsenalTravel {
 export interface Q1SelectedArsenalOptions {
   readonly game: Q1EntityServices;
   readonly replacedItems?: readonly ItemId[];
+  fired?(actor: ActorId, weapon: Q1BaseWeapon, animation: WeaponStepInput["animation"]): WeaponStepResult["animation"];
   observe(actor: ActorId): { readonly viewAngles: Vec3; readonly waterLevel: number };
 }
 
@@ -103,8 +104,12 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     const before = this.read(input.actor.id), observation = this.options.observe(input.actor.id);
     const seconds = input.frame.time.kind === "seconds" ? input.frame.time.value : input.frame.time.value / 1000;
     const pressed = (input.command.buttons & 1) !== 0 && (input.command.kind !== "q3" || (input.command.buttons & CommandButtons.TALK) === 0);
-    this.options.game.weaponInput(input.actor, pressed, observation.viewAngles, seconds, observation.waterLevel);
-    return { arsenal: this.options.game.host.actors.isLive(input.actor.id) ? this.read(input.actor.id) : before, animation: input.animation, effects: [] };
+    const weapon = this.require(input.actor.id).weapon;
+    if (!isQ1BaseWeapon(weapon)) throw new Error("Selected Q1 attack has an expansion weapon");
+    const fired = this.options.game.weaponInput(input.actor, pressed, observation.viewAngles, seconds, observation.waterLevel);
+    const live = this.options.game.host.actors.isLive(input.actor.id);
+    const animation = fired && live ? this.options.fired?.(input.actor.id, weapon, input.animation) ?? input.animation : input.animation;
+    return { arsenal: live ? this.read(input.actor.id) : before, animation, effects: [] };
   }
 
   frame(seconds: number): undefined {

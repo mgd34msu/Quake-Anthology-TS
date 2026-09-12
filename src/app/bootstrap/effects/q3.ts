@@ -203,7 +203,7 @@ export class Q3ApplicationEffects {
         this.flashes.set(event.actor, { event, time });
         if (event.weapon === Weapon.WP_LIGHTNING && previous?.weapon === event.weapon && time - previous.time <= 50) return;
         const available = weapon.flashSounds.filter(pcm => pcm !== null);
-        if (available.length > 0) media.sound(available[media.host.random.rand() % available.length] ?? null, event.origin, 2, 1);
+        if (available.length > 0) media.sound(available[media.host.random.rand() % available.length] ?? null, event.origin, 2, event.volume);
         return;
       }
       case "projectile": {

@@ -88,7 +88,6 @@ export class Q2WeaponState {
   fireBuffered = false;
   latchedAttack = false;
   machinegunShots = 0;
-  silencerShots = 0;
   emptySoundTime = 0;
   handReservation: Q2HandReservation = { kind: "none" };
   grenadeTime = 0;
