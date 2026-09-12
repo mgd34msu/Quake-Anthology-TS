@@ -1,3 +1,4 @@
+import type { VictimArmorContext } from "../../../../world/gameplay/armor.ts";
 import type { MoverActorAccess } from "../../../../content/q3/base/game/mover.ts";
 import type { ExecutableRecipe, ProviderReference } from "../../../../contracts/content.ts";
 import type { DamageRequest } from "../../../../contracts/gameplay.ts";
@@ -65,7 +66,7 @@ export interface Q3SourceHost extends ClientMovementHost {
   schedule(actor: OwnedActor, dueMilliseconds: number | null): undefined;
   runThink(actor: OwnedActor, timeMilliseconds: number): undefined;
   collision(actor: OwnedActor, collision: ActorCollision): undefined;
-  armorContext(request: DamageRequest): { readonly screenFacingDot: number; readonly arithmetic: "binary32" | "binary64" };
+  armorContext(request: DamageRequest): VictimArmorContext;
   foreign(actor: ActorId): GameEntity | null;
   isPlayer(actor: ActorId): boolean;
   /** Convert command units for source policy; moveClient still runs the selected provider. */

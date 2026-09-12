@@ -1,3 +1,4 @@
+import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import { Q2MissionPackProjectiles } from "../../../content/q2/missionpacks/projectiles/index.ts";
 import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
 import { registerQ2RereleaseOrdinaryMonsters } from "../../../content/q2/rerelease/monsters/index.ts";
@@ -68,7 +69,7 @@ import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ContentId, ExecutableRecipe, MonsterDefinitionReference, ProviderReference, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { PickupSupplyProfile, PickupSupplyOffer } from "../../../contracts/pickups.ts";
-import type { AttackProvenance, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
+import type { AttackProvenance, DamageRequest, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { ActorId, ClientId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -1127,7 +1128,7 @@ export class SharedSimulation implements Simulation {
         scene: this.scene, deathAnimations: this.deathAnimations, bots: this.botServices.source,
         now: () => Math.trunc(this.timeSeconds * 1000), schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due / 1000),
         runThink: actor => { this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics"); return undefined; },
-        collision: (actor, collision) => this.physics.setCollision(actor, collision), armorContext: () => ({ screenFacingDot: 0, arithmetic: "binary32" }),
+        collision: (actor, collision) => this.physics.setCollision(actor, collision), armorContext: request => this.victimArmorContext(request),
         primaryAttackAllowed: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
         admitPickup: item => this.admitSelectedQ3Pickup(item),
         previewPickup: item => this.previewSelectedQ3Pickup(item),
@@ -1301,18 +1302,20 @@ export class SharedSimulation implements Simulation {
     return { kind: "q2", product, game: product.game, weapons, monsters: product.monsters, movers: product.movers, items: product.items, players: product.players, baseEntities: product.baseEntities };
   }
 
+  private victimArmorContext(request: DamageRequest): VictimArmorContext {
+    const target = this.actorExecutions.get(request.target);
+    const product = target?.kind === "q2" ? target.services.options.edition : this.recipe.inventory.content.includes(":rerelease:") ? "rerelease" : "classic";
+    const body = this.bodies.read(request.target), contact = body === null ? zero : subtract(request.point, body.origin);
+    const direction = request.attack.cause.kind === "q1" && body !== null && contact.x === 0 && contact.y === 0 && contact.z === 0
+      && request.attack.inflictor !== null && this.worldActor()?.equals(request.attack.inflictor) !== true
+      ? { x: -request.direction.x, y: -request.direction.y, z: -request.direction.z } : contact;
+    const length = Math.hypot(direction.x, direction.y, direction.z), yaw = (body?.angles.y ?? 0) * Math.PI / 180;
+    return { arithmetic: "binary32", q2: { product, ctf: this.recipe.match.provider === "q2:ctf", alive: (this.combat.read(request.target)?.health ?? 0) > 0 }, screenFacingDot: length === 0 ? 0 : (direction.x * Math.cos(yaw) + direction.y * Math.sin(yaw)) / length };
+  }
+
   private registerCombat(): undefined {
     const id = this.recipe.combat.provider;
-    const armor = nativeVictimArmor(request => {
-      const target = this.actorExecutions.get(request.target);
-      const product = target?.kind === "q2" ? target.services.options.edition : this.recipe.inventory.content.includes(":rerelease:") ? "rerelease" : "classic";
-      const body = this.bodies.read(request.target), contact = body === null ? zero : subtract(request.point, body.origin);
-      const direction = request.attack.cause.kind === "q1" && body !== null && contact.x === 0 && contact.y === 0 && contact.z === 0
-        && request.attack.inflictor !== null && this.worldActor()?.equals(request.attack.inflictor) !== true
-        ? { x: -request.direction.x, y: -request.direction.y, z: -request.direction.z } : contact;
-      const length = Math.hypot(direction.x, direction.y, direction.z), yaw = (body?.angles.y ?? 0) * Math.PI / 180;
-      return { arithmetic: "binary32", q2: { product, ctf: this.recipe.match.provider === "q2:ctf", alive: (this.combat.read(request.target)?.health ?? 0) > 0 }, screenFacingDot: length === 0 ? 0 : (direction.x * Math.cos(yaw) + direction.y * Math.sin(yaw)) / length };
-    });
+    const armor = nativeVictimArmor(request => this.victimArmorContext(request));
     if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();

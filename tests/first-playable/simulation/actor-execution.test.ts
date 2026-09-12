@@ -1,3 +1,4 @@
+import type { Q2Edition } from "../../../src/content/q2/foundation/host.ts";
 import { expect, test } from "bun:test";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -261,3 +262,35 @@ test("Q3 selected supply observations preview actual authored grants and source 
     expect(gun.r.contents).toBe(0);
   } finally { native.close(); await nativeContent.close(); }
 }, 60000);
+
+const armorEditions: readonly Q2Edition[] = ["classic", "rerelease"];
+for (const edition of armorEditions) test(`Q3 application bridge resolves ${edition} Q2 armor on an explicitly synthetic source actor`, async () => {
+  const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Expected Q3 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q2:official", content: catalog.require(`q2-${edition}-baseq2`).id },
+  ] } } });
+  const content = await loadApplicationContent(command.options, recipe), identity = createIdentityOwner(`q3-q2-armor-${edition}`);
+  const simulation = createSimulation({ identity, recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "deathmatch", seed: 17, maxClients: 1 });
+  try {
+    const player = simulation.admitPlayer(identity.client(0, 0)).actor, source = simulation.q2WeaponSource();
+    if (source === null) throw new Error("Missing selected Q2 source");
+    expect(source.game.options.edition).toBe(edition);
+    const victim = source.game.create("armor_probe");
+    simulation.combat.create(victim.actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+    for (const family of ["q1", "q3"]) for (const front of [true, false]) for (const amount of [1, 9]) {
+      simulation.combat.setHealth(victim.actor, 100);
+      simulation.combat.setArmor(victim.actor, { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0, powerArmor: { kind: "screen", cells: 100 } });
+      const outcome = simulation.combat.apply({ target: victim.actor.id, amount, knockback: 0, delivery: "direct",
+        direction: { x: front ? -1 : 1, y: 0, z: 0 }, point: { x: family === "q1" ? 0 : front ? 16 : -16, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 },
+        attack: { sequence: 1, time: { kind: "milliseconds", value: 0 }, attacker: player, inflictor: player, weapon: null,
+          weaponProvider: family === "q1" ? "q1:official" : "q3:official", combatProvider: recipe.combat.provider, inventoryProvider: recipe.inventory.provider,
+          movementProvider: recipe.movement.provider, cause: family === "q1" ? { kind: "q1", deathType: "" } : { kind: "q3", meansOfDeath: 1, damageFlags: 0 } } });
+      expect(outcome.kind).toBe("committed");
+      const saved = front ? edition === "rerelease" ? Math.max(1, Math.trunc(amount / 3)) : Math.trunc(amount / 3) : 0;
+      expect(simulation.combat.read(victim.actor.id)?.health).toBe(100 - amount + saved);
+      expect(simulation.combat.read(victim.actor.id)?.armor).toEqual({ kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0, powerArmor: { kind: "screen", cells: 100 - saved } });
+    }
+  } finally { simulation.close(); await content.close(); }
+}, 30000);

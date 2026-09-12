@@ -1,3 +1,4 @@
+import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import type { AttackProvenance, CombatPolicy, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -25,7 +26,7 @@ interface CombatBridgeServices {
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
   readonly movementProvider: ProviderId;
-  armorContext(request: DamageRequest): { readonly screenFacingDot: number; readonly arithmetic: "binary32" | "binary64" };
+  armorContext(request: DamageRequest): VictimArmorContext;
   time(): number;
   intermissionQueued(): number;
   gameType(): number;
