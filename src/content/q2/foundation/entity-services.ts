@@ -4,7 +4,7 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import { add, integerField, length, numberField, scale, subtract, vectorField, zero } from "./fields.ts";
 import { Q2Entity } from "./host.ts";
-import type { Q2FoundationHost, Q2GameOptions, Q2GameServices, Q2Motion, Q2SpawnFields, Q2SpawnModule, Q2Think } from "./host.ts";
+import type { Q2FoundationHost, Q2GameOptions, Q2GameServices, Q2Motion, Q2SpawnFields, Q2SpawnModule, Q2Think, Q2WeaponTarget } from "./host.ts";
 import { freeQ2Entity, Q2SourceCallbacks } from "./callbacks.ts";
 import { restoreQ2Actor, saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "./checkpoint.ts";
 import type { Q2EntityCheckpoint, Q2FoundationCheckpoint } from "./checkpoint.ts";
@@ -216,6 +216,14 @@ export class Q2EntityServices implements Q2GameServices {
     const owner = actor === null ? null : this.host.actors.resolveOwned(actor);
     return owner === null ? null : this.entities.get(owner.id) ?? null;
   }
+  weaponTarget(actor: ActorId): Q2WeaponTarget | null {
+    if (!this.host.actors.isLive(actor)) return null;
+    if (this.host.weaponTarget !== undefined) return this.host.weaponTarget(actor);
+    const entity = this.entity(actor);
+    return entity === null ? null : { solid: entity.solid, laserImmune: entity.laserImmune,
+      damageableTarget: entity.damageableTarget, bfgExplobox: entity.classname === "misc_explobox" };
+  }
+
   monsterTarget(actor: ActorId | null) {
     if (actor === null) return null;
     if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);

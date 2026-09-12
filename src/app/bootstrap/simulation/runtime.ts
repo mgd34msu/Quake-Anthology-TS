@@ -92,7 +92,7 @@ import type { Q2RereleaseHooks } from "../../../content/q2/rerelease/types.ts";
 import type { Q2CharacterGib } from "../../../content/q2/base/player/character.ts";
 import type { Q2PlayerMovementChange, Q2PlayerView } from "../../../content/q2/base/player/types.ts";
 import type { Q1FoundationHost, Q1Powerup } from "../../../content/q1/foundation/types.ts";
-import type { Q2FoundationHost, Q2PresentationEvent, Q2LandmarkCarry } from "../../../content/q2/foundation/host.ts";
+import type { Q2FoundationHost, Q2PresentationEvent, Q2LandmarkCarry, Q2WeaponTarget } from "../../../content/q2/foundation/host.ts";
 import type { Q2ItemHooks } from "../../../content/q2/foundation/items.ts";
 import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../content/q2/foundation/weapons/index.ts";
 import type { Q2WeaponEvent } from "../../../content/q2/foundation/weapons/index.ts";
@@ -467,7 +467,7 @@ export class SharedSimulation implements Simulation {
       let monsters: Q2Monsters;
       const weapons = new Q2Ballistics({ emit: event => this.weaponEvent(reference.content, event),
         noise: (actor, origin, secondary) => monsters.reportNoise(actor, origin, secondary),
-        dodge: (actor, game, attacker, eta, trace) => monsters.dodge(actor, game, attacker, eta, trace),
+        dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
         ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
         lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) });
       monsters = new Q2Monsters(weapons, { mission: actor => this.monsterMissions.get(actor) ?? null });
@@ -739,11 +739,7 @@ export class SharedSimulation implements Simulation {
     }, noise: (actor, origin, secondary) => {
       for (const source of this.monsterSources.values()) if (source.kind === "q2") source.monsters.reportNoise(actor, origin, secondary);
       return undefined;
-    }, dodge: (monster, services, attacker, eta, trace) => {
-      const source = this.monsterSources.get(services.options.provider);
-      if (source?.kind === "q2") source.monsters.dodge(monster, services, attacker, eta, trace);
-      return undefined;
-    }, quadMultiplier: () => this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
+    }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), quadMultiplier: () => this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
       lagCompensation: { kind: "current-world" },
       ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
       canTarget: (attacker, target) => attacker === null || !sameActor(attacker, target) });
@@ -849,6 +845,7 @@ export class SharedSimulation implements Simulation {
     const content = source.content;
     return createQ2ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
       monsterTarget: actor => this.monsterTarget(actor),
+      weaponTarget: actor => this.q2WeaponTarget(actor),
       registerEntity: (entity, services) => this.registerActorExecution({ kind: "q2", entity, services, content, readMonster: () => readMonster(entity.actor.id) }),
       ...(runtime.random.rerelease === null ? {} : { rereleaseRandom: runtime.random.rerelease }),
       now: () => runtime.now(), frameSeconds: () => runtime.frameSeconds(), random: () => runtime.random.nextUnit(), schedule: (actor, due) => runtime.schedule(actor, due),
@@ -1061,7 +1058,7 @@ export class SharedSimulation implements Simulation {
       combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider }, []);
     const ballistics = new Q2Ballistics({ emit: event => this.events.emit(selection.source.content, { kind: "q2-weapon", event }, this.equipmentFrame.time),
       noise: (actor, origin, secondary) => this.source.kind === "q2" ? this.source.monsters.reportNoise(actor, origin, secondary) : undefined,
-      dodge: (monster, services, attacker, eta, trace) => this.source.kind === "q2" ? this.source.monsters.dodge(monster, services, attacker, eta, trace) : undefined,
+      dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
       lagCompensation: { kind: "current-world" },
       ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
       canTarget: (attacker, target) => attacker === null || !sameActor(attacker, target) });
@@ -1175,7 +1172,7 @@ export class SharedSimulation implements Simulation {
 
     const weapons = new Q2Weapons({ emit: event => this.weaponEvent(content, event),
       noise: (actor, origin, secondary) => { if (this.source.kind !== "q2") throw new Error("Q2 monster noise before source admission"); return this.source.monsters.reportNoise(actor, origin, secondary); },
-      dodge: (monster, game, attacker, eta, trace) => { if (this.source.kind !== "q2") throw new Error("Q2 dodge before source admission"); return this.source.monsters.dodge(monster, game, attacker, eta, trace); },
+      dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
       lagCompensation: { kind: "current-world" },
       ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
       canTarget: (attacker, target) => attacker === null || !sameActor(attacker, target) });
@@ -1338,6 +1335,29 @@ export class SharedSimulation implements Simulation {
   private executionProvider(actor: ActorId): ProviderId | null {
     const entry = this.actorExecutions.get(actor);
     return entry === undefined ? null : entry.kind === "q3" ? entry.provider : entry.kind === "q1" ? entry.services.provider : entry.services.options.provider;
+  }
+
+  private q2WeaponTarget(actor: ActorId): Q2WeaponTarget | null {
+    const owner = this.actors.resolveOwned(actor);
+    if (owner === null) return null;
+    const entry = this.actorExecutions.get(actor), native = entry?.kind === "q2" ? entry.entity : null;
+    const collision = this.collision(owner), linked = this.scene.spatial.get(actor)?.collision;
+    const solid = actor === this.worldActor() ? "brush" : entry?.kind === "q3" || entry === undefined && this.player(actor) === null
+      ? linked === undefined ? "none" : linked.role === "trigger" ? "trigger" : linked.shape.kind === "model" ? "brush" : "box"
+      : collision?.solid ?? "none";
+    return { solid, laserImmune: native?.laserImmune ?? false, damageableTarget: native?.damageableTarget ?? false,
+      bfgExplobox: entry !== undefined && entry.kind !== "q3" && entry.entity.classname === "misc_explobox" };
+  }
+
+  private q2MonsterDodge(actor: ActorId, attacker: ActorId, eta: number, trace: Parameters<Q2Weapons["hooks"]["dodge"]>[3]): undefined {
+    const entry = this.actorExecutions.get(actor);
+    if (entry?.kind !== "q2" || !this.actors.isLive(actor)) return undefined;
+    const selected = this.monsterSources.get(entry.services.options.provider);
+    const monsters = selected?.kind === "q2" && selected.game === entry.services ? selected.monsters
+      : this.source.kind === "q2" && this.source.game === entry.services ? this.source.monsters : null;
+    const context = monsters?.context(actor);
+    if (monsters === null || context === null || context === undefined) return undefined;
+    return monsters.dodge(context.entity, context.game, attacker, eta, trace);
   }
 
   private monsterTarget(actor: ActorId) {

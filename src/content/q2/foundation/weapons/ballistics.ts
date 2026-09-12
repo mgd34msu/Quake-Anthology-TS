@@ -126,11 +126,12 @@ export class Q2Ballistics {
     if (game.options.edition !== "classic" || !game.host.isPlayer(self.actor.id)) return undefined;
     if (game.options.skill === 0 && game.host.random() > 0.25) return undefined;
     const trace = game.host.trace({ start, end: add(start, scale(direction, 8192)), bounds: null, ignore: self.actor.id, mask: this.shotMask(self, game) });
-    const target = game.entity(hit(trace));
-    if (target === null || !game.host.isMonster(target.actor.id) || (game.host.combat.read(target.actor.id)?.health ?? 0) <= 0) return undefined;
-    const body = game.body(target);
+    const target = hit(trace);
+    if (target === null || !game.host.isMonster(target) || (game.host.combat.read(target)?.health ?? 0) <= 0) return undefined;
+    const body = game.host.bodies.read(target);
+    if (body === null) return undefined;
     if (dot(normalize(subtract(game.body(self).origin, body.origin)), angleVectors(body.angles).forward) <= 0.3) return undefined;
-    return this.hooks.dodge(target, game, self.actor.id, (length(subtract(trace.end, start)) - body.bounds.max.x) / speed, trace);
+    return this.hooks.dodge(target, self.actor.id, (length(subtract(trace.end, start)) - body.bounds.max.x) / speed, trace);
   }
 
   fireBullet(self: Pick<Q2WeaponOwner, "actor">, game: Q2GameServices, start: Vec3, direction: Vec3, damage: number, kick: number, horizontalSpread: number, verticalSpread: number, mod: number): undefined {
@@ -211,7 +212,7 @@ export class Q2Ballistics {
         const actor = hit(trace);
         if (actor === null) break;
         if (actor !== self.actor.id && canHurt(game, actor)) game.damage(actor, self.actor.id, self.actor.id, damage, kick, direction, trace.end, normal(trace), MOD.railgun, 0, "q2:weapon_railgun");
-        const entity = game.entity(actor);
+        const entity = game.weaponTarget(actor);
         const pierce = game.host.isMonster(actor) || game.host.isPlayer(actor) || entity?.solid === "box" || game.options.edition === "rerelease" && (entity?.damageableTarget === true || entity?.solid === "none" || entity?.solid === "trigger" || !game.host.actors.isLive(actor));
         if (!pierce || excluded.includes(actor)) break;
         if (game.options.edition === "rerelease" && excluded.length === 16) break;
@@ -474,8 +475,8 @@ export class Q2Ballistics {
           trace = current.host.trace({ start: from, end, bounds: null, ignore, exclude: excluded, mask: 1 | 0x2000000 | 0x4000000 | (current.options.edition === "rerelease" ? PLAYER_CONTENTS : 0) });
           if (trace.fraction === 1) break;
           const target = hit(trace);
-          if (target !== entity.owner && canHurt(current, target) && current.entity(target)?.laserImmune !== true) current.damage(target, entity, entity.owner, current.options.mode === "deathmatch" ? 5 : 10, 1, direction, trace.end, zero, MOD.bfgLaser, 4, "q2:weapon_bfg");
-          if (target === null || !current.host.isMonster(target) && !current.host.isPlayer(target) && !(current.options.edition === "rerelease" && current.entity(target)?.damageableTarget === true)) {
+          if (target !== entity.owner && canHurt(current, target) && current.weaponTarget(target)?.laserImmune !== true) current.damage(target, entity, entity.owner, current.options.mode === "deathmatch" ? 5 : 10, 1, direction, trace.end, zero, MOD.bfgLaser, 4, "q2:weapon_bfg");
+          if (target === null || !current.host.isMonster(target) && !current.host.isPlayer(target) && !(current.options.edition === "rerelease" && current.weaponTarget(target)?.damageableTarget === true)) {
             effect(current, "laser-sparks", trace.end, normal(trace), 4, entity.skin); break;
           }
           if (excluded.includes(target) || current.options.edition === "rerelease" && excluded.length === 16) break;
@@ -502,7 +503,7 @@ export class Q2Ballistics {
   private readonly blasterTouch: Q2Touch = (entity, current, contact) => this.blasterImpact(entity, current, contact.other, contact.plane?.normal ?? zero, ((contact.surface?.nativeFlags ?? 0) & 4) !== 0);
 
   private bfgTarget(game: Q2GameServices, actor: ActorId): boolean {
-    return game.host.isMonster(actor) || game.host.isPlayer(actor) || game.entity(actor)?.classname === "misc_explobox" || game.options.edition === "rerelease" && game.entity(actor)?.damageableTarget === true;
+    return game.host.isMonster(actor) || game.host.isPlayer(actor) || game.weaponTarget(actor)?.bfgExplobox === true || game.options.edition === "rerelease" && game.weaponTarget(actor)?.damageableTarget === true;
   }
 
   private bfgAmbient(entity: Q2Entity, game: Q2GameServices): undefined {

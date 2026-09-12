@@ -81,7 +81,15 @@ export interface Q2LandmarkCarry {
   readonly relativeViewAngles: Vec3;
 }
 
+export interface Q2WeaponTarget {
+  readonly solid: Q2Entity["solid"];
+  readonly laserImmune: boolean;
+  readonly damageableTarget: boolean;
+  readonly bfgExplobox: boolean;
+}
+
 export interface Q2FoundationHost {
+  weaponTarget?(actor: ActorId): Q2WeaponTarget | null;
   monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;
   registerEntity?(entity: Q2Entity, services: Q2EntityServices): undefined;
   readonly actors: SessionActorRegistry;
@@ -236,6 +244,7 @@ export interface Q2GameServices {
   create(classname: string, values?: ReadonlyMap<string, string>): Q2Entity;
   remove(entity: Q2Entity): undefined;
   entity(actor: ActorId | null): Q2Entity | null;
+  weaponTarget(actor: ActorId): Q2WeaponTarget | null;
   itemName(classname: string): string | null;
   pushTeam(actor: ActorId): readonly OwnedActor[];
   body(entity: Pick<Q2Entity, "actor">): BodyState;

@@ -4,7 +4,6 @@ import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { TraceResult } from "../../../../contracts/scene.ts";
-import type { Q2Entity, Q2GameServices } from "../host.ts";
 
 export interface Q2WeaponOwner { readonly actor: OwnedActor; readonly viewHeight: number }
 
@@ -44,7 +43,7 @@ export interface Q2WeaponHooks {
   quadMultiplier?(actor: ActorId): number;
   emit(event: Q2WeaponEvent): undefined;
   noise(actor: ActorId, origin: Vec3, secondary: boolean): undefined;
-  dodge(monster: Q2Entity, game: Q2GameServices, attacker: ActorId, etaSeconds: number, trace: TraceResult): undefined;
+  dodge(monster: ActorId, attacker: ActorId, etaSeconds: number, trace: TraceResult): undefined;
   readonly lagCompensation: { readonly kind: "current-world" }
     | { readonly kind: "history"; begin(actor: ActorId, start: Vec3, direction: Vec3): () => undefined };
   ammoChanged(actor: ActorId, ammo: ItemId): undefined;
