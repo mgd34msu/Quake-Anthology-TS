@@ -1,5 +1,7 @@
 # Implementation comparison checklist
 
+For the item-by-item implementation Done/Not done list, see [completion status](completion-status.md). It uses the fixed accepted source cutoff recorded there, separately from formal verification acceptance and installed-build status.
+
 This checklist compares the three donors with the unified engine. It records which implementation is retained, why, which useful features must be added to the common system, and which differences remain selectable. A source port is not proof that its full behavior is joined or verified.
 
 Source basis: pushed code through `3658b90d51b6ba96658434efb0f42604124eb797`; the Brain, Shambler, shared Q3 armor, failed-floor placement, execution-boundary, network-endpoint and authored inhibition snapshots passed independent review and strict/policy gates. Family audit documents identify their own source paths and evidence. In-flight changes are not treated as pushed or installed.
@@ -35,7 +37,7 @@ In family tables, `[x]` means evidence exists for the exact stated column and sc
 
 ## Existing inventory and audit scope
 
-The [477-record feature inventory](../verification/feature-ledger.json) remains the requirement list, with [Q1](../verification/features/q1.json), [Q2](../verification/features/q2.json) and [Q3](../verification/features/q3.json) shards. Its current recorded donor statuses are 328 implemented, 120 partial and 29 missing; these describe donors, not the unified engine. It records zero accepted target features and 39,693 runtime functions still awaiting direct feature links. The [source census](../verification/source-manifest.json) pins inputs; the [product manifest](../verification/product-manifest.json) records content evidence separately from runtime compatibility.
+The [477-record feature inventory](../verification/feature-ledger.json) remains the requirement list, with [Q1](../verification/features/q1.json), [Q2](../verification/features/q2.json) and [Q3](../verification/features/q3.json) shards. Its current recorded donor statuses are 328 implemented, 120 partial and 29 missing; these describe donors, not the unified engine. Formal verification acceptance and runtime-to-feature link bookkeeping are separate from implementation completion; use the [item-by-item completion verdicts](completion-status.md) for Done/Not done status. The [source census](../verification/source-manifest.json) pins inputs; the [product manifest](../verification/product-manifest.json) records content evidence separately from runtime compatibility.
 
 The [plan](work-packages.json) records 74 packages, 303 dependency edges, 55 running, 18 planned and one accepted for early tooling only. The [25-family overview](feature-coverage.md) preserves 40 source families. These records do not provide a verified engine completion percentage. This comparison adds no acceptance state and does not reduce the required inventory.
 
@@ -50,7 +52,7 @@ Family comparisons: [Quake I](comparison-q1.md), [Quake II](comparison-q2.md), [
 | [Q3](comparison-q3.md#complete-q3-inventory-cross-reference) | 104 | Ten checked comparison rows identify scoped joined mechanisms, not ten accepted inventory requirements. Each row keeps its remaining limits. |
 | Central integration checklist below | Not an additional requirement inventory | Six checked items identify shared actor/body, scene/backend, basic nine bot-composition, base-Q1/base-Q2 edition mixing and bounded roster-editor evidence; the remaining items name concrete gaps. |
 
-The family conventions are intentionally stated rather than summed into a false completion score. The formal inventory still records **0 of 477 target features accepted**. This does not mean zero implementation: source presence, joined mechanisms and bounded tests are recorded in the detailed comparisons.
+The family conventions remain distinct from formal verification acceptance. The [completion list](completion-status.md) records actual requirement-by-requirement Done/Not done verdicts; its counts are not equally sized tasks or an overall engine completion percentage.
 
 ## Current choices and open decisions across the 25 feature families
 
