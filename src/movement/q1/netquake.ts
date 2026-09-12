@@ -1,3 +1,4 @@
+import { q1WaterTransition } from "./water-transition.ts";
 /* Ported from WinQuake/sv_user.c, sv_phys.c and rerelease donor extensions.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { ProviderId } from "../../contracts/identity.ts";
@@ -301,14 +302,9 @@ class NetQuakeMove {
   }
   private waterTransition(): void {
     const s = this.state, contents = this.context.contents(s.origin);
-    if (s.waterType === 0) { s.waterType = contents; s.waterLevel = 1; return; }
-    if (contents <= Q1_CONTENTS_WATER) {
-      if (s.waterType === Q1_CONTENTS_EMPTY) this.context.options.hooks?.sound?.(this.input.actor, "misc/h2ohit1.wav", s);
-      s.waterType = contents; s.waterLevel = 1;
-    } else {
-      if (s.waterType !== Q1_CONTENTS_EMPTY) this.context.options.hooks?.sound?.(this.input.actor, "misc/h2ohit1.wav", s);
-      s.waterType = Q1_CONTENTS_EMPTY; s.waterLevel = contents;
-    }
+    const transition = q1WaterTransition(s.waterType, contents);
+    if (transition.splash) this.context.options.hooks?.sound?.(this.input.actor, "misc/h2ohit1.wav", s);
+    s.waterType = transition.waterType; s.waterLevel = transition.waterLevel;
   }
   private toss(): void {
     const c = this.context, m = c.math, s = this.state;

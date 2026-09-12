@@ -1,3 +1,4 @@
+import { q1WaterTransition } from "../../../movement/q1/water-transition.ts";
 import { stepQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
 import { createMutableVectorMath } from "../../../core/math.ts";
@@ -632,14 +633,9 @@ export class Q1EntityServices {
   checkWaterTransition(entity: Q1Actor): undefined {
     const contents = this.host.contents(this.body(entity).origin);
     const value = contents === "solid" ? -2 : contents === "water" ? -3 : contents === "slime" ? -4 : contents === "lava" ? -5 : contents === "sky" ? -6 : -1;
-    if (entity.waterType === 0) { entity.waterType = value; entity.waterLevel = 1; return undefined; }
-    if (value <= -3) {
-      if (entity.waterType === -1) this.sound(entity, "misc/h2ohit1.wav", "auto");
-      entity.waterType = value; entity.waterLevel = 1;
-    } else {
-      if (entity.waterType !== -1) this.sound(entity, "misc/h2ohit1.wav", "auto");
-      entity.waterType = -1; entity.waterLevel = value;
-    }
+    const transition = q1WaterTransition(entity.waterType, value);
+    if (transition.splash) this.sound(entity, "misc/h2ohit1.wav", "auto");
+    entity.waterType = transition.waterType; entity.waterLevel = transition.waterLevel;
     return undefined;
   }
 }

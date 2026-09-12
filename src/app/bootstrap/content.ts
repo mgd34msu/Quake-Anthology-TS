@@ -1,3 +1,4 @@
+import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
 import { resolveLaunchResource } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
@@ -63,7 +64,7 @@ export class LoadedApplicationContent {
   private readonly opened = new Set<MountedContent>();
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
-    readonly world: ApplicationWorld, readonly mounts: MountedContent) {}
+    readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null) {}
 
   openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
 
@@ -138,6 +139,13 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   };
   const recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
+    if (module.kind === "quakec") {
+      if (!options.dedicated || options.network.kind !== "offline" || catalog.product(recipe.map.entities.content).expectation.id !== "q1-classic-id1"
+        || recipe.map.geometryContent !== recipe.map.entities.content || module.owner.provider !== recipe.map.entities.provider
+        || module.owner.content !== recipe.map.entities.content || recipe.execution.length !== 1)
+        throw new Error("QuakeC application execution currently requires an explicit dedicated native classic id1 map and one known id1 server artifact; clients and saves are unsupported");
+      continue;
+    }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
   }
   const mounts = await openMountPlan(recipe.mounts);
@@ -160,7 +168,9 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       }));
       world = toQ2WorldGeometry(raw, { readMaterial: path => materials.get(path) ?? null });
     } else world = decodeQ3World(bytes, map);
-    return new LoadedApplicationContent(catalog, recipe, world, mounts);
+    const execution = recipe.execution.find(module => module.kind === "quakec");
+    const prepared = execution?.kind === "quakec" ? await prepareQuakeCSource(execution, mounts) : null;
+    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared);
   } catch (error) {
     mounts.close();
     throw error;

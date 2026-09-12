@@ -47,6 +47,7 @@ export interface SharedPhysicsFlags {
   readonly teamSlave?: boolean;
 }
 export interface SharedPhysicsOptions {
+  readonly q1WaterTransition?: (actor: OwnedActor) => undefined;
   readonly actors: SessionActorRegistry;
   readonly callbacks: ActorCallbackTable;
   readonly scene: SharedSceneQueries;
@@ -659,7 +660,7 @@ export class SharedPhysics {
     if (motion.kind !== "fly" && motion.kind !== "fly-missile" && motion.kind !== "wall-bounce") velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
     this.writeLive(actor, { velocity, angles: this.add(state.angles, this.scale(motion.angularVelocity, elapsed)) });
     const trace = this.pushEntity(actor, this.scale(velocity, elapsed));
-    this.waterTransition(actor, state.origin);
+    if (family !== "q1") this.waterTransition(actor, state.origin);
     state = this.bodies.read(actor.id);
     if (state === null || trace.fraction === 1) return undefined;
     const currentMotion = this.motion(actor) ?? motion;
@@ -670,6 +671,7 @@ export class SharedPhysics {
       this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
       this.options.writeAngularVelocity?.(actor, zero);
     } else this.writeLive(actor, { velocity });
+    if (family === "q1" && this.live(actor)) this.options.q1WaterTransition?.(actor);
     return undefined;
   }
 

@@ -1,3 +1,4 @@
+import { Application } from "../../../src/app/bootstrap/application.ts";
 import { cameraWithKick } from "../../../src/app/bootstrap/presentation.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
 import { perspectiveProjection } from "../../../src/render/scene/view.ts";
@@ -650,3 +651,78 @@ test("authored Q1 platform pauses local time when blocked and restores its sourc
     } finally { restored.close(); }
   } finally { simulation.close(); await content.close(); }
 });
+
+
+test("dedicated actual id1 QuakeC application traverses authored pushers and live source slots", async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Expected dedicated launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset: { ...preset, execution: [{ kind: "quakec", owner: preset.map.entities,
+    role: "server-game", artifact: { content: preset.map.entities.content, path: "progs.dat" },
+    api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }] }, choice: presetChoice(preset.id) });
+  const application = await Application.open(command.options, { print: () => undefined }, recipe);
+  try {
+    const simulation = application.simulation, source = simulation.quakecSource();
+    if (source === null) throw new Error("Actual QC source missing");
+    const field = (name: string): number => {
+      const definition = source.prepared.program.fieldsByName.get(name);
+      if (definition === undefined) throw new Error(`Missing source field ${name}`);
+      return definition.offset;
+    };
+    const initial = simulation.actors.observations(), pushers = initial.filter(actor => source.readMoveType(actor.id) === 7);
+    expect(simulation.q1Source()).toBeNull();
+    expect(simulation.players()).toEqual([]);
+    expect(source.prepared.resources.size).toBe(358);
+    expect(pushers.length).toBe(30);
+    expect(source.options.random).toBe(simulation.random);
+    expect(source.options.physics).toBe(simulation.physics);
+    expect(source.options.actors).toBe(simulation.actors);
+    expect(() => simulation.checkpoint()).toThrow("complete saved-game checkpoint");
+    expect(() => simulation.admitPlayer(simulation.options.identity.client(0, 0))).toThrow("QuakeC");
+    const visits: number[] = [], beforeActor = source.beforeActor.bind(source);
+    source.beforeActor = actor => {
+      const slot = source.sourceSlot(actor.id);
+      if (slot === null) throw new Error("Missing live source slot");
+      if (visits.length === 0) expect(source.machine.globals.float(source.machine.globalOffset("time"))).toBe(Math.fround(source.timeSeconds));
+      visits.push(slot); return beforeActor(actor);
+    };
+    for (const milliseconds of [100, 100, 50]) {
+      visits.length = 0;
+      const beginning = simulation.timeSeconds, elapsed = milliseconds / 1000;
+      const localTimes = new Map(pushers.map((pusher): [ActorId, number] => {
+        const slot = source.sourceSlot(pusher.id);
+        if (slot === null) throw new Error("Missing authored pusher");
+        const words = source.entities.at(slot), local = words.float(field("ltime")), next = words.float(field("nextthink"));
+        return [pusher.id, Math.fround(local + Math.max(0, Math.min(elapsed, next - local)))];
+      }));
+      await application.step(milliseconds);
+      expect(source.machine.globals.float(source.machine.globalOffset("frametime"))).toBe(Math.fround(elapsed));
+      expect(source.timeSeconds).toBe(beginning);
+      expect(source.machine.globals.float(source.machine.globalOffset("time"))).toBeGreaterThanOrEqual(Math.fround(beginning));
+      expect(source.machine.globals.float(source.machine.globalOffset("time"))).toBeLessThanOrEqual(Math.fround(beginning + elapsed));
+      expect(simulation.timeSeconds).toBeCloseTo(beginning + elapsed, 12);
+      expect(visits).toEqual([...visits].sort((a, b) => a - b));
+      expect(new Set(visits).size).toBe(visits.length);
+      for (const pusher of pushers) {
+        const slot = source.sourceSlot(pusher.id);
+        if (slot === null) throw new Error("Authored pusher unexpectedly freed");
+        expect(visits).toContain(slot);
+        const expectedLocalTime = localTimes.get(pusher.id);
+        if (expectedLocalTime === undefined) throw new Error("Missing authored pusher deadline expectation");
+        expect(source.entities.at(slot).float(field("ltime"))).toBe(expectedLocalTime);
+        expect(simulation.bodies.read(pusher.id)?.origin).toEqual(source.entities.at(slot).vector(field("origin")));
+      }
+    }
+    expect(simulation.actors.observations().length).toBeGreaterThan(initial.length);
+    expect(() => source.machine.execute(source.prepared.program.functionNamed("door_blocked").index)).toThrow("Unsupported QuakeC damage provenance");
+    const door = pushers.find(actor => source.classname(actor.id) === "door"), victim = simulation.actors.observations().find(actor => source.classname(actor.id) === "monster_army");
+    if (door === undefined || victim === undefined) throw new Error("Authored crusher callback actors missing");
+    const owner = simulation.actors.resolveOwned(door.id), before = simulation.combat.read(victim.id)?.health;
+    if (owner === null || before === undefined) throw new Error("Missing shared source damage state");
+    // Explicit callback invocation tests provenance; it does not claim a physical collision.
+    source.pusherServices.blocked(owner, victim.id);
+    expect(simulation.combat.read(victim.id)?.health).toBeLessThan(before);
+    expect(source.currentPhysicsCallback).toBeNull();
+  } finally { await application.close(); }
+}, 45000);

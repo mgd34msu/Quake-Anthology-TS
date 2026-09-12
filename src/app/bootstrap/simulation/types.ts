@@ -1,3 +1,4 @@
+import type { PreparedQuakeCSource } from "./quakec-source.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.ts";
 import type { WeaponReference } from "./weapon-slot.ts";
 import type { HandGrenadeTravel } from "./equipment-runtime.ts";
@@ -31,6 +32,8 @@ import type { Q3SourceSessionCarry } from "./q3/types.ts";
 import type { SaveImage } from "../../../contracts/session.ts";
 
 export interface SimulationOptions {
+  readonly dedicated?: boolean;
+  readonly preparedQuakeC?: PreparedQuakeCSource;
   readonly identity: IdentityOwner;
   readonly recipe: ExecutableRecipe;
   readonly world: ApplicationWorld;

@@ -26,6 +26,7 @@ export interface QcWorldHostOptions {
   readonly model: (name: string) => { readonly index: number; readonly bounds: Bounds } | null;
   /** The application owns surrogate source slots for actors supplied by other modules. */
   readonly foreignReference: (actor: ActorId) => number;
+  readonly admit?: (actor: OwnedActor, slot: number) => undefined;
 }
 
 /** WinQuake/world.c SV_LinkEdict expands items horizontally and other edicts on all axes. */
@@ -125,7 +126,10 @@ export class QcWorldHost {
   actor(slot: number): OwnedActor {
     if (this.isFreeEntity(slot)) throw new QcProgramError("world builtin references a free source edict");
     const actor = this.options.slots.at(slot) ?? this.options.slots.bindExisting(slot, "quakec:edict");
-    if (this.options.bodies.read(actor.id) === null) this.options.bodies.bind(actor, this.body(slot));
+    if (this.options.bodies.read(actor.id) === null) {
+      this.options.bodies.bind(actor, this.body(slot));
+      this.options.admit?.(actor, slot);
+    }
     return actor;
   }
   private body(slot: number): BodyStateBinding {
