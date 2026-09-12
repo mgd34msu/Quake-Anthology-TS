@@ -368,6 +368,72 @@ retail("Q1 deathmatch bots use selected Q2 weapons through application commands 
   } finally { await application.close(); await rm(temporary, { recursive: true, force: true }); }
 }, 120000);
 
+retail("Q1 map bots collect mapped Q3 weapons and fire through the selected arsenal", async () => {
+  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4",
+    "--movement", "q1", "--character", "q2", "--mode", "deathmatch", "--dedicated"]);
+  if (launch.kind !== "run") throw new Error("Expected Q1 launch");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, launch.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [
+    { provider: "q3:official", content: catalog.require("q3-baseq3").id },
+  ] } } });
+  const application = await Application.open(launch.options, { print: () => undefined }, recipe);
+  try {
+    const captured: ApplicationBots[] = [], services = application.simulation.botServices, attach = services.attach.bind(services);
+    services.attach = (director, transport) => { captured.push(transport); attach(director, transport); };
+    application.queueCommand("addbot", ["Sarge", "5"], null); await application.step(100);
+    const transport = captured[0], bot = transport?.director.roster()[0];
+    if (transport === undefined || bot === undefined) throw new Error("Missing selected Q3 bot");
+    const world = application.simulation, source = world.q1Source(), arsenal = world.selectedQ3WeaponSource();
+    if (source === null || arsenal === null) throw new Error("Missing actual Q1 map or Q3 arsenal");
+    expect(world.q3Source()).toBeNull(); expect(world.q1WeaponSource()).toBeNull();
+    expect(arsenal.has(bot.actor.id)).toBe(true);
+    for (let frame = 0; frame < 50; frame++) await application.step(100);
+    const pickups = transport.game.pickups;
+    if (pickups === null) throw new Error("Missing map-owned supply observations");
+    const supply = pickups.candidates(bot.sourceClient).find(item => item.name === "weapon_rocketlauncher");
+    if (supply === undefined) throw new Error("Missing authored dm4 rocket launcher");
+    expect(supply.preview.weapons.some(receipt => receipt.item === "q3:weapon/rocketlauncher" && receipt.given > 0)).toBe(true);
+    const start = { x: 12.117749006091444, y: 131.88225099390857, z: -294.96875 };
+    source.composition.services.teleport(bot.actor.id, start, { x: 0, y: 315, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    let selectedGoal = false;
+    for (let frame = 0; frame < 60; frame++) {
+      await application.step(100);
+      const goal = transport.director.library.goals.getTopGoal(bot.state.gs);
+      if (goal?.entity === supply.entity && goal.number >= 0x40000000) selectedGoal = true;
+      if (pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind === "respawning") break;
+    }
+    expect(selectedGoal).toBe(true);
+    expect(pickups.inspect(bot.sourceClient, supply.observation.actor)?.observation.availability.kind).toBe("respawning");
+    for (const receipt of [...supply.preview.weapons, ...supply.preview.ammo]) expect(world.inventory.count(bot.actor.id, receipt.item)).toBe(receipt.before + receipt.given);
+    expect(world.inventory.count(bot.actor.id, "q1:weapon/rocketlauncher")).toBe(0);
+    const humanClient = application.session.createClient(1), human = world.admitPlayer(humanClient.id);
+    source.composition.services.teleport(bot.actor.id, start, { x: 0, y: 315, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    source.composition.services.teleport(human.actor, { x: 80, y: 64, z: start.z }, { x: 0, y: 135, z: 0 }, { x: 0, y: 0, z: 0 }, world.timeSeconds);
+    for (const ammo of ["q3:ammo/machinegun", "q3:ammo/shotgun"] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[]) world.inventory.consume(bot.actor, ammo, world.inventory.count(bot.actor.id, ammo));
+    const rockets = world.inventory.count(bot.actor.id, "q3:ammo/rocketlauncher");
+    let rocketIntent = false, rocketHit = false;
+    const frameCommands = transport.frame.bind(transport);
+    transport.frame = (time, elapsed) => {
+      const commands = frameCommands(time, elapsed);
+      if (commands.some(command => command.arsenal?.weapon === "q3:weapon/rocketlauncher")) rocketIntent = true;
+      return commands;
+    };
+    for (let frame = 0; frame < 60; frame++) {
+      const output = await application.step(100);
+      for (const event of output.events) if (event.payload.kind === "damage" && event.payload.outcome.kind === "committed") {
+        const decision = event.payload.outcome.decision, attack = decision.request.attack;
+        if (decision.request.target.equals(human.actor) && attack.attacker?.equals(bot.actor.id) === true && decision.appliedDamage > 0
+          && attack.weapon === "q3:weapon/rocketlauncher" && attack.cause.kind === "q3") rocketHit = true;
+      }
+      if (rocketHit) break;
+    }
+    expect(rocketIntent).toBe(true); expect(rocketHit).toBe(true);
+    expect(world.inventory.count(bot.actor.id, "q3:ammo/rocketlauncher")).toBeLessThan(rockets);
+    expect(arsenal.read(bot.actor.id).activeWeapon).toBe("q3:weapon/rocketlauncher");
+    expect(world.combat.read(human.actor)?.health).toBeLessThan(100);
+  } finally { await application.close(); }
+}, 120000);
+
 retail("native Q1 bots pursue an authored supply and fight through the same director", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q1-rerelease-id1", "--map", "dm4",
     "--movement", "q1", "--character", "q2", "--mode", "deathmatch", "--dedicated"]);

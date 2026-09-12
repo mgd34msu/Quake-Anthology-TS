@@ -2316,6 +2316,9 @@ export class SharedSimulation implements Simulation {
     if (this.selectedArsenal !== null) return this.selectedArsenal.family === "q2" && this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
     return this.source.kind === "q2" ? this.source : null;
   }
+  selectedQ3WeaponSource(): Pick<Q3SelectedArsenal, "has" | "read"> | null {
+    return this.selectedArsenal?.family === "q3" ? this.selectedArsenal : null;
+  }
   q2Source(): Extract<SourceRuntime, { readonly kind: "q2" }> | null { return this.source.kind === "q2" ? this.source : null; }
   q1Source() { return this.source.kind === "q1" ? this.source : null; }
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }

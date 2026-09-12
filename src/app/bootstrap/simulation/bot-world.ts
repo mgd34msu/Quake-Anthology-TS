@@ -27,8 +27,7 @@ const zero = { x: 0, y: 0, z: 0 };
 export function createSharedBotWorld(options: Options) {
   const simulation = options.simulation, source = simulation.q2Source() ?? simulation.q1Source();
   if (source === null) throw new Error("Shared bot observations require an admitted Q1 or Q2 world");
-  const arsenal = simulation.q2WeaponSource(), q1Arsenal = simulation.q1WeaponSource();
-  if (arsenal === null && q1Arsenal === null) throw new Error("Shared bot weapon observations require actual Q1 or Q2 weapons");
+  const arsenal = simulation.q2WeaponSource();
   const numeric = simulation.recipe.timing.find(entry => entry.provider === simulation.recipe.engineBehavior.provider)?.numeric;
   if (numeric === undefined) throw new Error("Bot world has no source numeric policy");
   const policy = { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } satisfies import("../../../contracts/scene.ts").TracePolicy;

@@ -175,15 +175,19 @@ export function updateQ3BotInventory(state: BotState): void {
   const ps = state.curPs, schema = statSchema(state.product);
   state.inventory[BotInventory.ARMOR] = ps.stats.get(schema.armor);
   const weapons = ps.stats.get(schema.weapons);
+  updateQ3BotWeaponInventory(state, weapon => (weapons & (1 << weapon)) !== 0, weapon => ps.ammo.get(weapon));
+  updateQ3BotItemInventory(state);
+}
+
+export function updateQ3BotWeaponInventory(state: BotState, owned: (weapon: number) => boolean, ammo: (weapon: number) => number): void {
   for (const [index, weapon] of weaponInventory) {
     if (state.product === "baseq3" && weapon > Weapon.WP_GRAPPLING_HOOK) continue;
-    state.inventory[index] = Number((weapons & (1 << weapon)) !== 0);
+    state.inventory[index] = Number(owned(weapon));
   }
   for (const [index, weapon] of ammoInventory) {
     if (state.product === "baseq3" && weapon > Weapon.WP_GRAPPLING_HOOK) continue;
-    state.inventory[index] = ps.ammo.get(weapon);
+    state.inventory[index] = ammo(weapon);
   }
-  updateQ3BotItemInventory(state);
 }
 
 export function updateQ3BotItemInventory(state: BotState): void {
