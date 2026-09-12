@@ -342,3 +342,30 @@ test("expansion impact noise retains native and foreign owners and rejects relea
   expect(base.noises.has(foreign.id)).toBe(false);
   scene.actors.close();
 });
+
+test("proximity explosion credits live shared owners and falls back after their lifetime ends", () => {
+  for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const foreignOwner of [false, true]) for (const released of [false, true]) {
+    const scene = fixture(edition), projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
+    try {
+      const owner = foreignOwner ? scene.actors.allocate("q1:character", "q1:player") : scene.player;
+      if (foreignOwner) {
+        const body = scene.bodies.read(scene.player.id); if (body === null) throw new Error("Missing source fixture body");
+        scene.bodies.create(owner, { ...body, origin: { x: -256, y: 0, z: 0 } }); scene.foreignPlayers.add(owner.id);
+        expect(scene.game.entity(owner.id)).toBeNull();
+      }
+      const target = scene.target(64), mine = projectiles.fireProx({ actor: owner }, scene.game, zero, forward, 1, 0);
+      const explode = projectiles.callbacks.think?.["Prox_Explode"]; if (explode === undefined) throw new Error("Missing source proximity callback");
+      const mineId = mine.actor.id;
+      if (released) {
+        scene.actors.release(owner);
+        const replacement = scene.actors.allocate("q3:character", "q3:sarge");
+        expect(replacement.id.slot).toBe(owner.id.slot); expect(replacement.id.generation).not.toBe(owner.id.generation);
+      }
+      explode(mine, scene.game);
+      const damage = scene.outcomes.find(outcome => outcome.kind === "committed" && outcome.decision.request.target.equals(target.actor.id));
+      if (damage?.kind !== "committed") throw new Error("Source proximity explosion did not damage its actual target");
+      expect(damage.decision.appliedDamage).toBeGreaterThan(0); expect(damage.decision.request.attack.attacker).toBe(released ? mineId : owner.id);
+      expect(scene.actors.isLive(mineId)).toBe(false);
+    } finally { scene.actors.close(); }
+  }
+});

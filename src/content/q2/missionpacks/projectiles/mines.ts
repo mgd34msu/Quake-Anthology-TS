@@ -81,11 +81,11 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
   private readonly proxExplode: Q2Think = (entity, game) => {
     const field = game.entity(entity.teamChain);
     if (field !== null && field.owner === entity.actor.id) game.remove(field);
-    const owner = game.entity(entity.teamMaster);
+    const owner = entity.teamMaster !== null && game.host.actors.isLive(entity.teamMaster) ? entity.teamMaster : entity.actor.id;
     if (entity.teamMaster !== null) this.hooks.base.playerNoiseForActor(entity.teamMaster, game, game.body(entity).origin, "impact");
     if (entity.damage > 90) game.sound(entity, "items/damage3.wav", 3);
     if (game.host.combat.read(entity.actor.id) !== null) game.host.combat.setTraits(entity.actor, { canTakeDamage: false });
-    game.radiusDamage(entity, owner?.actor.id ?? entity.actor.id, entity.damage, entity.actor.id, 192, mod.prox, 0, "q2:weapon_proxlauncher");
+    game.radiusDamage(entity, owner, entity.damage, entity.actor.id, 192, mod.prox, 0, "q2:weapon_proxlauncher");
     this.grenadeEffect(entity, game); return game.remove(entity);
   };
 
