@@ -31,6 +31,7 @@ export interface PlayerMovementHost {
   touchTriggers(actor: OwnedActor): undefined;
   isBrush(actor: ActorId): boolean;
   worldActor(): ActorId | null;
+  sourcePunch?(actor: ActorId): Vec3 | null;
   jump(actor: OwnedActor, action: "jump" | "swim"): undefined;
 }
 
@@ -186,7 +187,8 @@ export class MovementPlayer {
       environment: playerMovementEnvironment(this, combat),
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
     const state = this.state, profile = selectedMovementProfile(this), command = input.command;
-    const q1Options = { viewHeight: this.viewHeight, hooks: {
+    const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
+    const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
       playerAction: (actor: OwnedActor, action: "jump" | "swim") => this.host.jump(actor, action),
       link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
       isBsp: (hit: TraceHit) => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),

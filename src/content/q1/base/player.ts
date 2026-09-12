@@ -1,8 +1,9 @@
+import type { Q1CharacterAttack } from "../foundation/types.ts";
 /* player.qc/client.qc presentation and lifecycle. Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
-import { ZERO, length, normalize, vadd, vscale } from "../foundation/types.ts";
+import { length, normalize, vadd, vscale } from "../foundation/types.ts";
 import { spawnBubble } from "./map-entities.ts";
 import { throwGib } from "./projectiles.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../persistence/value.ts";
@@ -43,7 +44,6 @@ export interface Q1CharacterPresentation {
   readonly solid: "slidebox" | "none";
   readonly movement: "walk" | "toss" | "bounce";
   readonly weaponVisible: boolean;
-  readonly punch: Vec3;
 }
 export interface Q1CharacterOptions {
   /** The chosen inventory provider owns the contents and conversion of a death drop. */
@@ -89,7 +89,6 @@ export class Q1CharacterActor {
   private locomotion: "stand" | "run" | null = null;
   private nextAnimation = 0;
   private painUntil = 0;
-  private punch: Vec3 = ZERO;
   private viewOffset: Vec3 = { x: 0, y: 0, z: 22 };
   private lastFallSpeed = 0;
   private airFinished = 12;
@@ -101,12 +100,12 @@ export class Q1CharacterActor {
   }
   get waterLevel(): 0 | 1 | 2 | 3 { return this.input.waterLevel; }
   capture(): Uint8Array {
-    return encodeCheckpointValue({ version: 2, input: this.input, life: this.life, model: this.model, modelFrame: this.modelFrame, animation: this.animation, animationFrame: this.animationFrame, attackAnimation: this.attackAnimation,
-      walkFrame: this.walkFrame, locomotion: this.locomotion, nextAnimation: this.nextAnimation, painUntil: this.painUntil, punch: this.punch, viewOffset: this.viewOffset, lastFallSpeed: this.lastFallSpeed,
+    return encodeCheckpointValue({ version: 3, input: this.input, life: this.life, model: this.model, modelFrame: this.modelFrame, animation: this.animation, animationFrame: this.animationFrame, attackAnimation: this.attackAnimation,
+      walkFrame: this.walkFrame, locomotion: this.locomotion, nextAnimation: this.nextAnimation, painUntil: this.painUntil, viewOffset: this.viewOffset, lastFallSpeed: this.lastFallSpeed,
       airFinished: this.airFinished, drownDamage: this.drownDamage, hazardAt: this.hazardAt, inWater: this.inWater });
   }
   restore(bytes: Uint8Array): undefined {
-    const reader = new SaveReader(decodeCheckpointValue(bytes), "q1:character"), version = reader.field("version").choice(1, 2); const input = reader.field("input");
+    const reader = new SaveReader(decodeCheckpointValue(bytes), "q1:character"), version = reader.field("version").choice(1, 2, 3); const input = reader.field("input");
     this.input = { axePose: input.field("axePose").boolean(), attack: input.field("attack").boolean(), jump: input.field("jump").boolean(), use: input.field("use").boolean(), waterLevel: input.field("waterLevel").choice(0, 1, 2, 3), waterType: input.field("waterType").choice("empty", "water", "slime", "lava"), invisible: input.field("invisible").boolean(), invulnerable: input.field("invulnerable").boolean() };
     this.life = reader.field("life").choice("alive", "dying", "dead", "respawnable"); this.model = reader.field("model").string(); this.modelFrame = reader.field("modelFrame").number();
     this.animation = reader.field("animation").nullable(value => ({ first: value.field("first").integer(0), count: value.field("count").integer(1), end: value.field("end").choice("locomotion", "dead") }));
@@ -116,7 +115,7 @@ export class Q1CharacterActor {
       reader.field("locomotion").nullable(value => value.choice("stand", "run"));
     this.nextAnimation = reader.field("nextAnimation").number(); this.painUntil = reader.field("painUntil").number();
     const vector = (value: SaveReader): Vec3 => ({ x: value.field("x").number(), y: value.field("y").number(), z: value.field("z").number() });
-    this.punch = vector(reader.field("punch")); this.viewOffset = vector(reader.field("viewOffset")); this.lastFallSpeed = reader.field("lastFallSpeed").number();
+    this.viewOffset = vector(reader.field("viewOffset")); this.lastFallSpeed = reader.field("lastFallSpeed").number();
     this.airFinished = reader.field("airFinished").number(); this.drownDamage = reader.field("drownDamage").number(); this.hazardAt = reader.field("hazardAt").number(); this.inWater = reader.field("inWater").boolean(); return undefined;
   }
   get presentation(): Q1CharacterPresentation {
@@ -124,7 +123,7 @@ export class Q1CharacterActor {
     const model = this.life === "alive" ? this.input.invisible ? "progs/eyes.mdl" : pose?.definition?.model ?? "progs/player.mdl" : this.model;
     const frame = this.life === "alive" ? this.input.invisible ? 0 : pose?.frame ?? this.modelFrame : this.modelFrame;
     return { model, frame, viewOffset: this.viewOffset, life: this.life,
-      solid: this.life === "alive" ? "slidebox" : "none", movement: this.life === "alive" ? "walk" : this.model === "progs/h_player.mdl" ? "bounce" : "toss", weaponVisible: this.life === "alive", punch: this.punch };
+      solid: this.life === "alive" ? "slidebox" : "none", movement: this.life === "alive" ? "walk" : this.model === "progs/h_player.mdl" ? "bounce" : "toss", weaponVisible: this.life === "alive" };
   }
   private sound(path: string, attenuation = 1): undefined { return this.game.sound(this.actor, path, "voice", attenuation); }
   private animate(animation: PlayerAnimation, attack = false): undefined {
@@ -174,14 +173,15 @@ export class Q1CharacterActor {
     return this.presentation;
   }
   /** Called by the selected arsenal after an admitted shot, including foreign weapons using a Q1 pose. */
-  attack(kind: "axe" | "shotgun" | "rocket" | "nail" | "lightning"): undefined {
+  attack(attack: Q1CharacterAttack): undefined {
+    const { kind } = attack;
     if (this.life !== "alive") return undefined;
     const pose = this.options.sourcePose?.(); this.selectModel(pose);
     if (pose?.definition !== undefined || (pose?.frame ?? null) !== null) {
       this.animation = null; this.attackAnimation = false; return undefined;
     }
     if (kind === "axe") {
-      const r = this.game.host.random(), first = r < 0.25 ? 119 : r < 0.5 ? 125 : r < 0.75 ? 131 : 137;
+      const first = 119 + attack.variant * 6;
       return this.animate({ first, count: 6, end: "locomotion" }, true);
     }
     return this.animate({ first: kind === "shotgun" ? 113 : kind === "rocket" ? 107 : kind === "nail" ? 103 : 105, count: kind === "nail" || kind === "lightning" ? 2 : 6, end: "locomotion" }, true);
@@ -228,7 +228,7 @@ export class Q1CharacterActor {
   }
   respawn(health?: number): undefined {
     this.life = "alive"; this.model = "progs/player.mdl"; this.modelFrame = 12; this.animation = null; this.attackAnimation = false; this.walkFrame = 0; this.locomotion = null; this.painUntil = 0;
-    this.viewOffset = { x: 0, y: 0, z: 22 }; this.punch = ZERO; this.airFinished = this.game.time + 12; this.drownDamage = 2;
+    this.viewOffset = { x: 0, y: 0, z: 22 }; this.airFinished = this.game.time + 12; this.drownDamage = 2;
     this.hazardAt = 0; this.inWater = false; this.lastFallSpeed = 0;
     this.selectModel(this.options.sourcePose?.());
     this.game.host.combat.setTraits(this.actor, { canTakeDamage: true }); if (health !== undefined) this.game.host.combat.setHealth(this.actor, health); return undefined;

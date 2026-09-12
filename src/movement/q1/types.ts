@@ -39,6 +39,7 @@ export interface Q1MovementHooks {
 }
 
 export interface Q1MovementOptions {
+  readonly sourcePunchAngles?: Vec3;
   readonly viewHeight?: number;
   readonly maxVelocity?: number;
   readonly noStep?: boolean;

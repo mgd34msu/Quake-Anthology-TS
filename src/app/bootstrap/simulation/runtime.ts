@@ -874,7 +874,11 @@ export class SharedSimulation implements Simulation {
           return this.physics.pushMove(actor, displacement, { x: angular.x * elapsed, y: angular.y * elapsed, z: angular.z * elapsed }); },
         scheduleThink: (actor, due) => runtime.schedule(actor, due), cancelThink: actor => runtime.schedule(actor, null),
         emit: event => {
-          if (event.kind === "weapon") this.viewModels.set(event.player, { path: event.viewModel, frame: event.frame });
+          if (event.kind === "weapon") {
+            this.viewModels.set(event.player, { path: event.viewModel, frame: event.frame });
+            const player = this.player(event.player);
+            if (player !== null && event.attack !== undefined) this.q1Characters.get(player.actor)?.attack(event.attack);
+          }
           if (event.kind === "intermission") for (const player of this.playerStates.values()) {
             player.viewHeight = 0;
             this.setPlayerMovement(player.actor.id, { kind: "freeze", origin: event.origin, angles: event.angles });
@@ -1512,6 +1516,7 @@ export class SharedSimulation implements Simulation {
   private createPlayer(actor: OwnedActor, client: ClientId, origin: Vec3, angles: Vec3, arsenal: ArsenalState): MovementPlayer {
     const player = new MovementPlayer(actor, client, this.recipe, { actors: this.actors, bodies: this.bodies, combat: this.combat, scene: this.scene, rereleaseMovement: this.physics.rereleaseMovement,
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
+      sourcePunch: actor => this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? null,
       worldActor: () => this.worldActor(), touchTriggers: owned => this.source.kind === "q3" ? undefined : this.physics.touchTriggers(owned), isBrush: id => this.physics.isBrush(id), jump: (owned, action) => this.jump(owned, action),
       q3Hooks: { firing: context => (context.command.buttons & 1) !== 0 && context.motion.health > 0,
         animation: (request, context) => context.animation.state.kind === "q3" ? q3SourceAnimation(request, context) : { animation: context.animation, effects: [] }, torso: context => context.animation.state.kind === "q3" ? q3SourceTorso(11, context, true) : { animation: context.animation, effects: [] },
@@ -1788,8 +1793,8 @@ export class SharedSimulation implements Simulation {
       pointContents: point => this.contents(point, "q2"), powerups: actor => {
         const powers = this.source.kind === "q1" ? this.source.game.player(actor)?.powerups : undefined;
         return { quadUntil: powers?.get("quad") ?? 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0, breatherUntil: powers?.get("suit") ?? 0, enviroUntil: powers?.get("suit") ?? 0 };
-      }, weapon: actor => { const player = this.requirePlayer(actor); return { q2Name: null, ammo: this.playerUi(actor).ammo?.item ?? null,
-        kickAngles: player.state.kind === "q1-netquake" ? player.state.punchAngles : zero, kickOrigin: zero, loopSound: "" }; },
+      }, weapon: actor => { return { q2Name: null, ammo: this.playerUi(actor).ammo?.item ?? null,
+        kickAngles: zero, kickOrigin: zero, loopSound: "" }; },
       emit: event => this.events.emit(content, { kind: "q2", event }), view: (actor, view) => { this.q2Views.set(actor, view); return undefined; },
       noise: (actor, origin) => { if (this.source.kind === "q2") this.source.monsters.reportNoise(actor, origin); return undefined; },
       environmentDamage: (actor, amount, means, flags) => { const body = this.bodies.read(actor.id); if (body === null) return undefined;
@@ -2083,6 +2088,12 @@ export class SharedSimulation implements Simulation {
           this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
           this.selectedArsenal.frame(seconds(frame.time));
         }
+        const q1Weapons = this.q1WeaponSource();
+        if (!paused && q1Weapons !== null) for (const player of this.playerStates.values()) {
+          if (player.cutscene !== null || player.intermission || player.state.kind === "q1-netquake" && player.state.moveType === 0) continue;
+          const punchAngles = q1Weapons.game.advancePunch(player.actor.id, seconds(this.selectedQ1Frame().elapsed), createNumericOperations(providerTiming(this.recipe, this.weaponProvider.provider).numeric));
+          if (punchAngles !== null && player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles };
+        }
         if (this.handGrenades !== null) this.equipmentFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.handGrenades.selection.source.provider).clock);
         if (this.grapple !== null) {
           this.grappleFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.grapple.selection.source.provider).clock);
@@ -2164,6 +2175,8 @@ export class SharedSimulation implements Simulation {
           if (this.source.kind === "q2" && moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(player.actor.id, moved.impactDelta, (moved.state.flags & 128) !== 0);
           } finally { player.gravityMultiplier = gravityMultiplier; }
         }
+        const sourcePunch = this.q1WeaponSource()?.game.player(player.actor.id)?.punchAngles;
+        if (sourcePunch !== undefined && player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles: sourcePunch };
         if (!paused && this.selectedArsenal !== null && (player.profile.kind === "q2-classic" || player.profile.kind === "q2-rerelease") && this.actors.isLive(player.actor.id)) {
           const combat = this.combat.read(player.actor.id);
           if (combat === null) throw new Error("Selected arsenal owner has no combat state");
@@ -2372,8 +2385,9 @@ export class SharedSimulation implements Simulation {
   playerView(actor: ActorId): PlayerView {
     const player = this.requirePlayer(actor), view = player.view(), source = this.q2Views.get(actor);
     if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z };
-    return player.character !== "q2" || source === undefined ? view
-      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), viewHeight: source.offset.z };
+    const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
+    return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch }
+      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch, viewHeight: source.offset.z };
   }
   get sourceEntityText(): string { return this.options.world.entities; }
 

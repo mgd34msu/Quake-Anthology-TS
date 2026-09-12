@@ -41,7 +41,7 @@ export interface Q1SavedPlayer {
 export interface Q1FoundationCheckpoint {
   readonly format: "q1-foundation";
   readonly provider: ProviderId;
-  readonly version: 3;
+  readonly version: 4;
   readonly precaches: Q1PrecacheTables;
   readonly edition: "classic" | "rerelease";
   readonly time: number;
@@ -99,7 +99,7 @@ function saveEntity(game: Q1EntityServices, entity: Q1Actor): Q1SavedEntity {
 }
 export function captureFoundation(game: Q1EntityServices, sequence: number, nextDynamicSlot: number): Q1FoundationCheckpoint {
   return {
-    format: "q1-foundation", provider: game.provider, version: 3,
+    format: "q1-foundation", provider: game.provider, version: 4,
     precaches: { phase: game.precaches.phase, models: [...game.precaches.models], sounds: [...game.precaches.sounds] }, edition: game.options.edition, time: game.time, frameSeconds: game.frameSeconds, forceRetouch: game.forceRetouch, basis: { forward: { ...game.basis.forward }, right: { ...game.basis.right }, up: { ...game.basis.up } }, sequence, nextDynamicSlot,
     totalSecrets: game.totalSecrets, foundSecrets: game.foundSecrets, totalMonsters: game.totalMonsters, killedMonsters: game.killedMonsters,
     worldType: game.worldType, mapName: game.mapName, world: game.world === null ? null : savedOwned(game.world.actor),
@@ -108,7 +108,7 @@ export function captureFoundation(game: Q1EntityServices, sequence: number, next
     entities: [...game.entities.values()].map(entity => saveEntity(game, entity)),
     players: [...game.players.values()].map(player => {
       const { actor, powerups, ...state } = player;
-      return { actor: savedOwned(actor), actorProvider: actor.owner, state: { ...state, viewAngles: { ...state.viewAngles } }, powerups: [...powerups].map(([kind, expires]) => ({ kind, expires })) };
+      return { actor: savedOwned(actor), actorProvider: actor.owner, state: { ...state, punchAngles: { ...state.punchAngles }, viewAngles: { ...state.viewAngles } }, powerups: [...powerups].map(([kind, expires]) => ({ kind, expires })) };
     }),
     extensions: [...game.stateExtensions.values()].map(extension => ({ id: extension.id, bytes: extension.capture().slice() })),
   };
@@ -116,7 +116,7 @@ export function captureFoundation(game: Q1EntityServices, sequence: number, next
 
 /** Restores source objects around existing authority tables. It never runs a spawn function. */
 export function restoreFoundation(game: Q1EntityServices, checkpoint: Q1FoundationCheckpoint): undefined {
-  if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 3 || checkpoint.edition !== game.options.edition || checkpoint.provider !== game.provider) throw new Error("Incompatible Q1 source checkpoint");
+  if (checkpoint.format !== "q1-foundation" || checkpoint.version !== 4 || checkpoint.edition !== game.options.edition || checkpoint.provider !== game.provider) throw new Error("Incompatible Q1 source checkpoint");
   if (game.entities.size !== 0 || game.players.size !== 0) throw new Error("Restore Q1 source state into a fresh provider");
   game.precaches.restore(checkpoint.precaches);
   const owned = (saved: SavedActorId): OwnedActor => {

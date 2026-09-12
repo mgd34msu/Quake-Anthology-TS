@@ -1,3 +1,4 @@
+import type { Vec3 } from "../../contracts/math.ts";
 import { ApplicationWorldScene } from "./presentation-scene.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Rect, RendererBackend, RenderFrame, SceneCamera } from "../../contracts/render.ts";
@@ -33,6 +34,14 @@ export function seatViewport(index: number, count: number, width: number, height
   return { x, y, width: Math.trunc((column + 1) * width / columns) - x, height: Math.trunc((row + 1) * height / rows) - y };
 }
 
+export function cameraWithKick(camera: SceneCamera, kick: Vec3): SceneCamera {
+  if (kick.x === 0 && kick.y === 0 && kick.z === 0) return camera;
+  const local = anglesToAxis(kick), axis = camera.axis;
+  const rotate = (v: Vec3): Vec3 => ({ x: axis[0].x * v.x + axis[1].x * v.y + axis[2].x * v.z,
+    y: axis[0].y * v.x + axis[1].y * v.y + axis[2].y * v.z, z: axis[0].z * v.x + axis[1].z * v.y + axis[2].z * v.z });
+  return { ...camera, axis: [rotate(local[0]), rotate(local[1]), rotate(local[2])] };
+}
+
 export class WorldSeatPresentation implements SeatPresentation {
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
@@ -61,12 +70,12 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   camera(): SceneCamera {
-    if (this.q3Client !== null) return this.q3Client.camera();
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
+    if (this.q3Client !== null) return cameraWithKick(this.q3Client.camera(), player.kickAngles ?? { x: 0, y: 0, z: 0 });
     const fovX = 90, fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
-    return this.effects.playerView(this.local.player.actor, camera).camera;
+    return this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;
   }
 
   receive(events: readonly SimulationEvent[]): undefined {
@@ -126,7 +135,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects.lights, q3Lights: effects.q3Lights,
       ...this.scene.styles() };
-    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera, this.local.player.actor));
+    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera, this.local.player.actor), camera => cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
     this.frames.begin();
     if (nativeFrame === undefined) {
       this.frames.world(this.scene.view(input, effects.operations,

@@ -24,7 +24,7 @@ export class RogueGrapple {
     return [...this.game.entities.values()].find(entity => entity.classname === "hook" && entity.owner !== null && sameActor(entity.owner, owner)) ?? null;
   }
   private presentation(player: Q1PlayerState, punch = 0): undefined {
-    return this.game.host.emit({ kind: "weapon", player: player.actor.id, weapon: "rogue:grapple", viewModel: "progs/v_grpple.mdl", frame: player.weaponFrame, punch });
+    this.game.weaponPunch(player, punch); return this.game.host.emit({ kind: "weapon", player: player.actor.id, weapon: "rogue:grapple", viewModel: "progs/v_grpple.mdl", frame: player.weaponFrame, punch });
   }
   private fire(player: Q1PlayerState): boolean {
     const game = this.game; player.attackFinished = Math.fround(game.time + 0.1);

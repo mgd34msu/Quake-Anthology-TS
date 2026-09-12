@@ -1,3 +1,5 @@
+import type { NumericOperations } from "../../../contracts/numeric.ts";
+import { createMutableVectorMath } from "../../../core/math.ts";
 /* Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
@@ -311,7 +313,7 @@ export class Q1EntityServices {
       for (const item of ["q1:key/silver", "q1:key/gold"] satisfies readonly ItemId[]) this.host.inventory.configure(actor, { item, count: 0, capacity: 1 });
     }
     const state: Q1PlayerState = { actor, weapon: options.weapon ?? "shotgun", primaryHolstered: false, attackFinished: 0, attackHeld: false, jumpHeld: false, teleportUntil: 0, weaponFrame: 0, weaponAnimationAt: -1, weaponAnimationBase: 1,
-      continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, nailSide: 1,
+      continuousFiring: false, nextWeaponFrame: 0, lightningSoundAt: 0, punchAngles: ZERO, nailSide: 1,
       maxHealth: options.maxHealth ?? (this.options.edition === "rerelease" && this.options.skill === 3 && this.options.deathmatch === 0 ? 50 : 100), megaRotAt: -1, hostileUntil: 0, viewAngles: this.host.bodies.read(actor.id)?.angles ?? ZERO,
       waterLevel: 0, airFinished: this.time + 12, drownDamage: 2, drownAt: 0, hazardAt: 0, autoSwitch: "always", powerups: new Map<Q1Powerup, number>() };
     this.players.set(actor, state);
@@ -481,6 +483,16 @@ export class Q1EntityServices {
       }
     }
     return undefined;
+  }
+  weaponPunch(player: Q1PlayerState, pitch: number): undefined {
+    if (pitch !== 0) player.punchAngles = { ...player.punchAngles, x: pitch };
+    return undefined;
+  }
+  advancePunch(actor: ActorId, elapsed: number, numeric: NumericOperations): Vec3 | null {
+    const player = this.player(actor); if (player === null) return null;
+    const math = createMutableVectorMath(numeric, "preserve"), direction = { ...player.punchAngles };
+    const magnitude = math.VectorNormalize(direction), remaining = Math.max(0, numeric.subtract(magnitude, numeric.multiply(10, elapsed)));
+    const punch = { ...ZERO }; math.VectorScale(direction, remaining, punch); player.punchAngles = punch; return punch;
   }
   weaponFrame(actor: OwnedActor, seconds: number): undefined {
     this.time = seconds; const player = this.players.get(actor);

@@ -1,3 +1,4 @@
+import type { Q1CharacterAttack } from "./types.ts";
 /* weapons.qc/player.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -168,6 +169,7 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   const volume = game.host.weaponVolume?.(player.actor.id) ?? 1;
   if (!game.registeredWeapons.has(player.weapon)) game.weaponBeforeFire(player);
   const basis = game.makeVectors(player.viewAngles); const weapon = player.weapon; let delay = 0.1, punch = -2;
+  let attack: Q1CharacterAttack = { kind: weapon === "shotgun" || weapon === "supershotgun" ? "shotgun" : weapon === "lightning" ? "lightning" : weapon === "nailgun" || weapon === "supernailgun" ? "nail" : "rocket" };
   player.continuousFiring = weapon === "nailgun" || weapon === "supernailgun" || weapon === "lightning";
   player.nextWeaponFrame = Math.fround(game.time + 0.1);
   if (!player.continuousFiring) { player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; }
@@ -175,7 +177,7 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   switch (weapon) {
     case "axe": {
       delay = 0.5; punch = 0; game.sound(player.actor, "weapons/ax1.wav", "weapon", 1, volume);
-      const animation = game.host.random(); player.weaponAnimationBase = animation >= 0.25 && animation < 0.5 || animation >= 0.75 ? 5 : 1;
+      const animation = game.host.random(); attack = { kind: "axe", variant: animation < 0.25 ? 0 : animation < 0.5 ? 1 : animation < 0.75 ? 2 : 3 }; player.weaponAnimationBase = animation >= 0.25 && animation < 0.5 || animation >= 0.75 ? 5 : 1;
       // player_axe3 is the hit frame, two 0.1 second animation steps after attack begins.
       const strike = game.create("axe_strike"); strike.owner = player.actor.id;
       game.schedule(strike, 0.2, game.named.action(strike, "player_axe3")); break;
@@ -211,7 +213,8 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   }
   player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay));
   player.weaponFrame = player.continuousFiring ? player.weaponFrame % (weapon === "lightning" ? 4 : 8) + 1 : player.weaponAnimationBase;
-  game.host.emit({ kind: "weapon", player: player.actor.id, weapon, viewModel: game.weaponModel(weapon, player), frame: player.weaponFrame, punch });
+  game.weaponPunch(player, punch);
+  game.host.emit({ kind: "weapon", player: player.actor.id, weapon, viewModel: game.weaponModel(weapon, player), frame: player.weaponFrame, punch, attack });
   game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 

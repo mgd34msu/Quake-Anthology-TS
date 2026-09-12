@@ -243,8 +243,12 @@ class NetQuakeMove {
   private clientThink(): void {
     const c = this.context, m = c.math, n = m.n, s = this.state;
     if (s.moveType === Q1_MOVE_NONE) return;
-    const punch = m.normalize(s.punchAngles);
-    s.punchAngles = m.scale(punch.direction, Math.max(0, n.subtract(punch.length, n.multiply(10, this.frameSeconds))));
+    const sourcePunch = c.options.sourcePunchAngles;
+    if (sourcePunch !== undefined) s.punchAngles = sourcePunch;
+    else {
+      const punch = m.normalize(s.punchAngles);
+      s.punchAngles = m.scale(punch.direction, Math.max(0, n.subtract(punch.length, n.multiply(10, this.frameSeconds))));
+    }
     if (s.health <= 0) return;
     const angles = m.add(s.viewAngles, s.punchAngles);
     const side = m.dot(s.velocity, m.angles(s.angles).right), sign = side < 0 ? -1 : 1;

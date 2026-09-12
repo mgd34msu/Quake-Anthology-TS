@@ -12,6 +12,7 @@ import { grenadeVelocity, missionReference, moveMissile, setMissionNumber, setMi
 function finish(game: Q1EntityServices, player: Q1PlayerState, delay: number, frame: number, model: string, punch: number): boolean {
   player.attackFinished = Math.fround(game.time + delay); player.nextWeaponFrame = player.attackFinished;
   player.weaponFrame = frame; player.hostileUntil = Math.fround(game.time + 1);
+  game.weaponPunch(player, punch);
   game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon, viewModel: model, frame, punch });
   const body = game.host.bodies.read(player.actor.id); if (body !== null) game.effect("muzzleflash", body.origin, player.actor.id);
   return true;

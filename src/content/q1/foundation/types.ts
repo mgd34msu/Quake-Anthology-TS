@@ -49,6 +49,8 @@ export interface Q1TraceRequest {
   readonly missile?: boolean;
 }
 export interface Q1Basis { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3; }
+export type Q1CharacterAttack = { readonly kind: "axe"; readonly variant: 0 | 1 | 2 | 3 } | { readonly kind: "shotgun" | "rocket" | "nail" | "lightning" };
+
 export type Q1Event =
   | { readonly kind: "sound"; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
   | { readonly kind: "ambient"; readonly origin: Vec3; readonly path: string; readonly volume: number; readonly attenuation: number }
@@ -62,7 +64,7 @@ export type Q1Event =
   | { readonly kind: "lightstyle"; readonly style: number; readonly pattern: string }
   | { readonly kind: "monster-total"; readonly total: number }
   | { readonly kind: "secret" | "monster-killed"; readonly actor: ActorId; readonly total: number; readonly found: number }
-  | { readonly kind: "weapon"; readonly player: ActorId; readonly weapon: Q1Weapon; readonly viewModel: string; readonly frame: number; readonly punch: number }
+  | { readonly kind: "weapon"; readonly player: ActorId; readonly weapon: Q1Weapon; readonly viewModel: string; readonly frame: number; readonly punch: number; readonly attack?: Q1CharacterAttack }
   | { readonly kind: "teleport-player"; readonly player: ActorId; readonly angles: Vec3; readonly lockUntil: number }
   | { readonly kind: "powerup"; readonly player: ActorId; readonly powerup: Q1Powerup; readonly expires: number }
   | { readonly kind: "intermission"; readonly origin: Vec3; readonly angles: Vec3; readonly map: string; readonly exitAfter: number; readonly track: number }
@@ -159,6 +161,7 @@ export interface Q1PlayerState {
   continuousFiring: boolean;
   nextWeaponFrame: number;
   lightningSoundAt: number;
+  punchAngles: Vec3;
   nailSide: number;
   maxHealth: number;
   megaRotAt: number;

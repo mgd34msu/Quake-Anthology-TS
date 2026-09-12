@@ -251,7 +251,7 @@ export class ApplicationQ3Client {
     }
     return null;
   }
-  frame(additionalEffects?: (camera: SceneCamera) => ApplicationEffectFrame): RenderFrame {
+  frame(additionalEffects?: (camera: SceneCamera) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera): RenderFrame {
     this.requireGame(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
@@ -262,7 +262,8 @@ export class ApplicationQ3Client {
           operations: [{ kind: "draw", batches: prepareMaterialText(submission.draw, this.viewportValue, world.materialContext(input)) }] });
         continue;
       }
-      const scene = submission.scene, input: WorldViewInput = { camera: scene.camera, time, target: { kind: "seat", seat },
+      const scene = submission.scene, camera = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? scene.camera : transformCamera?.(scene.camera) ?? scene.camera;
+      const input: WorldViewInput = { camera, time, target: { kind: "seat", seat },
         q3Lights: scene.lights.map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: light.additive })).slice(0, 32),
         renderText: scene.source.text, visibleAreas: new Set(Array.from({ length: scene.source.areaMask.length * 8 }, (_, area) => area)
           .filter(area => ((scene.source.areaMask[area >> 3] ?? 0) & (1 << (area & 7))) === 0)),

@@ -1,3 +1,6 @@
+import { cameraWithKick } from "../../../src/app/bootstrap/presentation.ts";
+import { anglesToAxis } from "../../../src/core/math.ts";
+import { perspectiveProjection } from "../../../src/render/scene/view.ts";
 import { q1Creatures } from "../../../src/content/q1/base/creatures.ts";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import { simulationProviderCheckpoint } from "../../../src/app/bootstrap/simulation/save.ts";
@@ -68,6 +71,7 @@ test("native Q1 desired weapon intents preserve continuous fire and source impul
         for (const [weapon, ammo] of [["q1:weapon/nailgun", "q1:ammo/nails"], ["q1:weapon/lightning", "q1:ammo/cells"]] satisfies readonly (readonly [ItemId, ItemId])[]) {
           for (let frame = 0; frame < 4; frame++) {
             step(frame === 0 || repeatSelection ? weapon : null, true);
+            if (movement.state.kind === "q1-netquake") expect(movement.state.punchAngles).toEqual(native.punchAngles);
             timeline.push({ weapon: native.weapon, frame: native.weaponFrame, continuous: native.continuousFiring,
               deadline: native.attackFinished, nextFrame: native.nextWeaponFrame, ammo: simulation.inventory.count(actor, ammo) });
           }
@@ -438,6 +442,7 @@ for (const mapEdition of armorEditions) test(`e1m1 ${mapEdition} map runs the ot
     shells.touch(actor, null); expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(45);
     step(simulation, actor, client, 4, true); expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(44);
     expect(weapon.attackFinished).toBeGreaterThan(0); expect(native.attackFinished).toBe(0);
+    expect(weapon.punchAngles.x).toBe(-2);
     for (let frame = 5; frame < 12; frame++) step(simulation, actor, client, frame);
     const nailgun = [...map.game.entities.values()].find(entity => entity.classname === 'weapon_nailgun');
     if (nailgun?.touch == null) throw new Error('Missing authored e1m1 nailgun');
@@ -512,3 +517,79 @@ for (const mapEdition of armorEditions) test(`e1m1 ${mapEdition} map runs the ot
     expect(simulation.inventory.count(actor, 'q1:ammo/shells')).toBe(44);
   } finally { simulation.close(); await content.close(); }
 }, 30000);
+
+for (const family of ['q1', 'q2', 'q3', 'q3-world']) test(`Q1 source recoil survives ${family} movement and character with one saved camera kick`, async () => {
+  const selectedFamily = family === 'q3-world' ? 'q3' : family;
+  const command = parseApplicationCommand(['--game', family === 'q3-world' ? 'q3-baseq3' : 'q1-classic-id1', '--map', family === 'q3-world' ? 'q3dm1' : 'e1m1', '--movement', selectedFamily, '--character', selectedFamily, '--dedicated']);
+  if (command.kind !== 'run') throw new Error('Expected Q1 recoil launch');
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false }), preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: 'selected', value: [{ provider: 'q1:official', content: catalog.require('q1-rerelease-id1').id }] } } });
+  const content = await loadApplicationContent(command.options, recipe), identity = createIdentityOwner(`recoil-${family}`), client = identity.client(0, 0);
+  const options: Parameters<typeof createSimulation>[0] = { identity, recipe, world: content.world, mounts: content.mounts, skill: 0, mode: 'singleplayer', seed: 17, maxClients: 1, playerIdentity: value => ({ seat: value.slot, socialId: '' }) };
+  const simulation = createSimulation(options);
+  const step = (world: ReturnType<typeof createSimulation>, actor: ActorId, owner: ClientId, sequence: number, attack = false, copies = 1) => {
+    const profile = world.movementPlayer(actor)?.profile.kind;
+    world.step({ elapsedMilliseconds: 100, commands: Array.from({ length: copies }, (_, copy): Parameters<typeof world.step>[0]['commands'][number] => ({ actor, source: { kind: 'remote-client', client: owner }, sequence: sequence * 2 + copy,
+      command: profile === 'q1-netquake' ? { kind: 'q1-netquake', acknowledgedServerTimeSeconds: world.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse: 0 }
+        : profile === 'q2-classic' ? { kind: 'q2-classic', milliseconds: 100, angleShorts: [0, 0, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: Number(attack), impulse: 0, lightLevel: 0 }
+        : { kind: 'q3', serverTimeMilliseconds: (sequence + 1) * 100, angleWords: [0, 0, 0], forwardMove: 0, rightMove: 0, upMove: 0, buttons: Number(attack), weapon: 0 },
+    })) });
+  };
+  try {
+    const actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor), source = simulation.q1WeaponSource();
+    const weapon = source?.game.player(actor);
+    if (player === null || source === null || weapon == null) throw new Error('Missing source recoil owner');
+    for (let frame = 0; frame < 4; frame++) step(simulation, actor, client, frame);
+    simulation.inventory.give(player.actor, 'q1:weapon/supershotgun', 1);
+    expect(simulation.requestWeapon(actor, { provider: source.game.provider, item: 'q1:weapon/supershotgun' })).toBe(true);
+    step(simulation, actor, client, 4, true);
+    expect(weapon.punchAngles).toEqual({ x: -4, y: 0, z: 0 });
+    expect(simulation.playerView(actor).kickAngles?.x).toBe(-4);
+    expect(player.viewAngles.x).toBe(0); expect(player.commandAngles.x).toBe(0);
+    const gun = simulation.presentations().find(model => model.viewWeapon && model.actor.equals(actor));
+    expect(gun?.angles.x).toBe(0);
+    if (player.state.kind === 'q1-netquake') expect(player.state.punchAngles).toEqual(weapon.punchAngles);
+    if (player.animation.state.kind === 'q1') expect(player.animation.state.frame).toBe(113);
+    if (family === 'q3-world') {
+      // Native Q3 saved games are separately unavailable; all three movement saves are covered on e1m1 above.
+      for (let frame = 5; frame < 9; frame++) { step(simulation, actor, client, frame); expect(weapon.punchAngles.x).toBe(-4 + (frame - 4) * source.game.frameSeconds * 10); }
+      return;
+    }
+    const restoredIdentity = createIdentityOwner(`recoil-restored-${family}`), restoredClient = restoredIdentity.client(0, 0);
+    const restored = createSimulation({ ...options, identity: restoredIdentity, restoredClients: [restoredClient], restore: decodeSaveImage(encodeSaveImage(simulation.checkpoint())) });
+    try {
+      const restoredActor = restored.players()[0]; if (restoredActor === undefined) throw new Error('Missing restored recoil owner');
+      expect(restored.playerView(restoredActor).kickAngles).toEqual(simulation.playerView(actor).kickAngles);
+      for (let frame = 5; frame < 9; frame++) {
+        if (frame === 6) { simulation.step({ elapsedMilliseconds: 100, commands: [] }); restored.step({ elapsedMilliseconds: 100, commands: [] }); }
+        else { step(simulation, actor, client, frame, false, frame === 5 ? 2 : 1); step(restored, restoredActor, restoredClient, frame, false, frame === 5 ? 2 : 1); }
+        expect(weapon.punchAngles.x).toBe(frame === 8 ? -0 : frame - 8);
+        expect(restored.q1WeaponSource()?.game.player(restoredActor)?.punchAngles).toEqual(weapon.punchAngles);
+        expect(restored.playerView(restoredActor).kickAngles).toEqual(simulation.playerView(actor).kickAngles);
+        expect(player.viewAngles.x).toBe(0); expect(player.commandAngles.x).toBe(0);
+      }
+    } finally { restored.close(); }
+    if (family === 'q1') {
+      for (let frame = 9; frame < 13; frame++) step(simulation, actor, client, frame);
+      expect(simulation.requestWeapon(actor, { provider: source.game.provider, item: 'q1:weapon/axe' })).toBe(true);
+      const random = source.game.host.random; let draws = 0;
+      source.game.host.random = () => { draws++; return random(); };
+      try { expect(source.game.weaponInput(player.actor, true, player.viewAngles, source.game.time, player.waterLevel)).toBe(true); }
+      finally { source.game.host.random = random; }
+      expect(draws).toBe(1);
+    }
+  } finally { simulation.close(); await content.close(); }
+}, 30000);
+
+
+test("common camera kick preserves zero basis and raises a pitched yawed view without changing aim", () => {
+  const aim = { x: 20, y: 35, z: 0 };
+  const camera: Parameters<typeof cameraWithKick>[0] = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis(aim), viewport: { x: 0, y: 0, width: 640, height: 400 }, projection: perspectiveProjection(90, 64, 16384), clip: { kind: 'none' } };
+  expect(cameraWithKick(camera, { x: 0, y: 0, z: 0 })).toBe(camera);
+  const kicked = cameraWithKick(camera, { x: -4, y: 0, z: 0 }), expected = anglesToAxis({ ...aim, x: 16 });
+  for (const axis of [0, 1, 2]) {
+    const actual = kicked.axis[axis], target = expected[axis]; if (actual === undefined || target === undefined) throw new Error('Missing camera basis');
+    expect(actual.x).toBeCloseTo(target.x, 6); expect(actual.y).toBeCloseTo(target.y, 6); expect(actual.z).toBeCloseTo(target.z, 6);
+  }
+  expect(camera.axis).toEqual(anglesToAxis(aim));
+});
