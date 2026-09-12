@@ -9,7 +9,7 @@ import type { QcHostBuiltinName } from "./builtins.ts";
 import type { QcBuiltin } from "./machine.ts";
 import type { QcWorldHost } from "./world-host.ts";
 
-export type QcPresentationEvent = Extract<Q1Event, { readonly kind: "sound" | "ambient" | "particles" | "lightstyle" }>;
+export type QcPresentationEvent = Extract<Q1Event, { readonly kind: "sound" | "ambient" | "particles" | "lightstyle" | "server-command" }>;
 export interface QcPrecachedResource {
   readonly index: number;
   readonly resource: ResolvedResourceReference;
@@ -43,6 +43,7 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
     });
   };
   install("bprint", vm => { services.print(vm.varString(0)); });
+  install("localcmd", vm => { emit({ kind: "server-command", text: vm.argString(0) }); });
   const message = services.message;
   if (message !== undefined) {
     for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {

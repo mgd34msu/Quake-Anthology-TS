@@ -1138,3 +1138,90 @@ test.skipIf(!haveCorpus)("actual id1 broadcast writers preserve all temp effects
     expect(messages.bytes()).toHaveLength(0);
   } finally { actors.close(); archive.close(); }
 });
+
+test.skipIf(!haveCorpus)("installed Hipnotic localcmd appends exact source text without executing it", async () => {
+  const { QcWorldHost } = await import("../../../src/compat/qc/world-host.ts");
+  const { createQcPresentationBindings } = await import("../../../src/compat/qc/presentation-host.ts");
+  const { createSceneQueries } = await import("../../../src/world/collision/index.ts");
+  const { readQ1Bsp } = await import("../../../src/formats/q1-map/index.ts");
+  const { CommandBuffer } = await import("../../../src/core/commands/index.ts");
+  const program = await readProgram("hipnotic/pak0.pak"), archive = await openArchive(corpus + "id1/PAK0.PAK");
+  const identity = createIdentityOwner("qc-localcmd"), actors = new SessionActorRegistry(identity);
+  try {
+    const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing real geometry");
+    const scene = createSceneQueries(readQ1Bsp(await archive.readEntry(entry))), numeric = createNumericOperations(Q1_DONOR_PROFILE);
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 16), bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => qcLinkBounds(body, 0, numeric),
+      onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
+        scene.link(body, { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false }); return undefined;
+      } });
+    const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 16, lifetime: quakeEdictLifetime(1),
+      storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }), now: () => ({ kind: "seconds", value: 1 }),
+      unlink: actor => bodies.unlink(actor), exhausted: () => { throw new Error("No command edicts"); } });
+    slots.bindExisting(0, "quakec:world"); slots.allocate("quakec:info_command");
+    const world = new QcWorldHost({ program, entities, actors, slots, bodies, scene, numeric: Q1_DONOR_PROFILE, model: () => null,
+      foreignReference: () => { throw new Error("No foreign command actors"); } });
+    const texts: string[] = [], printed: string[] = [];
+    const presentation = createQcPresentationBindings(world, { content: "q1:classic:hipnotic:retail", loading: () => false,
+      print: () => undefined, lookup: () => null, precache: () => { throw new Error("No command precache"); },
+      events: { registerResource: () => undefined, emit: (_content, source) => {
+        if (source.event.kind !== "server-command") throw new Error("Unexpected command event"); texts.push(source.event.text); return undefined;
+      } } });
+    const vm = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake", host: presentation }), serverActive: () => true });
+    const message = program.fieldsByName.get("message"); if (message === undefined) throw new Error("Missing message field");
+    vm.globals.setInt(vm.globalOffset("self"), entities.reference(1));
+    const chunks = ["echo \"split", " text\";wait;echo after\n"];
+    for (const text of chunks) { entities.at(1).setInt(message.offset, vm.strings.setEngine("map-command", text)); vm.execute(program.functionNamed("info_command").index); }
+    expect(texts).toEqual(chunks); expect(printed).toEqual([]);
+    const commands = new CommandBuffer({ dialect: "q1-netquake", context: { session: identity.session, origin: { kind: "server-console" } }, print: text => { printed.push(text); } });
+    for (const text of texts) commands.append(text);
+    expect(printed).toEqual([]); commands.execute(); expect(printed.join("")).toContain("split text"); expect(printed.join("")).not.toContain("after");
+    commands.execute(); expect(printed.join("")).toContain("after");
+  } finally { actors.close(); archive.close(); }
+});
+
+
+test.skipIf(!haveCorpus)("Q1 application localcmd shares native startup and next-frame command execution", async () => {
+  const { Application } = await import("../../../src/app/bootstrap/application.ts");
+  const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
+  const { applicationPreset } = await import("../../../src/app/bootstrap/content.ts");
+  const { discoverInstalledContent, presetChoice, resolveLaunch } = await import("../../../src/content/catalog/index.ts");
+for (const mode of ['qc', 'native']) {
+  const command = parseApplicationCommand(['--game', mode === 'qc' ? 'q1-classic-id1' : 'q1-classic-hipnotic', '--map', mode === 'qc' ? 'e1m1' : 'hip1m1', '--dedicated']);
+  if (command.kind !== 'run') throw new Error('Missing launch');
+  const catalog = await discoverInstalledContent({ corpusRoot: command.options.corpusRoot, discoverMods: false });
+  const preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset: mode === 'native' ? preset : { ...preset, execution: [{ kind: 'quakec', owner: preset.map.entities, role: 'server-game', artifact: { content: preset.map.entities.content, path: 'progs.dat' }, api: { kind: 'q1-netquake', programVersion: 6, systemCrc: 5927 } }] }, choice: presetChoice(preset.id) });
+  const printed: string[] = [];
+  const app = await Application.open(command.options, { print: text => { printed.push(text); } }, recipe);
+  try {
+    const qc = app.simulation.quakecSource(), native = app.simulation.q1Source();
+    const cvars = qc?.cvars ?? native?.cvars; if (cvars === undefined) throw new Error('Missing cvars');
+    const emit = (text: string): void => {
+      if (qc !== null) { qc.machine.globals.setInt(4, qc.machine.strings.setEngine('localcmd-probe', text)); qc.machine.execute(qc.prepared.program.functionNamed('localcmd').index, 1); }
+      else if (native !== null) { const entity = native.game.create('info_command'); entity.message = text; native.game.spawnEntity(entity); }
+      else throw new Error('Missing source');
+    };
+    emit('sv_gravity 3'); emit('21;echo startup-once;wait;sv_gravity 654\n');
+    if (cvars.variableValue('sv_gravity') !== 800) throw new Error('Command executed synchronously');
+    await app.step(100);
+    if (cvars.variableValue('sv_gravity') !== 321) throw new Error('Startup/append/wait phase failed');
+    const delivered = app.presentationEvents.filter(event => event.kind === 'q1' && event.event.kind === 'server-command');
+    if (delivered.length !== 2) throw new Error('Startup events lost or duplicated');
+    await app.step(100);
+    if (cvars.variableValue('sv_gravity') !== 654) throw new Error('Next-frame wait failed');
+    if (printed.join('').split('startup-once').length !== 2) throw new Error('Startup command replayed');
+    if (qc !== null) {
+      const begin = qc.beginFrame.bind(qc); let once = false;
+      qc.beginFrame = frame => { begin(frame); if (!once) { once = true; emit('sv_gravity 222\n'); } return undefined; };
+      await app.step(100);
+      if (cvars.variableValue('sv_gravity') !== 654) throw new Error('Source command executed at frame end');
+      await app.step(100);
+      if (cvars.variableValue('sv_gravity') !== 222) throw new Error('Source command did not execute next frame');
+    }
+    emit('not_a_registered_engine_command\n'); await app.step(100);
+    if (!printed.join('').includes('Unknown command')) throw new Error('Unsupported command silently swallowed');
+    expect(delivered).toHaveLength(2);
+    expect(printed.join('')).toContain('Unknown command');
+  } finally { await app.close(); }
+}
+}, 30000);

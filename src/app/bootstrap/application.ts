@@ -270,7 +270,7 @@ export class Application {
       this.sourceCommands = this.q2Console.commands;
       return;
     }
-    const q1 = this.simulation.q1Source();
+    const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
     if (q1 !== null) {
       const commands = new CommandBuffer({ dialect: "q1-netquake", cvars: q1.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
@@ -341,6 +341,14 @@ export class Application {
     this.pendingRestart = this.elapsed + delay * 1000; return undefined;
   }
 
+  private appendQ1Commands(events: readonly SimulationPresentationEvent[]): void {
+    for (const source of events) {
+      if (source.kind !== "q1" || source.event.kind !== "server-command") continue;
+      if (this.sourceCommands === null) throw new Error("Q1 source console has no command owner");
+      this.sourceCommands.append(source.event.text);
+    }
+  }
+
   private async sourceActions(): Promise<void> {
     for (const source of this.sourceEvents) {
       if (source.kind === "q1-composition") {
@@ -396,7 +404,7 @@ export class Application {
         if (local) this.requestQuit();
       }
     }
-    this.sourceCommands?.execute();
+    if (this.simulation.q1Source() === null && this.simulation.quakecSource() === null) this.sourceCommands?.execute();
   }
 
   private async networkHost(simulation = this.simulation, content = this.content): Promise<NativeServerHost> {
@@ -840,6 +848,10 @@ export class Application {
       await this.applyTransition();
       this.graphical?.input.pump();
       await this.dispatchClientInputs();
+      const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
+      const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
+      this.appendQ1Commands(beforeFrameEvents);
+      if (q1 !== null && this.sourceCommands !== this.dedicatedCommands) this.sourceCommands?.execute();
       if (this.dedicatedCommands !== null) {
         this.dedicatedConsole?.drain(this.dedicatedCommands);
         this.dedicatedCommands.execute();
@@ -863,7 +875,9 @@ export class Application {
       const output = this.session.step({ elapsedMilliseconds,
         commands: [...localCommands, ...remote] });
       this.frames++;
-      this.sourceEvents = this.simulation.drainPresentationEvents();
+      const frameEvents = this.simulation.drainPresentationEvents();
+      if (q1 !== null) this.appendQ1Commands(frameEvents);
+      this.sourceEvents = [...beforeFrameEvents, ...frameEvents];
       this.bots?.receive(this.sourceEvents);
       this.network?.server.publish(output, this.sourceEvents, performance.now());
       const intents = this.simulation.takeTransitions();
