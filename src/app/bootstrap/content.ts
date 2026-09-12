@@ -137,6 +137,9 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
   };
   const recipe = restoredRecipe ?? await resolveRecipe();
+  for (const module of recipe.execution) {
+    if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
+  }
   const mounts = await openMountPlan(recipe.mounts);
   try {
     const bytes = await mounts.read(recipe.map.geometry);
