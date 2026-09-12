@@ -90,6 +90,7 @@ export interface BotObservedPickup {
   readonly name: string;
 }
 export interface BotPickupObservations {
+  ownsItemGoal?(client: number, entity: number): boolean;
   candidates(client: number): readonly BotObservedPickup[];
   inspect(client: number, actor: ActorId): BotObservedPickup | null;
 }

@@ -351,6 +351,7 @@ export interface SourcePickupGoal {
   readonly utility: number;
 }
 export interface SourcePickupGoals {
+  ownsItemGoal?(client: number, entity: number): boolean;
   candidates(client: number): readonly SourcePickupGoal[];
   inspect(client: number, actor: ActorId): SourcePickupGoal | null;
 }
@@ -1197,6 +1198,11 @@ export class BotGoalLibrary {
       if (candidate.kind === "native") {
         const item = candidate.item;
         if (!this.allowed(item.flags) || (item.flags & 8) !== 0 || item.goalArea === 0 || (item.entity === 0 && (item.flags & 16) === 0)) continue;
+        if (world.sourcePickups?.ownsItemGoal !== undefined) {
+          const revision = this.mapRevision, owned = world.sourcePickups.ownsItemGoal(state.client, item.entity);
+          if (revision !== this.mapRevision) return false;
+          if (owned) continue;
+        }
         const indexes = state.weightIndexes;
         if (indexes === null) throw new RangeError("item weight indexes have not been initialized");
         const indexView = allocationView(indexes), offset = item.info.number * 4;

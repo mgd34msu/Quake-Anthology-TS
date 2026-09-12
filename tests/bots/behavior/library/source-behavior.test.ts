@@ -86,12 +86,13 @@ test("chat uses caller time, shared cooldowns, context matches, and caller-owned
 test("item goals combine source weights, borrowed route costs, and source respawn avoidance", () => {
   const memory = new BotMemory(), reader = sources({
     "items.c": 'iteminfo "item_health" { name "Health" modelindex 5 respawntime 35 mins {-15,-15,-15} maxs {15,15,15} }\n'
-      + 'iteminfo "item_armor" { name "Armor" modelindex 6 respawntime 25 mins {-15,-15,-15} maxs {15,15,15} }',
-    "weights.c": 'weight "item_health" return 10; weight "item_armor" return 30;',
+      + 'iteminfo "item_armor" { name "Armor" modelindex 6 respawntime 25 mins {-15,-15,-15} maxs {15,15,15} }\n'
+      + 'iteminfo "weapon_shotgun" { name "Shotgun" modelindex 7 respawntime 30 mins {-15,-15,-15} maxs {15,15,15} }',
+    "weights.c": 'weight "item_health" return 10; weight "item_armor" return 30; weight "weapon_shotgun" return balance(150,100,200);',
   }, memory), weightStore = new WeightConfigStore(reader, { memory });
-  let now = 50;
+  let now = 50, randomCalls = 0;
   const library = new BotGoalLibrary({ memory, resolver: reader, weightStore, log: { write() {} }, clock: () => now,
-    gameType: () => 0, random: { nextInt: () => 0 } });
+    gameType: () => 0, random: { nextInt: () => { randomCalls++; return 0; } } });
   const bspEntities = new AasBspEntities(() => {}, memory);
   const entities = new Map<number, GoalEntityInfo>();
   for (const [entity, x, modelIndex] of [[1, 100, 5], [2, 200, 6]]) {
@@ -192,6 +193,46 @@ test("item goals combine source weights, borrowed route costs, and source respaw
     expect(anchored.origin).toEqual({ x: 200, y: 0, z: 39 });
     expect(anchored.mins).toEqual({ x: -8, y: -8, z: -24 });
     expect(anchored.maxs).toEqual({ x: 8, y: 8, z: 32 });
+    bspEntities.load('{ "classname" "worldspawn" } { "classname" "item_health" "origin" "100 0 15" } { "classname" "weapon_shotgun" "origin" "200 0 15" }');
+    const weaponOrigin = { x: 200, y: 0, z: 15 };
+    entities.set(2, { origin: weaponOrigin, lastVisibleOrigin: weaponOrigin, lastUpdateTime: now, type: 2, modelIndex: 7 });
+    let supplyAvailable = false;
+    const mappedPickups: SourcePickupGoals = {
+      candidates: client => supplyAvailable ? sourcePickups.candidates(client).map(pickup => ({ ...pickup, entity: 2 })) : [],
+      inspect: (client, actor) => {
+        const pickup = supplyAvailable ? sourcePickups.inspect(client, actor) : null;
+        return pickup === null ? null : { ...pickup, entity: 2 };
+      },
+    };
+    const unownedWorld = { ...world, sourcePickups: mappedPickups };
+    library.initLevelItems(unownedWorld); library.updateEntityItems(); library.resetGoalState(state); randomCalls = 0;
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    const nativeWeapon = library.getTopGoal(state);
+    if (nativeWeapon === null) throw new Error("Linked native weapon goal missing");
+    expect(nativeWeapon.entity).toBe(2); expect(isSourceGoalNumber(nativeWeapon.number)).toBe(false);
+    expect(randomCalls).toBe(2);
+    const ownershipCalls: (readonly [number, number])[] = [];
+    const ownedWorld = { ...unownedWorld, sourcePickups: { ...mappedPickups, ownsItemGoal: (client: number, entity: number) => {
+      ownershipCalls.push([client, entity]); return entity === 2;
+    } } };
+    library.initLevelItems(ownedWorld); library.updateEntityItems(); library.resetGoalState(state); randomCalls = 0;
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(true);
+    expect(library.getTopGoal(state)?.entity).toBe(1);
+    expect(randomCalls).toBe(1); expect(ownershipCalls).toEqual([[0, 2], [0, 1]]);
+    expect(library.goalName(nativeWeapon.number)).toBe("Shotgun");
+    expect(library.getLevelItemGoal(-1, "Shotgun")?.entity).toBe(2);
+    supplyAvailable = true; library.resetGoalState(state); randomCalls = 0;
+    expect(library.chooseNBGItem(state, { x: 0, y: 0, z: 0 }, [0], 0, null, 201)).toBe(true);
+    const mapped = library.getTopGoal(state);
+    if (mapped === null) throw new Error("Mapped weapon supply goal missing");
+    expect(mapped.entity).toBe(2); expect(isSourceGoalNumber(mapped.number)).toBe(true);
+    expect(randomCalls).toBe(1);
+    library.initLevelItems({ ...unownedWorld, sourcePickups: { ...mappedPickups, ownsItemGoal: () => {
+      library.initLevelItems(unownedWorld); return true;
+    } } });
+    library.updateEntityItems(); library.resetGoalState(state); randomCalls = 0;
+    expect(library.chooseLTGItem(state, { x: 0, y: 0, z: 0 }, [0], 0)).toBe(false);
+    expect(library.getTopGoal(state)).toBeNull(); expect(randomCalls).toBe(0);
   } finally { library.shutdown(); weightStore.shutdown(); reader.disposeResources(); memory.dispose(); }
 });
 

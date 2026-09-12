@@ -94,6 +94,7 @@ export class SourceBotDirector {
   }
 
   private sourcePickupGoals(game: SourceBotGame): SourcePickupGoals {
+    const pickups = game.pickups;
     const goal = (client: number, pickup: BotObservedPickup | null): SourcePickupGoal | null => {
       const state = this.ai.context.states.get(client);
       if (pickup === null || state === undefined || state === null || pickup.observation.availability.kind !== "ready" || !pickup.observation.availability.eligible) return null;
@@ -101,7 +102,7 @@ export class SourceBotDirector {
       return utility > 0 ? { actor: pickup.observation.actor, entity: pickup.entity, origin: pickup.origin,
         bounds: pickup.bounds, name: pickup.name, utility } : null;
     };
-    return { candidates: client => {
+    return { ...(pickups?.ownsItemGoal === undefined ? {} : { ownsItemGoal: pickups.ownsItemGoal.bind(pickups) }), candidates: client => {
       const candidates: SourcePickupGoal[] = [];
       for (const pickup of game.pickups?.candidates(client) ?? []) {
         const candidate = goal(client, pickup);
