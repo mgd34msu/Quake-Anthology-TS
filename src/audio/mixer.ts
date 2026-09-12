@@ -348,7 +348,7 @@ export class AudioMixer {
         requireGain(volume, "music volume");
         this.musicVolume = volume;
     }
-    /** Standalone setting; engine-owned mixers read their bound s_doppler during loop registration. */
+    /** Global permission; a source s_doppler cvar may further disable its own loops. */
     setDopplerEnabled(enabled: boolean): void {
         this.dopplerEnabled = enabled;
     }
@@ -538,7 +538,7 @@ export class AudioMixer {
         const dopplerCvar = this.soundCvars?.get("s_doppler");
         if (this.soundCvars !== null && dopplerCvar === undefined)
             throw new Error("Missing sound cvar s_doppler");
-        const dopplerEnabled = dopplerCvar === undefined ? this.dopplerEnabled : dopplerCvar.integerValue !== 0;
+        const dopplerEnabled = this.dopplerEnabled && (dopplerCvar === undefined || dopplerCvar.integerValue !== 0);
         if (dopplerEnabled && dot3(velocity, velocity) > 0) {
             doppler = true;
             const listenerPosition = this.positionForEntity(this.listenerEntity);
@@ -923,7 +923,7 @@ export class AudioMixer {
             const absoluteFrame = this.paintedTime + outputFrame;
             const sampleOffset = absoluteFrame % loop.prepared.outputFrames;
             const count = Math.min(frames - outputFrame, loop.prepared.outputFrames - sampleOffset);
-            if (!loop.doppler || loop.dopplerScale === 1) {
+            if (!this.dopplerEnabled || !loop.doppler || loop.dopplerScale === 1) {
                 for (let index = 0; index < count; index++) {
                     if (sampleOffset + index < 0)
                         throw new RangeError("loop sound reached an invalid negative sample access");

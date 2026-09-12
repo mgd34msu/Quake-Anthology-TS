@@ -64,6 +64,7 @@ export class ApplicationAudio {
     private readonly characterModel: string, private readonly print: (text: string) => undefined) {
     this.random = new GameRandom(seed);
     this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
+    this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
     this.music = new ApplicationMusic(this.engine, print);
     this.engine.openDevice();
   }

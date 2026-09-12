@@ -213,12 +213,15 @@ export interface EquipmentSelection {
   readonly handGrenades: HandGrenadeSelection;
 }
 
+export type DopplerSelection = { readonly kind: "source" | "disabled" };
+
 export type EnvironmentSelection =
   | { readonly kind: "audio-content" }
   | { readonly kind: "disabled" }
   | { readonly kind: "selected"; readonly resource: ResourceRequest };
 
 export interface PresentationSelection {
+  readonly doppler: DopplerSelection;
   readonly environment: EnvironmentSelection;
   readonly assets: ContentId;
   readonly hud: ProviderReference;

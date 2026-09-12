@@ -51,6 +51,7 @@ export class UnifiedAudio {
     readonly sampleRate: number;
     private readonly seats: SeatAudio[] = [];
     private readonly actors: ActorId[] = [];
+    private dopplerEnabled = true;
     private readonly positions = new Map<number, Vec3>();
     private readonly streams = new Map<string, StreamBus>();
     private readonly music = new Map<string, MusicBus>();
@@ -110,6 +111,7 @@ export class UnifiedAudio {
                     mixer: new AudioMixer(this.sampleRate, this.options.milliseconds, 96, 2, this.options.maxActors ?? 65536),
                     reverb: new StereoReverb(this.sampleRate), underwater: new UnderwaterFilter(this.sampleRate), environment: null, loops: new Map<string, LoopSound>() };
                 state.mixer.setEffectsVolume(this.effectsGain);
+                state.mixer.setDopplerEnabled(this.dopplerEnabled);
                 // A new seat starts at the host paint epoch; it has no prior source channels.
                 state.mixer.selectTime(this.frame, this.frame);
                 for (const [entity, position] of this.positions) {
@@ -130,6 +132,11 @@ export class UnifiedAudio {
         for (const state of this.seats) {
             state.mixer.setEffectsVolume(gain);
         }
+    }
+    setDopplerEnabled(enabled: boolean): void {
+        this.check();
+        this.dopplerEnabled = enabled;
+        for (const state of this.seats) state.mixer.setDopplerEnabled(enabled);
     }
     updateActor(actor: ActorId, origin: Vec3): void {
         this.check();

@@ -25,7 +25,7 @@ function recipe(): ExecutableRecipe {
   const geometry = { ...raw, id: createResourceId(raw) };
   return { schemaVersion: 3, id: "recipe:fixture:1", preset: "recipe:fixture:1", map: { geometryContent: content, geometry, entities: provider("game") }, campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("game") },
     movement: provider("movement"), character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
-    presentation: { environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
+    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("engine"), combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
     execution: [{ kind: "typescript", owner: provider("game"), implementation: "q1:official", role: "server-game", api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
     mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
@@ -172,4 +172,14 @@ test("environment selection roundtrips and older recipes retain game defaults", 
   for (const environment of [null, { kind: "automatic-fallback" }, { kind: "selected", resource: { content: base.presentation.audio.content } }]) {
     expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...base.presentation, environment } }))).toThrow();
   }
+});
+
+
+test("Doppler choice survives saves and legacy omission preserves source behavior", () => {
+  const base = recipe();
+  const selected = { ...base, presentation: { ...base.presentation, doppler: { kind: "disabled" } } };
+  expect(readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(selected)))).presentation.doppler).toEqual({ kind: "disabled" });
+  const { doppler: _doppler, ...presentation } = base.presentation;
+  expect(readRecipe(new SaveReader({ ...base, presentation })).presentation.doppler).toEqual({ kind: "source" });
+  expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...presentation, doppler: { kind: "realistic" } } }))).toThrow();
 });

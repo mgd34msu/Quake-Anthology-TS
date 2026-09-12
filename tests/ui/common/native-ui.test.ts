@@ -33,7 +33,7 @@ function drawContext(owner: IdentityOwner, seat: SeatId, x = 0): UiDrawContext {
   const provider = { provider: "ui:test", content: "q1:rerelease:id1:retail" } satisfies { readonly provider: "ui:test"; readonly content: "q1:rerelease:id1:retail" };
   return { binding: { seat, client: owner.client(seat.index, 0), viewport: { x, y: 0, width: 640, height: 480 },
     safeArea: { x, y: 0, width: 640, height: 480 }, hudScale: 1,
-    presentation: { environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 1000 };
+    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 1000 };
 }
 
 test("native settings alter real command input and remain isolated per seat", () => {

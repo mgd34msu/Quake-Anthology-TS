@@ -106,6 +106,11 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     expect((await model.resolve()).recipe.presentation.environment).toEqual({ kind: "disabled" });
     click(0); click(1);
     expect((await model.resolve()).recipe.presentation.environment).toEqual({ kind: "audio-content" });
+    click(1); click(1);
+    expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "disabled" });
+    expect(menu.controller.activeMenu).toBe("menu:startup:sound");
+    click(1); click(0);
+    expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "source" });
     menu.controller.closeMenu(); menu.controller.closeMenu();
     click(0); click(2); click(1); click(1);
     await model.prepareMonsterRoster();

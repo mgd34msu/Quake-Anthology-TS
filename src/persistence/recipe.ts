@@ -74,7 +74,8 @@ function readEnvironment(reader: SaveReader): EnvironmentSelection {
   return { kind, resource: { content: readContentId(resource.field("content")), path: resource.field("path").string() } };
 }
 function readPresentation(reader: SaveReader): PresentationSelection {
-  return { environment: readEnvironment(reader.field("environment")), assets: readContentId(reader.field("assets")), hud: readProvider(reader.field("hud")), effects: readProvider(reader.field("effects")), audio: readProvider(reader.field("audio")) };
+  const doppler = reader.field("doppler");
+  return { doppler: { kind: doppler.value === undefined ? "source" : doppler.field("kind").choice("source", "disabled") }, environment: readEnvironment(reader.field("environment")), assets: readContentId(reader.field("assets")), hud: readProvider(reader.field("hud")), effects: readProvider(reader.field("effects")), audio: readProvider(reader.field("audio")) };
 }
 function readExecution(reader: SaveReader): ResolvedExecutionModule {
   const owner = readProvider(reader.field("owner"));

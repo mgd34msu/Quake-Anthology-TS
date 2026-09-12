@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
+import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { Axis } from "../../src/contracts/math.ts";
 import { UnifiedAudio, AudioMixer, decodeWav, decodeQuakeWav, RawAudioStream, parseEnvironments, StereoReverb, reverbPreset, MusicPlayer, MemoryPcmStream } from "../../src/audio/index.ts";
@@ -421,4 +422,50 @@ test("large finite Doppler averages complete cycles without capping pitch", () =
     mixer.updateLoopingSound(sound, { entity: 2, origin: { x: 1, y: 0, z: 0 }, velocity: { x: 639, y: 0, z: 0 }, frameNumber: 2 });
     mixer.setListener(1, origin, axis);
     expect(mixer.mix(32).every(sample => sample > 0)).toBe(true);
+});
+
+
+test("global Doppler disable overrides source cvars and already-submitted loops", () => {
+    const sound: PcmSound = { sampleRate: 1000, channels: 1, frameCount: 2048, loopStart: null,
+        samples: Int16Array.from({ length: 2048 }, (_, index) => index < 1024 ? 12000 : -12000) };
+    const cvars = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } } });
+    cvars.register("s_doppler", "1"); cvars.register("s_testsound", "0");
+    const mixer = new AudioMixer(1000, () => 0);
+    mixer.bindSoundCvars(cvars);
+    const submit = () => {
+        mixer.updateLoopingSound(sound, { entity: 2, origin: { x: 1, y: 0, z: 0 }, velocity: { x: 639, y: 0, z: 0 }, frameNumber: 1 });
+        mixer.setListener(1, origin, axis);
+    };
+    mixer.setListener(1, origin, axis); submit();
+    expect(mixer.mix(8).every(sample => sample === 0)).toBe(true);
+    mixer.setDopplerEnabled(false);
+    expect(mixer.mix(8).every(sample => sample > 0)).toBe(true);
+    submit(); // s_doppler remains enabled, but cannot override the global choice.
+    expect(mixer.mix(8).every(sample => sample > 0)).toBe(true);
+    mixer.setDopplerEnabled(true); submit();
+    expect(mixer.mix(8).every(sample => sample === 0)).toBe(true);
+    cvars.set("s_doppler", "0"); submit();
+    expect(mixer.mix(8).every(sample => sample > 0)).toBe(true);
+});
+
+test("Doppler choice reaches current and newly-created seats in the shared engine", () => {
+    const first = identity.seat(0), second = identity.seat(1), actor = identity.actor(50, 0);
+    const sound: SoundAsset = { ...asset, pcm: { sampleRate: 8000, channels: 1, frameCount: 2048, loopStart: null,
+        samples: Int16Array.from({ length: 2048 }, (_, index) => index < 1024 ? 12000 : -12000) } };
+    using audio = new UnifiedAudio({ sampleRate: 8000, milliseconds: () => 0, random: () => 0 });
+    const listener = (seat: typeof first, gain: number) => ({ seat, actor: null, origin, axis, gain, underwater: false });
+    audio.setListeners([listener(first, 1)]);
+    const submit = () => {
+        audio.beginLoopFrame();
+        audio.loop({ sound, family: "q3", actor, origin: { kind: "fixed", position: { x: 1, y: 0, z: 0 } }, audience: { kind: "world" },
+            volume: 1, attenuation: 1, velocity: { x: 639, y: 0, z: 0 }, frameNumber: 1, lifetime: "frame" });
+        audio.endLoopFrame();
+    };
+    submit(); expect(audio.mix(8).every(sample => sample === 0)).toBe(true);
+    audio.setDopplerEnabled(false);
+    expect(audio.mix(8).every(sample => sample > 0)).toBe(true);
+    audio.setListeners([listener(first, 0), listener(second, 1)]);
+    submit(); expect(audio.mix(8).every(sample => sample > 0)).toBe(true);
+    audio.setDopplerEnabled(true);
+    submit(); expect(audio.mix(8).every(sample => sample === 0)).toBe(true);
 });
