@@ -5,7 +5,7 @@ import { defaultCheckAttack } from "../../foundation/monsters/perception.ts";
 import type { Q2Monsters } from "../../foundation/monsters/index.ts";
 import type { MonsterContext, Q2MonsterDefinition } from "../../foundation/monsters/types.ts";
 import { berserkDefinition } from "../../base/monsters/berserk.ts";
-import { mutantDefinition } from "../../base/monsters/mutant.ts";
+import { createMutantDefinition } from "../../base/monsters/mutant.ts";
 import { parasiteDefinition } from "../../base/monsters/parasite.ts";
 import { damagedSkin } from "../../base/monsters/common.ts";
 import { blockedCheckJump, blockedCheckPlatform, monsterJumpFinished } from "../../rerelease/monsters/common.ts";
@@ -32,6 +32,7 @@ function jump(context: MonsterContext, up: string, down: string, dodge: boolean)
 }
 
 export function createRogueJumpingMonsters(monsters: Q2Monsters, source: Q2MissionPackMonsterState): readonly Q2MonsterDefinition[] {
+  const mutantDefinition = createMutantDefinition(monsters, "rogue");
   function berserkRun(context: MonsterContext): undefined { finishDodge(context); return berserkDefinition.run(context); }
   function berserkMelee(context: MonsterContext): undefined { finishDodge(context); return context.setMove((Math.floor(context.game.host.random() * 0x8000) & 1) === 0 ? "berserk_move_attack_spike" : "berserk_move_attack_club"); }
   function berserkSidestep(context: MonsterContext): undefined {

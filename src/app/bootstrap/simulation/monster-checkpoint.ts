@@ -1,3 +1,4 @@
+import type { Q2Ballistics } from "../../../content/q2/foundation/weapons/ballistics.ts";
 import type { MonsterDefinitionReference, ProviderReference } from "../../../contracts/content.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { AuthoredMonster } from "../../../content/monsters/authored.ts";
@@ -26,14 +27,14 @@ export type MonsterSourceCheckpoint = {
   readonly frame: FrameContext;
   readonly random: ReturnType<SourceRandom["checkpoint"]>;
 } & ({ readonly kind: "q1"; readonly entities: Q1FoundationCheckpoint }
-  | { readonly kind: "q2"; readonly entities: Q2FoundationCheckpoint; readonly monsters: Q2MonstersCheckpoint });
+  | { readonly kind: "q2"; readonly entities: Q2FoundationCheckpoint; readonly monsters: Q2MonstersCheckpoint; readonly ballistics: ReturnType<Q2Ballistics["captureProjectiles"]> });
 export interface SelectedMonstersCheckpoint {
-  readonly version: 1;
+  readonly version: 2;
   readonly authored: readonly SavedAuthoredMonster[];
   readonly sources: readonly MonsterSourceCheckpoint[];
 }
 export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMonstersCheckpoint {
-  return { version: reader.field("version").literal(1), authored: reader.field("authored").list(value => {
+  return { version: reader.field("version").literal(2), authored: reader.field("authored").list(value => {
     const activation = value.field("activation"), kind = activation.field("kind").choice("active", "dormant", "scheduled");
     return { actor: readSavedActor(value.field("actor")), definition: { source: readProvider(value.field("definition").field("source")), classname: value.field("definition").field("classname").string() },
       classname: value.field("classname").string(), sourceOrdinal: value.field("sourceOrdinal").integer(0), spawnflags: value.field("spawnflags").integer(),
@@ -46,6 +47,6 @@ export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMons
     if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") return value.field("random").fail("Unsupported selected monster random stream");
     const kind = value.field("kind").choice("q1", "q2");
     return kind === "q1" ? { kind, reference, frame, random, entities: readQ1FoundationCheckpoint(value.field("entities")) }
-      : { kind, reference, frame, random, entities: readQ2FoundationCheckpoint(value.field("entities")), monsters: readQ2MonstersCheckpoint(value.field("monsters")) };
+      : { kind, reference, frame, random, entities: readQ2FoundationCheckpoint(value.field("entities")), monsters: readQ2MonstersCheckpoint(value.field("monsters")), ballistics: { blasterCauses: value.field("ballistics").field("blasterCauses").list(cause => ({ actor: readSavedActor(cause.field("actor")), meansOfDeath: cause.field("meansOfDeath").integer() })) } };
   }) };
 }

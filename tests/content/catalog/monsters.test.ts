@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "bun:test";
-import type { EnemySelection } from "../../../src/contracts/content.ts";
+import type { EnemySelection, ProviderReference } from "../../../src/contracts/content.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -30,4 +32,26 @@ test("selected creature definitions resolve edition assets and clocks without re
       expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
     }
   }
+}, 60000);
+
+const corpus = resolve(import.meta.dir, "../../../../qfiles");
+
+test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("classic Q2 ordinary roster resolves its species, shared environment, projectile and skin resources", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
+  if (command.kind !== "run") throw new Error("Expected Q2 launch command");
+  const preset = applicationPreset(catalog, command.options), content = catalog.require("q2-classic-baseq2").id;
+  const classnames = ["monster_infantry", "monster_berserk", "monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_gladiator", "monster_gunner",
+    "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander"];
+  const source: ProviderReference = { provider: "q2:monsters/classic/baseq2", content };
+  const enemies: EnemySelection = { kind: "replace", default: { source, classname: "monster_infantry" },
+    byClassname: Object.fromEntries(classnames.map(classname => [classname, { source, classname }])) };
+  const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+  expect(recipe.enemies).toEqual(enemies);
+  const paths = new Set(recipe.resources.map(resource => resource.requestedPath));
+  for (const path of ["models/monsters/gladiatr/tris.md2", "models/monsters/float/tris.md2", "models/monsters/bitch/tris.md2",
+    "models/monsters/soldier/skin_ssp.pcx", "models/monsters/soldier/skin_ltp.pcx", "models/objects/laser/tris.md2", "models/objects/grenade/tris.md2",
+    "models/objects/rocket/tris.md2", "sound/weapons/rockfly.wav", "sound/weapons/grenlb1b.wav", "sound/infantry/inflies1.wav",
+    "sound/misc/fhit3.wav", "sound/player/watr_in.wav", "sound/mutant/step3.wav"]) expect(paths.has(path)).toBe(true);
+  expect(readRecipe(new SaveReader(recipe, "recipe"))).toEqual(recipe);
 }, 60000);

@@ -18,7 +18,7 @@ import { insaneDefinition } from "./insane.ts";
 import { createJorgDefinition } from "./jorg.ts";
 import { makronDefinition, withMakronSpawnCallbacks } from "./makron.ts";
 import { createMedicDefinition } from "./medic.ts";
-import { mutantDefinition } from "./mutant.ts";
+import { createMutantDefinition } from "./mutant.ts";
 import { parasiteDefinition } from "./parasite.ts";
 import { supertankDefinition } from "./supertank.ts";
 import { tankCommanderDefinition, tankDefinition } from "./tank.ts";
@@ -26,7 +26,7 @@ import { tankCommanderDefinition, tankDefinition } from "./tank.ts";
 /** Original base gameplay definitions; rerelease providers explicitly replace changed species. */
 export function q2ClassicBaseMonsterDefinitions(monsters: Q2Monsters): readonly Q2MonsterDefinition[] {
   return [berserkDefinition, brainDefinition, chickDefinition, flipperDefinition, floaterDefinition, flyerDefinition, gladiatorDefinition, gunnerDefinition, hoverDefinition,
-    createMedicDefinition(monsters), mutantDefinition, parasiteDefinition, supertankDefinition, tankDefinition, tankCommanderDefinition, boss2Definition,
+    createMedicDefinition(monsters), createMutantDefinition(monsters), parasiteDefinition, supertankDefinition, tankDefinition, tankCommanderDefinition, boss2Definition,
     createJorgDefinition(monsters), withMakronSpawnCallbacks(makronDefinition, monsters), actorDefinition, insaneDefinition].map(definition => withBossExplosionCallbacks(definition, monsters));
 }
 
@@ -41,5 +41,5 @@ export function registerQ2ClassicBaseMonsters(monsters: Q2Monsters): Q2SpawnModu
 }
 
 export { actorDefinition, createActorTargetModule, berserkDefinition, boss2Definition, q2Boss3StandModule, brainDefinition, chickDefinition, flipperDefinition, floaterDefinition,
-  flyerDefinition, gladiatorDefinition, gunnerDefinition, hoverDefinition, insaneDefinition, createJorgDefinition, makronDefinition, createMedicDefinition, mutantDefinition,
+  flyerDefinition, gladiatorDefinition, gunnerDefinition, hoverDefinition, insaneDefinition, createJorgDefinition, makronDefinition, createMedicDefinition, createMutantDefinition,
   parasiteDefinition, supertankDefinition, tankDefinition, tankCommanderDefinition };

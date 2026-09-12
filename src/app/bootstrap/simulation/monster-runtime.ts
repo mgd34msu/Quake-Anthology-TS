@@ -1,3 +1,4 @@
+import type { Q2Ballistics } from "../../../content/q2/foundation/weapons/ballistics.ts";
 import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../contracts/content.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
@@ -20,7 +21,7 @@ export type SelectedMonsterSource = {
   readonly random: SourceRandom;
   readonly clock: { frame: FrameContext; advanced: boolean };
 } & ({ readonly kind: "q1"; readonly game: Q1EntityServices }
-  | { readonly kind: "q2"; readonly game: Q2EntityServices; readonly monsters: Q2Monsters });
+  | { readonly kind: "q2"; readonly game: Q2EntityServices; readonly monsters: Q2Monsters; readonly ballistics: Q2Ballistics });
 
 export interface SelectedMonsterBehavior {
   attach(actor: OwnedActor, definition: MonsterDefinitionReference, mission: MonsterMission): undefined;
@@ -34,7 +35,7 @@ export interface SelectedMonsterBehavior {
 export type MonsterMap = { readonly kind: "q1"; readonly game: Q1Foundation }
   | { readonly kind: "q2"; readonly game: Q2Foundation; readonly items: Q2ItemModule };
 
-const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie"]);
+const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie"]);
 const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander"]);
 
 /** Authored links and counters remain in the map program while behavior attaches to its actual actor. */

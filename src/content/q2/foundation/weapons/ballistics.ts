@@ -1,3 +1,5 @@
+import type { Q2WeaponsCheckpoint } from "./checkpoint.ts";
+import { restoreQ2Actor } from "../checkpoint.ts";
 import type { Q2WeaponOwner } from "./types.ts";
 /* Adapted from id Software Quake II g_weapon.c and rerelease g_weapon.cpp.
  * GPL-2.0-or-later. All damage is admitted by the session combat authority. */
@@ -64,6 +66,22 @@ export class Q2Ballistics {
   sound2Entity: Q2NoiseRecord | null = null;
 
   constructor(readonly hooks: Q2WeaponHooks) {}
+
+  registerCallbacks(game: Q2GameServices): undefined {
+    this.trackActors(game);
+    return game.sourceCallbacks.register(this.callbacks);
+  }
+
+  captureProjectiles(): Pick<Q2WeaponsCheckpoint, "blasterCauses"> {
+    return { blasterCauses: [...this.blasterCauses].map(([actor, meansOfDeath]) => ({ actor: { slot: actor.slot, generation: actor.generation }, meansOfDeath })) };
+  }
+
+  restoreProjectiles(game: Q2GameServices, checkpoint: Pick<Q2WeaponsCheckpoint, "blasterCauses">): undefined {
+    this.registerCallbacks(game);
+    this.blasterCauses.clear();
+    for (const saved of checkpoint.blasterCauses) this.blasterCauses.set(restoreQ2Actor(game, saved.actor).id, saved.meansOfDeath);
+    return undefined;
+  }
 
   silencerShots(actor: ActorId): number { return this.silencerCharges.get(actor) ?? 0; }
 
@@ -268,8 +286,7 @@ export class Q2Ballistics {
   }
 
   private projectileForActor(owner: ActorId, game: Q2GameServices, classname: string, start: Vec3, direction: Vec3, speed: number, model: string, effects: number, clipMask: number): Q2Entity {
-    game.sourceCallbacks.register(this.callbacks);
-    this.trackActors(game);
+    this.registerCallbacks(game);
     const projectile = game.create(classname);
     projectile.owner = owner; projectile.model = model; projectile.effects = effects;
     projectile.clipMask = clipMask; projectile.projectile = true;

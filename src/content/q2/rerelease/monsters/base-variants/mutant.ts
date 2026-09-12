@@ -1,5 +1,5 @@
 // Rerelease m_mutant.cpp. ZeniMax Media, GPL-2.0.
-import { mutantDefinition } from "../../../base/monsters/mutant.ts";
+import { createMutantDefinition } from "../../../base/monsters/mutant.ts";
 import { aliveEnemy } from "../../../base/monsters/common.ts";
 import { add, length, normalize, scale, subtract } from "../../../foundation/fields.ts";
 import type { Q2Touch } from "../../../foundation/host.ts";
@@ -21,6 +21,7 @@ function jump(context: MonsterContext, up: boolean): undefined {
   return context.game.move(context.entity, { velocity: add(body.velocity, add(scale(axes.forward, up ? 200 : 100), scale(axes.up, up ? 450 : 300))) });
 }
 export function createRereleaseMutantDefinition(monsters: Q2Monsters): Q2MonsterDefinition {
+  const mutantDefinition = createMutantDefinition(monsters);
   const touch: Q2Touch = (entity, game, contact) => {
     const context = monsters.context(entity.actor.id); if (context === null) return undefined;
     if (health(game, entity.actor.id) <= 0) { entity.touch = null; return undefined; }

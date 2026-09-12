@@ -1,3 +1,5 @@
+import { preservesAuthoredQ1Placement } from "../../../src/app/bootstrap/simulation/monster-placement.ts";
+import { parseQ1Entities } from "../../../src/formats/q1-map/index.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { q1MonsterSources } from "../../../src/content/monsters/q1.ts";
@@ -71,7 +73,7 @@ test.skipIf(!existsSync(join(corpus, "q1/rerelease/mg3/pak0.pak")))("retail MG3 
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
-async function openSelectedId1(map: string) {
+async function openSelectedId1(map: string, wizardClassname = "monster_wizard") {
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", map, "--dedicated", "--mode", "singleplayer"]);
   if (command.kind !== "run") throw new Error("Expected Q1 application options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), preset = applicationPreset(catalog, command.options);
@@ -80,7 +82,7 @@ async function openSelectedId1(map: string) {
   const source = { provider: classic.provider, content: catalog.require("q1-classic-id1").id };
   const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: {
     kind: "replace", default: { source, classname: "monster_army" },
-    byClassname: Object.fromEntries(Object.keys(classic.creatures).map(classname => [classname, { source, classname }])),
+    byClassname: Object.fromEntries(Object.keys(classic.creatures).map(classname => [classname, { source, classname: classname === "monster_wizard" ? wizardClassname : classname }])),
   } } } });
   return Application.open(command.options, { print: () => undefined }, recipe);
 }
@@ -104,6 +106,11 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected 
     expect(Object.hasOwn(classic.creatures, "monster_fish")).toBe(false);
     expect(Object.hasOwn(classic.creatures, "monster_boss")).toBe(false);
     expect(Object.hasOwn(classic.creatures, "monster_oldone")).toBe(false);
+    const marksman = parseQ1Entities('{ "classname" "monster_ogre_marksman" }')[0];
+    if (marksman === undefined) throw new Error("Missing ogre alias source entity");
+    expect(application.simulation.q1Source()?.game.monsterAdmission?.resolve("monster_ogre_marksman", marksman)).toEqual({
+      source: { provider: classic.provider, content: application.content.catalog.require("q1-classic-id1").id }, classname: "monster_ogre_marksman",
+    });
     const client = application.session.createClient(0), human = application.simulation.admitPlayer(client.id);
     for (let frame = 0; frame < 15; frame++) await application.step(100);
     const selected = selectedId1(application);
@@ -167,10 +174,35 @@ test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m2 selected 
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
 
-test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 keeps obstructed authored wizard placement rejected", async () => {
+test.skipIf(!existsSync(join(corpus, "q1/id1/PAK0.PAK")))("retail e1m3 preserves native authored flying overlap but rejects different selected geometry", async () => {
   const application = await openSelectedId1("e1m3");
   try {
-    await expect((async () => { for (let frame = 0; frame < 15; frame++) await application.step(100); })()).rejects.toThrow(
-      "Selected monster placement obstructed in maps/e1m3.bsp: source 383 monster_wizard -> q1:monsters/classic/id1/monster_wizard");
+    for (let frame = 0; frame < 15; frame++) await application.step(100);
+    const selected = selectedId1(application), wizard = selected.source.entities.entities.find(entity => entity.actor.slot === selected.authored.find(entry => entry.sourceOrdinal === 383)?.actor.slot);
+    if (wizard === undefined) throw new Error("Authored wizard missing");
+    expect(wizard.classname).toBe("monster_wizard");
+    expect(wizard.callbacks.think).toBe("base:monster_frame");
+    const actor = application.simulation.actors.resolveSaved(wizard.actor);
+    if (actor === null) throw new Error("Wizard shared actor missing");
+    expect(application.simulation.bodies.read(actor.id)?.origin).toEqual({ x: -528, y: -304, z: -64 });
+    const previousThink = wizard.state.nextThink;
+    for (let frame = 0; frame < 5; frame++) await application.step(100);
+    expect(selectedId1(application).source.entities.entities.find(entity => entity.actor.slot === wizard.actor.slot)?.state.nextThink).toBeGreaterThan(previousThink);
+    const native = await Application.open(application.options, { print: () => undefined });
+    try {
+      const game = native.simulation.q1Source()?.game, entity = game === undefined ? undefined : [...game.entities.values()].find(entity => entity.sourceOrdinal === 383);
+      if (game === undefined || entity === undefined) throw new Error("Native authored wizard missing");
+      const body = game.body(entity), authored = parseQ1Entities(native.simulation.sourceEntityText)[383];
+      const definition = { source: { provider: "q1:monsters/classic/id1", content: application.content.recipe.map.entities.content }, classname: "monster_wizard" } satisfies Parameters<typeof preservesAuthoredQ1Placement>[0]["definition"];
+      const input = { map: application.content.recipe.map, authored, definition, entity, body };
+      expect(preservesAuthoredQ1Placement(input)).toBe(true);
+      expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, bounds: { ...body.bounds, max: { ...body.bounds.max, x: 32 } } } })).toBe(false);
+      expect(preservesAuthoredQ1Placement({ ...input, body: { ...body, origin: { ...body.origin, x: body.origin.x + 1 } } })).toBe(false);
+      expect(preservesAuthoredQ1Placement({ ...input, definition: { ...definition, source: { ...definition.source, provider: "q1:monsters/rerelease/id1" } } })).toBe(false);
+    } finally { await native.close(); }
   } finally { await application.close(); }
+  const different = await openSelectedId1("e1m3", "monster_ogre");
+  try {
+    await expect((async () => { for (let frame = 0; frame < 15; frame++) await different.step(100); })()).rejects.toThrow("monster_wizard -> q1:monsters/classic/id1/monster_ogre");
+  } finally { await different.close(); }
 }, 30000);

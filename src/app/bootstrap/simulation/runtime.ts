@@ -6,6 +6,8 @@ import type { WeaponSlotProjection } from "./weapon-slot-projection.ts";
 import { readWeaponSlots } from "./weapon-slot-checkpoint.ts";
 import { GrappleRuntime } from "./grapple-runtime.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
+import { preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
+import { parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { SelectedMonsterSource } from "./monster-runtime.ts";
 import { monsterSource } from "../../../content/monsters/definitions.ts";
 import type { MonsterMission } from "../../../content/monsters/authored.ts";
@@ -474,7 +476,8 @@ export class SharedSimulation implements Simulation {
       const modules = registered.edition === "classic" ? [registerQ2ClassicBaseMonsters(monsters), monsters] : [monsters];
       const game = new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
         { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, modules);
-      source = { kind: "q2", reference, random, clock, game, monsters };
+      weapons.registerCallbacks(game);
+      source = { kind: "q2", reference, random, clock, game, monsters, ballistics: weapons };
     }
     this.monsterSources.set(reference.provider, source);
     return source;
@@ -509,7 +512,17 @@ export class SharedSimulation implements Simulation {
         const trace = this.scene.geometryTrace({ start: body.origin, end: body.origin, shape: { kind: "box", bounds: body.bounds },
           target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
           policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
-        if (trace.startSolid || trace.allSolid) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+        if (trace.startSolid || trace.allSolid) {
+          const entity = source.kind === "q1" ? source.game.entity(entry.actor.id) : null;
+          const q2Entity = source.kind === "q2" ? source.game.entity(entry.actor.id) : null;
+          const preservedQ2 = source.kind === "q2" && map.kind === "q2" && this.options.world.kind === "q2-bsp" && q2Entity !== null
+            && preservesAuthoredQ2Placement({ map: this.recipe.map,
+              authored: parseQ2Entities(this.options.world.entities, map.game.options.edition)[entry.sourceOrdinal], definition,
+              native: map.monsters.definition(entry.classname, map.game), game: source.game, entity: q2Entity, body });
+          const preserved = source.kind === "q1" && this.options.world.kind === "q1-bsp" && entity !== null
+            && preservesAuthoredQ1Placement({ map: this.recipe.map, authored: this.options.world.entityList[entry.sourceOrdinal], definition, entity, body });
+          if (!preserved && !preservedQ2) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+        }
         return undefined;
       },
       resume: (actor, activator) => {
@@ -537,16 +550,7 @@ export class SharedSimulation implements Simulation {
         if (entity === null) throw new Error("Selected Q1 route actor has no source continuation");
         return setMonsterRoute(source.game, entity, goal, pauseUntil);
       } });
-    const worldClock = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
-    const maximumInterval = worldClock.kind === "q1-netquake" ? (worldClock.fixedFrameSeconds ?? worldClock.maximumFrameSeconds) * 1000
-      : worldClock.kind === "q1-quakeworld" ? worldClock.maximumCommandMilliseconds
-      : worldClock.kind === "q3" ? worldClock.serverFrameMilliseconds : worldClock.frameMilliseconds;
-    for (const definition of [selection.default, ...Object.values(selection.byClassname)]) {
-      const registered = monsterSource(definition);
-      const requiredInterval = registered.family === "q1" || registered.edition === "classic" ? 100 : 25;
-      if (maximumInterval > requiredInterval) throw new Error(`Selected monster source ${registered.provider} requires ${requiredInterval}ms boundaries; configured world maximum is ${maximumInterval}ms`);
-      this.monsterSourceFor(definition);
-    }
+    for (const definition of [selection.default, ...Object.values(selection.byClassname)]) this.monsterSourceFor(definition);
     if (map.kind === "q1") {
       map.game.monsterAdmission = { resolve: (classname, source) => selected.resolve(classname, new Map(source.properties.map(property => [property.key, property.value]))), spawn: (actor, fields, ordinal, definition) => selected.admitQ1(actor, fields, ordinal, definition) };
       map.game.authoredPathFollower = actor => selected.q1PathFollower(actor);
@@ -562,10 +566,10 @@ export class SharedSimulation implements Simulation {
 
   private captureSelectedMonsters(): SelectedMonstersCheckpoint | null {
     if (this.selectedMonsters === null) return null;
-    return { version: 1, authored: this.selectedMonsters.capture(), sources: [...this.monsterSources.values()].map(source => {
+    return { version: 2, authored: this.selectedMonsters.capture(), sources: [...this.monsterSources.values()].map(source => {
       const common = { reference: source.reference, frame: source.clock.frame, random: source.random.checkpoint() };
       return source.kind === "q1" ? { ...common, kind: "q1", entities: source.game.capture() }
-        : { ...common, kind: "q2", entities: source.game.capture(), monsters: source.monsters.capture() };
+        : { ...common, kind: "q2", entities: source.game.capture(), monsters: source.monsters.capture(), ballistics: source.ballistics.captureProjectiles() };
     }) };
   }
 
@@ -586,28 +590,28 @@ export class SharedSimulation implements Simulation {
       if (source === undefined || source.reference.content !== state.reference.content || source.kind !== state.kind) throw new Error("Saved monster source differs from selected module");
       source.clock.frame = state.frame; source.clock.advanced = false; source.random.restore(state.random);
       if (source.kind === "q1" && state.kind === "q1") source.game.restore(state.entities, { scheduleThinks: false });
-      else if (source.kind === "q2" && state.kind === "q2") { source.game.restore(state.entities); source.monsters.restore(source.game, state.monsters); }
+      else if (source.kind === "q2" && state.kind === "q2") { source.game.restore(state.entities); source.monsters.restore(source.game, state.monsters); source.ballistics.restoreProjectiles(source.game, state.ballistics); }
     }
     return undefined;
   }
 
-  private beginMonsterFrames(): undefined {
+  private beginMonsterFrames(milliseconds: number, map: boolean): undefined {
     const worldClock = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
     for (const source of this.monsterSources.values()) {
-      const profile = providerTiming(this.recipe, source.reference.provider).clock;
-      const projected = providerFrame(this.sourceFrame, worldClock, profile);
       source.clock.advanced = false;
       if (source.kind === "q1") {
+        if (!map) continue;
+        const projected = providerFrame(this.sourceFrame, worldClock, providerTiming(this.recipe, source.reference.provider).clock);
         source.clock.frame = projected; source.clock.advanced = true;
         source.game.beginFrame(seconds(projected.time), seconds(projected.elapsed));
       } else {
-        const interval = source.game.options.edition === "classic" ? 0.1 : 0.025;
-        const next = Math.round((seconds(source.clock.frame.time) + interval) * 1000) / 1000;
-        if (seconds(projected.time) + 0.000001 < next) continue;
-        const milliseconds = profile.kind === "q2-rerelease";
-        source.clock.frame = { ...projected, frame: source.clock.frame.frame + 1,
-          time: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? next * 1000 : next },
-          elapsed: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? interval * 1000 : interval } };
+        const interval = source.game.options.edition === "classic" ? 100 : 25;
+        const next = Math.round(seconds(source.clock.frame.time) * 1000) + interval;
+        if (milliseconds !== next) continue;
+        const kind = source.game.options.edition === "classic" ? "seconds" : "milliseconds";
+        const divisor = kind === "seconds" ? 1000 : 1;
+        source.clock.frame = { frame: source.clock.frame.frame + 1, phase: "frame-entry",
+          time: { kind, value: next / divisor }, elapsed: { kind, value: interval / divisor } };
         source.clock.advanced = true;
         source.monsters.beginFrame(source.game);
       }
@@ -2002,14 +2006,21 @@ export class SharedSimulation implements Simulation {
       const mapRun = !paused && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000);
       const elapsed = fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
       const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
-      const mapEndMilliseconds = selectedQ2 === null ? 0 : selectedQ2.mapMilliseconds + (fixed ?? Math.min(100, Math.max(1, input.elapsedMilliseconds)));
-      const boundaries: { readonly map: boolean; readonly q2: boolean; readonly milliseconds: number }[] = [];
-      if (mapRun && selectedQ2 !== null) {
-        for (let due = selectedQ2.nextMilliseconds; due < mapEndMilliseconds; due += selectedQ2.intervalMilliseconds)
-          boundaries.push({ map: false, q2: true, milliseconds: due });
+      const mapEndMilliseconds = (selectedQ2?.mapMilliseconds ?? this.timeSeconds * 1000) + elapsed * 1000;
+      const deadlines = new Set<number>([mapEndMilliseconds]);
+      const weaponDeadlines = new Set<number>();
+      if (mapRun) {
+        if (selectedQ2 !== null) for (let due = selectedQ2.nextMilliseconds; due <= mapEndMilliseconds; due += selectedQ2.intervalMilliseconds) {
+          deadlines.add(due); weaponDeadlines.add(due);
+        }
+        for (const source of this.monsterSources.values()) if (source.kind === "q2") {
+          const interval = source.game.options.edition === "classic" ? 100 : 25;
+          for (let due = Math.round(seconds(source.clock.frame.time) * 1000) + interval; due <= mapEndMilliseconds; due += interval) deadlines.add(due);
+        }
       }
-      const nextQ2Boundary = boundaries.length === 0 ? selectedQ2?.nextMilliseconds : (boundaries.at(-1)?.milliseconds ?? 0) + (selectedQ2?.intervalMilliseconds ?? 0);
-      boundaries.push({ map: mapRun, q2: mapRun && nextQ2Boundary === mapEndMilliseconds, milliseconds: mapEndMilliseconds });
+      const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
+        map: mapRun && milliseconds === mapEndMilliseconds, q2: weaponDeadlines.has(milliseconds), milliseconds,
+      }));
       for (const boundary of boundaries) {
       const run = boundary.map, commandTurn = run || !mapRun;
       if (run && selectedQ2 !== null) selectedQ2.mapMilliseconds = mapEndMilliseconds;
@@ -2020,10 +2031,11 @@ export class SharedSimulation implements Simulation {
           elapsed: { kind: milliseconds ? "milliseconds" : "seconds", value: milliseconds ? selectedQ2.intervalMilliseconds : selectedQ2.intervalMilliseconds / 1000 } };
         selectedQ2.nextMilliseconds = boundary.milliseconds + selectedQ2.intervalMilliseconds;
       }
+      if (mapRun && !run) this.beginMonsterFrames(boundary.milliseconds, false);
       if (run) {
         if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
         else this.sourceFrame = this.clock.advance({ kind: this.clock.frame.time.kind, value: this.clock.frame.time.kind === "seconds" ? elapsed : fixed });
-        this.beginMonsterFrames();
+        this.beginMonsterFrames(boundary.milliseconds, true);
         if (this.selectedArsenal?.family === "q1") {
           const frame = this.selectedQ1Frame();
           this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
@@ -2147,6 +2159,7 @@ export class SharedSimulation implements Simulation {
           visited.add(actor);
           const execution = this.actorExecutions.get(actor.id);
           if (execution?.kind === "q3") {
+            if (!commandTurn) continue;
             execution.step(previousSelectedMilliseconds, this.selectedMilliseconds);
             this.physics.commitAttachments(); continue;
           }
@@ -2164,6 +2177,20 @@ export class SharedSimulation implements Simulation {
             const player = this.playerStates.get(actor);
             if (player !== undefined) player.arsenal = this.selectedArsenal.read(actor.id);
             this.weaponSlots.get(actor.id)?.reconcile();
+          }
+          const monsterSource = execution?.kind === "q2" ? this.monsterSources.get(execution.services.options.provider) : undefined;
+          if (execution?.kind === "q2" && monsterSource?.kind === "q2" && execution.services === monsterSource.game) {
+            const active = run ? this.selectedMonsters?.beforeTurn(actor.id) !== false : this.selectedMonsters?.active(actor.id) !== false;
+            if (run && active && this.source.kind === "q1" && this.source.game.forceRetouch > 0) {
+              this.bodies.link(actor); this.physics.touchTriggers(actor);
+            }
+            if (mapRun && active && monsterSource.clock.advanced && this.actors.isLive(actor.id)) {
+              const frame = monsterSource.clock.frame;
+              executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+                frame, timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+              this.physics.commitAttachments();
+            }
+            continue;
           }
           if (!run || this.selectedMonsters?.beforeTurn(actor.id) === false) continue;
           const equipmentPlayer = this.playerStates.get(actor);
@@ -2197,6 +2224,7 @@ export class SharedSimulation implements Simulation {
           this.physics.commitAttachments();
         }
       }
+      if (mapRun) for (const source of this.monsterSources.values()) if (source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
       if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
       if (run || paused) {
         if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.endFrame(entity, this.source.game); }
@@ -2206,7 +2234,6 @@ export class SharedSimulation implements Simulation {
           this.checkingQ2Rules = true;
           try { this.source.product.checkRules(); } finally { this.checkingQ2Rules = false; }
         }
-        for (const source of this.monsterSources.values()) if (run && source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
         if (this.source.kind === "q3") this.source.game.endFrame();
         for (const [actor, character] of this.q2Characters) if (paused || this.timeSeconds + 0.001 >= (this.characterTicks.get(actor) ?? 0)) {
           this.characterTicks.set(actor, this.timeSeconds + 0.1); character.endFrame();
