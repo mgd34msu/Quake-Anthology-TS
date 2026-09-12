@@ -876,3 +876,112 @@ test.skipIf(!haveCorpus)("retail QC pusher uses shared authored brush movement a
     actors.close();
   } finally { archive.close(); }
 });
+
+test.skipIf(!haveCorpus)("verified id1 synchronous attacks retain source identity and actual BSP hit facts", async () => {
+  const { Id1SynchronousAttacks } = await import("../../../src/content/q1/quakec/id1-attacks.ts");
+  const { Id1DamageBinding } = await import("../../../src/content/q1/quakec/id1-damage.ts");
+  const { QcWorldHost } = await import("../../../src/compat/qc/world-host.ts");
+  const { createQcPresentationBindings } = await import("../../../src/compat/qc/presentation-host.ts");
+  const { createSceneQueries } = await import("../../../src/world/collision/index.ts");
+  const { readQ1Bsp } = await import("../../../src/formats/q1-map/index.ts");
+  const { parseEntities } = await import("../../../src/core/common-parse.ts");
+  const { SimulationEvents } = await import("../../../src/app/bootstrap/simulation/events.ts");
+  const { createQcAimBinding } = await import("../../../src/compat/qc/client-host.ts");
+  const { SourceRandom } = await import("../../../src/app/bootstrap/simulation/random.ts");
+  const { openMountPlan, digestFile } = await import("../../../src/content/mounts/index.ts");
+  const mount = await openMountPlan({ id: "mount-plan:qc:attacks", prefixOrders: [], defaultOrder: ["mount:qc:attacks"], mounts: [
+    { kind: "archive", identity: { id: "mount:qc:attacks", content: "q1:classic:id1:retail", generation: 0 }, format: "pak", archivePath: corpus + "id1/PAK0.PAK", archiveDigest: await digestFile(corpus + "id1/PAK0.PAK") },
+  ] });
+  const sounds = new Map<string, import("../../../src/compat/qc/presentation-host.ts").QcPrecachedResource>();
+  try {
+    for (const path of ["weapons/guncock.wav", "weapons/shotgn2.wav"]) {
+      const asset = await mount.open(`sound/${path}`); if (asset === null) throw new Error(`Missing actual ${path}`);
+      sounds.set(path, { index: sounds.size + 1, resource: asset.reference });
+    }
+  } finally { mount.close(); }
+  const program = await readProgram("id1/PAK0.PAK"), archive = await openArchive(corpus + "id1/PAK0.PAK");
+  try {
+    const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1");
+    const map = readQ1Bsp(await archive.readEntry(entry));
+    const start = parseEntities(map.entities).find(entity => entity.get("classname") === "info_player_start");
+    const coordinates = start?.get("origin")?.split(/\s+/).map(Number), x = coordinates?.[0], y = coordinates?.[1], z = coordinates?.[2];
+    if (x === undefined || y === undefined || z === undefined) throw new Error("Missing actual start pose");
+    const field = (name: string): number => { const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
+    const run = (observed: boolean, weapon: "axe" | "shotgun" | "supershotgun" | "fallback") => {
+      const scene = createSceneQueries(map), numeric = createNumericOperations(Q1_DONOR_PROFILE);
+      const actors = new SessionActorRegistry(createIdentityOwner(`qc-attack-${observed}`)), callbacks = new ActorCallbackTable(actors);
+      const entities = new QcEntityMemory(classicQcEntityLayout(program), 16);
+      const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => qcLinkBounds(body, 0, numeric),
+        onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
+          scene.link(body, { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false });
+          return undefined;
+        } });
+      scene.bindActorState(actor => bodies.read(actor));
+      const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 16, lifetime: quakeEdictLifetime(1),
+        storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }), now: () => ({ kind: "seconds", value: 3 }),
+        unlink: actor => bodies.unlink(actor), exhausted: () => { throw new Error("No edicts"); } });
+      slots.bindExisting(0, "quakec:world"); const shooter = slots.allocate("quakec:player"), target = slots.allocate("quakec:target");
+      const world = new QcWorldHost({ program, entities, actors, slots, bodies, scene, numeric: Q1_DONOR_PROFILE,
+        model: () => null, foreignReference: () => { throw new Error("No foreign actor"); } });
+      world.actor(0); world.actor(1); world.actor(2);
+      const events = new SimulationEvents(bodies, () => ({ kind: "seconds", value: 3 }), () => null, actor => actors.sourceOf(actor)?.slot ?? null);
+      const presentation = createQcPresentationBindings(world, { content: "q1:classic:id1:retail", events, loading: () => false,
+        print: () => { throw new Error("Unexpected missing source resource"); }, lookup: (_kind, path) => sounds.get(path) ?? null,
+        precache: () => { throw new Error("No source precache during attack"); } });
+      const outcomes: DamageOutcome[] = [];
+      const authority = new GameplayAuthority(actors, callbacks, { impulse: () => { throw new Error("Source impulse replay"); },
+        beforeReaction: () => undefined, confirmed: outcome => { outcomes.push(outcome); return undefined; } });
+      const attacks = new Id1SynchronousAttacks(world.options, () => vm);
+      const damage = new Id1DamageBinding(world.options, authority, () => vm, call => {
+        const attack = attacks.resolve(call); if (attack === null) throw new Error("Unexpected damage source");
+        return { target: call.target, amount: call.amount, knockback: attack.knockback, direction: attack.direction, point: attack.point, normal: attack.normal, delivery: "direct",
+          attack: { sequence: outcomes.length, time: { kind: "seconds", value: attack.time }, attacker: attack.actor, inflictor: call.inflictor, weapon: attack.weapon,
+            weaponProvider: "test:qc", combatProvider: "test:qc", inventoryProvider: "test:qc", movementProvider: "test:qc", cause: { kind: "q1", deathType: "" } } };
+      });
+      const host = new Map([...world.host, ...presentation]);
+      host.set("aim", createQcAimBinding(world, { aimThreshold: () => 0.93, teamplay: () => 0 }));
+      const vm: QcMachine = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake", host, random: new SourceRandom(1) }),
+        serverActive: () => true, ...(observed ? { functionBoundary: attacks.compose(damage.functionBoundary),
+          observeCall: call => damage.observeCall(call), observeEntityStore: store => damage.observeEntityStore(store) } : {}) });
+      const owner = entities.at(1), victim = entities.at(2);
+      owner.setInt(field("classname"), vm.strings.setEngine("player-class", "player"));
+      owner.setFloat(field("weapon"), 128); // A later/current weapon word must not identify these explicit source attacks.
+      owner.setFloat(field("ammo_shells"), weapon === "fallback" ? 1 : 10); owner.setFloat(field("currentammo"), weapon === "fallback" ? 1 : 10);
+      owner.setVector(field("size"), { x: 32, y: 32, z: 56 });
+      owner.setFloat(field("flags"), 8); owner.setVector(field("origin"), { x, y, z });
+      owner.setVector(field("mins"), { x: -16, y: -16, z: -24 }); owner.setVector(field("maxs"), { x: 16, y: 16, z: 32 });
+      victim.setVector(field("origin"), { x: x + 40, y, z });
+      victim.setVector(field("mins"), { x: -16, y: -16, z: -24 }); victim.setVector(field("maxs"), { x: 16, y: 16, z: 32 });
+      victim.setFloat(field("solid"), 2); victim.setFloat(field("takedamage"), 2); victim.setFloat(field("movetype"), 3);
+      victim.setFloat(field("health"), 100); victim.setFloat(field("armorvalue"), 40); victim.setFloat(field("armortype"), 0.3); victim.setFloat(field("items"), 8192);
+      victim.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
+      authority.bind(target, { read: () => ({ health: victim.float(field("health")), armor: damage.readArmor(victim), mass: 200, canTakeDamage: true, invulnerable: false, team: null }),
+        writeHealth: () => { throw new Error("Source health replay"); }, writeArmor: () => { throw new Error("Source armor replay"); } });
+      world.link(1); world.link(2);
+      vm.globals.setInt(vm.globalOffset("self"), entities.reference(1)); vm.globals.setFloat(vm.globalOffset("time"), 3);
+      vm.globals.setVector(4, owner.vector(field("v_angle"))); vm.execute(program.functionNamed("makevectors").index, 1);
+      vm.execute(program.functionNamed(weapon === "axe" ? "W_FireAxe" : weapon === "shotgun" ? "W_FireShotgun" : "W_FireSuperShotgun").index);
+      const bytes = entities.bytes.slice(), velocity = bodies.read(target.id)?.velocity;
+      if (observed) {
+        expect(owner.float(field("ammo_shells"))).toBe(weapon === "axe" ? 10 : weapon === "fallback" ? 0 : weapon === "shotgun" ? 9 : 8);
+        expect(outcomes).toHaveLength(1); const outcome = outcomes[0]; if (outcome?.kind !== "committed") throw new Error("No committed source attack");
+        expect(outcome.decision.appliedDamage).toBeGreaterThan(0);
+        expect(outcome.decision.request.attack.weapon).toBe(weapon === "fallback" ? "q1:weapon/shotgun" : `q1:weapon/${weapon}`);
+        expect(outcome.decision.request.attack.attacker).toEqual(shooter.id);
+        expect(outcome.decision.request.target).toEqual(target.id);
+        expect(outcome.decision.request.attack.time).toEqual({ kind: "seconds", value: 3 });
+        expect(outcome.decision.request.point.x).toBeGreaterThan(x);
+        expect(outcome.decision.mutations.some(value => value.kind === "source-velocity")).toBe(true);
+        vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1)); vm.globals.setFloat(13, 20);
+        expect(() => vm.execute(117, 4)).toThrow("Unexpected damage source");
+        vm.globals.setInt(vm.globalOffset("multi_ent"), entities.reference(2)); vm.globals.setFloat(vm.globalOffset("multi_damage"), 4);
+        expect(() => vm.execute(program.functionNamed("ApplyMultiDamage").index)).toThrow("Unmatched id1 synchronous damage scope");
+        victim.setInt(field("th_pain"), program.functionNamed("error").index);
+        expect(() => vm.execute(program.functionNamed("W_FireAxe").index)).toThrow();
+        expect(() => vm.execute(program.functionNamed("ApplyMultiDamage").index)).toThrow("Unmatched id1 synchronous damage scope");
+      }
+      actors.close(); return { bytes, velocity };
+    };
+    for (const weapon of ["axe", "shotgun", "supershotgun", "fallback"] satisfies readonly ("axe" | "shotgun" | "supershotgun" | "fallback")[]) expect(run(true, weapon)).toEqual(run(false, weapon));
+  } finally { archive.close(); }
+}, 45000);

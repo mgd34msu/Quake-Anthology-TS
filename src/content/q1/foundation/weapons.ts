@@ -1,3 +1,4 @@
+import { aimQ1 } from "../../../world/gameplay/q1-aim.ts";
 import type { Q1CharacterAttack } from "./types.ts";
 /* weapons.qc/player.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -9,7 +10,7 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { ammoItem } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Weapon } from "./types.ts";
-import { POINT, ZERO, vadd, vsub, vscale, normalize, dot, isQ1BaseWeapon } from "./types.ts";
+import { POINT, ZERO, vadd, vsub, vscale, normalize, isQ1BaseWeapon } from "./types.ts";
 
 export function weaponModel(weapon: Q1Weapon): string {
   if (!isQ1BaseWeapon(weapon)) throw new Error(`Use registered Q1 weapon model for ${weapon}`);
@@ -34,28 +35,17 @@ export function bestWeapon(game: Q1EntityServices, actor: OwnedActor, ammoCount?
 /** PF_aim preserves horizontal aim and corrects height toward a visible DAMAGE_AIM target. */
 export function aim(game: Q1EntityServices, actor: OwnedActor, forward: Vec3): Vec3 {
   const body = game.host.bodies.read(actor.id); if (body === null) return forward;
-  const start = vadd(body.origin, { x: 0, y: 0, z: 20 });
   const team = game.host.combat.read(actor.id)?.team ?? null;
-  const eligible = (target: ActorId): boolean => {
-    const traits = game.sourceTarget(target);
-    if (sameActor(target, actor.id) || !(traits.aimedDamage || traits.player)) return false;
-    const state = game.host.combat.read(target);
-    return state !== null && state.canTakeDamage && !((game.options.teamplay ?? 0) !== 0 && team !== null && team === state.team);
-  };
-  const straight = game.host.trace({ start, end: vadd(start, vscale(forward, 2048)), bounds: POINT, ignore: actor.id, monsters: true });
-  if (straight.actor !== null && eligible(straight.actor)) return forward;
-  let best = game.options.aimThreshold ?? 0.93, selected: Vec3 | null = null;
-  for (const observation of game.host.actors.observations()) {
-    const target = observation.id; if (!eligible(target)) continue;
-    const targetBody = game.host.bodies.read(target); if (targetBody === null) continue;
-    const end = vadd(targetBody.origin, vscale(vadd(targetBody.bounds.min, targetBody.bounds.max), 0.5));
-    const distance = dot(normalize(vsub(end, start)), forward); if (distance < best) continue;
-    const trace = game.host.trace({ start, end, bounds: POINT, ignore: actor.id, monsters: true });
-    if (trace.actor !== null && sameActor(trace.actor, target)) { best = distance; selected = targetBody.origin; }
-  }
-  if (selected === null) return forward;
-  const delta = vsub(selected, body.origin), result = vscale(forward, dot(delta, forward));
-  return normalize({ ...result, z: delta.z });
+  return aimQ1(body.origin, forward, game.options.aimThreshold ?? 0.93, {
+    targets: game.host.actors.observations().map(value => value.id),
+    body: target => game.host.bodies.read(target),
+    eligible: target => {
+      const traits = game.sourceTarget(target), state = game.host.combat.read(target);
+      return !sameActor(target, actor.id) && (traits.aimedDamage || traits.player) && state !== null && state.canTakeDamage
+        && !((game.options.teamplay ?? 0) !== 0 && team !== null && team === state.team);
+    },
+    trace: (start, end) => game.host.trace({ start, end, bounds: POINT, ignore: actor.id, monsters: true }).actor,
+  });
 }
 
 /** MultiDamage flushes when the next pellet changes target, preserving intervening reactions. */
