@@ -19,7 +19,7 @@ import { SessionActorRegistry } from "../../src/world/actors/registry.ts";
 import { q3SpawnAnimation } from "../../src/content/q3/foundation/arsenal.ts";
 import type { Q3CharacterView } from "../../src/content/q3/foundation/presentation.ts";
 import { EntityEvent } from "../../src/movement/q3/constants.ts";
-import type { SimulationPresentation } from "../../src/app/bootstrap/simulation/types.ts";
+import type { SimulationPresentation, SimulationPresentationEvent } from "../../src/app/bootstrap/simulation/types.ts";
 import type { Q1BeamStyle } from "../../src/content/q1/foundation/types.ts";
 
 test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("retail effects from all three games draw through the shared CPU renderer and expire once for both seats", async () => {
@@ -51,6 +51,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       { kind: "q3-character", content: q3, seconds: 1, sequence: 5, event: { actor, sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_JUMP_PAD, parameter: 0 } },
     ]);
     await effects.prepare(snapshot(1), [rocket], [character]);
+    expect(effects.drainSounds().map(sound => sound.path)).toContain("weapons/r_exp3.wav");
     const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
       viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
     const first = effects.frame(camera), second = effects.frame({ ...camera, viewport: { ...camera.viewport, x: 160 } });
@@ -190,9 +191,75 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     expect(effects.frame(camera).operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
     await effects.prepare(snapshot(20), []);
     expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    effects.drainSounds();
+    effects.receive([
+      { kind: "q1", content: q1, seconds: 21, sequence: 100, event: { kind: "effect", effect: "wizard-spike", actor: null, origin: { x: 80, y: -24, z: 0 }, amount: 0 } },
+      { kind: "q1", content: q1, seconds: 21, sequence: 101, event: { kind: "effect", effect: "knight-spike", actor: null, origin: { x: 80, y: 24, z: 0 }, amount: 0 } },
+      { kind: "q1", content: q1, seconds: 21, sequence: 102, event: { kind: "colored-explosion", origin: { x: 80, y: 0, z: 0 }, colorStart: 228, colorLength: 5 } },
+    ]);
+    await effects.prepare(snapshot(21), []);
+    const points = effects.frame(camera);
+    expect(points.lights).toHaveLength(1);
+    expect(points.lights[0]).toEqual({ origin: { x: 80, y: 0, z: 0 }, radius: 350, color: { x: 1, y: 1, z: 1 }, minimum: 0 });
+    expect(points.operations.some(operation => operation.kind === "draw" && operation.batches.some(batch => batch.indices.length === 562 * 3))).toBe(true);
+    expect(effects.drainSounds().map(sound => [sound.content, sound.path, sound.channel, sound.volume, sound.seconds])).toEqual([
+      [q1, "wizard/hit.wav", 0, 1, 21], [q1, "hknight/hit.wav", 0, 1, 21], [q1, "weapons/r_exp3.wav", 0, 1, 21],
+    ]);
+    frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: snapshot(21).frame.time, viewport: camera.viewport,
+      clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: points.operations });
+    target.execute(frames.finish(false));
+    expect(new Set(renderer.pixels).size).toBeGreaterThan(16);
+    await effects.prepare(snapshot(21.1), []);
+    expect(effects.frame(camera).lights[0]?.radius).toBeCloseTo(320, 5);
+    expect(effects.drainSounds()).toEqual([]);
+    await effects.prepare(snapshot(21.51), []);
+    expect(effects.frame(camera).lights).toEqual([]);
+    expect(effects.frame(camera).operations.every(operation => operation.kind !== "draw" || operation.batches.every(batch => batch.indices.length === 0))).toBe(true);
+    const spikes = new ApplicationEffects(assets, createSceneQueries(content.world), () => false, 1);
+    const expectedRandom = new SourceRandom(1), expectedParticles = new SourceParticles(expectedRandom), expectedSounds: string[] = [];
+    const spikeEvents: SimulationPresentationEvent[] = [];
+    for (let index = 0; index < 24; index++) {
+      const effect = index % 2 === 0 ? "spike" : "superspike", origin = { x: 80, y: 0, z: 0 };
+      expectedParticles.q1Impact(origin, { x: 0, y: 0, z: 0 }, 0, effect === "spike" ? 10 : 20, 22);
+      if (expectedRandom.nextInteger() % 5 !== 0) expectedSounds.push("weapons/tink1.wav");
+      else { const choice = expectedRandom.nextInteger() & 3; expectedSounds.push(choice === 1 ? "weapons/ric1.wav" : choice === 2 ? "weapons/ric2.wav" : "weapons/ric3.wav"); }
+      spikeEvents.push({ kind: "q1", content: q1, seconds: 22, sequence: index, event: { kind: "effect", effect, actor: null, origin, amount: 0 } });
+    }
+    spikes.receive(spikeEvents);
+    await spikes.prepare(snapshot(22), []);
+    expect(spikes.drainSounds().map(sound => sound.path)).toEqual(expectedSounds);
+    expect(new Set(expectedSounds).size).toBeGreaterThan(1);
+    expect(spikes.drainSounds()).toEqual([]);
+    spikes.receive([{ kind: "q1", content: q1, seconds: 23, sequence: 24, event: { kind: "effect", effect: "tar-explosion", actor: null, origin: { x: 80, y: 0, z: 0 }, amount: 0 } }]);
+    await spikes.prepare(snapshot(23), []);
+    expect(spikes.drainSounds().map(sound => sound.path)).toEqual(["weapons/r_exp3.wav"]);
+    expect(spikes.frame(camera).lights).toEqual([]);
+    spikes.close();
     effects.close(); target.close();
   } finally { assets.close(); await content.close(); }
 }, 60000);
+
+test("Quake colored explosions retain source palette cycle, count, bounds and lifetime", () => {
+  const particles = new SourceParticles(new SourceRandom(1)), origin = { x: 10, y: 20, z: 30 };
+  particles.q1ColorExplosion(origin, 1, 228, 5);
+  const first = particles.sample(1, 0).q1;
+  expect(first).toHaveLength(512);
+  expect(first.map(particle => particle.kind === "indexed" ? particle.paletteIndex : -1)).toEqual(Array.from({ length: 512 }, (_, index) => 228 + (511 - index) % 5));
+  expect(first.every(particle => particle.origin.x >= -6 && particle.origin.x <= 25 && particle.origin.y >= 4 && particle.origin.y <= 35 && particle.origin.z >= 14 && particle.origin.z <= 45)).toBe(true);
+  expect(particles.sample(1.3, 0).q1).toHaveLength(512);
+  expect(particles.sample(1.301, 0).q1).toHaveLength(0);
+  const bounded = new SourceParticles(new SourceRandom(1), 5);
+  bounded.q1ColorExplosion(origin, 1, 0, 4);
+  expect(bounded.sample(1, 0).q1).toHaveLength(5);
+  expect(() => bounded.q1ColorExplosion(origin, 1, 0, 0)).toThrow("palette range");
+  for (const [color, count, minimum] of [[20, 30, 16], [226, 20, 224]] satisfies readonly (readonly [number, number, number])[]) {
+    const impact = new SourceParticles(new SourceRandom(1));
+    impact.q1Impact(origin, { x: 0, y: 0, z: 0 }, color, count, 1);
+    const points = impact.sample(1, 0).q1;
+    expect(points).toHaveLength(count);
+    expect(points.every(point => point.kind === "indexed" && point.paletteIndex >= minimum && point.paletteIndex < minimum + 8)).toBe(true);
+  }
+});
 
 test("rerelease berserk slam particles use source colors, velocity and lifetime", () => {
   const particles = new SourceParticles(new SourceRandom(1)), origin = { x: 10, y: 20, z: 30 };

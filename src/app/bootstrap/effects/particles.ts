@@ -47,6 +47,16 @@ export class SourceParticles {
         type: blob ? i & 1 ? "blob" : "blob2" : i & 1 ? "explode" : "explode2" })) return;
     }
   }
+  q1ColorExplosion(origin: Vec3, seconds: number, colorStart: number, colorLength: number): void {
+    if (!Number.isInteger(colorStart) || colorStart < 0 || colorStart > 255 || !Number.isInteger(colorLength) || colorLength < 1 || colorLength > 255)
+      throw new Error("Invalid Quake colored explosion palette range");
+    for (let i = 0; i < 512 && this.q1.length < this.capacity; i++) {
+      const component = (base: number): readonly [number, number] => [base + this.rand() % 32 - 16, this.rand() % 512 - 256];
+      const x = component(origin.x), y = component(origin.y), z = component(origin.z);
+      this.first({ origin: { x: x[0], y: y[0], z: z[0] }, velocity: { x: x[1], y: y[1], z: z[1] },
+        color: colorStart + i % colorLength, ramp: 0, die: seconds + 0.3, type: "blob" });
+    }
+  }
   q1Splash(origin: Vec3, seconds: number, lava: boolean): void {
     const step = lava ? 1 : 4;
     for (let i = -16; i < 16; i += step) for (let j = -16; j < 16; j += step) for (let k = lava ? 0 : -24; k < (lava ? 1 : 32); k += 4) {

@@ -275,15 +275,34 @@ export class ApplicationEffects {
     }
     if (source.kind === "q1") {
       const event = source.event;
-      if (event.kind !== "effect" && event.kind !== "beam") return;
+      if (event.kind !== "effect" && event.kind !== "beam" && event.kind !== "colored-explosion") return;
       const group = await this.group(source.content), particles = group.particles, seconds = source.seconds;
       if (event.kind === "beam") { this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end, die: seconds + 0.2, width: 0, color: 0, model: q1BeamModels[event.style], family: "q1" }); return; }
+      const sound = (path: string): void => { this.sounds.push({ content: source.content, path, origin: event.origin,
+        channel: 0, volume: 1, seconds, playback: { kind: "once" } }); };
+      if (event.kind === "colored-explosion") {
+        particles.q1ColorExplosion(event.origin, seconds, event.colorStart, event.colorLength);
+        this.light(event.origin, seconds, 350, 0.5, white, 300);
+        sound("weapons/r_exp3.wav");
+        return;
+      }
       switch (event.effect) {
         case "blood": case "meat-spray": particles.q1Impact(event.origin, zero, 73, event.amount, seconds); break;
         case "gunshot": particles.q1Impact(event.origin, zero, 0, 20, seconds); break;
-        case "spike": case "superspike": particles.q1Impact(event.origin, zero, 0, event.effect === "spike" ? 10 : 20, seconds); break;
-        case "explosion": particles.q1Explosion(event.origin, seconds, false); this.light(event.origin, seconds, 350, 0.5, white, 300); break;
-        case "tar-explosion": particles.q1Explosion(event.origin, seconds, true); break;
+        case "spike": case "superspike": {
+          particles.q1Impact(event.origin, zero, 0, event.effect === "spike" ? 10 : 20, seconds);
+          if (this.random.nextInteger() % 5 !== 0) sound("weapons/tink1.wav");
+          else {
+            const ricochet = this.random.nextInteger() & 3;
+            sound(ricochet === 1 ? "weapons/ric1.wav" : ricochet === 2 ? "weapons/ric2.wav" : "weapons/ric3.wav");
+          }
+          break;
+        }
+        case "wizard-spike": case "knight-spike":
+          particles.q1Impact(event.origin, zero, event.effect === "wizard-spike" ? 20 : 226, event.effect === "wizard-spike" ? 30 : 20, seconds);
+          sound(event.effect === "wizard-spike" ? "wizard/hit.wav" : "hknight/hit.wav"); break;
+        case "explosion": particles.q1Explosion(event.origin, seconds, false); this.light(event.origin, seconds, 350, 0.5, white, 300); sound("weapons/r_exp3.wav"); break;
+        case "tar-explosion": particles.q1Explosion(event.origin, seconds, true); sound("weapons/r_exp3.wav"); break;
         case "lava-splash": case "teleport": particles.q1Splash(event.origin, seconds, event.effect === "lava-splash"); break;
         case "muzzleflash": {
           const pose = event.actor === null ? undefined : this.pose(event.actor), direction = pose === undefined ? zero : anglesToAxis(pose.angles)[0];
