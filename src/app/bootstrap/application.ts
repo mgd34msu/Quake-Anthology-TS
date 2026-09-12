@@ -1,3 +1,4 @@
+import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
 import { ApplicationQ2Console } from "./q2-console.ts";
@@ -124,10 +125,13 @@ export class Application {
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
     if (options.network.kind === "q2-client") throw new Error("Remote clients require RemoteApplication without a local simulation");
     const content = await loadApplicationContent(options, recipe);
-    if (recipe !== undefined) {
-      try { options = applicationOptionsForRecipe(options, content); }
-      catch (error) { await content.close(); throw error; }
-    }
+    try {
+      if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);
+      if (options.serverProfilePath !== undefined) {
+        const value: unknown = JSON.parse(await Bun.file(options.serverProfilePath).text());
+        options = { ...options, serverProfile: parseServerProfile(value, serverDefinitionsForRecipe(content.recipe)) };
+      } else if (options.serverProfile !== undefined) options = { ...options, serverProfile: parseServerProfile(options.serverProfile, serverDefinitionsForRecipe(content.recipe)) };
+    } catch (error) { await content.close(); throw error; }
     const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
     const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
     const localSeats = new Map<ClientId, SessionSeat>();
@@ -135,7 +139,7 @@ export class Application {
     try {
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
       const simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-        skill: options.skill, mode: options.mode, seed: options.seed,
+        skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
         maxClients: options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
         playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
       session.attachWorld(simulation);
@@ -259,6 +263,18 @@ export class Application {
     }
   }
 
+  private bindServerSettingCommand(commands: CommandBuffer): void {
+    commands.unregister("server_setting");
+    commands.register("server_setting", invocation => {
+      const id = invocation.args[0], value = invocation.args[1];
+      if (id === undefined || value === undefined || invocation.args.length !== 2) throw new Error("Usage: server_setting <server:setting-id> <value>");
+      const binding = this.simulation.serverSettings().find(binding => binding.definition.id === id);
+      if (binding === undefined) throw new Error(`No selected server setting ${id}`);
+      const status = writeServerSetting(binding, value);
+      this.host.print(`${id} = ${status.desired}${status.pending ? ` (effective ${status.effective}; ${status.applyAt})` : ""}\n`);
+      return undefined;
+    });
+  }
   private async bindSourceCommands(): Promise<void> {
     if (this.simulation.q2Source() !== null) {
       if (this.q2Console === null) {
@@ -268,6 +284,7 @@ export class Application {
         await this.q2Console.initialize();
       } else await this.q2Console.bindCurrent();
       this.sourceCommands = this.q2Console.commands;
+      this.bindServerSettingCommand(this.sourceCommands);
       return;
     }
     const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
@@ -309,6 +326,7 @@ export class Application {
     });
     commands.register("quit", () => this.requestQuit());
     this.sourceCommands = commands;
+    this.bindServerSettingCommand(commands);
   }
 
   private kickClients(args: readonly string[]): undefined {
@@ -551,6 +569,8 @@ export class Application {
     const previousBots = this.bots;
     const q1BotCvars = this.simulation.q1Source()?.cvars.snapshots().filter(variable => variable.name.startsWith("bot_") || variable.name === "g_spSkill");
     const q3Session = q3?.captureSession();
+    const serverProfile = this.simulation.serverProfile();
+    const q2Cvars = this.simulation.q2ServerCvars()?.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     let simulation: SharedSimulation | null = null, assets: ApplicationAssets | null = null, art: NativeUiArt | null = null;
@@ -575,7 +595,7 @@ export class Application {
       simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? this.simulation.options.maxClients,
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
-        ...(save === undefined ? { ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
+        ...(save === undefined ? { serverProfile, ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
       const nextQ1 = nextSimulation.q1Source();

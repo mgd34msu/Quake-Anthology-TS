@@ -1,3 +1,6 @@
+import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
+import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../../../settings/server/index.ts";
+import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
 import { QuakeCSource } from "./quakec-source.ts";
 import { createNativeQ1PusherServices } from "./native-q1-pusher.ts";
@@ -209,6 +212,7 @@ export class SharedSimulation implements Simulation {
   private selectedMonsters: SelectedMonsters | null = null;
   private readonly monsterSources = new Map<ProviderId, SelectedMonsterSource>();
   private readonly monsterMissions = new Map<ActorId, MonsterMission>();
+  private q2ServerRegistry: CvarRegistry | null = null;
   private source: SourceRuntime = { kind: "loading" };
   private sourceFrame: FrameContext;
   private hostMilliseconds = 0;
@@ -1244,6 +1248,8 @@ export class SharedSimulation implements Simulation {
       }, { gameType: this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
         mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
         ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) });
+      for (const definition of q3GameCvarDefinitions(product)) host.cvars.register(definition.name, definition.value, definition.flags);
+      this.initializeServerSettings(host.cvars);
       return { kind: "q3", game: new Q3SourceRuntime({ recipe, weaponProvider: this.weaponProvider, product, entities: this.options.world.entities,
         seed: this.options.seed, maxClients: this.options.maxClients, buildDate: "TypeScript port",
         ...(this.options.q3Session === undefined ? {} : { sessionCarry: this.options.q3Session }) }, host) };
@@ -1335,12 +1341,24 @@ export class SharedSimulation implements Simulation {
     };
     let owningMonsters: Q2ProductRuntime["monsters"] | null = null;
     const host = this.q2ActorHost(recipe.map.entities, actorRuntime, actor => owningMonsters?.context(actor)?.state);
+    const serverCvars = new CvarRegistry({ dialect: content.includes(":rerelease:") ? "q2-rerelease" : "q2-classic",
+      context: { session: this.session, origin: { kind: "server-console" } }, print: text => this.events.message({ kind: "print", level: 2, text }) });
+    this.q2ServerRegistry = serverCvars;
+    registerQ2ServerCvars(serverCvars, recipe.match.provider);
+    for (const variable of this.options.q2Cvars ?? []) serverCvars.set(variable.name, variable.value, true);
+    this.initializeServerSettings(serverCvars);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
       match: recipe.match.provider === "q2:lmctf" ? { kind: "lmctf", ...(this.options.travel?.source.kind === "q2" && this.options.travel.source.lmctf !== undefined ? { travel: this.options.travel.source.lmctf } : {}) } : { kind: recipe.match.provider === "q2:ctf" ? "ctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
-        skill: this.options.skill, mode: this.options.mode, deathmatchFlags: 0, maxClients: this.options.maxClients, provider: recipe.map.entities.provider,
+        skill: this.options.skill, mode: this.options.mode, deathmatchFlags: serverCvars.variableValue("dmflags"), maxClients: this.options.maxClients, provider: recipe.map.entities.provider,
         campaign, combatProvider: recipe.combat.provider, movementProvider: recipe.movement.provider, inventoryProvider: recipe.inventory.provider },
-      services: { sharedGrapple: this.sharedGrapple(), gravity: () => this.physics.gravity, hunterCamera: false, strongMines: false,
+      services: { deathmatchFlags: { read: () => serverCvars.variableValue("dmflags"), write: flags => {
+        const before = serverCvars.find("dmflags"), changed = Number(before?.value ?? 0) ^ flags;
+        const desired = ((Number(before?.latchedValue ?? before?.value ?? 0) & ~changed) | (flags & changed)) >>> 0;
+        serverCvars.set("dmflags", String(flags), true);
+        if (desired !== flags) serverCvars.stage("dmflags", String(desired));
+        return undefined;
+      } }, sharedGrapple: this.sharedGrapple(), gravity: () => this.physics.gravity, hunterCamera: false, strongMines: false,
         emit: event => {
           if (event.kind === "grapple-prediction") {
             const player = this.requirePlayer(event.actor);
@@ -1385,6 +1403,8 @@ export class SharedSimulation implements Simulation {
       if (program !== "baseq2" && program !== "xatrix" && program !== "rogue") throw new Error(`Unsupported Q2 classic program ${program}`);
       product = createQ2ProductRuntime({ ...common, edition: "classic", program });
     }
+    bindQ2ServerCvars(serverCvars, product);
+    serverCvars.setServerActive(true);
     owningMonsters = product.monsters;
     return { kind: "q2", product, game: product.game, weapons, monsters: product.monsters, movers: product.movers, items: product.items, players: product.players, baseEntities: product.baseEntities };
   }
@@ -1443,7 +1463,9 @@ export class SharedSimulation implements Simulation {
       } } : {}), context: request => ({ arithmetic: "binary32", player: this.player(request.target) !== null,
       monster: this.classname(request.target).startsWith("monster_"), attackerPlayer: request.attack.attacker !== null && this.player(request.attack.attacker) !== null,
       hasEnemy: this.source.kind === "q2" && (this.source.game.entity(request.target)?.enemy ?? null) !== null, easySkill: this.options.skill === 0, deathmatch: this.options.mode === "deathmatch",
-      defenderSphere: false, teamDamageEnabled: false, friendlyFire: true, nuke: false, noKnockback: false, movable: !this.physics.isBrush(request.target), rejectTeamDamage: false, suppressPain: false }) }));
+      defenderSphere: false,
+      teamDamageEnabled: this.source.kind === "q2" && (this.recipe.match.provider === "q2:ctf" || this.recipe.match.provider === "q2:lmctf" || (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0),
+      friendlyFire: this.q2ServerRegistry === null || (this.q2ServerRegistry.variableValue("dmflags") & 256) === 0, nuke: false, noKnockback: false, movable: !this.physics.isBrush(request.target), rejectTeamDamage: false, suppressPain: false }) }));
     return undefined;
   }
 
@@ -2440,6 +2462,9 @@ export class SharedSimulation implements Simulation {
       if (run || paused) {
         if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.endFrame(entity, this.source.game); }
         if (run && this.source.kind === "q2") {
+          const match = this.source.product.match.source;
+          if (match instanceof Q2Lmctf && match.match.phase === "countdown" && !match.match.paused && match.match.remaining <= 0 && this.source.game.host.now() >= match.match.nextThink)
+            this.q2ServerRegistry?.applyLatched("timelimit");
           this.source.product.afterPlayerFrames();
           this.source.monsters.endFrame(this.source.game);
           this.checkingQ2Rules = true;
@@ -2568,6 +2593,26 @@ export class SharedSimulation implements Simulation {
   selectedQ3WeaponSource(): Pick<Q3SelectedArsenal, "has" | "read"> | null {
     return this.selectedArsenal?.family === "q3" ? this.selectedArsenal : null;
   }
+  private initializeServerSettings(cvars: CvarRegistry): void {
+    if (this.options.serverProfile === undefined) return;
+    const owner = cvarServerSettingsOwner(cvars, true);
+    applyServerProfile(this.options.serverProfile, serverDefinitionsForRecipe(this.recipe).map(definition => ({ definition, owner })));
+  }
+  q2ServerCvars(): CvarRegistry | null { return this.q2ServerRegistry; }
+  serverSettings(): readonly BoundServerSetting[] {
+    const cvars = this.q2ServerRegistry ?? (this.source.kind === "q3" ? this.source.game.host.cvars : null);
+    if (cvars === null) return [];
+    const owner = cvarServerSettingsOwner(cvars);
+    if (this.source.kind === "q3") {
+      const settings = this.source.game.settings;
+      return serverDefinitionsForRecipe(this.recipe).map(definition => ({ definition, owner: {
+        write: owner.write,
+        read: target => ({ ...owner.read(target), effective: target.kind === "value" ? settings.snapshot(target.name).value : owner.read(target).effective }),
+      } satisfies ServerSettingsOwner }));
+    }
+    return serverDefinitionsForRecipe(this.recipe).map(definition => ({ definition, owner }));
+  }
+  serverProfile(): ServerProfile { return captureServerProfile(this.serverSettings()); }
   q2Source(): Extract<SourceRuntime, { readonly kind: "q2" }> | null { return this.source.kind === "q2" ? this.source : null; }
   quakecSource() { return this.source.kind === "quakec" ? this.source.game : null; }
   q1Source() { return this.source.kind === "q1" ? this.source : null; }

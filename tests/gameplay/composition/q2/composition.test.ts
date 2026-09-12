@@ -11,11 +11,11 @@ import type { Q2RereleaseEvent, Q2RereleaseHooks } from "../../../../src/content
 import { createQ2ProductRuntime, captureQ2Product, restoreQ2Product } from "../../../../src/content/composition/q2/index.ts";
 import { loadApplicationContent } from "../../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../../src/app/bootstrap/options.ts";
-import type { Q2MatchSelection } from "../../../../src/content/composition/q2/index.ts";
+import type { Q2CompositionServices, Q2MatchSelection } from "../../../../src/content/composition/q2/index.ts";
 import { Q2Ctf } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { Q2Tag } from "../../../../src/content/q2/missionpacks/modes/index.ts";
-function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2) {
+function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2, deathmatchFlags?: Q2CompositionServices["deathmatchFlags"]) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -48,7 +48,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
       provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q2:movement" },
     playerHooks: hooks, itemHooks: { weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined },
     entityHooks: { playerPush: () => undefined, setActorGravity: () => undefined, localTime: () => ({hour: 12, minute: 0, second: 0}) },
-    services: { gravity: () => 800, emit: () => undefined, hunterCamera: false, strongMines: false,
+    services: { ...(deathmatchFlags === undefined ? {} : { deathmatchFlags }), gravity: () => 800, emit: () => undefined, hunterCamera: false, strongMines: false,
       foreignPowerups: () => ({quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0}) }, rereleaseHooks: rrHooks });
   combat.register(createQ2CombatPolicy({ id: "q2:combat", sourceEffects: composition.match.sourceEffects(composition.game), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "rerelease", ctf: false, alive: true } })),
     context: () => ({ arithmetic: "binary64", player: true, monster: false, attackerPlayer: false, hasEnemy: false, easySkill: false,
@@ -321,4 +321,14 @@ test("LMCTF native skip vote resumes ballots and strict deadline through a check
   expect(voteMode.vote.startedAt).toBe(0); expect(restored.players.intermission.kind).toBe("playing");
   restored.advance(30.1); voteMode.playerFrame(restored.first, restored.game);
   expect(voteMode.vote.startedAt).toBeNull(); expect(restored.players.intermission.kind).toBe("intermission");
+});
+
+test("DeathBall initializes required flags through the external owner and preserves its configured bits", () => {
+  let flags = 16;
+  const active = compose(true, '{ "classname" "worldspawn" } { "classname" "info_player_start" } { "classname" "dm_dball_ball_start" }', { kind: "deathball", team1Skin: "male/ctf_r", team2Skin: "male/ctf_b", goalLimit: 5 }, 2,
+    { read: () => flags, write: value => { flags = value; return undefined; } });
+  const required = 0x20000 | 0x80000 | 0x40000 | 256 | 64;
+  expect(flags).toBe(16 | required);
+  expect(active.game.options.deathmatchFlags).toBe(16 | required);
+  expect(active.composition.movementStopSpeed).toBe(0);
 });

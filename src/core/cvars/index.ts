@@ -257,6 +257,21 @@ export class CvarRegistry {
     return this.set(name, text.slice(0, 31), this.dialect === "q3");
   }
 
+  /** Host configuration can defer a value without changing native cvar declaration flags. */
+  stage(name: string, input: string): CvarSnapshot {
+    const state = this.variables.get(this.key(name)), value = sourceCommandText(input);
+    if (state === undefined) throw new Error(`Cannot stage an unregistered cvar ${name}`);
+    if (this.dialect === "q3" ? (state.flags & (CvarFlag.ReadOnly | CvarFlag.Init)) !== 0 : isQ2(this.dialect) && (state.flags & Q2CvarFlag.NoSet) !== 0)
+      throw new Error(`Cannot stage a protected cvar ${name}`);
+    if (isQ2(this.dialect) && (state.flags & 6) !== 0 && !validInfo(value)) throw new Error(`Invalid staged info cvar ${name}`);
+    const pending = value === state.value ? undefined : value;
+    if (state.latchedValue !== pending) {
+      state.latchedValue = pending; state.modified = true; state.modificationCount++;
+      if (this.dialect === "q3") this.changedFlags |= state.flags;
+    }
+    return snapshot(state);
+  }
+
   applyLatched(name?: string): readonly CvarSnapshot[] {
     const changed: CvarSnapshot[] = [];
     for (let state = this.first; state !== undefined; state = state.next) {

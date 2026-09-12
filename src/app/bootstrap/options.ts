@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
 
 export interface ApplicationOptions {
+  readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
+  readonly serverProfilePath?: string;
   readonly corpusRoot: string;
   readonly product: string;
   readonly map: string;
@@ -47,6 +49,7 @@ Usage: bun run src/main.ts [options]
   --width N --height N       Window dimensions (default 960 by 600)
   --seats N                  Local seats, 1 through 4
   --mode singleplayer|coop|deathmatch
+  --server-profile PATH      Load validated shared server settings from JSON
   --rules standard|ctf|lmctf Q2 match rules, independent of map and movement
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
@@ -149,6 +152,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (botSkill !== 1 && botSkill !== 2 && botSkill !== 3 && botSkill !== 4 && botSkill !== 5) throw new RangeError("Invalid bot skill");
         options = { ...options, botSkill }; break;
       }
+      case "--server-profile": options = { ...options, serverProfilePath: resolve(value) }; break;
       case "--rules":
         if (value !== "standard" && value !== "ctf" && value !== "lmctf") throw new Error(`Unknown match rules: ${value}`);
         options = { ...options, rules: value }; break;

@@ -25,6 +25,7 @@ export type Q2CompositionEvent =
 
 /** These operations use the session's selected movement and presentation owners. */
 export interface Q2CompositionServices {
+  readonly deathmatchFlags?: { read(): number; write(flags: number): undefined };
   readonly sharedGrapple?: SharedGrappleControl;
   gravity(): number;
   emit(event: Q2CompositionEvent): undefined;

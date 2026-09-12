@@ -212,10 +212,12 @@ export class Q2ProductRuntime {
       ...(armory === null ? [] : [armory.items]), this.items,
       ...(this.rerelease === null ? [] : [this.rerelease.monsters]), ...this.expansions.map(expansion => expansion.monsters), baseMonsters, this.monsters,
     ];
-    const deathmatchFlags = configuration.match?.kind === "deathball" ? q2DeathBallRules(configuration.options.deathmatchFlags).deathmatchFlags : configuration.options.deathmatchFlags;
+    const configuredFlags = configuration.services.deathmatchFlags?.read() ?? configuration.options.deathmatchFlags;
+    const deathmatchFlags = configuration.match?.kind === "deathball" ? q2DeathBallRules(configuredFlags).deathmatchFlags : configuredFlags;
     const rules = { deathmatchFlags: deathmatchFlags >>> 0 };
     this.activeRules = rules;
-    this.game = new Q2Foundation(configuration.host, { ...configuration.options, edition: configuration.edition, get deathmatchFlags() { return rules.deathmatchFlags; } }, this.modules);
+    if (deathmatchFlags !== configuredFlags) this.setDeathmatchFlags(deathmatchFlags);
+    this.game = new Q2Foundation(configuration.host, { ...configuration.options, edition: configuration.edition, get deathmatchFlags() { return configuration.services.deathmatchFlags?.read() ?? rules.deathmatchFlags; } }, this.modules);
     this.registerCallbacks();
   }
 
@@ -224,7 +226,10 @@ export class Q2ProductRuntime {
       : this.configuration.program === "baseq2" ? [] : [this.configuration.program];
   }
 
-  setDeathmatchFlags(flags: number): undefined { this.activeRules.deathmatchFlags = flags >>> 0; return undefined; }
+  setDeathmatchFlags(flags: number): undefined {
+    if (this.configuration.services.deathmatchFlags !== undefined) return this.configuration.services.deathmatchFlags.write(flags >>> 0);
+    this.activeRules.deathmatchFlags = flags >>> 0; return undefined;
+  }
 
   get originalSourceFallbacks(): readonly string[] {
     return this.rerelease === null ? [] : this.expansions.flatMap(expansion => expansion.monsters.originalSourceFallbacks)
