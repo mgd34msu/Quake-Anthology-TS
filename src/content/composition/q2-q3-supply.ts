@@ -10,7 +10,7 @@ export const Q2_Q3_SUPPLY_PROFILE: PickupSupplyProfile = {
     { source: "q2:ammo_cells", destinations: ["q2:ammo_cells", "q3:ammo/plasmagun", "q3:ammo/lightning", "q3:ammo/bfg"] },
     { source: "q2:ammo_rockets", destinations: ["q3:ammo/rocketlauncher"] },
     { source: "q2:ammo_slugs", destinations: ["q3:ammo/railgun"] },
-    { source: "q2:ammo_grenades", destinations: ["q3:ammo/grenadelauncher"] },
+    { source: "q2:ammo_grenades", destinations: ["q2:ammo_grenades", "q3:ammo/grenadelauncher"] },
   ],
   weapons: [
     { source: "q2:weapon_shotgun", destinations: ["q3:weapon/shotgun"] },
