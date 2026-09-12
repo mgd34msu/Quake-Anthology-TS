@@ -2050,6 +2050,13 @@ export class SharedSimulation implements Simulation {
           const intent = command.arsenal;
           if (intent.weapon !== null && !this.requestWeapon(player.actor.id, { provider: intent.provider, item: intent.weapon })) throw new Error("Weapon request is unavailable to this actor");
           command = { ...command, arsenal: { provider: this.weaponProvider.provider, weapon: null, useHoldable: intent.useHoldable } };
+        } else if (!paused && slot === undefined && this.selectedArsenal === null && command.arsenal !== undefined
+          && (this.source.kind === "q1" || this.source.kind === "q2")) {
+          const intent = command.arsenal;
+          if (intent.provider !== this.weaponProvider.provider) throw new Error("Arsenal command belongs to a different provider");
+          if (intent.weapon !== null && (this.source.kind !== "q1" || intent.weapon !== this.arsenal(player).activeWeapon)
+            && !this.requestWeapon(player.actor.id, { provider: intent.provider, item: intent.weapon })) throw new Error("Weapon request is unavailable to this actor");
+          command = { ...command, arsenal: { provider: this.weaponProvider.provider, weapon: null, useHoldable: intent.useHoldable } };
         }
         if (!paused && this.grapple?.selection.binding === "slot") this.grapple.input(player.actor.id, (command.command.buttons & 1) !== 0);
         if (paused && lmctf !== null && !lmctf.canMove(player.actor.id)) {
