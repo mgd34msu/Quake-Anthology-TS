@@ -174,7 +174,7 @@ function parseCueLoop(reader: BinaryReader, source: string, chunkOffset: number)
     reader.skip(20);
     return reader.u32();
 }
-function parseSamplerLoop(reader: BinaryReader, source: string, chunkOffset: number): number | null {
+function parseSamplerLoop(reader: BinaryReader, source: string, chunkOffset: number, sourceSentinel = false): number | null {
     if (reader.length < 36)
         reject(source, chunkOffset, "truncated WAV sampler chunk");
     reader.seek(28);
@@ -184,11 +184,15 @@ function parseSamplerLoop(reader: BinaryReader, source: string, chunkOffset: num
         reject(source, chunkOffset, "truncated WAV sampler-loop records");
     if (loopCount === 0)
         return null;
-    reader.seek(44);
-    return reader.u32();
+    reader.seek(40);
+    const type = reader.u32(), start = reader.u32(), end = reader.u32();
+    return sourceSentinel && type === 255 && start === 0xffffffff && end === 0xffffffff ? null : start;
 }
 // Asset inspection checks the complete RIFF and retains its cue/smpl extension.
 export function decodeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
+    return decodePcm(bytes, source, false);
+}
+function decodePcm(bytes: Uint8Array, source: string, sourceSignedChunks: boolean): DecodedWav {
     const reader = new BinaryReader(bytes, source);
     if (reader.length < 12)
         reject(source, 0, "truncated RIFF/WAVE header");
@@ -210,8 +214,14 @@ export function decodeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
             reject(source, chunkHeaderOffset, "truncated WAV chunk header");
         const chunkId = fourCc(reader);
         const chunkLength = reader.u32();
+        // Quake FindNextChunk treats a negative signed length as the end of its search.
+        if (sourceSignedChunks && chunkLength > 0x7fffffff) break;
         const chunkOffset = reader.offset;
         if (chunkOffset > riffEnd - chunkLength) {
+            // Retail Quake tools wrote incomplete trailing INFO lists. The source
+            // searches fmt/cue/data independently and never consumes this metadata.
+            if (sourceSignedChunks && format !== null && data !== null && chunkId === "LIST"
+                && riffEnd - chunkOffset >= 4 && matchesFourCc(reader, chunkOffset, "INFO")) break;
             reject(source, chunkHeaderOffset + 4, `WAV chunk ${JSON.stringify(chunkId)} exceeds RIFF bounds`);
         }
         const chunkEnd = chunkOffset + chunkLength;
@@ -229,7 +239,7 @@ export function decodeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
             cueLoopStart = parseCueLoop(reader.section(chunkOffset, chunkLength), source, chunkOffset);
         }
         else if (chunkId === "smpl" && samplerLoopStart === null) {
-            samplerLoopStart = parseSamplerLoop(reader.section(chunkOffset, chunkLength), source, chunkOffset);
+            samplerLoopStart = parseSamplerLoop(reader.section(chunkOffset, chunkLength), source, chunkOffset, sourceSignedChunks);
         }
         reader.seek(nextChunkOffset);
     }
@@ -262,7 +272,7 @@ export function decodeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
 }
 /** Quake/Q2 Sound Forge LIST mark stores the audible loop end, before the data tail. */
 export function decodeQuakeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
-    const pcm = decodeWav(bytes, source);
+    const pcm = decodePcm(bytes, source, true);
     if (pcm.loopStart === null)
         return pcm;
     const reader = new BinaryReader(bytes, source);
@@ -271,6 +281,8 @@ export function decodeQuakeWav(bytes: Uint8Array, source = "<buffer>"): DecodedW
     const riffEnd = 8 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, true);
     while (reader.offset + 8 <= riffEnd) {
         const name = fourCc(reader), length = reader.u32(), start = reader.offset;
+        if (length > 0x7fffffff) break;
+        if (start > riffEnd - length && name === "LIST" && riffEnd - start >= 4 && matchesFourCc(reader, start, "INFO")) break;
         if (name === "cue ")
             cueSeen = true;
         if (cueSeen && name === "LIST" && length >= 24) {

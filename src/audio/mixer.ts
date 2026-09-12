@@ -1,3 +1,5 @@
+import { sourceSoundChannel } from "./types.ts";
+import type { SharedSoundChannel, SoundChannelCommand } from "./types.ts";
 /*
  * PCM mixing translated from id Software's code/client/snd_mix.c,
  * snd_dma.c, and snd_mem.c.
@@ -48,6 +50,7 @@ export interface RealLoopingSoundOptions {
 interface PreparedSound {
     readonly sound: PcmSound;
     readonly step256: number;
+    readonly memory: MixerSoundMemory | null;
     readonly outputFrames: number;
 }
 /** Engine sound handles borrow the bank's current resampled chunk allocation. */
@@ -57,10 +60,17 @@ export interface MixerSoundMemory {
     sample(sound: PcmSound, frame: number): number;
     touch(sound: PcmSound, milliseconds: number): undefined;
 }
+interface VoicePolicy {
+    readonly attenuation: number;
+    readonly loopStart: number | null;
+    readonly role: "effect" | "static" | "ambient" | "entity-loop";
+    readonly key: number;
+}
 interface OneShotVoice {
     readonly prepared: PreparedSound;
     readonly entity: number;
-    readonly channel: number;
+    readonly channel: SharedSoundChannel | null;
+    readonly policy: VoicePolicy | null;
     readonly origin: VoiceOrigin;
     readonly volume: number;
     stereoVolume: StereoVolume;
@@ -144,19 +154,18 @@ function checkedSample(samples: Int16Array, index: number): number {
     }
     return sample;
 }
-function checkedPaint(paint: Int32Array, index: number): number {
+function checkedPaint(paint: Float64Array, index: number): number {
     const sample = paint[index];
     if (sample === undefined) {
         throw new Error(`paint index ${index} is outside ${paint.length} values`);
     }
     return sample;
 }
-function addPaint(paint: Int32Array, index: number, contribution: number): void {
-    paint[index] = int32(checkedPaint(paint, index) + contribution);
+function addPaint(paint: Float64Array, index: number, contribution: number): void {
+    paint[index] = checkedPaint(paint, index) + contribution;
 }
-function addFloatPaint(paint: Int32Array, index: number, contribution: number): void {
-    const sum = Math.fround(Math.fround(checkedPaint(paint, index)) + Math.fround(contribution));
-    paint[index] = int32(Math.trunc(sum));
+function addFloatPaint(paint: Float64Array, index: number, contribution: number): void {
+    paint[index] = checkedPaint(paint, index) + Math.trunc(contribution);
 }
 function checkedRaw(samples: Int32Array, index: number): number {
     const sample = samples[index];
@@ -308,7 +317,7 @@ export class AudioMixer {
         // positions until the next respatialization.
         for (const voice of this.voices) {
             if (voice !== null)
-                voice.stereoVolume = this.spatialize(voice.entity, voice.origin, voice.volume);
+                voice.stereoVolume = voice.policy === null ? this.spatialize(voice.entity, voice.origin, voice.volume) : this.policySpatialize(voice);
         }
         this.loopChannels = this.collectLoopMixes();
     }
@@ -342,6 +351,11 @@ export class AudioMixer {
         }, sourceName);
     }
     startSound(sound: PcmSound, options: StartSoundOptions, sourceName: string | null = null): boolean {
+        if (!this.enabled) return false;
+        requireChannel(options.channel);
+        return this.startSharedSound(sound, options, sourceSoundChannel("q3", options.channel), sourceName);
+    }
+    startSharedSound(sound: PcmSound, options: Omit<StartSoundOptions, "channel">, channelCommand: SoundChannelCommand, sourceName: string | null = null): boolean {
         if (!this.enabled)
             return false;
         if (this.soundMemory === null)
@@ -356,7 +370,6 @@ export class AudioMixer {
             // loopSounds; resolveOrigin checks bounds if later spatialization does.
             throw new RangeError(`entity must be an integer from 0 through ${this.entityCapacity}`);
         }
-        requireChannel(options.channel);
         requireChannelVolume(options.volume);
         const prepared = this.prepare(sound);
         // S_StartSound prints after memory preparation, before either clock read or
@@ -373,7 +386,7 @@ export class AudioMixer {
         // The native loop increments ch and also indexes ch[i], reading beyond
         // s_channels. Scan each actual slot once instead of reproducing that UB.
         for (const voice of this.voices) {
-            if (voice === null || voice.entity !== options.entity || voice.prepared.sound !== sound)
+            if (voice === null || voice.policy !== null || voice.entity !== options.entity || voice.prepared.sound !== sound)
                 continue;
             if (int32(time - voice.allocatedAt) < 50)
                 return false;
@@ -383,8 +396,9 @@ export class AudioMixer {
         if (sameSoundCount > allowed)
             return false;
         this.soundMemory?.touch(sound, time);
+        this.replaceChannel(options.entity, channelCommand);
         const free = this.freeChannels.at(-1);
-        const channel = free === undefined ? this.chooseVictim(options.entity, time) : free;
+        const channel = free ?? (this.voices.some(voice => voice !== null && voice.policy !== null) ? this.voices.length : this.chooseVictim(options.entity, time));
         // S_ChannelMalloc samples Com_Milliseconds again only for a free slot.
         if (free !== undefined)
             this.freeChannels.pop();
@@ -392,7 +406,8 @@ export class AudioMixer {
         this.voices[channel] = {
             prepared,
             entity: options.entity,
-            channel: options.channel,
+            channel: channelCommand.kind === "channel" ? channelCommand.channel : null,
+            policy: null,
             origin: options.origin.kind === "fixed"
                 ? { kind: "fixed", position: vec3(options.origin.position.x, options.origin.position.y, options.origin.position.z) }
                 : options.origin,
@@ -402,6 +417,74 @@ export class AudioMixer {
             allocatedAt,
         };
         return true;
+    }
+    private policySpatialize(voice: OneShotVoice): StereoVolume {
+        if (voice.policy?.role === "ambient") return voice.stereoVolume;
+        if (voice.origin.kind === "local" || voice.entity === this.listenerEntity) return { left: voice.volume, right: voice.volume };
+        const position = this.resolveOrigin(voice.origin), delta = sub3(position, this.listenerOrigin), distance = length3(delta);
+        const pan = distance === 0 ? 0 : -dot3(delta, this.listenerAxis[1]) / distance;
+        const gain = voice.volume * (1 - distance * (voice.policy?.attenuation ?? 0));
+        return { left: Math.max(0, Math.trunc(gain * (this.outputChannels === 1 ? 1 : 1 - pan))),
+            right: Math.max(0, Math.trunc(gain * (this.outputChannels === 1 ? 1 : 1 + pan))) };
+    }
+    startQ1Sound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
+        command: SoundChannelCommand, random: () => number): boolean {
+        return this.admitQ1(sound, options, command, { attenuation: options.attenuation / 1000, loopStart: null, role: "effect", key: 0 }, random);
+    }
+    private admitQ1(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
+        command: SoundChannelCommand, policy: VoicePolicy, random: (() => number) | null): boolean {
+        if (!this.enabled) return false;
+        validateSound(sound, false);
+        if (sound.channels !== 1 || sound.frameCount < 1) throw new Error("Q1 effects require nonempty mono PCM");
+        if (!Number.isFinite(options.volume) || options.volume < 0 || !Number.isFinite(options.attenuation) || options.attenuation < 0) throw new RangeError("Invalid Q1 sound gain or attenuation");
+        const ratio = sound.sampleRate / this.outputRate;
+        const prepared: PreparedSound = { sound, memory: null, step256: ratio * 256, outputFrames: Math.trunc(sound.frameCount / ratio) };
+        if (prepared.outputFrames < 1) throw new Error("Sound resamples to zero frames");
+        const marker = policy.loopStart ?? (sound.loopStart === null ? null : Math.trunc(sound.loopStart / ratio));
+        if (marker !== null && (marker < 0 || marker >= prepared.outputFrames)) throw new RangeError("Sound loop outside PCM");
+        let offset = 0;
+        if (random !== null && this.voices.some(voice => voice !== null && voice.policy?.role === "effect" && voice.prepared.sound === sound && voice.start.kind === "started" && voice.start.sample === this.paintedTime)) {
+            const value = random();
+            if (!Number.isInteger(value) || value < 0) throw new RangeError("Sound random source must return a nonnegative integer");
+            offset = Math.min(prepared.outputFrames - 1, value % Math.max(1, Math.trunc(0.1 * this.outputRate)));
+        }
+        const voice: OneShotVoice = { prepared, entity: options.entity, channel: command.kind === "channel" ? command.channel : null,
+            origin: options.origin, volume: Math.trunc(options.volume * 255), stereoVolume: { left: 0, right: 0 },
+            start: { kind: "started", sample: policy.role === "entity-loop" ? 0 : this.paintedTime - offset }, allocatedAt: this.allocationTime(), policy: { ...policy, loopStart: marker } };
+        voice.stereoVolume = this.policySpatialize(voice);
+        if (policy.role === "effect" && voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0) return false;
+        this.replaceChannel(options.entity, command);
+        const free = this.freeChannels.pop(), index = free ?? this.voices.length;
+        this.voices[index] = voice;
+        return true;
+    }
+    addStaticSound(sound: PcmSound, origin: Vec3, volume: number, attenuation: number): boolean {
+        if (sound.loopStart === null) throw new Error("Static sound requires a WAV loop marker");
+        return this.admitQ1(sound, { entity: -1, origin: { kind: "fixed", position: origin }, volume: volume / 255, attenuation }, { kind: "auto" },
+            { attenuation: attenuation / 64000, loopStart: null, role: "static", key: 0 }, null);
+    }
+    updateAmbient(sounds: readonly PcmSound[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
+        if (!this.enabled) return;
+        for (let key = 0; key < 2; key++) {
+            const sound = sounds[key], amount = levels[key];
+            let index = this.voices.findIndex(voice => voice?.policy?.role === "ambient" && voice.policy.key === key);
+            if (sound === undefined || amount === undefined || level === 0) { if (index >= 0) this.freeChannel(index); continue; }
+            if (index < 0 || this.voices[index]?.prepared.sound !== sound) {
+                if (index >= 0) this.freeChannel(index);
+                this.admitQ1(sound, { entity: -1, origin: { kind: "local" }, volume: 0, attenuation: 0 }, { kind: "auto" }, { attenuation: 0, loopStart: 0, role: "ambient", key }, null);
+                index = this.voices.findIndex(voice => voice?.policy?.role === "ambient" && voice.policy.key === key);
+            }
+            const voice = this.voices[index];
+            if (voice == null) throw new Error("Ambient voice admission failed");
+            const target = level * amount < 8 ? 0 : level * amount, current = voice.stereoVolume.left, step = Math.max(0, elapsedSeconds * fade);
+            const gain = current < target ? Math.min(target, current + step) : Math.max(target, current - step);
+            voice.stereoVolume = { left: gain, right: gain };
+        }
+    }
+    setQ1LoopSounds(entries: readonly { readonly entity: number; readonly sound: PcmSound; readonly origin: Vec3; readonly volume: number; readonly attenuation?: number }[]): void {
+        for (const [index, voice] of this.voices.entries()) if (voice?.policy?.role === "entity-loop") this.freeChannel(index);
+        for (const entry of entries) this.admitQ1(entry.sound, { ...entry, origin: { kind: "fixed", position: entry.origin }, attenuation: entry.attenuation ?? 1 }, { kind: "auto" },
+            { attenuation: (entry.attenuation ?? 1) / 1000, loopStart: 0, role: "entity-loop", key: entry.entity }, null);
     }
     updateLoopingSound(sound: PcmSound, options: FrameLoopingSoundOptions): void {
         if (!this.enabled)
@@ -483,10 +566,22 @@ export class AudioMixer {
             this.loops.set(entity, { ...loop, active: false });
     }
     stopChannel(entity: number, channel: number): void {
+        this.replaceChannel(entity, sourceSoundChannel("q3", channel));
+    }
+    stopSharedChannel(entity: number, channel: SharedSoundChannel): void {
+        this.replaceChannel(entity, { kind: "channel", channel });
+    }
+    hasActorSound(entity: number): boolean {
+        return this.voices.some(voice => voice !== null && voice.entity === entity && (voice.policy === null || voice.policy.role === "effect"));
+    }
+    private replaceChannel(entity: number, command: SoundChannelCommand): void {
         for (let index = 0; index < this.voices.length; index++) {
             const voice = this.voices[index];
-            if (voice !== undefined && voice !== null && voice.entity === entity && voice.channel === channel)
+            if (voice !== undefined && voice !== null && voice.entity === entity && (voice.policy === null || voice.policy.role === "effect") && (command.kind === "replace-actor" || command.kind === "channel" && voice.channel === command.channel))
+            {
                 this.freeChannel(index);
+                if (command.kind === "replace-actor") return;
+            }
         }
     }
     stopEntity(entity: number): void {
@@ -644,7 +739,7 @@ export class AudioMixer {
         const effectsGain = Math.trunc(Math.fround(Math.fround(this.effectsVolume) * 255));
         while (this.paintedTime < endFrame) {
             const count = Math.min(PAINTBUFFER_SIZE, endFrame - this.paintedTime);
-            const paint = new Int32Array(count * 2);
+            const paint = new Float64Array(count * 2);
             this.paintRaw(paint, count);
             for (const voice of this.voices) {
                 if (voice === null)
@@ -656,7 +751,9 @@ export class AudioMixer {
                     continue;
                 const firstOffset = this.paintedTime - voice.start.sample;
                 for (let outputFrame = 0; outputFrame < count; outputFrame++) {
-                    const soundFrame = firstOffset + outputFrame;
+                    let soundFrame = firstOffset + outputFrame;
+                    if (voice.policy?.loopStart != null && soundFrame >= voice.prepared.outputFrames)
+                        soundFrame = voice.policy.loopStart + (soundFrame - voice.prepared.outputFrames) % (voice.prepared.outputFrames - voice.policy.loopStart);
                     if (soundFrame < 0 || soundFrame >= voice.prepared.outputFrames)
                         continue;
                     const sample = this.effectSample(voice.prepared, soundFrame);
@@ -696,7 +793,7 @@ export class AudioMixer {
         if (this.soundMemory !== null) {
             const memory = this.soundMemory;
             memory.frameCount(sound);
-            return { sound, step256: 256, get outputFrames() { return memory.frameCount(sound); } };
+            return { sound, memory, step256: 256, get outputFrames() { return memory.frameCount(sound); } };
         }
         const scale = Math.fround(sound.sampleRate / this.outputRate);
         const outputFrames = Math.trunc(Math.fround(Math.fround(sound.frameCount) / scale));
@@ -705,6 +802,7 @@ export class AudioMixer {
         }
         return {
             sound,
+            memory: null,
             step256: Math.trunc(scale * 256),
             outputFrames,
         };
@@ -718,7 +816,7 @@ export class AudioMixer {
     private resetChannels(): void {
         this.voices.fill(null);
         this.freeChannels.length = 0;
-        for (let index = 0; index < this.capacity; index++)
+        for (let index = 0; index < this.voices.length; index++)
             this.freeChannels.push(index);
         this.rawDebugPrint("Channel memory manager started\n");
     }
@@ -736,7 +834,7 @@ export class AudioMixer {
                 this.voices[index] = { ...voice, start: { kind: "started", sample: this.paintedTime } };
                 newSamples = true;
             }
-            else if (voice.start.sample + voice.prepared.outputFrames <= this.paintedTime) {
+            else if ((voice.policy === null || voice.policy.loopStart === null) && voice.start.sample + voice.prepared.outputFrames <= this.paintedTime) {
                 this.freeChannel(index);
             }
         }
@@ -746,7 +844,7 @@ export class AudioMixer {
         let victim: number | null = null;
         let oldest = time;
         for (const [index, voice] of this.voices.entries()) {
-            if (voice === null || voice.entity === this.listenerEntity || voice.entity !== entity || voice.channel === 7)
+            if (voice === null || voice.policy !== null && voice.policy.role !== "effect" || voice.entity === this.listenerEntity || voice.entity !== entity || voice.channel === "announcer")
                 continue;
             if (voice.allocatedAt < oldest) {
                 oldest = voice.allocatedAt;
@@ -756,7 +854,7 @@ export class AudioMixer {
         if (victim !== null)
             return victim;
         for (const [index, voice] of this.voices.entries()) {
-            if (voice === null || voice.entity === this.listenerEntity || voice.channel === 7)
+            if (voice === null || voice.policy !== null && voice.policy.role !== "effect" || voice.entity === this.listenerEntity || voice.channel === "announcer")
                 continue;
             if (voice.allocatedAt < oldest) {
                 oldest = voice.allocatedAt;
@@ -797,12 +895,12 @@ export class AudioMixer {
         return spatializeSoundOrigin(position, this.listenerOrigin, this.listenerAxis, volume, this.outputChannels);
     }
     private effectSample(prepared: PreparedSound, outputFrame: number): number {
-        if (this.soundMemory !== null)
-            return this.soundMemory.sample(prepared.sound, outputFrame);
+        if (prepared.memory !== null)
+            return prepared.memory.sample(prepared.sound, outputFrame);
         const sourceFrame = Math.trunc(outputFrame * prepared.step256 / 256);
         return checkedSample(prepared.sound.samples, sourceFrame);
     }
-    private paintLoop(paint: Int32Array, frames: number, loop: LoopMix, effectsGain: number): void {
+    private paintLoop(paint: Float64Array, frames: number, loop: LoopMix, effectsGain: number): void {
         let outputFrame = 0;
         while (outputFrame < frames) {
             const absoluteFrame = this.paintedTime + outputFrame;
@@ -822,13 +920,13 @@ export class AudioMixer {
             outputFrame += count;
         }
     }
-    private paintDopplerLoop(paint: Int32Array, outputFrame: number, count: number, sourceOffset: number, loop: LoopMix, effectsGain: number): void {
+    private paintDopplerLoop(paint: Float64Array, outputFrame: number, count: number, sourceOffset: number, loop: LoopMix, effectsGain: number): void {
         const scaledOffset = Math.trunc(Math.fround(Math.fround(sourceOffset) * loop.oldDopplerScale));
         const chunkCount = Math.ceil(loop.prepared.outputFrames / SND_CHUNK_SIZE);
         let chunk = scaledOffset < 0 ? 0 : Math.trunc(scaledOffset / SND_CHUNK_SIZE) % chunkCount;
         let offset = Math.fround(scaledOffset < 0 ? scaledOffset : scaledOffset % SND_CHUNK_SIZE);
-        const leftVolume = Math.fround(Math.imul(loop.leftVolume, effectsGain));
-        const rightVolume = Math.fround(Math.imul(loop.rightVolume, effectsGain));
+        const leftVolume = Math.fround(loop.leftVolume * effectsGain);
+        const rightVolume = Math.fround(loop.rightVolume * effectsGain);
         for (let index = 0; index < count; index++) {
             const first = Math.trunc(offset);
             offset = Math.fround(offset + loop.dopplerScale);
@@ -841,7 +939,7 @@ export class AudioMixer {
                 }
                 sampleTotal = Math.fround(sampleTotal + this.dopplerSample(loop.prepared, chunk, source));
             }
-            const divisor = Math.fround(Math.imul(256, last - first));
+            const divisor = Math.fround(256 * (last - first));
             const leftContribution = Math.fround(Math.fround(sampleTotal * leftVolume) / divisor);
             const rightContribution = Math.fround(Math.fround(sampleTotal * rightVolume) / divisor);
             addFloatPaint(paint, (outputFrame + index) * 2, leftContribution);
@@ -850,8 +948,8 @@ export class AudioMixer {
     }
     private dopplerSample(prepared: PreparedSound, chunk: number, sampleOffset: number): number {
         const outputFrame = chunk * SND_CHUNK_SIZE + (sampleOffset & (SND_CHUNK_SIZE - 1));
-        if (this.soundMemory !== null)
-            return this.soundMemory.sample(prepared.sound, outputFrame);
+        if (prepared.memory !== null)
+            return prepared.memory.sample(prepared.sound, outputFrame);
         // The source reads uninitialized tail storage in the final sndBuffer when
         // Doppler outruns soundLength. Deterministic mixing explicitly stabilizes
         // that undefined memory as zero.
@@ -859,11 +957,11 @@ export class AudioMixer {
             return 0;
         return this.effectSample(prepared, outputFrame);
     }
-    private paintEffect(paint: Int32Array, outputFrame: number, sample: number, volume: StereoVolume, effectsGain: number): void {
-        const leftGain = Math.imul(volume.left, effectsGain);
-        const rightGain = Math.imul(volume.right, effectsGain);
-        addPaint(paint, outputFrame * 2, Math.imul(sample, leftGain) >> 8);
-        addPaint(paint, outputFrame * 2 + 1, Math.imul(sample, rightGain) >> 8);
+    private paintEffect(paint: Float64Array, outputFrame: number, sample: number, volume: StereoVolume, effectsGain: number): void {
+        const leftGain = volume.left * effectsGain;
+        const rightGain = volume.right * effectsGain;
+        addPaint(paint, outputFrame * 2, Math.floor(sample * leftGain / 256));
+        addPaint(paint, outputFrame * 2 + 1, Math.floor(sample * rightGain / 256));
     }
     private collectLoopMixes(): LoopMix[] {
         this.loopChannels = [];
@@ -900,7 +998,7 @@ export class AudioMixer {
         }
         return mixes;
     }
-    private paintRaw(paint: Int32Array, frames: number): void {
+    private paintRaw(paint: Float64Array, frames: number): void {
         const stop = Math.min(this.paintedTime + frames, this.rawEndTime);
         for (let absoluteFrame = this.paintedTime; absoluteFrame < stop; absoluteFrame++) {
             const outputFrame = absoluteFrame - this.paintedTime;

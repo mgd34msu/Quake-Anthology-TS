@@ -63,3 +63,13 @@ export interface AudioStreamTarget {
     readonly audience: AudioAudience;
     readonly gain: number;
 }
+
+export type SharedSoundChannel = "weapon" | "voice" | "item" | "body" | "local" | "local-sound" | "announcer" | `${SoundFamily}:extension:${number}`;
+export type SoundChannelCommand = { readonly kind: "auto" } | { readonly kind: "replace-actor" } | { readonly kind: "channel"; readonly channel: SharedSoundChannel };
+export function sourceSoundChannel(family: SoundFamily, channel: number): SoundChannelCommand {
+    if (!Number.isInteger(channel) || channel < 0 && !(family === "q1" && channel === -1)) throw new RangeError("Invalid source sound channel");
+    if (channel === -1) return { kind: "replace-actor" };
+    if (channel === 0) return { kind: "auto" };
+    const names: readonly SharedSoundChannel[] = family === "q3" ? ["local", "weapon", "voice", "item", "body", "local-sound", "announcer"] : ["weapon", "voice", "item", "body"];
+    return { kind: "channel", channel: names[channel - 1] ?? `${family}:extension:${channel}` };
+}
