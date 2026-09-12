@@ -1,6 +1,7 @@
-import type { InventoryTable, ItemId } from "../../contracts/gameplay.ts";
+import { inventoryGive } from "./inventory.ts";
+import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
-import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyProfile } from "../../contracts/pickups.ts";
+import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyOffer, PickupSupplyPreview, PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 export interface SharedPickupAdmissionOptions {
   readonly inventory: InventoryTable;
@@ -28,10 +29,29 @@ export class SharedPickupAdmission implements PickupAdmission {
     return mapping.destinations;
   }
 
-  private requireEntries(actor: ActorId, items: readonly ItemId[]): undefined {
+  private requireEntries(actor: ActorId, items: readonly ItemId[]): readonly InventoryEntry[] {
     const inventory = this.options.inventory.entries(actor);
     for (const item of items) if (!inventory.some(entry => entry.item === item)) throw new Error(`Pickup destination ${item} was not admitted`);
-    return undefined;
+    return inventory;
+  }
+
+  preview(actor: ActorId, offer: PickupSupplyOffer): PickupSupplyPreview {
+    const weapons = offer.kind === "ammo" ? [] : this.destinations("weapons", offer.kind === "weapon" ? offer.offer.item : offer.offer.weapon);
+    const ammo = this.resolveAmmo(offer.kind === "weapon" ? offer.offer.ammo : [offer.offer]);
+    const entries = new Map(this.requireEntries(actor, [...weapons, ...ammo.map(grant => grant.item)]).map(entry => [entry.item, entry]));
+    const give = (item: ItemId, amount: number): PickupAmmoReceipt => {
+      const entry = entries.get(item);
+      if (entry === undefined) throw new Error(`Pickup destination ${item} was not admitted`);
+      const transition = inventoryGive(entry, amount);
+      if (transition.kind === "write") entries.set(item, transition.entry);
+      return { item, before: entry.count, given: transition.given };
+    };
+    if (offer.kind === "weapon") {
+      const weaponReceipts = weapons.map(item => give(item, 1));
+      return { accepted: true, weapons: weaponReceipts, ammo: ammo.map(grant => give(grant.item, grant.amount)) };
+    }
+    const receipts = ammo.map(grant => give(grant.item, grant.amount)), accepted = receipts.some(grant => grant.given > 0);
+    return { accepted, ammo: receipts, weapons: accepted ? weapons.map(item => give(item, 1)) : [] };
   }
 
   owns(actor: ActorId, sourceWeapon: ItemId): boolean {

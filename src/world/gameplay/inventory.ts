@@ -30,6 +30,19 @@ function copyEntry(entry: InventoryEntry): InventoryEntry {
   return Object.freeze({ ...entry, count: sourceCount(entry, entry.count), ...(entry.countPolicy === undefined ? {} : { countPolicy: Object.freeze({ ...entry.countPolicy }) }) });
 }
 
+export type InventoryGiveTransition =
+  | { readonly kind: "unchanged"; readonly given: 0 }
+  | { readonly kind: "write"; readonly entry: InventoryEntry; readonly given: number };
+
+/** Preserve source rounding and writes even when the resulting count delta is zero. */
+export function inventoryGive(entry: InventoryEntry, count: number): InventoryGiveTransition {
+  quantity(count);
+  const given = Math.min(count, Math.max(0, entry.capacity - entry.count));
+  if (given === 0) return { kind: "unchanged", given: 0 };
+  const next = copyEntry({ ...entry, count: entry.count + sourceCount(entry, given) });
+  return { kind: "write", entry: next, given: next.count - entry.count };
+}
+
 /** Capacity and item selection belong to the chosen inventory provider. Counts have one write path. */
 export class SharedInventoryTable implements InventoryTable {
   private readonly stores = new Map<OwnedActor, InventoryStateBinding>();
@@ -81,11 +94,10 @@ export class SharedInventoryTable implements InventoryTable {
     const binding = this.stores.get(actor);
     const entry = binding?.read().find(candidate => candidate.item === item);
     if (entry === undefined || binding === undefined) return 0;
-    const given = Math.min(count, Math.max(0, entry.capacity - entry.count));
-    if (given === 0) return 0;
-    const next = copyEntry({ ...entry, count: entry.count + sourceCount(entry, given) });
-    binding.write(next);
-    return next.count - entry.count;
+    const transition = inventoryGive(entry, count);
+    if (transition.kind === "unchanged") return 0;
+    binding.write(transition.entry);
+    return transition.given;
   }
 
   /** Source pickups can change capacity or retain an over-cap count without a forced generic clamp. */
