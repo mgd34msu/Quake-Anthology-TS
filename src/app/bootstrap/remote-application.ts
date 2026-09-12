@@ -142,6 +142,7 @@ export class RemoteApplication {
   }
 
   private async loadServerWorld(state: Q2ApplicationGameState): Promise<LoadedApplicationContent> {
+    this.controls?.stopHaptics();
     const layout = q2ApplicationLayout(this.remote.protocol), path = state.configStrings.get(layout.models + 1);
     if (path === undefined) throw new Error("Q2 server supplied no world model");
     const map = mapResourcePath(path);
@@ -205,6 +206,7 @@ export class RemoteApplication {
       this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], this.remote);
     }
     const input = this.controls, local = input.locals[0];
+    frontend.audio.bindHaptics(input);
     if (local === undefined) throw new Error("Remote input has no local seat");
     const ui = new ApplicationSeatUi(local, frontend.art, input, this.remote, frontend.font, frontend.audio,
       () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), await frontend.assets.loadMenuTypography());
@@ -260,8 +262,9 @@ export class RemoteApplication {
       const now = performance.now();
       await this.network.poll(now);
       this.frames++;
-      if (this.network.phase === "closed" || this.network.phase === "rejected") { this.requestQuit(); return null; }
+      if (this.network.phase === "closed" || this.network.phase === "rejected") { this.controls?.stopHaptics(); this.requestQuit(); return null; }
       if (this.network.phase !== "active" || this.remote.output === null) {
+        this.controls?.stopHaptics();
         this.dispatchCommands();
         this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
           commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
@@ -271,7 +274,7 @@ export class RemoteApplication {
       this.network.submit(this.controls?.build(elapsedMilliseconds, this.elapsed, this.remote.output.snapshot.frame.frame) ?? [], now);
       this.dispatchCommands();
       await this.network.poll(now);
-      if (this.network.phase !== "active") return null;
+      if (this.network.phase !== "active") { this.controls?.stopHaptics(); return null; }
       await this.bindSeat();
       const output = this.remote.samplePresentation(performance.now()), frontend = this.frontend, presentation = this.presentation;
       if (output === null) return null;

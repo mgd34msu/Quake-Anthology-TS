@@ -1,12 +1,12 @@
 import type { CommandDialect } from "../../contracts/common.ts";
 import { defaultMouseTuning } from "../../input/mouse.ts";
 import { defaultViewInputTuning } from "../../input/user-command.ts";
-import { bindAudioSettings, bindPrimaryInputSettings } from "../../ui/settings/index.ts";
-import type { AudioSettings, PrimaryInputSettings, SettingBinding } from "../../ui/settings/index.ts";
+import { bindAudioSettings, bindPrimaryInputSettings, bindControllerVibration } from "../../ui/settings/index.ts";
+import type { AudioSettings, PrimaryInputSettings, ControllerVibrationSettings, SettingBinding } from "../../ui/settings/index.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationInput, LocalInput } from "./input.ts";
 
-export type FrontendPreferenceValues = AudioSettings & PrimaryInputSettings;
+export type FrontendPreferenceValues = AudioSettings & PrimaryInputSettings & ControllerVibrationSettings;
 export type FrontendPreferenceOverrides = Partial<FrontendPreferenceValues>;
 
 export function applyFrontendPreferences(values: FrontendPreferenceOverrides, input: ApplicationInput, audio: ApplicationAudio): void {
@@ -14,10 +14,11 @@ export function applyFrontendPreferences(values: FrontendPreferenceOverrides, in
   if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume;
   for (const local of input.locals) applyFrontendInput(values, local);
 }
-export function readFrontendInput(local: LocalInput): PrimaryInputSettings {
-  return { sensitivity: local.builder.mouse.tuning.sensitivity, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
+export function readFrontendInput(local: LocalInput): PrimaryInputSettings & ControllerVibrationSettings {
+  return { controllerVibration: local.haptics.enabled, sensitivity: local.builder.mouse.tuning.sensitivity, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
 }
-export function applyFrontendInput(values: Partial<PrimaryInputSettings>, local: LocalInput): void {
+export function applyFrontendInput(values: Partial<PrimaryInputSettings & ControllerVibrationSettings>, local: LocalInput): void {
+  if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration);
   local.builder.mouse.tuning = { ...local.builder.mouse.tuning,
     ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
     ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
@@ -31,6 +32,7 @@ export function readFrontendPreferences(input: ApplicationInput, audio: Applicat
 export function changedFrontendPreferences(before: FrontendPreferenceValues, after: FrontendPreferenceValues,
   selected: FrontendPreferenceOverrides): FrontendPreferenceOverrides {
   return { ...selected,
+    ...(after.controllerVibration === before.controllerVibration ? {} : { controllerVibration: after.controllerVibration }),
     ...(after.effectsVolume === before.effectsVolume ? {} : { effectsVolume: after.effectsVolume }),
     ...(after.musicVolume === before.musicVolume ? {} : { musicVolume: after.musicVolume }),
     ...(after.sensitivity === before.sensitivity ? {} : { sensitivity: after.sensitivity }),
@@ -43,7 +45,8 @@ export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
   constructor(private readonly dialect: () => CommandDialect) {}
   bindings(): readonly SettingBinding[] {
-    return [...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
+    return [bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true }),
+      write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? defaultMouseTuning.sensitivity,
       invertMouse: this.values.invertMouse ?? defaultMouseTuning.invertPitch,

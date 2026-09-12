@@ -64,7 +64,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.controller = new NativeUiController({ seat, skin: () => menuSkin(art.skin.font),
       measureText: (text, scale) => layoutText({ text, font: typography.body, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
       bindings: () => local.input.bindings, appearance: () => this.preferences.values,
-      focus: (focus, time) => { local.input.setFocus(focus, time); input.router.updateCapture(); },
+      focus: (focus, time) => { local.input.setFocus(focus, time); local.haptics.setActive(local.input.focused && focus.kind === "game"); input.router.updateCapture(); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
@@ -83,7 +83,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } });
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
-    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder), ...volumes, ...this.preferences.bindings()]);
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled }),
+      write: values => { if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
     this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Paused", fullScreen: true,

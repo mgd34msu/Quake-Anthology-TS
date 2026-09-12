@@ -1,6 +1,7 @@
 // BNVIB format and motor downmix ported from quake-2-re-ts qcommon/bnvib.ts
 // and platform/haptics.ts. Scheduling and device ownership are per seat.
 // GPL-2.0-or-later.
+import type { ContentId, ResourceRequest } from "../contracts/content.ts";
 import type { SeatId } from "../contracts/identity.ts";
 import { BinaryReader } from "../core/binary/index.ts";
 import type { ControllerOperationResult, SdlControllers } from "../platform/controller.ts";
@@ -69,46 +70,74 @@ export class BnvibScheduler {
 }
 export interface SeatHapticsOptions {
   readonly seat: SeatId;
-  readonly controllers: SdlControllers;
+  readonly controllers: Pick<SdlControllers, "rumble">;
   readonly controller: (seat: SeatId) => number | null;
-  readonly load: (path: string) => Promise<Uint8Array | null>;
+  readonly load: (request: ResourceRequest) => Promise<Uint8Array | null>;
   readonly now: () => number;
 }
 export class SeatHaptics {
   readonly scheduler: BnvibScheduler;
   private readonly cache = new Map<string, Promise<BnvibPattern | null>>();
-  private sequence = 0;
-  private lastDevice: number | null = null;
-  private enabled = true;
+  private generation = 0;
+  private requested = 0;
+  private accepted = 0;
+  private device: number | null;
+  private active = true;
+  private preference = true;
+  private closed = false;
+  get enabled(): boolean { return this.preference; }
   constructor(private readonly options: SeatHapticsOptions) {
-    this.scheduler = new BnvibScheduler({ setMotors: (low, high, duration) => {
-      const instance = options.controller(options.seat);
-      if (this.lastDevice !== null && this.lastDevice !== instance) options.controllers.rumble(this.lastDevice, 0, 0, 0);
-      this.lastDevice = instance;
-      return instance === null ? { kind: "disconnected", reason: "Seat has no assigned controller" }
-        : options.controllers.rumble(instance, low, high, duration);
-    } });
+    this.device = null;
+    this.scheduler = new BnvibScheduler({ setMotors: (low, high, duration) => this.device === null
+      ? { kind: "disconnected", reason: "Seat has no assigned controller" }
+      : options.controllers.rumble(this.device, low, high, duration) });
   }
   setEnabled(enabled: boolean): HapticsResult {
-    this.enabled = enabled;
-    if (!enabled) { this.sequence++; return this.scheduler.stop(); }
-    return { kind: "unchanged" };
+    this.preference = enabled;
+    return enabled ? { kind: "unchanged" } : this.cancel();
   }
-  async sound(sound: string): Promise<HapticsResult | null> {
-    if (!this.enabled) return null;
-    const path = tactilePathForSound(sound);
+  setActive(active: boolean): void {
+    if (this.active === active) return;
+    this.active = active;
+    if (!active) this.cancel();
+  }
+  private synchronizeDevice(): void {
+    const device = this.options.controller(this.options.seat);
+    if (device === this.device) return;
+    this.cancel();
+    this.device = device;
+  }
+  cancel(): ControllerOperationResult {
+    this.generation++;
+    return this.scheduler.stop();
+  }
+  async sound(content: ContentId, sound: string): Promise<HapticsResult | null> {
+    if (this.closed) return null;
+    this.synchronizeDevice();
+    if (!this.preference || !this.active || this.device === null) return null;
+    const path = tactilePathForSound(sound.startsWith("sound/") ? sound.slice(6) : sound);
     if (path === null) return null;
-    const sequence = ++this.sequence;
-    let pending = this.cache.get(path);
+    const generation = this.generation, requested = ++this.requested, key = `${content}/${path}`;
+    let pending = this.cache.get(key);
     if (pending === undefined) {
-      pending = this.options.load(path).then(bytes => bytes === null ? null : parseBnvib(bytes));
-      this.cache.set(path, pending);
+      pending = this.options.load({ content, path }).then(bytes => bytes === null ? null : parseBnvib(bytes));
+      this.cache.set(key, pending);
     }
     const pattern = await pending;
-    if (pattern === null || sequence !== this.sequence || !this.enabled) return null;
+    if (this.closed || generation !== this.generation) return null;
+    this.synchronizeDevice();
+    if (pattern === null || generation !== this.generation || requested < this.accepted || this.closed || !this.preference || !this.active) return null;
+    this.accepted = requested;
     return this.scheduler.play(pattern, this.options.now());
   }
-  update(): HapticsResult { return this.scheduler.update(this.options.now()); }
-  invalidateAssets(): void { this.cache.clear(); }
-  close(): ControllerOperationResult { this.enabled = false; this.sequence++; this.cache.clear(); return this.scheduler.stop(); }
+  update(): HapticsResult {
+    if (this.closed) return { kind: "unchanged" };
+    this.synchronizeDevice();
+    return this.scheduler.update(this.options.now());
+  }
+  invalidateAssets(): void { this.cancel(); this.cache.clear(); }
+  close(): ControllerOperationResult {
+    this.closed = true; this.cache.clear();
+    return this.cancel();
+  }
 }

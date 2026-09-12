@@ -1,4 +1,7 @@
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
+import type { ContentId, ResourceRequest } from "../../contracts/content.ts";
+import type { AudioAudience } from "../../audio/types.ts";
+import { SeatHaptics } from "../../input/haptics.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ArsenalIntent } from "../../contracts/gameplay.ts";
@@ -31,6 +34,7 @@ export interface LocalInput {
   readonly input: SeatInput;
   readonly console: SeatConsole;
   readonly builder: InputCommandBuilder;
+  readonly haptics: SeatHaptics;
 }
 
 export interface ApplicationInputCommands {
@@ -66,6 +70,7 @@ export class ApplicationInput {
   readonly controllers: SdlControllers;
   readonly router: InputRouter;
   private sequence = 0;
+  private hapticLoad: (request: ResourceRequest) => Promise<Uint8Array | null> = async () => null;
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
   private readonly q3Selections = new Map<SeatId, Q3CommandSelection>();
   private readonly arsenalSelections = new Map<SeatId, Pick<ArsenalIntent, "provider" | "weapon">>();
@@ -108,13 +113,16 @@ export class ApplicationInput {
           return (ui?.input(event, focus) ?? false) || (console?.input(event, focus) ?? false) || (actions.clientInput?.(event) ?? false);
         } });
       console = new SeatConsole({ seat: player.seat.id, dialect: sourceDialect, context: seatContext, commands: this.commands, cvars: consoleCvars,
-        now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now()); },
+        now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now());
+          locals.find(local => local.player.seat.id.equals(player.seat.id))?.haptics.setActive(input.focused && focus.kind === "game"); },
         chat: (text, team, target) => actions.execute(team ? "say_team" : "say", target === null ? [text] : [text, String(target)], player.seat.id) });
       const builder = new InputCommandBuilder(dialect);
       builder.setViewAngles(simulation.playerView(player.actor).angles);
       for (const binding of defaultBindings(0, dialect)) input.bind(binding);
       input.bind({ input: { kind: "key", code: 113 }, target: { kind: "command", text: "+weaponwheel" } });
-      locals.push({ player, input, console, builder });
+      locals.push({ player, input, console, builder, haptics: new SeatHaptics({ seat: player.seat.id,
+        controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
+        controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now }) });
     }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
@@ -142,6 +150,7 @@ export class ApplicationInput {
       controller: locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" } })),
       keyboardSeat: first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
       unhandled: event => {
+        if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
         if (event.kind === "assignment" && event.instance !== null) {
           const input = locals[event.slot]?.input;
           if (input !== undefined) for (const binding of defaultBindings(event.instance, dialect)) input.bind(binding);
@@ -155,11 +164,32 @@ export class ApplicationInput {
   pump(): void {
     this.synchronizeClientFocus();
     for (const event of this.window.pollEvents()) {
+      if (event.kind === "window" && event.event === 13) this.stopHaptics();
       this.router.handlePlatform(event);
     }
     for (const event of this.controllers.pollEvents()) this.router.handleController(event);
     this.commands.execute();
     this.router.updateCapture();
+    for (const local of this.locals) {
+      local.haptics.setActive(local.input.focused && local.input.focus.kind === "game");
+      local.haptics.update();
+    }
+  }
+
+  bindHaptics(load: (request: ResourceRequest) => Promise<Uint8Array | null>): void {
+    for (const local of this.locals) local.haptics.invalidateAssets();
+    this.hapticLoad = load;
+  }
+
+  stopHaptics(): void { for (const local of this.locals) local.haptics.cancel(); }
+
+  async soundHaptics(content: ContentId, sound: string, actor: ActorId | null, audience: AudioAudience): Promise<void> {
+    if (actor === null) return;
+    for (const local of this.locals) {
+      if (!local.player.actor.equals(actor) || audience.kind === "seat" && !audience.seat.equals(local.player.seat.id)) continue;
+      local.haptics.setActive(local.input.focused && local.input.focus.kind === "game");
+      await local.haptics.sound(content, sound);
+    }
   }
 
   build(elapsedMilliseconds: number, serverMilliseconds: number, serverFrame: number): readonly ActorCommand[] {
@@ -198,7 +228,9 @@ export class ApplicationInput {
     }
   }
 
-  input(event: SeatInputEvent): boolean { this.synchronizeClientFocus(); return this.router.seat(event.seat)?.input(event) ?? false; }
+  input(event: SeatInputEvent): boolean {
+    if (event.kind === "focus" && !event.focused) this.locals.find(local => local.player.seat.id.equals(event.seat))?.haptics.cancel();
+    this.synchronizeClientFocus(); return this.router.seat(event.seat)?.input(event) ?? false; }
 
   setQ3CommandSelection(seat: SeatId, selection: Q3CommandSelection): void {
     if (!this.locals.some(local => local.player.seat.id.equals(seat))) throw new Error("Command selection has no local seat");
@@ -239,6 +271,7 @@ export class ApplicationInput {
     for (const local of this.locals) {
       const player = players.find(player => player.seat.id.equals(local.player.seat.id));
       if (player === undefined) throw new Error("World travel has no player for a local seat");
+      local.haptics.invalidateAssets();
       local.input.release(this.now());
       local.player.actor = player.actor;
       local.builder.setViewAngles(simulation.playerView(player.actor).angles);
@@ -249,6 +282,7 @@ export class ApplicationInput {
   }
 
   close(): undefined {
+    for (const local of this.locals) local.haptics.close();
     this.router.close();
     this.controllers.close();
     this.seatUi.clear();

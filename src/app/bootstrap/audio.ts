@@ -1,3 +1,4 @@
+import type { ApplicationInput } from "./input.ts";
 import type { ContentId, GameFamily } from "../../contracts/content.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -59,6 +60,7 @@ export class ApplicationAudio {
   private readonly environmentSeats: SeatId[] = [];
   private volume = 0.7;
   private closed = false;
+  private haptics: ApplicationInput | null = null;
 
   constructor(private readonly content: LoadedApplicationContent, now: () => number, seed: number,
     private readonly characterModel: string, private readonly print: (text: string) => undefined) {
@@ -67,6 +69,15 @@ export class ApplicationAudio {
     this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
     this.music = new ApplicationMusic(this.engine, print);
     this.engine.openDevice();
+  }
+
+  bindHaptics(input: ApplicationInput): void {
+    this.haptics = input;
+    input.bindHaptics(async request => {
+      const mounts = await this.content.forContent(request.content);
+      const resource = await mounts.resolve(request.path);
+      return resource === null ? null : mounts.read(resource);
+    });
   }
 
   async prepareEnvironment(scene: SceneQueries): Promise<void> {
@@ -143,10 +154,18 @@ export class ApplicationAudio {
     return sound;
   }
 
+  private playHaptics(content: ContentId, sound: SoundAsset, actor: ActorId | null, audience: AudioAudience): void {
+    const tactile = this.haptics?.soundHaptics(content, sound.name, actor, audience);
+    if (tactile !== undefined) void tactile.catch((error: unknown) => {
+      if (!this.closed) this.print(`Controller vibration unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
+    });
+  }
+
   private async play(content: ContentId, family: GameFamily, path: string, actor: ActorId | null, origin: Vec3 | null,
     channel: number, volume: number, attenuation: number, delaySeconds = 0, audience: AudioAudience = { kind: "world" }): Promise<void> {
     const sound = await this.sound(content, path, family, actor);
     if (sound === null || this.closed) return;
+    this.playHaptics(content, sound, actor, audience);
     this.engine.play({ sound, family, actor, origin: origin !== null ? { kind: "fixed", position: origin }
       : actor === null ? { kind: "local" } : { kind: "actor", actor }, audience, channel, volume, attenuation, delaySeconds });
   }
@@ -345,7 +364,9 @@ export class ApplicationAudio {
     for (const frame of this.cgameFrames.splice(0)) {
       if (!listeners.some(listener => listener.seat.equals(frame.seat))) continue;
       for (const operation of frame.operations) switch (operation.kind) {
-        case "play": this.engine.play(operation.sound); break;
+        case "play":
+          this.playHaptics(frame.content, operation.sound.sound, operation.sound.actor, operation.sound.audience);
+          this.engine.play(operation.sound); break;
         case "loop": this.engine.loop(operation.sound); break;
         case "position": this.engine.updateQ3SeatActor(frame.seat, operation.actor, operation.origin); break;
         case "clear-loops": this.engine.clearQ3SeatLoops(frame.seat, operation.killAll); break;

@@ -1,3 +1,9 @@
+import type { Q3SeatAudioFrame } from "../../src/app/bootstrap/audio/q3.ts";
+import { ApplicationInput } from "../../src/app/bootstrap/input.ts";
+import { InputRouter } from "../../src/input/router.ts";
+import { SdlControllers } from "../../src/platform/controller.ts";
+import type { ControllerOperationResult } from "../../src/platform/controller.ts";
+import { FrontendPreferences, applyFrontendPreferences } from "../../src/app/bootstrap/frontend-preferences.ts";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
@@ -135,6 +141,13 @@ test("explicit Quake II environments preserve native Q1 and Q3 audio and trace a
   const corpus = join(import.meta.dir, "../../../qfiles");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
   const audioContent = catalog.require("q2-rerelease-baseq2").id;
+  const cgameFrames: Q3SeatAudioFrame[] = [], tactileRequests: { readonly content: string; readonly sound: string }[] = [];
+  const receiveCgame = ApplicationAudio.prototype.receiveCgameFrame, tactileSound = ApplicationInput.prototype.soundHaptics, environmentRumble = SdlControllers.prototype.rumble;
+  SdlControllers.prototype.rumble = function(this: SdlControllers): ControllerOperationResult { return { kind: "accepted" }; };
+  ApplicationAudio.prototype.receiveCgameFrame = function(this: ApplicationAudio, frame): void { cgameFrames.push(frame); receiveCgame.call(this, frame); };
+  ApplicationInput.prototype.soundHaptics = function(this: ApplicationInput, content, sound, actor, audience): Promise<void> {
+    tactileRequests.push({ content, sound }); return tactileSound.call(this, content, sound, actor, audience);
+  };
   const original = UnifiedAudio.prototype.setEnvironment;
   const traces: AudioTraceQuery[] = [];
   const selectors: EnvironmentReverb[] = [];
@@ -204,8 +217,103 @@ test("explicit Quake II environments preserve native Q1 and Q3 audio and trace a
         const configurations = traces.length;
         await application.step(100);
         expect(traces).toHaveLength(configurations);
+        if (game === "q3-baseq3") {
+          const local = application.localPlayers[0]; if (local === undefined) throw new Error("Missing Q3 local player");
+          application.input({ kind: "focus", seat: local.seat.id, timeMilliseconds: performance.now(), focused: true });
+          application.input({ kind: "mouse-button", seat: local.seat.id, timeMilliseconds: performance.now(), button: 1, down: true });
+          for (let frame = 0; frame < 3; frame++) await application.step(100);
+          const q3Content = recipe.engineBehavior.content;
+          expect(cgameFrames.length).toBeGreaterThan(0);
+          expect(cgameFrames.every(frame => frame.content === q3Content)).toBe(true);
+          const sound = cgameFrames.flatMap(frame => frame.operations).find(operation => operation.kind === "play" && operation.sound.actor?.equals(local.actor));
+          if (sound?.kind !== "play") throw new Error("Actual cgame did not produce a local-player sound");
+          expect(tactileRequests).toContainEqual({ content: q3Content, sound: sound.sound.sound.name });
+        }
       } finally { await application.close(); }
     }
     expect(traces).toHaveLength(3);
-  } finally { UnifiedAudio.prototype.setEnvironment = original; EnvironmentReverb.prototype.update = update; }
-}, 45000);
+  } finally { UnifiedAudio.prototype.setEnvironment = original; EnvironmentReverb.prototype.update = update;
+    ApplicationAudio.prototype.receiveCgameFrame = receiveCgame; ApplicationInput.prototype.soundHaptics = tactileSound; SdlControllers.prototype.rumble = environmentRumble; }
+}, 60000);
+
+test("actual rerelease sound dispatch scopes genuine tactile data to its owning input seat", async () => {
+  const command = parseApplicationCommand(["--game", "q2-rerelease-baseq2", "--character", "q2", "--movement", "q2", "--map", "base1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "200", "--seats", "2"]);
+  if (command.kind !== "run") throw new Error("Expected actual map command");
+  const joined: { readonly audio: ApplicationAudio; readonly input: ApplicationInput }[] = [];
+  const pendingHaptics: Promise<void>[] = [];
+  const motors: { readonly device: number; readonly low: number; readonly high: number }[] = [];
+  const bind = ApplicationAudio.prototype.bindHaptics, controller = InputRouter.prototype.controllerFor, rumble = SdlControllers.prototype.rumble, soundHaptics = ApplicationInput.prototype.soundHaptics;
+  ApplicationInput.prototype.soundHaptics = function(this: ApplicationInput, content, sound, actor, audience): Promise<void> {
+    const pending = soundHaptics.call(this, content, sound, actor, audience); pendingHaptics.push(pending); return pending;
+  };
+  ApplicationAudio.prototype.bindHaptics = function(this: ApplicationAudio, input): void { bind.call(this, input); joined.push({ audio: this, input }); };
+  InputRouter.prototype.controllerFor = function(this: InputRouter, seat): number | null {
+    const index = joined.at(-1)?.input.locals.findIndex(local => local.player.seat.id.equals(seat)) ?? -1;
+    return index < 0 ? null : 100 + index;
+  };
+  SdlControllers.prototype.rumble = function(this: SdlControllers, device, low, high): ControllerOperationResult {
+    motors.push({ device, low, high }); return { kind: "accepted" };
+  };
+  let application: Application | null = null;
+  try {
+    application = await Application.open(command.options, { print: () => undefined });
+    const pair = joined.at(-1), first = pair?.input.locals[0], second = pair?.input.locals[1];
+    if (pair === undefined || first === undefined || second === undefined) throw new Error("Actual local seat haptics not joined");
+    for (const local of pair.input.locals) local.input.input({ kind: "focus", seat: local.player.seat.id, timeMilliseconds: 0, focused: true });
+    const content = application.content.catalog.require("q2-rerelease-baseq2").id;
+    const event: SimulationPresentationEvent = { content, sequence: 1, seconds: 0, kind: "q2", event: {
+      kind: "sound", actor: first.player.actor, origin: application.simulation.playerView(first.player.actor).origin, path: "weapons/hyprbf1a.wav", channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "once" } };
+    await pair.audio.receive([event]); await Promise.all(pendingHaptics);
+    expect(first.haptics.scheduler.active).toBe(true);
+    expect(second.haptics.scheduler.active).toBe(false);
+    expect(motors.every(value => value.device === 100)).toBe(true);
+    first.haptics.cancel();
+    await pair.input.soundHaptics(content, "sound/weapons/hyprbf1a.wav", first.player.actor, { kind: "seat", seat: second.player.seat.id });
+    expect(first.haptics.scheduler.active).toBe(false);
+    await pair.input.soundHaptics(content, "sound/weapons/hyprbf1a.wav", null, { kind: "world" });
+    expect(first.haptics.scheduler.active).toBe(false);
+    const classic = application.content.catalog.require("q2-classic-baseq2").id;
+    await pair.input.soundHaptics(classic, "sound/weapons/hyprbf1a.wav", first.player.actor, { kind: "world" });
+    expect(first.haptics.scheduler.active).toBe(false);
+    const preferences = new FrontendPreferences(() => "q2-rerelease");
+    const toggle = preferences.bindings().find(binding => binding.id === "ui:input:controller-vibration");
+    if (toggle?.kind !== "toggle") throw new Error("Missing controller vibration setting");
+    toggle.write(false); applyFrontendPreferences(preferences.values, pair.input, pair.audio);
+    await pair.audio.receive([event]); await Promise.all(pendingHaptics);
+    expect(first.haptics.scheduler.active).toBe(false);
+    expect(application.frontendValues?.controllerVibration).toBe(false);
+    first.haptics.setEnabled(true);
+    first.input.setFocus({ kind: "console" }, 0);
+    await pair.audio.receive([event]); await Promise.all(pendingHaptics); expect(first.haptics.scheduler.active).toBe(false);
+    first.input.setFocus({ kind: "game" }, 0);
+    await pair.audio.receive([event]); await Promise.all(pendingHaptics); expect(first.haptics.scheduler.active).toBe(true);
+    pair.input.rebindPlayers(application.localPlayers, application.simulation);
+    expect(first.haptics.scheduler.active).toBe(false);
+    const mounts = await application.content.forContent(content), tactile = await mounts.open("tactile/weapons/hyprbf1a.bnvib");
+    if (tactile === null) throw new Error("Missing genuine tactile resource");
+    const deferred = Promise.withResolvers<Uint8Array | null>();
+    pair.input.bindHaptics(() => deferred.promise);
+    pair.audio.engine.setListeners(pair.input.locals.map(local => ({ seat: local.player.seat.id, actor: local.player.actor,
+      origin: { x: 0, y: 0, z: 0 },
+      axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false })));
+    pair.audio.engine.stopAll();
+    await pair.audio.receive([event]);
+    expect(first.haptics.scheduler.active).toBe(false);
+    expect(pair.audio.engine.mix(512).some(sample => sample !== 0)).toBe(true);
+    pair.input.router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 100, instance: 101 });
+    pair.input.router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 101, instance: 100 });
+    deferred.resolve(tactile.bytes); await Promise.all(pendingHaptics);
+    expect(first.haptics.scheduler.active).toBe(false);
+    const focusPending = Promise.withResolvers<Uint8Array | null>();
+    pair.input.bindHaptics(() => focusPending.promise);
+    await pair.audio.receive([event]);
+    pair.input.input({ kind: "focus", seat: first.player.seat.id, timeMilliseconds: 0, focused: false });
+    pair.input.input({ kind: "focus", seat: first.player.seat.id, timeMilliseconds: 0, focused: true });
+    focusPending.resolve(tactile.bytes); await Promise.all(pendingHaptics);
+    expect(first.haptics.scheduler.active).toBe(false);
+  } finally {
+    if (application !== null) await application.close();
+    ApplicationAudio.prototype.bindHaptics = bind; InputRouter.prototype.controllerFor = controller; SdlControllers.prototype.rumble = rumble;
+    ApplicationInput.prototype.soundHaptics = soundHaptics;
+  }
+}, 30000);

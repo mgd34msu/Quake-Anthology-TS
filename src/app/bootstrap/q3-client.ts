@@ -202,7 +202,7 @@ export class ApplicationQ3Client {
       for (const [provider, models] of this.models(submission.scene)) await this.renderer(provider).preload(models.map(model => model.entity), entity => models.find(model => model.entity === entity)?.options ?? {});
     }
     await Promise.all([...this.renderers.values()].map(renderer => renderer.refreshShaderRemaps()));
-    this.options.audio.receiveCgameFrame({ seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
+    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
   }
   command(argv: readonly string[]): Promise<boolean> { return this.requireGame().console.execute(argv); }
   handlesCommand(name: string): boolean { return this.requireGame().console.handles(name); }
@@ -301,7 +301,7 @@ export class ApplicationQ3Client {
   close(): void {
     if (this.closed) return;
     this.game?.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
-    this.options.audio.receiveCgameFrame({ seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
+    this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
     this.closed = true; this.cinematics?.close(); this.media.close(); this.foreign.close(); this.renderers.clear(); this.submissions.length = 0;
   }
 }
