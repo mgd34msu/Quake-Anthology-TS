@@ -80,7 +80,15 @@ test("rerelease liquid damage remains 10 Hz with 40 Hz source frames", () => {
 test("rerelease pickups and fog preserve independent split players", () => {
   const active = rerelease(), { game, first, second, items, module, players } = active;
   const ammo = game.spawn({ classname: "ammo_shells", ordinal: 2, values: new Map([["message", "per player pickup"]]) });
-  items.touch(ammo, game, first.actor.id); items.touch(ammo, game, first.actor.id); items.touch(ammo, game, second.actor.id);
+  ammo.think?.(ammo, game);
+  const before = { source: module.capture(), inventory: active.inventory.entries(first.actor.id), message: ammo.message, events: [...active.events] };
+  expect(items.observeSupply(game, ammo.actor.id, first.actor.id)?.availability).toEqual({ kind: "ready", eligible: true });
+  expect({ source: module.capture(), inventory: active.inventory.entries(first.actor.id), message: ammo.message, events: [...active.events] }).toEqual(before);
+  items.touch(ammo, game, first.actor.id);
+  expect(items.observeSupply(game, ammo.actor.id, first.actor.id)?.availability).toEqual({ kind: "ready", eligible: false });
+  expect(items.observeSupply(game, ammo.actor.id, second.actor.id)?.availability).toEqual({ kind: "ready", eligible: true });
+  expect(ammo.message).toBe("per player pickup");
+  items.touch(ammo, game, first.actor.id); items.touch(ammo, game, second.actor.id);
   expect(active.inventory.count(first.actor.id, "q2:ammo_shells")).toBe(10);
   expect(active.inventory.count(second.actor.id, "q2:ammo_shells")).toBe(10);
   expect(game.entity(ammo.actor.id)).toBe(ammo);

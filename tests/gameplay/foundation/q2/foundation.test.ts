@@ -119,40 +119,73 @@ describe("Q2 permanent gameplay foundation", () => {
       const authored = parseQ2Entities(readQ2Bsp(await archive.readEntry(entry)).entities).find(entity => entity.classname === "weapon_shotgun");
       if (authored === undefined) throw new Error("Missing retail shotgun");
       for (const mode of ["singleplayer", "coop", "deathmatch"] satisfies readonly Q2GameOptions["mode"][]) {
-        const { game, host, player, items } = targetGame({ ...options, mode });
+        const { game, host, player, items, events, advance } = targetGame({ ...options, mode });
+        host.trace = request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end,
+          contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surface: null,
+          sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null });
         for (const item of q3SpawnLoadout("q3:arsenal", "baseq3", false).ammo) host.inventory.configure(player, item);
         for (const mapping of Q2_Q3_SUPPLY_PROFILE.weapons) for (const destination of mapping.destinations) expect(Q3_WEAPON_ITEMS.some(item => item.item === destination)).toBe(true);
         const selected: string[] = [];
         const selections: string[] = [];
-        items.setPickupAdmission(new SharedPickupAdmission({ inventory: host.inventory, profile: Q2_Q3_SUPPLY_PROFILE,
-          ammoGranted: () => undefined, weaponGranted: (_actor, weapons, selection) => { selected.push(...weapons); selections.push(selection); return undefined; } }));
+        const admission = new SharedPickupAdmission({ inventory: host.inventory, profile: Q2_Q3_SUPPLY_PROFILE,
+          ammoGranted: () => undefined, weaponGranted: (_actor, weapons, selection) => { selected.push(...weapons); selections.push(selection); return undefined; } });
+        items.setPickupAdmission(admission);
         const shotgun = game.create(authored.classname, authored.values); expect(items.spawn(shotgun, game)).toBe(true);
+        expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability.kind).toBe("inactive");
+        advance(0.2);
+        const beforeObservation = { inventory: host.inventory.entries(player.id), items: items.capture(game), events: events.length, selected: [...selected] };
+        const health = host.combat.read(player.id)?.health;
+        if (health === undefined) throw new Error("Missing recipient health");
+        host.combat.setHealth(player, 0.5);
+        expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: false });
+        items.touch(shotgun, game, player.id);
+        expect({ inventory: host.inventory.entries(player.id), items: items.capture(game), events: events.length, selected: [...selected] }).toEqual(beforeObservation);
+        host.combat.setHealth(player, 1);
+        expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: true });
+        host.combat.setHealth(player, health);
+        const observation = items.observeSupply(game, shotgun.actor.id, player.id);
+        if (observation === null) throw new Error("Actual shotgun supply missing");
+        expect(observation.availability).toEqual({ kind: "ready", eligible: true });
+        const preview = admission.preview(player.id, observation.offer);
+        expect(preview.ammo).toEqual([{ item: "q3:ammo/shotgun", before: 0, given: 10 }]);
+        expect({ inventory: host.inventory.entries(player.id), items: items.capture(game), events: events.length, selected: [...selected] }).toEqual(beforeObservation);
         items.touch(shotgun, game, player.id);
         expect(host.inventory.count(player.id, "q3:weapon/shotgun")).toBe(1);
         expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(10);
         expect(host.inventory.count(player.id, "q2:weapon_shotgun")).toBe(0);
         expect(selected).toEqual(["q3:weapon/shotgun"]);
         expect(selections).toEqual(["always"]);
-        if (mode === "coop") { items.touch(shotgun, game, player.id); expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(10); }
-        if (mode === "deathmatch") { expect(host.actors.isLive(shotgun.actor.id)).toBe(true); expect(shotgun.visible).toBe(false); }
+        if (mode === "coop") {
+          expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: false });
+          items.touch(shotgun, game, player.id); expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(10);
+        }
+        if (mode === "deathmatch") {
+          expect(host.actors.isLive(shotgun.actor.id)).toBe(true); expect(shotgun.visible).toBe(false);
+          expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability).toEqual({ kind: "respawning", atSeconds: 30.2 });
+          advance(30.2);
+          expect(items.observeSupply(game, shotgun.actor.id, player.id)?.availability).toEqual({ kind: "ready", eligible: true });
+        }
         if (mode === "singleplayer") expect(host.actors.isLive(shotgun.actor.id)).toBe(false);
         for (const flags of [0x10000, 0x20000]) {
           const dropped = game.create("weapon_shotgun", new Map([["spawnflags", String(flags)]])); items.spawn(dropped, game);
+          expect(items.observeSupply(game, dropped.actor.id, player.id)?.offer).toEqual({ kind: "weapon", offer: {
+            item: "q2:weapon_shotgun", ammo: flags === 0x10000 ? [] : [{ item: "q2:ammo_shells", amount: 10 }] } });
           const before = host.inventory.count(player.id, "q3:ammo/shotgun"); items.touch(dropped, game, player.id);
           expect(host.inventory.count(player.id, "q3:ammo/shotgun")).toBe(before + (flags === 0x10000 ? 0 : 10));
           expect(host.actors.isLive(dropped.actor.id)).toBe(false);
         }
         host.inventory.give(player, "q3:ammo/grenadelauncher", 200);
+        host.inventory.give(player, "q2:ammo_grenades", 50);
         const report = game.load('{ "classname" "ammo_grenades" "target" "attempt" } { "classname" "target_secret" "targetname" "attempt" }');
         const grenades = report.spawned[0]; if (grenades === undefined) throw new Error("Missing grenades");
         items.touch(grenades, game, player.id); items.touch(grenades, game, player.id);
         expect(game.counters.foundSecrets).toBe(mode === "deathmatch" ? 0 : 1); expect(host.actors.isLive(grenades.actor.id)).toBe(true);
         expect(host.inventory.count(player.id, "q3:weapon/grenadelauncher")).toBe(0);
-        host.inventory.consume(player, "q3:ammo/grenadelauncher", 200); grenades.count = 3;
+        host.inventory.consume(player, "q3:ammo/grenadelauncher", 200); host.inventory.consume(player, "q2:ammo_grenades", 50); grenades.count = 3;
         items.touch(grenades, game, player.id);
         expect(host.inventory.count(player.id, "q3:ammo/grenadelauncher")).toBe(3);
         expect(host.inventory.count(player.id, "q3:weapon/grenadelauncher")).toBe(1);
-        expect(host.inventory.count(player.id, "q2:ammo_grenades")).toBe(0);
+        expect(host.inventory.count(player.id, "q2:ammo_grenades")).toBe(3);
         expect(selections).toEqual(["always", "never", "never", "always"]);
         const cells = game.create("ammo_cells"), shield = game.create("item_power_shield");
         items.spawn(cells, game); items.spawn(shield, game);
@@ -167,6 +200,21 @@ describe("Q2 permanent gameplay foundation", () => {
         expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 40 } });
         expect(host.inventory.count(player.id, "q3:ammo/plasmagun")).toBe(50);
       }
+      const native = targetGame(options);
+      const nativeShotgun = native.game.create(authored.classname, authored.values); native.items.spawn(nativeShotgun, native.game);
+      const nativeObservation = native.items.observeSupply(native.game, nativeShotgun.actor.id, native.player.id);
+      if (nativeObservation === null) throw new Error("Native shotgun supply missing");
+      const preview = new SharedPickupAdmission({ inventory: native.host.inventory,
+        profile: { id: "q2:test-identity", weaponOwnership: "all-destinations",
+          ammo: [{ source: "q2:ammo_shells", destinations: ["q2:ammo_shells"] }],
+          weapons: [{ source: "q2:weapon_shotgun", destinations: ["q2:weapon_shotgun"] }] },
+        ammoGranted: () => { throw new Error("Preview invoked ammo callback"); }, weaponGranted: () => { throw new Error("Preview selected weapon"); } });
+      const before = native.host.inventory.entries(native.player.id);
+      const expected = preview.preview(native.player.id, nativeObservation.offer);
+      expect(native.host.inventory.entries(native.player.id)).toEqual(before);
+      native.items.touch(nativeShotgun, native.game, native.player.id);
+      for (const receipt of [...expected.weapons, ...expected.ammo]) expect(native.host.inventory.count(native.player.id, receipt.item)).toBe(receipt.before + receipt.given);
+      expect(native.items.observeSupply(native.game, nativeShotgun.actor.id, native.player.id)).toBeNull();
     } finally { archive.close(); }
   });
   test("source gravity direction supports ceiling walking and ceiling water sampling independently of gravity strength", () => {

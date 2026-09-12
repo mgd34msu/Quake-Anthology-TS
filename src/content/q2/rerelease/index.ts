@@ -163,10 +163,13 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
 
   private instanced(game: Q2GameServices): boolean { return game.options.mode === "coop" && q2UsesInstancedItems(this.players.rereleaseOptions); }
   instancedCoop(game: Q2GameServices): boolean { return this.instanced(game); }
-  beforePickup(entity: Q2Entity, game: Q2GameServices, player: ActorId): boolean {
+  canPickup(entity: Q2Entity, game: Q2GameServices, player: ActorId): boolean {
     const state = this.players.states.get(player);
     if (state === undefined) return false;
-    if (this.instanced(game) && this.pickedUpBy.get(entity.actor.id)?.has(state.slot)) return false;
+    return !this.instanced(game) || this.pickedUpBy.get(entity.actor.id)?.has(state.slot) !== true;
+  }
+  beforePickup(entity: Q2Entity, game: Q2GameServices, player: ActorId): boolean {
+    if (!this.canPickup(entity, game, player)) return false;
     if (this.instanced(game) || game.options.mode === "deathmatch") { this.pickupMessages.set(entity.actor.id, entity.message); entity.message = ""; }
     return true;
   }

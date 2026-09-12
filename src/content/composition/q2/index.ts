@@ -197,6 +197,7 @@ export class Q2ProductRuntime {
       const mode = this.match.source, edition = this.rerelease?.entities;
       this.items.setPickupPolicy({
         instancedCoop: game => edition?.instancedCoop(game) ?? false,
+        canPickup: (entity, game, actor) => mode.pickupsAllowed() && (edition?.canPickup(entity, game, actor) ?? true),
         beforePickup: (entity, game, actor) => mode.pickupsAllowed() && (edition?.beforePickup(entity, game, actor) ?? true),
         beforeTargets: (entity, game, actor, taken) => edition?.beforeTargets(entity, game, actor, taken),
         afterPickup: (entity, game, actor, taken) => edition?.afterPickup(entity, game, actor, taken),
