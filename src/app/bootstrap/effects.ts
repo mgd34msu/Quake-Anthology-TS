@@ -37,6 +37,7 @@ interface Group {
   readonly particles: SourceParticles;
   readonly renderer: SceneModelRenderer;
   models: SceneEntity[];
+  beams: { readonly actor: ActorId; readonly remote: readonly SceneEntity[]; readonly local: readonly SceneEntity[] | null }[];
   sampled: readonly SceneParticle[];
 }
 interface TimedLight extends SurfaceDynamicLight { readonly born: number; readonly die: number; readonly decay: number; readonly actor: ActorId | null; }
@@ -102,7 +103,7 @@ export class ApplicationEffects {
   private async group(content: ContentId): Promise<Group> {
     const prior = this.groups.get(content); if (prior !== undefined) return prior;
     const provider = await this.assets.provider(content);
-    const group: Group = { provider, particles: new SourceParticles(this.random), renderer: new SceneModelRenderer(provider, this.assets.world), models: [], sampled: [] };
+    const group: Group = { provider, particles: new SourceParticles(this.random), renderer: new SceneModelRenderer(provider, this.assets.world), models: [], beams: [], sampled: [] };
     this.groups.set(content, group);
     if (provider.family !== "q3" && !this.images.has(provider.family)) this.images.set(provider.family,
       this.assets.images.register(`*${provider.family}-source-particles`, legacyParticleImage(provider.family), { wrap: "clamp", filter: "linear" }));
@@ -126,7 +127,7 @@ export class ApplicationEffects {
     if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
     const elapsed = this.time === null ? 0 : now - this.time;
     this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon)];
-    for (const group of this.groups.values()) group.models = [];
+    for (const group of this.groups.values()) { group.models = []; group.beams = []; }
     const pending = this.pending; this.pending = [];
     for (const source of pending) await this.event(source);
     const liveActors = new Set(snapshot.actors.map(actor => actor.id));
@@ -159,7 +160,7 @@ export class ApplicationEffects {
     for (const group of this.groups.values()) {
       const samples = group.particles.sample(now, elapsed);
       group.sampled = group.provider.family === "q1" ? samples.q1 : samples.q2;
-      await group.renderer.preload(group.models);
+      await group.renderer.preload([...group.models, ...group.beams.flatMap(beam => [...beam.remote, ...(beam.local ?? [])])]);
     }
     for (const effects of this.q3.values()) await effects.prepare(Math.trunc(now * 1000), Math.trunc(elapsed * 1000));
     for (const [content, effects] of this.q3Weapons) {
@@ -181,7 +182,8 @@ export class ApplicationEffects {
         const image = this.images.get(family); if (image === undefined) throw new Error("Particles have no source texture");
         batches.push(prepareParticleBatch(group.sampled, { camera, indexedProfile: family, paletteColor: index => this.palette(group, index) }, image, project));
       }
-      batches.push(...group.renderer.prepare(group.models, { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights }));
+      const models = [...group.models, ...group.beams.flatMap(beam => viewer?.equals(beam.actor) && beam.local !== null ? beam.local : beam.remote)];
+      batches.push(...group.renderer.prepare(models, { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights }));
     }
     for (const beam of this.beams) if (beam.model === null) {
       const group = this.groups.get(beam.content); if (group === undefined) throw new Error("Beam has no source palette");
@@ -443,24 +445,32 @@ export class ApplicationEffects {
   }
   private async beamModels(beam: Beam): Promise<void> {
     if (beam.model === null) return;
-    const start = beam.start;
-    const delta = sub3(beam.end, start), length = length3(delta), direction = normalize3OrZero(delta), horizontal = Math.hypot(delta.x, delta.y);
-    const yawAngle = horizontal === 0 ? 0 : Math.atan2(delta.y, delta.x) * 180 / Math.PI;
-    const pitchAngle = horizontal === 0 ? delta.z > 0 ? 90 : 270 : Math.atan2(delta.z, horizontal) * (beam.family === "q1" ? 180 : -180) / Math.PI;
-    const yaw = beam.family === "q1" ? Math.trunc(yawAngle) : yawAngle < 0 ? yawAngle + 360 : yawAngle;
-    const pitch = beam.family === "q1" ? Math.trunc(pitchAngle) : pitchAngle < 0 ? pitchAngle + 360 : pitchAngle;
     const asset = await this.assets.model(beam.content, beam.model), group = await this.group(beam.content);
-    const lightning = beam.model === "models/proj/lightning/tris.md2", modelLength = lightning ? 35 : 30;
-    const beamLength = lightning ? length - 20 : length, shortLightning = lightning && beamLength <= modelLength;
-    const steps = shortLightning ? 1 : Math.ceil(beamLength / modelLength), spacing = beam.family === "q1" ? 30 : steps > 1 ? (beamLength - modelLength) / (steps - 1) : 0;
-    for (let segment = 0; segment < steps; segment++) {
-      const origin = shortLightning ? beam.end : add3(start, scale3(direction, segment * spacing));
-      const angles = { x: lightning && !shortLightning ? -pitch : pitch, y: lightning && !shortLightning ? yaw + 180 : yaw, z: this.random.nextInteger() % 360 };
-      group.models.push({ actor: null, resource: asset.resource, model: asset.model,
-        transform: { origin, axis: anglesToAxis(angles), scale: white }, previousOrigin: origin,
-        pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { ...white, w: 1 }, shaderTime: { kind: "seconds", value: 0 },
-        flags: { kind: beam.family, bits: lightning ? 8 : 0 }, lightingOrigin: origin, shadowPlane: 0, attachments: [] });
-    }
+    const rolls: number[] = [];
+    const build = (start: Vec3): readonly SceneEntity[] => {
+      const models: SceneEntity[] = [];
+      const delta = sub3(beam.end, start), length = length3(delta), direction = normalize3OrZero(delta), horizontal = Math.hypot(delta.x, delta.y);
+      const yawAngle = horizontal === 0 ? 0 : Math.atan2(delta.y, delta.x) * 180 / Math.PI;
+      const pitchAngle = horizontal === 0 ? delta.z > 0 ? 90 : 270 : Math.atan2(delta.z, horizontal) * (beam.family === "q1" ? 180 : -180) / Math.PI;
+      const yaw = beam.family === "q1" ? Math.trunc(yawAngle) : yawAngle < 0 ? yawAngle + 360 : yawAngle;
+      const pitch = beam.family === "q1" ? Math.trunc(pitchAngle) : pitchAngle < 0 ? pitchAngle + 360 : pitchAngle;
+      const lightning = beam.model === "models/proj/lightning/tris.md2", modelLength = lightning ? 35 : 30;
+      const beamLength = lightning ? length - 20 : length, shortLightning = lightning && beamLength <= modelLength;
+      const steps = shortLightning ? 1 : Math.ceil(beamLength / modelLength), spacing = beam.family === "q1" ? 30 : steps > 1 ? (beamLength - modelLength) / (steps - 1) : 0;
+      for (let segment = 0; segment < steps; segment++) {
+        const origin = shortLightning ? beam.end : add3(start, scale3(direction, segment * spacing));
+        const roll = rolls[segment] ?? this.random.nextInteger() % 360; rolls[segment] = roll;
+        const angles = { x: lightning && !shortLightning ? -pitch : pitch, y: lightning && !shortLightning ? yaw + 180 : yaw, z: roll };
+        models.push({ actor: null, resource: asset.resource, model: asset.model,
+          transform: { origin, axis: anglesToAxis(angles), scale: white }, previousOrigin: origin,
+          pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { ...white, w: 1 }, shaderTime: { kind: "seconds", value: 0 },
+          flags: { kind: beam.family, bits: lightning ? 8 : 0 }, lightingOrigin: origin, shadowPlane: 0, attachments: [] });
+      }
+      return models;
+    };
+    const remote = build(beam.start), pose = beam.family === "q1" ? this.pose(beam.actor) : undefined;
+    if (beam.family === "q2") group.models.push(...remote);
+    else group.beams.push({ actor: beam.actor, remote, local: pose === undefined ? null : build(pose.origin) });
   }
   private async explosionModel(explosion: Explosion, now: number): Promise<void> {
     const asset = await this.assets.model(explosion.content, explosion.path), group = await this.group(explosion.content);

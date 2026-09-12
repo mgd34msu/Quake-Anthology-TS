@@ -51,6 +51,10 @@ test("retail Q1 MDL and SPR prepare transformed geometry and real embedded skins
   const surface = prepared.surfaces[0];
   if (surface === undefined) throw new Error("Missing MDL surface");
   expect(surface.image.kind).toBe("indexed");
+  expect(surface.cull).toBe("front");
+  expect(surface.depthRange).toEqual([0, 1]);
+  const viewModel = prepareSceneEntity(entity(parseMdl(mdl.bytes), mdl.resource, "q1"), { camera, timeSeconds: 0.25, options: () => ({ viewModel: true }) });
+  expect(viewModel.surfaces[0]?.depthRange).toEqual([0, 0.3]);
   const local = surface.localGeometry.vertices[0], world = surface.geometry.vertices[0];
   if (local === undefined || world === undefined) throw new Error("Missing geometry");
   expect(world.position.x).toBeCloseTo(local.position.x + 20);

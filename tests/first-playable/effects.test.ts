@@ -93,6 +93,15 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       event: { kind: "beam", style: beam.style, actor: actor.id, start: { x: 80, y: -30, z: index * 10 - 15 }, end: { x: 80, y: 30, z: index * 10 - 15 } } }]);
     await effects.prepare(snapshot(8), []);
     const beamFrame = effects.frame(camera);
+    await effects.prepare(snapshot(8), [], [{ ...character, origin: { x: 80, y: 20, z: 0 } }]);
+    const remoteBeamFrame = effects.frame(camera, rocketActor.id), ownerBeamFrame = effects.frame(camera, actor.id);
+    const indexCount = (frame: typeof beamFrame): number => frame.operations.reduce((sum, operation) => sum +
+      (operation.kind === "draw" ? operation.batches.reduce((count, batch) => count + batch.indices.length, 0) : 0), 0);
+    expect(indexCount(ownerBeamFrame)).toBeLessThan(indexCount(remoteBeamFrame));
+    expect(ownerBeamFrame.operations).not.toEqual(remoteBeamFrame.operations);
+    expect(effects.frame(camera, rocketActor.id)).toEqual(remoteBeamFrame);
+    expect(effects.frame(camera, actor.id)).toEqual(ownerBeamFrame);
+    expect(effects.frame(camera)).toEqual(remoteBeamFrame);
     const beamImages = beamFrame.operations.flatMap(operation => operation.kind === "draw" ? operation.batches.flatMap(batch =>
       batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated" ? [batch.texture.image.source.name] : []) : []);
     for (const beam of beams) {
