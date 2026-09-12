@@ -62,6 +62,9 @@ export interface MixerSoundMemory {
 }
 interface VoicePolicy {
     readonly attenuation: number;
+    readonly distanceOffset: number;
+    readonly stereoScale: number;
+    readonly unattenuatedMono: boolean;
     readonly loopStart: number | null;
     readonly role: "effect" | "static" | "ambient" | "entity-loop";
     readonly key: number;
@@ -75,6 +78,10 @@ interface OneShotVoice {
     readonly volume: number;
     stereoVolume: StereoVolume;
     readonly start: {
+        readonly kind: "scheduled";
+        readonly sample: number;
+        readonly order: number;
+    } | {
         readonly kind: "pending";
     } | {
         readonly kind: "started";
@@ -220,6 +227,7 @@ export function spatializeSoundOrigin(position: Vec3, listenerOrigin: Vec3, list
 /** PCM mixing with a borrowed allocation clock and no device ownership. */
 export class AudioMixer {
     readonly outputRate: number;
+    /** Initial slot allocation; active voices and source loops can grow beyond it. */
     readonly capacity: number;
     readonly rawCapacity = RAW_SAMPLE_CAPACITY;
     private effectsVolume = 0.8;
@@ -235,6 +243,8 @@ export class AudioMixer {
     private loopChannels: LoopMix[] = [];
     private readonly rawSamples = new Int32Array(RAW_SAMPLE_CAPACITY * 2);
     private paintedTime = 0;
+    private sourceBeginOffset = 0;
+    private sourceScheduleOrder = 0;
     private soundTime = 0;
     private rawEndTime = 0;
     private enabled = true;
@@ -267,7 +277,7 @@ export class AudioMixer {
         readonly right: number;
     }, void, unknown> {
         for (const voice of this.voices) {
-            if (voice === null || (voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0))
+            if (voice === null || voice.start.kind === "scheduled" || (voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0))
                 continue;
             yield { sound: voice.prepared.sound, ...voice.stereoVolume };
         }
@@ -316,7 +326,7 @@ export class AudioMixer {
         // S_Respatialize owns these cells; painting must not observe newer entity
         // positions until the next respatialization.
         for (const voice of this.voices) {
-            if (voice !== null)
+            if (voice !== null && voice.start.kind !== "scheduled")
                 voice.stereoVolume = voice.policy === null ? this.spatialize(voice.entity, voice.origin, voice.volume) : this.policySpatialize(voice);
         }
         this.loopChannels = this.collectLoopMixes();
@@ -398,8 +408,8 @@ export class AudioMixer {
         this.soundMemory?.touch(sound, time);
         this.replaceChannel(options.entity, channelCommand);
         const free = this.freeChannels.at(-1);
-        const channel = free ?? (this.voices.some(voice => voice !== null && voice.policy !== null) ? this.voices.length : this.chooseVictim(options.entity, time));
-        // S_ChannelMalloc samples Com_Milliseconds again only for a free slot.
+        const channel = free ?? this.voices.length;
+        // Sample the allocation clock again when reusing a free slot.
         if (free !== undefined)
             this.freeChannels.pop();
         const allocatedAt = free === undefined ? time : this.allocationTime();
@@ -423,20 +433,23 @@ export class AudioMixer {
         if (voice.origin.kind === "local" || voice.entity === this.listenerEntity) return { left: voice.volume, right: voice.volume };
         const position = this.resolveOrigin(voice.origin), delta = sub3(position, this.listenerOrigin), distance = length3(delta);
         const pan = distance === 0 ? 0 : -dot3(delta, this.listenerAxis[1]) / distance;
-        const gain = voice.volume * (1 - distance * (voice.policy?.attenuation ?? 0));
-        return { left: Math.max(0, Math.trunc(gain * (this.outputChannels === 1 ? 1 : 1 - pan))),
-            right: Math.max(0, Math.trunc(gain * (this.outputChannels === 1 ? 1 : 1 + pan))) };
+        const policy = voice.policy;
+        if (policy === null) throw new Error("Source spatialization requires a voice policy");
+        const gain = voice.volume * (1 - Math.max(0, distance - policy.distanceOffset) * policy.attenuation);
+        const mono = this.outputChannels === 1 || policy.unattenuatedMono && policy.attenuation === 0;
+        return { left: Math.max(0, Math.trunc(gain * (mono ? 1 : policy.stereoScale * (1 - pan)))),
+            right: Math.max(0, Math.trunc(gain * (mono ? 1 : policy.stereoScale * (1 + pan)))) };
     }
     startQ1Sound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
         command: SoundChannelCommand, random: () => number): boolean {
-        return this.admitQ1(sound, options, command, { attenuation: options.attenuation / 1000, loopStart: null, role: "effect", key: 0 }, random);
+        return this.admitSourceSound(sound, options, command, { attenuation: options.attenuation / 1000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, role: "effect", key: 0 }, random);
     }
-    private admitQ1(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
-        command: SoundChannelCommand, policy: VoicePolicy, random: (() => number) | null): boolean {
+    private admitSourceSound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
+        command: SoundChannelCommand, policy: VoicePolicy, random: (() => number) | null, scheduled: { readonly sample: number; readonly order: number } | null = null): boolean {
         if (!this.enabled) return false;
         validateSound(sound, false);
-        if (sound.channels !== 1 || sound.frameCount < 1) throw new Error("Q1 effects require nonempty mono PCM");
-        if (!Number.isFinite(options.volume) || options.volume < 0 || !Number.isFinite(options.attenuation) || options.attenuation < 0) throw new RangeError("Invalid Q1 sound gain or attenuation");
+        if (sound.channels !== 1 || sound.frameCount < 1) throw new Error("Source effects require nonempty mono PCM");
+        if (!Number.isFinite(options.volume) || options.volume < 0 || !Number.isFinite(options.attenuation) || options.attenuation < 0) throw new RangeError("Invalid source sound gain or attenuation");
         const ratio = sound.sampleRate / this.outputRate;
         const prepared: PreparedSound = { sound, memory: null, step256: ratio * 256, outputFrames: Math.trunc(sound.frameCount / ratio) };
         if (prepared.outputFrames < 1) throw new Error("Sound resamples to zero frames");
@@ -450,18 +463,18 @@ export class AudioMixer {
         }
         const voice: OneShotVoice = { prepared, entity: options.entity, channel: command.kind === "channel" ? command.channel : null,
             origin: options.origin, volume: Math.trunc(options.volume * 255), stereoVolume: { left: 0, right: 0 },
-            start: { kind: "started", sample: policy.role === "entity-loop" ? 0 : this.paintedTime - offset }, allocatedAt: this.allocationTime(), policy: { ...policy, loopStart: marker } };
-        voice.stereoVolume = this.policySpatialize(voice);
-        if (policy.role === "effect" && voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0) return false;
-        this.replaceChannel(options.entity, command);
+            start: scheduled === null ? { kind: "started", sample: policy.role === "entity-loop" ? 0 : this.paintedTime - offset } : { kind: "scheduled", ...scheduled }, allocatedAt: this.allocationTime(), policy: { ...policy, loopStart: marker } };
+        if (scheduled === null) voice.stereoVolume = this.policySpatialize(voice);
+        if (scheduled === null && policy.role === "effect" && voice.stereoVolume.left === 0 && voice.stereoVolume.right === 0) return false;
+        if (scheduled === null) this.replaceChannel(options.entity, command);
         const free = this.freeChannels.pop(), index = free ?? this.voices.length;
         this.voices[index] = voice;
         return true;
     }
     addStaticSound(sound: PcmSound, origin: Vec3, volume: number, attenuation: number): boolean {
         if (sound.loopStart === null) throw new Error("Static sound requires a WAV loop marker");
-        return this.admitQ1(sound, { entity: -1, origin: { kind: "fixed", position: origin }, volume: volume / 255, attenuation }, { kind: "auto" },
-            { attenuation: attenuation / 64000, loopStart: null, role: "static", key: 0 }, null);
+        return this.admitSourceSound(sound, { entity: -1, origin: { kind: "fixed", position: origin }, volume: volume / 255, attenuation }, { kind: "auto" },
+            { attenuation: attenuation / 64000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, role: "static", key: 0 }, null);
     }
     updateAmbient(sounds: readonly PcmSound[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
         if (!this.enabled) return;
@@ -471,7 +484,7 @@ export class AudioMixer {
             if (sound === undefined || amount === undefined || level === 0) { if (index >= 0) this.freeChannel(index); continue; }
             if (index < 0 || this.voices[index]?.prepared.sound !== sound) {
                 if (index >= 0) this.freeChannel(index);
-                this.admitQ1(sound, { entity: -1, origin: { kind: "local" }, volume: 0, attenuation: 0 }, { kind: "auto" }, { attenuation: 0, loopStart: 0, role: "ambient", key }, null);
+                this.admitSourceSound(sound, { entity: -1, origin: { kind: "local" }, volume: 0, attenuation: 0 }, { kind: "auto" }, { attenuation: 0, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: 0, role: "ambient", key }, null);
                 index = this.voices.findIndex(voice => voice?.policy?.role === "ambient" && voice.policy.key === key);
             }
             const voice = this.voices[index];
@@ -481,10 +494,27 @@ export class AudioMixer {
             voice.stereoVolume = { left: gain, right: gain };
         }
     }
-    setQ1LoopSounds(entries: readonly { readonly entity: number; readonly sound: PcmSound; readonly origin: Vec3; readonly volume: number; readonly attenuation?: number }[]): void {
+    setSourceLoopSounds(entries: readonly { readonly family: "q1" | "q2"; readonly entity: number; readonly sound: PcmSound; readonly origin: Vec3; readonly volume: number; readonly attenuation?: number }[]): void {
         for (const [index, voice] of this.voices.entries()) if (voice?.policy?.role === "entity-loop") this.freeChannel(index);
-        for (const entry of entries) this.admitQ1(entry.sound, { ...entry, origin: { kind: "fixed", position: entry.origin }, attenuation: entry.attenuation ?? 1 }, { kind: "auto" },
-            { attenuation: (entry.attenuation ?? 1) / 1000, loopStart: 0, role: "entity-loop", key: entry.entity }, null);
+        for (const entry of entries) this.admitSourceSound(entry.sound, { ...entry, origin: { kind: "fixed", position: entry.origin }, attenuation: entry.attenuation ?? 1 }, { kind: "auto" },
+            { attenuation: (entry.attenuation ?? 1) * (entry.family === "q1" ? 0.001 : 0.003), distanceOffset: entry.family === "q1" ? 0 : 80,
+                stereoScale: entry.family === "q1" ? 1 : 0.5, unattenuatedMono: entry.family === "q2", loopStart: 0, role: "entity-loop", key: entry.entity }, null);
+    }
+    startQ2Sound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number; readonly delaySeconds?: number; readonly serverMilliseconds?: number }, command: SoundChannelCommand): boolean {
+        if (!this.enabled) return false;
+        const delay = options.delaySeconds ?? 0, server = (options.serverMilliseconds ?? this.paintedTime * 1000 / this.outputRate) * 0.001 * this.outputRate;
+        if (!Number.isFinite(delay) || !Number.isFinite(server)) throw new RangeError("Invalid source sound timestamp");
+        let offset = this.sourceBeginOffset, begin = Math.trunc(server + offset);
+        if (begin < this.paintedTime) { begin = this.paintedTime; offset = Math.trunc(begin - server); }
+        else if (begin > this.paintedTime + 0.3 * this.outputRate) { begin = Math.trunc(this.paintedTime + 0.1 * this.outputRate); offset = Math.trunc(begin - server); }
+        else offset -= 10;
+        begin = delay === 0 ? this.paintedTime : Math.trunc(begin + delay * this.outputRate);
+        if (!Number.isSafeInteger(begin)) throw new RangeError("Sound deadline is outside the shared clock");
+        const accepted = this.admitSourceSound(sound, options, command,
+            { attenuation: options.attenuation * (options.attenuation === 3 ? 0.001 : 0.0005), distanceOffset: 80, stereoScale: 0.5, unattenuatedMono: true, loopStart: null, role: "effect", key: 0 }, null,
+            { sample: begin, order: this.sourceScheduleOrder });
+        if (accepted) { this.sourceBeginOffset = offset; this.sourceScheduleOrder++; }
+        return accepted;
     }
     updateLoopingSound(sound: PcmSound, options: FrameLoopingSoundOptions): void {
         if (!this.enabled)
@@ -569,15 +599,12 @@ export class AudioMixer {
         this.replaceChannel(entity, sourceSoundChannel("q3", channel));
     }
     stopSharedChannel(entity: number, channel: SharedSoundChannel): void {
-        this.replaceChannel(entity, { kind: "channel", channel });
+        this.replaceChannel(entity, { kind: "channel", channel }, true);
     }
-    hasActorSound(entity: number): boolean {
-        return this.voices.some(voice => voice !== null && voice.entity === entity && (voice.policy === null || voice.policy.role === "effect"));
-    }
-    private replaceChannel(entity: number, command: SoundChannelCommand): void {
+    private replaceChannel(entity: number, command: SoundChannelCommand, cancelScheduled = false): void {
         for (let index = 0; index < this.voices.length; index++) {
             const voice = this.voices[index];
-            if (voice !== undefined && voice !== null && voice.entity === entity && (voice.policy === null || voice.policy.role === "effect") && (command.kind === "replace-actor" || command.kind === "channel" && voice.channel === command.channel))
+            if (voice !== undefined && voice !== null && (cancelScheduled || voice.start.kind !== "scheduled") && voice.entity === entity && (voice.policy === null || voice.policy.role === "effect") && (command.kind === "replace-actor" || command.kind === "channel" && voice.channel === command.channel))
             {
                 this.freeChannel(index);
                 if (command.kind === "replace-actor") return;
@@ -594,6 +621,8 @@ export class AudioMixer {
     }
     stopAll(): void {
         this.resetChannels();
+        this.sourceBeginOffset = 0;
+        this.sourceScheduleOrder = 0;
         this.loops.clear();
         this.loopChannels = [];
         this.entityPositions.fill(vec3(0, 0, 0));
@@ -738,11 +767,13 @@ export class AudioMixer {
         this.scanChannelStarts();
         const effectsGain = Math.trunc(Math.fround(Math.fround(this.effectsVolume) * 255));
         while (this.paintedTime < endFrame) {
-            const count = Math.min(PAINTBUFFER_SIZE, endFrame - this.paintedTime);
+            this.issueScheduledSounds();
+            let count = Math.min(PAINTBUFFER_SIZE, endFrame - this.paintedTime);
+            for (const voice of this.voices) if (voice?.start.kind === "scheduled") count = Math.min(count, voice.start.sample - this.paintedTime);
             const paint = new Float64Array(count * 2);
             this.paintRaw(paint, count);
             for (const voice of this.voices) {
-                if (voice === null)
+                if (voice === null || voice.start.kind === "scheduled")
                     continue;
                 if (voice.start.kind === "pending")
                     throw new Error("Channel scan left a pending sound");
@@ -834,38 +865,22 @@ export class AudioMixer {
                 this.voices[index] = { ...voice, start: { kind: "started", sample: this.paintedTime } };
                 newSamples = true;
             }
-            else if ((voice.policy === null || voice.policy.loopStart === null) && voice.start.sample + voice.prepared.outputFrames <= this.paintedTime) {
+            else if (voice.start.kind === "started" && (voice.policy === null || voice.policy.loopStart === null) && voice.start.sample + voice.prepared.outputFrames <= this.paintedTime) {
                 this.freeChannel(index);
             }
         }
         return newSamples;
     }
-    private chooseVictim(entity: number, time: number): number {
-        let victim: number | null = null;
-        let oldest = time;
-        for (const [index, voice] of this.voices.entries()) {
-            if (voice === null || voice.policy !== null && voice.policy.role !== "effect" || voice.entity === this.listenerEntity || voice.entity !== entity || voice.channel === "announcer")
-                continue;
-            if (voice.allocatedAt < oldest) {
-                oldest = voice.allocatedAt;
-                victim = index;
-            }
+    private issueScheduledSounds(): void {
+        const due = [...this.voices.entries()].filter(([, voice]) => voice?.start.kind === "scheduled" && voice.start.sample <= this.paintedTime);
+        due.sort(([, left], [, right]) => left?.start.kind === "scheduled" && right?.start.kind === "scheduled" ? left.start.sample - right.start.sample || right.start.order - left.start.order : 0);
+        for (const [index, voice] of due) {
+            if (voice === null || voice.start.kind !== "scheduled") continue;
+            if (voice.channel !== null) this.replaceChannel(voice.entity, { kind: "channel", channel: voice.channel });
+            const started: OneShotVoice = { ...voice, start: { kind: "started", sample: this.paintedTime } };
+            started.stereoVolume = this.policySpatialize(started);
+            this.voices[index] = started;
         }
-        if (victim !== null)
-            return victim;
-        for (const [index, voice] of this.voices.entries()) {
-            if (voice === null || voice.policy !== null && voice.policy.role !== "effect" || voice.entity === this.listenerEntity || voice.channel === "announcer")
-                continue;
-            if (voice.allocatedAt < oldest) {
-                oldest = voice.allocatedAt;
-                victim = index;
-            }
-        }
-        if (victim !== null)
-            return victim;
-        // Native code reads one-past-end ch->entnum before its listener fallback.
-        // Its result, including whether it drops the sound, is undefined.
-        throw new Error("S_StartSound reached the undefined native listener fallback");
     }
     private positionForEntity(entity: number): Vec3 {
         const position = this.entityPositions[entity];
@@ -993,8 +1008,6 @@ export class AudioMixer {
                 continue;
             mixes.push({ prepared: loop.prepared, leftVolume: Math.min(255, leftVolume), rightVolume: Math.min(255, rightVolume),
                 doppler: loop.doppler, dopplerScale: loop.dopplerScale, oldDopplerScale: loop.oldDopplerScale });
-            if (mixes.length === this.capacity)
-                break;
         }
         return mixes;
     }

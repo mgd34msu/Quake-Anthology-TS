@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { Axis } from "../../src/contracts/math.ts";
-import { UnifiedAudio, AudioMixer, QuakeMixer, decodeWav, decodeQuakeWav, RawAudioStream, parseEnvironments, StereoReverb, reverbPreset, MusicPlayer, MemoryPcmStream } from "../../src/audio/index.ts";
+import { UnifiedAudio, AudioMixer, decodeWav, decodeQuakeWav, RawAudioStream, parseEnvironments, StereoReverb, reverbPreset, MusicPlayer, MemoryPcmStream } from "../../src/audio/index.ts";
 import type { PcmSound, SoundAsset } from "../../src/audio/index.ts";
 import { join } from "node:path";
 const identity = createIdentityOwner("audio-smoke");
@@ -22,10 +22,11 @@ test("real Q1, Q2 rerelease and Q3 archive sounds decode and mix", async () => {
             const bytes = await archive.readEntry(wav);
             const pcm = entry.family === "q3" ? decodeWav(bytes, wav.path) : decodeQuakeWav(bytes, wav.path);
             expect(pcm.frameCount).toBeGreaterThan(0);
-            const mixer = entry.family === "q2" ? new QuakeMixer(48000) : new AudioMixer(48000, () => 100);
+            const mixer = new AudioMixer(48000, () => 100);
             mixer.setListener(1, origin, axis);
-            if (entry.family === "q1" && mixer instanceof AudioMixer) mixer.startQ1Sound(pcm, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 1 }, { kind: "channel", channel: "weapon" }, () => 1234);
-            else mixer.startSound(pcm, { entity: 1, channel: 1, origin: { kind: "local" }, volume: entry.family === "q3" ? 127 : 1, attenuation: 1 });
+            if (entry.family === "q1") mixer.startQ1Sound(pcm, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 1 }, { kind: "channel", channel: "weapon" }, () => 1234);
+            else if (entry.family === "q2") mixer.startQ2Sound(pcm, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 1 }, { kind: "channel", channel: "weapon" });
+            else mixer.startSound(pcm, { entity: 1, channel: 1, origin: { kind: "local" }, volume: 127 });
             expect(mixer.mix(4800).some(value => value !== 0)).toBe(true);
         }
         finally {
@@ -122,13 +123,13 @@ test("Q1 effect, static, ambient and entity loops share the Q3 paint clock", () 
     mixer.startQ1Sound(tone, { entity: 1, origin: { kind: "local" }, volume: 0.1, attenuation: 0 }, { kind: "auto" }, () => 0);
     mixer.addStaticSound(loop, origin, 100, 0);
     mixer.updateAmbient([loop], [100], 1);
-    mixer.setQ1LoopSounds([{ entity: 2, sound: loop, origin, volume: 0.1 }]);
+    mixer.setSourceLoopSounds([{ family: "q1", entity: 2, sound: loop, origin, volume: 0.1 }]);
     mixer.startSound(tone, { entity: 3, origin: { kind: "local" }, channel: 2, volume: 10 });
     mixer.clearLoopingSounds(true);
     expect([...mixer.channelVolumes()]).toHaveLength(5);
     expect(mixer.mix(10).every(value => value > 0)).toBe(true);
     expect(mixer.sampleClock).toBe(10);
-    mixer.setQ1LoopSounds([]);
+    mixer.setSourceLoopSounds([]);
     mixer.updateAmbient([], [], 0);
     mixer.startQ1Sound(loop, { entity: -1, origin: { kind: "local" }, volume: 0.1, attenuation: 0 }, { kind: "replace-actor" }, () => 0);
     expect([...mixer.channelVolumes()]).toHaveLength(4);
@@ -272,4 +273,97 @@ test("full-pan Q1 voice products retain positive and negative polarity before cl
         expect([...mixer.channelVolumes()].map(voice => [voice.left, voice.right])).toEqual([[510, 0]]);
         expect([...mixer.mix(1)]).toEqual([sample, 0]);
     }
+});
+
+test("Q2 deadlines replace shared weapon voices at issuance and cancel before issuance", () => {
+    const mixer = new AudioMixer(1000, () => 100);
+    mixer.setListener(1, origin, axis);
+    const old: PcmSound = { samples: new Int16Array(100).fill(1000), sampleRate: 1000, channels: 1, frameCount: 100, loopStart: null };
+    const next: PcmSound = { ...old, samples: new Int16Array(100).fill(-1000) };
+    mixer.startQ1Sound(old, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0 }, { kind: "channel", channel: "weapon" }, () => 0);
+    mixer.startQ2Sound(next, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, delaySeconds: 0.005 }, { kind: "channel", channel: "weapon" });
+    expect([...mixer.channelVolumes()].map(voice => voice.sound)).toEqual([old]);
+    const crossing = mixer.mix(8);
+    expect(crossing[8]).toBeGreaterThan(0);
+    expect(crossing[10]).toBeLessThan(0);
+    expect([...mixer.channelVolumes()].map(voice => voice.sound)).toEqual([next]);
+    mixer.startQ2Sound(old, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, delaySeconds: 0.005 }, { kind: "channel", channel: "weapon" });
+    mixer.stopSharedChannel(1, "weapon");
+    expect(mixer.mix(20).every(value => value === 0)).toBe(true);
+    expect(mixer.sampleClock).toBe(28);
+});
+
+test("Q2 equal deadlines issue newest first and late issuance starts at sample zero", () => {
+    const mixer = new AudioMixer(1000, () => 100);
+    mixer.setListener(1, origin, axis);
+    const first: PcmSound = { samples: new Int16Array([1000, 2000, 3000, 4000]), sampleRate: 1000, channels: 1, frameCount: 4, loopStart: null };
+    const second: PcmSound = { ...first, samples: new Int16Array(4).fill(-1000) };
+    for (const sound of [first, second]) mixer.startQ2Sound(sound, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, delaySeconds: 0.005 }, { kind: "channel", channel: "weapon" });
+    expect(mixer.mix(5).every(value => value === 0)).toBe(true);
+    expect(mixer.mix(1)[0]).toBeGreaterThan(0);
+    expect([...mixer.channelVolumes()].map(voice => voice.sound)).toEqual([first]);
+    mixer.stopAll();
+    mixer.startQ2Sound(first, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, delaySeconds: -0.1 }, { kind: "auto" });
+    const late = mixer.mix(2);
+    expect(late[0]).toBeGreaterThan(0);
+    expect(late[2]).toBeGreaterThan(late[0] ?? 0);
+});
+
+test("shared Q1 and Q2 entity loops retain phase and source attenuation", () => {
+    const mixer = new AudioMixer(1000, () => 100);
+    mixer.setListener(1, origin, axis);
+    const loop: PcmSound = { samples: new Int16Array([1000, 2000, 3000, 4000]), sampleRate: 1000, channels: 1, frameCount: 4, loopStart: null };
+    mixer.setSourceLoopSounds([{ family: "q1", entity: 2, sound: loop, origin, volume: 0.1 }, { family: "q2", entity: 3, sound: loop, origin, volume: 0.1 }]);
+    expect([...mixer.channelVolumes()]).toHaveLength(2);
+    const first = mixer.mix(3);
+    mixer.setSourceLoopSounds([{ family: "q1", entity: 2, sound: loop, origin, volume: 0.1 }, { family: "q2", entity: 3, sound: loop, origin, volume: 0.1 }]);
+    const refreshed = mixer.mix(2);
+    expect(refreshed[0]).toBeGreaterThan(first[4] ?? 0);
+    expect(refreshed[2]).toBe(first[0]);
+    mixer.setSourceLoopSounds([]);
+    mixer.startQ2Sound(loop, { entity: 2, origin: { kind: "fixed", position: { x: 0, y: 80, z: 0 } }, volume: 1, attenuation: 1 }, { kind: "auto" });
+    const pan = mixer.mix(1);
+    expect(pan[0]).toBeGreaterThan(0);
+    expect(pan[1]).toBe(0);
+    expect([...mixer.channelVolumes()].map(voice => [voice.left, voice.right])).toEqual([[255, 0]]);
+    expect(mixer.sampleClock).toBe(6);
+});
+
+test("Q2 server drift correction bounds future starts and preserves zero-delay immediacy", () => {
+    const mixer = new AudioMixer(1000, () => 100);
+    mixer.setListener(1, origin, axis);
+    const short: PcmSound = { samples: new Int16Array([1000, 2000]), sampleRate: 1000, channels: 1, frameCount: 2, loopStart: null };
+    mixer.startQ2Sound(short, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, serverMilliseconds: 10000, delaySeconds: 0.005 }, { kind: "auto" });
+    expect(mixer.mix(105).every(value => value === 0)).toBe(true);
+    expect(mixer.mix(1)[0]).toBeGreaterThan(0);
+    mixer.stopAll();
+    mixer.startQ2Sound(short, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, serverMilliseconds: -10000, delaySeconds: 0.005 }, { kind: "auto" });
+    expect(mixer.mix(5).every(value => value === 0)).toBe(true);
+    expect(mixer.mix(1)[0]).toBeGreaterThan(0);
+    mixer.stopAll();
+    mixer.startQ2Sound(short, { entity: 1, origin: { kind: "local" }, volume: 1, attenuation: 0, serverMilliseconds: 10000 }, { kind: "auto" });
+    expect(mixer.mix(1)[0]).toBeGreaterThan(0);
+    expect(mixer.sampleClock).toBe(113);
+});
+
+test("pure Q3 effects and unique loops grow independently of initial allocation", () => {
+    const small = new AudioMixer(1000, () => 100, 2), roomy = new AudioMixer(1000, () => 100, 8);
+    const sounds = [1000, 2000, 3000].map(value => ({ samples: new Int16Array(8).fill(value), sampleRate: 1000, channels: 1, frameCount: 8, loopStart: null } satisfies PcmSound));
+    for (const mixer of [small, roomy]) {
+        mixer.setListener(1, origin, axis);
+        for (const [index, sound] of sounds.entries()) expect(mixer.startSound(sound, { entity: index + 2, origin: { kind: "local" }, channel: 0, volume: 127 })).toBe(true);
+        expect([...mixer.channelVolumes()]).toHaveLength(3);
+    }
+    const effects = small.mix(1);
+    expect(effects[0]).toBeGreaterThan(0);
+    expect([...effects]).toEqual([...roomy.mix(1)]);
+    for (const mixer of [small, roomy]) {
+        mixer.stopAll();
+        for (const [index, sound] of sounds.entries()) mixer.updateRealLoopingSound(sound, { entity: index + 2, origin, velocity: origin });
+        mixer.setListener(1, origin, axis);
+    }
+    const loops = small.mix(1);
+    expect(loops[0]).toBeGreaterThan(0);
+    expect([...loops]).toEqual([...roomy.mix(1)]);
+    expect(small.sampleClock).toBe(2);
 });

@@ -1,12 +1,11 @@
 import { sourceSoundChannel } from "./types.ts";
-import type { SharedSoundChannel, SoundChannelCommand, SoundFamily } from "./types.ts";
+import type { SharedSoundChannel } from "./types.ts";
 import type { ActorId, SeatId } from "../contracts/identity.ts";
 import type { Vec3 } from "../contracts/math.ts";
 import { SdlAudioDevice } from "../platform/audio.ts";
 import type { SdlAudioOptions } from "../platform/audio.ts";
 import { AudioMixer } from "./mixer.ts";
 import type { VoiceOrigin } from "./mixer.ts";
-import { QuakeMixer } from "./quake-mixer.ts";
 import { RawAudioStream } from "./streams.ts";
 import { MusicPlayer } from "./music.ts";
 import { EnvironmentReverb } from "./environments.ts";
@@ -15,7 +14,6 @@ import { StereoReverb, UnderwaterFilter } from "./reverb.ts";
 import type { AudioListener, PlaySound, LoopSound, AudioAudience, AudioStreamTarget, StreamPcm, SoundAsset } from "./types.ts";
 interface SeatAudio {
     listener: AudioListener;
-    readonly q2: QuakeMixer;
     readonly mixer: AudioMixer;
     readonly reverb: StereoReverb;
     readonly underwater: UnderwaterFilter;
@@ -108,23 +106,19 @@ export class UnifiedAudio {
         for (const listener of listeners) {
             let state = this.seats.find(value => value.listener.seat.equals(listener.seat));
             if (state === undefined) {
-                state = { listener, q2: new QuakeMixer(this.sampleRate),
+                state = { listener,
                     mixer: new AudioMixer(this.sampleRate, this.options.milliseconds, 96, 2, this.options.maxActors ?? 65536),
                     reverb: new StereoReverb(this.sampleRate), underwater: new UnderwaterFilter(this.sampleRate), environment: null, loops: new Map<string, LoopSound>() };
-                state.q2.effectsVolume = this.effectsGain;
                 state.mixer.setEffectsVolume(this.effectsGain);
                 // A new seat starts at the host paint epoch; it has no prior source channels.
-                state.q2.setTime(this.frame);
                 state.mixer.selectTime(this.frame, this.frame);
                 for (const [entity, position] of this.positions) {
-                    state.q2.updateEntityPosition(entity, position);
                     state.mixer.updateEntityPosition(entity, position);
                 }
                 this.seats.push(state);
             }
             state.listener = listener;
             const entity = listener.actor === null ? 0 : this.entity(listener.actor);
-            state.q2.setListener(entity, listener.origin, listener.axis);
             state.mixer.setListener(entity, listener.origin, listener.axis);
             state.environment?.update(listener.origin, this.options.milliseconds());
         }
@@ -134,7 +128,6 @@ export class UnifiedAudio {
             throw new RangeError("Invalid effects gain");
         this.effectsGain = gain;
         for (const state of this.seats) {
-            state.q2.effectsVolume = gain;
             state.mixer.setEffectsVolume(gain);
         }
     }
@@ -143,7 +136,6 @@ export class UnifiedAudio {
         const entity = this.entity(actor);
         this.positions.set(entity, { ...origin });
         for (const state of this.seats) {
-            state.q2.updateEntityPosition(entity, origin);
             state.mixer.updateEntityPosition(entity, origin);
         }
     }
@@ -171,11 +163,9 @@ export class UnifiedAudio {
             const local = state.listener.actor === null ? 0 : this.entity(state.listener.actor);
             const options = { entity: origin.kind === "local" ? local : entity, channel: request.channel, origin, volume: request.volume, attenuation: request.attenuation,
                 ...(request.delaySeconds === undefined ? {} : { delaySeconds: request.delaySeconds }), ...(request.serverMilliseconds === undefined ? {} : { serverMilliseconds: request.serverMilliseconds }) };
-            const replaceQ2Actor = channelCommand.kind === "replace-actor" && !state.mixer.hasActorSound(options.entity);
             const accepted = request.family === "q3" ? state.mixer.startSharedSound(request.sound.pcm, { ...options, volume: Math.trunc(request.volume * 127) }, channelCommand, request.sound.name)
                 : request.family === "q1" ? state.mixer.startQ1Sound(request.sound.pcm, options, channelCommand, this.options.random)
-                : state.q2.startSound(request.sound.pcm, options);
-            if (accepted) this.replaceSourceChannel(state, options.entity, channelCommand, request.family, replaceQ2Actor);
+                : state.mixer.startQ2Sound(request.sound.pcm, options, channelCommand);
             if (accepted)
                 playing++;
         }
@@ -186,22 +176,7 @@ export class UnifiedAudio {
     stopSound(actor: ActorId, channel: SharedSoundChannel): void {
         const entity = this.entity(actor);
         for (const state of this.seats) {
-            this.replaceSourceChannel(state, entity, { kind: "channel", channel }, null);
-        }
-    }
-    private replaceSourceChannel(state: SeatAudio, entity: number, command: SoundChannelCommand, incoming: SoundFamily | null, replaceQ2Actor = false): void {
-        if (command.kind === "auto") return;
-        if (incoming === "q2" || incoming === null) {
-            if (command.kind === "replace-actor") state.mixer.stopEntity(entity);
-            else state.mixer.stopSharedChannel(entity, command.channel);
-        }
-        if (incoming !== "q2") {
-            if (command.kind === "replace-actor") { if (replaceQ2Actor) state.q2.replaceActorSound(entity); }
-            else if (command.channel.startsWith("q2:extension:")) state.q2.stopSound(entity, Number(command.channel.slice("q2:extension:".length)));
-            else for (let raw = 1; raw <= 4; raw++) {
-                const mapped = sourceSoundChannel("q2", raw);
-                if (mapped.kind === "channel" && mapped.channel === command.channel) state.q2.stopSound(entity, raw);
-            }
+            state.mixer.stopSharedChannel(entity, channel);
         }
     }
     private loopPosition(request: LoopSound, listener: AudioListener): Vec3 {
@@ -240,8 +215,7 @@ export class UnifiedAudio {
         for (const state of this.seats) {
             const loops = [...state.loops.values()].map(loop => ({ family: loop.family, entity: this.entity(loop.actor), sound: loop.sound.pcm,
                 origin: this.loopPosition(loop, state.listener), volume: loop.volume, attenuation: loop.attenuation }));
-            state.mixer.setQ1LoopSounds(loops.filter(loop => loop.family === "q1"));
-            state.q2.setLoopSounds(loops.filter(loop => loop.family === "q2"));
+            state.mixer.setSourceLoopSounds(loops.filter(loop => loop.family === "q1" || loop.family === "q2").map(loop => ({ ...loop, family: loop.family === "q1" ? "q1" : "q2" })));
             const entity = state.listener.actor === null ? 0 : this.entity(state.listener.actor);
             state.mixer.setListener(entity, state.listener.origin, state.listener.axis);
         }
@@ -317,7 +291,6 @@ export class UnifiedAudio {
             return new Int16Array(frames * 2);
         for (const state of this.seats) {
             const seat = new Float64Array(frames * 2);
-            add(seat, state.q2.mix(frames), 1);
             add(seat, state.mixer.mix(frames), 1);
             const params = state.environment?.params;
             if (params !== undefined && params !== null)
@@ -371,7 +344,6 @@ export class UnifiedAudio {
         this.device?.resume(); }
     stopAll(): void {
         for (const state of this.seats) {
-            state.q2.stopAll();
             state.mixer.stopAll();
             state.loops.clear();
             state.reverb.reset();

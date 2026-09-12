@@ -2,8 +2,6 @@ export { UnifiedAudio } from "./engine.ts";
 export type { UnifiedAudioOptions } from "./engine.ts";
 export { AudioMixer, SOUND_TIME_EPOCH, spatializeSoundOrigin } from "./mixer.ts";
 export type { StartSoundOptions, VoiceOrigin, MixerSoundMemory, SoundPaintRange } from "./mixer.ts";
-export { QuakeMixer } from "./quake-mixer.ts";
-export type { QuakeStartSound, QuakeLoopSound } from "./quake-mixer.ts";
 export { SoundBank } from "./bank.ts";
 export { MusicPlayer, CdMusic, Q2Jukebox, remapQ2MusicTrack } from "./music.ts";
 export type { OpenMusicTrack, MusicTrack } from "./music.ts";
