@@ -1,19 +1,19 @@
 # Implementation completion status
 
-Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics is excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
+Source cutoff: `a5fca3567968151261506707acfc392a5b95679e`. Unaffected verdicts carry from 3897f5d; updates cover accepted haptics a8ace02 and strength/static/navigation 3e57748, 60cfc8e and a5fca35. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
-| Q1 | 120 | 60 | 180 | 66.7% |
-| Q2 | 105 | 88 | 193 | 54.4% |
-| Q3 | 49 | 55 | 104 | 47.1% |
-| Overall inventory | 274 | 203 | 477 | 57.4% |
+| Q1 | 121 | 59 | 180 | 67.2% |
+| Q2 | 108 | 85 | 193 | 56% |
+| Q3 | 50 | 54 | 104 | 48.1% |
+| Overall inventory | 279 | 198 | 477 | 58.5% |
 
 | Game | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: |
-| Q1 | 102 | 15 | 3 |
-| Q2 | 61 | 32 | 12 |
-| Q3 | 39 | 7 | 3 |
+| Q1 | 102 | 15 | 4 |
+| Q2 | 61 | 32 | 15 |
+| Q3 | 39 | 7 | 4 |
 
 ## Q1 requirements
 
@@ -231,7 +231,7 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q1.bots.ctf-coop-horde` — Bot objectives and campaign participation | not-done | missing-work | botAdmissionError explicitly rejects Q1 team and campaign objectives, including CTF, coop and Horde. | [src/app/bootstrap/simulation/bots.ts](../src/app/bootstrap/simulation/bots.ts) |
 | `q1.bots.nav2-and-construction` — Retail NAV2 import and navigation for foreign maps | done | extended-common | Common navigation loads authored NAV2 or constructs scene-based graphs; live movement prediction admits traversal against shared collision and moving bodies. | [src/bots/navigation/load.ts](../src/bots/navigation/load.ts), [src/bots/navigation/construct.ts](../src/bots/navigation/construct.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts) |
 
-### input — 3 done / 6 total
+### input — 4 done / 6 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
@@ -239,7 +239,7 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q1.input.controller-mapping-hotplug` — SDL controllers, mappings and hotplug | done | shared-replacement | Shared SDL controller ownership routes axis/button/hotplug events and clears removed-device state. | [src/platform/controller.ts](../src/platform/controller.ts), [src/input/router.ts](../src/input/router.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q1.input.controller-tuning` — Controller deadzones, curves and per-seat settings UI | not-done | missing-work | Tuning controls and gamepad curves exist, but full per-seat preview and persistent application settings are not connected. | [src/ui/settings/index.ts](../src/ui/settings/index.ts), [src/input/gamepad.ts](../src/input/gamepad.ts), [src/settings/config.ts](../src/settings/config.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q1.input.focus-modal-recovery` — Focus, minimize and modal input recovery | done | shared-replacement | Seat/router focus transitions clear held actions and update capture, including device removal and modal UI ownership. | [src/input/router.ts](../src/input/router.ts), [src/input/seat.ts](../src/input/seat.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/ui.ts](../src/app/bootstrap/ui.ts) |
-| `q1.input.haptics` — BNVIB tactile playback and per-player rumble | not-done | missing-work | At this accepted cutoff the BNVIB timeline is a library without application construction/event routing; the in-flight haptics work is excluded. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
+| `q1.input.haptics` — BNVIB tactile playback and per-player rumble | done | extended-common | Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
 | `q1.input.gyro` — Gyro aiming and device settings | not-done | missing-work | Gyro samples are routed into seat aiming, but stationary calibration/bias handling and complete enable/calibrate UI are not implemented. | [src/input/gamepad.ts](../src/input/gamepad.ts), [src/input/router.ts](../src/input/router.ts), [src/ui/settings/index.ts](../src/ui/settings/index.ts) |
 
 ### ui — 0 done / 5 total
@@ -534,13 +534,13 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q2.bots.combat-campaign-goals` — Execute bot combat and campaign decisions | not-done | missing-work | Shared bots provide combat/item/movement decisions, but complete Q2 authored campaign objective solving is not established; the rerelease guidance hook still reports no-navigation. | [src/app/bootstrap/simulation/runtime.ts](../src/app/bootstrap/simulation/runtime.ts), [src/bots/behavior/index.ts](../src/bots/behavior/index.ts) |
 | `q2.bots.map-lifecycle` — Restore bot population after map changes | done | shared-replacement | The shared Q3-derived bot controller uses real game clients, selected skill/character decision parameters and source commands; application bot ownership is rebuilt across maps. | [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts), [src/bots/behavior/index.ts](../src/bots/behavior/index.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts) |
 
-### navigation — 1 done / 4 total
+### navigation — 2 done / 4 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
-| `q2.navigation.nav2-loading` — Load and validate NAV2 navigation data | not-done | missing-work | NAV2 parsing, graph construction and reference validation are integrated for bots, but the actual bot loader omits navigationContent. The checksumless NAV provenance guard is consequently inactive and an inherited same-name graph can be accepted for different selected geometry. MG3 passes the guard; Q2 bot loading does not. | [src/bots/navigation/nav.ts](../src/bots/navigation/nav.ts), [src/bots/navigation/load.ts](../src/bots/navigation/load.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts), [src/app/bootstrap/simulation/monster-navigation.ts](../src/app/bootstrap/simulation/monster-navigation.ts) |
+| `q2.navigation.nav2-loading` — Load and validate NAV2 navigation data | done | extended-common | Accepted a5fca35 passes actual navigation-content provenance into bot loading and validates NAV2 against selected geometry, including checksumless inherited-map rejection. | [src/bots/navigation/nav.ts](../src/bots/navigation/nav.ts), [src/bots/navigation/load.ts](../src/bots/navigation/load.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts), [src/app/bootstrap/simulation/monster-navigation.ts](../src/app/bootstrap/simulation/monster-navigation.ts) |
 | `q2.navigation.path-capabilities` — Respect navigation traversal capabilities | done | shared-replacement | The application loads NAV2/NAV3 or constructs a provenance-bound graph, then routes with the actual actor movement profile and live scene collision/entity checks; invalid and unreachable routes are refused. | [src/bots/navigation/load.ts](../src/bots/navigation/load.ts), [src/bots/navigation/runtime.ts](../src/bots/navigation/runtime.ts), [src/bots/navigation/construct.ts](../src/bots/navigation/construct.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts) |
-| `q2.navigation.dynamic-obstacles` — Update routes for doors, lifts, hazards, and moving floors | not-done | missing-work | Live collision and moving brush bounds participate in route validation, but the application adapter hardcodes enabled=true, locked=false, destination=null and hazard=false. Conditional door state and dynamic nonblocking hazards are not supplied to the shared navigation runtime. | [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts), [src/bots/navigation/runtime.ts](../src/bots/navigation/runtime.ts) |
+| `q2.navigation.dynamic-obstacles` — Update routes for doors, lifts, hazards, and moving floors | not-done | missing-work | Accepted a5fca35 supplies live enabled, locked, destination and hazard observations to shared route validation. Unsupported mover travel is still rejected, so complete dynamic route execution remains unfinished. | [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts), [src/bots/navigation/runtime.ts](../src/bots/navigation/runtime.ts) |
 | `q2.navigation.foreign-map-construction` — Construct navigation for maps without NAV2 | not-done | missing-work | Constructed graphs drive real foreign-map movement, combat and item access, but admitted shared bots exclude campaign/team objective play. The stated objective navigation component is not completed by the current application join. | [src/bots/navigation/construct.ts](../src/bots/navigation/construct.ts), [src/app/bootstrap/simulation/navigation.ts](../src/app/bootstrap/simulation/navigation.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts) |
 
 ### hud — 1 done / 12 total
@@ -571,7 +571,7 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q2.accessibility.independent-scales` — Scale menus, HUD, and console independently | not-done | missing-work | HUD/text scale controls exist, but independent menu/HUD/console scale ownership on every actual draw path is not fully wired. | [src/ui/settings/index.ts](../src/ui/settings/index.ts), [src/app/bootstrap/ui.ts](../src/app/bootstrap/ui.ts), [src/app/bootstrap/startup-menu.ts](../src/app/bootstrap/startup-menu.ts) |
 | `q2.accessibility.color-and-captions` — Complete readable non-color-only and caption workflows | not-done | missing-work | Caption data/scheduler and HUD support exist but no application media-event producer supplies timed captions; the common HUD initializes captions empty. | [src/text/captions.ts](../src/text/captions.ts), [src/ui/hud/index.ts](../src/ui/hud/index.ts), [src/app/bootstrap/ui.ts](../src/app/bootstrap/ui.ts) |
 
-### input — 3 done / 8 total
+### input — 5 done / 8 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
@@ -580,8 +580,8 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q2.input.buttons-triggers` — Map controller buttons and analog triggers | done | shared-replacement | The common input router sends device events only to the assigned seat, applies controller tuning/gyro state and balanced source actions, and releases device state on loss. | [src/input/router.ts](../src/input/router.ts), [src/input/gamepad.ts](../src/input/gamepad.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q2.input.axis-deadzone` — Apply analog deadzones and response | done | shared-replacement | The common input router sends device events only to the assigned seat, applies controller tuning/gyro state and balanced source actions, and releases device state on loss. | [src/input/router.ts](../src/input/router.ts), [src/input/gamepad.ts](../src/input/gamepad.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls | not-done | missing-work | Runtime seat routing/tuning/bindings work, but ConfigStore seat/device persistence is not connected to ApplicationInput startup/shutdown; the required restart persistence is unfinished. | [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/input/router.ts](../src/input/router.ts), [src/settings/config.ts](../src/settings/config.ts) |
-| `q2.input.haptic-envelopes` — Play sound-triggered tactile envelopes | not-done | missing-work | At this immutable cutoff SeatHaptics has no production construction or sound trigger; the later in-flight haptics slice is deliberately excluded. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
-| `q2.input.per-seat-rumble` — Route haptics to the affected local player | not-done | missing-work | At this immutable cutoff SeatHaptics has no production construction or sound trigger; the later in-flight haptics slice is deliberately excluded. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
+| `q2.input.haptic-envelopes` — Play sound-triggered tactile envelopes | done | extended-common | Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
+| `q2.input.per-seat-rumble` — Route haptics to the affected local player | done | extended-common | Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
 | `q2.input.gyro-device-behavior` — Complete required gyro and device controls | done | shared-replacement | The common input router sends device events only to the assigned seat, applies controller tuning/gyro state and balanced source actions, and releases device state on loss. | [src/input/router.ts](../src/input/router.ts), [src/input/gamepad.ts](../src/input/gamepad.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 
 ### audio — 6 done / 7 total
@@ -883,7 +883,7 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q3.formats.ibsp44-compatibility` — Observed IBSP44 map compatibility | not-done | missing-work | The Q3 BSP decoder explicitly accepts version 46; the required IBSP44 compatibility path is missing. | [src/formats/q3-map/decode.ts](../src/formats/q3-map/decode.ts) |
 | `q3.formats.md4-skeletal-models` — MD4 skeletal model loading and animation | done | integrated | MD4 version 1 frames, variable bone weights and LOD surfaces are decoded; the production common model renderer registers each LOD shader, selects projected-size LOD and skins/interpolates the selected surfaces. The existing fixture is synthetic, a validation limitation rather than missing implementation. | [src/formats/q3-model/md4.ts](../src/formats/q3-model/md4.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [tests/formats/q3-model/md4.test.ts](../tests/formats/q3-model/md4.test.ts) |
 
-### input — 2 done / 6 total
+### input — 3 done / 6 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
@@ -892,7 +892,7 @@ Source cutoff: `3897f5d0b33f08de0e2c9c47a139968a300c5737`. Uncommitted haptics i
 | `q3.input.joystick-profiles-hotplug` — Joystick profiles, thresholds and device lifecycle | not-done | missing-work | SDL controller routing works, but SourceInputState and its Linux/Windows legacy joystick/POV/ball profiles have no application caller. | [src/input/source-input.ts](../src/input/source-input.ts), [src/input/source-joystick.ts](../src/input/source-joystick.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q3.input.midi-controller` — MIDI note input and device configuration | not-done | missing-work | MIDI decoding/device helpers exist without an application-owned MIDI input lifecycle or selected-device configuration. | [src/input/midi.ts](../src/input/midi.ts), [src/input/source-midi.ts](../src/input/source-midi.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts) |
 | `q3.input.multiple-local-players` — Multiple local seats and remote participation | not-done | missing-work | Multiple local seats have independent input/view/audio state, but local seats joining a remote Q3 match are not supported by the current Q2-only remote application. | [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts), [src/app/bootstrap/remote-application.ts](../src/app/bootstrap/remote-application.ts) |
-| `q3.input.gyro-haptics` — Per-seat gyro and tactile feedback | not-done | missing-work | At the specified accepted cutoff, gyro/haptic source resources are not fully joined to application sound provenance and per-seat lifecycle. Later live haptics work is deliberately excluded. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts) |
+| `q3.input.gyro-haptics` — Per-seat gyro and tactile feedback | done | extended-common | Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. Existing gyro/router and gamepad configuration remain joined through the common input path. | [src/input/haptics.ts](../src/input/haptics.ts), [src/app/bootstrap/input.ts](../src/app/bootstrap/input.ts), [src/app/bootstrap/audio.ts](../src/app/bootstrap/audio.ts), [src/input/router.ts](../src/input/router.ts), [src/input/gamepad.ts](../src/input/gamepad.ts), [src/app/bootstrap/audio/q3.ts](../src/app/bootstrap/audio/q3.ts), [src/app/bootstrap/q3-client.ts](../src/app/bootstrap/q3-client.ts) |
 
 ### audio — 3 done / 6 total
 

@@ -1,52 +1,52 @@
 {
-  "sourceCutoff": "3897f5d0b33f08de0e2c9c47a139968a300c5737",
+  "sourceCutoff": "a5fca3567968151261506707acfc392a5b95679e",
   "exclusions": [
-    "Uncommitted haptics"
+    "Uncommitted source changes"
   ],
   "interpretation": "Requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage.",
   "families": [
     {
       "family": "q1",
-      "done": 120,
-      "notDone": 60,
+      "done": 121,
+      "notDone": 59,
       "total": 180,
-      "percentage": 66.7,
+      "percentage": 67.2,
       "methods": {
         "integrated": 102,
         "sharedReplacement": 15,
-        "extendedCommon": 3
+        "extendedCommon": 4
       }
     },
     {
       "family": "q2",
-      "done": 105,
-      "notDone": 88,
+      "done": 108,
+      "notDone": 85,
       "total": 193,
-      "percentage": 54.4,
+      "percentage": 56,
       "methods": {
         "integrated": 61,
         "sharedReplacement": 32,
-        "extendedCommon": 12
+        "extendedCommon": 15
       }
     },
     {
       "family": "q3",
-      "done": 49,
-      "notDone": 55,
+      "done": 50,
+      "notDone": 54,
       "total": 104,
-      "percentage": 47.1,
+      "percentage": 48.1,
       "methods": {
         "integrated": 39,
         "sharedReplacement": 7,
-        "extendedCommon": 3
+        "extendedCommon": 4
       }
     }
   ],
   "overall": {
-    "done": 274,
-    "notDone": 203,
+    "done": 279,
+    "notDone": 198,
     "total": 477,
-    "percentage": 57.4
+    "percentage": 58.5
   },
   "rows": [
     {
@@ -1477,9 +1477,9 @@
     {
       "id": "q1.input.haptics",
       "title": "BNVIB tactile playback and per-player rumble",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "At this accepted cutoff the BNVIB timeline is a library without application construction/event routing; the in-flight haptics work is excluded.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -3388,9 +3388,9 @@
     {
       "id": "q2.navigation.nav2-loading",
       "title": "Load and validate NAV2 navigation data",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "NAV2 parsing, graph construction and reference validation are integrated for bots, but the actual bot loader omits navigationContent. The checksumless NAV provenance guard is consequently inactive and an inherited same-name graph can be accepted for different selected geometry. MG3 passes the guard; Q2 bot loading does not.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted a5fca35 passes actual navigation-content provenance into bot loading and validates NAV2 against selected geometry, including checksumless inherited-map rejection.",
       "paths": [
         "src/bots/navigation/nav.ts",
         "src/bots/navigation/load.ts",
@@ -3416,7 +3416,7 @@
       "title": "Update routes for doors, lifts, hazards, and moving floors",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Live collision and moving brush bounds participate in route validation, but the application adapter hardcodes enabled=true, locked=false, destination=null and hazard=false. Conditional door state and dynamic nonblocking hazards are not supplied to the shared navigation runtime.",
+      "reason": "Accepted a5fca35 supplies live enabled, locked, destination and hazard observations to shared route validation. Unsupported mover travel is still rejected, so complete dynamic route execution remains unfinished.",
       "paths": [
         "src/app/bootstrap/simulation/navigation.ts",
         "src/bots/navigation/runtime.ts"
@@ -3706,9 +3706,9 @@
     {
       "id": "q2.input.haptic-envelopes",
       "title": "Play sound-triggered tactile envelopes",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "At this immutable cutoff SeatHaptics has no production construction or sound trigger; the later in-flight haptics slice is deliberately excluded.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -3718,9 +3718,9 @@
     {
       "id": "q2.input.per-seat-rumble",
       "title": "Route haptics to the affected local player",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "At this immutable cutoff SeatHaptics has no production construction or sound trigger; the later in-flight haptics slice is deliberately excluded.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -5523,13 +5523,17 @@
     {
       "id": "q3.input.gyro-haptics",
       "title": "Per-seat gyro and tactile feedback",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "At the specified accepted cutoff, gyro/haptic source resources are not fully joined to application sound provenance and per-seat lifecycle. Later live haptics work is deliberately excluded.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. Existing gyro/router and gamepad configuration remain joined through the common input path.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
-        "src/app/bootstrap/audio.ts"
+        "src/app/bootstrap/audio.ts",
+        "src/input/router.ts",
+        "src/input/gamepad.ts",
+        "src/app/bootstrap/audio/q3.ts",
+        "src/app/bootstrap/q3-client.ts"
       ]
     },
     {
