@@ -1,3 +1,4 @@
+import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/identity.ts";
 import type { ArsenalState, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
@@ -12,6 +13,8 @@ export interface SelectedArsenal {
   admit(actor: OwnedActor, maxHealth: number, teamDeathmatch?: boolean): ArsenalState;
   read(actor: ActorId): ArsenalState;
   select(actor: ActorId, item: ItemId): boolean;
+  pickupAmmo(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined;
+  pickupWeapons(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined;
   pendingWeapon(actor: ActorId): ItemId | null;
   handoff(actor: ActorId): PrimaryWeaponHandoff;
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult;

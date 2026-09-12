@@ -459,3 +459,30 @@ test("Q2 weapon ownership fires and restores without a source player entity", ()
   scene.actors.release(actor); expect(restored.states.has(actor.id)).toBe(false);
   scene.actors.close();
 });
+
+
+test("BFG explosion requires owner visibility for native and foreign shared owners", () => {
+  for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const foreign of [false, true]) {
+    const scene = fixture(edition, "bfg"), target = scene.target(350);
+    if (foreign) scene.game.entities.delete(scene.player.id);
+    expect(scene.game.entity(scene.player.id) === null).toBe(foreign);
+    const projectile = scene.weapons.fireBfg({ actor: scene.player }, scene.game, { x: 200, y: 0, z: 0 }, forward, 300, 0, 500);
+    projectile.touch?.(projectile, scene.game, { self: projectile.actor, other: scene.game.host.worldActor(), plane, surface: null });
+    const before = scene.combat.read(target.actor.id)?.health;
+    const ownerOrigin = scene.bodies.read(scene.player.id)?.origin;
+    if (ownerOrigin === undefined) throw new Error("Missing shared shooter body");
+    scene.tracing.trace = request => request.start.x === ownerOrigin.x
+      ? { ...clearTrace(request), fraction: 0, end: request.start }
+      : clearTrace(request);
+    const explosion = projectile.think;
+    if (explosion === null) throw new Error("BFG explosion continuation missing");
+    explosion(projectile, scene.game);
+    expect(scene.combat.read(target.actor.id)?.health).toBe(before);
+    const visible = scene.weapons.fireBfg({ actor: scene.player }, scene.game, { x: 200, y: 0, z: 0 }, forward, 300, 0, 500);
+    visible.touch?.(visible, scene.game, { self: visible.actor, other: scene.game.host.worldActor(), plane, surface: null });
+    scene.tracing.trace = clearTrace;
+    visible.think?.(visible, scene.game);
+    expect(scene.combat.read(target.actor.id)?.health ?? 500).toBeLessThan(before ?? 500);
+    scene.actors.close();
+  }
+});

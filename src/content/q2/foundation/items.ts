@@ -133,6 +133,15 @@ function staysCoop(item: Item): boolean {
 
 export function q2ItemPickupName(classname: string): string | null { return items.find(item => item.classname === classname)?.name ?? null; }
 
+function weaponInventory(catalog: readonly Q2ItemDefinition[]): readonly { readonly item: ItemId; readonly capacity: number }[] {
+  return [...catalog].flatMap(item => item.kind === "ammo" || item.kind === "weapon"
+    ? [{ item: id(item), capacity: item.kind === "ammo" ? item.capacity : 32767 }] : []);
+}
+
+export function q2BaseWeaponInventory(): readonly { readonly item: ItemId; readonly capacity: number }[] {
+  return weaponInventory(items);
+}
+
 export class Q2ItemModule implements Q2SpawnModule {
   private readonly catalog = new Map(items.map(item => [item.classname, item]));
   private pickups = new WeakMap<Q2Entity, PickupState>();
@@ -239,10 +248,15 @@ export class Q2ItemModule implements Q2SpawnModule {
     return this.powers.get(player) ?? { quadUntil: 0, invulnerabilityUntil: 0, breatherUntil: 0, enviroUntil: 0 };
   }
 
+  weaponInventory(): readonly { readonly item: ItemId; readonly capacity: number }[] {
+    return weaponInventory([...this.catalog.values()]);
+  }
+
   configurePlayer(actor: OwnedActor, game: Q2GameServices, giveBlaster = false): undefined {
+    const weapons = new Map(this.weaponInventory().map(entry => [entry.item, entry.capacity]));
     for (const item of this.catalog.values()) {
       if (item.kind !== "ammo" && item.kind !== "weapon" && item.kind !== "power" && item.kind !== "power-armor" && item.kind !== "key" && item.kind !== "custom") continue;
-      this.ensure(actor, game, id(item), item.kind === "ammo" || item.kind === "custom" ? item.capacity : 32767);
+      this.ensure(actor, game, id(item), weapons.get(id(item)) ?? (item.kind === "custom" ? item.capacity : 32767));
     }
     if (giveBlaster && game.host.inventory.count(actor.id, "q2:weapon_blaster") === 0) game.host.inventory.give(actor, "q2:weapon_blaster", 1);
     return this.bindPowerArmor(actor, game);

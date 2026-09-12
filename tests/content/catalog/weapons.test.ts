@@ -4,7 +4,9 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
-import { admitWeaponTiming, selectedWeaponResources } from "../../../src/content/catalog/weapons.ts";
+import { admitWeaponTiming, selectedWeaponResources, selectedWeaponTiming } from "../../../src/content/catalog/weapons.ts";
+import { EQUIPMENT_PROVIDERS, equipmentTiming } from "../../../src/content/catalog/equipment.ts";
+import type { EquipmentSelection } from "../../../src/contracts/content.ts";
 import { nativeProviderTiming } from "../../../src/content/catalog/timing.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
@@ -63,3 +65,28 @@ test("selected weapon metadata retains matching native timing and rejects confli
   expect(() => admitWeaponTiming(timing, { ...profile, clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: 0.1 } })).toThrow("conflicting timing");
   expect(() => admitWeaponTiming(timing, { ...profile, numeric: { ...profile.numeric, floatToInt: "qvm-indefinite" } })).toThrow("conflicting timing");
 });
+
+test.skipIf(!existsSync(corpusRoot))("foreign base Q2 weapons resolve source resources and native timing", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  for (const game of ["q1-classic-id1", "q3-baseq3"]) {
+    const command = parseApplicationCommand(["--game", game, "--map", game.startsWith("q1") ? "e1m1" : "q3dm1"]);
+    if (command.kind !== "run") throw new Error("Expected launch");
+    const preset = applicationPreset(catalog, command.options);
+    for (const edition of ["classic", "rerelease"]) {
+    const weapon = { provider: "q2:official", content: catalog.require(`q2-${edition}-baseq2`).id } satisfies typeof preset.map.entities;
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [weapon] } } });
+    expect(recipe.timing.filter(entry => entry.provider === weapon.provider)).toEqual([nativeProviderTiming(weapon, "q2", edition === "rerelease")]);
+    const requests = selectedWeaponResources(preset.map.entities, [weapon], catalog);
+    expect(requests.filter(request => request.path.startsWith("models/weapons/v_") && request.path.endsWith("tris.md2"))).toHaveLength(11);
+    for (const request of requests) expect(recipe.resources.some(resource => resource.requestedPath === request.path && resource.provenance.mount.identity.content === weapon.content)).toBe(true);
+    if (game === "q1-classic-id1" && edition === "classic") {
+      const gear = { provider: EQUIPMENT_PROVIDERS.handGrenades, content: weapon.content };
+      expect(selectedWeaponResources(preset.map.entities, [gear], catalog)).toEqual([]);
+      expect(selectedWeaponTiming(preset.map.entities, [gear], catalog)).toEqual([]);
+      const equipment: EquipmentSelection = { grapple: { kind: "disabled" }, handGrenades: { kind: "enabled", source: gear, edition, binding: "offhand", initialAmmo: 5, capacity: 50 } };
+      const mixed = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [weapon] }, equipment: { kind: "selected", value: equipment } } });
+      expect(mixed.timing.filter(entry => entry.provider === gear.provider)).toEqual([...equipmentTiming(equipment)]);
+    }
+    }
+  }
+}, 60000);

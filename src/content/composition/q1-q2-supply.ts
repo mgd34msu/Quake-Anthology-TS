@@ -1,5 +1,5 @@
-import type { PickupSelection, PickupSupplyProfile } from "../../contracts/pickups.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
+import type { PickupSelection, PickupSupplyProfile } from "../../contracts/pickups.ts";
 import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
 
 /** Cross-game pickup preference uses base weapon progression, not native Q2 pickup autoswitch rules. */
@@ -32,3 +32,11 @@ export const Q1_Q2_SUPPLY_PROFILE: PickupSupplyProfile = {
     { source: "q1:weapon/lightning", destinations: ["q2:weapon_hyperblaster"] },
   ],
 };
+
+export function q1Q2SupplyLoadout(): { readonly weapon: ItemId; readonly inventory: readonly { readonly item: ItemId; readonly count: number }[] } {
+  return { weapon: "q2:weapon_shotgun", inventory: [
+    { item: "q2:weapon_blaster", count: 1 },
+    { item: "q2:weapon_shotgun", count: 1 },
+    { item: "q2:ammo_shells", count: 25 },
+  ] };
+}

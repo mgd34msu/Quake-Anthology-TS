@@ -81,6 +81,7 @@ export class Q2Ballistics {
     if (this.releaseRegistries.has(game.host.actors)) return;
     this.releaseRegistries.add(game.host.actors);
     game.host.actors.onRelease(actor => {
+      this.states.delete(actor.id); this.inputs.delete(actor.id);
       this.blasterCauses.delete(actor.id); this.silencerCharges.delete(actor.id); this.noises.delete(actor.id);
       if (this.soundEntity?.actor.equals(actor.id)) this.soundEntity = null;
       if (this.sound2Entity?.actor.equals(actor.id)) this.sound2Entity = null;
@@ -425,8 +426,8 @@ export class Q2Ballistics {
       if (current.options.edition === "rerelease") this.bfgAmbient(entity, current);
       if (entity.frame === 0) for (const actor of current.host.nearby(current.body(entity).origin, entity.damageRadius)) {
         if (actor === entity.owner || !canHurt(current, actor) || !current.canDamage(actor, entity)) continue;
-        const owner = current.entity(entity.owner);
-        if (owner !== null && !current.canDamage(actor, owner)) continue;
+        const owner = entity.owner === null ? null : current.host.actors.resolveOwned(entity.owner);
+        if (owner !== null && current.host.bodies.read(owner.id) !== null && !current.canDamage(actor, { actor: owner })) continue;
         if (current.options.edition === "rerelease" && (!this.bfgTarget(current, actor) || !this.hooks.canTarget(entity.owner, actor))) continue;
         const center = centroid(current, actor), body = current.host.bodies.read(actor);
         if (center === null || body === null) continue;

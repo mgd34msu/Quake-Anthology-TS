@@ -131,10 +131,6 @@ export class Q2Weapons extends Q2Ballistics {
     if (this.states.has(self.actor.id)) throw new Error("Q2 weapon state already bound to actor");
     this.resetSilencer(self.actor.id); this.trackActors(game);
     this.states.set(self.actor.id, state);
-    const removeListener = game.host.actors.onRelease(actor => {
-      if (actor.id === self.actor.id) { this.states.delete(actor.id); this.inputs.delete(actor.id); this.noises.delete(actor.id); removeListener(); }
-      return undefined;
-    });
     return state;
   }
 
@@ -399,7 +395,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   multiplier(context: Q2WeaponContext): number {
     const quad = context.input.quadUntil > context.now;
-    return (quad ? 4 : 1) * (context.input.doubleUntil > context.now && !(quad && context.input.noStackDouble) ? 2 : 1);
+    return (quad ? this.hooks.quadMultiplier?.(context.self.actor.id) ?? 4 : 1) * (context.input.doubleUntil > context.now && !(quad && context.input.noStackDouble) ? 2 : 1);
   }
 
   powerupSound(context: Q2WeaponContext): undefined {

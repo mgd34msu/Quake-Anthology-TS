@@ -1,3 +1,4 @@
+import { latchQ2WeaponButtons, earlyQ2WeaponTurn, beginQ2WeaponTurn } from "../../foundation/weapons/turn.ts";
 /* Source player phases are invoked by the common simulation. This is not a second G_RunFrame. */
 import type { DamageDecision, InventoryEntry } from "../../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -391,16 +392,14 @@ export class Q2Players implements Q2SpawnModule {
   /** Call after the common movement commit, trigger callbacks, and Q2 movement contacts. */
   afterClientThink(entity: Q2Entity, game: Q2GameServices): undefined {
     const context = this.context(entity, game), state = context.state;
-    state.latchedButtons |= context.movement.buttons & ~state.buttons; state.buttons = context.movement.buttons;
+    latchQ2WeaponButtons(state, context.movement.buttons);
     if (this.intermission.kind === "intermission") {
       if (game.host.now() > this.intermission.started + 5 && state.buttons !== 0) this.intermission = { ...this.intermission, exit: true };
       return undefined;
     }
     if (state.spectator) {
       if ((state.latchedButtons & 1) !== 0) { state.latchedButtons &= ~1; this.chase(entity, game, 1, true); }
-    } else if (state.useQ2Weapons && (state.latchedButtons & 1) !== 0 && !state.weaponThunk) {
-      state.weaponThunk = true; this.weapons.tick(entity, game, { ...this.hooks.weaponInput(entity.actor.id), latchedAttack: true });
-    }
+    } else if (state.useQ2Weapons) earlyQ2WeaponTurn(state, latchedAttack => this.weapons.tick(entity, game, { ...this.hooks.weaponInput(entity.actor.id), latchedAttack }));
     for (const [actor, watcher] of this.states) {
       const observer = game.entity(actor);
       if (watcher.chaseTarget === entity.actor.id && observer !== null) this.updateChase(observer, game);
@@ -412,8 +411,7 @@ export class Q2Players implements Q2SpawnModule {
     if (this.intermission.kind !== "playing") return undefined;
     const context = this.context(entity, game), state = context.state, now = game.host.now();
     if (game.options.mode === "deathmatch" && state.requestedSpectator !== state.spectator && now - state.respawnTime >= 5) return this.spectatorRespawn(entity, game);
-    if (state.useQ2Weapons && !state.weaponThunk && !state.spectator) this.weapons.tick(entity, game, { ...this.hooks.weaponInput(entity.actor.id), latchedAttack: (state.latchedButtons & 1) !== 0 });
-    else state.weaponThunk = false;
+    beginQ2WeaponTurn(state, state.useQ2Weapons && !state.spectator, latchedAttack => this.weapons.tick(entity, game, { ...this.hooks.weaponInput(entity.actor.id), latchedAttack }));
     if (state.dead) return this.deadFrame(context);
     if (game.options.mode !== "deathmatch") this.hooks.emit({ kind: "trail", actor: entity.actor.id, origin: game.body(entity).origin, time: now });
     state.latchedButtons = 0;
