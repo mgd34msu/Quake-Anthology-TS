@@ -3,7 +3,7 @@ import type { SourcePlayerState } from "../base/shared/player-state.ts";
 import type { Axis, Vec3 } from "../../../contracts/math.ts";
 import { add3, scale3 } from "../../../core/math.ts";
 import type { ParticleSystem } from "../../../render/scene/particles/q3-system.ts";
-import { PersistentIndex, Team } from "../base/shared/definitions.ts";
+import { EntityType, PersistentIndex, Team, statSchema, weaponCount } from "../base/shared/definitions.ts";
 import { MoveFlags } from "../base/shared/player-state.ts";
 import { ClientVmCvarSymbol } from "./config.ts";
 import type { ClientConfiguration } from "./config.ts";
@@ -65,6 +65,16 @@ export class Q3PresentationFrameRuntime {
     if (snapshot === null || snapshot.flags & 2) return h.loadingFrame();
     h.setUserCommandValue(s.weaponSelect, s.zoomSensitivity); s.clientFrame = (s.clientFrame + 1) | 0;
     await h.prediction.predictPlayerState(); h.view.calculateViewValues();
+    const requiredWeapons = new Set([s.predictedPlayerState.weapon]);
+    const owned = snapshot.playerState.stats.get(statSchema(s.product).weapons), count = weaponCount(s.product);
+    for (let weapon = 1; weapon < count; weapon++) if ((owned & (1 << weapon)) !== 0) requiredWeapons.add(weapon);
+    for (const entity of snapshot.entities) {
+      const current = s.entityAt(entity.number).currentState;
+      if (current.eType === EntityType.ET_PLAYER) requiredWeapons.add(current.weapon);
+      else if (current.eType === EntityType.ET_MISSILE || current.eType === EntityType.ET_GRAPPLE)
+        requiredWeapons.add(current.weapon > count ? 0 : current.weapon);
+    }
+    for (const weapon of requiredWeapons) await h.media.weaponRegistry.registerWeapon(weapon);
     if (!s.renderingThirdPerson) { const damage = h.view.damageBlendBlob(h.media.graphics.viewBloodShader, h.hardware === "ragepro"); if (damage !== null) h.scene.addRefEntity(damage); }
     if (!s.hyperspace) {
       h.packet.addPacketEntities(h.packetOptions());

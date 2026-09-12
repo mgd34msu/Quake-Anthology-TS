@@ -25,7 +25,7 @@ import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
 import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
-import { q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
+import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
 import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { SessionSeat } from "../../world/session/index.ts";
@@ -504,7 +504,7 @@ export class Application {
     const source = simulation.q3Source(); if (source === null) return null;
     const prediction = createSimulationPredictionHost(simulation, local.player.actor, local.player.seat.id);
     const initial = source.sourceState(); prediction.captureSource(initial);
-    const client = await ApplicationQ3Client.create({ assets, queries: simulation.scene, initial, local, audio, movement: prediction,
+    const client = await ApplicationQ3Client.create({ weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, queries: simulation.scene, initial, local, audio, movement: prediction,
       splitScreen: this.options.seats > 1,
       ...(settings === undefined ? {} : { settings }), predictionCommand: (command, time) => prediction.submit(command, time),
       linkBounds: number => source.world.linkState(number)?.absbounds ?? null,
@@ -769,6 +769,21 @@ export class Application {
     for (const command of pending) {
       try {
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
+        if (command.name === "use") {
+          const actor = this.commandActor(command.seat), requested = command.arguments_.join("").toLowerCase().replaceAll(" ", "");
+          const item = this.simulation.playerUi(actor).items.find(item => item.kind === "weapon" && item.owned
+            && (item.id === requested || item.label.toLowerCase().replaceAll(" ", "") === requested));
+          const weapon = Q3_WEAPON_ITEMS.find(weapon => weapon.item === item?.id), player = this.simulation.movementPlayer(actor);
+          if (weapon !== undefined && player?.arsenal.state.kind === "q3") {
+            if (sourceClient !== undefined) { await sourceClient.client.command(["weapon", String(weapon.weapon)]); continue; }
+            const local = this.graphical?.input.locals.find(local => local.player.actor.equals(actor));
+            if (local !== undefined) {
+              this.graphical?.input.setArsenalSelection(local.player.seat.id, { provider: player.arsenal.provider, weapon: weapon.item });
+              this.simulation.requestWeapon(actor, { provider: player.arsenal.provider, item: weapon.item });
+              continue;
+            }
+          }
+        }
         if (sourceClient !== undefined && await sourceClient.client.command([command.name, ...command.arguments_])) continue;
         if (command.name === "addbot" || command.name === "botlist") {
           if (this.bots === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);

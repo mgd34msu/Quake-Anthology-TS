@@ -1,3 +1,4 @@
+import type { WeaponHudReader } from "./player-state.ts";
 // HUD composition from id Software's code/cgame/cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -26,6 +27,7 @@ export type ClientHudCvar = "cg_draw2D" | "cg_drawStatus" | "cg_drawIcons" | "cg
   | "cg_drawCrosshairNames" | "cg_drawAmmoWarning" | "cg_paused";
 
 export interface ClientHudHost {
+  readonly weaponHud?: WeaponHudReader;
   readonly icons: ClientDrawIcons;
   readonly status: ClientDrawStatus;
   readonly corners: ClientHudCorners;
@@ -129,7 +131,7 @@ export class ClientHud {
     icons.drawTeamBackground({ x: 0, y: 420, width: 640, height: 60 }, f(0.33), ps.persistant.get(PersistentIndex.PERS_TEAM));
     const weapon = state.entityAt(ps.clientNum).currentState.weapon;
     const ammoModel = registry.weapon(weapon).ammoModel;
-    if (weapon !== 0 && ammoModel.kind !== "default") icons.draw3DModel({ x: 100, y: 432, width: ICON, height: ICON },
+    if (this.host.weaponHud === undefined && weapon !== 0 && ammoModel.kind !== "default") icons.draw3DModel({ x: 100, y: 432, width: ICON, height: ICON },
       ammoModel, null, vec3(70, 0, 0), vec3(0, f(90 + f(20 * f(Math.sin(f(f(state.time) / 1000))))), 0));
     this.drawStatusBarHead(285);
     if (predicted.powerups.get(Powerup.PW_REDFLAG)) this.drawStatusBarFlag(333, Team.TEAM_RED);
@@ -137,7 +139,7 @@ export class ClientHud {
     else if (predicted.powerups.get(Powerup.PW_NEUTRALFLAG)) this.drawStatusBarFlag(333, Team.TEAM_FREE);
     if (ps.stats.get(stats.armor) !== 0) icons.draw3DModel({ x: 470, y: 432, width: ICON, height: ICON }, graphics.armorModel,
       null, vec3(90, 0, -10), vec3(0, f((state.time & 2047) * 360 / 2048), 0));
-    if (weapon !== 0) {
+    if (this.host.weaponHud === undefined && weapon !== 0) {
       const ammo = ps.ammo.get(weapon);
       if (ammo > -1) {
         this.tools.draw.setColor(predicted.weaponState === WeaponState.WEAPON_FIRING && predicted.weaponTime > 100 ? FIRING : NORMAL);
@@ -265,7 +267,7 @@ export class ClientHud {
     return true;
   }
   drawAmmoWarning(): void {
-    if (!this.enabled("cg_drawAmmoWarning") || this.state.lowAmmoWarning === 0) return;
+    if (this.host.weaponHud !== undefined || !this.enabled("cg_drawAmmoWarning") || this.state.lowAmmoWarning === 0) return;
     const text = this.state.lowAmmoWarning === 2 ? "OUT OF AMMO" : "LOW AMMO WARNING";
     this.tools.drawBigString(320 - drawStrlen(text) * 8, 64, text, 1);
   }
@@ -357,7 +359,7 @@ export class ClientHud {
         } else this.drawStatusBar();
         this.drawAmmoWarning();
         if (this.variant.kind === "missionpack") this.drawProxWarning();
-        this.drawCrosshair(); this.drawCrosshairNames(); this.host.weapons.drawWeaponSelect();
+        this.drawCrosshair(); this.drawCrosshairNames(); if (this.host.weaponHud === undefined) this.host.weapons.drawWeaponSelect();
         if (this.variant.kind === "baseq3") await this.drawHoldableItem();
         this.drawReward();
       }

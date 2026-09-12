@@ -1,3 +1,4 @@
+import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.ts";
 // Player-state transitions from id Software's code/cgame/cg_playerstate.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
@@ -18,7 +19,10 @@ export type PlayerStateSound = "noAmmoSound" | "hitSound" | "hitTeamSound" | "ca
 export type MissionPlayerStateSound = "hitSoundHighArmor" | "hitSoundLowArmor" | "firstImpressiveSound" | "firstExcellentSound" | "firstHumiliationSound";
 export type RewardMedal = "medalCapture" | "medalImpressive" | "medalExcellent" | "medalGauntlet" | "medalDefend" | "medalAssist";
 
+export type WeaponHudReader = () => { readonly status: WeaponHudStatus | null; readonly warning: ArsenalAmmoWarning };
+
 interface TransitionServices {
+  readonly weaponHud?: WeaponHudReader;
   readonly staticState: ClientGameStaticState;
   readonly events: Pick<ClientEventRuntime, "entityEvent" | "painEvent">;
   readonly sounds: Readonly<Record<PlayerStateSound, PcmSound | null>>;
@@ -46,6 +50,12 @@ export class PlayerStateRuntime {
   private buffered(key: PlayerStateSound): void { this.host.addBufferedSound(this.host.sounds[key]); }
 
   checkAmmo(): void {
+    if (this.host.weaponHud !== undefined) {
+      const warning = this.host.weaponHud().warning, previous = this.state.lowAmmoWarning;
+      this.state.lowAmmoWarning = warning === "empty" ? 2 : warning === "low" ? 1 : 0;
+      if (this.state.lowAmmoWarning !== 0 && this.state.lowAmmoWarning !== previous) this.local("noAmmoSound", LOCAL_SOUND);
+      return;
+    }
     const ps = this.snapshot().playerState, weapons = ps.stats.get(statSchema(ps.product).weapons);
     let total = 0;
     for (let weapon = Weapon.WP_MACHINEGUN; weapon < weaponCount(ps.product); weapon++) {

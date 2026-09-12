@@ -676,3 +676,8 @@ export function q2BaseItemIcons(): readonly { readonly item: ItemId; readonly ic
   return [...ammunition.map(item => ({ item: id(item), icon: item.icon })),
     ...Q2_BASE_WEAPONS.map(weapon => ({ item: weapon.item, icon: weaponNames[weapon.name].icon }))];
 }
+
+export function q2BaseWeaponDisplayName(item: ItemId): string | null {
+  const weapon = Q2_BASE_WEAPONS.find(weapon => weapon.item === item);
+  return weapon === undefined ? null : weaponNames[weapon.name].name;
+}

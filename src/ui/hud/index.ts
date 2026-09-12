@@ -1,3 +1,5 @@
+import { drawWeaponHud } from "./weapon.ts";
+import type { CommonWeaponHud } from "./weapon.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Shared per-seat overlay drawing; gameplay providers retain their source HUD/stat layouts.
 import type { ResourceId } from "../../contracts/content.ts";
@@ -45,6 +47,7 @@ export interface HudPointOfInterest {
   readonly expiresMilliseconds: number;
 }
 export interface CommonHudData {
+  readonly weapon?: CommonWeaponHud;
   readonly seat: SeatId;
   readonly visible: boolean;
   readonly vitals: readonly HudValue[];
@@ -147,7 +150,7 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   }
   if (data.vitals.length > 0) {
     anchor = { x: 320, y: 480 };
-    const rects = hudVitalRects(data.vitals.length, groupScale);
+    const rects = hudVitalRects(data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1), groupScale);
     for (const [index, vital] of data.vitals.entries()) {
       const rect = rects[index];
       if (rect === undefined) continue;
@@ -155,6 +158,14 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
       fill(rect, background);
       if (vital.icon !== null) image(vital.icon, { x: x + 6, y: 442, width: 24, height: 24 });
       text(`${vital.label} ${vital.value}`, x + (vital.icon === null ? 8 : 34), 446, vital.warning ? accent : color);
+    }
+  }
+  if (data.weapon !== undefined) {
+    const rect = data.weapon.nativeStatus ? { x: 8, y: 434, width: 152, height: 42 }
+      : hudVitalRects(data.vitals.length + 1, groupScale)[data.vitals.length];
+    if (rect !== undefined) {
+      anchor = { x: data.weapon.nativeStatus ? 0 : 320, y: 480 };
+      for (const command of drawWeaponHud(data.weapon, rect, { ...skin, colors: { ...skin.colors, text: color, accent, panel: background } }, textScale)) commands.push({ command, anchor, scale: groupScale });
     }
   }
   anchor = { x: 320, y: 0 };

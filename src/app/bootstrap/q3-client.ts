@@ -1,3 +1,6 @@
+import { MoveType, PersistentIndex, Team } from "../../content/q3/base/shared/definitions.ts";
+import { weaponViewCamera } from "./weapon-view.ts";
+import type { WeaponHudReader } from "../../content/q3/presentation/player-state.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { CommandContext } from "../../contracts/common.ts";
@@ -48,6 +51,7 @@ import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
 import { q3WeaponCamera } from "./q3-client/view.ts";
 
 export interface ApplicationQ3ClientOptions {
+  readonly weaponHud?: WeaponHudReader;
   readonly assets: ApplicationAssets;
   readonly queries: SceneQueries & Pick<SharedSceneQueries, "pointLeaf" | "leafCluster" | "leafArea" | "areaBits">;
   readonly initial: Q3SourcePresentationState;
@@ -142,7 +146,7 @@ export class ApplicationQ3Client {
       this.submissions.push({ kind: "command", command });
     }, draw => { this.submissions.push({ kind: "text", draw }); }), "stretch-640");
     const cinematics = new ApplicationQ3Cinematics(media, o.audio, seat, o.now); this.cinematics = cinematics;
-    this.game = await createQ3ClientPresentation({ assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
+    this.game = await createQ3ClientPresentation({ ...(o.weaponHud === undefined ? {} : { weaponHud: o.weaponHud }), assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
       world: o.assets.world, collision: q3ClientCollision(o.queries), movement: o.movement, target: this.viewportValue, hardware: "generic", commandContext: this.commandContext(),
       session: { product: o.initial.product, clientNumber: source.clientNumber, serverMessageSequence: 0, lastExecutedServerCommand: 0,
         mode: { kind: "live" }, commands: source.commands, snapshots: source, cvars: this.cvars,
@@ -178,6 +182,13 @@ export class ApplicationQ3Client {
   get cgame(): Q3ClientPresentation { return this.requireGame(); }
   get userCommandSelection(): { readonly weapon: number; readonly sensitivity: number } { return this.selection; }
   get presentedEvents(): number { return this.eventCount; }
+  weaponHudView(): { readonly visible: boolean; readonly aggregateWarning: boolean } {
+    const state = this.requireGame().state, ps = state.snap?.playerState;
+    return { visible: ps !== undefined && !state.levelShot && !state.showScores && ps.health > 0
+      && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
+      && (this.cvars.get("cg_draw2D")?.integerValue ?? 1) !== 0 && (this.cvars.get("cg_drawStatus")?.integerValue ?? 1) !== 0,
+      aggregateWarning: (this.cvars.get("cg_drawAmmoWarning")?.integerValue ?? 1) !== 0 };
+  }
   camera(): SceneCamera { return this.latestCamera; }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); this.source.receive(state, events, commands); }
   async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = []): Promise<void> {
@@ -224,7 +235,8 @@ export class ApplicationQ3Client {
         () => ({ ...model.options, noWorldModel, shaderTexCoord: model.source.shaderTexCoord })));
     }
     if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) batches.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
-      (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponInput.camera));
+      (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponViewCamera(weaponInput.camera,
+        this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []))));
     const context = this.options.assets.world.materialContext(input);
     for (const effect of scene.effects) {
       const picture = this.requireGame().media.resources.picture(effect.shader), source = effect.source;

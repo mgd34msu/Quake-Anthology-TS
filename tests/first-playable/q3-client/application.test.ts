@@ -71,3 +71,30 @@ test("retail q3dm1 runs independent cgame snapshots, weapon events and HUDs in t
     expect(engine.mix(2048).some(sample => sample !== 0)).toBe(true);
   } finally { await application.close(); }
 }, 60000);
+
+test("Team Arena give weapons registers newly owned media before synchronous presentation", async () => {
+  const parsed = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpteam1", "--movement", "q3", "--character", "q3",
+    "--mode", "deathmatch", "--renderer", "cpu", "--width", "320", "--height", "200", "--hidden"]);
+  if (parsed.kind !== "run") throw new Error("No Team Arena launch");
+  const application = await Application.open(parsed.options, { print: () => undefined });
+  try {
+    const local = application.localPlayers[0], source = application.simulation.q3Source();
+    if (local === undefined || source === null || !(local.seat.presentation instanceof WorldSeatPresentation) || local.seat.presentation.q3Client === null)
+      throw new Error("Missing native Team Arena source and presentation");
+    const client = local.seat.presentation.q3Client, registry = client.cgame.media.weaponRegistry;
+    await application.step(50);
+    expect(() => registry.requireWeapon(3)).toThrow("must finish registration");
+    source.host.cvars.set("sv_cheats", "1", true);
+    application.queueCommand("give", ["weapons"], local.seat.id);
+    application.queueCommand("give", ["ammo"], local.seat.id);
+    await application.step(50);
+    expect(application.simulation.inventory.count(local.actor, "q3:weapon/shotgun")).toBe(1);
+    await application.step(50);
+    expect(registry.requireWeapon(3).weaponModel.kind).not.toBe("default");
+    expect(registry.requireWeapon(11).weaponModel.kind).not.toBe("default");
+    await client.command(["weapon", "3"]);
+    for (let frame = 0; frame < 8; frame++) await application.step(50);
+    expect(client.cgame.state.predictedPlayerState.weapon).toBe(3);
+    expect(new Set(application.readPixels()).size).toBeGreaterThan(16);
+  } finally { await application.close(); }
+}, 60_000);

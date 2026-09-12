@@ -189,13 +189,19 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     const vertex = gunBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (vertex === undefined) throw new Error("Expected a lit Q1 gun vertex on the actual Q2 map");
     expect(sampled.x).toBeGreaterThan(sampled.y);
-    expect(vertex.color.x / vertex.color.y).toBeCloseTo(sampled.x / sampled.y, 2);
+    // Actual BSP sample is (156,98,18): Q1 clamps shade to (64,94,24), including gun minimum.
+    expect(vertex.color.x / vertex.color.y).toBeCloseTo(64 / 94, 2);
+    expect(vertex.color.x / vertex.color.z).toBeCloseTo(64 / 24, 2);
+    const ordinary = cache1.prepare([gun], gunInput)[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
+    if (ordinary === undefined) throw new Error("Expected ordinary Q1 model lighting");
+    expect(ordinary.color.x / ordinary.color.y).toBeCloseTo(sampled.x / sampled.y, 2);
     const dynamic = { origin: gunOrigin, radius: 25.6, color: { x: 0, y: 0, z: 1 }, scale: 1, cone: null, shadow: { kind: "none" } } satisfies import("../../../../src/contracts/render.ts").Q2FragmentLight;
     const dynamicInput = { ...gunInput, q2FragmentLighting: { lights: [dynamic], atlas: null } };
     const dynamicBatches = cache1.prepare([gun], dynamicInput, () => ({ viewModel: true }));
     const dynamicVertex = dynamicBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (dynamicVertex === undefined) throw new Error("Expected Q2 dynamic lighting on the Q1 gun");
-    expect(dynamicVertex.color.x / dynamicVertex.color.z).toBeCloseTo(sampled.x / (sampled.z + 0.1), 2);
+    // Map-owned blue dynamic adds25.5 source units after the minimum24.
+    expect(dynamicVertex.color.x / dynamicVertex.color.z).toBeCloseTo(64 / 49.5, 2);
     const once = cache1.prepare([gun], { ...dynamicInput, lights: [{ ...dynamic, minimum: 0 }] }, () => ({ viewModel: true }));
     expect(once[0]?.vertices.map(value => value.color)).toEqual(dynamicBatches[0]?.vertices.map(value => value.color));
     const q3Map = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "maps/q3dm1.bsp", "q3");

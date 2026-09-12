@@ -1,3 +1,4 @@
+import type { WeaponHudReader } from "./player-state.ts";
 import type { CommandContext } from "../../../contracts/common.ts";
 // Team Arena HUD from id Software's code/cgame/cg_newdraw.c, cg_main.c and cg_draw.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -32,6 +33,7 @@ import { TeamArenaUiMemory } from "../../../ui/common/legacy/team-arena/memory.t
 import { MissionOwnerDraw } from "./mission-owner-draw.ts";
 
 export interface MissionHudHost {
+  readonly weaponHud?: WeaponHudReader;
   readonly assets: Pick<SoundAssetReader, "has" | "readSync">;
   readonly fontRegistry: UiAssetRegistry;
   readonly icons: ClientDrawIcons;
@@ -124,7 +126,7 @@ export class MissionHud {
       get big() { return owner.bigFont; },
       get smallThreshold() { return owner.host.configuration.readVmCvar("ui_smallFont").numericValue; },
       get bigThreshold() { return owner.host.configuration.readVmCvar("ui_bigFont").numericValue; } };
-    this.ownerDraw = new MissionOwnerDraw(state, staticState, media, { icons: host.icons, fonts: () => this.fonts,
+    this.ownerDraw = new MissionOwnerDraw(state, staticState, media, { ...(host.weaponHud === undefined ? {} : { weaponHud: host.weaponHud }), icons: host.icons, fonts: () => this.fonts,
       configuration: host.configuration, random: host.random, configString: index => host.configString(index),
       selectedPlayer: () => this.getSelectedPlayer(), chat: () => this.chat() });
     const zero = media.resources.picture(null);

@@ -1,3 +1,4 @@
+import type { WeaponHudReader } from "./player-state.ts";
 // Composition of source cgame runtimes over one unified client/seat. GPL-2.0-or-later.
 import type { Axis } from "../../../contracts/math.ts";
 import type { CommandContext } from "../../../contracts/common.ts";
@@ -87,6 +88,7 @@ export interface Q3ClientSound {
   startBackgroundTrack(intro: string, loop: string): Promise<void>;
 }
 export interface Q3ClientPresentationOptions {
+  readonly weaponHud?: WeaponHudReader;
   readonly session: Q3PresentationSession; readonly commandContext: CommandContext;
   readonly assets: SoundAssetReader; readonly resources: RendererResources; readonly scene: Q3SceneRecorder;
   readonly world: WorldScene; readonly collision: CollisionWorld; readonly movement: PresentationMovementHost;
@@ -211,7 +213,7 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
       registerModel: path => resources.registerModel(path), print,
     });
     const menus = options.menus.kind === "baseq3" ? null : new MissionHud(state, staticState, media, {
-      ...options.menus, modelPainter: new EngineUiModelPainter(resources, commands),
+      ...options.menus, ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), modelPainter: new EngineUiModelPainter(resources, commands),
       assets, fontRegistry: options.fontRegistry, icons, configuration, cvars: session.cvars,
       commands: { append: sendConsoleCommand }, commandContext: options.commandContext, clients, random, configString, resetPlayerEntity: entity => players.resetPlayerEntity(entity),
       print, milliseconds: () => options.clock.milliseconds(),
@@ -314,13 +316,13 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
     const events: ClientEventRuntime = new ClientEventRuntime(state, session.product === "baseq3" ? { ...eventServices, get options() { return eventServices.options; }, product: "baseq3" }
       : { ...eventServices, get options() { return eventServices.options; }, product: "missionpack", missionSounds: media.sounds, missionEffects: effects, startLocalSound,
         voiceChatLocal: (mode, voiceOnly, clientNum, color, command) => serverCommands.voiceChatLocal(mode, voiceOnly, clientNum, color, command) });
-    const transitionServices = { staticState, events, sounds: media.sounds, medals: media.graphics,
+    const transitionServices = { ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), staticState, events, sounds: media.sounds, medals: media.graphics,
       get showMiss() { return enabled("cg_showmiss"); }, startLocalSound, addBufferedSound: (sound: PcmSound | null) => frameAudio.addBufferedSound(sound), print };
     const playerState: PlayerStateRuntime = new PlayerStateRuntime(state, session.product === "baseq3" ? { ...transitionServices, get showMiss() { return enabled("cg_showmiss"); }, product: "baseq3" }
       : { ...transitionServices, get showMiss() { return enabled("cg_showmiss"); }, product: "missionpack", missionSounds: media.sounds });
     if (menus !== null) { await menus.assetCache(); await menus.loadHudMenu(); }
     const corners = new ClientHudCorners(state, staticState, icons, { readVmCvar: readVm, configString, milliseconds: () => options.clock.milliseconds() });
-    const hud = new ClientHud(state, staticState, { icons, status, corners, prediction, weapons, random, readVmCvar: readVm, startLocalSound },
+    const hud = new ClientHud(state, staticState, { ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), icons, status, corners, prediction, weapons, random, readVmCvar: readVm, startLocalSound },
       menus === null ? { kind: "baseq3", scoreboard: new BaseScoreboard(state, staticState, { icons, clients, players, readVmCvar: readVm, configString, sendClientCommand, print }) }
         : { kind: "missionpack", fonts: menus.fonts, menus });
 

@@ -1,3 +1,4 @@
+import type { WeaponHudReader } from "./player-state.ts";
 // Team Arena owner drawing from id Software's code/cgame/cg_newdraw.c,
 // with CG_OwnerDrawWidth from cg_main.c and IDs from ui/menudef.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -47,6 +48,7 @@ export enum MissionOwnerDrawFlags {
   CG_SHOW_ANYNONTEAMGAME = 0x80000, CG_SHOW_2DONLY = 0x10000000,
 }
 export interface MissionOwnerDrawHost {
+  readonly weaponHud?: WeaponHudReader;
   readonly icons: ClientDrawIcons;
   readonly fonts: () => FontSet;
   readonly configuration: Pick<ClientConfiguration, "readVmCvar">;
@@ -116,6 +118,7 @@ export class MissionOwnerDraw {
       case ID.CG_SELECTEDPLAYER_HEALTH: return this.selected().health;
       case ID.CG_PLAYER_ARMOR_VALUE: return ps.stats.get(stats.armor);
       case ID.CG_PLAYER_AMMO_VALUE: {
+        if (this.host.weaponHud !== undefined) { const status = this.host.weaponHud().status; return status?.ammo.kind === "finite" ? status.ammo.count : -1; }
         const weapon = this.state.entityAt(ps.clientNum).currentState.weapon;
         return weapon !== 0 ? ps.ammo.get(weapon) : -1;
       }
@@ -204,6 +207,7 @@ export class MissionOwnerDraw {
     }
   }
   private ammoIcon(rect: Rect2D, force2D: boolean): void {
+    if (this.host.weaponHud !== undefined) return;
     const registry = this.media.weaponRegistry;
     if (force2D || this.cvar("cg_draw3dIcons") === 0 && this.cvar("cg_drawIcons") !== 0) {
       const icon = registry.weapon(this.state.predictedPlayerState.weapon).ammoIcon;
@@ -438,7 +442,7 @@ export class MissionOwnerDraw {
       case ID.CG_PLAYER_AMMO_ICON: this.ammoIcon(rect, force2D); break;
       case ID.CG_PLAYER_AMMO_ICON2D: this.ammoIcon(rect, true); break;
       case ID.CG_PLAYER_AMMO_VALUE:
-        if (this.state.entityAt(this.ps.clientNum).currentState.weapon !== 0 && this.rawValue(id) > -1) this.number(rect, scale, color, this.rawValue(id), picture, style); break;
+        if (this.host.weaponHud === undefined && this.state.entityAt(this.ps.clientNum).currentState.weapon !== 0 && this.rawValue(id) > -1) this.number(rect, scale, color, this.rawValue(id), picture, style); break;
       case ID.CG_PLAYER_ARMOR_VALUE: case ID.CG_PLAYER_HEALTH: case ID.CG_PLAYER_SCORE: case ID.CG_SELECTEDPLAYER_HEALTH:
         this.number(rect, scale, color, this.rawValue(id), picture, style); break;
       case ID.CG_SELECTEDPLAYER_ARMOR:

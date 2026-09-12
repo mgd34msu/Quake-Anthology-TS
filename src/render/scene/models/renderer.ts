@@ -222,12 +222,17 @@ export class SceneModelRenderer {
       if (light === undefined) {
         const sampled = this.lighting.sample(entity.transform.origin, lightingInput, q2Lighting).color;
         if (this.provider.family === "q2") light = q2AliasLight(entity.flags.kind === "q2" ? entity.flags.bits : 0, sampled, time, false, source.infrared);
-        else if (this.world.map.kind === "q2-bsp") light = sampled;
+        else if (this.world.map.kind === "q2-bsp" && source.viewModel !== true) light = sampled;
         else {
-          const channel = (value: number): number => {
+          const staticLight = this.world.map.kind === "q2-bsp" ? this.lighting.sample(entity.transform.origin, lightingInput, false).color : sampled;
+          const channel = (value: number, total: number): number => {
             let ambient = value * 255, shade = ambient;
             if (source.viewModel === true && ambient < 24) ambient = shade = 24;
-            for (const dynamic of input.lights ?? []) {
+            if (this.world.map.kind === "q2-bsp") {
+              const amount = (total - value) * 255;
+              ambient += amount; shade += amount;
+            }
+            for (const dynamic of this.world.map.kind === "q2-bsp" ? [] : input.lights ?? []) {
               const difference = sub3(entity.transform.origin, dynamic.origin), amount = dynamic.radius - Math.hypot(difference.x, difference.y, difference.z);
               if (amount > 0) { ambient += amount; shade += amount; }
             }
@@ -236,7 +241,7 @@ export class SceneModelRenderer {
             if (["progs/flame.mdl", "progs/flame2.mdl"].includes(entity.resource.requestedPath)) shade = 256;
             return shade / 200 * (source.overbrightModels === false ? 1 : 2);
           };
-          light = { x: channel(sampled.x), y: channel(sampled.y), z: channel(sampled.z) };
+          light = { x: channel(staticLight.x, sampled.x), y: channel(staticLight.y, sampled.y), z: channel(staticLight.z, sampled.z) };
         }
         lightCache.set(entity, light);
       }

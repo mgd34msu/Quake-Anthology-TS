@@ -121,6 +121,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+    await this.ui.prepareWeaponHud(this.assets);
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }
     await this.finale.prepare();
@@ -159,7 +160,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, camera.viewport.height / 480));
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
-      !this.finale.active && this.q3Client === null, !(this.rerelease?.storyActive(this.local.player.actor) ?? false));
+      !this.finale.active && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
+      this.q3Client !== null, this.q3Client?.weaponHudView().aggregateWarning ?? true);
     const scale = Math.max(1, Math.floor(camera.viewport.height / 300));
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(camera.viewport.height * 0.5);

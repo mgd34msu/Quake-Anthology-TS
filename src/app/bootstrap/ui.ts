@@ -1,3 +1,7 @@
+import type { CommonHudData } from "../../ui/hud/index.ts";
+import { ApplicationWeaponHudAssets } from "./weapon-hud.ts";
+import type { ApplicationAssets } from "./assets.ts";
+import type { ResourceId } from "../../contracts/content.ts";
 import type { Rect, RenderCommand, SceneCamera } from "../../contracts/render.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
 import { KeyCode } from "../../input/key-codes.ts";
@@ -35,12 +39,21 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly disposeInput: () => void;
   private readonly disposeMenu: () => void;
   private readonly now: () => number;
+  private readonly measureHudText: (text: string, scale: number) => number;
+  private weaponAssets: ApplicationWeaponHudAssets | null = null;
+  private weaponIcons: { readonly weapon: ResourceId | null; readonly ammo: ResourceId | null } = { weapon: null, ammo: null };
+
+  async prepareWeaponHud(assets: ApplicationAssets): Promise<void> {
+    this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
+    this.weaponIcons = await this.weaponAssets.prepare(this.simulation.playerUi(this.local.player.actor).weaponStatus);
+  }
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
     command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography) {
     const seat = local.player.seat.id;
     this.now = input.now;
+    this.measureHudText = (text, scale) => layoutText({ text, font, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
     this.preferences = new SeatUiPreferences(seat);
     this.messages = new SeatHudMessages(seat);
     this.text = new UiTextRenderer(seat);
@@ -130,21 +143,24 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   weaponOcclusion(context: UiDrawContext, gameVisible: boolean): readonly Rect[] {
     if (!gameVisible || this.local.input.focus.kind !== "game") return [];
     const player = this.simulation.playerUi(this.local.player.actor);
-    return hudVitalOccupiedRects(context, player.ammo === null ? 2 : 3, this.preferences.values.hudScale);
+    return hudVitalOccupiedRects(context, player.weaponStatus === null ? 2 : 3, this.preferences.values.hudScale);
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
-    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true): void {
+    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true): void {
     const player = this.simulation.playerUi(this.local.player.actor);
     const armor = player.armor.kind === "none" ? 0 : player.armor.points;
     const base = emptyHudData(this.local.player.seat.id);
-    const hud = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
-      crosshair: { ...base.crosshair, visible: crosshairVisible },
-      vitals: [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false },
-        ...(player.ammo === null ? [] : [{ label: "Ammo", value: player.ammo.count, icon: null, warning: player.ammo.count <= 5 }])] };
+    const hud: CommonHudData = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+      crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeStatus },
+      ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
+        weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
+        iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
+        measureText: this.measureHudText, nativeStatus } }),
+      vitals: nativeStatus ? [] : [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false }] };
     const commands = [...drawCommonHud(context, hud, { skin: this.art.skin, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
       ];
-    renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
+    renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
     renderUiCommands(context, this.controller.activeMenu === null ? [] : [menuPanel(context), ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }

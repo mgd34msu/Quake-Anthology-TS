@@ -1,3 +1,5 @@
+import { drawWeaponHud } from "../../../src/ui/hud/weapon.ts";
+import type { CommonWeaponHud } from "../../../src/ui/hud/weapon.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import type { CommandContext } from "../../../src/contracts/common.ts";
@@ -207,4 +209,22 @@ test("weapon occlusion follows the actual HUD vital fills at each seat safe area
       expect(rect.x).toBeGreaterThan(context.binding.safeArea.x);
     }
   }
+});
+
+test("common weapon HUD distinguishes finite zero, source one-shell fallback, unmetered and aggregate warning", () => {
+  const base: CommonWeaponHud = { status: { source: { provider: "q1:weapons/rerelease/id1", content: "q1:rerelease:id1:retail" },
+    item: "q1:weapon/supershotgun", label: "supershotgun", ammo: { kind: "finite", item: "q1:ammo/shells", count: 1, hasAmmoToStart: true, low: false } },
+    warning: "none", weaponIcon: null, ammoIcon: null, nativeStatus: false };
+  const draw = (data: CommonWeaponHud) => drawWeaponHud(data, { x: 400, y: 434, width: 156, height: 42 }, defaultUiSkin(fontId), 1)
+    .flatMap(command => command.kind === "text" ? [command.text] : []);
+  expect(draw(base)).toEqual(["1", "supershotgun"]);
+  expect(draw({ ...base, status: { ...base.status, ammo: { kind: "finite", item: "q1:ammo/shells", count: 0, hasAmmoToStart: false, low: false } } })).toEqual(["0", "NO AMMO"]);
+  expect(draw({ ...base, status: { ...base.status, ammo: { kind: "unmetered" } } })).toEqual(["supershotgun"]);
+  expect(draw({ ...base, warning: "empty" })).toEqual(["1", "OUT OF AMMO"]);
+  expect(draw({ ...base, warning: "low" })).toEqual(["1", "LOW AMMO WARNING"]);
+  const measureText = (text: string, scale: number) => text.length * 10 * scale;
+  const warning = drawWeaponHud({ ...base, warning: "low", measureText }, { x: 8, y: 434, width: 152, height: 42 }, defaultUiSkin(fontId), 3)
+    .find(command => command.kind === "text" && command.text === "LOW AMMO WARNING");
+  if (warning?.kind !== "text") throw new Error("Missing aggregate warning");
+  expect(warning.origin.x + measureText(warning.text, warning.scale)).toBeLessThanOrEqual(156);
 });
