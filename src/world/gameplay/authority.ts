@@ -38,7 +38,7 @@ export function copyArmor(armor: ArmorState): ArmorState {
 
 export function copyCombat(state: CombatState): CombatState { return Object.freeze({ ...state, armor: copyArmor(state.armor) }); }
 
-function captureRequest(request: DamageRequest): DamageRequest {
+export function captureRequest(request: DamageRequest): DamageRequest {
   if (!Number.isFinite(request.amount) || !Number.isFinite(request.knockback)) throw new RangeError("Damage and knockback must be finite");
   const source = request.attack.cause;
   const cause = source.kind === "q2" && source.native !== undefined ? { ...source, native: Object.freeze({ ...source.native }) } : { ...source };
@@ -193,6 +193,15 @@ export class GameplayAuthority implements DamageAuthority {
     const outcome: DamageOutcome = Object.freeze({ kind: "committed", decision: completed, survived: current !== null && current.health > 0 });
     this.hooks.confirmed(outcome);
     return outcome;
+  }
+
+  /** A source deferred its callback after committing damage in an earlier call. */
+  sourceReaction(input: DamageRequest, result: { readonly reaction: "pain" | "death"; readonly appliedDamage: number }): undefined {
+    const request = captureRequest(input), target = this.actors.resolveOwned(request.target);
+    if (target === null) return undefined;
+    if (!Number.isFinite(result.appliedDamage)) throw new Error("Source applied damage must be finite");
+    this.hooks.beforeReaction(target, captureDecision({ request, mutations: [], ...result }, request));
+    return undefined;
   }
 
   apply(input: DamageRequest): DamageOutcome {

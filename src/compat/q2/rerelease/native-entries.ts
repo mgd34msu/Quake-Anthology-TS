@@ -13,11 +13,16 @@ export const rereleaseSpawnSignature = signature([], P);
 export const rereleaseFreeSignature = signature([P]);
 // Win64 passes the three-byte by-value mod_t indirectly; the shared ABI planner owns that rule.
 export const rereleaseDamageSignature = signature([P, P, P, P, P, P, I, I, I, { kind: "aggregate", layout: rereleaseModLayout }]);
-export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; }
-/** Retail entry boundaries verified through native give/pickup/trigger_hurt execution and PE unwind records. */
+export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly processPain: GuestAddress; }
+/** Retail entry boundaries verified through native give/pickup/trigger_hurt and monster-frame execution plus PE unwind records. */
 export function retailRereleaseEntries(module: Pick<RereleaseGuestModule, "memory">, imageBase: GuestAddress): RereleaseNativeEntries {
   const authority = retailRereleaseClientProfile.authority;
   if (authority.kind !== "artifact" || module.memory.module.digest !== authority.digest) throw new Error("Native entry profile requires the verified retail DLL");
   const entry = (rva: bigint): GuestAddress => { const address = module.memory.offset(imageBase, rva); module.memory.check(address, 1, "execute"); return address; };
-  return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n) };
+  return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n), processPain: entry(0x76e20n) };
 }
+
+/** Retail monster accumulator offsets measured at both T_Damage store sites and M_ProcessPain reset. */
+export const rereleaseMonsterDamage = {
+  attacker: 3120, inflictor: 3128, blood: 3136, knockback: 3140, point: 3144, mod: 3156,
+};

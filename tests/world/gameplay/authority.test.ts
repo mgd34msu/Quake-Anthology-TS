@@ -429,3 +429,49 @@ test("target damage admission handles source use before policy and preserves ree
   expect(calls).toEqual(["use", "confirmed", "use", "confirmed"]);
   actors.close();
 });
+
+test("deferred source reactions restore provenance without repeating committed damage", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("deferred-source-reaction"));
+  const callbacks = new ActorCallbackTable(actors), order: string[] = [];
+  const target = actors.allocate("q2:guest", "q2:monster"), attacker = actors.allocate("q2:game", "q2:player");
+  const authority = new GameplayAuthority(actors, callbacks, {
+    impulse: () => { throw new Error("Source reaction cannot apply impulse"); },
+    beforeReaction: (_actor, decision) => { order.push(`${decision.reaction}:${decision.request.attack.sequence}:${decision.appliedDamage}`); return undefined; },
+    confirmed: () => { order.push("confirmed"); return undefined; },
+  });
+  let health = 100;
+  authority.bind(target, { read: () => state(health), writeHealth: () => { throw new Error("Native source owns health stores"); }, writeArmor: () => { throw new Error("No armor writes expected"); } });
+  for (const sequence of [1, 2]) {
+    authority.runSourceDamage(attack(target.id, attacker.id, sequence, 3), observer => {
+      const before = health; health -= 3; observer.stored({ kind: "health", before, after: health });
+      return { reaction: "none", appliedDamage: 3 };
+    });
+  }
+  authority.sourceReaction(attack(target.id, attacker.id, 2, 3), { reaction: "pain", appliedDamage: 6 });
+  expect(order).toEqual(["none:1:3", "confirmed", "none:2:3", "confirmed", "pain:2:6"]);
+  expect(health).toBe(94);
+  actors.release(target);
+  authority.sourceReaction(attack(target.id, attacker.id, 2, 3), { reaction: "death", appliedDamage: 6 });
+  expect(order).toHaveLength(5);
+  actors.close();
+});
+
+test("native-only source reload resolves current historical actors without checkpoint remapping", () => {
+  const identities = createIdentityOwner("native-reload-history"), original = new SessionActorRegistry(identities);
+  const first = original.allocate("q2:guest", "q2:projectile"), saved = { slot: first.id.slot, generation: first.id.generation };
+  original.release(first);
+  expect(original.referenceSaved(saved, "current").equals(first.id)).toBe(true);
+  const checkpoint = original.checkpoint();
+  const restored = SessionActorRegistry.restore(identities, checkpoint, original.sourceCheckpoint());
+  const later = restored.allocate("q2:guest", "q2:later-projectile"); restored.release(later);
+  const laterSaved = { slot: later.id.slot, generation: later.id.generation };
+  expect(restored.referenceSaved(laterSaved, "current").equals(later.id)).toBe(true);
+  expect(restored.referenceSaved(saved).equals(first.id)).toBe(false);
+  expect(restored.isLive(restored.referenceSaved(laterSaved, "current"))).toBe(false);
+  expect(() => restored.referenceSaved({ slot: 100, generation: 0 }, "current")).toThrow();
+  expect(() => restored.referenceSaved({ slot: later.id.slot, generation: later.id.generation + 1 }, "current")).toThrow();
+  const reused = restored.allocate("q2:guest", "q2:reused-projectile");
+  expect(restored.referenceSaved(laterSaved, "current").equals(reused.id)).toBe(false);
+  expect(restored.referenceSaved({ slot: reused.id.slot, generation: reused.id.generation }, "current")).toBe(reused.id);
+  original.close(); restored.close();
+});

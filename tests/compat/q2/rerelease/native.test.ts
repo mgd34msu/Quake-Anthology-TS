@@ -30,7 +30,7 @@ import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compa
 import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
 
 const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url);
-const available = await Bun.file(dll).exists();
+export const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
 export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices) {
@@ -97,7 +97,7 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
     const client = edict.client === null ? null : new RereleaseSourceClient(edict.client, module, retailRereleaseClientProfile);
     if (client !== null && inventoryItems === null) inventoryItems = rereleaseInventoryItems(module, value => owner().core.string(value));
     const classname = module.memory.readPointer(edict.at("classname"));
-    const barrel = foreignDamage !== undefined && classname !== null && readGuestString(module.memory, classname) === "misc_explobox";
+    const barrel = foreignDamage !== undefined && classname !== null && ["misc_explobox", "monster_soldier"].includes(readGuestString(module.memory, classname));
     return { ...base, combat: !barrel ? base.combat : edict.combat({ armor: () => ({ kind: "none" }), writeArmor: () => { throw new Error("Native barrel has no armor"); }, traits: () => ({ invulnerable: false, team: null, noKnockback: false }) }),
       inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
       callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
@@ -290,7 +290,7 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
     expect(callbackOrder).toEqual(["use", "touch"]);
   } finally { memory.writePointer(targetUse, previousUse); memory.writePointer(targetTouch, previousTouch); memory.writeUint32(playerFlags, previousFlags); }
   if (Bun.env["Q2_RR_SAVE_PROBE"] === "1") {
-    try { const saved = host.writeSave("level", false); console.log("native level JSON", saved.length, new TextDecoder().decode(saved).slice(0, 500)); }
+    try { const saved = host.writeSave("level", false); console.log("native level JSON", saved.native.length, new TextDecoder().decode(saved.native).slice(0, 500)); }
     catch (error) {
       const registers = guest.options.runner.options.cpu.state.registers;
       const format = memory.pointer(registers.read("r9", 64)), stack = memory.pointer(registers.read("rsp", 64));

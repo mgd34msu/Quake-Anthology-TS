@@ -146,8 +146,18 @@ export class SessionActorRegistry implements ActorRegistry {
     return actor !== undefined && actor !== null && actor.id.generation === saved.generation ? actor : null;
   }
 
-  /** Restores provenance pointing to a released lifetime without granting actor authority. */
-  referenceSaved(saved: SavedActorId): ActorId {
+  /** Resolves provenance in checkpoint or current-registry generations without granting actor authority. */
+  referenceSaved(saved: SavedActorId, domain: "checkpoint" | "current" = "checkpoint"): ActorId {
+    if (domain === "current") {
+      const slot = this.slots[saved.slot];
+      if (!Number.isSafeInteger(saved.slot) || saved.slot < 0 || !Number.isSafeInteger(saved.generation) || saved.generation < 0 || slot === undefined
+        || saved.generation > slot.generation || (slot.actor === null && saved.generation === slot.generation)) throw new RangeError("Invalid current actor history reference");
+      if (slot.actor !== null && slot.actor.id.generation === saved.generation) return slot.actor.id;
+      const key = `current:${saved.slot}/${saved.generation}`;
+      const existing = this.savedReferences.get(key); if (existing !== undefined) return existing;
+      const reference = this.identities.actor(saved.slot, saved.generation);
+      this.savedReferences.set(key, reference); return reference;
+    }
     const key = `${saved.slot}/${saved.generation}`;
     const existing = this.savedReferences.get(key);
     if (existing !== undefined) return existing;

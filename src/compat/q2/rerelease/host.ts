@@ -23,7 +23,8 @@ import type { RereleaseMessageServices } from "./messages.ts";
 import { RereleaseSoundImports } from "./sounds.ts";
 import type { RereleaseSoundEvent } from "./sounds.ts";
 import { RereleaseForeignActors } from "./foreign-actors.ts";
-import type { RereleaseForeignDamageServices } from "./foreign-actors.ts";
+import type { RereleaseForeignDamageServices, RereleaseProjectionSave } from "./foreign-actors.ts";
+import type { RereleaseDeferredDamageSave } from "./deferred-damage.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
 
 export interface RereleaseActorBindings {
@@ -32,6 +33,11 @@ export interface RereleaseActorBindings {
   readonly powerArmorCells: PowerArmorCellBinding | null;
   readonly inventory: InventoryStateBinding | null;
   readonly callbacks: ActorCallbacks;
+}
+export interface RereleaseSourceSave {
+  readonly native: Uint8Array;
+  readonly deferredDamage: readonly RereleaseDeferredDamageSave[];
+  readonly projections: readonly RereleaseProjectionSave[];
 }
 /** Private layouts and native gameplay policy are identified by the actual guest artifact. */
 export interface RereleaseSemanticBindings {
@@ -166,7 +172,7 @@ export class RereleaseQ2GuestHost {
   clientThink(...arguments_: Parameters<RereleaseGuestModule["clientThink"]>): void { this.core.refreshCvars(); this.module.clientThink(...arguments_); this.reconcile(); }
   clientDisconnect(slot: number): void { this.module.clientDisconnect(slot); this.reconcile(); }
   /** Save serialization runs in the guest so expanded source fields remain intact. */
-  writeSave(kind: "game" | "level", automaticOrTransition: boolean): Uint8Array {
+  writeSave(kind: "game" | "level", automaticOrTransition: boolean): RereleaseSourceSave {
     const memory = this.module.memory, size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
     let output: GuestAddress | null = null;
     try {
@@ -174,15 +180,20 @@ export class RereleaseQ2GuestHost {
       if (output === null) throw new Error("Q2 source save returned null");
       const length = memory.readUint64(size);
       if (length > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Q2 source save length exceeds host copy range");
-      return memory.copy(output, Number(length));
+      return { native: memory.copy(output, Number(length)), deferredDamage: kind === "level" ? this.foreignActors?.deferred.save() ?? [] : [],
+        projections: kind === "level" ? this.foreignActors?.saveProjections() ?? [] : [] };
     } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
   }
-  readSave(kind: "game" | "level", bytes: Uint8Array): void {
+  readSave(kind: "game" | "level", saved: RereleaseSourceSave): void {
+    const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
+    if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
     const memory = this.module.memory, address = memory.allocate({ byteLength: bytes.length + 1, label: "Q2 source save input" });
-    memory.write(address, bytes);
-    try { this.core.refreshCvars(); this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]); this.reconcile(); }
-    finally { memory.unmap(address, bytes.length + 1); }
+    let restoring = false;
+    try {
+      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections); restoring = true;
+      this.core.refreshCvars(); this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]); this.reconcile(); this.foreignActors?.deferred.restore(saved.deferredDamage);
+    } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, bytes.length + 1); }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
     const text = this.#worldText?.invoke(call);
