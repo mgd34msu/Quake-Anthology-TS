@@ -1,3 +1,4 @@
+import { registerLlmSettingsMenu, type LlmSettingsUi } from "./llm.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Live options retain Q1/Q2 named cvars and Q3 archived/latched cvar behavior.
 import type { SeatId } from "../../contracts/identity.ts";
@@ -88,8 +89,10 @@ const categories: readonly { readonly id: SettingCategory; readonly label: strin
   { id: "network", label: "Network" }, { id: "accessibility", label: "Accessibility" }, { id: "language", label: "Language" },
 ];
 /** Pagination keeps every bound option reachable at the smallest native menu size. */
-export function registerSettingsMenus(controller: NativeUiController, bindings: readonly SettingBinding[]): SettingsMenus {
+export function registerSettingsMenus(controller: NativeUiController, bindings: readonly SettingBinding[], llm?: LlmSettingsUi): SettingsMenus {
   const root: UiMenuId = "menu:settings:root", disposers: (() => void)[] = [];
+  const llmMenu = llm === undefined ? null : registerLlmSettingsMenu(controller, llm);
+  if (llmMenu !== null) disposers.push(llmMenu.dispose);
   const back = (): UiControl => ({ id: "ui:settings:back", kind: "button", label: "Back", rect: menuRow(11), enabled: true, visible: true,
     activate: () => controller.closeMenu() });
   for (const category of categories) {
@@ -120,7 +123,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
     controls: [...categories.filter(category => bindings.some(binding => binding.category === category.id)).map((category, index): UiControl => ({
       id: `ui:settings:category:${category.id}`, kind: "button", label: category.label, rect: menuRow(index), enabled: true, visible: true,
       activate: () => controller.openMenu(`menu:settings:${category.id}:0`),
-    })), back()], open: () => undefined, close: () => undefined })));
+    })), ...(llmMenu === null ? [] : [{ id: "ui:settings:llm", kind: "button", label: "LLM options", rect: menuRow(categories.filter(category => bindings.some(binding => binding.category === category.id)).length), enabled: true, visible: true, activate: () => controller.openMenu(llmMenu.root) } satisfies UiControl]), back()], open: () => undefined, close: () => undefined })));
   return { root, dispose() { for (const dispose of disposers.reverse()) dispose(); } };
 }
 

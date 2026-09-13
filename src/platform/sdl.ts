@@ -19,6 +19,7 @@ function loadSdl() {
     SDL_SetHint: { args: ["buffer", "buffer"], returns: "i32" },
     SDL_QuitSubSystem: { args: ["u32"], returns: "void" },
     SDL_GetError: { args: [], returns: "cstring" },
+    SDL_OpenURL: { args: ["buffer"], returns: "i32" },
     SDL_GetClipboardText: { args: [], returns: "ptr" },
     SDL_free: { args: ["ptr"], returns: "void" },
     SDL_ShowWindow: { args: ["ptr"], returns: "void" },
@@ -117,6 +118,10 @@ function handle(result: Pointer | null, operation: string): Pointer {
 function cString(value: string): Buffer {
   if (value.includes("\0")) throw new Error("SDL string contains NUL");
   return Buffer.from(`${value}\0`, "utf8");
+}
+
+export function openSdlUrl(url: string): void {
+  if (sdl().SDL_OpenURL(cString(url)) !== 0) throw new Error("Could not open the sign-in browser.");
 }
 
 /** Win32 Sys_GetClipboardData's strtok(data, "\n\r\b") keeps leading delimiters. */

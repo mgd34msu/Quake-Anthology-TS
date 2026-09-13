@@ -1,3 +1,4 @@
+import { readSdlClipboard } from "../../platform/sdl.ts";
 import { serviceLoading } from "./loading.ts";
 import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
@@ -104,7 +105,8 @@ export class StartupApplication {
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
       const commands = new CommandBuffer({ dialect: "q3", context });
-      menu = new StartupMenu({ seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
+      menu = new StartupMenu({ ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
+        clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         play: () => { this.pending = { kind: "play" }; }, load: id => {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }

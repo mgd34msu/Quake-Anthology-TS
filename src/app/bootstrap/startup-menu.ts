@@ -1,3 +1,4 @@
+import { registerLlmSettingsMenu, type LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
@@ -21,6 +22,8 @@ import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 
 export interface StartupMenuOptions {
+  readonly llm?: LlmSettingsUi;
+  readonly clipboard?: () => string | null;
   readonly seat: SeatId;
   readonly model: StartupSelectionModel;
   readonly art: NativeUiArt;
@@ -78,6 +81,7 @@ export class StartupMenu {
     this.text.bind(menuTitleFont, options.titleFont);
     const skin = menuSkin(options.art.skin.font);
     this.controller = new NativeUiController({ seat: options.seat, skin: () => skin, now: options.now, bindings: () => [],
+      ...(options.clipboard === undefined ? {} : { clipboard: options.clipboard }),
       focus: () => undefined, sound: () => undefined, measureText: (text, scale) => this.measure(text, scale), executeScript: () => { throw new Error("Startup menu has no legacy scripts"); } });
     this.register(main, () => [
       this.button("single", "Single Player", 0, () => this.configure(false)),
@@ -94,10 +98,13 @@ export class StartupMenu {
     this.register(categoryMenu, () => [
       ...this.rows(this.group?.fields ?? []).map((row, index) => this.row(row, index)), this.back(),
     ]);
+    const llm = options.llm === undefined ? null : registerLlmSettingsMenu(this.controller, options.llm);
+    if (llm !== null) this.disposers.push(llm.dispose);
     this.register(optionsMenu, () => [
       this.button("display", "Display", 0, () => this.controller.openMenu(displayMenu), true),
       this.button("sound", "Sound", 1, () => this.controller.openMenu(soundMenu), true),
-      this.button("controls", "Controls", 2, () => this.controller.openMenu(controlsMenu), true), this.back(),
+      this.button("controls", "Controls", 2, () => this.controller.openMenu(controlsMenu), true),
+      ...(llm === null ? [] : [this.button("llm", "LLM options", 3, () => this.controller.openMenu(llm.root), true)]), this.back(),
     ]);
     const display = registerSettingsMenus(this.controller, [...(options.settings ?? []).filter(binding => binding.category === "display"),
       { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (requires Apply)", enabled: () => !this.busy,
@@ -286,7 +293,7 @@ export class StartupMenu {
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (!active?.startsWith("menu:settings:display:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (active !== "menu:settings:llm" && !active?.startsWith("menu:settings:display:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });

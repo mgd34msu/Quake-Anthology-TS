@@ -253,7 +253,7 @@ export class NativeUiController implements SeatUiController {
         active.cursor.focus = control.id; this.focusChanged();
         if (control.kind === "slider") { this.dragging = control.id; this.sliderPointer(control); }
         else if (control.kind === "text-entry") {
-          const field = this.field(control), text = Array.from(control.text), x = this.cursor.x - control.rect.x - control.rect.width * 0.5;
+          const field = this.field(control), text = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text), x = this.cursor.x - control.rect.x - control.rect.width * 0.5;
           const scale = this.options.skin().fontScale * (this.options.appearance?.().textScale ?? 1);
           const measure = (value: string): number => this.options.measureText?.(value, scale) ?? Array.from(value).length * 8 * scale;
           field.cursor = field.start;
@@ -341,7 +341,7 @@ export class NativeUiController implements SeatUiController {
           commands.push({ kind: "fill", rect: { x: x + width * ratio - 3, y: y + 2, width: 6, height: 12 }, color }); break;
         }
         case "text-entry": {
-          const field = this.field(control), all = Array.from(control.text), available = control.rect.width * 0.5 - 12;
+          const field = this.field(control), all = Array.from(control.masked === true ? "*".repeat(Array.from(control.text).length) : control.text), available = control.rect.width * 0.5 - 12;
           const measure = (value: string): number => this.options.measureText?.(value, skin.fontScale) ?? Array.from(value).length * 8 * skin.fontScale;
           let start = Math.min(field.start, field.cursor), end = field.cursor;
           while (start < field.cursor && measure(all.slice(start, field.cursor).join("")) > available) start++;

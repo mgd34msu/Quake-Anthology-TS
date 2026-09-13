@@ -101,7 +101,7 @@ export type UiControl = UiControlBase & (
   | { readonly kind: "button"; readonly activate: (seat: SeatId) => undefined }
   | { readonly kind: "toggle"; readonly checked: boolean; readonly change: (seat: SeatId, checked: boolean) => undefined }
   | { readonly kind: "slider"; readonly minimum: number; readonly maximum: number; readonly step: number; readonly value: number; readonly change: (seat: SeatId, value: number) => undefined }
-  | { readonly kind: "text-entry"; readonly text: string; readonly maximumLength: number; readonly change: (seat: SeatId, text: string) => undefined; readonly submit: (seat: SeatId, text: string) => undefined }
+  | { readonly kind: "text-entry"; readonly masked?: boolean; readonly text: string; readonly maximumLength: number; readonly change: (seat: SeatId, text: string) => undefined; readonly submit: (seat: SeatId, text: string) => undefined }
   | { readonly kind: "choice"; readonly choices: readonly UiChoice[]; readonly selected: string | null; readonly select: (seat: SeatId, choice: string) => undefined }
   | { readonly kind: "list"; readonly rows: readonly UiListRow[]; readonly selected: string | null; readonly select: (seat: SeatId, row: string) => undefined }
   | { readonly kind: "owner-draw"; readonly owner: ProviderId; readonly sourceId: number; readonly draw: (context: UiDrawContext) => readonly UiDrawCommand[]; readonly key: (seat: SeatId, code: number, down: boolean) => boolean }

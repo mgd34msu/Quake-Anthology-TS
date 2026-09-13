@@ -19,3 +19,13 @@
 .env.*
 !.env.example
 !.env.sample
+
+# LLM settings and credentials stored beside the application.
+/chatgpt.key
+/other.key
+/other.service
+/llm.json
+/chatgpt.key.*.tmp
+/other.key.*.tmp
+/other.service.*.tmp
+/llm.json.*.tmp

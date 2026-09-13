@@ -50,13 +50,25 @@ Run `quake-typescript` from that output directory:
 
 Use `--renderer cpu` for software rendering. Gamma defaults to 1; higher values brighten the final image.
 
+**Controls, console, and LLM setup**
+
+**Options > Controls** offers overall mouse sensitivity and horizontal/vertical multipliers (0–200%, default 100%). Invert mouse is separate.
+
+In the console, Tab/Shift+Tab completes commands and inserts `/`. Use `find <text>` and `help <name>`. Up/Down recalls history; PageUp/PageDown scrolls output.
+
+Under **Options > LLM options**, choose **ChatGPT Subscription**, **ChatGPT API**, or **Other API**. Subscription uses **Sign in with ChatGPT** in your browser; API providers use **Paste API key**. Edit **Model**, then **Save settings**. Other API also needs **Base URL** and uses OpenAI-compatible Chat Completions.
+
+Files live beside the compiled executable, or in the working directory when running source. `chatgpt.key` independently stores the API key and OAuth credentials, including refresh credentials. `other.key` stores the other provider's key; `other.service` is JSON containing `baseUrl`, `model`, and `transport`. `llm.json` stores preferences.
+
+`llm_ask` and `llm_exec` remain explicit placeholders: neither inference nor command execution is implemented.
+
 **Selections and current limits**
 
 The menu offers installed campaigns and starting maps, movement, character source and model, weapons, supported monster replacements, grapple placement, and offhand grenades. It resolves these choices through the same content and recipe system used by the application. Unsupported combinations can still fail preflight or return a runtime error to the menu.
 
 - Independent base Q1, Q2, and Q3 arsenals have supported mixed-game paths. This does not mean every edition, expansion, or combination works.
 - Pickups retain their authored placement and feed the selected arsenal through explicit supply mappings. Independent pickup replacement is not implemented.
-- The Multiplayer menu configures local sessions. It is not a server browser or online lobby; separate native-protocol command-line paths have their own restrictions.
+- **Multiplayer > Find servers** offers LAN discovery, direct addresses, favorites, and connection controls. Native-protocol interoperability still has restrictions.
 - Save support covers implemented Q1/Q2 paths. Full native Q3 world saves are not supported.
 - Audio, lighting, effects, and full gameplay parity remain under development.
 

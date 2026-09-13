@@ -522,7 +522,7 @@ export class RemoteApplication {
     const typography = await frontend.assets.loadMenuTypography();
     assertCurrent();
     const ui = new ApplicationSeatUi(local, frontend.art, input, this.remote, frontend.font, frontend.audio,
-      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding());
+      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding(), this.host.llm);
     if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
     const remote = this.remote;
     let q3: ApplicationQ3Client | null = null;

@@ -26,7 +26,7 @@ test("LLM placeholders preserve the invoking seat, expose usage, and never execu
   expect(output.map(entry => entry.text)).toEqual([
     "Usage: llm_ask <question>\nQuote text containing semicolons.\n",
     "Usage: llm_exec <request>\nQuote text containing semicolons.\n",
-    "LLM integration is not configured.\n", "LLM integration is not configured.\n",
+    "LLM requests are not implemented yet.\n", "LLM requests are not implemented yet.\n",
   ]);
   for (const entry of output) expect(entry.source).toEqual(source);
   expect(effects).toBe(0); expect(chats).toBe(0);
