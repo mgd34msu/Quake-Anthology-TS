@@ -4,7 +4,7 @@ import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { NetQuakeChannel } from '../../../src/network/q1/channels.ts';
 import { NetQuakeConnectClient } from '../../../src/network/q1/handshake.ts';
-import { NetQuakeDecoder, writeNetQuakeMove } from '../../../src/network/q1/netquake.ts';
+import { NetQuakeDecoder, writeNetQuakeMove, writeNetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import type { NetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import { NetQuakeSignon, writeClientStringCommand } from '../../../src/network/q1/session.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
@@ -364,8 +364,18 @@ test('production NetQuake client honors advertised game port and original signon
         expect(move?.kind).toBe('unreliable');
         expect(move===null?[]:[...move.payload]).toEqual([3,0,0,128,63,0,64,128,200,0,156,255,0,0,3,7]);
         expect(control.poll()).toBeNull();expect(reasons).toEqual([]);expect(messages.some(value=>value.kind==='entity')).toBe(true);
-        game.send(transport.address,server.unreliable(Uint8Array.of(4,154,2,0,0)));await Bun.sleep(1);
-        await expect(client.poll(12)).rejects.toThrow('requires native NetQuake 15');
+        const profile = { kind:'q1-fitzquake',version:666 } satisfies import('../../../src/contracts/protocol.ts').Q1ProtocolIdentity;
+        const wide = new SizeBuf(128), origin = {x:0,y:0,z:0};
+        writeNetQuakeMessage(wide,profile,{kind:'version',version:666});
+        writeNetQuakeMessage(wide,profile,{kind:'baseline',state:{number:7,origin,angles:origin,modelIndex:257,frame:513,colorMap:0,skin:0,effects:0,alpha:128,scale:16,lerpFinishSeconds:0,step:false}});
+        game.send(transport.address,server.unreliable(wide.bytes()));await Bun.sleep(1);await client.poll(12);
+        expect(client.wire).toEqual({kind:'source',protocol:profile});
+        expect(messages.find(value=>value.kind==='baseline'&&value.state.number===7)).toMatchObject({kind:'baseline',state:{modelIndex:257,frame:513,alpha:128}});
+        client.submit([command],13);
+        const wideMove=server.receive(await receive(game),13).delivery;
+        expect(wideMove===null?[]:[...wideMove.payload]).toEqual([3,0,0,128,63,0,0,0,64,0,128,200,0,156,255,0,0,3,7]);
+        game.send(transport.address,server.unreliable(Uint8Array.of(4,9,3,0,0)));await Bun.sleep(1);
+        await expect(client.poll(14)).rejects.toThrow('Unsupported NetQuake protocol 777');
     } finally {client.close();control.close();game.close();}
 });
 

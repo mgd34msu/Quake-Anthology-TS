@@ -19,6 +19,9 @@ export function netQuakeProfile(version: number, flags = 0): Q1ProtocolIdentity 
         default: throw new Error(`Unsupported NetQuake protocol ${version}`);
     }
 }
+export function defaultNetQuakeProfile(version: number): Q1ProtocolIdentity {
+    return netQuakeProfile(version, version === 999 ? PRFL_INT32COORD | PRFL_SHORTANGLE : 0);
+}
 export function quakeWorldProfile(version: number, flags = 0): QuakeWorldProfile {
     if (version === 28)
         return { kind: 'q1-quakeworld', version };

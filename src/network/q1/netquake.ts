@@ -155,10 +155,12 @@ export function readTemporaryEntity(r: MessageReader, coord: () => number, quake
 export class NetQuakeDecoder {
     readonly baselines = new Map<number, EntityStateT>();
     timeSeconds = 0;
-    constructor(public protocol: Q1ProtocolIdentity = { kind: 'q1-netquake', version: 15 }, readonly rereleaseMessages: RereleaseMessages = 'known-retail', readonly standardQuake = true) { }
+    private flagsValue: number;
+    get flags(): number { return this.flagsValue; }
+    constructor(public protocol: Q1ProtocolIdentity = { kind: 'q1-netquake', version: 15 }, readonly rereleaseMessages: RereleaseMessages = 'known-retail', readonly standardQuake = true) { this.flagsValue = protocolFlags(protocol); }
     decode(bytes: Uint8Array): readonly NetQuakeMessage[] {
         const r = new MessageReader(bytes), messages: NetQuakeMessage[] = [];
-        let codec = createNetQuakeCodec(this.protocol, r), flags = protocolFlags(this.protocol);
+        let codec = createNetQuakeCodec(this.protocol, r), flags = this.flagsValue;
         const coord = (): number => codec.readCoord(flags), angle = (): number => codec.readAngle(flags);
         while (r.remaining > 0) {
             const op = r.Byte();
@@ -177,9 +179,13 @@ export class NetQuakeDecoder {
                     case 3:
                         message = { kind: 'stat', index: r.Byte(), value: r.Long() };
                         break;
-                    case 4:
-                        message = { kind: 'version', version: r.Long() };
+                    case 4: {
+                        const version = r.Long();
+                        this.protocol = netQuakeProfile(version, flags);
+                        codec = createNetQuakeCodec(this.protocol, r);
+                        message = { kind: 'version', version };
                         break;
+                    }
                     case 5:
                         message = { kind: 'set-view', entity: r.Short() & 65535 };
                         break;
@@ -207,6 +213,7 @@ export class NetQuakeDecoder {
                         this.protocol = protocol;
                         codec = createNetQuakeCodec(protocol, r);
                         flags = protocolFlags(protocol);
+                        this.flagsValue = flags;
                         this.baselines.clear();
                         const maxClients = r.Byte(), gameType = r.Byte(), level = r.String(), models = this.readList(r, codec.maxPrecache), sounds = this.readList(r, codec.maxPrecache);
                         message = { kind: 'server-info', protocol, maxClients, gameType, level, models, sounds };
@@ -403,8 +410,8 @@ export class NetQuakeDecoder {
         }
     }
 }
-export function writeNetQuakeMove(sb: SizeBuf, command: Q1UserCommand, protocol: Q1ProtocolIdentity): void {
-    const codec = createNetQuakeCodec(protocol, new MessageReader(new Uint8Array(0))), flags = protocolFlags(protocol);
+export function writeNetQuakeMove(sb: SizeBuf, command: Q1UserCommand, protocol: Q1ProtocolIdentity, flags = protocolFlags(protocol)): void {
+    const codec = createNetQuakeCodec(protocol, new MessageReader(new Uint8Array(0)));
     MSG_WriteByte(sb, 3);
     MSG_WriteFloat(sb, command.acknowledgedServerTimeSeconds);
     for (const n of [command.viewAngles.x, command.viewAngles.y, command.viewAngles.z])

@@ -1,8 +1,11 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
+import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
+import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export interface ApplicationOptions {
+  readonly q1Protocol?: Q1ProtocolIdentity;
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
@@ -57,9 +60,10 @@ Usage: bun run src/main.ts [options]
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
   --listen PORT              Host the selected game's native source protocol
+  --q1-protocol 15|666|999    NetQuake host protocol (default 15; RMQ flags 130)
   --listen-q2 PORT           Host the native Quake II source protocol
   --bind ADDRESS             Server IP (default 0.0.0.0)
-  --connect-q1 ADDRESS       Join a native Quake server (id1, protocol 15)
+  --connect-q1 ADDRESS       Join a native Quake server (id1, protocols 15/666/999)
   --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
   --connect-q2 ADDRESS       Join a native Quake II server
@@ -147,6 +151,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (listen !== null && listenKind !== kind) throw new Error("Choose either --listen or --listen-q2");
         listenKind = kind; listen = integer(value, flag, 0, 65535); break;
       }
+      case "--q1-protocol": options = { ...options, q1Protocol: defaultNetQuakeProfile(integer(value, flag, 15, 999)) }; break;
       case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3":
         if (remote !== null) throw new Error("Choose one native remote connection");
         remoteKind = flag === "--connect-qw" ? "qw-client" : flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
@@ -180,6 +185,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
+  if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && options.product.startsWith("q3-") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");

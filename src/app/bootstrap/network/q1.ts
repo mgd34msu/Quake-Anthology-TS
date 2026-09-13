@@ -6,7 +6,8 @@ import type { WireSelection } from '../../../network/common/session.ts';
 import { NetQuakeChannel } from '../../../network/q1/channels.ts';
 import { answerNetQuakeControl, quakeWorldCommandArguments } from '../../../network/q1/handshake.ts';
 import { decodeNetQuakeClient, writeNetQuakeEntity, writeNetQuakeMessage } from '../../../network/q1/netquake.ts';
-import { SizeBuf, SZ_Write } from '../../../network/q1/message.ts';
+import { MessageReader, SizeBuf, SZ_Write } from '../../../network/q1/message.ts';
+import { createNetQuakeCodec, protocolFlags } from '../../../network/q1/profile.ts';
 import { entityState } from '../../../network/q1/netquake.ts';
 import { EntityStateT } from '../../../network/q1/wire-types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
@@ -24,22 +25,25 @@ interface Peer<TAddress extends NetworkAddress> {
 }
 export class Q1ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
     readonly role = 'server';
-    readonly wire: WireSelection;
+    get wire(): WireSelection { return { kind: 'source', protocol: this.host.protocol }; }
     private ended = false;
     private host: Q1ApplicationServerHost;
+    private codec: ReturnType<typeof createNetQuakeCodec>;
     private readonly peers = new Map<string, Peer<TAddress>>();
     private pending: ActorCommand[] = [];
-    constructor(readonly options: Q1ServerNetworkOptions<TAddress>) { this.validate(options.host); this.host = options.host; this.wire = { kind: 'source', protocol: this.host.protocol }; }
+    constructor(readonly options: Q1ServerNetworkOptions<TAddress>) { this.validate(options.host); this.host = options.host; this.codec = createNetQuakeCodec(this.host.protocol, new MessageReader(new Uint8Array(0))); }
     private validate(host: Q1ApplicationServerHost): void { const support = host.supportsSourceWire(); if (support.kind === 'unsupported')
-        throw new Error(support.reasons.join('; ')); if (host.protocol.version !== 15)
-        throw new Error('Application NetQuake server currently requires protocol 15'); }
+        throw new Error(support.reasons.join('; ')); }
     get address(): TAddress { return this.options.transport.address; }
     get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
     get clients(): readonly Q1ApplicationPlayer[] { return [...this.peers.values()].map(peer => peer.player); }
-    private bytes(messages: readonly Q1ApplicationMessage[]): Uint8Array { const buffer = new SizeBuf(8000); for (const message of messages)
+    private bytes(messages: readonly Q1ApplicationMessage[]): Uint8Array { const buffer = new SizeBuf(this.codec.maxMsglen); for (const message of messages)
         writeNetQuakeMessage(buffer, this.host.protocol, message); return buffer.bytes(); }
     private start(peer: Peer<TAddress>): void { peer.stage = 1; peer.reliable.push(this.bytes([peer.state.info, { kind: 'set-view', entity: peer.player.sourceEntity }, { kind: 'signon', stage: 1 }])); }
-    changeWorld(host: Q1ApplicationServerHost): void { this.validate(host); const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) })); this.host = host; this.pending = []; for (const { peer, player } of carried) {
+    changeWorld(host: Q1ApplicationServerHost): void { this.validate(host);
+        if (this.peers.size !== 0 && (host.protocol.version !== this.host.protocol.version || protocolFlags(host.protocol) !== protocolFlags(this.host.protocol))) throw new Error('Connected NetQuake peers require the same protocol across travel');
+        const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) })); this.host = host;
+        this.codec = createNetQuakeCodec(host.protocol, new MessageReader(new Uint8Array(0))); this.pending = []; for (const { peer, player } of carried) {
         peer.player = player;
         peer.state = host.gameState(player);
         peer.reliable.length = 0;
@@ -94,7 +98,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                             if (admitted.kind === 'rejected')
                                 return admitted;
                             try {
-                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(), stage: 1, state: this.host.gameState(admitted.player), reliable: [], lastReceived: now, sequence: 0 };
+                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: [], lastReceived: now, sequence: 0 };
                                 this.start(peer);
                                 this.peers.set(addressKey(packet.from), peer);
                             }
@@ -173,25 +177,25 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 this.options.transport.send(peer.remote, reliable);
             if (peer.stage !== 4)
                 continue;
-            const buffer = new SizeBuf(1024);
+            const buffer = new SizeBuf(this.codec.maxDatagram);
             writeNetQuakeMessage(buffer, this.host.protocol, { kind: 'time', seconds: frame.seconds });
             for (const message of frame.messages)
                 writeNetQuakeMessage(buffer, this.host.protocol, message);
             for (const state of frame.entities) {
                 const encoded = new SizeBuf(128);
                 writeNetQuakeEntity(encoded, this.host.protocol, state, peer.state.baselines.get(state.number) ?? entityState(state.number, new EntityStateT()), frame.seconds);
-                if (buffer.cursize + encoded.cursize > 1024)
+                if (buffer.cursize + encoded.cursize > this.codec.maxDatagram)
                     break;
                 SZ_Write(buffer, encoded.bytes());
             }
-            const datagram = new SizeBuf(1024);
+            const datagram = new SizeBuf(this.codec.maxDatagram);
             for (const message of frame.datagram) {
                 const encoded = this.bytes([message]);
-                if (datagram.cursize + encoded.length > 1024)
+                if (datagram.cursize + encoded.length > this.codec.maxDatagram)
                     break;
                 SZ_Write(datagram, encoded);
             }
-            if (buffer.cursize + datagram.cursize <= 1024)
+            if (buffer.cursize + datagram.cursize <= this.codec.maxDatagram)
                 SZ_Write(buffer, datagram.bytes());
             this.options.transport.send(peer.remote, peer.channel.unreliable(buffer.bytes()));
         }

@@ -5,6 +5,7 @@ import type { IpAddress } from '../../../network/common/endpoint.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { NetQuakeChannel } from '../../../network/q1/channels.ts';
+import { WIDE_MAX_MSGLEN } from '../../../network/q1/codecs/wide.ts';
 import { NetQuakeConnectClient } from '../../../network/q1/handshake.ts';
 import { NetQuakeDecoder, writeNetQuakeMove } from '../../../network/q1/netquake.ts';
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
@@ -27,9 +28,9 @@ export interface Q1ClientNetworkOptions {
 }
 export class Q1ClientNetwork implements ApplicationNetwork {
     readonly role = 'client';
-    readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol: { kind: 'q1-netquake', version: 15 } };
+    get wire(): ApplicationNetwork['wire'] { return { kind: 'source', protocol: this.decoder.protocol }; }
     private readonly handshake = new NetQuakeConnectClient();
-    private readonly channel = new NetQuakeChannel();
+    private readonly channel = new NetQuakeChannel(WIDE_MAX_MSGLEN);
     private readonly decoder = new NetQuakeDecoder();
     private readonly signon: NetQuakeSignon;
     private state: ApplicationNetworkPhase = 'connecting';
@@ -39,7 +40,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
     private readonly reliable: Uint8Array[] = [];
     constructor(readonly options: Q1ClientNetworkOptions) {
         if (options.seat.extensionFlags !== null)
-            throw new Error('Native NetQuake 15 does not negotiate extensions');
+            throw new Error('Native NetQuake does not negotiate private extensions');
         this.signon = new NetQuakeSignon(options.seat);
     }
     get phase(): ApplicationNetworkPhase { return this.state; }
@@ -94,16 +95,12 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             const messages = this.decoder.decode(received.delivery.payload);
             for (const message of messages) {
                 if (message.kind === 'server-info') {
-                    if (message.protocol.kind !== 'q1-netquake' || message.protocol.version !== 15)
-                        throw new Error('Remote client requires native NetQuake 15');
                     if (message.maxClients < 1 || message.maxClients > 16)
-                        throw new Error('Native NetQuake 15 requires 1–16 scoreboard slots');
+                        throw new Error('Native NetQuake requires 1–16 scoreboard slots');
                     this.signon.stage = 0;
                     this.movementMessages = 0;
                     this.state = 'loading';
                 }
-                if (message.kind === 'version' && message.version !== 15)
-                    throw new Error('Remote client requires native NetQuake 15');
             }
             await this.options.host.receive(messages, now);
             for (const message of messages) {
@@ -149,7 +146,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             const move = this.options.host.command(command);
             if (++this.movementMessages <= 2)
                 continue;
-            writeNetQuakeMove(bytes, { ...move, acknowledgedServerTimeSeconds: this.decoder.timeSeconds }, { kind: 'q1-netquake', version: 15 });
+            writeNetQuakeMove(bytes, { ...move, acknowledgedServerTimeSeconds: this.decoder.timeSeconds }, this.decoder.protocol, this.decoder.flags);
             this.options.transport.send(this.peer, this.channel.unreliable(bytes.bytes()));
         }
     }

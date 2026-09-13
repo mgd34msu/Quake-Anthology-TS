@@ -431,10 +431,11 @@ export class Application {
 
   private async networkHost(simulation = this.simulation, content = this.content): Promise<NativeServerHost> {
     const source = content.catalog.product(content.recipe.map.entities.content).expectation;
+    if (this.options.q1Protocol !== undefined && source.family !== "q1") throw new Error("--q1-protocol requires a Quake I source game");
     if (this.options.network.kind === "q2-server" && source.family !== "q2") throw new Error("--listen-q2 requires a Quake II source game; use --listen for the selected native protocol");
     const common = { session: this.session, simulation, content, print: (text: string): void => { this.host.print(text); } };
     switch (source.family) {
-      case "q1": return { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: { kind: "q1-netquake", version: 15 } }) };
+      case "q1": return { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
       case "q2": return { kind: "q2", host: await createQ2ApplicationServerHost({ ...common,
         protocol: source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 } }) };
       case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost(common) };

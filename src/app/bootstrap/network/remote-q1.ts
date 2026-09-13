@@ -7,6 +7,7 @@ import type { Vec3 } from '../../../contracts/math.ts';
 import type { ActorCommand, SimulationOutput, SimulationEvent } from '../../../contracts/session.ts';
 import type { Q1ClientData, Q1ExtendedEntityState, Q1UserCommand } from '../../../contracts/protocol.ts';
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
+import { ENTALPHA_DECODE, ENTSCALE_DECODE } from '../../../network/q1/constants.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
 import { createSceneQueries } from '../../../world/collision/index.ts';
 import type { LoadedApplicationContent } from '../content.ts';
@@ -62,6 +63,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     private viewEntity = 0;
     private viewAngles = zero;
     private data: Q1ClientData | null = null;
+    private weaponAlpha = 0;
     private readonly actors = new Map<number, ActorId>();
     private current = new Map<number, Q1ExtendedEntityState>();
     private previous = new Map<number, Q1ExtendedEntityState>();
@@ -129,6 +131,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 this.pendingImpulse = 0;
                     this.viewAngles = zero;
                     this.data = null;
+                    this.weaponAlpha = 0;
                     this.published = null;
                     this.seconds = 0;
                     this.previousSeconds = 0;
@@ -160,6 +163,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     break;
                 case 'client-data':
                     this.data = message.data;
+                    this.weaponAlpha = message.weaponAlpha;
                     break;
                 case 'light-style':
                     this.styles.set(message.index, message.value);
@@ -270,7 +274,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             if (path === undefined)
                 throw new Error(`Unknown NetQuake model ${state.modelIndex}`);
             const colors = state.colorMap > 0 && state.colorMap <= this.maxClients ? this.scoreboard.get(state.colorMap - 1)?.colors : undefined;
-            result.push({ actor: this.actor(number), content: this.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, scale: 1, visible: number !== this.viewEntity, viewWeapon: false,
+            result.push({ actor: this.actor(number), content: this.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, alpha: ENTALPHA_DECODE(state.alpha), scale: ENTSCALE_DECODE(state.scale), visible: number !== this.viewEntity, viewWeapon: false,
                 ...(colors === undefined ? {} : { playerColors: { top: Math.min(colors >> 4 & 15, 13), bottom: Math.min(colors & 15, 13) } }) });
         };
         for (const state of this.current.values())
@@ -282,7 +286,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             if (path === undefined)
                 throw new Error('Unknown Q1 weapon model');
             const view = this.playerView(player.actor);
-            result.push({ actor: player.actor, content: this.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
+            result.push({ actor: player.actor, content: this.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, alpha: ENTALPHA_DECODE(this.weaponAlpha), scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
         }
         return result;
     }

@@ -8,6 +8,9 @@ import type { Q1ApplicationPlayer, Q1ApplicationServerHost, Q1ApplicationMessage
 import type { SimulationPresentationEvent } from './types.ts';
 import type { SimulationOutput } from '../../../contracts/session.ts';
 import { WEAPONS } from '../../../content/q1/foundation/types.ts';
+import { ENTALPHA_ENCODE, ENTALPHA_ZERO, ENTSCALE_ENCODE } from '../../../network/q1/constants.ts';
+import { createNetQuakeCodec } from '../../../network/q1/profile.ts';
+import { MessageReader } from '../../../network/q1/message.ts';
 export interface Q1ApplicationServerBindingOptions {
     readonly session: EngineSession;
     readonly simulation: SharedSimulation;
@@ -23,7 +26,8 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
     if (!game.usesId1Precaches || game.options.edition !== 'classic' || source.composition.selection.program !== 'id1')
         throw new Error('Native ordered Q1 precaches currently require classic id1 source declarations');
     if (game.precaches.phase !== 'frozen') throw new Error('Q1 source precaches are still loading');
-    if (game.precaches.models.length > 256 || game.precaches.sounds.length > 256) throw new Error('NetQuake 15 precache overflow');
+    const codec = createNetQuakeCodec(options.protocol, new MessageReader(new Uint8Array(0))), wide = options.protocol.version !== 15;
+    if (game.precaches.models.length > codec.maxPrecache || game.precaches.sounds.length > codec.maxPrecache) throw new Error(`NetQuake ${options.protocol.version} precache overflow`);
     const models = new Map(game.precaches.models.slice(1).map((path, ordinal) => [path, ordinal + 1]));
     const sounds = new Map(game.precaches.sounds.slice(1).map((path, ordinal) => [path, ordinal + 1]));
     const soundResources = new Map<string, ResourceId>();
@@ -42,21 +46,32 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         throw new Error(`Q1 resource was not precached before signon: ${path}`); return value; };
     const number = (actor: ActorId): number => { const address = simulation.actors.sourceOf(actor); if (address === null || address.provider !== simulation.recipe.map.entities.provider)
         throw new Error('Q1 actor has no source address'); return address.slot; };
+    const visual = (alpha: number, scale: number): { readonly alpha: number; readonly scale: number } => wide
+        ? { alpha: ENTALPHA_ENCODE(alpha), scale: Math.trunc(ENTSCALE_ENCODE(scale)) & 255 } : { alpha: 0, scale: 16 };
     const entities = (): readonly Q1ExtendedEntityState[] => {
         const states: Q1ExtendedEntityState[] = [], presentations = new Map(simulation.presentations().filter(value => !value.viewWeapon).map(value => [value.actor, value]));
         for (const entity of game.entities.values()) {
             const body = simulation.bodies.read(entity.actor.id), presentation = presentations.get(entity.actor.id), path = presentation?.path ?? entity.model;
             if (body === null || path === '' || number(entity.actor.id) === 0)
                 continue;
-            states.push({ number: number(entity.actor.id), origin: body.origin, angles: body.angles, modelIndex: index(path, models), frame: presentation?.frame ?? entity.frame, colorMap: game.player(entity.actor.id) === null ? 0 : number(entity.actor.id), skin: presentation?.skin ?? entity.skin, effects: (presentation?.effects ?? entity.effects) | (muzzleFlashes.has(entity.actor.id) ? 2 : 0), alpha: 0, scale: 16, lerpFinishSeconds: 0, step: entity.movement === 'step' });
+            states.push({ number: number(entity.actor.id), origin: body.origin, angles: body.angles, modelIndex: index(path, models), frame: presentation?.frame ?? entity.frame, colorMap: game.player(entity.actor.id) === null ? 0 : number(entity.actor.id), skin: presentation?.skin ?? entity.skin, effects: (presentation?.effects ?? entity.effects) | (muzzleFlashes.has(entity.actor.id) ? 2 : 0), ...visual(entity.number('alpha'), entity.number('scale')), lerpFinishSeconds: 0, step: entity.movement === 'step' });
         }
         for (const actor of simulation.players()) {
             const body = simulation.bodies.read(actor), presentation = presentations.get(actor);
             if (body === null)
                 continue;
-            states.push({ number: number(actor), origin: body.origin, angles: body.angles, modelIndex: index(presentation?.path ?? 'progs/player.mdl', models), frame: presentation?.frame ?? 0, colorMap: number(actor), skin: presentation?.skin ?? 0, effects: (presentation?.effects ?? 0) | (muzzleFlashes.has(actor) ? 2 : 0), alpha: 0, scale: 16, lerpFinishSeconds: 0, step: false });
+            states.push({ number: number(actor), origin: body.origin, angles: body.angles, modelIndex: index(presentation?.path ?? 'progs/player.mdl', models), frame: presentation?.frame ?? 0, colorMap: number(actor), skin: presentation?.skin ?? 0, effects: (presentation?.effects ?? 0) | (muzzleFlashes.has(actor) ? 2 : 0), ...visual(game.player(actor)?.alpha ?? 0, game.player(actor)?.scale ?? 0), lerpFinishSeconds: 0, step: false });
         }
         return states.sort((a, b) => a.number - b.number);
+    };
+    const baseline = (state: Q1ExtendedEntityState): Q1ExtendedEntityState => {
+        const player = state.number > 0 && state.number <= maxClients;
+        const modelIndex = player ? index('progs/player.mdl', models) : state.modelIndex;
+        const frame = Math.trunc(state.frame);
+        return { ...state, modelIndex: !wide && (modelIndex & 0xff00) !== 0 ? 0 : modelIndex,
+            frame: !wide && (frame & 0xff00) !== 0 ? 0 : frame, skin: Math.trunc(state.skin), effects: 0,
+            colorMap: player ? state.number : 0, alpha: player ? 0 : state.alpha,
+            scale: player || options.protocol.version !== 999 ? 16 : state.scale, lerpFinishSeconds: 0, step: false };
     };
     const muzzleFlashes = new Set<ActorId>();
     const clientData = (player: Q1ApplicationPlayer): Q1ApplicationMessage => {
@@ -73,7 +88,7 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         for (const [powerup, expires] of native.powerups)
             if (expires > game.time)
                 items |= powerup === 'quad' ? 4194304 : powerup === 'invulnerability' ? 1048576 : powerup === 'invisibility' ? 524288 : powerup === 'suit' ? 2097152 : 0;
-        return { kind: 'client-data', weaponAlpha: 0, data: { viewHeight: movement.viewHeight, idealPitch: state.idealPitch, punchAngles: state.punchAngles, velocity: state.velocity, items, onGround: (state.flags & 512) !== 0, inWater: state.waterLevel >= 2, weaponFrame: native.weaponFrame, armor: ui.armor.kind === 'none' ? 0 : ui.armor.points, weaponModel: index(game.weaponModel(native.weapon, native), models), health: ui.health, ammo: ui.ammo?.count ?? 0, shells: simulation.inventory.count(player.actor, 'q1:ammo/shells'), nails: simulation.inventory.count(player.actor, 'q1:ammo/nails'), rockets: simulation.inventory.count(player.actor, 'q1:ammo/rockets'), cells: simulation.inventory.count(player.actor, 'q1:ammo/cells'), activeWeapon: weaponBits[WEAPONS.findIndex(weapon => weapon === native.weapon)] ?? 0 } };
+        return { kind: 'client-data', weaponAlpha: wide ? ENTALPHA_ENCODE(native.alpha) : 0, data: { viewHeight: movement.viewHeight, idealPitch: state.idealPitch, punchAngles: state.punchAngles, velocity: state.velocity, items, onGround: (state.flags & 512) !== 0, inWater: state.waterLevel >= 2, weaponFrame: native.weaponFrame, armor: ui.armor.kind === 'none' ? 0 : ui.armor.points, weaponModel: index(game.weaponModel(native.weapon, native), models), health: ui.health, ammo: ui.ammo?.count ?? 0, shells: simulation.inventory.count(player.actor, 'q1:ammo/shells'), nails: simulation.inventory.count(player.actor, 'q1:ammo/nails'), rockets: simulation.inventory.count(player.actor, 'q1:ammo/rockets'), cells: simulation.inventory.count(player.actor, 'q1:ammo/cells'), activeWeapon: weaponBits[WEAPONS.findIndex(weapon => weapon === native.weapon)] ?? 0 } };
     };
     interface Routed {
         readonly recipient: ActorId | null;
@@ -219,8 +234,7 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
     return {
         protocol: options.protocol, maxClients, mapName: game.mapName,
         supportsSourceWire: () => { const reasons: string[] = []; if (source.composition.selection.program !== 'id1')
-            reasons.push('Native NetQuake application item serialization currently binds id1'); if (options.protocol.version !== 15)
-            reasons.push('Q1 application network currently binds NetQuake protocol 15'); if (!simulation.recipe.movement.provider.startsWith('q1:') || !simulation.recipe.character.definition.provider.startsWith('q1:') || !simulation.recipe.inventory.provider.startsWith('q1:') || simulation.recipe.weapons.some(value => !value.provider.startsWith('q1:')))
+            reasons.push('Native NetQuake application item serialization currently binds id1'); if (!simulation.recipe.movement.provider.startsWith('q1:') || !simulation.recipe.character.definition.provider.startsWith('q1:') || !simulation.recipe.inventory.provider.startsWith('q1:') || simulation.recipe.weapons.some(value => !value.provider.startsWith('q1:')))
             reasons.push('Mixed composition requires unified serialization'); return reasons.length === 0 ? { kind: 'supported' } : { kind: 'unsupported', reasons }; },
         admit: from => {
             let slot = 0;
@@ -249,9 +263,9 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         carriedPlayer: client => { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client)); if (actor === undefined)
             throw new Error('Carried Q1 player has not been admitted'); const player = { client, actor, sourceEntity: number(actor) }; clients.set(client.slot, player); return player; },
         disconnect: player => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); clients.delete(player.client.slot); },
-        gameState: player => { const states = entities(); clientData(player); return { info: { kind: 'server-info', protocol: options.protocol, maxClients, gameType: game.options.deathmatch === 0 ? 0 : 1, level: game.world?.message || game.mapName, models: [...models.keys()], sounds: [...sounds.keys()] }, baselines: new Map(states.map(state => [state.number, state])), signon: persistentSignon() }; },
+        gameState: player => { const states = entities(); clientData(player); return { info: { kind: 'server-info', protocol: options.protocol, maxClients, gameType: game.options.deathmatch === 0 ? 0 : 1, level: game.world?.message || game.mapName, models: [...models.keys()], sounds: [...sounds.keys()] }, baselines: new Map(states.map(state => [state.number, baseline(state)])), signon: persistentSignon() }; },
         spawn: player => [{ kind: 'time', seconds: game.time }, ...Array.from({ length: 64 }, (_, index) => ({ kind: 'light-style', index, value: simulation.events.lightStyle(index) } satisfies Q1ApplicationMessage)), ...[...source.composition.clients.records.values()].flatMap(client => [{ kind: 'name', slot: client.slot, value: client.name }, { kind: 'colors', slot: client.slot, value: client.shirt * 16 + client.pants }, { kind: 'frags', slot: client.slot, value: client.frags }] satisfies Q1ApplicationMessage[]), { kind: 'stat', index: 11, value: game.totalSecrets }, { kind: 'stat', index: 12, value: game.totalMonsters }, { kind: 'stat', index: 13, value: game.foundSecrets }, { kind: 'stat', index: 14, value: game.killedMonsters }, { kind: 'set-angle', angles: simulation.playerView(player.actor).angles }, clientData(player)],
-        frame: (player, _output) => { const origin = simulation.playerView(player.actor).origin, cluster = simulation.scene.leafCluster(simulation.scene.pointLeaf(origin)); return { seconds: game.time, messages: [clientData(player)], reliable: routed.filter(event => event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), datagram: routed.filter(event => !event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), entities: entities().filter(state => state.number === player.sourceEntity || simulation.scene.clusterVisible(cluster, simulation.scene.leafCluster(simulation.scene.pointLeaf(state.origin)), 'pvs')) }; },
+        frame: (player, _output) => { const origin = simulation.playerView(player.actor).origin, cluster = simulation.scene.leafCluster(simulation.scene.pointLeaf(origin)); return { seconds: game.time, messages: [clientData(player)], reliable: routed.filter(event => event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), datagram: routed.filter(event => !event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), entities: entities().filter(state => !wide || state.alpha !== ENTALPHA_ZERO || state.effects !== 0).filter(state => state.number === player.sourceEntity || simulation.scene.clusterVisible(cluster, simulation.scene.leafCluster(simulation.scene.pointLeaf(state.origin)), 'pvs')) }; },
         input: (player, command, sequence) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command }),
         command: (player, name, args) => { if (name === 'name') {
             const values = new Map(source.composition.clients.require(player.actor).userinfo);
