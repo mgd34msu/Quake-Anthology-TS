@@ -237,13 +237,13 @@ export class CollisionWorld {
     return sourceTraceView(this.traceSource(query));
   }
 
-  #sourceClipModels(): SourceClipModels {
+  sourceClipModels(): SourceClipModels {
     if (this.#sourceModels === null) this.#sourceModels = new SourceClipModels(this);
     return this.#sourceModels;
   }
 
   traceSource(query: TraceQuery): SourceTraceResult {
-    if (query.modelIndex === SOURCE_CAPSULE_MODEL_HANDLE) return this.#sourceClipModels().trace(query, SOURCE_CAPSULE_MODEL_HANDLE);
+    if (query.modelIndex === SOURCE_CAPSULE_MODEL_HANDLE) return this.sourceClipModels().trace(query, SOURCE_CAPSULE_MODEL_HANDLE);
     const info = shapeInfo(query.shape);
     const stationary = query.start.x === query.end.x && query.start.y === query.end.y && query.start.z === query.end.z;
     return this.#trace(query, add3(query.start, info.center), add3(query.end, info.center), info.shape, info.mins, stationary, null);
@@ -261,7 +261,7 @@ export class CollisionWorld {
   }
 
   transformedTraceSource(query: TraceQuery, origin: Vec3, angles: Vec3): SourceTraceResult {
-    if (query.modelIndex === SOURCE_CAPSULE_MODEL_HANDLE) return this.#sourceClipModels().transformedTrace(query, SOURCE_CAPSULE_MODEL_HANDLE, origin, angles);
+    if (query.modelIndex === SOURCE_CAPSULE_MODEL_HANDLE) return this.sourceClipModels().transformedTrace(query, SOURCE_CAPSULE_MODEL_HANDLE, origin, angles);
     if (!finite(origin) || (query.modelIndex !== SOURCE_BOX_MODEL_HANDLE && !finite(angles))) throw new RangeError("model transform requires finite coordinates");
     const info = shapeInfo(query.shape);
     const axis = query.modelIndex !== SOURCE_BOX_MODEL_HANDLE && (angles.x !== 0 || angles.y !== 0 || angles.z !== 0) ? anglesToAxis(angles) : null;

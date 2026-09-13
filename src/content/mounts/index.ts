@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { open, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { relative } from "node:path";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
 import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
 import { openArchive, readLooseEntry } from "../archive/index.ts";
 import type { ArchiveHandle } from "../archive/index.ts";
-import { findContentPath, normalizeResourcePath } from "./paths.ts";
+import { findContentPath, isMissingFile, normalizeResourcePath } from "./paths.ts";
 
 export { findContentPath, normalizeResourcePath } from "./paths.ts";
 
@@ -160,6 +160,52 @@ export class MountedContent {
   }
 
   async resolve(path: string): Promise<ResolvedResourceReference | null> { return (await this.open(path))?.reference ?? null; }
+
+  /** Q3 FS_ListFilteredFiles without a filter, in selected mount and archive-directory order. */
+  async listFiles(path: string, extension: string): Promise<readonly string[]> {
+    this.#assertOpen();
+    if (path.length >= 256 || [...path, ...extension].some(character => character.charCodeAt(0) > 255 || character === "\0")) {
+      throw new RangeError("Q3 file listing exceeds source path representation");
+    }
+    const directory = path.replace(/[\\/]$/, "");
+    if (directory !== "") normalizeResourcePath(directory);
+    const prefix = this.plan.prefixOrders.find(order => `${directory}/`.toLowerCase().startsWith(order.prefix.toLowerCase()));
+    const names: string[] = [], seen = new Set<string>();
+    const add = (name: string): void => {
+      if (names.length < 4095 && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); names.push(name); }
+    };
+    const depth = (value: string): number => [...value].filter(character => character === "/" || character === "\\").length;
+    const suffix = (name: string): boolean => name.toLowerCase().endsWith(extension.toLowerCase());
+    for (const id of prefix?.mounts ?? this.plan.defaultOrder) {
+      const source = this.#sources.get(id);
+      if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
+      if (source.kind === "archive") {
+        for (const entry of source.archive.entries) {
+          const name = entry.path, lastSeparator = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
+          if (!this.#allowed(source, name) || depth(name) - depth(path) > 2 || directory.length > Math.max(0, lastSeparator)
+            || name.slice(0, directory.length).toLowerCase() !== directory.toLowerCase() || !suffix(name)) continue;
+          add(name.slice(directory.length === 0 ? 0 : directory.length + 1));
+        }
+      } else {
+        if ((this.options.pure?.archives.length ?? 0) !== 0) continue;
+        const location = directory === "" ? source.mount.rootPath
+          : await findContentPath(source.mount.rootPath, directory, this.options.looseComparison);
+        if (location === null) continue;
+        const entries = await readdir(location, { withFileTypes: true }).catch((error: unknown) => {
+          if (isMissingFile(error)) return [];
+          throw error;
+        });
+        this.#assertOpen();
+        for (const entry of entries) {
+          if (entry.isSymbolicLink()) continue;
+          if ((extension === "/") !== entry.isDirectory() || extension !== "/" && !suffix(entry.name)) continue;
+          add(entry.name);
+        }
+      }
+    }
+    this.#assertOpen();
+    return names;
+  }
 
   async read(resource: string | ResolvedResourceReference): Promise<Uint8Array> {
     this.#assertOpen();

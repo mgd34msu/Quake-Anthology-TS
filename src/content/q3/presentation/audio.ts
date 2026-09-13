@@ -43,6 +43,10 @@ export class Q3PresentationSoundBank implements ClientSoundBank {
     if (!Number.isInteger(index) || sound === undefined) throw new RangeError(`Q3 sound handle ${index} is not registered`);
     return sound.pcm;
   }
+  soundForIndex(index: number): PcmSound | null | undefined {
+    if (!Number.isInteger(index)) throw new RangeError('Sound handle must be an integer');
+    return index === 0 ? null : this.registered[index - 1]?.pcm;
+  }
   registrations(): readonly SoundRegistration[] { return [...this.requests.values()]; }
 }
 export interface Q3AudioTarget {

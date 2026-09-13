@@ -41,6 +41,7 @@ export interface Q3ResourceHost {
 export class Q3RendererResources implements RendererResources {
   private readonly models: SceneModel[] = [DEFAULT_MODEL];
   private readonly modelNames = new Map<string, SceneModel>();
+  private readonly skinHandles: (SceneSkin | null)[] = [null];
   private readonly skins = new Map<string, SceneSkin | null>();
   private readonly pictures = new Map<string, MaterialPicture>();
   private readonly shaders = new Map<number, MaterialPicture>();
@@ -54,7 +55,9 @@ export class Q3RendererResources implements RendererResources {
   }
   async registerSkin(path: string): Promise<SceneSkin | null> {
     if (this.skins.has(path)) return this.skins.get(path) ?? null;
-    const skin = await this.host.skin(path); this.skins.set(path, skin); return skin;
+    const skin = await this.host.skin(path); this.skins.set(path, skin);
+    if (skin !== null && !this.skinHandles.includes(skin)) this.skinHandles.push(skin);
+    return skin;
   }
   registerShader(path: string): Promise<SceneShader | null> { return this.shader(path, true); }
   registerShaderNoMip(path: string | null): Promise<SceneShader | null> { return path === null ? Promise.resolve(null) : this.shader(path, false); }
@@ -75,6 +78,17 @@ export class Q3RendererResources implements RendererResources {
   modelHandle(model: SceneModel): number { const index = this.models.indexOf(model); if (index < 0) throw new Error("Cgame model belongs to another resource owner"); return index; }
   modelForHandle(handle: number): SceneModel { const model = this.models[handle]; if (model === undefined) throw new RangeError(`Invalid cgame model handle ${handle}`); return model; }
   shaderForHandle(handle: number): SceneShader | null { if (handle === 0) return null; const shader = this.shaders.get(handle); if (shader === undefined) throw new RangeError(`Invalid cgame shader handle ${handle}`); return shader; }
+  shaderHandle(shader: SceneShader | null): number { return shader === null ? 0 : this.picture(shader).material.order; }
+  skinHandle(skin: SceneSkin | null): number {
+    const index = this.skinHandles.indexOf(skin);
+    if (index < 0) throw new Error("Cgame skin belongs to another resource owner");
+    return index;
+  }
+  skinForHandle(handle: number): SceneSkin | null {
+    const skin = this.skinHandles[handle];
+    if (skin === undefined) throw new RangeError(`Invalid cgame skin handle ${handle}`);
+    return skin;
+  }
   clearScene(): void { this.host.scene.clearScene(); }
   addRefEntity(entity: RefEntity): void { this.host.scene.addRefEntity(entity); }
   addPoly(poly: RefPoly): void { this.host.scene.addPoly(poly); }
