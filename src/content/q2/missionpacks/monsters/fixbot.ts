@@ -66,8 +66,8 @@ export function createFixbotDefinition(monsters: Q2Monsters): Q2MonsterDefinitio
     initialMove: "fixbot_move_stand", moves: fixbotMoves, stand: move("fixbot_move_stand"), run, attack,
     sourceCallbacks: { think: { G_FreeEdict: freeQ2Entity } },
     walk(context) {
-      const target = goal(context);
-      return context.setMove(target.classname === "object_repair" && length(subtract(context.game.body(context.entity).origin, context.game.body(target).origin)) < 32 ? "fixbot_move_weld_start" : "fixbot_move_walk");
+      const target = context.game.entity(context.entity.goal);
+      return context.setMove(target?.classname === "object_repair" && length(subtract(context.game.body(context.entity).origin, context.game.body(target).origin)) < 32 ? "fixbot_move_weld_start" : "fixbot_move_walk");
     },
     pain(context, reaction) {
       if (context.game.host.now() < context.state.painTime) return undefined;
