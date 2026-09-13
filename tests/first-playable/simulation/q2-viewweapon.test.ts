@@ -13,6 +13,14 @@ for (const edition of ["classic", "rerelease"]) test(`Q2 ${edition} camera and g
   try {
     const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor, source = simulation.q2Source(), player = simulation.movementPlayer(actor);
     if (source === null || player === null) throw new Error("Missing native Q2 player");
+    const admitted = source.players.states.get(actor);
+    if (admitted === undefined) throw new Error("Missing admitted source state");
+    expect(admitted.userinfo).toContain("\\fov\\90");
+    expect(admitted.fov).toBe(90);
+    simulation.setPlayerFieldOfView(actor, 110);
+    expect(admitted.fov).toBe(110);
+    simulation.setPlayerFieldOfView(actor, 90);
+    expect(admitted.fov).toBe(90);
     let sequence = 0;
     const step = (crouch = false) => {
       simulation.step({ elapsedMilliseconds: 100, commands: [{ actor, source: { kind: "remote-client", client }, sequence: sequence++,
@@ -24,6 +32,7 @@ for (const edition of ["classic", "rerelease"]) test(`Q2 ${edition} camera and g
       if (body === null) throw new Error("Missing player body");
       const height = native.offset.z + (edition === "rerelease" ? player.viewHeight : 0);
       expect(view.viewHeight).toBe(height);
+      if (source.players.intermission.kind !== "intermission") expect(view.fieldOfView).toBe(90);
       expect(view.origin).toEqual(add3(body.origin, { x: native.offset.x, y: native.offset.y, z: 0 }));
       const gun = simulation.presentations().find(entry => entry.viewWeapon && entry.actor.equals(actor));
       if ((simulation.combat.read(actor)?.health ?? 0) > 0) {

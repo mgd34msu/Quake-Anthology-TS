@@ -1965,7 +1965,7 @@ export class SharedSimulation implements Simulation {
     }
     if (source.kind === "q1") { source.game.attachPlayer(actor); source.composition.attach(actor, { slot: client.slot, userinfo: new Map([["name", `Player ${client.slot + 1}`], ["topcolor", "0"], ["bottomcolor", "0"]]) }); }
     else { source.items.configurePlayer(actor, source.game, true); if (entity !== null) {
-      source.product.admit(actor, { slot: client.slot, userinfo: `\\name\\Player ${client.slot + 1}\\skin\\male/grunt`, initializeInventory: false, useQ2Weapons: this.selectedArsenal === null }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
+      source.product.admit(actor, { slot: client.slot, userinfo: `\\name\\Player ${client.slot + 1}\\skin\\male/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.selectedArsenal === null }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
     } }
     if (player.character === "q1" && source.kind === "q1") {
       const character = new Q1CharacterActor(source.game, actor, { requestRespawn: () => this.respawnPlayer(player), dropInventory: () => this.dropPlayerInventory(player), sourcePose: () => this.q1CharacterPose(actor.id), fallDamageAllowed: () => source.composition.fallDamageAllowed(actor.id) });
