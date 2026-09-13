@@ -1,6 +1,6 @@
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createQ2ApplicationServerHost } from "../../../src/app/bootstrap/simulation/network.ts";
-import { Q2WireCodec, Q2ServerMessageReader, PlayerStateT, EntityStateT, encodeQ2Frame } from "../../../src/network/q2/index.ts";
+import { Q2WireCodec, Q2ServerMessageReader, PlayerStateT, EntityStateT, encodeQ2Frame, q2OutOfBand, readQ2OutOfBand, readQ2Status } from "../../../src/network/q2/index.ts";
 import type { Q2ServerRecord } from "../../../src/network/q2/index.ts";
 import { expect, test } from 'bun:test';
 import { Application } from '../../../src/app/bootstrap/application.ts';
@@ -19,6 +19,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
     const identity = createIdentityOwner('Q2 UDP remote application'), session = new EngineSession(identity, { kind: 'headless' });
     const otherIdentity = createIdentityOwner('Q2 UDP second peer'), otherSession = new EngineSession(otherIdentity, { kind: 'headless' });
     const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+    const discovery = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const address = server.networkAddress;
     if (address === null)
         throw new Error('Server did not bind UDP');
@@ -59,6 +60,15 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         await Bun.sleep(1);
         await client?.poll(now);
         await otherClient?.poll(now);
+    };
+    const query = async (text: string) => {
+        discovery.send(address, q2OutOfBand(text));
+        for (let step = 0; step < 8; step++) {
+            await exchange(10);
+            const packet = discovery.poll();
+            if (packet?.kind === 'packet') return readQ2OutOfBand(packet.payload);
+        }
+        return null;
     };
     try {
         for (let count = 0; count < 80 && remote.output === null; count++)
@@ -111,6 +121,24 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         const player = remote.player, admitted = server.networkClients[0];
         if (player === null || admitted === undefined)
             throw new Error(`No actual network player: ${prints.join('')}`);
+        const nativePlayer = server.simulation.q2Source()?.players.states.get(admitted.actor);
+        if (nativePlayer === undefined) throw new Error('Discovery has no native player state');
+        const priorScore = nativePlayer.score, priorPing = nativePlayer.ping;
+        nativePlayer.score = 17; nativePlayer.ping = 43;
+        cvars.set('hostname', 'Local discovery fixture');
+        const statusPacket = await query('status');
+        if (statusPacket === null) throw new Error('Native Q2 application ignored status');
+        const status = readQ2Status(statusPacket, { kind: 'q2-classic', version: 34 });
+        expect(status?.name).toBe('Local discovery fixture'); expect(status?.map).toBe('base1');
+        expect(status?.maxPlayers).toBe(server.simulation.options.maxClients);
+        expect(status?.rules.get('protocol')).toBe('34');
+        expect(status?.playerDetails).toEqual([{ name: nativePlayer.name, score: 17, ping: 43 }]);
+        const info = await query('info 34');
+        expect(info?.command).toBe('info'); expect(info?.body).toContain('Local discovery fixture');
+        expect((await query('info 999'))?.body).toBe('Local discovery fixture: wrong version\n');
+        expect(await query('rcon wrong hostname changed')).toBeNull();
+        expect(cvars.variableString('hostname')).toBe('Local discovery fixture');
+        nativePlayer.score = priorScore; nativePlayer.ping = priorPing;
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);
         expect(remote.isPlayer(player.actor)).toBe(true);
@@ -176,6 +204,9 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         for (let count = 0; count < 80 && (content.recipe.map.geometry.requestedPath !== 'maps/base2.bsp' || remote.output === null || remote.player?.actor.equals(player.actor)); count++)
             await exchange();
         expect(content.recipe.map.geometry.requestedPath).toBe('maps/base2.bsp');
+        const traveledStatus = await query('status');
+        if (traveledStatus === null) throw new Error('Traveled Q2 application ignored status');
+        expect(readQ2Status(traveledStatus, { kind: 'q2-classic', version: 34 })?.map).toBe('base2');
         expect(remote.output).not.toBeNull();
         expect(server.networkClients[0]?.client.equals(admitted.client)).toBe(true);
         expect(remote.player?.client.equals(player.client)).toBe(true);
@@ -196,6 +227,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
     }
     finally {
         releaseDownload();
+        discovery.close();
         otherClient?.close();
         client.close();
         await server.close();

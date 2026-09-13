@@ -106,6 +106,11 @@ export interface Q2ConnectionlessHost {
     rechargeRconRate(): void;
     executeRcon(command: string, limited: boolean, output: (text: string) => void): Promise<void>;
 }
+export function q2InfoText(info: ReturnType<Q2ConnectionlessHost['info']>, protocols: readonly Q2ProtocolIdentity[], version: number): string | null {
+    if (info.maxPlayers === 1) return null;
+    return !protocols.some(protocol => protocol.version === version) ? `info\n${info.name}: wrong version\n`
+        : `info\n${info.name.padStart(16)} ${info.map.padStart(8)} ${String(info.players).padStart(2)}/${String(info.maxPlayers).padStart(2)}\n`;
+}
 export class Q2ConnectionlessServer {
     constructor(readonly host: Q2ConnectionlessHost, readonly challenges: Q2ChallengeTable) { }
     async receive(from: NetworkAddress, bytes: Uint8Array, now: number): Promise<boolean> {
@@ -121,12 +126,8 @@ export class Q2ConnectionlessServer {
                 reply(`print\n${q2StatusText(this.host.status())}`);
                 return true;
             case 'info': {
-                const info = this.host.info();
-                if (info.maxPlayers === 1)
-                    return true;
-                const version = Number(message.arguments[0]);
-                reply(!this.host.protocols.some(protocol => protocol.version === version) ? `info\n${info.name}: wrong version\n`
-                    : `info\n${info.name.padStart(16)} ${info.map.padStart(8)} ${String(info.players).padStart(2)}/${String(info.maxPlayers).padStart(2)}\n`);
+                const text = q2InfoText(this.host.info(), this.host.protocols, Number(message.arguments[0]));
+                if (text !== null) reply(text);
                 return true;
             }
             case 'getchallenge':

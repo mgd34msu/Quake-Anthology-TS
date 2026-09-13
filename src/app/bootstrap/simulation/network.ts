@@ -3,6 +3,7 @@ import type { Vec3 } from '../../../contracts/math.ts';
 import type { ActorCommand } from '../../../contracts/session.ts';
 import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
 import { blockChecksum } from '../../../core/md4.ts';
+import { Q2CvarFlag } from '../../../core/cvars/index.ts';
 import { addressKey } from '../../../network/common/endpoint.ts';
 import { q2Userinfo } from '../../../content/q2/base/player/index.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
@@ -31,6 +32,11 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         throw new Error('Q2 server network host requires the Q2 source game provider');
     const cvars = simulation.q2ServerCvars();
     if (cvars === null) throw new Error('Q2 server network host requires the source cvar registry');
+    cvars.register('hostname', 'noname', Q2CvarFlag.ServerInfo | Q2CvarFlag.Archive);
+    for (const [name, value] of [['protocol', String(options.protocol.version)], ['mapname', source.game.options.mapName], ['maxclients', String(source.game.options.maxClients)]] satisfies readonly (readonly [string, string])[]) {
+        cvars.register(name, value, Q2CvarFlag.ServerInfo | (name === 'maxclients' ? Q2CvarFlag.Latch : Q2CvarFlag.NoSet));
+        cvars.set(name, value, true);
+    }
     const downloads = createQ2ApplicationDownloads(await options.content.forContent(options.content.recipe.map.entities.content), cvars, source.game.options.edition);
     const layout = q2ApplicationLayout(options.protocol), models = new Map<string, number>(), sounds = new Map<string, number>(), images = new Map<string, number>();
     const configs = new Map<number, string>(), clients = new Map<number, Q2ApplicationPlayer>();
@@ -196,6 +202,12 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     const knownConfigs = new Map<number, Map<number, string>>();
     return {
         downloads,
+        discovery: {
+            status: () => ({ serverInfo: cvars.infoString(Q2CvarFlag.ServerInfo), players: [...source.players.states.values()]
+                .filter(player => player.connected).map(player => ({ name: player.name, score: player.score, ping: player.ping })) }),
+            info: () => ({ name: cvars.variableString('hostname'), map: source.game.options.mapName,
+                players: [...source.players.states.values()].filter(player => player.connected).length, maxPlayers: source.game.options.maxClients }),
+        },
         protocol: options.protocol, messageOptions: { maxConfigStrings: layout.maxConfigStrings, inventorySlots: 256 }, maxClients: source.game.options.maxClients,
         observe: (output, events) => {
             if (eventFrame !== output.snapshot.frame.frame) {

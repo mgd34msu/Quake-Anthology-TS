@@ -9,6 +9,7 @@ import type { Q2ChannelReceive, Q2ServerRecord, Q2ServerWriteEvent, Q2WireFrame,
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase, Q2ApplicationGameState, Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ClientNetworkOptions, Q2ServerNetworkOptions } from './types.ts';
 import { Q2PeerDownload } from './q2-downloads.ts';
+import { q2InfoText, q2StatusText } from '../../../network/q2/connectionless.ts';
 function tokens(text: string): readonly string[] {
     const cursor = { data: text, index: 0 }, result: string[] = [];
     while (cursor.index < text.length) {
@@ -118,6 +119,17 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         if (message === null)
             return false;
         switch (message.command) {
+            case 'status':
+                if (this.host.discovery !== undefined) this.reply(remote, `print\n${q2StatusText(this.host.discovery.status())}`);
+                break;
+            case 'info': {
+                const discovery = this.host.discovery;
+                if (discovery !== undefined) {
+                    const text = q2InfoText(discovery.info(), [this.host.protocol], Number(message.arguments[0]));
+                    if (text !== null) this.reply(remote, text);
+                }
+                break;
+            }
             case 'getchallenge':
                 this.options.transport.send(remote, this.challenges.reply(remote, now, [this.host.protocol]));
                 break;
