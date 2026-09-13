@@ -7,6 +7,7 @@ import type { Q1Actor, Q1Monster } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import { POINT, vadd, vsub, vscale, length, normalize, dot, yawFor } from "./types.ts";
 import { fireBullets } from "./weapons.ts";
+import { throwGib, throwHead } from "../base/projectiles.ts";
 
 const armyWalk: readonly number[] = [1, 1, 1, 1, 2, 3, 4, 4, 2, 2, 2, 1, 0, 1, 1, 1, 3, 3, 3, 3, 2, 1, 1, 1];
 const armyRun: readonly number[] = [11, 15, 10, 10, 8, 15, 10, 8];
@@ -172,15 +173,11 @@ function monsterFrame(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monste
 }
 function gib(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monster): undefined {
   const health = game.health(entity.actor.id); game.sound(entity, "player/udeath.wav");
-  const velocity = (): Vec3 => vscale({ x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 200 + game.host.random() * 100 }, health > -50 ? 0.7 : 2);
+  if (monster.species === "army") throwHead(game, entity, "h_guard", health);
   for (const model of monster.species === "army" ? ["gib1", "gib2", "gib3"] : ["gib3", "gib3", "gib3"]) {
-    const piece = game.create("gib"); piece.model = `progs/${model}.mdl`; piece.movement = "bounce";
-    game.setBody(piece, { origin: game.body(entity).origin, velocity: velocity() }); piece.angularVelocity = { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
-    game.schedule(piece, 10 + game.host.random() * 10, game.named.action(piece, "SUB_Remove")); game.link(piece);
+    throwGib(game, game.body(entity).origin, model, health);
   }
-  entity.model = monster.species === "army" ? "progs/h_guard.mdl" : "progs/h_dog.mdl"; entity.frame = 0; entity.movement = "bounce"; entity.solid = "none";
-  game.setBody(entity, { velocity: velocity(), bounds: POINT, origin: vadd(game.body(entity).origin, { x: 0, y: 0, z: -24 }) });
-  entity.angularVelocity = { x: 0, y: game.host.random() * 600, z: 0 }; return game.schedule(entity, 10 + game.host.random() * 10, game.named.action(entity, "SUB_Remove"));
+  return monster.species === "dog" ? throwHead(game, entity, "h_dog", health) : undefined;
 }
 export function spawnMonster(game: Q1EntityServices, entity: Q1Actor): undefined {
   const species = entity.classname === "monster_army" ? "army" : "dog";

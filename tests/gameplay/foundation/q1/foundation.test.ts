@@ -25,6 +25,25 @@ import { previewQ1Supply } from "../../../../src/content/q1/foundation/pickups.t
 import { ZERO, vadd } from "../../../../src/content/q1/foundation/types.ts";
 
 const path = resolve(import.meta.dir, "../../../../../qfiles/q1/rerelease/id1/pak0.pak");
+test.skipIf(!existsSync(path))("authored soldier gib death launches a persistent head before its gib pieces", async () => {
+  const { runtime, due } = gameFor(await loadMap());
+  due(1);
+  const soldier = [...runtime.entities.values()].find(entity => entity.classname === "monster_army"), world = runtime.world;
+  if (soldier === undefined || world === null) throw new Error("Missing authored soldier/world");
+  runtime.setBody(soldier, { ground: world.actor.id });
+  const origin = runtime.body(soldier).origin;
+  runtime.damage(soldier.actor.id, soldier.actor.id, null, 250);
+  const head = runtime.body(soldier), pieces = [...runtime.entities.values()].filter(entity => entity.classname === "gib");
+  expect(soldier.model).toBe("progs/h_guard.mdl");
+  expect(head.ground).toBeNull();
+  expect(head.bounds).toEqual({ min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 56 } });
+  expect(soldier.nextThink).toBe(-1);
+  expect(soldier.think).toBeNull();
+  expect(soldier.angularVelocity.y).toBeLessThan(0);
+  expect(head.origin.z).toBe(Math.fround(origin.z - 24));
+  expect(pieces.map(entity => entity.model)).toEqual(["progs/gib1.mdl", "progs/gib2.mdl", "progs/gib3.mdl"]);
+  for (const piece of pieces) expect(runtime.body(piece).origin).toEqual(head.origin);
+});
 async function loadMap(): Promise<Q1Map> {
   const archive = await openArchive(path);
   try { const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1"); return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" }); }
