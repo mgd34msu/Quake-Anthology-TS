@@ -30,6 +30,9 @@ export class SessionActorRegistry implements ActorRegistry {
   private readonly restoredHistory: { readonly checkpoint: ActorSlotCheckpoint; readonly generationBase: number }[] = [];
   private readonly savedReferences = new Map<string, ActorId>();
   private closed = false;
+  private orderingRevision = 0;
+
+  get revision(): number { return this.orderingRevision; }
 
   constructor(private readonly identities: IdentityOwner, readonly capacity = 65536) {
     if (!Number.isSafeInteger(capacity) || capacity <= 0) throw new RangeError("Actor capacity must be a positive safe integer");
@@ -53,6 +56,7 @@ export class SessionActorRegistry implements ActorRegistry {
     const actor = this.identities.ownedActor(this.identities.actor(index, slot.generation), owner);
     slot.actor = actor;
     slot.definition = definition;
+    this.orderingRevision++;
     return actor;
   }
 
@@ -64,6 +68,7 @@ export class SessionActorRegistry implements ActorRegistry {
     const actor = this.allocate(owner, definition);
     this.requireSlot(actor).source = { provider: owner, slot: sourceSlot };
     table.set(sourceSlot, actor);
+    this.orderingRevision++;
     return actor;
   }
 
@@ -82,6 +87,7 @@ export class SessionActorRegistry implements ActorRegistry {
     slot.actor = null;
     slot.source = null;
     slot.generation++;
+    this.orderingRevision++;
     this.restoredActors.delete(actor.id.slot);
     if (source !== null) this.sourceSlots.get(source.provider)?.delete(source.slot);
     const errors: unknown[] = [];
@@ -169,6 +175,7 @@ export class SessionActorRegistry implements ActorRegistry {
       const actor = active.kind === "free" ? null : identities.ownedActor(identities.actor(index, generation), active.owner);
       registry.slots.push({ generation, actor, definition: active.kind === "free" ? "world:free" : active.definition, source: null });
       if (actor !== null) {
+        registry.orderingRevision++;
         registry.restoredActors.set(index, { savedGeneration: checkpoint.generation, actor });
         registry.savedReferences.set(`${index}/${checkpoint.generation}`, actor.id);
       }
@@ -184,6 +191,7 @@ export class SessionActorRegistry implements ActorRegistry {
       if (table.has(source.sourceSlot) || slot.source !== null) throw new RangeError("Duplicate source actor binding");
       slot.source = { provider: source.provider, slot: source.sourceSlot };
       table.set(source.sourceSlot, actor);
+      registry.orderingRevision++;
     }
     return registry;
   }

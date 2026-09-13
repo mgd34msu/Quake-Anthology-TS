@@ -2489,22 +2489,7 @@ export class SharedSimulation implements Simulation {
         if (run && this.source.kind === "q2") this.source.monsters.beginFrame(this.source.game);
         if (run && this.source.kind === "q3") this.source.game.beginFrame(this.sourceFrame);
         const visited = new Set<OwnedActor>();
-        let cursor: readonly [number, number] | null = null;
-        for (;;) {
-          const previous = cursor;
-          let next: { readonly actor: OwnedActor; readonly position: readonly [number, number] } | null = null;
-          for (const observation of this.actors.observations()) {
-            const candidate = this.actors.resolveOwned(observation.id);
-            if (candidate === null || visited.has(candidate)) continue;
-            const position = this.sourcePosition(candidate.id);
-            if (previous !== null && (position[0] < previous[0] || position[0] === previous[0] && position[1] <= previous[1])) continue;
-            if (next === null || position[0] < next.position[0] || position[0] === next.position[0] && position[1] < next.position[1])
-              next = { actor: candidate, position };
-          }
-          if (next === null) break;
-          const actor = next.actor;
-          cursor = next.position;
-          visited.add(actor);
+        for (const actor of orderedActorTurns(this.actors, actor => this.sourcePosition(actor.id), visited)) {
           const execution = this.actorExecutions.get(actor.id), clientPlayer = this.playerStates.get(actor);
           if (run && clientPlayer?.profile.kind === "q1-netquake" && (this.source.kind === "q1" || this.source.kind === "quakec")) {
             if (this.source.kind === "quakec") this.source.game.beforeActor(actor);
@@ -3192,3 +3177,34 @@ export class SharedSimulation implements Simulation {
 export function createSimulation(options: SimulationOptions): SharedSimulation { return new SharedSimulation(options); }
 import { readSelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
 import type { SelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
+
+
+export function* orderedActorTurns(
+  actors: SessionActorRegistry,
+  positionOf: (actor: OwnedActor) => readonly [number, number],
+  visited: Set<OwnedActor>,
+): Generator<OwnedActor, void, unknown> {
+  let revision = -1;
+  let cursor: readonly [number, number] | null = null;
+  let pending: { readonly actor: OwnedActor; readonly position: readonly [number, number] }[] = [];
+  let index = 0;
+  for (;;) {
+    if (revision !== actors.revision) {
+      pending = [];
+      for (const observation of actors.observations()) {
+        const actor = actors.resolveOwned(observation.id);
+        if (actor !== null && !visited.has(actor)) pending.push({ actor, position: positionOf(actor) });
+      }
+      pending.sort((left, right) => left.position[0] - right.position[0] || left.position[1] - right.position[1]);
+      revision = actors.revision;
+      index = 0;
+    }
+    const next = pending[index++];
+    if (next === undefined) return;
+    if (visited.has(next.actor) || cursor !== null && (next.position[0] < cursor[0]
+      || next.position[0] === cursor[0] && next.position[1] <= cursor[1])) continue;
+    cursor = next.position;
+    visited.add(next.actor);
+    yield next.actor;
+  }
+}
