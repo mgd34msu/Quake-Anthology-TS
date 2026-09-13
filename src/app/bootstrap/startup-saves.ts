@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 import { readSaveImage } from "../../persistence/save-image.ts";
@@ -24,6 +24,14 @@ export class StartupSaves {
     const row = this.current.rows.find(row => row.id === id), path = this.paths.get(id);
     if (row === undefined || path === undefined) throw new Error("This saved game is no longer listed. Refresh the saved games.");
     if (row.unavailable !== null) throw new Error(row.unavailable);
+    return path;
+  }
+  async namedPath(name: string): Promise<string> {
+    const label = name.trim();
+    if (!/^[\p{L}\p{N} _-]{1,48}$/u.test(label)) throw new Error("Use 1-48 letters, numbers, spaces, - or _.");
+    await mkdir(this.directory, { recursive: true });
+    const path = join(this.directory, `${label}.sav`);
+    if (await Bun.file(path).exists()) throw new Error("Name exists. Select its slot to overwrite.");
     return path;
   }
   async refresh(): Promise<void> {

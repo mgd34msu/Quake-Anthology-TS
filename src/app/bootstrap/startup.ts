@@ -163,7 +163,7 @@ export class StartupApplication {
             seats: Math.min(this.model.options.seats, Math.max(1, settings.clientSlots.length)) } };
         })();
         loading?.menu.setStatus("Preparing world...", true);
-        const game = await Application.open(selected.options, { ...this.host, loading: { deferWindowVisibility: true,
+        const game = await Application.open(selected.options, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true,
           stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values);
         this.game = game;
         try {

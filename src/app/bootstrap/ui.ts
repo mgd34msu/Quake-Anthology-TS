@@ -1,3 +1,4 @@
+import { registerSavedGameMenus, type SavedGameMenuService } from "../../ui/saves/menu.ts";
 import { hudSkinFont } from "../../ui/common/skin.ts";
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import { registerServerSettingsMenu } from "../../ui/settings/server.ts";
@@ -36,6 +37,8 @@ import { bindImageSettings, bindModelSettings } from "../../ui/settings/images.t
 
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
+  pauseMenuOpen = false;
+  private readonly saves: ReturnType<typeof registerSavedGameMenus>;
   readonly preferences: SeatUiPreferences;
   readonly messages: SeatHudMessages;
   readonly weaponWheel: SeatWeaponWheel;
@@ -83,7 +86,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService) {
     const seat = local.player.seat.id;
     this.font = font; this.typography = typography;
     this.now = input.now;
@@ -128,11 +131,14 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
+    this.saves = registerSavedGameMenus(this.controller, saves);
     this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Paused", fullScreen: true,
       controls: [button("resume", "Resume game", 1, () => { this.controller.closeAll(); return undefined; }),
-        button("settings", "Options", 3, () => this.controller.openMenu(this.settings.root)),
+        button("save", "Save game", 2, () => this.controller.openMenu(this.saves.save)),
+        button("load", "Load game", 3, () => this.controller.openMenu(this.saves.load)),
+        button("settings", "Options", 4, () => this.controller.openMenu(this.settings.root)),
         button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
-        button("quit", "End game", 8, quit)], open: () => undefined, close: () => undefined }));
+        button("quit", "End game", 8, quit)], open: () => { this.pauseMenuOpen = true; return undefined; }, close: () => { this.pauseMenuOpen = false; return undefined; } }));
     this.disposeInput = input.attachUi(seat, this);
   }
 
@@ -214,5 +220,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }
