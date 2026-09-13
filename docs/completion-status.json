@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "a8f9e2f91d85330f0edce04aa829c27e37751135",
-  "carriedVerdictsFrom": "66e6136be8e0ee266672b4e98c401997ecc17c5b",
+  "sourceCutoff": "36f395ee80c4bede619a4b0eaaf1591873edba74",
+  "carriedVerdictsFrom": "a8f9e2f91d85330f0edce04aa829c27e37751135",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -8,13 +8,13 @@
   "families": [
     {
       "family": "q1",
-      "done": 122,
-      "notDone": 58,
+      "done": 123,
+      "notDone": 57,
       "total": 180,
-      "percentage": 67.8,
+      "percentage": 68.3,
       "methods": {
         "integrated": 102,
-        "sharedReplacement": 15,
+        "sharedReplacement": 16,
         "extendedCommon": 5
       }
     },
@@ -44,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 287,
-    "notDone": 190,
+    "done": 288,
+    "notDone": 189,
     "total": 477,
-    "percentage": 60.2
+    "percentage": 60.4
   },
   "rows": [
     {
@@ -1348,13 +1348,14 @@
     {
       "id": "q1.seats.device-persistence",
       "title": "Persistent per-player device and tuning assignments",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Controller selection/tuning data types and configuration serialization exist, but application input does not load/save complete per-seat device/tuning settings across reconnect/restart.",
+      "status": "done",
+      "basis": "shared-replacement",
+      "reason": "Accepted 36f395ee joins persisted explicit controller GUID/ordinal/serial choices, keyboard/mouse and automatic assignment, per-seat tuning and custom bindings across restart/reconnect in local and remote application paths. Root passed 8 tests/99 assertions covering serial and explicit-none choices, two-to-one-seat keyboard fallback, device remapping, gyro fallback and haptic strength; including remote CPU/GL checks (2/60). Physical hotplug is not qualified; identical GUID/ordinal devices without serials cannot be distinguished after reordering.",
       "paths": [
         "src/settings/config.ts",
         "src/app/bootstrap/input.ts",
-        "src/platform/controller.ts"
+        "src/platform/controller.ts",
+        "src/app/bootstrap/controller-settings.ts"
       ]
     },
     {
@@ -1454,7 +1455,7 @@
       "title": "Controller deadzones, curves and per-seat settings UI",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Tuning controls and gamepad curves exist, but full per-seat preview and persistent application settings are not connected.",
+      "reason": "Accepted 36f395ee joins per-seat controller/mouse tuning persistence and reconnect/device-profile fallback. Full per-seat preview and the complete exposed outer-threshold control workflow remain unqualified; persistent application settings are no longer the missing join.",
       "paths": [
         "src/ui/settings/index.ts",
         "src/input/gamepad.ts",
@@ -1480,7 +1481,7 @@
       "title": "BNVIB tactile playback and per-player rumble",
       "status": "done",
       "basis": "extended-common",
-      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Accepted 36f395ee persists per-seat enable flags and strength, including legacy-file default strength 1. Physical-controller qualification remains unclaimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -1836,7 +1837,7 @@
       "title": "Console scripts, aliases, history and completion",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Command buffering/aliases/exec/wait and console editing are connected, but bind persistence is not: registerConsoleCommands/writeconfig and ConfigStore are not constructed by the application.",
+      "reason": "Command buffering/aliases/exec/wait and console editing are connected. Accepted fc0c15e joins application writeconfig through src/app/bootstrap/capture.ts and src/console/commands.ts, and 36f395ee persists custom bindings across device remaps and restarts. Complete NQ/QW script, history/completion and profile-correct dispatch workflows remain unqualified.",
       "paths": [
         "src/core/commands/index.ts",
         "src/console/commands.ts",
@@ -1861,7 +1862,7 @@
       "title": "NetQuake protocols 15, 666 and 999",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Application NQ host currently fixes protocol15; other NQ protocol widths exist in codecs but are not selectable complete application admission/snapshot paths.",
+      "reason": "Accepted 5a0e1848 joins classic id1 host protocol selection and shared-client negotiation of NQ 15/666/999, explicit capacity limits, alpha/scale, movement, travel and svc_version codec flags. Root passed 9 tests/209 assertions, independent donor servers exercised all three protocols with authoritative movement, and entity updates inside actual UDP payloads matched donor codecs at 9/15/21 bytes. Rerelease/expansion/mod admission, private extensions, static visual-field production, nondefault lerpfinish and full bidirectional native-peer qualification remain open.",
       "paths": [
         "src/app/bootstrap/application.ts",
         "src/app/bootstrap/network/q1.ts",
@@ -3712,7 +3713,7 @@
       "title": "Play sound-triggered tactile envelopes",
       "status": "done",
       "basis": "extended-common",
-      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Accepted 36f395ee persists per-seat enable flags and strength, including legacy-file default strength 1. Physical-controller qualification remains unclaimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -3724,7 +3725,7 @@
       "title": "Route haptics to the affected local player",
       "status": "done",
       "basis": "extended-common",
-      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed.",
+      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Accepted 36f395ee persists per-seat enable flags and strength, including legacy-file default strength 1. Physical-controller qualification remains unclaimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",

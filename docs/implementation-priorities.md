@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite skin/identity reason update at source cutoff `a8f9e2f91d85330f0edce04aa829c27e37751135`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite NQ/controller review at source cutoff `36f395ee80c4bede619a4b0eaaf1591873edba74`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -49,6 +49,8 @@ Complete NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 in both
 Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Hosting, spectator/extensions, split-screen, demos, full prediction/effects and application host download policy remain open; no requirement closes.
 
 Accepted `066ab042` adds QW custom skins and editable saved remote identity; `0c0499c3` supplies shared indexed color/crop semantics. Local source-color forwarding is accepted in `a8f9e2f`, but local setup/color-console and cross-source appearance ownership remain open. Download scope remains base qw/id1, with mod gamedir and host denial-policy work outstanding.
+
+Accepted `5a0e1848` adds bounded classic-id1 NQ 15/666/999 application profiles; remaining product and wire qualification stays open. Accepted `36f395ee` closes shared device persistence, including custom bindings and per-seat haptic enable/strength. Full controller preview and physical-device qualification remain separate.
 
 ### 6. Actual mod execution
 
@@ -208,7 +210,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **190 open requirements** use source cutoff `a8f9e2f91d85330f0edce04aa829c27e37751135`. Only identity and download reasons are narrowed by accepted skin work; no verdict changes. All other 475 records carry unchanged from `66e6136`, without a new audit. Every previously completed row remains absent.
+The following **189 open requirements** use source cutoff `36f395ee80c4bede619a4b0eaaf1591873edba74`. Only device persistence closes; six related reasons are narrowed. The other 470 records carry unchanged from `a8f9e2f91d85330f0edce04aa829c27e37751135`, without a new audit.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
@@ -323,11 +325,10 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q3.bots.aas-reachability-clustering` — AAS reachability, clustering, writing and optimization
 - `q3.bots.foreign-map-construction` — Navigation construction for foreign maps and moving geometry
 
-### Priority 12: Independent local and remote seats — 6 carried-forward open requirements
+### Priority 12: Independent local and remote seats — 5 carried-forward open requirements
 
 - `q1.seats.connections-lifecycle` — Two to four independent local player connections
 - `q1.seats.presentation-ownership` — Resolve shared effects, audio, menus and recordings for seats
-- `q1.seats.device-persistence` — Persistent per-player device and tuning assignments
 - `q1.seats.qw-native-extension` — Local players with QuakeWorld gameplay and native networking
 - `q2.seats.remote-network` — Use multiple local players on a remote server
 - `q3.input.multiple-local-players` — Multiple local seats and remote participation
