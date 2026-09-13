@@ -55,7 +55,7 @@ export interface PreparedQuakeCSource {
 }
 
 /** Decode the selected artifact and genuine assets before synchronous source precaching. */
-export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: MountedContent): Promise<PreparedQuakeCSource> {
+export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: MountedContent, entityText = ""): Promise<PreparedQuakeCSource> {
   const artifact = await mounts.open(execution.artifact.requestedPath);
   if (artifact === null || artifact.reference.digest !== execution.artifact.digest || artifact.reference.id !== execution.artifact.id)
     throw new Error("Selected QuakeC artifact no longer matches its resolved identity");
@@ -70,6 +70,8 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
     if (/\.(mdl|spr|bsp|wav)$/.test(name)) names.add(name);
     offset += name.length + 1;
   }
+  for (const entity of parseEntities(entityText)) for (const name of entity.values())
+    if (/\.(mdl|spr|bsp|wav)$/.test(name)) names.add(name);
   for (const name of names) {
     const asset = await mounts.open(name.endsWith(".wav") ? `sound/${name}` : name);
     if (asset === null) continue; // Conditional source precache fails if it actually requests this absent asset.
@@ -159,7 +161,8 @@ export class QuakeCSource {
     this.models.set(options.recipe.map.geometry.requestedPath, { index: 1, bounds: options.scene.modelBounds(0) });
     for (let model = 1; model < options.world.models.length; model++) this.models.set(`*${model}`, { index: model + 1, bounds: options.scene.modelBounds(model) });
     this.worldHost = new QcWorldHost({ program: prepared.program, entities: this.entities, actors: options.actors, slots: this.slots,
-      bodies: options.physics.bodies, scene: options.scene, numeric: Q1_DONOR_PROFILE, model: name => this.models.get(name) ?? null,
+      bodies: options.physics.bodies, scene: options.scene, numeric: Q1_DONOR_PROFILE,
+      model: name => name === "" ? { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } } : this.models.get(name) ?? null,
       foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
     this.cvars = new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
     for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",

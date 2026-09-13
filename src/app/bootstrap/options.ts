@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
 import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
+import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
   readonly q1Protocol?: Q1ProtocolIdentity;
@@ -13,6 +14,7 @@ export interface ApplicationOptions {
   readonly userContentRoot?: string;
   readonly product: string;
   readonly map: string;
+  readonly quakeCProgram?: string;
   readonly movement: GameFamily;
   readonly character: GameFamily;
   readonly characterModel: string;
@@ -48,6 +50,7 @@ Usage: bun run src/main.ts [options]
   --user-content-root PATH   Writable user content root (default ~/.local/share/quake-typescript/content)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
   --map NAME                 Map name or maps/path.bsp
+  --progs MOUNTED_PATH       Validated QuakeC .dat artifact; dedicated offline classic Q1 only
   --movement q1|q2|q3        Player movement provider
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
@@ -127,6 +130,11 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
       case "--game": options = { ...options, product: value }; break;
       case "--map": options = { ...options, map: mapResourcePath(value) }; break;
+      case "--progs": {
+        const path = normalizeResourcePath(value);
+        if (!path.endsWith(".dat")) throw new Error("--progs requires a mounted .dat artifact");
+        options = { ...options, quakeCProgram: path }; break;
+      }
       case "--movement": options = { ...options, movement: family(value) }; break;
       case "--character": {
         const selected = family(value);

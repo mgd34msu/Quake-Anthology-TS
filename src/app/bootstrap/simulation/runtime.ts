@@ -244,10 +244,12 @@ export class SharedSimulation implements Simulation {
     this.recipe = options.recipe;
     const quakec = options.recipe.execution.find(module => module.kind === "quakec");
     if (quakec !== undefined) {
+      const nativeMap = quakec.api.kind === "q1-quakeworld" ? options.recipe.map.entities.content.startsWith("q1:quakeworld:id1:")
+        : options.recipe.map.entities.content.startsWith("q1:classic:id1:") || options.recipe.map.entities.content.startsWith("q1:classic:hipnotic:");
       if (options.dedicated !== true || options.preparedQuakeC === undefined || !isDeepStrictEqual(quakec, options.preparedQuakeC.execution)
-        || options.world.kind !== "q1-bsp" || options.recipe.execution.length !== 1 || !options.recipe.map.entities.content.startsWith(quakec.api.kind === "q1-quakeworld" ? "q1:quakeworld:id1:" : "q1:classic:id1:")
+        || options.world.kind !== "q1-bsp" || options.recipe.execution.length !== 1 || !nativeMap
         || options.recipe.enemies.kind !== "map-defined" || options.recipe.weapons.some(weapon => !isDeepStrictEqual(weapon, options.recipe.map.entities)))
-        throw new Error("QuakeC simulation requires the prepared dedicated native classic id1 artifact and map-defined actors");
+        throw new Error("QuakeC simulation requires the prepared dedicated native supported artifact and map-defined actors");
       if (quakec.api.kind === "q1-quakeworld" && (options.mode !== "deathmatch" || options.maxClients > 32 || providerTiming(options.recipe, options.recipe.movement.provider).clock.kind !== "q1-quakeworld"))
         throw new Error("Native QuakeWorld requires deathmatch, at most 32 clients and QuakeWorld movement");
       if (options.restore !== undefined || options.travel !== undefined && (options.travel.source.kind !== (quakec.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake")) || (options.restoredClients?.length ?? 0) !== 0
