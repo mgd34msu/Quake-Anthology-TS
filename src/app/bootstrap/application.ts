@@ -537,7 +537,8 @@ export class Application {
         const sourceClient = await this.createQ3SeatClient(local, assets, audioOwner, inputOwner, native, this.simulation);
         if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
-          (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
+          (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)));
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -708,13 +709,14 @@ export class Application {
         this.frontendOverrides = frontendOverrides;
         this.frontendBaseline = readFrontendPreferences(input, audio);
         const current = simulation, worldAssets = assets, menuArt = art;
-        const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor })));
+        const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor, language: previous.rerelease.selectedLanguage(player.seat.id) })));
         const presentations: WorldSeatPresentation[] = [], q3Clients = new Map<SeatId, Q3SeatClient>();
         for (const [index, local] of input.locals.entries()) {
           const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id));
           if (sourceClient !== null) q3Clients.set(local.player.seat.id, sourceClient);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
-            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
+            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
           local.player.seat.attachPresentation(presentation, () => presentation.close());

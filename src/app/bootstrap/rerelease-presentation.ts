@@ -10,16 +10,20 @@ import type { SeatTextPresentation } from "../../text/layout.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import { RereleaseFog } from "./rerelease-presentation/fog.ts";
+import { NativeLanguageSettings } from "../../ui/settings/services.ts";
+import type { SettingBinding } from "../../ui/settings/index.ts";
 
 export interface RereleasePresentationSeat { readonly seat: SeatId; readonly actor: ActorId; readonly language?: string; }
 export type RereleaseSkyView = NonNullable<WorldViewInput["q2Sky"]>;
 type RereleaseSource = Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>;
 interface SeatState {
   readonly binding: RereleasePresentationSeat;
-  readonly catalogs: Map<ContentId, Promise<LocalizationCatalog>>;
+  readonly catalogs: Map<ContentId, Promise<NativeLanguageSettings>>;
+  language: string;
   readonly fog: RereleaseFog;
   fogReceived: boolean;
   story: string;
+  storySource: { readonly content: ContentId; readonly text: string } | null;
 }
 
 /** Player name tokens are resolved after localized argument expansion, as in CL_ParseLocPrint. */
@@ -44,7 +48,7 @@ export class ApplicationRereleasePresentation {
   }
 
   constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[]) {
-    this.seats = seats.map(binding => ({ binding, catalogs: new Map<ContentId, Promise<LocalizationCatalog>>(), fog: new RereleaseFog(), fogReceived: false, story: "" }));
+    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null }));
   }
 
   receive(events: readonly SimulationPresentationEvent[]): void {
@@ -57,12 +61,40 @@ export class ApplicationRereleasePresentation {
     }
   }
 
-  private catalog(seat: SeatState, content: ContentId): Promise<LocalizationCatalog> {
+  selectedLanguage(id: SeatId): string { return this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english"; }
+
+  async languageBinding(id: SeatId, content: ContentId, failed: (error: unknown) => void): Promise<SettingBinding | undefined> {
+    if ((await this.assets.provider(content)).family !== "q2") return undefined;
+    const seat = this.seats.find(seat => seat.binding.seat.equals(id));
+    if (seat === undefined) throw new Error("Unknown localization seat");
+    const settings = await this.catalog(seat, content), binding = settings.binding();
+    if (binding.kind !== "choice") throw new Error("Language setting must be a choice");
+    return { ...binding, write: (value: string) => {
+      settings.select(value).then(() => {
+        seat.language = binding.read();
+        for (const key of seat.catalogs.keys()) if (key !== content) seat.catalogs.delete(key);
+      }).catch(failed);
+    } };
+  }
+
+  private catalog(seat: SeatState, content: ContentId): Promise<NativeLanguageSettings> {
     const existing = seat.catalogs.get(content); if (existing !== undefined) return existing;
-    const pending = (async (): Promise<LocalizationCatalog> => {
-      const provider = await this.assets.provider(content), language = seat.binding.language ?? "english", path = `localization/loc_${language}.txt`;
-      const [primary, english] = await Promise.all([provider.mounts.open(path), language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt")]);
-      const result = new LocalizationCatalog(seat.binding.seat, "q2-rerelease"); result.loadOrdered({ base: primary?.bytes ?? null, mods: [] }, { base: english?.bytes ?? null, mods: [] }); return result;
+    const pending = (async (): Promise<NativeLanguageSettings> => {
+      const provider = await this.assets.provider(content);
+      const languages = new Set(["english", seat.language]);
+      for (const file of await provider.mounts.listFiles("localization", ".txt")) {
+        const match = /^loc_([a-z]+)\.txt$/iu.exec(file), language = match?.[1];
+        if (language !== undefined) languages.add(language.toLowerCase());
+      }
+      const result = new NativeLanguageSettings(new LocalizationCatalog(seat.binding.seat, "q2-rerelease"), [...languages].sort().map(language => ({
+        id: language, label: language.charAt(0).toUpperCase() + language.slice(1), load: async () => {
+          const [primary, mod, english, englishMod] = await Promise.all([provider.mounts.open(`localization/loc_${language}.txt`), provider.mounts.open(`localization/loc_${language}_mod.txt`),
+            language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt"), language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english_mod.txt")]);
+          return { primary: { base: primary?.bytes ?? null, mods: mod === null ? [] : [mod.bytes] }, fallback: { base: english?.bytes ?? null, mods: englishMod === null ? [] : [englishMod.bytes] } };
+        },
+      })), seat.language, () => undefined);
+      await result.select(seat.language);
+      return result;
     })();
     seat.catalogs.set(content, pending); return pending;
   }
@@ -91,11 +123,15 @@ export class ApplicationRereleasePresentation {
       if (event.kind !== "story" && event.kind !== "localized-print") continue;
       for (const seat of this.seats) {
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;
-        const catalog = await this.catalog(seat, source.content), text = q2PlayerNameTokens(catalog.localize(event.text, event.kind === "localized-print" ? event.args : []), this.names);
-        if (event.kind === "story") seat.story = text;
+        const catalog = await this.catalog(seat, source.content), text = q2PlayerNameTokens(catalog.localization.localize(event.text, event.kind === "localized-print" ? event.args : []), this.names);
+        if (event.kind === "story") { seat.story = text; seat.storySource = { content: source.content, text: event.text }; }
         else this.prints.push({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
           ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }), event: { kind: "print", target: seat.binding.actor, level: event.level, text } });
       }
+    }
+    for (const seat of this.seats) if (seat.storySource !== null) {
+      const catalog = await this.catalog(seat, seat.storySource.content);
+      seat.story = q2PlayerNameTokens(catalog.localization.localize(seat.storySource.text), this.names);
     }
   }
 
