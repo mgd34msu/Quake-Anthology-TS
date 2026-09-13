@@ -13,7 +13,7 @@ function object(value: unknown): Record<string, unknown> {
   return value;
 }
 
-function accountId(token: string): string {
+export function subscriptionAccountId(token: string): string {
   try {
     const payload = token.split(".")[1];
     if (payload === undefined || !/^[A-Za-z0-9_-]+$/.test(payload)) throw new Error();
@@ -26,7 +26,7 @@ function accountId(token: string): string {
 }
 
 export async function requestCodex(input: TransportRequest, credential: SubscriptionCredential, fetcher: LlmFetch): Promise<string> {
-  const id = accountId(credential.accessToken), session = crypto.randomUUID();
+  const id = subscriptionAccountId(credential.accessToken), session = crypto.randomUUID();
   const response = await fetchLlmResponse("https://chatgpt.com/backend-api/codex/responses", {
     method: "POST", signal: input.signal,
     headers: {
@@ -38,6 +38,7 @@ export async function requestCodex(input: TransportRequest, credential: Subscrip
       model: input.model.replace(/^openai[:/]/, ""), store: false, stream: true,
       instructions: input.instructions.trim() || "You are a helpful assistant.",
       input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
+      ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }),
       text: { verbosity: "medium" }, include: ["reasoning.encrypted_content"], prompt_cache_key: session,
     }),
   }, fetcher, input.signal);

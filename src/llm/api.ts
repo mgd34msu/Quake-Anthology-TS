@@ -6,7 +6,7 @@ import { consumeSse } from "./sse.ts";
 export async function requestChatCompletions(input: TransportRequest, credential: { readonly apiKey: string; readonly baseUrl: string }, fetcher: LlmFetch): Promise<string> {
   const response = await fetchLlmResponse(`${credential.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST", headers: { authorization: `Bearer ${credential.apiKey}`, "content-type": "application/json", accept: "text/event-stream" },
-    body: JSON.stringify({ model: input.model, messages: [{ role: "system", content: input.instructions }, { role: "user", content: input.prompt }], stream: true }),
+    body: JSON.stringify({ model: input.model, ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }), messages: [{ role: "system", content: input.instructions }, { role: "user", content: input.prompt }], stream: true }),
   }, fetcher, input.signal);
   if (!response.ok) { cancelResponseBody(response); throw new LlmHttpError(response.status); }
   let text = "", finished = false, done = false;

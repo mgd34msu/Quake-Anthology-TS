@@ -8,6 +8,7 @@ export interface LlmRequestInput {
 }
 export interface TransportRequest extends Omit<LlmRequestInput, "signal"> {
   readonly model: string;
+  readonly reasoningEffort?: string;
   readonly signal: AbortSignal;
 }
 export type LlmFetch = (url: string, init: RequestInit) => Promise<Response>;

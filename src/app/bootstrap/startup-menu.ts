@@ -288,7 +288,7 @@ export class StartupMenu {
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (active !== "menu:settings:llm" && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (!active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
