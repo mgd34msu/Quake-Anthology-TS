@@ -226,6 +226,6 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
-    this.game?.requestQuit(); this.remote?.requestQuit(); this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;
+    this.game?.requestQuit(); this.remote?.requestQuit(); await this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;
   }
 }

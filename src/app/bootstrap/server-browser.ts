@@ -8,6 +8,8 @@ import { q2DiscoveryWire, readQ2Status } from "../../network/q2/connectionless.t
 import { readQ2OutOfBand } from "../../network/q2/handshake.ts";
 import { q3DiscoveryWire, decodeQ3ServerStatus } from "../../network/q3/discovery.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import { directServerText, maximumDirectServers, readDirectServers } from "./server-browser-addresses.ts";
+import type { DirectServerAddress } from "./server-browser-addresses.ts";
 
 export type BrowserProtocol = "q1" | "q2" | "q3";
 export interface BrowserConnection { readonly protocol: BrowserProtocol; readonly remote: string; }
@@ -19,8 +21,12 @@ export function browserAddress(address: NetworkAddress): string {
 }
 export class StartupServerBrowser {
   private readonly browsers: ReadonlyMap<BrowserProtocol, ServerBrowser>;
+  private readonly directServers = new Map<BrowserProtocol, readonly DirectServerAddress[]>();
+  private readonly addresses = new Map<BrowserProtocol, string>();
+  private writes: Promise<void> = Promise.resolve();
   protocol: BrowserProtocol = "q1";
-  address = "localhost:26000";
+  get address(): string { return this.addresses.get(this.protocol) ?? `localhost:${ports[this.protocol]}`; }
+  set address(value: string) { this.addresses.set(this.protocol, value); }
   filter = "";
   favoritesOnly = false;
   selected: string | null = null;
@@ -36,6 +42,15 @@ export class StartupServerBrowser {
     const result = new StartupServerBrowser(transport, config);
     try {
       for (const protocol of protocols) { const saved = await config.loadText(`servers-${protocol}`); if (saved !== null) { if (saved.length > 65536) throw new Error("Saved server list is too large"); result.browser(protocol).restoreFavorites(saved); for (const address of result.browser(protocol).favoriteAddresses()) browserAddress(address); } }
+      for (const protocol of protocols) {
+        const saved = await config.loadText(`servers-direct-${protocol}`);
+        if (saved === null) continue;
+        const servers = readDirectServers(saved);
+        result.directServers.set(protocol, servers);
+        for (const server of servers) result.browser(protocol).add(server.address, "direct");
+        const last = servers[0];
+        if (last !== undefined) result.addresses.set(protocol, last.remote);
+      }
       return result;
     } catch (error) { transport.close(); throw error; }
   }
@@ -44,7 +59,7 @@ export class StartupServerBrowser {
   }
   choose(protocol: string): void {
     if (protocol !== "q1" && protocol !== "q2" && protocol !== "q3") throw new Error("Unsupported server protocol");
-    this.protocol = protocol; this.selected = null; this.address = `localhost:${ports[protocol]}`;
+    this.protocol = protocol; this.selected = null;
   }
   rows(): readonly BrowserEntry[] {
     const search = this.filter.toLowerCase();
@@ -52,24 +67,56 @@ export class StartupServerBrowser {
       && `${entry.status?.name ?? ""} ${entry.status?.map ?? ""} ${browserAddress(entry.address)}`.toLowerCase().includes(search))
       .sort((a, b) => (a.pingMilliseconds ?? Infinity) - (b.pingMilliseconds ?? Infinity) || browserAddress(a.address).localeCompare(browserAddress(b.address)));
   }
-  select(key: string): void { const entry = this.rows().find(entry => addressKey(entry.address) === key); if (entry !== undefined) { this.selected = key; this.address = browserAddress(entry.address); } }
+  select(key: string): void {
+    const entry = this.rows().find(entry => addressKey(entry.address) === key);
+    if (entry === undefined) return;
+    const direct = entry.sources.includes("direct") ? this.directServers.get(this.protocol)?.find(server => addressKey(server.address) === key) : undefined;
+    this.selected = key; this.address = direct?.remote ?? browserAddress(entry.address);
+  }
   async query(): Promise<void> {
-    if (this.address.length > 255) throw new Error("Server address is too long");
-    const protocol = this.protocol, address = await resolveAddress(this.address, ports[protocol], 4);
-    this.browser(protocol).add(address, "direct");
-    if (!this.browser(protocol).query(address, performance.now(), "status")) throw new Error("Could not send server query");
-    this.status = "Query sent";
+    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    await this.persist(async () => {
+      const address = await resolveAddress(remote, ports[protocol], 4);
+      await this.rememberDirect(protocol, { remote, address });
+      if (!this.browser(protocol).query(address, performance.now(), "status")) throw new Error("Could not send server query");
+      this.status = "Query sent";
+    });
   }
   scan(): void {
     this.browser().broadcast([ipv4Address([255, 255, 255, 255], ports[this.protocol])], performance.now()); this.status = "Searching local network...";
   }
   async favorite(): Promise<void> {
-    const protocol = this.protocol, address = await resolveAddress(this.address, ports[protocol], 4), browser = this.browser(protocol);
-    const existing = browser.list().find(entry => addressKey(entry.address) === addressKey(address));
-    if (existing?.sources.includes("favorite")) browser.removeFavorite(address); else browser.add(address, "favorite");
-    await this.config.dump(`servers-${protocol}`, browser.saveFavorites());
+    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    await this.persist(async () => {
+      const address = await resolveAddress(remote, ports[protocol], 4), browser = this.browser(protocol);
+      const before = browser.saveFavorites(), existing = browser.list().find(entry => addressKey(entry.address) === addressKey(address));
+      const removing = existing?.sources.includes("favorite") === true;
+      if (removing) browser.removeFavorite(address); else browser.add(address, "favorite");
+      try { await this.config.dump(`servers-${protocol}`, browser.saveFavorites()); }
+      catch (error) { browser.restoreFavorites(before); throw error; }
+      this.status = removing ? "Favorite removed" : "Favorite added";
+    });
   }
-  connection(): BrowserConnection { return { protocol: this.protocol, remote: this.address }; }
+  async connection(): Promise<BrowserConnection> {
+    const protocol = this.protocol, remote = directServerText(this.address.trim());
+    await this.persist(async () => {
+      const address = await resolveAddress(remote, ports[protocol], 4);
+      await this.rememberDirect(protocol, { remote, address });
+    });
+    return { protocol, remote };
+  }
+  private persist(write: () => Promise<void>): Promise<void> {
+    const pending = this.writes.then(write);
+    this.writes = pending.catch(() => undefined);
+    return pending;
+  }
+  private async rememberDirect(protocol: BrowserProtocol, server: DirectServerAddress): Promise<void> {
+    const servers = [server, ...this.directServers.get(protocol) ?? []].filter((entry, index, entries) =>
+      entries.findIndex(candidate => addressKey(candidate.address) === addressKey(entry.address)) === index).slice(0, maximumDirectServers);
+    await this.config.dump(`servers-direct-${protocol}`, `${JSON.stringify({ version: 1, servers })}\n`);
+    this.directServers.set(protocol, servers);
+    this.browser(protocol).add(server.address, "direct");
+  }
   poll(): void {
     for (let event = this.transport.poll(); event !== null; event = this.transport.poll()) {
       if (event.kind === "error") { this.status = event.error.message; continue; }
@@ -89,5 +136,5 @@ export class StartupServerBrowser {
     }
     for (const [protocol, browser] of this.browsers) if (browser.expireQueries(performance.now(), 3000).length > 0 && protocol === this.protocol) this.status = "No response from server";
   }
-  close(): void { this.transport.close(); }
+  async close(): Promise<void> { this.transport.close(); await this.writes; }
 }

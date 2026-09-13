@@ -192,7 +192,7 @@ export class StartupMenu {
         64, 252 + index * 34, 512, () => browser.select(addressKey(entry.address)))),
       button("server-page", `Page ${this.page + 1}/${pages}`, 64, 358, 240, () => { this.page = (this.page + 1) % pages; }),
       button("server-favorites", browser.favoritesOnly ? "Favorites only" : "All servers", 320, 358, 256, () => { browser.favoritesOnly = !browser.favoritesOnly; this.page = 0; }),
-      button("server-connect", "Connect", 64, 396, 240, () => this.options.connect?.(browser.connection())),
+      button("server-connect", "Connect", 64, 396, 240, () => run(async () => this.options.connect?.(await browser.connection()))),
       button("server-back", "Back", 320, 396, 256, () => this.controller.closeMenu()),
     ];
   }
