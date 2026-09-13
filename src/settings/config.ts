@@ -125,5 +125,9 @@ export class ConfigStore {
     const text = await readFile(settingsPath(this.root, name), "utf8");
     commands.append(`${text}\n`, { session: context.session, origin: { kind: "script", name, caller: context.origin } });
   }
+  async loadText(name: string): Promise<string | null> {
+    const file = Bun.file(settingsPath(this.root, name));
+    return await file.exists() ? file.text() : null;
+  }
   async dump(name: string, contents: string): Promise<void> { await writeAtomic(settingsPath(this.root, name), contents); }
 }

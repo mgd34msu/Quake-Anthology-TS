@@ -1,3 +1,6 @@
+import { addressKey } from "../../network/common/endpoint.ts";
+import { browserAddress } from "./server-browser.ts";
+import type { StartupServerBrowser, BrowserConnection } from "./server-browser.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { RenderCommand } from "../../contracts/render.ts";
 import type { SeatInputEvent, UiControl, UiDrawCommand, UiDrawContext, UiMenuId } from "../../contracts/ui.ts";
@@ -23,6 +26,8 @@ export interface StartupMenuOptions {
   readonly titleFont: TextFontSelection;
   readonly now: () => number;
   readonly play: () => void;
+  readonly browser?: StartupServerBrowser;
+  readonly connect?: (connection: BrowserConnection) => void;
   readonly load: (id: string) => void;
   readonly saves: () => StartupSaveList;
   readonly refreshSaves: () => void;
@@ -31,6 +36,7 @@ export interface StartupMenuOptions {
   readonly applyDisplay: () => void;
 }
 const main: UiMenuId = "menu:startup:main";
+const browserMenu: UiMenuId = "menu:startup:servers";
 const session: UiMenuId = "menu:startup:session";
 const optionsMenu: UiMenuId = "menu:startup:options";
 const displayMenu: UiMenuId = "menu:startup:display";
@@ -76,7 +82,8 @@ export class StartupMenu {
       this.button("options", "Options", 3, () => this.controller.openMenu(optionsMenu)),
       this.button("quit", "Quit", 4, options.quit),
     ]);
-    this.register(session, () => [...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
+    this.register(browserMenu, () => this.browserControls());
+    this.register(session, () => [...(this.multiplayer && options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu), true)] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("play", "Play", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
     this.register(categoryMenu, () => [
@@ -147,6 +154,36 @@ export class StartupMenu {
     this.options.model.select("mode", multiplayer ? this.multiplayerMode : "singleplayer");
     this.status = ""; this.controller.openMenu(session);
   }
+  resumeServerBrowser(): void { if (this.options.browser !== undefined) this.controller.openMenu(browserMenu); }
+
+  private browserControls(): readonly UiControl[] {
+    const browser = this.options.browser;
+    if (browser === undefined) return [this.back()];
+    const run = (work: () => Promise<void>): void => { work().catch((error: unknown) => { browser.status = error instanceof Error ? error.message : String(error); }); };
+    const button = (id: string, label: string, x: number, y: number, width: number, action: () => void): UiControl =>
+      ({ ...this.button(id, label, 0, action), rect: { x, y, width, height: 30 } });
+    const text = (id: string, label: string, value: string, y: number, change: (value: string) => void, submit: () => void): UiControl => ({
+      id: `ui:startup:${id}`, kind: "text-entry", label, text: value, maximumLength: 255, rect: { x: 64, y, width: 512, height: 30 },
+      enabled: !this.busy, visible: true, change: (_seat, value) => { change(value); return undefined; }, submit: () => { submit(); return undefined; } });
+    const entries = browser.rows(), pages = Math.max(1, Math.ceil(entries.length / 3)); this.page = Math.min(this.page, pages - 1);
+    return [
+      { id: "ui:startup:server-protocol", kind: "choice", label: "Game", rect: { x: 64, y: 108, width: 512, height: 30 }, enabled: true, visible: true,
+        choices: [{ id: "q1", label: "Quake" }, { id: "q2", label: "Quake II" }, { id: "q3", label: "Quake III Arena" }], selected: browser.protocol,
+        select: (_seat, value) => { browser.choose(value); this.page = 0; return undefined; } },
+      text("server-address", "Address", browser.address, 144, value => { browser.address = value; }, () => run(() => browser.query())),
+      button("server-query", "Query", 64, 180, 160, () => run(() => browser.query())),
+      button("server-lan", "Find LAN", 240, 180, 160, () => browser.scan()),
+      button("server-favorite", "Favorite", 416, 180, 160, () => run(() => browser.favorite())),
+      text("server-filter", "Filter", browser.filter, 216, value => { browser.filter = value; this.page = 0; }, () => undefined),
+      ...entries.slice(this.page * 3, this.page * 3 + 3).map((entry, index) => button(`server:${addressKey(entry.address)}`,
+        this.fit(`${entry.sources.includes("favorite") ? "* " : ""}${entry.status?.name || browserAddress(entry.address)}  ${entry.status === null ? "?" : `${entry.status.players}/${entry.status.maxPlayers}`}  ${entry.pingMilliseconds === null ? "" : `${Math.round(entry.pingMilliseconds)}ms`}`, 490, 2.6),
+        64, 252 + index * 34, 512, () => browser.select(addressKey(entry.address)))),
+      button("server-page", `Page ${this.page + 1}/${pages}`, 64, 358, 240, () => { this.page = (this.page + 1) % pages; }),
+      button("server-favorites", browser.favoritesOnly ? "Favorites only" : "All servers", 320, 358, 256, () => { browser.favoritesOnly = !browser.favoritesOnly; this.page = 0; }),
+      button("server-connect", "Connect", 64, 396, 240, () => this.options.connect?.(browser.connection())),
+      button("server-back", "Back", 320, 396, 256, () => this.controller.closeMenu()),
+    ];
+  }
   private register(id: UiMenuId, controls: () => readonly UiControl[]): void {
     this.disposers.push(this.controller.register(id, () => ({ id, title: "", fullScreen: false, controls: controls(), open: () => undefined, close: () => undefined })));
   }
@@ -215,7 +252,7 @@ export class StartupMenu {
     const backdrop = menuBackdrop(context), panel = menuPanel(context, active === main);
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
-      : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
+      : active === browserMenu ? "Find servers" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Counts: this map. Choices apply across this campaign.", 64, 82, 1.5);
@@ -229,6 +266,10 @@ export class StartupMenu {
         text(this.fit(row.label, 260, 1.35), 316, 150 + index * 28, 1.35, true);
         text(this.fit(value.replace(" (campaign default)", "").replace(" authored monsters", " monsters"), 260, 2.1), 316, 161 + index * 28, 2.1);
       }
+    }
+    if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
+      const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);
+      text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, 1.8), 64, 450, 1.8);
     }
     if (active === loadMenu) {
       const saves = this.options.saves();

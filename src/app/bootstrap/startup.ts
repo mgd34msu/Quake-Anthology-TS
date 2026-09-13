@@ -1,3 +1,7 @@
+import { StartupServerBrowser } from "./server-browser.ts";
+import type { BrowserConnection } from "./server-browser.ts";
+import { ConfigStore } from "../../settings/config.ts";
+import { RemoteApplication } from "./remote-application.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CommandContext } from "../../contracts/common.ts";
@@ -29,7 +33,7 @@ import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
 
-type StartupAction = { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
+type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
   readonly display: StartupDisplay;
@@ -45,6 +49,8 @@ interface StartupGraphics {
 export class StartupApplication {
   private graphics: StartupGraphics | null = null;
   private game: Application | null = null;
+  private remote: RemoteApplication | null = null;
+  private browser: StartupServerBrowser | null = null;
   private pending: StartupAction | null = null;
   private stopping = false;
   private closed = false;
@@ -62,7 +68,7 @@ export class StartupApplication {
 
   static async open(options: ApplicationOptions, host: ApplicationHost, saveDirectory = join(homedir(), ".local", "share", "quake-typescript", "saves")): Promise<StartupApplication> {
     const application = new StartupApplication(await createStartupSelection(options), host, saveDirectory);
-    try { await application.openGraphics(); return application; }
+    try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); await application.openGraphics(); return application; }
     catch (error) { await application.close(); throw error; }
   }
 
@@ -90,6 +96,7 @@ export class StartupApplication {
       const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client } };
       const commands = new CommandBuffer({ dialect: "q3", context });
       menu = new StartupMenu({ seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
+        ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         play: () => { this.pending = { kind: "play" }; }, load: id => {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
@@ -126,7 +133,7 @@ export class StartupApplication {
   get activeGame(): Application | null { return this.game; }
   get inputSeat(): SeatId | null { return this.graphics?.menu.controller.seat ?? null; }
   input(event: SeatInputEvent): boolean { return this.graphics?.menu.input(event) ?? false; }
-  requestQuit(): void { this.stopping = true; this.game?.requestQuit(); }
+  requestQuit(): void { this.stopping = true; this.game?.requestQuit(); this.remote?.requestQuit(); }
   readPixels(): Uint8Array { if (this.graphics === null) throw new Error("Startup menu is not visible"); return this.graphics.renderer.readPixels(); }
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame(); }
 
@@ -134,6 +141,7 @@ export class StartupApplication {
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw();
     try {
+      if (action.kind === "connect") { await this.connect(action.connection); return; }
       const selected = action.kind === "play" ? await this.model.resolve() : await (async () => {
         const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
         return { recipe: image.recipe, options: { ...this.model.options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
@@ -158,8 +166,25 @@ export class StartupApplication {
     }
   }
 
+  private async connect(connection: BrowserConnection): Promise<void> {
+    const family = connection.protocol;
+    const options: ApplicationOptions = { ...this.model.options, product: family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3",
+      map: family === "q1" ? "maps/e1m1.bsp" : family === "q2" ? "maps/base1.bsp" : "maps/q3dm1.bsp", movement: family, character: family,
+      characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats: 1, dedicated: false, rules: "standard",
+      network: { kind: family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
+    this.graphics?.close(); this.graphics = null;
+    try {
+      const remote = await RemoteApplication.open(options, { ...this.host, print: text => {
+        this.host.print(text); const message = text.trim(); if (message !== "") this.status = message.slice(-512); return undefined;
+      } }); this.remote = remote;
+      try { if (this.stopping) remote.requestQuit(); await remote.run(); }
+      finally { this.remote = null; await remote.close(); }
+    } finally { if (!this.stopping && !this.closed) { const graphics = await this.openGraphics(); graphics.menu.resumeServerBrowser(); } }
+  }
+
   async step(): Promise<void> {
     if (this.closed || this.stopping) return;
+    this.browser?.poll();
     const graphics = this.graphics;
     if (graphics === null) throw new Error("Startup frame has no renderer");
     for (const event of graphics.renderer.window.pollEvents()) graphics.router.handlePlatform(event);
@@ -193,6 +218,6 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
-    this.game?.requestQuit(); this.graphics?.close(); this.graphics = null;
+    this.game?.requestQuit(); this.remote?.requestQuit(); this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;
   }
 }

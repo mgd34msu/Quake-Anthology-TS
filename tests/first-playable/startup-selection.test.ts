@@ -181,3 +181,36 @@ test.skipIf(!existsSync(corpus))("environment resources retain native sound sele
       environment: { kind: "selected", resource: { content: preset.presentation.audio.content, path: "sound/default.environments" } } } } } })).rejects.toThrow("Required environment resource is absent from its selected content and base");
   }
 }, 30000);
+
+for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" }, { family: "q2", product: "q2-classic-baseq2", map: "base1" }, { family: "q3", product: "q3-baseq3", map: "q3dm1" }]) test(`startup browser queries a real local ${profile.family} host and preserves favorites`, async () => {
+  const { Application } = await import("../../src/app/bootstrap/application.ts");
+  const { StartupServerBrowser, browserAddress } = await import("../../src/app/bootstrap/server-browser.ts");
+  const { ConfigStore } = await import("../../src/settings/config.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const directory = await mkdtemp(`${tmpdir()}/quake-browser-`), config = new ConfigStore(directory);
+  const command = parseApplicationCommand(["--game", profile.product, "--map", profile.map, "--character", profile.family, "--movement", profile.family, "--dedicated", "--listen", "0", "--bind", "127.0.0.1"]);
+  if (command.kind !== "run") throw new Error("Missing host options");
+  const app = await Application.open(command.options, { print: () => undefined });
+  const browser = await StartupServerBrowser.open(config);
+  try {
+    const address = app.networkAddress; if (address === null) throw new Error("Missing local host address");
+    browser.choose(profile.family); browser.address = `localhost:${address.port}`; await browser.query();
+    for (let index = 0; index < 30 && browser.rows()[0]?.status == null; index++) { await app.step(16); await Bun.sleep(2); browser.poll(); }
+    const row = browser.rows()[0];
+    expect(row?.status?.map).toBe(profile.map); expect(row?.pingMilliseconds).not.toBeNull();
+    expect(row?.status?.wire).toEqual({ kind: "source", protocol: profile.family === "q1" ? { kind: "q1-netquake", version: 15 }
+      : profile.family === "q2" ? { kind: "q2-classic", version: 34 } : { kind: "q3", version: 68 } });
+    browser.filter = "absent-name"; expect(browser.rows()).toHaveLength(0); browser.filter = "";
+    await browser.favorite();
+    browser.address = "[::1]:26000"; await expect(browser.query()).rejects.toThrow("Address family");
+    browser.address = browserAddress(address);
+    const restored = await StartupServerBrowser.open(config);
+    try { restored.choose(profile.family); expect(restored.rows()[0]?.sources).toContain("favorite"); expect(restored.rows()[0]?.address).toEqual(address); }
+    finally { restored.close(); }
+    if (profile.family === "q1") {
+      await config.dump("servers-q1", '[{"kind":"loopback","id":"invalid-favorite"}]');
+      await expect(StartupServerBrowser.open(config)).rejects.toThrow("requires an IP address");
+    }
+  } finally { browser.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
+}, 30000);
