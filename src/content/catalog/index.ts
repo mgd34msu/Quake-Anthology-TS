@@ -66,28 +66,44 @@ function archiveFormat(name: string): ArchiveFormat | null {
     case ".pak": return "pak";
     case ".pk3": return "pk3";
     case ".kpf": return "kpf";
-    case ".zip": return "zip";
+    case ".zip": case ".pkz": return "zip";
     default: return null;
   }
 }
 
 function sourceCompare(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 
+/** q2repro files.c pakcmp: numeric pak prefixes first, then case-insensitive names. */
+function compareQ2Archives(left: CatalogArchive, right: CatalogArchive): number {
+  const first = basename(left.path).toLowerCase(), second = basename(right.path).toLowerCase();
+  const firstPak = first.startsWith("pak"), secondPak = second.startsWith("pak");
+  if (!firstPak || !secondPak) return firstPak ? -1 : secondPak ? 1 : sourceCompare(first, second);
+  const parse = (name: string): { readonly number: bigint; readonly suffix: string } => {
+    const tail = name.slice(3), match = /^[ \t\n\r\f\v]*[+-]?\d+/.exec(tail);
+    if (match === null) return { number: 0n, suffix: tail };
+    const value = BigInt(match[0].trim()), magnitude = value < 0n ? -value : value;
+    const maximum = 0xffffffffffffffffn;
+    return { number: magnitude > maximum ? maximum : BigInt.asUintN(64, value), suffix: tail.slice(match[0].length) };
+  };
+  const a = parse(first), b = parse(second);
+  return a.number < b.number ? -1 : a.number > b.number ? 1 : sourceCompare(a.suffix, b.suffix);
+}
+
 /** Highest priority first, matching each source engine's prepend order. */
 export function orderGameArchives(product: ProductExpectation, archives: readonly CatalogArchive[]): readonly CatalogArchive[] {
   const sorted = [...archives].sort((left, right) => sourceCompare(basename(left.path), basename(right.path)));
   if (product.family === "q3") return sorted.filter(archive => archive.format === "pk3")
     .sort((left, right) => sourceCompare(basename(left.path).toLowerCase(), basename(right.path).toLowerCase())).reverse();
+  if (product.family === "q2") return archives.filter(archive => archive.format === "pak" || archive.format === "zip" && /\.pkz$/i.test(archive.path))
+    .sort(compareQ2Archives).reverse();
   const numbered: CatalogArchive[] = [];
-  const limit = product.family === "q2" ? 10 : archives.length + 1;
+  const limit = archives.length + 1;
   for (let index = 0; index < limit; index++) {
     const archive = sorted.find(candidate => basename(candidate.path).toLowerCase() === `pak${index}.pak`);
     if (archive !== undefined) numbered.push(archive);
-    else if (product.family === "q1") break;
+    else break;
   }
-  const extra = product.family === "q2"
-    ? sorted.filter(archive => archive.format === "pak" && !/^pak[0-9]\.pak$/i.test(basename(archive.path)))
-    : sorted.filter(archive => archive.format === "pk3" || archive.format === "kpf");
+  const extra = sorted.filter(archive => archive.format === "pk3" || archive.format === "kpf");
   return [...numbered, ...extra].reverse();
 }
 

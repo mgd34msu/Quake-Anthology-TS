@@ -1,3 +1,8 @@
+import { readQ2DownloadServer } from "../../../network/q2/handshake.ts";
+import { mkdir } from "node:fs/promises";
+import { HttpDownloadQueue, fetchHttpDownloadMetadata } from '../../../network/services/http-downloads.ts';
+import { openArchive } from '../../../content/archive/index.ts';
+import { defaultUserContentRoot, userProductDirectory } from '../../../content/user-data.ts';
 /* Quake II server/sv_user.c SV_BeginDownload_f/SV_NextDownload_f. GPL-2.0-or-later. */
 import { canDownloadResource } from '../../../content/mounts/index.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
@@ -18,16 +23,19 @@ import type { Q2ApplicationGameState } from './types.ts';
 import { q2ApplicationLayout } from './q2-layout.ts';
 
 export interface Q2ApplicationDownloads {
+    httpServer?(): URL | null;
     allowed(name: string): boolean;
     open(name: string): Promise<DownloadSource | null>;
 }
 
 /** FS_LoadFile retains selected mounted bytes for the lifetime of one native transfer. */
 export function createQ2ApplicationDownloads(mounts: MountedContent, cvars: CvarRegistry, edition: 'classic' | 'rerelease'): Q2ApplicationDownloads {
+    cvars.register('sv_downloadserver', '', 0);
     cvars.register('allow_download', edition === 'classic' ? '0' : '1', Q2CvarFlag.Archive);
     cvars.register('allow_download_players', edition === 'classic' ? '0' : '1', Q2CvarFlag.Archive);
     for (const name of ['models', 'sounds', 'maps']) cvars.register(`allow_download_${name}`, '1', Q2CvarFlag.Archive);
     return {
+        httpServer: () => readQ2DownloadServer([`dlserver=${cvars.variableString('sv_downloadserver')}`]),
         allowed: name => {
             if (name.includes('..') || name.startsWith('.') || !name.includes('/') || cvars.variableValue('allow_download') === 0) return false;
             try { downloadPath(name); } catch { return false; }
@@ -83,6 +91,7 @@ export class Q2PeerDownload {
 type Q2DownloadBlock = Extract<Q2ServerEvent, { readonly kind: 'download' }>;
 export type Q2DownloadPreparation = 'ready' | 'waiting' | 'canceled';
 export interface Q2ApplicationClientDownloads {
+    setHttpServer(server: URL | null): void;
     prepare(state: Q2ApplicationGameState): Promise<Q2DownloadPreparation>;
     receive(block: Q2DownloadBlock): 'complete' | 'waiting' | 'unsolicited';
     close(): void;
@@ -90,14 +99,88 @@ export interface Q2ApplicationClientDownloads {
 
 /** Protocol 34 has a completion percent, but advertises neither a size nor a digest. */
 export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
+    private server: URL | null = null;
+    private http: HttpDownloadQueue | null = null;
+    private metadata = new AbortController();
+    private httpTask: Promise<void> | null = null;
+    private httpError: Error | null = null;
+    private readonly attempted = new Set<string>();
+    private retryPath: string | null = null;
     private generation = 0;
     private state: Q2ApplicationGameState | null = null;
     private paths: AsyncGenerator<string, void, unknown> | null = null;
     private pending: { readonly path: string; readonly sink: DownloadSink; percent: number } | null = null;
     private readonly refused = new Set<string>();
     constructor(private readonly content: () => LoadedApplicationContent,
-        private readonly command: (text: string) => void, private readonly print: (text: string) => void) {}
+        private readonly command: (text: string) => void, private readonly print: (text: string) => void,
+        private readonly refreshPackages?: () => Promise<void>) {}
     get revision(): number { return this.generation; }
+
+    setHttpServer(server: URL | null): void { this.close(); this.server = server; }
+    private root(): string {
+        const content = this.content(), product = content.catalog.product(content.recipe.map.entities.content);
+        return product.userContent?.root ?? userProductDirectory(content.catalog.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
+    }
+    private start(task: Promise<void>): void {
+        const generation = this.generation;
+        this.httpTask = task.catch((cause: unknown) => {
+            if (this.generation === generation) this.httpError = cause instanceof Error ? cause : new Error(String(cause));
+        }).finally(() => { if (this.generation === generation) this.httpTask = null; });
+    }
+    private async httpAsset(path: string, kind: 'asset' | 'package' = 'asset'): Promise<void> {
+        const http = this.http, server = this.server, state = this.state;
+        if (http === null || server === null || state === null || this.attempted.has(path)) return;
+        this.attempted.add(path);
+        const game = state.data.gamedir || 'baseq2';
+        const url = new URL(`${game}/${path.split('/').map(encodeURIComponent).join('/')}`, server);
+        const result = await http.enqueue({ path, url, kind, expected: { kind: 'protocol-completion', maximumBytes: 0x7fffffff },
+            ...(kind === 'package' ? { validate: async (staged: string) => { const archive = await openArchive(staged, path.toLowerCase().endsWith(".pak") ? "pak" : "zip"); await archive.close(); } } : {}) });
+        if (result.kind === 'failed') throw result.reason;
+        if (result.kind === 'fallback') this.print(`HTTP unavailable: ${path}; ${kind === 'asset' ? 'using native download' : 'continuing with individual files'}\n`);
+    }
+    private async httpInitial(state: Q2ApplicationGameState): Promise<void> {
+        const server = this.server;
+        if (server === null) return;
+        const generation = this.generation, signal = this.metadata.signal;
+        const current = (): void => { if (generation !== this.generation || signal.aborted) throw new Error('Q2 download generation retired'); };
+        const game = state.data.gamedir || 'baseq2', map = state.configStrings.get(33);
+        if (!/^[a-zA-Z0-9_-]+$/.test(game)) throw new Error('Invalid Q2 download game directory');
+        await mkdir(this.root(), { recursive: true }); current();
+        this.http = new HttpDownloadQueue({ root: this.root(), assertCurrent: current,
+            resolved: async path => { const found = await this.content().mounts.resolve(path); current(); return found !== null; },
+            refreshPackage: async () => { if (this.refreshPackages === undefined) throw new Error('Q2 package refresh is unavailable'); await this.refreshPackages(); current(); },
+            progress: () => undefined });
+        const assets = new Set<string>(), packages = new Set<string>();
+        const lists = [`${game}.filelist`];
+        if (map !== undefined) { this.validate(map); lists.push(`${game}/${map.slice(0, -4)}.filelist`); assets.add(map); }
+        for (const list of lists) {
+            const bytes = await fetchHttpDownloadMetadata(new URL(list, server), 1 << 20, signal); current();
+            if (bytes === null) continue;
+            for (const raw of new TextDecoder().decode(bytes).split('\n')) {
+                const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+                if (line === '') continue;
+                try {
+                    if (/\.(?:pak|pkz)$/i.test(line)) {
+                        downloadPath(line);
+                        if (!/^[a-zA-Z0-9_+.-]+\.(?:pak|pkz)$/i.test(line)) throw new Error('Invalid package path');
+                        if (this.refreshPackages !== undefined) packages.add(line);
+                    } else { const path = line.startsWith('@') ? line.slice(1) : line; this.validate(path); assets.add(path); }
+                } catch { this.print(`Ignoring invalid Q2 filelist entry: ${line.slice(0, 128)}\n`); }
+            }
+        }
+        // Native Q2 cannot download flat packages. Settle package publication/reload before assets.
+        for (const path of packages) { await this.httpAsset(path, 'package'); current(); }
+        const layout = q2ApplicationLayout({ kind: 'q2-classic', version: 34 });
+        for (let index = 1; index < layout.maxModels; index++) {
+            const path = state.configStrings.get(layout.models + index);
+            if (path && !path.startsWith('*') && !path.startsWith('#')) { this.validate(path); assets.add(path); }
+        }
+        for (let index = 1; index < layout.maxSounds; index++) {
+            const name = state.configStrings.get(layout.sounds + index);
+            if (name && !name.startsWith('*')) { const path = name.startsWith('#') ? name.slice(1) : `sound/${name}`; this.validate(path); assets.add(path); }
+        }
+        await Promise.all([...assets].map(path => this.httpAsset(path))); current();
+    }
 
     private validate(path: string): void {
         downloadPath(path);
@@ -152,15 +235,19 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     async prepare(state: Q2ApplicationGameState): Promise<Q2DownloadPreparation> {
-        if (this.state !== state) { this.close(); this.state = state; this.paths = this.resources(state, this.content()); }
+        const game = this.content().catalog.product(this.content().recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1);
+        if ((state.data.gamedir || 'baseq2') !== game)
+            throw new Error(`Q2 server game ${state.data.gamedir} differs from selected installed game ${game}`);
+        if (this.state !== state) { this.close(); this.state = state; if (this.server !== null) this.start(this.httpInitial(state)); }
+        if (this.httpTask !== null) return 'waiting';
+        if (this.httpError !== null) throw this.httpError;
+        if (this.paths === null) this.paths = this.resources(state, this.content());
         if (this.pending !== null) return 'waiting';
         const generation = this.generation, paths = this.paths, content = this.content();
         if (paths === null) return 'canceled';
-        const game = content.catalog.product(content.recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1);
-        if ((state.data.gamedir || 'baseq2') !== game)
-            throw new Error(`Q2 server game ${state.data.gamedir} differs from selected installed game ${game}`);
         for (;;) {
-            const next = await paths.next();
+            const next = this.retryPath === null ? await paths.next() : { done: false, value: this.retryPath };
+            this.retryPath = null;
             if (generation !== this.generation) return 'canceled';
             if (next.done) return 'ready';
             const path = next.value;
@@ -168,11 +255,12 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
             const installed = await content.mounts.resolve(path);
             if (generation !== this.generation) return 'canceled';
             if (installed !== null || this.refused.has(path)) continue;
-            const selected = content.recipe.map.entities.content;
-            const mount = content.mounts.plan.defaultOrder.map(id => content.mounts.plan.mounts.find(candidate => candidate.identity.id === id))
-                .find(candidate => candidate?.kind === 'loose' && candidate.identity.content === selected);
-            if (mount?.kind !== 'loose') throw new Error('Q2 downloads require a selected installed loose content root');
-            const sink = DownloadSink.create(mount.rootPath, path, { kind: 'protocol-completion', maximumBytes: 0x7fffffff });
+            if (this.http !== null && !this.attempted.has(path)) {
+                this.retryPath = path; this.start(this.httpAsset(path)); return 'waiting';
+            }
+            await mkdir(this.root(), { recursive: true });
+            if (generation !== this.generation) return 'canceled';
+            const sink = DownloadSink.create(this.root(), path, { kind: 'protocol-completion', maximumBytes: 0x7fffffff });
             this.pending = { path, sink, percent: 0 };
             try { this.command(`download ${path}`); }
             catch (error) { this.close(); throw error; }
@@ -205,7 +293,9 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     close(): void {
-        this.generation++; this.pending?.sink.close(); this.pending = null;
+        this.generation++; this.http?.cancel(); this.http = null; this.metadata.abort(); this.metadata = new AbortController();
+        this.httpTask = null; this.httpError = null; this.attempted.clear(); this.retryPath = null;
+        this.pending?.sink.close(); this.pending = null;
         this.paths = null; this.state = null; this.refused.clear();
     }
 }

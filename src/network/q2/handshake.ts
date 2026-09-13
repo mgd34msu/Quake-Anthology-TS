@@ -130,6 +130,17 @@ export function readQ2Challenge(message: Q2ConnectionlessMessage): Q2Challenge {
     const challenge = decimal(message.arguments[0]), offer = message.arguments.find(value => value.startsWith('p='));
     return { challenge, versions: offer === undefined ? [34] : offer.slice(2).split(',').map(value => decimal(value)) };
 }
+/** Q2PRO client_connect extension; it does not select a different packet protocol. */
+export function readQ2DownloadServer(arguments_: readonly string[]): URL | null {
+    const advertised = arguments_.find(value => value.startsWith('dlserver='))?.slice(9);
+    if (!advertised || advertised.length >= 512 || !/^https?:\/\//i.test(advertised)) return null;
+    try {
+        const url = new URL(advertised);
+        if (url.username !== '' || url.password !== '' || url.hash !== '' || url.search !== '') return null;
+        if (!url.pathname.endsWith('/')) url.pathname += '/';
+        return url;
+    } catch { return null; }
+}
 export type Q2ClientHandshakeState = {
     readonly kind: 'challenging';
     readonly lastSent: number | null;
@@ -140,6 +151,7 @@ export type Q2ClientHandshakeState = {
 } | {
     readonly kind: 'connected';
     readonly request: Q2ConnectRequest;
+    readonly downloadServer: URL | null;
 } | {
     readonly kind: 'rejected';
     readonly reason: string;
@@ -186,7 +198,7 @@ export class Q2ClientHandshake {
             return true;
         }
         if (message.command === 'client_connect' && this.state.kind === 'connecting') {
-            this.state = { kind: 'connected', request: this.state.request };
+            this.state = { kind: 'connected', request: this.state.request, downloadServer: readQ2DownloadServer(message.arguments) };
             return true;
         }
         return false;

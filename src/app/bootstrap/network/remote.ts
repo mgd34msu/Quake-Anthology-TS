@@ -31,6 +31,7 @@ export interface Q2RemotePresentationOptions {
     print(text: string): void;
     sendCommand(text: string): void;
     loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
+    refreshDownloads?(assertCurrent: () => void): Promise<LoadedApplicationContent>;
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(values: Float32Array): Vec3 { return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) }; }
@@ -84,7 +85,15 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
         this.userinfo = options.userinfo;
         this.content = options.content;
-        this.downloads = new Q2DownloadReceiver(() => this.content, options.sendCommand, options.print);
+        const refreshDownloads = options.refreshDownloads;
+        this.downloads = new Q2DownloadReceiver(() => this.content, options.sendCommand, options.print,
+            refreshDownloads === undefined ? undefined : async () => {
+                const revision = this.downloads.revision;
+                const assertCurrent = (): void => { if (this.downloads.revision !== revision) throw new Error('Q2 package refresh was retired'); };
+                const fresh = await refreshDownloads(assertCurrent);
+                assertCurrent();
+                this.content = fresh;
+            });
         this.collision = createSceneQueries(options.content.world);
         this.client = options.session.createClient(0);
         this.client.connect('remote');

@@ -201,3 +201,40 @@ test("user-only mods inherit installed base dependencies and downloaded archive 
     expect(missing.product(custom.id).availability.kind).toBe("missing");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+for (const edition of ["classic", "rerelease"] satisfies readonly ProductExpectation["edition"][]) {
+  test(`Q2 ${edition} mounts PKZ with source numeric package order and per-root precedence`, async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "q2-pkz-"));
+    const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+    const product: ProductExpectation = { ...overlayProduct, id: `q2-${edition}-pkz`, family: "q2", edition,
+      campaign: "baseq2", contentDirectory: `q2-${edition}/baseq2`, requiredContentArchives: [`q2-${edition}/baseq2/pak0.pak`] };
+    const corpus = userProductDirectory(corpusRoot, product.contentDirectory), user = userProductDirectory(userContentRoot, product.contentDirectory);
+    const names = ["zzz.PKZ", "custom.pak", "pak17.pkz", "pak17.pak", "pak10.pak", "pak2.pkz", "pak0.pak"];
+    try {
+      await mkdir(corpus, { recursive: true }); await mkdir(user, { recursive: true });
+      await writeFile(resolve(corpus, "pak0.pak"), pak("shared.txt", "corpus"));
+      await writeFile(resolve(corpus, "zzzz.pkz"), zip([["shared.txt", "corpus custom"], ["user-loose.txt", "corpus package"]]));
+      for (const name of names) await writeFile(resolve(user, name), name.toLowerCase().endsWith(".pkz")
+        ? zip([["shared.txt", name], ["maps/download.bsp", name]]) : pak("shared.txt", name));
+      await writeFile(resolve(user, "zzzzz.zip"), zip([["shared.txt", "not a Q2 package"]]));
+      await writeFile(resolve(user, "shared.txt"), "user loose");
+      await writeFile(resolve(user, "user-loose.txt"), "user loose overrides corpus package");
+      const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [product], discoverMods: false });
+      const selected = catalog.require(product.id), mounts = await catalog.mountsFor(selected.id);
+      expect(mounts.map(mount => mount.kind === "archive" ? mount.archivePath : mount.rootPath)).toEqual([
+        ...names.map(name => resolve(user, name)), user, resolve(corpus, "zzzz.pkz"), resolve(corpus, "pak0.pak"), corpus,
+      ]);
+      expect(mounts.filter(mount => mount.kind === "archive" && mount.archivePath.endsWith("zzz.PKZ")).map(mount => mount.kind === "archive" ? mount.format : null)).toEqual(["zip"]);
+      expect(catalog.mapsFor(selected.id).map(map => map.path)).toEqual(["maps/download.bsp"]);
+      // Open each suffix to prove every adjacent source-priority collision with actual archive bytes.
+      for (let index = 0; index < names.length; index++) {
+        const expected = names[index];
+        if (expected === undefined) throw new Error("Missing package expectation");
+        const remaining = mounts.slice(index);
+        using mounted = await openMountPlan({ id: "mount-plan:q2:pkz", mounts: remaining, defaultOrder: remaining.map(mount => mount.identity.id), prefixOrders: [] });
+        expect(new TextDecoder().decode(await mounted.read("shared.txt"))).toBe(expected);
+        expect(new TextDecoder().decode(await mounted.read("user-loose.txt"))).toBe("user loose overrides corpus package");
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}

@@ -77,15 +77,20 @@ test('protocol-completion staging stays bounded and cannot overwrite installed f
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('native Q2 client receives missing map and dependencies before loading its remote world', async () => {
+for (const httpEnabled of [false, true]) test(`native Q2 client receives missing map and dependencies before loading its remote world (HTTP ${httpEnabled})`, async () => {
     const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
     if (command.kind !== 'run') throw new Error('Missing Q2 launch');
-    const installed = await loadApplicationContent(command.options), root = await mkdtemp(join(tmpdir(), 'q2-client-assets-'));
+    const temporary = await mkdtemp(join(tmpdir(), 'q2-client-assets-')), root = join(temporary, 'q2/baseq2');
+    await mkdir(root, { recursive: true });
+    const installed = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
     const identity = createIdentityOwner('Q2 client download'), session = new EngineSession(identity, { kind: 'headless' });
     const serverTransport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), clientTransport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     let server: Q2ServerNetwork<typeof serverTransport.address> | null = null, client: Q2ClientNetwork<typeof serverTransport.address> | null = null;
     let content: LoadedApplicationContent | null = null;
     const files = new Map<string, Uint8Array>(), requests: string[] = [];
+    let stopHttp = async (): Promise<void> => {};
+    const refreshed: LoadedApplicationContent[] = [];
+    let activeHttp = 0, peakHttp = 0; const httpPaths: string[] = [];
     try {
         const selected = installed.recipe.map.entities.content;
         const mounts = await openMountPlan({ ...installed.mounts.plan, mounts: installed.mounts.plan.mounts.map(mount =>
@@ -110,23 +115,39 @@ test('native Q2 client receives missing map and dependencies before loading its 
         const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Download fixture', serverState: 2 },
             configStrings: new Map([[30, '1'], [31, String(blockChecksum(map))], [33, mapName], [34, modelName], [289, 'download-fixture.wav']]), baselines: new Map<number, EntityStateT>() };
         const player = { client: identity.client(1, 0), actor: identity.actor(1, 0), sourceEntity: 1 };
+        const packedPath = 'sound/download-fixture.wav', packedSound = files.get(packedPath);
+        if (packedSound === undefined) throw new Error('Missing packaged sound');
+        const packageBytes = new Uint8Array(12 + packedSound.length + 64), packageView = new DataView(packageBytes.buffer);
+        packageBytes.set(new TextEncoder().encode('PACK')); packageView.setInt32(4, 12 + packedSound.length, true); packageView.setInt32(8, 64, true);
+        packageBytes.set(packedSound, 12); packageBytes.set(new TextEncoder().encode(packedPath), 12 + packedSound.length);
+        packageView.setInt32(12 + packedSound.length + 56, 12, true); packageView.setInt32(12 + packedSound.length + 60, packedSound.length, true);
+        const httpServer = httpEnabled ? Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+            const path = decodeURIComponent(new URL(request.url).pathname); httpPaths.push(path);
+            if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys()].join('\n'));
+            const asset = path.slice('/baseq2/'.length), bytes = asset === 'pak99.pak' ? packageBytes : files.get(asset);
+            if (bytes === undefined || asset.endsWith('.wal')) return new Response(null, { status: 404 });
+            activeHttp++; peakHttp = Math.max(peakHttp, activeHttp);
+            try { await Bun.sleep(20); return new Response(bytes); } finally { activeHttp--; }
+        } }) : null;
+        if (httpServer !== null) stopHttp = async () => { await httpServer.stop(true); };
         const host: Q2ApplicationServerHost = { protocol: { kind: 'q2-classic', version: 34 }, messageOptions: { maxConfigStrings: 2080, inventorySlots: 256 }, maxClients: 1,
             supportsSourceWire: () => ({ kind: 'supported' }), observe() {}, admit: () => ({ kind: 'accepted', player }), disconnect() {}, carriedPlayer: () => player,
             gameState: () => state, frame: () => { throw new Error('Signon fixture does not publish frames'); }, events: () => [],
             input: () => { throw new Error('Signon fixture does not submit movement'); }, command() {}, userinfo() {}, print() {},
-            downloads: { allowed: name => files.has(name), open: async name => {
+            downloads: { httpServer: () => httpServer === null ? null : new URL(`http://127.0.0.1:${httpServer.port}/`), allowed: name => files.has(name), open: async name => {
                 requests.push(name); const bytes = files.get(name);
                 return bytes === undefined ? null : { byteLength: bytes.length, read: (offset, count) => bytes.slice(offset, offset + count), close() {} };
             } } };
         server = new Q2ServerNetwork({ transport: serverTransport, host, random: () => 12345 });
         let loaded = false;
         const remote = new Q2RemotePresentation({ identity, session, content, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
-            sendCommand: text => { if (client === null) throw new Error('No client'); client.command(text); }, loadContent: async () => {
+            sendCommand: text => { if (client === null) throw new Error('No client'); client.command(text); },
+            refreshDownloads: async assertCurrent => { const fresh = await loadApplicationContent({ ...command.options, userContentRoot: temporary }); refreshed.push(fresh); assertCurrent(); content = fresh; return fresh; }, loadContent: async () => {
                 if (content === null) throw new Error('No client content');
                 for (const [path, bytes] of files) expect((await content.mounts.open(path))?.bytes).toEqual(bytes);
                 const resource = await content.mounts.resolve(mapName);
                 if (resource === null) throw new Error('Downloaded map did not resolve');
-                content = new LoadedApplicationContent(installed.catalog, { ...installed.recipe, map: { ...installed.recipe.map, geometry: resource } }, toQ2WorldGeometry(readQ2Bsp(map)), content.mounts);
+                content = new LoadedApplicationContent(content.catalog, { ...installed.recipe, map: { ...installed.recipe.map, geometry: resource } }, toQ2WorldGeometry(readQ2Bsp(map)), content.mounts);
                 loaded = true; return content;
             } });
         client = new Q2ClientNetwork({ transport: clientTransport, remote: serverTransport.address, host: remote, qport: 3011 });
@@ -134,7 +155,9 @@ test('native Q2 client receives missing map and dependencies before loading its 
             await client.poll(step * 10); await Bun.sleep(1); await server.poll(step * 10); await Bun.sleep(1);
         }
         expect(client.phase).toBe('active'); expect(loaded).toBe(true); expect(session.world).toBeNull();
-        expect(requests).toEqual([mapName, modelName, skinName, 'sound/download-fixture.wav', 'textures/download-fixture.wal']);
+        expect(requests).toEqual(httpEnabled ? ['textures/download-fixture.wal'] : [mapName, modelName, skinName, 'sound/download-fixture.wav', 'textures/download-fixture.wal']);
+        if (httpEnabled) { expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(1); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
+        if (!httpEnabled) {
         const nextState = (sound: string): Q2ApplicationGameState => ({ ...state,
             configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, sound]]) });
         expect(await remote.downloads.prepare(nextState('cancel.wav'))).toBe('waiting');
@@ -165,8 +188,9 @@ test('native Q2 client receives missing map and dependencies before loading its 
         await canceledLoad;
         expect(remote.player).toBe(playerBeforeCancel); expect(remote.scene).toBe(sceneBeforeCancel);
         expect(await mounts.resolve(mapName)).not.toBeNull();
+        }
     } finally {
-        client?.close(); server?.close(); clientTransport.close(); serverTransport.close(); session.close();
-        await content?.close(); await installed.close(); await rm(root, { recursive: true, force: true });
+        await stopHttp(); client?.close(); server?.close(); clientTransport.close(); serverTransport.close(); session.close();
+        await content?.close(); for (const fresh of refreshed) await fresh.close(); await installed.close(); await rm(temporary, { recursive: true, force: true });
     }
 }, 30000);

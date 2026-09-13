@@ -84,7 +84,7 @@ export class RemoteApplication {
   private stepping = false;
   private q3Content: Q3ClientContent | null = null;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
-  private q3CatalogSeed: LoadedApplicationContent | null = null;
+  private downloadCatalogSeed: LoadedApplicationContent | null = null;
   private q3InitialViewPending = false;
   private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
@@ -146,7 +146,7 @@ export class RemoteApplication {
       const remote = new Q2RemotePresentation({ identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
-        loadContent: state => this.loadQ2ServerWorld(state) });
+        loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshDownloadCatalog(assertCurrent) });
       this.remote = remote;
       this.network = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     }
@@ -233,7 +233,25 @@ export class RemoteApplication {
     const map = state.configStrings.get(layout.models + 1);
     if (map === undefined) throw new Error("Q2 server supplied no world model");
     const names = (first: number, maximum: number): string[] => Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
-    return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) });
+    const seed = this.downloadCatalogSeed;
+    const content = await this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) }, undefined, seed !== null);
+    if (this.downloadCatalogSeed === seed) this.downloadCatalogSeed = null;
+    await seed?.close();
+    return content;
+  }
+  private async refreshDownloadCatalog(assertOwnerCurrent: () => void): Promise<LoadedApplicationContent> {
+    const generation = this.worldLoadGeneration;
+    const assertCurrent = (): void => {
+      assertOwnerCurrent();
+      if (this.closed || this.closing || generation !== this.worldLoadGeneration) throw new Error("Remote package refresh was cancelled");
+    };
+    assertCurrent();
+    const fresh = await loadApplicationContent({ ...this.options, map: this.content.recipe.map.geometry.requestedPath });
+    try { assertCurrent(); } catch (error) { await fresh.close(); throw error; }
+    const old = this.downloadCatalogSeed; this.downloadCatalogSeed = fresh;
+    try { await old?.close(); assertCurrent(); }
+    catch (error) { if (this.downloadCatalogSeed === fresh) { this.downloadCatalogSeed = null; await fresh.close(); } throw error; }
+    return fresh;
   }
   private async prepareQ3Downloads(connection: Q3ClientConnection): Promise<boolean> {
     const generation = connection.generation;
@@ -242,7 +260,7 @@ export class RemoteApplication {
         throw new Error("Q3 package download belongs to a retired connection");
     };
     assertCurrent();
-    const seed = this.q3CatalogSeed ?? this.content, product = seed.catalog.require(this.options.product);
+    const seed = this.downloadCatalogSeed ?? this.content, product = seed.catalog.require(this.options.product);
     const directory = product.userContent?.root ?? userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
     const root = dirname(directory), packages = await Q3ApplicationPackages.open(seed, connection.checksumFeed);
     assertCurrent();
@@ -254,9 +272,7 @@ export class RemoteApplication {
       reliable: text => connection.reliable.add(text), sendPacket: () => { assertCurrent(); if (this.network instanceof Q3ClientNetwork) this.network.sendPacket(); },
       progress: (name, count, size) => { if (count === 0 || count === size) this.print(`Downloading ${name}: ${count}/${size} bytes\n`); },
       reloadPackages: async () => {
-        const fresh = await loadApplicationContent({ ...this.options, map: this.content.recipe.map.geometry.requestedPath });
-        try { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package refresh was cancelled"); } catch (error) { await fresh.close(); throw error; }
-        const old = this.q3CatalogSeed; this.q3CatalogSeed = fresh; await old?.close();
+        await this.refreshDownloadCatalog(() => { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package refresh was cancelled"); });
       } });
     this.q3Downloads = downloads;
     const loadedChecksums = packages.packs.map(pack => pack.pack.checksum), exists = (path: string): boolean => existsSync(join(root, path));
@@ -272,18 +288,18 @@ export class RemoteApplication {
 
   private async loadQ3ServerWorld(world: Q1RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent> {
     const generation = connection.generation;
-    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.q3CatalogSeed ?? this.content);
+    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.downloadCatalogSeed ?? this.content);
     try {
       if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
       const content = await this.loadServerWorld(world, prepared.content);
       if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
       this.q3Content = prepared;
-      const seed = this.q3CatalogSeed; this.q3CatalogSeed = null; await seed?.close();
+      const seed = this.downloadCatalogSeed; this.downloadCatalogSeed = null; await seed?.close();
       return content;
     } catch (error) { await prepared.close(); throw error; }
   }
 
-  private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent): Promise<LoadedApplicationContent> {
+  private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent, refreshContent = false): Promise<LoadedApplicationContent> {
     const generation = ++this.worldLoadGeneration;
     const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
     assertCurrent();
@@ -292,9 +308,9 @@ export class RemoteApplication {
     const map = mapResourcePath(path);
     if (this.presentation !== null) this.uiPreferences = { ...this.presentation.ui.preferences.values };
     const differentMap = map !== this.content.recipe.map.geometry.requestedPath;
-    const replaceContent = differentMap || preparedContent !== undefined;
+    const replaceContent = differentMap || preparedContent !== undefined || refreshContent;
     if (replaceContent || this.presentation !== null || this.remote.player !== null) {
-      const options = { ...this.options, map }, content = preparedContent ?? (differentMap ? await loadApplicationContent(options) : this.content);
+      const options = { ...this.options, map }, content = preparedContent ?? (differentMap || refreshContent ? await loadApplicationContent(options) : this.content);
       let frontend: RemoteWorldFrontend;
       try {
         assertCurrent();
@@ -534,7 +550,7 @@ export class RemoteApplication {
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }
-    try { await this.q3CatalogSeed?.close(); this.q3CatalogSeed = null; } catch (error) { errors.push(error); }
+    try { await this.downloadCatalogSeed?.close(); this.downloadCatalogSeed = null; } catch (error) { errors.push(error); }
     try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");

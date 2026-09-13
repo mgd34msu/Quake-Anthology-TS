@@ -57,6 +57,10 @@ interface ServerPeer<TAddress extends NetworkAddress> {
 export class Q2ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
     readonly role = 'server';
     readonly wire: WireSelection;
+    private acceptConnection(remote: TAddress): void {
+        const url = this.options.host.downloads?.httpServer?.() ?? null;
+        this.reply(remote, `client_connect${url === null ? '' : ` dlserver=${url.href}`}`);
+    }
     private ended = false;
     private readonly peers = new Map<string, ServerPeer<TAddress>>();
     private readonly challenges: Q2ChallengeTable;
@@ -148,7 +152,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 }
                 const existing = this.peers.get(addressKey(remote));
                 if (existing !== undefined) {
-                    this.reply(remote, 'client_connect');
+                    this.acceptConnection(remote);
                     break;
                 }
                 if (this.peers.size >= this.host.maxClients) {
@@ -165,7 +169,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     channel: new Q2Channel({ side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
                     wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
                 this.peers.set(addressKey(remote), peer);
-                this.reply(remote, 'client_connect');
+                this.acceptConnection(remote);
                 break;
             }
             default: return true;
@@ -544,6 +548,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 }
                 if (this.handshake.state.kind === 'connected' && this.channel === null) {
                     const request = this.handshake.state.request;
+                    this.options.host.downloads?.setHttpServer(this.handshake.state.downloadServer);
                     this.channel = new Q2Channel({ side: 'client', protocol: request.protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes });
                     this.state = 'loading';
                     this.command('new');
@@ -562,6 +567,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             this.state = 'rejected';
             this.options.host.disconnected('Connection timed out');
         }
+        await this.prepareGameState();
         const channel = this.channel;
         if (channel !== null && this.phase !== 'closed' && this.phase !== 'rejected') {
             for (const command of this.pendingCommands) {
