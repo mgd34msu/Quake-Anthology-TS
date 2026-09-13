@@ -23,4 +23,3 @@ export function openContainedParent(root: string, name: string, create: boolean)
     return { descriptor, leaf };
   } catch (error) { closeSync(descriptor); throw error; }
 }
-
