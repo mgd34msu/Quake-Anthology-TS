@@ -319,16 +319,20 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const recipe = this.content.recipe, time = this.previousSeconds + (this.seconds - this.previousSeconds) * this.fraction;
         const bodies = [...this.current.values()].map(state => ({ actor: this.actor(state.number), body: { origin: this.sampled(state).origin, angles: this.sampled(state).angles, velocity: state.number === this.viewEntity ? data.velocity : zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }));
         this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: [...this.soundsPending] };
-        this.options.session.publish(this.published);
+        this.options.session.publish({ ...this.published, events: [] });
     }
     samplePresentation(now: number): SimulationOutput | null {
         if (this.seconds - this.previousSeconds > 0.1) this.previousSeconds = this.seconds - 0.1;
         const duration = Math.max(0, this.seconds - this.previousSeconds);
         this.fraction = duration === 0 ? 1 : Math.max(0, Math.min(1, (now - this.receivedAt) / (duration * 1000)));
         this.publish();
-        this.soundsPending.length = 0;
         return this.published;
     }
-    drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.splice(0); }
+    drainPresentationEvents(): readonly SimulationPresentationEvent[] {
+        if (this.published === null) return [];
+        this.options.session.publish({ ...this.published, events: [...this.soundsPending] });
+        this.soundsPending.length = 0;
+        return this.events.splice(0);
+    }
     disconnected(reason: string): void { this.options.print(`${reason}\n`); this.client.disconnect(); }
 }

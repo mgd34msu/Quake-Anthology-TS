@@ -259,7 +259,7 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
         expect(playback?.payload.kind).toBe('sound');
         if(playback?.payload.kind!=='sound') throw new Error('No decoded native sound playback');
         expect(playback.payload.channel).toBe(1);expect(playback.payload.actor?.equals(local.actor)).toBe(true);
-        expect(app.remote.sourceRecords.some(record=>'kind' in record&&record.kind==='sound')).toBe(true);
+        expect(app.remote.sourceRecords.some(record=>typeof record==='object'&&record!==null&&'kind' in record&&record.kind==='sound')).toBe(true);
         const audible=app.presentationEvents.find(event=>event.kind==='q1'&&event.event.kind==='sound');
         if(audible?.kind!=='q1'||audible.event.kind!=='sound'||audible.event.origin===undefined) throw new Error('No positional audio event');
         const { ApplicationAudio }=await import('../../../src/app/bootstrap/audio.ts');
@@ -271,6 +271,31 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
             expect(audio.engine.mix(512).some(value=>value!==0)).toBe(true);
             if(!(app.remote instanceof Q1RemotePresentation)) throw new Error('Wrong remote adapter');
             const decoded = app.remote;
+            const afterDrain = decoded.samplePresentation(performance.now());
+            expect(afterDrain?.events.some(event => event.payload.kind === 'sound')).toBe(false);
+            const replay = decoded.sourceRecords.find(record => record.kind === 'sound');
+            if (replay === undefined) throw new Error('No source sound record');
+            const receive = local.seat.receive;
+            let delivered = 0;
+            local.seat.receive = events => {
+                delivered += events.filter(event => event.payload.kind === 'sound').length;
+                return receive.call(local.seat, events);
+            };
+            try {
+                await decoded.receive([replay], performance.now());
+                await decoded.receive([], performance.now());
+                const firstSample = decoded.samplePresentation(performance.now());
+                const secondSample = decoded.samplePresentation(performance.now());
+                expect(firstSample?.events.filter(event => event.payload.kind === 'sound')).toHaveLength(1);
+                expect(secondSample?.events).toEqual(firstSample?.events);
+                expect(delivered).toBe(0);
+                expect(decoded.drainPresentationEvents().some(event => event.kind === 'q1' && event.event.kind === 'sound')).toBe(true);
+                expect(delivered).toBe(1);
+                expect(decoded.samplePresentation(performance.now())?.events).toHaveLength(0);
+                expect(decoded.drainPresentationEvents()).toHaveLength(0);
+                expect(delivered).toBe(1);
+            } finally { local.seat.receive = receive; }
+
             const stop=async(channel:number):Promise<void>=>{
                 const packed=admitted.sourceEntity*8+channel;
                 await decoded.receive(new NetQuakeDecoder().decode(Uint8Array.of(16,packed&255,packed>>8)),performance.now());
