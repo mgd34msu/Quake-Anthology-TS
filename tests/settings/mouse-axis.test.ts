@@ -67,6 +67,6 @@ test("frontend uses the same axis bindings and transfers only selected coefficie
   expect(preferences.values).toEqual({ pitch: 0.011 });
   expect(slider(preferences.bindings(), "mouse-pitch").read()).toBe(50);
   const before = { sensitivity: 3, pitch: 0.022, yaw: 0.022, invertMouse: false, alwaysRun: false,
-    effectsVolume: 0.7, musicVolume: 0.25, controllerVibration: true, controllerVibrationStrength: 1 };
+    acceleration: 0, filter: false, freeLook: true, effectsVolume: 0.7, musicVolume: 0.25, controllerVibration: true, controllerVibrationStrength: 1 };
   expect(changedFrontendPreferences(before, { ...before, yaw: -0 }, preferences.values)).toEqual({ pitch: 0.011, yaw: -0 });
 });

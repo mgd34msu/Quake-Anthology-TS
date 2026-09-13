@@ -47,7 +47,7 @@ const session: UiMenuId = "menu:startup:session";
 const optionsMenu: UiMenuId = "menu:startup:options";
 const displayMenu: UiMenuId = "menu:settings:display:0";
 const soundMenu: UiMenuId = "menu:startup:sound";
-const controlsMenu: UiMenuId = "menu:startup:controls";
+const controlsMenu: UiMenuId = "menu:settings:input:0";
 const selectMenu: UiMenuId = "menu:startup:select";
 const rosterMenu: UiMenuId = "menu:startup:roster";
 const categoryMenu: UiMenuId = "menu:startup:category";
@@ -106,25 +106,20 @@ export class StartupMenu {
       this.button("controls", "Controls", 2, () => this.controller.openMenu(controlsMenu), true),
       ...(llm === null ? [] : [this.button("llm", "LLM options", 3, () => this.controller.openMenu(llm.root), true)]), this.back(),
     ]);
-    const display = registerSettingsMenus(this.controller, [...(options.settings ?? []).filter(binding => binding.category === "display"),
+    const settings = registerSettingsMenus(this.controller, [...(options.settings ?? []).filter(binding => binding.category === "display" || binding.category === "input"),
       { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (requires Apply)", enabled: () => !this.busy,
         read: () => options.model.options.renderer, choices: () => [{ id: "gl", label: "OpenGL" }, { id: "cpu", label: "Software" }],
         write: value => options.model.select("renderer", value) },
-      { id: "ui:startup:apply-display", category: "display", kind: "button", label: "Apply renderer change", enabled: () => !this.busy, activate: options.applyDisplay }]);
-    this.disposers.push(display.dispose);
-    for (const [id, category] of [[soundMenu, "audio"], [controlsMenu, "input"]] satisfies readonly (readonly [UiMenuId, string])[])
-      this.register(id, () => {
-        const bindings = (options.settings ?? []).filter(binding => binding.category === category);
-        const offset = category === "audio" ? 2 : 0;
-        const rect = (index: number) => ({ x: 64, y: 118 + (index + offset) * 38, width: 512, height: 34 });
-        const controls = [...(category === "audio" ? this.rows(["environment", "doppler"]).map((row, index) => this.row(row, index)) : []),
-          ...bindings.map((binding, index) => settingControl(binding, rect(index), options.seat))];
-        if (category === "input" && this.gyroMenu !== null) controls.push({
-          ...this.button("gyro", "Gyro controls", 0, () => { if (this.gyroMenu !== null) this.controller.openMenu(this.gyroMenu); }),
-          rect: rect(bindings.length),
-        });
-        return [...controls, this.back()];
-      });
+      { id: "ui:startup:apply-display", category: "display", kind: "button", label: "Apply renderer change", enabled: () => !this.busy, activate: options.applyDisplay },
+      { id: "ui:startup:gyro", category: "input", kind: "button", label: "Gyro controls", enabled: () => this.gyroMenu !== null,
+        activate: () => { if (this.gyroMenu !== null) this.controller.openMenu(this.gyroMenu); } }]);
+    this.disposers.push(settings.dispose);
+    this.register(soundMenu, () => {
+      const bindings = (options.settings ?? []).filter(binding => binding.category === "audio");
+      const rect = (index: number) => ({ x: 64, y: 118 + (index + 2) * 38, width: 512, height: 34 });
+      return [...this.rows(["environment", "doppler"]).map((row, index) => this.row(row, index)),
+        ...bindings.map((binding, index) => settingControl(binding, rect(index), options.seat)), this.back()];
+    });
     this.register(selectMenu, () => {
       const row = this.selectionRow();
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
@@ -293,7 +288,7 @@ export class StartupMenu {
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (active !== "menu:settings:llm" && !active?.startsWith("menu:settings:display:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (active !== "menu:settings:llm" && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });

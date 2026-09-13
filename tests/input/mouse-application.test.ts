@@ -10,7 +10,7 @@ import { ConfigStore } from "../../src/settings/config.ts";
 import { defaultGamepadTuning } from "../../src/input/gamepad.ts";
 import { defaultMouseTuning } from "../../src/input/mouse.ts";
 import { bindInputSettings } from "../../src/ui/settings/index.ts";
-import { readFrontendInput } from "../../src/app/bootstrap/frontend-preferences.ts";
+import { readFrontendInput, applyFrontendInput } from "../../src/app/bootstrap/frontend-preferences.ts";
 
 test("normal native application shares per-seat mouse values across console, menu and reopen", async () => {
   const root = await mkdtemp(join(tmpdir(), "mouse-local-app-"));
@@ -30,7 +30,8 @@ test("normal native application shares per-seat mouse values across console, men
     if (sensitivity?.kind !== "slider") throw new Error("Missing sensitivity menu");
     expect(sensitivity.read()).toBe(8); sensitivity.write(6);
     expect(input.inputCvars(one.player.seat.id)?.variableValue("sensitivity")).toBe(6);
-    await app.close(); app = await Application.open(parsed.options, { print: () => undefined }, undefined, { pitch: 0.011 });
+    await app.close(); app = await Application.open(parsed.options, { print: () => undefined }, undefined,
+      { pitch: 0.011, acceleration: 0.5, filter: true, freeLook: false });
     const reopened = await controls();
     expect(reopened.locals[0]?.builder.mouse.tuning.sensitivity).toBe(6);
     expect(reopened.locals[0]?.builder.mouse.tuning.invertPitch).toBe(true);
@@ -39,6 +40,18 @@ test("normal native application shares per-seat mouse values across console, men
     expect(local.builder.mouse.tuning.pitch).toBe(Math.fround(0.011));
     expect(local.builder.mouse.tuning.yaw).toBe(Math.fround(defaultMouseTuning.yaw));
     expect(readFrontendInput(local).pitch).toBe(Math.fround(0.011));
+    expect(readFrontendInput(local).acceleration).toBe(0.5);
+    expect(readFrontendInput(local).filter).toBe(true); expect(readFrontendInput(local).freeLook).toBe(false);
+    const motion = local.builder.mouse.sample({ x: 2, y: 4 }, 10, false, false);
+    expect(motion.pitch).toBe(0); expect(motion.forward).toBeLessThan(-12);
+    applyFrontendInput({ filter: false }, local);
+    expect(local.builder.mouse.tuning.acceleration).toBe(0.5); expect(local.builder.mouse.tuning.freeLook).toBe(false);
+    expect(local.builder.mouse.tuning.sensitivity).toBe(6); expect(local.builder.mouse.tuning.filter).toBe(false);
+    const acceleration = bindInputSettings(local.input, local.builder).find(binding => binding.id === "ui:input:acceleration");
+    if (acceleration?.kind !== "slider") throw new Error("Missing game acceleration slider");
+    acceleration.write(1);
+    expect(app.frontendSettings.acceleration).toBe(1);
+    expect(app.frontendSettings.sensitivity).toBeUndefined(); expect(app.frontendSettings.yaw).toBeUndefined();
   } finally { await app?.close(); opened.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
 

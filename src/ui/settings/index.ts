@@ -7,6 +7,7 @@ import type { UiChoice, UiControl, UiControlId, UiMenuId } from "../../contracts
 import { CvarFlag, Q2CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { defaultMouseTuning } from "../../input/mouse.ts";
+import type { MouseTuning } from "../../input/mouse.ts";
 import type { SeatInput } from "../../input/seat.ts";
 import type { InputCommandBuilder } from "../../input/user-command.ts";
 import type { RestartControls, RestartKind } from "../../settings/restart.ts";
@@ -134,6 +135,7 @@ function toggle(id: string, label: string, read: () => boolean, write: (value: b
   return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
 }
 export interface PrimaryInputSettings { readonly sensitivity: number; readonly pitch: number; readonly yaw: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
+export type MouseMotionSettings = Pick<MouseTuning, "acceleration" | "filter" | "freeLook">;
 export interface ControllerVibrationSettings { readonly controllerVibration: boolean; readonly controllerVibrationStrength: number; }
 export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
   return [toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
@@ -158,6 +160,11 @@ export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryIn
     mouseAxis(service, "yaw", "Horizontal sensitivity"), mouseAxis(service, "pitch", "Vertical sensitivity"),
     toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
     toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
+}
+export function bindMouseMotionSettings(service: SettingsValueService<MouseMotionSettings>): readonly SettingBinding[] {
+  return [numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => service.read().acceleration, value => service.write({ acceleration: value })),
+    toggle("filter", "Mouse smoothing", () => service.read().filter, value => service.write({ filter: value })),
+    toggle("freelook", "Free look", () => service.read().freeLook, value => service.write({ freeLook: value }))];
 }
 export interface AudioOutputSettings {
   selected(): string | null;
@@ -192,9 +199,7 @@ export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder
           ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
         if (values.alwaysRun !== undefined) builder.tuning = { ...builder.tuning, alwaysRun: values.alwaysRun };
       } }),
-    numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => mouse.tuning.acceleration, value => { mouse.tuning = { ...mouse.tuning, acceleration: value }; }),
-    toggle("filter", "Mouse smoothing", () => mouse.tuning.filter, value => { mouse.tuning = { ...mouse.tuning, filter: value }; }),
-    toggle("freelook", "Free look", () => mouse.tuning.freeLook, value => { mouse.tuning = { ...mouse.tuning, freeLook: value }; }),
+    ...bindMouseMotionSettings({ read: () => mouse.tuning, write: values => { mouse.tuning = { ...mouse.tuning, ...values }; } }),
     toggle("invert-controller", "Invert controller", () => pad.tuning.invertPitch, value => { pad.tuning = { ...pad.tuning, invertPitch: value }; }),
     toggle("swap-sticks", "Swap controller sticks", () => pad.tuning.swapSticks, value => { pad.tuning = { ...pad.tuning, swapSticks: value }; }),
     numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad.tuning.yawDegreesPerSecond, value => { pad.tuning = { ...pad.tuning, yawDegreesPerSecond: value }; }),
