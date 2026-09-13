@@ -13,6 +13,7 @@ import { classicCharset } from "../../text/atlas.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { createMountedTextFonts } from "../../text/mounted.ts";
 import { mountedImageReader } from "./image-reader.ts";
+import type { ImagePolicy } from "../../render/scene/image-policy.ts";
 
 export interface MenuFontOptions {
   readonly catalog: InstalledCatalog;
@@ -20,6 +21,7 @@ export interface MenuFontOptions {
   readonly family: GameFamily;
   readonly rerelease: boolean;
   readonly images: SceneImageRegistry;
+  readonly imagePolicy?: ImagePolicy;
 }
 export async function loadMenuFont(options: MenuFontOptions): Promise<{ readonly font: TextFontSelection; close(): void }> {
   const { mounts, family, images } = options;
@@ -35,11 +37,13 @@ export async function loadMenuFont(options: MenuFontOptions): Promise<{ readonly
     const paletteAsset = family === "q2" ? await mounts.open("pics/colormap.pcx") : null;
     const colors = paletteAsset === null ? null : decodePcx(paletteAsset.bytes, "pics/colormap.pcx").palette;
     const palette = paletteAsset === null || colors === null ? null : { colors, source: paletteAsset.reference };
-    const textures = new SceneTextureLoader(images, mountedImageReader(options.catalog, mounts), palette);
+    const textures = new SceneTextureLoader(images, mountedImageReader(options.catalog, mounts), palette,
+      options.imagePolicy === undefined ? {} : { policy: options.imagePolicy });
+    try {
     const texture = await textures.load(family === "q2" ? "pics/conchars.pcx" : "gfx/2d/bigchars", { family, mipmap: false, wrap: "clamp" });
     if (texture === null) throw new Error("Quake III console charset is missing");
     image = images.register("conchars", texture.content, { wrap: "clamp", filter: "nearest" }, texture.image.source);
-    images.release(texture.image);
+    } finally { textures.disposeImages(); }
   }
   const classic = classicCharset(image, "conchars", family === "q3" ? "tinted" : "baked");
   const fonts = createMountedTextFonts(mounts, images);
@@ -57,7 +61,7 @@ export interface MenuTypography {
 }
 
 export async function loadMenuTypography(catalog: InstalledCatalog,
-  images: SceneImageRegistry, classic: TextAtlas): Promise<MenuTypography> {
+  images: SceneImageRegistry, classic: TextAtlas, imagePolicy?: ImagePolicy): Promise<MenuTypography> {
   const product = catalog.products.find(product => product.availability.kind === "installed"
     && product.expectation.edition === "rerelease" && (product.expectation.family === "q1" || product.expectation.family === "q2"));
   if (product === undefined) {
@@ -68,8 +72,9 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
     }
     const mounts = await catalog.mountsFor(q3.id);
     const mounted = await openMountPlan({ id: "mount-plan:menu:typography", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const textures = new SceneTextureLoader(images, mountedImageReader(catalog, mounted), null,
+      imagePolicy === undefined ? {} : { policy: imagePolicy });
     try {
-      const textures = new SceneTextureLoader(images, mountedImageReader(catalog, mounted));
       const texture = await textures.load("menu/art/font1_prop.tga", { family: "q3", mipmap: false, wrap: "clamp" });
       if (texture === null) throw new Error("Quake III proportional menu font is missing");
       const glyphs = new Map<number, AtlasGlyph>();
@@ -78,8 +83,8 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
         glyphs.set(code, { x, y, width, height: 27, advance: width + 3, color: false });
       }
       const font: TextFontSelection = { kind: "atlas", classic, font: { kind: "kfont", name: "Q3 proportional", picture: { kind: "image", name: texture.name, image: texture.image }, lineHeight: 27, glyphs } };
-      return { body: font, title: font, close() { images.release(texture.image); mounted.close(); } };
-    } catch (error) { mounted.close(); throw error; }
+      return { body: font, title: font, close() { textures.disposeImages(); mounted.close(); } };
+    } catch (error) { textures.disposeImages(); mounted.close(); throw error; }
   }
   const mounts = await catalog.mountsFor(product.id);
   const mounted = await openMountPlan({ id: "mount-plan:menu:typography", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });

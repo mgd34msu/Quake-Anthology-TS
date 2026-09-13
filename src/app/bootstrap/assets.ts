@@ -20,6 +20,7 @@ import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { loadApplicationModel } from "./model-loader.ts";
 import { mountedImageReader } from "./image-reader.ts";
+import type { ImagePolicy } from "../../render/scene/image-policy.ts";
 
 export interface ProviderSceneAssets {
   readonly family: GameFamily;
@@ -27,6 +28,16 @@ export interface ProviderSceneAssets {
   readonly palette: Palette | null;
   readonly textures: SceneTextureLoader;
   readonly shaders: SceneShaderRegistry;
+}
+
+export interface PreparedApplicationImageBinding { commit(): void; discard(): void; }
+export interface PreparedApplicationImages extends PreparedApplicationImageBinding {
+  readonly font: TextFontSelection;
+  readonly typography: Awaited<ReturnType<typeof loadMenuTypography>>;
+  readonly policy: ImagePolicy;
+  provider(content: ContentId): Promise<ProviderSceneAssets>;
+  commit(): void;
+  discard(): void;
 }
 
 export interface ModelAsset {
@@ -81,10 +92,15 @@ export class ApplicationAssets {
   private fonts: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
   private typography: Promise<Awaited<ReturnType<typeof loadMenuTypography>>> | null = null;
   private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
+  private imagePolicyValue: ImagePolicy | undefined;
+  private retiredImages: (() => void)[] = [];
 
-  constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() }) {
+  constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
+    options: { readonly imagePolicy?: ImagePolicy } = {}) {
     this.images = new SceneImageRegistry(owner, mediaClock);
+    this.imagePolicyValue = options.imagePolicy;
   }
+  get imagePolicy(): ImagePolicy | undefined { return this.imagePolicyValue; }
 
   get world(): WorldScene {
     if (this.currentWorld === null) throw new Error("World presentation has not loaded");
@@ -99,7 +115,8 @@ export class ApplicationAssets {
       const family = this.content.catalog.product(content).expectation.family;
       const mounts = await this.content.forContent(content), palette = await paletteFor(mounts, family);
       if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, mounts), palette);
+      const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, mounts), palette,
+        this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue });
       this.activeTextures.add(textures);
       const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
       for (const path of await shaderPaths(this.content, mounts)) {
@@ -107,7 +124,7 @@ export class ApplicationAssets {
         if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
       }
       if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      return { family, mounts, palette, textures, shaders };
+      return { family, mounts, palette, get textures() { return shaders.textures; }, shaders };
     })();
     this.providers.set(content, pending);
     return pending;
@@ -160,7 +177,8 @@ export class ApplicationAssets {
       const provider = await this.provider(this.content.recipe.presentation.assets);
       const product = this.content.catalog.product(this.content.recipe.presentation.assets);
       this.fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
-        rerelease: product.expectation.edition === "rerelease", images: this.images });
+        rerelease: product.expectation.edition === "rerelease", images: this.images,
+        ...(this.imagePolicyValue === undefined ? {} : { imagePolicy: this.imagePolicyValue }) });
       return this.fonts.font;
     })();
     return this.font;
@@ -169,11 +187,75 @@ export class ApplicationAssets {
   loadMenuTypography(): Promise<Awaited<ReturnType<typeof loadMenuTypography>>> {
     this.typography ??= (async () => {
       const font = await this.loadConsoleFont();
-      this.loadedTypography = await loadMenuTypography(this.content.catalog, this.images, font.classic);
+      this.loadedTypography = await loadMenuTypography(this.content.catalog, this.images, font.classic, this.imagePolicyValue);
       return this.loadedTypography;
     })();
     return this.typography;
   }
+
+  async prepareImageRefresh(policy: ImagePolicy): Promise<PreparedApplicationImages> {
+    if (this.closed) throw new Error("Application assets are closed");
+    if (this.retiredImages.length !== 0) throw new Error("Previous image refresh has not finished rebinding");
+    const replacements = new Map<ContentId, { readonly provider: ProviderSceneAssets; readonly textures: SceneTextureLoader; readonly shaders: SceneShaderRegistry }>();
+    const stagedProvider = async (content: ContentId): Promise<ProviderSceneAssets> => {
+      let replacement = replacements.get(content);
+      if (replacement === undefined) {
+        const provider = await this.provider(content);
+        const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, provider.mounts), provider.palette, { policy });
+        replacement = { provider, textures, shaders: provider.shaders.replacement(textures) };
+        replacements.set(content, replacement);
+        await provider.textures.prepareReplacement(textures);
+        await provider.shaders.prepareReplacement(replacement.shaders);
+      }
+      return { ...replacement.provider, textures: replacement.textures, shaders: replacement.shaders };
+    };
+    const worlds: { readonly current: WorldScene; readonly replacement: WorldScene }[] = [];
+    let fonts: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
+    let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
+    try {
+      for (const content of this.providers.keys()) await stagedProvider(content);
+      for (const current of [...(this.currentWorld === null ? [] : [this.currentWorld]), ...this.brushScenes]) {
+        const provider = [...replacements.values()].find(replacement => replacement.provider.shaders === current.shaders);
+        if (provider === undefined) throw new Error("World image provider is absent");
+        worlds.push({ current, replacement: await current.prepareImages(provider.shaders) });
+      }
+      {
+        const content = this.content.recipe.presentation.assets, provider = await this.provider(content);
+        fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
+          rerelease: this.content.catalog.product(content).expectation.edition === "rerelease", images: this.images, imagePolicy: policy });
+        typography = await loadMenuTypography(this.content.catalog, this.images, fonts.font.classic, policy);
+      }
+    } catch (error) {
+      typography?.close(); fonts?.close();
+      for (const world of worlds) world.replacement.close();
+      for (const replacement of replacements.values()) replacement.textures.disposeImages();
+      throw error;
+    }
+    const preparedFonts = fonts, preparedTypography = typography;
+    if (preparedFonts === null || preparedTypography === null) throw new Error("Image refresh fonts were not prepared");
+    return { provider: stagedProvider, font: preparedFonts.font, typography: preparedTypography, policy,
+      commit: () => {
+        for (const replacement of replacements.values()) {
+          const previous = replacement.provider.textures;
+          replacement.provider.shaders.commitReplacement(replacement.shaders);
+          this.activeTextures.add(replacement.textures);
+          this.retiredImages.push(() => { previous.disposeImages(); this.activeTextures.delete(previous); });
+        }
+        for (const world of worlds) world.current.commitImages(world.replacement);
+        const previousFonts = this.fonts, previousTypography = this.loadedTypography;
+        this.retiredImages.push(() => previousFonts?.close(), () => previousTypography?.close());
+        this.fonts = preparedFonts; this.font = Promise.resolve(preparedFonts.font);
+        this.loadedTypography = preparedTypography; this.typography = Promise.resolve(preparedTypography);
+        this.imagePolicyValue = policy;
+      },
+      discard: () => {
+        preparedTypography.close(); preparedFonts.close();
+        for (const world of worlds) world.replacement.close();
+        for (const replacement of replacements.values()) replacement.textures.disposeImages();
+      } };
+  }
+
+  finishImageRefresh(): void { for (const retire of this.retiredImages.splice(0)) retire(); }
 
   model(content: ContentId, path: string): Promise<ModelAsset> {
     const key = `${content}\0${path}`;
@@ -204,6 +286,7 @@ export class ApplicationAssets {
   close(): undefined {
     if (this.closed) return;
     this.closed = true;
+    this.finishImageRefresh();
     for (const textures of this.activeTextures) textures.close();
     this.activeTextures.clear();
     for (const movie of this.activeMovies) movie.close();

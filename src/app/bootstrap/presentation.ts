@@ -19,7 +19,7 @@ import type { WorldViewInput } from "../../render/scene/world.ts";
 import { SeatTextPresentation } from "../../text/layout.ts";
 import { Draw2D, TextCommandSink } from "../../text/draw2d.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
-import type { ApplicationAssets } from "./assets.ts";
+import type { ApplicationAssets, PreparedApplicationImages, PreparedApplicationImageBinding } from "./assets.ts";
 import type { ApplicationEffects } from "./effects.ts";
 import { SourceFinale } from "./finale.ts";
 import type { LocalInput } from "./input.ts";
@@ -68,6 +68,25 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.local.player.seat.id.index, this.seatCount, size.width, size.height); }
+
+  async prepareImageRefresh(images: PreparedApplicationImages): Promise<PreparedApplicationImageBinding> {
+    const { font, typography } = images;
+    const replacements = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
+    try {
+      for (const content of this.worldFonts.keys()) {
+        const provider = await images.provider(content);
+        replacements.set(content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
+          rerelease: this.assets.content.catalog.product(content).expectation.edition === "rerelease", images: this.assets.images,
+          imagePolicy: images.policy }));
+      }
+      const hud = await this.ui.prepareImageRefresh(images);
+      return { commit: () => {
+        this.text.font = font; this.ui.refreshImages(font, typography); hud();
+        for (const font of this.worldFonts.values()) font.close();
+        this.worldFonts.clear(); for (const [content, font] of replacements) this.worldFonts.set(content, font);
+      }, discard: () => { for (const font of replacements.values()) font.close(); } };
+    } catch (error) { for (const font of replacements.values()) font.close(); throw error; }
+  }
 
   get state(): SeatClientState {
     const seat = this.local.player.seat.id, client = this.local.player.seat.client.id, viewport = this.viewport;
@@ -132,7 +151,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
       const provider = await this.assets.provider(text.content);
       this.worldFonts.set(text.content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
-        rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease", images: this.assets.images }));
+        rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease", images: this.assets.images,
+        ...(this.assets.imagePolicy === undefined ? {} : { imagePolicy: this.assets.imagePolicy }) }));
     }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }

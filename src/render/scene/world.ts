@@ -111,12 +111,12 @@ const q1DefaultStyles: readonly number[] = Array.from({ length: 256 }, () => 256
 const q2DefaultStyles: readonly Q2LightStyle[] = Array.from({ length: 256 }, () => ({ rgb: { x: 1, y: 1, z: 1 }, white: 3 }));
 
 export class WorldScene {
-  readonly surfaces: readonly WorldSurface[];
+  surfaces: readonly WorldSurface[];
   readonly bounds: Bounds;
-  readonly fogImage: RendererImage;
-  readonly dlightImage: RendererImage;
+  fogImage: RendererImage;
+  dlightImage: RendererImage;
   readonly noise = new RendererNoise();
-  private readonly shadowScene: Q2ShadowScene;
+  private shadowScene: Q2ShadowScene;
   private readonly owned: RendererImage[] = [];
   private q2Sky: readonly RendererImage[] = [];
   private readonly remapped = new Map<CompiledMaterial, { readonly shader: CompiledMaterial; readonly timeOffset: number }>();
@@ -142,6 +142,8 @@ export class WorldScene {
   static async load(map: DecodedWorld, shaders: SceneShaderRegistry, options: WorldSceneOptions = {}): Promise<WorldScene> {
     const owned: RendererImage[] = [], surfaces: WorldSurface[] = [];
     const images = shaders.textures.images;
+    let result: WorldScene | null = null;
+    try {
     const generated = (name: string, level: Parameters<typeof rgbaImage>[0], wrap: "clamp" | "repeat" = "clamp"): RendererImage => {
       const image = images.register(name, rgbaImage(level), { wrap, filter: "linear" }); owned.push(image); return image;
     };
@@ -235,7 +237,7 @@ export class WorldScene {
           material, fullbright: texture.fullbright, lightmap, q1Sky });
       }
     }
-    const result = new WorldScene(map, shaders, surfaces, options);
+    result = new WorldScene(map, shaders, surfaces, options);
     result.owned.push(...owned);
     if (map.kind === "q2-bsp" && options.q2SkyName !== undefined) {
       const sides: RendererImage[] = [];
@@ -243,6 +245,11 @@ export class WorldScene {
       result.q2Sky = sides;
     }
     return result;
+    } catch (error) {
+      if (result !== null) result.close();
+      else for (const image of owned) images.release(image);
+      throw error;
+    }
   }
 
   materialContext(input: WorldViewInput, model?: ModelTransform, fog: FogVolume | null = null): MaterialDrawContext {
@@ -432,6 +439,27 @@ export class WorldScene {
   }
 
   close(): void { this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+
+  /** Replace only renderer data; BSP identity and source light/style owners remain live. */
+  async prepareImages(shaders: SceneShaderRegistry): Promise<WorldScene> {
+    const replacement = await WorldScene.load(this.map, shaders, this.options);
+    try {
+      for (const [material, remap] of this.remapped)
+        await replacement.remapShader(material.material.name, remap.shader.material.name, remap.timeOffset);
+      return replacement;
+    } catch (error) { replacement.close(); throw error; }
+  }
+
+  commitImages(replacement: WorldScene): void {
+    this.close();
+    this.surfaces = replacement.surfaces;
+    this.fogImage = replacement.fogImage; this.dlightImage = replacement.dlightImage;
+    this.shadowScene = replacement.shadowScene;
+    this.q2Sky = replacement.q2Sky;
+    this.owned.push(...replacement.owned); replacement.owned.length = 0;
+    this.remapped.clear();
+    for (const [material, remap] of replacement.remapped) this.remapped.set(material, remap);
+  }
 
   async remapShader(original: string, replacement: string, timeOffset = 0): Promise<void> {
     this.shaders.remap(original, replacement, timeOffset);

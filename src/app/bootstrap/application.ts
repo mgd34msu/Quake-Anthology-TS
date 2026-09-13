@@ -1,5 +1,6 @@
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import { ApplicationImageSettings } from "./image-settings.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
@@ -98,6 +99,7 @@ export class Application {
   private graphical: GraphicalApplication | null = null;
   private capture: ApplicationCapture | null = null;
   private frontendOverrides: FrontendPreferenceOverrides = {};
+  private imageSettings: ApplicationImageSettings | null = null;
   private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBots | null = null;
   private dedicatedConsole: DedicatedConsole | null = null;
@@ -157,7 +159,14 @@ export class Application {
       application.frontendOverrides = preferences ?? {};
       await application.bindSourceCommands();
       if (options.dedicated) application.openDedicatedConsole();
-      else await application.openGraphical();
+      else {
+        const frontend = application;
+        application.imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
+          dialect: application.sourceDialect(), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
+            host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
+          } });
+        await application.openGraphical();
+      }
       application.bots = await application.createBots(content, simulation);
       await application.openNetwork();
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
@@ -237,6 +246,7 @@ export class Application {
 
   private inputActions(): ApplicationInputCommands {
     return { quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
+      ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
       console: { dialect: () => this.sourceDialect(), server: () => {
         const source = this.simulation.q3Source();
         return source === null ? this.q2Console === null ? null : { cvars: this.q2Console.cvars, sharedNames: this.q2Console.sharedNames } : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
@@ -468,7 +478,7 @@ export class Application {
 
   private async openGraphical(): Promise<void> {
     const owner = { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
-    const assets = new ApplicationAssets(this.content, owner);
+    const assets = new ApplicationAssets(this.content, owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy });
     let renderer: NativeRenderer | null = null, input: ApplicationInput | null = null, audio: ApplicationAudio | null = null;
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
@@ -618,7 +628,7 @@ export class Application {
         this.launchOptions = options;
         committed = true;
       } else {
-        assets = new ApplicationAssets(content, previous.renderer.owner);
+        assets = new ApplicationAssets(content, previous.renderer.owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy });
         await assets.loadWorld();
         const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
         if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
@@ -966,6 +976,8 @@ export class Application {
       await this.capture?.drain();
       await this.commands();
       await this.sourceActions();
+      const currentGraphics = this.graphical;
+      if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease);
       return output;
     } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
     finally { this.stepping = false; }
@@ -1001,6 +1013,7 @@ export class Application {
     const errors: unknown[] = [];
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
+    try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

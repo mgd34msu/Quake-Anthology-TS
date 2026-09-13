@@ -40,6 +40,7 @@ export interface LocalInput {
 }
 
 export interface ApplicationInputCommands {
+  readonly sharedCvars?: CvarRegistry;
   quit(): undefined;
   execute(name: string, arguments_: readonly string[], seat: SeatId | null): undefined;
   print(text: string): undefined;
@@ -101,9 +102,9 @@ export class ApplicationInput {
     this.cvars = owner?.cvars ?? new CvarRegistry({ dialect, context, print });
     const sourceDialect = actions.console?.dialect() ?? dialect;
     const consoleCvars = sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print });
-    this.consoleRouting = actions.console === undefined ? null : new ApplicationConsoleRouting({ fallback: consoleCvars,
+    this.consoleRouting = actions.console === undefined && actions.sharedCvars === undefined ? null : new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
-      seat: id => actions.console?.seat(id) ?? null, movement: () => this.cvars });
+      seat: id => actions.console?.seat(id) ?? null, movement: () => this.cvars, shared: () => actions.sharedCvars ?? null });
     this.commands = owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
       ...(this.consoleRouting === null ? {} : { cvarRouting: this.consoleRouting }), print, forwardToServer: invocation => {
       const name = invocation.argv[0]; if (name === undefined) return undefined;

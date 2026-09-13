@@ -4,6 +4,8 @@ import { decodeBmp, decodeGif, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, de
 import { SceneImageRegistry } from "./resources.ts";
 import { floodSkin } from "./skin.ts";
 import { q2MipmappedImage } from "./q2-image.ts";
+import { DEFAULT_IMAGE_POLICY, snapshotImagePolicy } from "./image-policy.ts";
+import type { ImagePolicy, ImageUsage } from "./image-policy.ts";
 
 export interface SceneAsset {
   readonly bytes: Uint8Array;
@@ -27,7 +29,7 @@ export interface SceneTextureLoadOptions {
   readonly mipmap?: boolean;
   readonly wrap?: TextureSampling["wrap"];
   readonly family?: "q1" | "q2" | "q3";
-  readonly usage?: "skin" | "sprite" | "picture" | "wall" | "sky";
+  readonly usage?: ImageUsage;
 }
 
 type AnimatedFrame = Exclude<RenderImage, { readonly kind: "depth32f" }>;
@@ -36,7 +38,11 @@ const repeat: TextureSampling = { wrap: "repeat", filter: "linear-mipmap-nearest
 
 /** Images retain palette data until the backend upload, including translated skins. */
 export class SceneTextureLoader {
+  private readonly policy: ImagePolicy | undefined;
+  readonly fullbrightFirst: number;
   private readonly loaded = new Map<string, Promise<SceneTexture | null>>();
+  private readonly requests = new Map<string, { readonly name: string; readonly options: SceneTextureLoadOptions }>();
+  private readonly ownedImages = new Set<RendererImage>();
   private animationFrames = new WeakMap<RendererImage, readonly [AnimatedFrame, ...AnimatedFrame[]]>();
   private readonly stopAnimations = new Set<() => void>();
   private closed = false;
@@ -44,7 +50,9 @@ export class SceneTextureLoader {
   readonly missing: SceneTexture;
 
   constructor(readonly images: SceneImageRegistry, readonly reader: SceneAssetReader,
-    readonly palette: Palette | null = null, readonly fullbrightFirst = 224) {
+    readonly palette: Palette | null = null, options: { readonly policy?: ImagePolicy; readonly fullbrightFirst?: number } = {}) {
+    this.policy = options.policy === undefined ? undefined : snapshotImagePolicy(options.policy);
+    this.fullbrightFirst = options.fullbrightFirst ?? 224;
     this.white = this.register("*white", { kind: "rgba8", levels: [{ width: 1, height: 1, pixels: new Uint8Array([255, 255, 255, 255]) }],
       borderColor: { x: 1, y: 1, z: 1, w: 1 } }, { wrap: "repeat", filter: "nearest" });
     const pixels = new Uint8Array(16 * 16 * 4);
@@ -60,6 +68,7 @@ export class SceneTextureLoader {
     source: RendererImage["source"] = { kind: "generated", name }, logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0]): SceneTexture {
     this.requireOpen();
     const image = this.images.register(name, content, sampling, source);
+    this.ownedImages.add(image);
     let fullbright: RendererImage | null = null;
     if (content.kind === "indexed8" && content.fullbright !== null) {
       const range = content.fullbright;
@@ -76,6 +85,7 @@ export class SceneTextureLoader {
       const [first, ...rest] = content.levels;
       fullbright = this.images.register(`${name}:fullbright`, { kind: "rgba8", levels: [convert(first), ...rest.map(convert)],
         borderColor: { x: 0, y: 0, z: 0, w: 0 } }, sampling, source);
+      this.ownedImages.add(fullbright);
     }
     return { name, image, content, fullbright, width: logicalSize.width, height: logicalSize.height };
   }
@@ -118,22 +128,39 @@ export class SceneTextureLoader {
     const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}\0${options.usage ?? ""}`;
     const existing = this.loaded.get(key);
     if (existing !== undefined) return existing;
+    this.requests.set(key, { name, options: { ...options } });
     const pending = this.loadUncached(name, options);
     this.loaded.set(key, pending);
     return pending;
+  }
+
+  async prepareReplacement(replacement: SceneTextureLoader): Promise<void> {
+    this.requireOpen();
+    for (const request of this.requests.values()) await replacement.load(request.name, request.options);
+    this.requireOpen();
   }
 
   private async loadUncached(name: string, options: SceneTextureLoadOptions): Promise<SceneTexture | null> {
     const dot = name.lastIndexOf("."), slash = name.lastIndexOf("/");
     const explicit = dot > slash, base = explicit ? name.slice(0, dot) : name;
     const wall = options.usage === "wall" || options.usage === undefined && (name.startsWith("textures/") || name.toLowerCase().endsWith(".wal"));
-    const extensions = options.family === "q2" ? [".png", ".jpg", ".tga", ".jpeg", ".bmp", ".gif", wall ? ".wal" : ".pcx"]
+    const policy = this.policy ?? (options.family === "q2" ? DEFAULT_IMAGE_POLICY : undefined);
+    const sourceExtensions = options.family === "q2" ? [".png", ".jpg", ".tga", ".jpeg", ".bmp", ".gif", wall ? ".wal" : ".pcx"]
       : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"];
-    const overrideNative = options.family === "q2" && /\.(pcx|wal)$/i.test(name);
+    const overrides = policy?.formats?.map(format => `.${format}`) ?? sourceExtensions.filter(extension => ![".lmp", ".wal", ".pcx"].includes(extension));
+    const extensions = policy?.formats === undefined ? sourceExtensions : [...overrides, ...(options.family === "q1" ? [".lmp", ".pcx"] : [options.family === "q2" && wall ? ".wal" : ".pcx"])];
+    // Q2 Mod_LoadTexinfo requests .wal; shared BSP callers retain extensionless material names.
+    const requestedName = !explicit && options.family === "q2" && wall ? `${name}.wal` : name;
+    const requested = explicit ? name.slice(dot + 1).toLowerCase() : requestedName !== name ? "wal" : "";
+    const native = requested === "pcx" || requested === "wal";
+    const truecolor = ["png", "jpg", "tga", "jpeg", "bmp", "gif"].includes(requested);
+    const usage = options.usage ?? (wall ? "wall" : "picture");
+    const overrideNative = policy !== undefined && policy.overrideLevel >= 1 && policy.overrideUsages.includes(usage)
+      && (native || policy.overrideLevel > 1 && truecolor);
     const alternatives = extensions.map(extension => base + extension);
     const candidates = [...new Set([
-      ...(overrideNative ? alternatives.slice(0, -1) : []),
-      ...(explicit ? [name] : []), ...alternatives,
+      ...(overrideNative ? overrides.map(extension => base + extension) : []),
+      ...(explicit || requestedName !== name ? [requestedName] : []), ...alternatives,
     ])];
     for (const path of candidates) {
       const asset = await this.reader.read(path);
@@ -216,12 +243,20 @@ export class SceneTextureLoader {
     return null;
   }
 
+  /** Call after consumers have rebound to replacement images. */
+  disposeImages(): void {
+    this.close();
+    for (const image of this.ownedImages) if (this.images.isResident(image)) this.images.release(image);
+    this.ownedImages.clear();
+  }
+
   close(): void {
     this.closed = true;
     for (const stop of this.stopAnimations) stop();
     this.stopAnimations.clear();
     this.animationFrames = new WeakMap();
     this.loaded.clear();
+    this.requests.clear();
   }
 
   private requireOpen(): void { if (this.closed) throw new Error("Scene texture loader is closed"); }

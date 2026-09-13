@@ -51,6 +51,18 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly wheelIcons = new Map<ItemId, ResourceId>();
   private weaponAssets: ApplicationWeaponHudAssets | null = null;
   private weaponIcons: { readonly weapon: ResourceId | null; readonly ammo: ResourceId | null } = { weapon: null, ammo: null };
+  private font: TextFontSelection;
+  private typography: MenuTypography;
+
+  refreshImages(font: TextFontSelection, typography: MenuTypography): void {
+    this.font = font; this.typography = typography;
+    this.text.bind(this.art.skin.font, font);
+    this.menuText.bind(this.art.skin.font, typography.body); this.menuText.bind(menuTitleFont, typography.title);
+  }
+
+  prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
+    return this.weaponAssets?.prepareImageRefresh(providers) ?? Promise.resolve(() => undefined);
+  }
 
   async prepare(assets: ApplicationAssets): Promise<void> {
     await this.prompt.prepare(assets, () => this.local.input.focus);
@@ -70,8 +82,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
     command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi) {
     const seat = local.player.seat.id;
+    this.font = font; this.typography = typography;
     this.now = input.now;
-    this.measureHudText = (text, scale) => layoutText({ text, font, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
+    this.measureHudText = (text, scale) => layoutText({ text, font: this.font, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
     this.preferences = new SeatUiPreferences(seat);
     this.messages = new SeatHudMessages(seat);
     this.text = new UiTextRenderer(seat);
@@ -80,7 +93,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.menuText.bind(art.skin.font, typography.body);
     this.menuText.bind(menuTitleFont, typography.title);
     this.controller = new NativeUiController({ seat, skin: () => this.controller.activeMenu === gamePromptMenu ? { ...menuSkin(art.skin.font), titleFont: art.skin.font, titleScale: 2.6 } : menuSkin(art.skin.font),
-      measureText: (text, scale) => layoutText({ text, font: typography.body, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
+      measureText: (text, scale) => layoutText({ text, font: this.typography.body, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
       bindings: () => local.input.bindings, appearance: () => this.preferences.values,
       focus: (focus, time) => { local.input.setFocus(focus, time); local.haptics.setActive(local.input.focused && focus.kind === "game"); input.router.updateCapture(); },
       sound: (sound, owner) => audio.uiSound(sound, owner),

@@ -35,6 +35,13 @@ export class ApplicationRereleasePresentation {
   private readonly prints: SimulationPresentationEvent[] = [];
   private readonly skies = new Map<ContentId, Map<string, Promise<readonly RendererImage[]>>>();
   private sky: RereleaseSkyView | null = null;
+  private skySource: { readonly content: ContentId; readonly name: string } | null = null;
+
+  async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
+    const next = this.sky === null || this.skySource === null ? null
+      : { ...this.sky, images: await this.loadSkyImages(providers, this.skySource.content, this.skySource.name) };
+    return () => { this.skies.clear(); this.sky = next; };
+  }
 
   constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[]) {
     this.seats = seats.map(binding => ({ binding, catalogs: new Map<ContentId, Promise<LocalizationCatalog>>(), fog: new RereleaseFog(), fogReceived: false, story: "" }));
@@ -63,22 +70,24 @@ export class ApplicationRereleasePresentation {
   private skyImages(content: ContentId, name: string): Promise<readonly RendererImage[]> {
     let cache = this.skies.get(content); if (cache === undefined) { cache = new Map<string, Promise<readonly RendererImage[]>>(); this.skies.set(content, cache); }
     const existing = cache.get(name); if (existing !== undefined) return existing;
-    const pending = (async (): Promise<readonly RendererImage[]> => {
-      const provider = await this.assets.provider(content), images: RendererImage[] = [];
+    const pending = this.loadSkyImages(this.assets, content, name);
+    cache.set(name, pending); return pending;
+  }
+
+  private async loadSkyImages(providers: Pick<ApplicationAssets, "provider">, content: ContentId, name: string): Promise<readonly RendererImage[]> {
+      const provider = await providers.provider(content), images: RendererImage[] = [];
       for (const suffix of SKY_FACE_SUFFIXES) {
-        const image = await provider.textures.load(`env/${name}${suffix}`, { family: "q2", wrap: "clamp", mipmap: false });
+        const image = await provider.textures.load(`env/${name}${suffix}`, { family: "q2", wrap: "clamp", mipmap: false, usage: "sky" });
         images.push((image ?? provider.textures.missing).image);
       }
       return images;
-    })();
-    cache.set(name, pending); return pending;
   }
 
   async prepare(): Promise<void> {
     for (const source of this.pending.splice(0)) {
       if (source.kind === "q2-player") { if (source.event.kind === "userinfo") this.names.set(source.event.slot, source.event.name); continue; }
       const event = source.event;
-      if (event.kind === "sky") { this.sky = { images: await this.skyImages(source.content, event.name), rotation: event.rotation, autoRotate: event.rotation !== 0 && event.autoRotate, axis: { ...event.axis } }; continue; }
+      if (event.kind === "sky") { this.skySource = { content: source.content, name: event.name }; this.sky = { images: await this.skyImages(source.content, event.name), rotation: event.rotation, autoRotate: event.rotation !== 0 && event.autoRotate, axis: { ...event.axis } }; continue; }
       if (event.kind !== "story" && event.kind !== "localized-print") continue;
       for (const seat of this.seats) {
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;

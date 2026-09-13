@@ -8,8 +8,14 @@ import type { ApplicationAssets } from "./assets.ts";
 export class ApplicationWeaponHudAssets {
   private readonly pending = new Map<string, Promise<ResourceId>>();
   private readonly pictures = new Map<ResourceId, PictureAsset>();
+  private readonly textureIcons = new Map<string, WeaponHudIcon>();
   constructor(readonly assets: ApplicationAssets) {}
   picture(id: ResourceId): PictureAsset | undefined { return this.pictures.get(id); }
+  async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
+    const pictures = new Map<ResourceId, PictureAsset>();
+    for (const [key, icon] of this.textureIcons) await this.loadIcon(icon, key, providers, pictures);
+    return () => { for (const [id, picture] of pictures) this.pictures.set(id, picture); };
+  }
   aspect(id: ResourceId | null): number {
     if (id === null) return 1;
     const picture = this.pictures.get(id);
@@ -34,10 +40,11 @@ export class ApplicationWeaponHudAssets {
     const prior = this.pending.get(key); if (prior !== undefined) return prior;
     const pending = this.loadIcon(icon, key); this.pending.set(key, pending); return pending;
   }
-  private async loadIcon(icon: WeaponHudIcon, key: string): Promise<ResourceId> {
+  private async loadIcon(icon: WeaponHudIcon, key: string, providers: Pick<ApplicationAssets, "provider"> = this.assets,
+    pictures: Map<ResourceId, PictureAsset> = this.pictures): Promise<ResourceId> {
     const id: ResourceId = `resource:weapon-hud:${key}`;
-    const provider = await this.assets.provider(icon.kind === "shader" ? icon.content : icon.resource.content);
-    if (icon.kind === "shader") this.pictures.set(id, await provider.shaders.registerPicture(icon.name));
+    const provider = await providers.provider(icon.kind === "shader" ? icon.content : icon.resource.content);
+    if (icon.kind === "shader") pictures.set(id, await provider.shaders.registerPicture(icon.name));
     else if (provider.family === "q1") {
       const asset = await provider.mounts.open(icon.resource.path);
       if (asset === null || provider.palette === null) throw new Error(`Weapon HUD picture missing: ${key}`);
@@ -46,11 +53,12 @@ export class ApplicationWeaponHudAssets {
       const picture = decodeQpic(lump?.bytes ?? asset.bytes, key);
       const image = this.assets.images.register(key, indexedRenderImage([{ width: picture.width, height: picture.height, pixels: picture.indices }], provider.palette,
         { kind: "index", index: 255 }), { wrap: "clamp", filter: "linear" }, { kind: "resource", resource: asset.reference });
-      this.pictures.set(id, { kind: "image", name: key, image });
+      pictures.set(id, { kind: "image", name: key, image });
     } else {
       const texture = await provider.textures.load(icon.resource.path, { family: provider.family, mipmap: false, wrap: "clamp" });
       if (texture === null) throw new Error(`Weapon HUD image missing: ${key}`);
-      this.pictures.set(id, { kind: "image", name: key, image: texture.image });
+      pictures.set(id, { kind: "image", name: key, image: texture.image });
+      this.textureIcons.set(key, icon);
     }
     return id;
   }

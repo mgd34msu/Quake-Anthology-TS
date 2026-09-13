@@ -52,8 +52,10 @@ export class SceneModelRenderer {
   private readonly materials = new Map<string, Material>();
   private readonly pending = new Map<string, Promise<void>>();
   private readonly fogs: readonly FogVolume[];
+  private textures: SceneTextureLoader;
 
   constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
+    this.textures = provider.textures;
     this.lighting = new ModelLightSampler(world);
     const volumes = new Map<number, FogVolume>();
     if (world.map.kind === "q3-bsp") for (const surface of world.surfaces) {
@@ -72,6 +74,9 @@ export class SceneModelRenderer {
   }
 
   async preload(entities: readonly SceneEntity[], options: SourceOptions = () => ({})): Promise<void> {
+    if (this.textures !== this.provider.textures) {
+      this.materials.clear(); this.pending.clear(); this.textures = this.provider.textures;
+    }
     const work: Promise<void>[] = [];
     const visit = (entity: SceneEntity): void => {
       const source = options(entity), selections = this.selections(entity, source);

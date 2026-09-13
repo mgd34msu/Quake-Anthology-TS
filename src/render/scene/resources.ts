@@ -57,6 +57,8 @@ export class SceneImageRegistry {
       throw new Error("Scene image belongs to another resource owner or has been released");
   }
 
+  isResident(image: RendererImage): boolean { return image.owner === this.owner && this.images.get(image.ordinal) === image; }
+
   trackAnimation(image: RendererImage, update: (milliseconds: number) => void, onStop: () => void): () => void {
     this.require(image);
     if (this.animations.has(image)) throw new Error("Scene image already has an animation");

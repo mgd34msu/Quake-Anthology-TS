@@ -29,6 +29,8 @@ import type { NativeUiArt } from "../../ui/common/index.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { ApplicationHost } from "./application.ts";
 import { ApplicationAssets } from "./assets.ts";
+import { ApplicationImageSettings } from "./image-settings.ts";
+import { ApplicationConsoleRouting } from "./console.ts";
 import { ApplicationAudio } from "./audio.ts";
 import { loadApplicationContent } from "./content.ts";
 import type { LoadedApplicationContent } from "./content.ts";
@@ -57,7 +59,7 @@ import { ApplicationSeatUi } from "./ui.ts";
 
 interface RemoteWorldFrontend {
   readonly assets: ApplicationAssets;
-  readonly font: TextFontSelection;
+  font: TextFontSelection;
   readonly art: NativeUiArt;
   readonly audio: ApplicationAudio;
   readonly effects: ApplicationEffects;
@@ -96,7 +98,7 @@ export class RemoteApplication {
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
-    private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
+    private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
     if (launchOptions.network.kind === "q3-client") {
       const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
       const cvars = new CvarRegistry({ dialect: "q3", context, print: text => this.print(text),
@@ -109,7 +111,9 @@ export class RemoteApplication {
       cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
       cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
       cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
-      const commands = new CommandBuffer({ dialect: "q3", context, cvars, print: text => this.print(text), forwardToServer: invocation => {
+      const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => "q3", server: () => null,
+        seat: () => null, shared: () => this.imageSettings.cvars });
+      const commands = new CommandBuffer({ dialect: "q3", context, cvars, cvarRouting, print: text => this.print(text), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
@@ -166,14 +170,17 @@ export class RemoteApplication {
     const address = await resolveAddress(options.network.remote, q1 ? 26000 : q3 ? 27960 : 27910, q3 ? 4 : 0);
     const content = await loadApplicationContent(options);
     const identity = createIdentityOwner(`quake:remote:${addressKey(address)}`), session = new EngineSession(identity, { kind: "local" });
-    let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null;
+    let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     try {
       const product = content.catalog.product(options.product);
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" || q3 && options.product !== "q3-baseq3")
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34 or baseq3 protocol 68 content");
+      imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
+        dialect: q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
+        print: text => { if (application === null) host.print(text); else application.print(text); } });
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
-      application = new RemoteApplication(options, content, session, renderer, host, transport, address, identity);
+      application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
       if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
       application.frontend = await application.loadFrontend(content);
@@ -181,7 +188,7 @@ export class RemoteApplication {
       return application;
     } catch (error) {
       if (application !== null) await application.close();
-      else { transport?.close(); renderer?.close(); session.close(); await content.close(); }
+      else { transport?.close(); renderer?.close(); session.close(); await imageSettings?.close(); await content.close(); }
       throw error;
     }
   }
@@ -203,7 +210,7 @@ export class RemoteApplication {
   }
 
   private async loadFrontend(content: LoadedApplicationContent): Promise<RemoteWorldFrontend> {
-    const assets = new ApplicationAssets(content, this.renderer.owner);
+    const assets = new ApplicationAssets(content, this.renderer.owner, undefined, { imagePolicy: this.imageSettings.policy });
     let art: NativeUiArt | null = null, audio: ApplicationAudio | null = null, effects: ApplicationEffects | null = null;
     try {
       await assets.loadWorld();
@@ -228,6 +235,13 @@ export class RemoteApplication {
     if (this.closed) return;
     this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
       commands: frontend.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
+  }
+
+  private async refreshImages(): Promise<void> {
+    const frontend = this.frontend;
+    if (frontend === null) return;
+    await this.imageSettings.refresh(frontend.assets, this.presentation === null ? [] : [this.presentation], null);
+    frontend.font = await frontend.assets.loadConsoleFont();
   }
 
   private async loadQ2ServerWorld(state: Q2ApplicationGameState): Promise<LoadedApplicationContent> {
@@ -376,7 +390,7 @@ export class RemoteApplication {
     if (this.controls === null) {
       const seat = this.session.createSeat(0, this.remote.client);
       this.controls = new ApplicationInput(this.window, [{ seat, actor: player.actor }], this.options, this.remote,
-        { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text),
+        { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
           clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
           clientInput: event => {
             const client = this.presentation?.q3Client;
@@ -484,6 +498,7 @@ export class RemoteApplication {
       if (this.network.phase !== "active" || this.remote.output === null) {
         this.controls?.stopHaptics();
         await this.dispatchCommands();
+        await this.refreshImages();
         this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
           commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
         await this.capture?.drain();
@@ -502,6 +517,7 @@ export class RemoteApplication {
       await this.network.poll(now);
       if (this.network.phase !== "active") { this.controls?.stopHaptics(); return null; }
       await this.bindSeat();
+      await this.refreshImages();
       const output = this.remote.samplePresentation(performance.now()), frontend = this.frontend, presentation = this.presentation;
       if (output === null) return null;
       if (frontend === null || presentation === null) throw new Error("Active remote player has no frontend");
@@ -561,6 +577,7 @@ export class RemoteApplication {
     }
     try { await this.downloadCatalogSeed?.close(); this.downloadCatalogSeed = null; } catch (error) { errors.push(error); }
     try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars); } catch (error) { errors.push(error); }
+    try { await this.imageSettings.close(); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");
   }

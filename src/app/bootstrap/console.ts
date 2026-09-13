@@ -17,6 +17,7 @@ export interface ApplicationConsoleRoutingOptions {
   seat(id: SeatId): CvarRegistry | null;
   /** Existing input tuning variables retain their movement provider's cvar policy. */
   readonly movement?: () => CvarRegistry | null;
+  readonly shared?: () => CvarRegistry | null;
 }
 
 function caller(origin: CommandOrigin): Exclude<CommandOrigin, { readonly kind: "script" }> {
@@ -67,6 +68,8 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
 
   owner(nameInput: string, source: CommandContext): CvarRegistry {
     const name = sourceCommandText(nameInput), { server, seat, movement, origin } = this.owners(source);
+    const shared = this.options.shared?.();
+    if (shared?.find(name) !== undefined) return shared;
     const serverHas = server !== null && server.cvars.find(name) !== undefined;
     const seatHas = seat !== null && seat.find(name) !== undefined;
     const movementHas = movement !== null && movement.find(name) !== undefined;
@@ -88,6 +91,7 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
 
   visible(source: CommandContext): readonly CvarRegistry[] {
     const { server, seat, movement } = this.owners(source), registries = new Set<CvarRegistry>();
+    const shared = this.options.shared?.(); if (shared !== undefined && shared !== null) registries.add(shared);
     if (server !== null) registries.add(server.cvars);
     if (seat !== null) registries.add(seat);
     if (movement !== null) registries.add(movement);
