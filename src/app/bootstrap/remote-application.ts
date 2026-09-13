@@ -218,7 +218,7 @@ export class RemoteApplication {
   }
 
   private async loadFrontend(content: LoadedApplicationContent): Promise<RemoteWorldFrontend> {
-    const assets = new ApplicationAssets(content, this.renderer.owner, undefined, { imagePolicy: this.imageSettings.policy });
+    const assets = new ApplicationAssets(content, this.renderer.owner, undefined, { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
     let art: NativeUiArt | null = null, audio: ApplicationAudio | null = null, effects: ApplicationEffects | null = null;
     try {
       await assets.loadWorld();

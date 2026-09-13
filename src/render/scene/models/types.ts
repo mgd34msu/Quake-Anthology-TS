@@ -4,6 +4,7 @@ import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts
 import type { DrawBatch, RenderImage, RenderState, SceneCamera } from "../../../contracts/render.ts";
 import type { ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
+import type { ModelReplacementPolicy } from "./replacements.ts";
 
 export type ModelImageSelection = { readonly kind: "external"; readonly name: string }
   | { readonly kind: "indexed"; readonly name: string; readonly width: number; readonly height: number;
@@ -33,6 +34,8 @@ export interface ModelSourceOptions {
 }
 
 export interface ModelPreparationContext {
+  readonly modelPolicy?: ModelReplacementPolicy;
+  readonly purpose?: "view" | "shadow";
   readonly camera: SceneCamera;
   readonly timeSeconds: number;
   readonly frustum?: readonly Plane[];

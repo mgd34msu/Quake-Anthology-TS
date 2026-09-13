@@ -478,7 +478,7 @@ export class Application {
 
   private async openGraphical(): Promise<void> {
     const owner = { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
-    const assets = new ApplicationAssets(this.content, owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy });
+    const assets = new ApplicationAssets(this.content, owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
     let renderer: NativeRenderer | null = null, input: ApplicationInput | null = null, audio: ApplicationAudio | null = null;
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
@@ -628,7 +628,7 @@ export class Application {
         this.launchOptions = options;
         committed = true;
       } else {
-        assets = new ApplicationAssets(content, previous.renderer.owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy });
+        assets = new ApplicationAssets(content, previous.renderer.owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
         await assets.loadWorld();
         const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
         if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");

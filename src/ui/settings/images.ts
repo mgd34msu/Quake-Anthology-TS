@@ -22,3 +22,14 @@ export function bindImageSettings(registry: CvarRegistry): readonly SettingBindi
     write: value => { const current = Number(mask.read()); mask.write(String(value ? current | bit : current & ~bit)); },
   }))];
 }
+
+export function bindModelSettings(registry: CvarRegistry): readonly SettingBinding[] {
+  const controls: readonly (readonly [string, string])[] = [
+    ["r_enhancedmodels", "Q1 enhanced models"], ["gl_md5_load", "Load Q2 enhanced models"],
+    ["gl_md5_use", "Draw Q2 enhanced models"],
+  ];
+  return [...controls.map(([name, label]) => bindCvarSetting(registry, {
+    name, label, category: "video", restart: null, kind: "toggle",
+  }, null)), bindCvarSetting(registry, { name: "r_model_distance", label: "Model range (map units)",
+    category: "video", restart: null, kind: "text-entry", maximumLength: 16, submitOnly: true }, null)];
+}

@@ -30,7 +30,7 @@ import { menuPanel, menuSkin, menuTitleFont } from "../../ui/common/menu-theme.t
 import { layoutText } from "../../text/layout.ts";
 import { SeatGamePrompt, gamePromptMenu } from "./game-prompt.ts";
 import { Q2MatchUi } from "./q2-match-ui.ts";
-import { bindImageSettings } from "../../ui/settings/images.ts";
+import { bindImageSettings, bindModelSettings } from "../../ui/settings/images.ts";
 
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
@@ -116,7 +116,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } });
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
-    const images = input.sharedCvars === null ? [] : bindImageSettings(input.sharedCvars);
+    const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];

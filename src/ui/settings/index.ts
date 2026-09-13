@@ -19,7 +19,8 @@ export type SettingBinding = SettingBase & (
   | { readonly kind: "toggle"; readonly read: () => boolean; readonly write: (value: boolean) => void }
   | { readonly kind: "slider"; readonly read: () => number; readonly write: (value: number) => void; readonly minimum: number; readonly maximum: number; readonly step: number }
   | { readonly kind: "choice"; readonly read: () => string; readonly write: (value: string) => void; readonly choices: () => readonly UiChoice[] }
-  | { readonly kind: "text-entry"; readonly read: () => string; readonly write: (value: string) => void; readonly maximumLength: number }
+  | { readonly kind: "text-entry"; readonly read: () => string; readonly write: (value: string) => void; readonly maximumLength: number;
+      readonly commit?: { submit(value: string): void; cancel(): void } }
   | { readonly kind: "button"; readonly activate: () => void }
 );
 export function settingControl(binding: SettingBinding, rect: Rect, seat: SeatId): UiControl {
@@ -33,7 +34,7 @@ export function settingControl(binding: SettingBinding, rect: Rect, seat: SeatId
       select: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; } };
     case "text-entry": return { ...base, kind: "text-entry", text: binding.read(), maximumLength: binding.maximumLength,
       change: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; },
-      submit: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; } };
+      submit: (actual, value) => { requireSeat(actual); if (binding.commit === undefined) binding.write(value); else binding.commit.submit(value); return undefined; } };
     case "button": return { ...base, kind: "button", activate: actual => { requireSeat(actual); binding.activate(); return undefined; } };
   }
 }
@@ -43,7 +44,7 @@ export type CvarSettingSpec = CvarSettingBase & (
   | { readonly kind: "toggle" }
   | { readonly kind: "slider"; readonly minimum: number; readonly maximum: number; readonly step: number }
   | { readonly kind: "choice"; readonly choices: readonly UiChoice[] }
-  | { readonly kind: "text-entry"; readonly maximumLength: number }
+  | { readonly kind: "text-entry"; readonly maximumLength: number; readonly submitOnly?: boolean }
 );
 /** The subsystem registers its cvar and supplies the spec; menus never create unused cvars. */
 export function bindCvarSetting(registry: CvarRegistry, spec: CvarSettingSpec, restarts: RestartControls | null): SettingBinding {
@@ -71,7 +72,12 @@ export function bindCvarSetting(registry: CvarRegistry, spec: CvarSettingSpec, r
     case "choice": return { ...base, kind: "choice", read, choices: () => spec.choices, write: value => {
       if (!spec.choices.some(choice => choice.id === value)) throw new RangeError("Unknown cvar setting choice"); write(value);
     } };
-    case "text-entry": return { ...base, kind: "text-entry", read, write, maximumLength: spec.maximumLength };
+    case "text-entry": {
+      if (spec.submitOnly !== true) return { ...base, kind: "text-entry", read, write, maximumLength: spec.maximumLength };
+      let draft: string | null = null;
+      return { ...base, kind: "text-entry", read: () => draft ?? read(), write: value => { draft = value; }, maximumLength: spec.maximumLength,
+        commit: { submit: value => { write(value); draft = null; }, cancel: () => { draft = null; } } };
+    }
   }
 }
 
@@ -102,7 +108,10 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
         }
         controls.push(back());
         return { id, title: `${category.label}${pages > 1 ? ` ${page + 1}/${pages}` : ""}`, fullScreen: false,
-          controls, open: () => undefined, close: () => undefined };
+          controls, open: () => undefined, close: () => {
+            for (const binding of selected.slice(page * 9, page * 9 + 9)) if (binding.kind === "text-entry") binding.commit?.cancel();
+            return undefined;
+          } };
       }));
     }
   }

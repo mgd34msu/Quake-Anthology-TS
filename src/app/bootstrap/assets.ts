@@ -19,10 +19,14 @@ import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { loadApplicationModel } from "./model-loader.ts";
+import type { ApplicationModelVariants } from "./model-loader.ts";
+import { DEFAULT_MODEL_REPLACEMENT_POLICY, loadModelReplacement } from "../../render/scene/models/replacements.ts";
+import type { ModelReplacementPolicy } from "../../render/scene/models/replacements.ts";
 import { mountedImageReader } from "./image-reader.ts";
 import type { ImagePolicy } from "../../render/scene/image-policy.ts";
 
 export interface ProviderSceneAssets {
+  readonly modelPolicy: ModelReplacementPolicy;
   readonly family: GameFamily;
   readonly mounts: MountedContent;
   readonly palette: Palette | null;
@@ -86,6 +90,7 @@ export class ApplicationAssets {
   private closed = false;
   private readonly providers = new Map<ContentId, Promise<ProviderSceneAssets>>();
   private readonly models = new Map<string, Promise<ModelAsset>>();
+  private readonly modelVariants = new Map<ApplicationModelVariants, ContentId>();
   private readonly brushScenes: WorldScene[] = [];
   private currentWorld: WorldScene | null = null;
   private font: Promise<TextFontSelection> | null = null;
@@ -93,14 +98,18 @@ export class ApplicationAssets {
   private typography: Promise<Awaited<ReturnType<typeof loadMenuTypography>>> | null = null;
   private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
   private imagePolicyValue: ImagePolicy | undefined;
+  private modelPolicyValue: ModelReplacementPolicy;
   private retiredImages: (() => void)[] = [];
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
-    options: { readonly imagePolicy?: ImagePolicy } = {}) {
+    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy } = {}) {
     this.images = new SceneImageRegistry(owner, mediaClock);
     this.imagePolicyValue = options.imagePolicy;
+    this.modelPolicyValue = options.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY;
   }
   get imagePolicy(): ImagePolicy | undefined { return this.imagePolicyValue; }
+  get modelPolicy(): ModelReplacementPolicy { return this.modelPolicyValue; }
+  setModelPolicy(policy: ModelReplacementPolicy): void { this.modelPolicyValue = policy; }
 
   get world(): WorldScene {
     if (this.currentWorld === null) throw new Error("World presentation has not loaded");
@@ -124,7 +133,9 @@ export class ApplicationAssets {
         if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
       }
       if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      return { family, mounts, palette, get textures() { return shaders.textures; }, shaders };
+      const assets = this;
+      return { family, mounts, palette, get textures() { return shaders.textures; }, shaders,
+        get modelPolicy() { return assets.modelPolicyValue; } };
     })();
     this.providers.set(content, pending);
     return pending;
@@ -193,7 +204,7 @@ export class ApplicationAssets {
     return this.typography;
   }
 
-  async prepareImageRefresh(policy: ImagePolicy): Promise<PreparedApplicationImages> {
+  async prepareImageRefresh(policy: ImagePolicy, modelPolicy = this.modelPolicyValue): Promise<PreparedApplicationImages> {
     if (this.closed) throw new Error("Application assets are closed");
     if (this.retiredImages.length !== 0) throw new Error("Previous image refresh has not finished rebinding");
     const replacements = new Map<ContentId, { readonly provider: ProviderSceneAssets; readonly textures: SceneTextureLoader; readonly shaders: SceneShaderRegistry }>();
@@ -210,10 +221,18 @@ export class ApplicationAssets {
       return { ...replacement.provider, textures: replacement.textures, shaders: replacement.shaders };
     };
     const worlds: { readonly current: WorldScene; readonly replacement: WorldScene }[] = [];
+    const models: (() => void)[] = [];
     let fonts: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
     try {
       for (const content of this.providers.keys()) await stagedProvider(content);
+      if (modelPolicy.q1Enhanced !== this.modelPolicyValue.q1Enhanced || modelPolicy.q2Load !== this.modelPolicyValue.q2Load) {
+        for (const [variants, content] of this.modelVariants) {
+          const provider = await stagedProvider(content);
+          if (loadModelReplacement(provider.family, modelPolicy) === loadModelReplacement(provider.family, this.modelPolicyValue)) continue;
+          models.push(await variants.prepareReplacement(provider, loadModelReplacement(provider.family, modelPolicy)));
+        }
+      }
       for (const current of [...(this.currentWorld === null ? [] : [this.currentWorld]), ...this.brushScenes]) {
         const provider = [...replacements.values()].find(replacement => replacement.provider.shaders === current.shaders);
         if (provider === undefined) throw new Error("World image provider is absent");
@@ -235,6 +254,7 @@ export class ApplicationAssets {
     if (preparedFonts === null || preparedTypography === null) throw new Error("Image refresh fonts were not prepared");
     return { provider: stagedProvider, font: preparedFonts.font, typography: preparedTypography, policy,
       commit: () => {
+        for (const commit of models) commit();
         for (const replacement of replacements.values()) {
           const previous = replacement.provider.textures;
           replacement.provider.shaders.commitReplacement(replacement.shaders);
@@ -247,6 +267,7 @@ export class ApplicationAssets {
         this.fonts = preparedFonts; this.font = Promise.resolve(preparedFonts.font);
         this.loadedTypography = preparedTypography; this.typography = Promise.resolve(preparedTypography);
         this.imagePolicyValue = policy;
+        this.modelPolicyValue = modelPolicy;
       },
       discard: () => {
         preparedTypography.close(); preparedFonts.close();
@@ -277,7 +298,9 @@ export class ApplicationAssets {
         this.brushScenes.push(brushScene);
         return { resource: asset.reference, model: { kind: "brush-model", world, model: 0 }, provider, brushScene };
       }
-      return { ...await loadApplicationModel(provider, asset), provider, brushScene: null };
+      const loaded = await loadApplicationModel(provider, asset, { enhancedModels: loadModelReplacement(provider.family, this.modelPolicyValue) });
+      if (loaded.variants !== undefined) this.modelVariants.set(loaded.variants, content);
+      return { ...loaded, provider, brushScene: null };
     })();
     this.models.set(key, pending);
     return pending;
@@ -303,6 +326,7 @@ export class ApplicationAssets {
     this.images.close();
     this.providers.clear();
     this.models.clear();
+    this.modelVariants.clear();
     return undefined;
   }
 }

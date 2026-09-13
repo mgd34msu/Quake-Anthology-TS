@@ -7,7 +7,7 @@ import type { SceneEntity } from "../../src/contracts/scene.ts";
 import type { SceneCamera } from "../../src/contracts/render.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { loadApplicationModel } from "../../src/app/bootstrap/model-loader.ts";
-import type { ApplicationModelProvider } from "../../src/app/bootstrap/model-loader.ts";
+import type { ApplicationModelProvider, LoadedApplicationModel } from "../../src/app/bootstrap/model-loader.ts";
 import { NativeRenderer } from "../../src/app/bootstrap/renderer.ts";
 import { decodeQ2Map } from "../../src/formats/q2-map/index.ts";
 import { decodePcx, encodePng } from "../../src/formats/images/index.ts";
@@ -38,6 +38,14 @@ async function fixture() {
   return { archive, identity, owner, images, overrides, ranks, required, provider };
 }
 
+
+function replacement(asset: LoadedApplicationModel) {
+  if (asset.model.kind !== "q2-md2") throw new Error("Native MD2 was discarded");
+  const model = asset.model.replacement?.model;
+  if (model === undefined || model.skinSelection.kind !== "q2-md2-replacement") throw new Error("Missing Q2 replacement");
+  return { ...model, skinSelection: model.skinSelection };
+}
+
 const paths = ["players/male/tris.md2", "models/monsters/soldier/tris.md2", "players/male/a_grenades.md2", "models/weapons/v_blast/tris.md2"];
 
 test("application loader selects Q2 MD5 pairs and preserves rank, fallback and optional scale diagnostics", async () => {
@@ -45,27 +53,29 @@ test("application loader selects Q2 MD5 pairs and preserves rank, fallback and o
   try {
     for (const path of paths) {
       const asset = await f.required(path), enhanced = await loadApplicationModel(f.provider, asset);
-      expect(enhanced.model.kind).toBe("md5");
+      expect(enhanced.model.kind).toBe("q2-md2");
+      expect(enhanced.resource).toBe(asset.reference);
+      const enhancedModel = replacement(enhanced);
       const plain = await loadApplicationModel(f.provider, asset, { enhancedModels: false });
       expect(plain.model.kind).toBe("q2-md2"); expect(plain.resource).toBe(asset.reference);
-      if (enhanced.model.kind !== "md5" || enhanced.model.skinSelection.kind !== "q2-md2-replacement" || plain.model.kind !== "q2-md2") throw new Error("Missing alias metadata");
-      expect(enhanced.model.skinSelection.sourceFrameCount).toBe(plain.model.frames.length);
-      expect(enhanced.model.frames.length).toBe(plain.model.frames.length);
-      expect(enhanced.model.skinSelection.diagnostics).toEqual([]);
-      expect(enhanced.model.skinSelection.skins.length).toBe(plain.model.skins.length);
-      if (path.includes("a_grenades")) expect(enhanced.model.frames.some(frame => frame.joints.some(joint => joint.scale !== 1))).toBe(true);
+      if (plain.model.kind !== "q2-md2") throw new Error("Missing alias metadata");
+      expect(enhancedModel.skinSelection.sourceFrameCount).toBe(plain.model.frames.length);
+      expect(enhancedModel.frames.length).toBe(plain.model.frames.length);
+      expect(enhancedModel.skinSelection.diagnostics).toEqual([]);
+      expect(enhancedModel.skinSelection.skins.length).toBe(plain.model.skins.length);
+      if (path.includes("a_grenades")) expect(enhancedModel.frames.some(frame => frame.joints.some(joint => joint.scale !== 1))).toBe(true);
     }
     const asset = await f.required(paths[0] ?? ""), mesh = "players/male/md5/tris.md5mesh", animation = "players/male/md5/tris.md5anim", scale = "players/male/md5/tris.md5scale";
-    f.ranks.set(mesh, 1); expect((await loadApplicationModel(f.provider, asset)).model.kind).toBe("q2-md2"); f.ranks.clear();
+    f.ranks.set(mesh, 1); expect((await loadApplicationModel(f.provider, asset)).model).toMatchObject({ kind: "q2-md2", replacement: null }); f.ranks.clear();
     for (const path of [mesh, animation]) {
-      f.overrides.set(path, null); expect((await loadApplicationModel(f.provider, asset)).model.kind).toBe("q2-md2");
-      f.overrides.set(path, new TextEncoder().encode("invalid")); expect((await loadApplicationModel(f.provider, asset)).model.kind).toBe("q2-md2"); f.overrides.clear();
+      f.overrides.set(path, null); expect((await loadApplicationModel(f.provider, asset)).model).toMatchObject({ kind: "q2-md2", replacement: null });
+      f.overrides.set(path, new TextEncoder().encode("invalid")); expect((await loadApplicationModel(f.provider, asset)).model).toMatchObject({ kind: "q2-md2", replacement: null }); f.overrides.clear();
     }
     f.overrides.set(scale, new TextEncoder().encode("not JSON"));
     const scaled = await loadApplicationModel(f.provider, asset);
-    if (scaled.model.kind !== "md5" || scaled.model.skinSelection.kind !== "q2-md2-replacement") throw new Error("Optional scale incorrectly rejected replacement");
-    expect(scaled.model.skinSelection.diagnostics).toHaveLength(1);
-    expect(scaled.model.frames.every(frame => frame.joints.every(joint => joint.scale === 1))).toBe(true);
+    const scaledModel = replacement(scaled);
+    expect(scaledModel.skinSelection.diagnostics).toHaveLength(1);
+    expect(scaledModel.frames.every(frame => frame.joints.every(joint => joint.scale === 1))).toBe(true);
   } finally { f.archive.close(); }
 });
 
@@ -78,7 +88,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
     const axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] satisfies SceneCamera["axis"];
     for (const path of paths) {
       const loaded = await loadApplicationModel(f.provider, await f.required(path));
-      if (loaded.model.kind !== "md5" || loaded.model.skinSelection.kind !== "q2-md2-replacement") throw new Error("Application loader left MD2 selected");
+      const skeletal = replacement(loaded);
       const origin = { x: 128, y: -320, z: 24 }, small = path.includes("a_grenades");
       const camera: SceneCamera = { origin: { ...origin, x: origin.x - (small ? 28 : 110), z: origin.z + (small ? 0 : 6) }, axis,
         projection: perspectiveProjection(65, 50, 4096), viewport: { x: 0, y: 0, width: 320, height: 240 }, clip: { kind: "none" } };
@@ -91,7 +101,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       expect(prepared.surfaces.every(surface => surface.cull === "front")).toBe(true);
       const shell = prepareSceneEntity({ ...entity, flags: { kind: "q2", bits: 1024 | 16 | 32 } }, { camera, timeSeconds: 0, options });
       expect(shell.surfaces[0]?.image.kind).toBe("white"); expect(shell.surfaces[0]?.depthRange).toEqual([0, 0.3]); expect(shell.surfaces[0]?.translucent).toBe(true);
-      const invalid = prepareSceneEntity({ ...entity, pose: { kind: "frame", frame: loaded.model.skinSelection.sourceFrameCount + 1, previousFrame: 1, backLerp: 0.5 } }, { camera, timeSeconds: 0, options });
+      const invalid = prepareSceneEntity({ ...entity, pose: { kind: "frame", frame: skeletal.skinSelection.sourceFrameCount + 1, previousFrame: 1, backLerp: 0.5 } }, { camera, timeSeconds: 0, options });
       expect(invalid.surfaces[0]?.geometry.vertices).toEqual(prepared.surfaces[0]?.geometry.vertices);
       await scene.preload([entity], options);
       const snapshots: Uint8Array[] = [];
@@ -103,7 +113,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
           clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
         const capture = renderer.captureNextFrame(); renderer.execute(frames.finish()); const pixels = await capture;
         const visibleChannels = pixels.filter((value, index) => index % 4 !== 3 && value > 5).length;
-        if (small && frame === 112) { expect(loaded.model.frames[frame]?.joints.some(joint => joint.scale === 0)).toBe(true); expect(visibleChannels).toBe(0); }
+        if (small && frame === 112) { expect(skeletal.frames[frame]?.joints.some(joint => joint.scale === 0)).toBe(true); expect(visibleChannels).toBe(0); }
         else expect(visibleChannels).toBeGreaterThan(100);
         snapshots.push(pixels);
         await Bun.write(`/tmp/q2-md5-${backend}-${path.includes("soldier") ? "soldier" : small ? "grenades" : path.includes("v_blast") ? "blaster" : "male"}-${frame}.png`, encodePng(320, 240, pixels));
@@ -111,4 +121,55 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       expect(snapshots[0]).not.toEqual(snapshots[1]);
     }
   } finally { renderer.close(); f.archive.close(); }
+}, 30000);
+
+test("retained Q2 aliases select by each eye, preserve native bounds and commit load changes together", async () => {
+  const f = await fixture();
+  try {
+    const loaded = await loadApplicationModel(f.provider, await f.required("models/monsters/soldier/tris.md2"));
+    if (loaded.model.kind !== "q2-md2" || loaded.variants === undefined) throw new Error("Missing retained alias pair");
+    const native = loaded.model, skeletal = replacement(loaded);
+    const axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] satisfies SceneCamera["axis"];
+    const origin = { x: 0, y: 0, z: 0 };
+    const entity: SceneEntity = { actor: null, resource: loaded.resource, model: native,
+      transform: { origin, axis, scale: { x: 2, y: 1, z: 1 } }, previousOrigin: origin,
+      pose: { kind: "frame", frame: 0, previousFrame: 1, backLerp: 0.5 }, skin: 500,
+      color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 },
+      flags: { kind: "q2", bits: 0 }, lightingOrigin: origin, shadowPlane: 0, attachments: [] };
+    const camera: SceneCamera = { origin: { x: -2048, y: 0, z: 0 }, axis,
+      projection: perspectiveProjection(65, 50, 8192), viewport: { x: 0, y: 0, width: 320, height: 240 }, clip: { kind: "none" } };
+    const near = prepareSceneEntity(entity, { camera, timeSeconds: 0 });
+    const far = prepareSceneEntity(entity, { camera: { ...camera, origin: { ...camera.origin, x: -2049 } }, timeSeconds: 0 });
+    expect(near.entity.model.kind).toBe("md5"); expect(far.entity.model).toBe(native);
+    expect(near.bounds).toEqual(far.bounds); expect(near.surfaces[0]?.image).toEqual({ kind: "external", name: skeletal.skinSelection.skins[0] ?? "" });
+    expect(far.surfaces[0]?.image).toEqual({ kind: "external", name: native.skins[0] ?? "" });
+    const first = native.frames[0], previous = native.frames[1];
+    if (first === undefined || previous === undefined) throw new Error("Missing original bounds frames");
+    expect(near.bounds?.max.x).toBeCloseTo(Math.max(first.translation.x + first.scale.x * 255, previous.translation.x + previous.scale.x * 255) * 2, 4);
+    for (const x of [-2048, -2049]) {
+      const bad = prepareSceneEntity({ ...entity, pose: { kind: "frame", frame: native.frames.length, previousFrame: 1, backLerp: 0.5 } },
+        { camera: { ...camera, origin: { x, y: 0, z: 0 } }, timeSeconds: 0 });
+      expect(bad.frame).toBe(0); expect(bad.previousFrame).toBe(0); expect(bad.frameFallback).toBe(true);
+    }
+    const custom = prepareSceneEntity(entity, { camera, timeSeconds: 0,
+      options: () => ({ customSkin: [{ name: "mesh0", shader: "players/male/grunt.pcx" }] }) });
+    expect(custom.surfaces[0]?.image).toEqual({ kind: "external", name: "players/male/grunt.pcx" });
+    const clear = await loaded.variants.prepareReplacement(f.provider, false);
+    expect(native.replacement?.model.kind).toBe("md5"); clear(); expect(native.replacement).toBeNull();
+    expect(prepareSceneEntity(entity, { camera, timeSeconds: 0 }).entity.model).toBe(native);
+    const restore = await loaded.variants.prepareReplacement(f.provider, true);
+    expect(native.replacement).toBeNull(); restore();
+    expect(prepareSceneEntity(entity, { camera, timeSeconds: 0 }).entity.model.kind).toBe("md5");
+    const joint = skeletal.joints[0];
+    if (joint === undefined) throw new Error("Missing source skeleton joint");
+    const world = await WorldScene.load(decodeQ2Map((await f.required("maps/base1.bsp")).bytes), f.provider.shaders, { q2SkyName: "unit1_" });
+    try {
+      const renderer = new SceneModelRenderer(f.provider, world), attached = { ...entity, attachments: [{ tag: joint.name, entity }] };
+      await renderer.preload([attached]);
+      const input = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: f.identity.seat(0) },
+        clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
+      expect(prepareSceneEntity(attached, { camera, timeSeconds: 0 }).attachments).toHaveLength(1);
+      expect(renderer.prepareShadowCasters([attached], { ...input, camera: { ...camera, origin: { x: -4096, y: 0, z: 0 } } })).toHaveLength(2);
+    } finally { world.close(); }
+  } finally { f.archive.close(); }
 }, 30000);

@@ -22,12 +22,15 @@ import type { ShadowCaster, ShadowMesh } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
 import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { prepareSceneEntity, preparedModelBatches } from "./prepare.ts";
+import { replacementEntity } from "./replacements.ts";
+import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldPoint } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
 import type { ModelImageSelection, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
 
 export interface ModelRenderProvider {
+  readonly modelPolicy?: ModelReplacementPolicy;
   readonly family: GameFamily;
   readonly palette: Palette | null;
   readonly textures: SceneTextureLoader;
@@ -81,6 +84,8 @@ export class SceneModelRenderer {
     const visit = (entity: SceneEntity): void => {
       const source = options(entity), selections = this.selections(entity, source);
       for (const selection of selections) work.push(this.load(entity, selection, source));
+      const replacement = replacementEntity(entity);
+      if (replacement !== null) for (const selection of this.selections(replacement, source)) work.push(this.load(replacement, selection, source));
       for (const attachment of entity.attachments) visit(attachment.entity);
     };
     for (const entity of entities) visit(entity);
@@ -107,7 +112,7 @@ export class SceneModelRenderer {
       case "q3-md3": for (const lod of options.q3Lods ?? [model]) if (lod !== null) for (const surface of lod.surfaces) for (const shader of surface.shaders) external(shader); break;
       case "q3-md4": for (const lod of model.lods) for (const surface of lod.surfaces) external(surface.shader); break;
       case "md5":
-        if (model.skinSelection.kind === "q1-mdl-replacement") for (const mesh of model.skinSelection.meshSkinGroups) for (const group of mesh) for (const name of frames(group)) external(name);
+        if (model.skinSelection.kind === "q1-mdl-replacement") for (const mesh of model.skinSelection.meshSkinGroups) for (const group of mesh) for (const name of frames(group)) external(`${name}.lmp`);
         else if (model.skinSelection.kind === "q2-md2-replacement") for (const name of model.skinSelection.skins) external(name);
         else for (const mesh of model.meshes) external(mesh.shader);
         break;
@@ -233,6 +238,7 @@ export class SceneModelRenderer {
       return result;
     };
     return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
+      ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
     { draw: surface => this.draw(surface, input, surface.options, lightCache.get(surface.entity)) }));
   }
@@ -246,7 +252,8 @@ export class SceneModelRenderer {
       const body: SceneEntity = { ...entity, attachments: [],
         flags: entity.flags.kind === "q2" ? { kind: "q2", bits: entity.flags.bits & ~Q2_SHELL_MASK } : entity.flags,
         pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose };
-      const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, options: () => source });
+      const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, purpose: "shadow",
+        ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }), options: () => source });
       const meshes: ShadowMesh[] = [];
       for (const surface of prepared.surfaces) {
         const material = this.materials.get(materialKey(surface.entity, surface.image, source));
@@ -263,7 +270,7 @@ export class SceneModelRenderer {
         if (geometry !== null) meshes.push({ positions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)), indices: geometry.indices });
       }
       if (meshes.length !== 0) result.push(shadowCaster(entity.transform.origin, meshes));
-      const parent = { ...body, pose: body.pose.kind === "frame" ? { ...body.pose, frame: prepared.frame, previousFrame: prepared.previousFrame } : body.pose };
+      const parent = { ...prepared.entity, pose: body.pose.kind === "frame" ? { ...body.pose, frame: prepared.frame, previousFrame: prepared.previousFrame } : body.pose };
       for (const attachment of entity.attachments) {
         const tag = modelAttachmentTag(parent, attachment.tag);
         if (tag !== null) visit(attachSceneEntity(parent, attachment.entity, tag), attachment.entity);

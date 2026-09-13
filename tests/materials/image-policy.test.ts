@@ -130,3 +130,27 @@ test("replacement preparation replays used skin requests and rejects a newly sel
     expect(await original.load("models/custom/skin.png", { family: "q2", usage: "skin", mipmap: false })).toBe(image);
   } finally { replacement.disposeImages(); original.disposeImages(); images.close(); }
 });
+
+test("explicit Q1 indexed skins retain LMP intent and logical dimensions under replacement controls", async () => {
+  const colors = new Uint8Array(768);
+  const record: Omit<ResolvedResourceReference, "id"> = { requestedPath: "palette", byteLength: colors.length, digest: digestBytes(colors),
+    provenance: { kind: "loose", memberPath: "palette", mount: { kind: "loose", rootPath: "/", identity: createMountIdentity(createMountId("q1-intent", "palette"), createContentId({ family: "q1", edition: "rerelease", package: "id1", revision: "test" }), 0) } },
+    resolution: { kind: "default-order", plan: createMountPlanId("q1-intent", "test"), rank: 0 } };
+  const palette = { colors, source: { ...record, id: createResourceId(record) } };
+  const lmp = new Uint8Array(8 + 2 * 3), header = new DataView(lmp.buffer); header.setUint32(0, 2, true); header.setUint32(4, 3, true); lmp.fill(224, 8);
+  const png = encodePng(8, 8, new Uint8Array(256).fill(192));
+  for (const [level, mask, expected] of [[0, -1, "lmp"], [1, 0, "lmp"], [1, 1, "png"]] satisfies readonly (readonly [number, number, string])[]) {
+    const images = new SceneImageRegistry({ identity: Symbol("q1-intent"), session: createIdentityOwner("q1-intent").session, generation: 0 });
+    const textures = new SceneTextureLoader(images, { read: async path => ({ bytes: path.endsWith(".lmp") ? lmp : png, source: { kind: "generated", name: path } }) }, palette,
+      { policy: imagePolicyFromControls({ overrideLevel: level, overrideMask: mask, formats: "png" }) });
+    try {
+      const skin = await textures.load("progs/dog_00_00.lmp", { family: "q1", usage: "skin" });
+      expect(skin?.image.source).toEqual({ kind: "generated", name: `progs/dog_00_00.${expected}` });
+      expect([skin?.width, skin?.height, skin?.image.width]).toEqual([2, 3, expected === "lmp" ? 2 : 8]);
+      if (expected === "lmp") {
+        expect(skin?.content.kind).toBe("indexed8"); expect(skin?.fullbright).not.toBeNull();
+        if (skin?.content.kind === "indexed8") expect(skin.content.palette).toBe(palette);
+      }
+    } finally { textures.disposeImages(); images.close(); }
+  }
+});

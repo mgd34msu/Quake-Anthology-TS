@@ -338,7 +338,12 @@ export interface Md5Model {
     | { readonly kind: "q2-md2-replacement"; readonly skins: readonly string[]; readonly sourceFrameCount: number;
         readonly scaleSource: string | null; readonly diagnostics: readonly string[] };
 }
-export type DecodedModel = Q1AliasModel | SpriteModel | Q2AliasModel | Q3MeshModel | Md4Model | Md5Model
+export interface ModelReplacement {
+  readonly resource: ResolvedResourceReference;
+  readonly model: Md5Model;
+}
+export type DecodedModel = ((Q1AliasModel | Q2AliasModel) & { readonly replacement?: ModelReplacement | null })
+  | SpriteModel | Q3MeshModel | Md4Model | Md5Model
   | { readonly kind: "brush-model"; readonly world: DecodedWorld; readonly model: number };
 
 export type TraceShape = { readonly kind: "point" }

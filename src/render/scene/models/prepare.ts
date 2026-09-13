@@ -12,7 +12,8 @@ import { sampleMd5Pose, skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import { q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { q1SpriteGeometry, spriteQuad } from "./sprites.ts";
-import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldDirection, modelWorldPoint } from "./transform.ts";
+import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldBounds, modelWorldDirection, modelWorldPoint } from "./transform.ts";
+import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replacements.ts";
 import { byteColor } from "./types.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
 import type { ModelBatchContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
@@ -39,7 +40,7 @@ function repairFrames(entity: SceneEntity): { frame: number; previousFrame: numb
     frame %= count; previousFrame %= count;
   }
   const badFrame = frame < 0 || frame >= count, badOld = previousFrame < 0 || previousFrame >= count;
-  if (entity.flags.kind === "q3" && (badFrame || badOld)) { frame = 0; previousFrame = 0; }
+  if ((entity.flags.kind === "q3" || entity.model.kind === "q2-md2") && (badFrame || badOld)) { frame = 0; previousFrame = 0; }
   else { if (badFrame) frame = 0; if (badOld) previousFrame = 0; }
   if (frame === previousFrame && entity.model.kind !== "q2-md2") backLerp = 0;
   return { frame, previousFrame, backLerp, fallback: badFrame || badOld };
@@ -127,6 +128,8 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
 
 function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
   const options = context.options?.(source) ?? {}, pose = repairFrames(entity), surfaces: PreparedModelSurface[] = [];
+  const native = entity;
+  entity = selectModelEntity(entity, context.camera.origin, context.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY, context.purpose);
   const flags = entity.flags, bits = flags.bits, model = entity.model;
   const shell = flags.kind === "q2" ? q2ShellColor(bits) : null;
   const portal = context.camera.clip.kind === "portal";
@@ -215,7 +218,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
         else if (selection.kind === "q1-mdl-replacement") {
           const groups = at(selection.meshSkinGroups, index, "Q1 replacement mesh skin");
-          shaders = groups.map(group => sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0));
+          shaders = groups.map(group => `${sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0)}.lmp`);
         } else shaders = [mesh.shader];
         append(`mesh${index}`, shell === null ? selectedShader(`mesh${index}`, shaders, entity, options) : { kind: "white" },
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(mesh.vertices, index, "MD5 UV").texCoord })), mesh.indices, shell !== null);
@@ -244,7 +247,18 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   }
   let bounds: Bounds | null = null;
   for (const surface of surfaces) for (const vertex of surface.geometry.vertices) bounds = addPointToBounds(bounds ?? emptyBounds(), vertex.position);
-  const cull = invisibleWeapon ? "out" : cullGeometry(bounds, context);
+  if (native.model.kind === "q1-mdl") bounds = modelWorldBounds(native.transform, native.model.bounds);
+  else if (native.model.kind === "q2-md2" && (bits & 128) === 0) {
+    let local = emptyBounds();
+    for (const index of [frame, previousFrame]) {
+      const sourceFrame = at(native.model.frames, index, "MD2 bounds frame");
+      local = addPointToBounds(local, sourceFrame.translation);
+      local = addPointToBounds(local, add3(sourceFrame.translation, scale3(sourceFrame.scale, 255)));
+    }
+    bounds = modelWorldBounds(native.transform, local);
+  }
+  const weapon = flags.kind === "q2" && (options.viewModel === true || (bits & 4) !== 0);
+  const cull = invisibleWeapon ? "out" : weapon ? "in" : cullGeometry(bounds, context);
   const attachments: PreparedModelEntity[] = [], missingAttachments: string[] = [];
   const repaired = entity.pose.kind === "frame" ? { ...entity, pose: { ...entity.pose, frame, previousFrame, backLerp } } : entity;
   for (const attachment of entity.attachments) {

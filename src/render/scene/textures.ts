@@ -152,7 +152,7 @@ export class SceneTextureLoader {
     // Q2 Mod_LoadTexinfo requests .wal; shared BSP callers retain extensionless material names.
     const requestedName = !explicit && options.family === "q2" && wall ? `${name}.wal` : name;
     const requested = explicit ? name.slice(dot + 1).toLowerCase() : requestedName !== name ? "wal" : "";
-    const native = requested === "pcx" || requested === "wal";
+    const native = requested === "pcx" || requested === "wal" || options.family === "q1" && requested === "lmp";
     const truecolor = ["png", "jpg", "tga", "jpeg", "bmp", "gif"].includes(requested);
     const usage = options.usage ?? (wall ? "wall" : "picture");
     const overrideNative = policy !== undefined && policy.overrideLevel >= 1 && policy.overrideUsages.includes(usage)
@@ -226,6 +226,10 @@ export class SceneTextureLoader {
       if (options.family === "q2" && name.toLowerCase().endsWith(".pcx") && suffix !== ".pcx") {
         const requested = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
         if (requested !== null) logicalSize = decodePcx(requested.bytes, name);
+      }
+      if (options.family === "q1" && requested === "lmp" && suffix !== ".lmp") {
+        const original = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
+        if (original !== null) logicalSize = decodeQpic(original.bytes, name);
       }
       const original = await this.reader.readOriginal?.(path);
       if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
