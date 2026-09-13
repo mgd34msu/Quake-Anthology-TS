@@ -82,10 +82,12 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
   };
+  let currentRosterPage = 0;
   const choose = (classname: string | null, id: string) => {
     const rows = model.monsterRosterRows(), rowIndex = rows.findIndex(row => row.classname === classname);
     if (rowIndex < 0) throw new Error("Missing authored roster row");
-    for (let page = 0; page < Math.floor(rowIndex / 7); page++) click(8);
+    const pages = Math.max(1, Math.ceil(rows.length / 7)), wantedPage = Math.floor(rowIndex / 7);
+    while (currentRosterPage !== wantedPage) { click(8); currentRosterPage = (currentRosterPage + 1) % pages; }
     click(rowIndex % 7);
     const row = rows[rowIndex], index = row?.choices.findIndex(choice => choice.id === id) ?? -1;
     if (index < 0) throw new Error("Missing replacement choice");

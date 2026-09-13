@@ -67,7 +67,7 @@ export class StartupMenu {
   private field: StartupSelectionField = "product";
   private page = 0;
   private rosterPage = 0;
-  private monsterField: { readonly kind: "none" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
+  private monsterField: { readonly kind: "none" } | { readonly kind: "source" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
   private savePage = 0;
   private multiplayer = false;
   private multiplayerMode: "coop" | "deathmatch" = "deathmatch";
@@ -123,6 +123,7 @@ export class StartupMenu {
       const controls = choices.slice(this.page * 7, this.page * 7 + 7).map((choice, index) => {
         const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(choice.label, 466, 2.6)}`, index, () => {
           if (this.monsterField.kind === "class") options.model.selectMonster(this.monsterField.classname, choice.id);
+          else if (this.monsterField.kind === "source") options.model.selectMonsterSource(choice.id);
           else options.model.select(this.field, choice.id);
           this.status = ""; this.controller.closeMenu();
           if (this.monsterField.kind === "none" && this.field === "enemies" && choice.id === "custom") this.openRoster();
@@ -136,15 +137,17 @@ export class StartupMenu {
     this.register(rosterMenu, () => {
       const rows = options.model.monsterRosterRows(), pages = Math.max(1, Math.ceil(rows.length / 7));
       this.rosterPage = Math.min(this.rosterPage, pages - 1);
+      const source = options.model.monsterSourceRow(), sourceLabel = source.choices.find(choice => choice.id === source.value)?.label ?? source.value;
       const controls = rows.slice(this.rosterPage * 7, this.rosterPage * 7 + 7).map((row, index) => {
-        const label = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${label}`, 486, 2.6), index, () => {
+        return this.button(`monster:${row.classname ?? "default"}`, this.fit(`${row.label}: ${row.effectiveLabel}`, 486, 2.6), index, () => {
           this.monsterField = { kind: "class", classname: row.classname }; this.page = 0; this.controller.openMenu(selectMenu);
         }, true);
       });
       if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.rosterPage = (this.rosterPage + pages - 1) % pages; }, true),
-        this.button("next", "Next page", 8, () => { this.rosterPage = (this.rosterPage + 1) % pages; }, true));
-      return [...controls, this.back()];
+        this.button("next", `Next page (${this.rosterPage + 1}/${pages})`, 8, () => { this.rosterPage = (this.rosterPage + 1) % pages; }, true));
+      return [{ ...this.button("monster-source", this.fit(`Monster source: ${sourceLabel}`, 486, 2.6), 0, () => {
+        this.monsterField = { kind: "source" }; this.page = 0; this.controller.openMenu(selectMenu);
+      }, true), rect: { x: 64, y: 78, width: 512, height: 26 } }, ...controls, this.back()];
     });
     this.register(loadMenu, () => {
       const saves = options.saves(), pages = Math.max(1, Math.ceil(saves.rows.length / 5));
@@ -222,7 +225,7 @@ export class StartupMenu {
   private back(): UiControl { return this.button("back", "Back", 9, () => this.controller.closeMenu(), true); }
   private selectionRow() {
     const selected = this.monsterField;
-    return selected.kind === "class" ? this.options.model.monsterRosterRows().find(row => row.classname === selected.classname)
+    return selected.kind === "source" ? this.options.model.monsterSourceRow() : selected.kind === "class" ? this.options.model.monsterRosterRows().find(row => row.classname === selected.classname)
       : this.options.model.rows().find(row => row.id === this.field);
   }
   private openRoster(): void {
@@ -283,7 +286,7 @@ export class StartupMenu {
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     text(title, 64, 44, active === main ? 6 : 4, true, true);
 
-    if (active === rosterMenu) text("Counts: this map. Choices apply across this campaign.", 64, 82, 1.5);
+    if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 
     if (active === session) {
