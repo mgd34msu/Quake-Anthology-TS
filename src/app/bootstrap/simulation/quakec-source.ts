@@ -6,7 +6,7 @@ import { QcBroadcastMessages } from "../../../compat/qc/presentation-host.ts";
 import { Id1SynchronousAttacks } from "../../../content/q1/quakec/id1-attacks.ts";
 import type { Q1UserCommand, QwUserCommand } from "../../../contracts/protocol.ts";
 import type { ClientId } from "../../../contracts/identity.ts";
-import type { QuakeWorldSourceTravel } from "./types.ts";
+import type { QuakeCSourceTravel } from "./types.ts";
 import type { Q1MovementState, QwMovementState, QwMovementProfile, ArsenalState, ActorAnimationState } from "../../../contracts/movement.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 import type { InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
@@ -107,6 +107,7 @@ export interface QuakeCSourceOptions {
   readonly admit: (actor: OwnedActor, slot: number, source: QuakeCSource) => undefined;
   readonly damageRequest: (call: Id1DamageCall) => DamageRequest;
   readonly print: (text: string) => undefined;
+  readonly changeLevel: (map: string) => undefined;
 }
 
 /** One source state owner, borrowed by the session's existing actor traversal. */
@@ -124,6 +125,7 @@ export class QuakeCSource {
   readonly pusherServices: Q1PusherServices;
   readonly reservedClientSlots: number;
   private currentTime: number;
+  private changeLevelIssued = false;
   private readonly activeClients = new Set<ActorId>();
   private readonly userInfo = new Map<number, ReadonlyMap<string, string>>();
   private readonly spawnParameters = new Map<number, readonly number[]>();
@@ -173,6 +175,11 @@ export class QuakeCSource {
     this.messages = new QcBroadcastMessages(this.worldHost, event => options.events.emit(prepared.execution.owner.content, { kind: "q1", event }), qw);
     const host = new Map([...this.worldHost.host, ...presentation, ...movement, ...this.clients.host, ...this.messages.host]);
     host.set("cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); });
+    host.set("changelevel", vm => {
+      if (this.changeLevelIssued) return undefined;
+      this.changeLevelIssued = true;
+      return options.changeLevel(vm.argString(0));
+    });
     host.set("cvar_set", vm => { const name = vm.argString(0); this.cvars.set(name, vm.argString(1)); if (name === "sv_gravity") options.physics.setWorldGravity(this.cvars.variableValue(name)); });
     const aim = createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay") });
     host.set("aim", vm => {
@@ -235,17 +242,17 @@ export class QuakeCSource {
     const existing = this.clientIdentities.get(client.slot + 1);
     if (existing !== undefined && !existing.equals(client)) throw new Error("QC client slot still belongs to an earlier connection");
     this.clientIdentities.set(client.slot + 1, client);
-    if (this.kind === "quakeworld" && !this.spawnParameters.has(client.slot + 1)) {
+    if (!this.spawnParameters.has(client.slot + 1)) {
       this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
       this.spawnParameters.set(client.slot + 1, Array.from({ length: 16 }, (_, index) => this.machine.globals.float(this.machine.globalOffset(`parm${index + 1}`))));
     }
     return this.worldHost.actor(client.slot + 1);
   }
   clientInfo(client: ClientId): ReadonlyMap<string, string> { return this.userInfo.get(client.slot + 1) ?? new Map<string, string>(); }
-  captureTravel(): QuakeWorldSourceTravel {
-    if (this.kind !== "quakeworld" || this.spawning) throw new Error("Native QW travel requires a loaded source world");
+  captureTravel(): QuakeCSourceTravel {
+    if (this.spawning) throw new Error("Native QuakeC travel requires a loaded source world");
     const serverFlags = this.machine.globals.float(this.machine.globalOffset("serverflags"));
-    const clients: QuakeWorldSourceTravel["clients"][number][] = [];
+    const clients: QuakeCSourceTravel["clients"][number][] = [];
     for (const [slot, client] of [...this.clientIdentities].sort(([a], [b]) => a - b)) {
       const actor = this.slots.at(slot);
       if (actor !== null && this.activeClients.has(actor.id)) {
@@ -253,13 +260,13 @@ export class QuakeCSource {
         this.spawnParameters.set(slot, Array.from({ length: 16 }, (_, index) => this.machine.globals.float(this.machine.globalOffset(`parm${index + 1}`))));
       }
       const parameters = this.spawnParameters.get(slot);
-      if (parameters === undefined) throw new Error("Native QW connection has no spawn parameters");
+      if (parameters === undefined) throw new Error("Native QuakeC connection has no spawn parameters");
       clients.push({ client, parameters: [...parameters], userInfo: new Map(this.userInfo.get(slot)) });
     }
-    return { kind: "quakeworld", serverFlags, clients, cvars: this.cvars.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value })) };
+    return { kind: this.kind, serverFlags, clients, cvars: this.cvars.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value })) };
   }
-  restoreTravel(travel: QuakeWorldSourceTravel): void {
-    if (this.kind !== "quakeworld" || !this.spawning || this.clientIdentities.size !== 0) throw new Error("Native QW travel requires a fresh source world");
+  restoreTravel(travel: QuakeCSourceTravel): void {
+    if (travel.kind !== this.kind || !this.spawning || this.clientIdentities.size !== 0) throw new Error("Native QuakeC travel requires a fresh source world with the same ABI");
     this.machine.globals.setFloat(this.machine.globalOffset("serverflags"), travel.serverFlags);
     for (const variable of travel.cvars) {
       if (this.cvars.get(variable.name) === undefined) this.cvars.register(variable.name, variable.value);
@@ -268,7 +275,7 @@ export class QuakeCSource {
     for (const record of travel.clients) {
       const slot = record.client.slot + 1;
       if (slot < 1 || slot > this.reservedClientSlots || this.clientIdentities.has(slot) || record.parameters.length !== 16 || record.parameters.some(value => !Number.isFinite(value)))
-        throw new Error("Invalid native QW travel client parameters");
+        throw new Error("Invalid native QuakeC travel client parameters");
       this.clientIdentities.set(slot, record.client); this.spawnParameters.set(slot, [...record.parameters]); this.userInfo.set(slot, new Map(record.userInfo));
     }
   }
@@ -300,21 +307,21 @@ export class QuakeCSource {
   admitClient(client: ClientId): OwnedActor {
     const slot = client.slot + 1;
     if (slot > this.options.maxClients || this.spawning) throw new Error("QC client slot is unavailable");
-    const reserved = this.slots.at(slot);
-    if (reserved !== null && this.activeClients.has(reserved.id)) throw new Error("QC reserved client is active");
-    if (reserved !== null && this.classname(reserved.id) === "player") this.options.actors.release(reserved);
+    const reserved = this.reservedClient(client);
+    if (this.activeClients.has(reserved.id)) throw new Error("QC reserved client is active");
+    if (this.classname(reserved.id) === "player") this.options.actors.release(reserved);
     const actor = this.worldHost.actor(slot);
     const words = this.entities.at(slot);
+    const parameters = this.spawnParameters.get(slot);
+    if (parameters === undefined) throw new Error("Native QuakeC client has no source spawn parameters");
     if (this.kind === "quakeworld") {
-      const parameters = this.spawnParameters.get(slot);
-      if (!this.preparedClients.has(slot) || parameters === undefined) throw new Error("QW begin requires completed source spawn preparation");
-      for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
+      if (!this.preparedClients.has(slot)) throw new Error("QW begin requires completed source spawn preparation");
     } else {
       words.bytes.fill(0);
       words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 1);
       words.setInt(this.field("netname"), this.machine.strings.allocate(this.userInfo.get(slot)?.get("name") ?? `Player ${slot}`));
-      this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
     }
+    for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
     this.activeClients.add(actor.id);
     this.bindClientInventory(actor, slot);
     this.invoke(this.prepared.program.functionNamed("ClientConnect").index, slot, 0, this.currentTime);

@@ -251,9 +251,9 @@ export class SharedSimulation implements Simulation {
         throw new Error("QuakeC simulation requires the prepared dedicated native classic id1 artifact and map-defined actors");
       if (quakec.api.kind === "q1-quakeworld" && (options.mode !== "deathmatch" || options.maxClients > 32 || providerTiming(options.recipe, options.recipe.movement.provider).clock.kind !== "q1-quakeworld"))
         throw new Error("Native QuakeWorld requires deathmatch, at most 32 clients and QuakeWorld movement");
-      if (options.restore !== undefined || options.travel !== undefined && (quakec.api.kind !== "q1-quakeworld" || options.travel.source.kind !== "quakeworld") || (options.restoredClients?.length ?? 0) !== 0
+      if (options.restore !== undefined || options.travel !== undefined && (options.travel.source.kind !== (quakec.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake")) || (options.restoredClients?.length ?? 0) !== 0
         || options.initialSourceMilliseconds !== undefined && options.initialSourceMilliseconds !== 1000)
-        throw new Error("QuakeC application clients, travel and saved games are not yet supported");
+        throw new Error("QuakeC travel must use the same native ABI and a fresh source clock; saved games are unsupported");
     } else if (options.preparedQuakeC !== undefined) throw new Error("Prepared QuakeC artifact does not match the selected execution");
     const weaponProvider = options.recipe.weapons[0];
     if (weaponProvider === undefined || options.recipe.weapons.length !== 1) throw new Error("This source arsenal requires one selected weapon provider");
@@ -473,8 +473,8 @@ export class SharedSimulation implements Simulation {
     if (saved !== undefined) this.restore(saved);
     else if (this.source.kind === "q1" && options.world.kind === "q1-bsp") this.source.composition.spawnMap(options.world);
     else if (this.source.kind === "quakec") {
-      if (options.travel?.source.kind === "quakeworld") {
-        if (options.travel.source.clients.some(record => !options.identity.owns(record.client))) throw new Error("QW travel client belongs to another session");
+      if (options.travel?.source.kind === "quakeworld" || options.travel?.source.kind === "netquake") {
+        if (options.travel.source.clients.some(record => !options.identity.owns(record.client))) throw new Error("QuakeC travel client belongs to another session");
         this.source.game.restoreTravel(options.travel.source);
       }
       this.source.game.spawnMap();
@@ -1212,6 +1212,13 @@ export class SharedSimulation implements Simulation {
         random: this.random, skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients,
         initialSourceTimeSeconds: this.timeSeconds,
         admit: (actor, _slot, source) => this.registerActorExecution({ kind: "quakec", actor, source, content }),
+        changeLevel: map => {
+          const campaign = recipe.campaign;
+          this.transitions.push(campaign.kind === "campaign"
+            ? { kind: "campaign-level", campaign: campaign.mission.provider, map: `q1:${map}`, spawnPoint: "", gates: [], cause: null }
+            : { kind: "match-rotation", match: recipe.match.provider, map: `q1:${map}` });
+          return undefined;
+        },
         damageRequest: call => {
           const attack = game.attacks.resolve(call);
           if (attack !== null) return { target: call.target, amount: call.amount, knockback: attack.knockback,
@@ -1839,9 +1846,9 @@ export class SharedSimulation implements Simulation {
     for (const player of this.playerStates.values()) if (player.client.slot === client.slot) throw new Error("Client already has a player");
     const source = this.source;
     if (source.kind === "quakec") {
-      if (travel !== undefined && (source.game.kind !== "quakeworld" || travel.source.kind !== "quakeworld") || this.options.dedicated !== true || providerFamily(this.recipe.character.definition.provider) !== "q1"
+      if (travel !== undefined && (travel.source.kind !== source.game.kind) || this.options.dedicated !== true || providerFamily(this.recipe.character.definition.provider) !== "q1"
         || providerTiming(this.recipe, this.recipe.movement.provider).clock.kind !== (source.game.kind === "quakeworld" ? "q1-quakeworld" : "q1-netquake"))
-        throw new Error("QuakeC internal clients require dedicated native NetQuake movement and Q1 character; graphical clients and travel are unsupported");
+        throw new Error("QuakeC internal clients require dedicated matching native movement, Q1 character and source travel");
       const actor = source.game.admitClient(client), body = this.bodies.read(actor.id);
       if (body === null) throw new Error("QC reserved client has no shared body");
       const player = this.createPlayer(actor, client, body.origin, body.angles, source.game.clientArsenal(actor.id));
@@ -2940,8 +2947,8 @@ export class SharedSimulation implements Simulation {
   captureTravel(spawnPoint = ""): SimulationTravel {
     this.assertOpen();
     const source = this.source;
-    if (source.kind === "quakec" && source.game.kind === "quakeworld") return { spawnPoint, source: source.game.captureTravel(), players: [] };
-    if (source.kind === "loading" || source.kind === "quakec") throw new Error("Source campaign travel is not available");
+    if (source.kind === "quakec") return { spawnPoint, source: source.game.captureTravel(), players: [] };
+    if (source.kind === "loading") throw new Error("Source campaign travel is not available");
     if (source.kind === "q3") throw new Error("Q3 map rotation uses match session state instead of campaign travel carry");
     for (const player of this.playerStates.values()) this.grapple?.release(player.actor.id);
     const landmark = this.levelChange?.landmark ?? null;
