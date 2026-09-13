@@ -2,6 +2,7 @@ import type { ImageLevel, Palette, RenderImage, RendererImage, TextureSampling }
 import type { Q1MipTexture } from "../../contracts/scene.ts";
 import { decodeBmp, decodeGif, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeQpic, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
 import { SceneImageRegistry } from "./resources.ts";
+import { floodSkin } from "./skin.ts";
 import { q2MipmappedImage } from "./q2-image.ts";
 
 export interface SceneAsset {
@@ -20,6 +21,13 @@ export interface SceneTexture {
   readonly image: RendererImage;
   readonly content: RenderImage;
   readonly fullbright: RendererImage | null;
+}
+
+export interface SceneTextureLoadOptions {
+  readonly mipmap?: boolean;
+  readonly wrap?: TextureSampling["wrap"];
+  readonly family?: "q1" | "q2" | "q3";
+  readonly usage?: "skin" | "sprite" | "picture" | "wall" | "sky";
 }
 
 type AnimatedFrame = Exclude<RenderImage, { readonly kind: "depth32f" }>;
@@ -105,9 +113,9 @@ export class SceneTextureLoader {
     return sampled;
   }
 
-  load(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" } = {}): Promise<SceneTexture | null> {
+  load(name: string, options: SceneTextureLoadOptions = {}): Promise<SceneTexture | null> {
     this.requireOpen();
-    const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}`;
+    const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}\0${options.usage ?? ""}`;
     const existing = this.loaded.get(key);
     if (existing !== undefined) return existing;
     const pending = this.loadUncached(name, options);
@@ -115,12 +123,18 @@ export class SceneTextureLoader {
     return pending;
   }
 
-  private async loadUncached(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" }): Promise<SceneTexture | null> {
+  private async loadUncached(name: string, options: SceneTextureLoadOptions): Promise<SceneTexture | null> {
     const dot = name.lastIndexOf("."), slash = name.lastIndexOf("/");
     const explicit = dot > slash, base = explicit ? name.slice(0, dot) : name;
-    const extensions = options.family === "q2" ? [".png", ".jpg", ".tga", ".jpeg", ".bmp", ".gif", name.startsWith("textures/") ? ".wal" : ".pcx"]
+    const wall = options.usage === "wall" || options.usage === undefined && (name.startsWith("textures/") || name.toLowerCase().endsWith(".wal"));
+    const extensions = options.family === "q2" ? [".png", ".jpg", ".tga", ".jpeg", ".bmp", ".gif", wall ? ".wal" : ".pcx"]
       : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"];
-    const candidates = explicit ? [name, ...extensions.map(extension => base + extension).filter(path => path !== name)] : extensions.map(extension => name + extension);
+    const overrideNative = options.family === "q2" && /\.(pcx|wal)$/i.test(name);
+    const alternatives = extensions.map(extension => base + extension);
+    const candidates = [...new Set([
+      ...(overrideNative ? alternatives.slice(0, -1) : []),
+      ...(explicit ? [name] : []), ...alternatives,
+    ])];
     for (const path of candidates) {
       const asset = await this.reader.read(path);
       this.requireOpen();
@@ -152,27 +166,33 @@ export class SceneTextureLoader {
         if (this.palette === null && pcx.palette === null) throw new Error(`PCX has no palette: ${path}`);
         const palette = pcx.palette ?? this.palette?.colors;
         if (palette === undefined || palette === null) throw new Error(`PCX palette was lost: ${path}`);
-        const pixels = new Uint8Array(pcx.width * pcx.height * 4), count = pcx.indices.length;
-        for (const [offset, index] of pcx.indices.entries()) {
-          let color = index;
-          if (options.family === "q2" && index === 255) {
-            const above = offset > pcx.width ? pcx.indices[offset - pcx.width] : undefined;
-            const below = offset < count - pcx.width ? pcx.indices[offset + pcx.width] : undefined;
-            const left = offset > 0 ? pcx.indices[offset - 1] : undefined;
-            const right = offset < count - 1 ? pcx.indices[offset + 1] : undefined;
-            color = [above, below, left, right].find(value => value !== undefined && value !== 255) ?? 0;
+        if (options.family === "q2" && (options.usage === "skin" || options.usage === "sprite") && this.palette !== null) {
+          const pixels = options.usage === "skin" ? floodSkin(pcx.indices, pcx.width, pcx.height, this.palette) : pcx.indices;
+          content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], this.palette, { kind: "index", index: 255 });
+        } else {
+          const pixels = new Uint8Array(pcx.width * pcx.height * 4), count = pcx.indices.length;
+          for (const [offset, index] of pcx.indices.entries()) {
+            let color = index;
+            if (options.family === "q2" && index === 255) {
+              const above = offset > pcx.width ? pcx.indices[offset - pcx.width] : undefined;
+              const below = offset < count - pcx.width ? pcx.indices[offset + pcx.width] : undefined;
+              const left = offset > 0 ? pcx.indices[offset - 1] : undefined;
+              const right = offset < count - 1 ? pcx.indices[offset + 1] : undefined;
+              color = [above, below, left, right].find(value => value !== undefined && value !== 255) ?? 0;
+            }
+            pixels.set([palette[color * 3] ?? 0, palette[color * 3 + 1] ?? 0, palette[color * 3 + 2] ?? 0, options.family === "q2" && index === 255 ? 0 : 255], offset * 4);
           }
-          pixels.set([palette[color * 3] ?? 0, palette[color * 3 + 1] ?? 0, palette[color * 3 + 2] ?? 0, options.family === "q2" && index === 255 ? 0 : 255], offset * 4);
+          content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
         }
-        content = this.rgba({ width: pcx.width, height: pcx.height, pixels }, options.mipmap !== false);
       } else {
+        if (![".png", ".tga", ".bmp", ".jpg", ".jpeg"].includes(suffix)) throw new Error(`Unsupported scene image format: ${path}`);
         const decoded = suffix === ".png" ? decodePng(asset.bytes, path) : suffix === ".tga" ? options.family === undefined || options.family === "q3"
           ? decodeQ3Tga(asset.bytes, path) : decodeTga(asset.bytes, path)
           : suffix === ".bmp" ? decodeBmp(asset.bytes, path) : decodeJpeg(asset.bytes, path);
         content = this.rgba(decoded, options.mipmap !== false);
       }
       let logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0];
-      if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && name.startsWith("textures/"))) {
+      if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && wall)) {
         const original = await this.reader.read(`${base}.wal`);
         if (original !== null) logicalSize = decodeWal(original.bytes, `${base}.wal`);
       }

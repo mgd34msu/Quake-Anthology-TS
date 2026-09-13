@@ -192,7 +192,7 @@ export class WorldScene {
           else textures.push(await shaders.textures.load(`textures/${texture.name}`, { family: "q1" })
             ?? shaders.textures.q1Embedded(texture) ?? shaders.textures.missing);
         }
-      } else for (const info of map.textureInfo) textures.push(await shaders.textures.load(`textures/${info.name}`, { family: "q2" }) ?? shaders.textures.missing);
+      } else for (const info of map.textureInfo) textures.push(await shaders.textures.load(`textures/${info.name}`, { family: "q2", usage: "wall" }) ?? shaders.textures.missing);
       const skyLayers = new Map<RendererImage, { readonly solid: RendererImage; readonly overlay: RendererImage }>();
       for (const [index, face] of map.faces.entries()) {
         const info = at<Exclude<DecodedWorld, { readonly kind: "q3-bsp" }>["textureInfo"][number]>(map.textureInfo, face.textureInfo);
@@ -239,7 +239,7 @@ export class WorldScene {
     result.owned.push(...owned);
     if (map.kind === "q2-bsp" && options.q2SkyName !== undefined) {
       const sides: RendererImage[] = [];
-      for (const suffix of SKY_FACE_SUFFIXES) sides.push((await shaders.textures.load(`env/${options.q2SkyName}${suffix}`, { family: "q2", wrap: "clamp", mipmap: false }) ?? shaders.textures.missing).image);
+      for (const suffix of SKY_FACE_SUFFIXES) sides.push((await shaders.textures.load(`env/${options.q2SkyName}${suffix}`, { family: "q2", usage: "sky", wrap: "clamp", mipmap: false }) ?? shaders.textures.missing).image);
       result.q2Sky = sides;
     }
     return result;

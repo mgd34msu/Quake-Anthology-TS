@@ -68,14 +68,14 @@ export class SceneShaderRegistry {
         lightmapImage: registered(lightmap ?? this.textures.white.image, 1),
         findImage: async request => {
           if (baseTexture !== null && this.key(request.name) === this.key(name)) return registered((await this.textures.sampleSurface(baseTexture, request)).image);
-          const texture = await this.textures.load(request.name, { mipmap: request.mipmap, wrap: request.wrap, family: this.family });
+          const texture = await this.textures.load(request.name, { mipmap: request.mipmap, wrap: request.wrap, family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" });
           return texture === null ? null : registered(texture.image);
         }, playShaderCinematic: this.playCinematic, applySun: sun => { this.sun = sun; },
         initializeSkyTexCoords: height => { this.sky.initializeCloudCoordinates(height); }, printWarning: message => { this.warnings.push(message); } });
       return { registered: result, material: shaderRenderMaterial(result.definition), finished: finishShader({ definition: result.definition,
         images: result.stages, lightmapIndex, profile: this.profile }) };
     }
-    const loaded = await this.textures.load(name, { mipmap, wrap: mipmap ? "repeat" : "clamp", family: this.family }), texture = loaded ?? this.textures.missing;
+    const loaded = await this.textures.load(name, { mipmap, wrap: mipmap ? "repeat" : "clamp", family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" }), texture = loaded ?? this.textures.missing;
     const implicitImage = { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } } satisfies Parameters<typeof compileImplicitMaterial>[0]["baseImage"];
     if (loaded === null) {
       this.warnings.push(`${name}: missing shader image, using the source default material`);

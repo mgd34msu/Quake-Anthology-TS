@@ -3,7 +3,7 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import type { DrawBatch, Palette } from "../../../contracts/render.ts";
 import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
 import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
-import { decodePcx, indexedRenderImage, q1PlayerTranslation } from "../../../formats/images/index.ts";
+import { q1PlayerTranslation } from "../../../formats/images/index.ts";
 import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/index.ts";
 import type { CompiledMaterial } from "../../../materials/compile.ts";
 import { diffuseColor } from "../../../materials/color.ts";
@@ -13,7 +13,7 @@ import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
 import type { SceneShaderRegistry } from "../shaders.ts";
 import type { SceneTexture, SceneTextureLoader } from "../textures.ts";
-import { q2MipmappedImage } from "../q2-image.ts";
+import { floodSkin } from "../skin.ts";
 import { cameraFrustum, createViewProjector } from "../view.ts";
 import type { WorldScene, WorldViewInput } from "../world.ts";
 import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts";
@@ -44,29 +44,6 @@ function materialKey(entity: SceneEntity, image: ModelImageSelection, options: M
   const translated = image.kind === "indexed" || entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement";
   const translation = translated && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
   return `${entity.resource.id}\0${image.kind}\0${"name" in image ? image.name : image.kind === "default" ? image.reason : ""}\0${translation}`;
-}
-
-/** GL_FloodFillSkin replaces the connected skin background before mipmapping. */
-function floodSkin(indices: Uint8Array, width: number, height: number, palette: Palette): Uint8Array {
-  const result = indices.slice(), fill = result[0];
-  let black = 0;
-  for (let index = 0; index < 256; index++) if (palette.colors[index * 3] === 0 && palette.colors[index * 3 + 1] === 0 && palette.colors[index * 3 + 2] === 0) { black = index; break; }
-  if (fill === undefined || fill === black || fill === 255) return result;
-  const queue = [0]; result[0] = 255;
-  for (let head = 0; head < queue.length; head++) {
-    const pixel = queue[head];
-    if (pixel === undefined) throw new Error("Skin flood queue lost a pixel");
-    const x = pixel % width, y = Math.trunc(pixel / width);
-    let color = black;
-    for (const next of [x > 0 ? pixel - 1 : -1, x + 1 < width ? pixel + 1 : -1, y > 0 ? pixel - width : -1, y + 1 < height ? pixel + width : -1]) {
-      if (next < 0) continue;
-      const value = result[next];
-      if (value === fill) { result[next] = 255; queue.push(next); }
-      else if (value !== undefined && value !== 255) color = value;
-    }
-    result[pixel] = color;
-  }
-  return result;
 }
 
 /** One cache per selected content provider. No asset IO occurs during prepare. */
@@ -160,23 +137,7 @@ export class SceneModelRenderer {
 
   private async externalTexture(entity: SceneEntity, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
     const sprite = entity.model.kind === "q2-sp2";
-    if (this.provider.family === "q2" && name.toLowerCase().endsWith(".pcx")) {
-      const base = name.slice(0, -4);
-      for (const suffix of [".png", ".tga", ".jpg"]) {
-        if (await this.provider.textures.reader.read(base + suffix) !== null) {
-          const replacement = await this.provider.textures.load(base + suffix, { family: "q2", mipmap: !sprite });
-          if (replacement !== null) return replacement;
-        }
-      }
-      const asset = await this.provider.textures.reader.read(name), palette = this.provider.palette;
-      if (asset !== null && palette !== null) {
-        const pcx = decodePcx(asset.bytes, name), pixels = sprite ? pcx.indices : floodSkin(pcx.indices, pcx.width, pcx.height, palette);
-        const content = indexedRenderImage([{ width: pcx.width, height: pcx.height, pixels }], palette, { kind: "index", index: 255 });
-        return this.provider.textures.register(`${entity.resource.id}:${name}`, sprite ? content : q2MipmappedImage(content),
-          { wrap: "repeat", filter: sprite ? "linear" : "linear-mipmap-nearest" }, asset.source);
-      }
-    }
-    const texture = await this.provider.textures.load(name, { family: this.provider.family, mipmap: !sprite }) ?? this.provider.textures.missing;
+    const texture = await this.provider.textures.load(name, { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite }) ?? this.provider.textures.missing;
     const colors = options.playerColors;
     if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement" && colors !== undefined && texture.content.kind === "indexed8") {
       return this.provider.textures.register(`${name}:${colors.top}:${colors.bottom}`,
