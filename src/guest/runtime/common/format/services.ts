@@ -6,8 +6,21 @@ import { UnsupportedWindowsImport } from "../../windows/contracts.ts";
 import type { SystemVServiceHost } from "../../system-v/contracts.ts";
 import { integer, pointer, requiredPointer } from "../memory.ts";
 import { formatGuestBuffer, GuestFormatFortifyFailure } from "../format.ts";
+import { scanWindowsBuffer, UnsupportedGuestScan } from "./scan.ts";
 
 export function installWindowsFormat(host: WindowsServiceHost, errno: GuestAddress): void {
+  for (const library of ["api-ms-win-crt-stdio-l1-1-0.dll", "ucrtbase.dll", "msvcrt.dll"])
+    host.service(library, "__stdio_common_vsscanf", ["uint64", "pointer", host.pointerStorage, "pointer", "pointer", "pointer"], "int32", (context, args) => {
+      if (pointer(args, 4) !== null || (integer(args, 0) & ~2n) !== 0n)
+        throw new UnsupportedWindowsImport(library, "__stdio_common_vsscanf", context, "scanf locale or options are not implemented");
+      try {
+        return { kind: "int32", value: scanWindowsBuffer({ memory: host.memory, input: requiredPointer(args, 1), capacity: integer(args, 2),
+          format: requiredPointer(args, 3), arguments: pointer(args, 5) }) };
+      } catch (error) {
+        if (error instanceof UnsupportedGuestScan) throw new UnsupportedWindowsImport(library, "__stdio_common_vsscanf", context, error.message);
+        throw error;
+      }
+    });
   for (const library of ["api-ms-win-crt-stdio-l1-1-0.dll", "ucrtbase.dll", "msvcrt.dll"])
     host.service(library, "__stdio_common_vsprintf", ["uint64", "pointer", host.pointerStorage, "pointer", "pointer", "pointer"], "int32", (context, args) => {
       const options = integer(args, 0);
