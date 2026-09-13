@@ -92,3 +92,173 @@ test('staged cleanup failure settles the transfer and cancels pending package wo
     expect(await pending).toEqual({ kind: 'cancelled' }); expect(readdirSync(root)).toEqual([]);
   } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
 });
+
+const rangeBytes = Uint8Array.from({ length: 1024 * 1024 + 123 }, (_value, index) => index * 17 % 251);
+function rangeRequest(port: number): HttpDownloadRequest {
+  return { ...request(port, 'large'), expected: { kind: 'protocol-completion', maximumBytes: rangeBytes.length } };
+}
+function rangeHeaders(): Headers {
+  return new Headers({ 'Accept-Ranges': 'bytes', 'Content-Length': String(rangeBytes.length), ETag: '"version-one"' });
+}
+function requestedSpan(req: Request): { start: number; end: number } {
+  const match = /^bytes=(\d+)-(\d+)$/.exec(req.headers.get('range') ?? '');
+  if (match === null) throw new Error('Expected exact byte range request');
+  return { start: Number(match[1]), end: Number(match[2]) };
+}
+function spanHeaders(start: number, end: number): Headers {
+  const headers = rangeHeaders();
+  headers.set('Content-Range', `bytes ${start}-${end}/${rangeBytes.length}`);
+  headers.set('Content-Length', String(end - start + 1));
+  return headers;
+}
+
+test('large HTTP files stream four overlapping ranges to one atomic byte-identical destination', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-ranges-')), overlap = deferred(), release = deferred();
+  let active = 0, peak = 0, head = 0;
+  const spans: { start: number; end: number }[] = [], progress: number[] = [];
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') { head++; return new Response(null, { headers: rangeHeaders() }); }
+    expect(req.headers.get('if-range')).toBe('"version-one"'); expect(req.headers.get('accept-encoding')).toBe('identity');
+    const span = requestedSpan(req); spans.push(span);
+    return new Response(new ReadableStream<Uint8Array>({ async start(controller) {
+      active++; peak = Math.max(peak, active); if (active === 4) overlap.resolve();
+      controller.enqueue(rangeBytes.slice(span.start, span.start + 32768));
+      await release.promise;
+      controller.enqueue(rangeBytes.slice(span.start + 32768, span.end + 1)); controller.close(); active--;
+    } }), { status: 206, headers: spanHeaders(span.start, span.end) });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {},
+    progress(_path, bytes, total) { expect(total).toBe(rangeBytes.length); progress.push(bytes); } });
+  try {
+    const result = queue.enqueue(rangeRequest(server.port ?? 0)); await overlap.promise;
+    expect(peak).toBe(4); expect(readdirSync(root).every(name => name.startsWith('.download-'))).toBe(true);
+    release.resolve(); expect((await result).kind).toBe('downloaded');
+    expect(head).toBe(1); expect(spans.length).toBe(4);
+    expect(readFileSync(join(root, 'large'))).toEqual(Buffer.from(rangeBytes));
+    expect(progress[0]).toBe(0); expect(progress.at(-1)).toBe(rangeBytes.length);
+    expect(progress.every((value, index) => index === 0 || value >= (progress[index - 1] ?? 0))).toBe(true);
+    expect(readdirSync(root)).toEqual(['large']);
+  } finally { release.resolve(); queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const status of [200, 416]) test(`range status ${status} drains the attempt and retries one identity-pinned whole GET`, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-range-retry-')); let whole = 0;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') return new Response(null, { headers: rangeHeaders() });
+    if (req.headers.has('range')) return new Response(status === 200 ? rangeBytes : null, { status,
+      headers: status === 200 ? rangeHeaders() : { ETag: '"version-one"' } });
+    whole++; expect(req.headers.get('if-match')).toBe('"version-one"');
+    return new Response(rangeBytes, { headers: rangeHeaders() });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try {
+    expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('downloaded'); expect(whole).toBe(1);
+    expect(readFileSync(join(root, 'large'))).toEqual(Buffer.from(rangeBytes)); expect(readdirSync(root)).toEqual(['large']);
+  } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const mode of ['missing', 'start', 'end', 'total', 'wildcard', 'trailing', 'etag', 'missing-etag', 'short', 'overflow', 'changed-200'])
+  test(`invalid ranged ${mode} response returns native fallback without publishing`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'http-range-invalid-')); let whole = 0;
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+      if (req.method === 'HEAD') return new Response(null, { headers: rangeHeaders() });
+      if (!req.headers.has('range')) { whole++; return new Response(rangeBytes, { headers: rangeHeaders() }); }
+      const { start, end } = requestedSpan(req), headers = spanHeaders(start, end);
+      if (mode === 'missing') headers.delete('content-range');
+      if (mode === 'start') headers.set('content-range', `bytes ${start + 1}-${end}/${rangeBytes.length}`);
+      if (mode === 'end') headers.set('content-range', `bytes ${start}-${end - 1}/${rangeBytes.length}`);
+      if (mode === 'total') headers.set('content-range', `bytes ${start}-${end}/${rangeBytes.length + 1}`);
+      if (mode === 'wildcard') headers.set('content-range', `bytes ${start}-${end}/*`);
+      if (mode === 'trailing') headers.append('content-range', 'garbage');
+      if (mode === 'etag' || mode === 'changed-200') headers.set('etag', '"version-two"');
+      if (mode === 'missing-etag') headers.delete('etag');
+      headers.delete('content-length');
+      let bytes = rangeBytes.slice(start, end + 1);
+      if (mode === 'short') bytes = bytes.slice(1);
+      if (mode === 'overflow') bytes = new Uint8Array(bytes.length + 1);
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+        { status: mode === 'changed-200' ? 200 : 206, headers });
+    } });
+    const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+    try {
+      expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('fallback');
+      expect(whole).toBe(0); expect(readdirSync(root)).toEqual([]);
+    } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+  });
+
+for (const mode of ['unsupported-head', 'weak-etag', 'no-etag', 'no-ranges']) test(`${mode} uses the original whole-file HTTP path`, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-head-fallback-')); let whole = 0;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') {
+      const headers = rangeHeaders();
+      if (mode === 'weak-etag') headers.set('etag', 'W/"version-one"');
+      if (mode === 'no-etag') headers.delete('etag');
+      if (mode === 'no-ranges') headers.delete('accept-ranges');
+      return new Response(null, { status: mode === 'unsupported-head' ? 405 : 200, headers });
+    }
+    whole++; expect(req.headers.has('range')).toBe(false); return new Response(rangeBytes);
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try {
+    expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('downloaded'); expect(whole).toBe(1);
+    expect(readFileSync(join(root, 'large'))).toEqual(Buffer.from(rangeBytes));
+  } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('cancelling paused range bodies drains siblings and removes all staging', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-range-cancel-')), streamed = deferred(), release = deferred(); let retired = false;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') return new Response(null, { headers: rangeHeaders() });
+    const { start, end } = requestedSpan(req);
+    return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(rangeBytes.slice(start, start + 32768));
+      void release.promise.then(() => { try { controller.enqueue(rangeBytes.slice(start + 32768, end + 1)); controller.close(); } catch {} });
+    } }), { status: 206, headers: spanHeaders(start, end) });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() { if (retired) throw new Error('Retired epoch'); }, resolved: () => false,
+    async refreshPackage() {}, progress(_path, received) { if (received > 0) streamed.resolve(); } });
+  try {
+    const result = queue.enqueue(rangeRequest(server.port ?? 0)); await streamed.promise; retired = true; queue.cancel();
+    expect(await result).toEqual({ kind: 'cancelled' }); expect(readdirSync(root)).toEqual([]);
+  } finally { release.resolve(); await Bun.sleep(0); queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('whole-file degradation rejects a representation changed after range rejection', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-range-representation-'));
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') return new Response(null, { headers: rangeHeaders() });
+    if (req.headers.has('range')) return new Response(null, { status: 416 });
+    const headers = rangeHeaders(); headers.set('etag', '"version-two"'); return new Response(rangeBytes, { headers });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try { expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('fallback'); expect(readdirSync(root)).toEqual([]); }
+  finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const streams of [0, 99]) test(`range stream setting ${streams} clamps to the supported bounds`, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-range-clamp-')); let ranges = 0, heads = 0;
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') { heads++; return new Response(null, { headers: rangeHeaders() }); }
+    if (!req.headers.has('range')) return new Response(rangeBytes);
+    ranges++; const { start, end } = requestedSpan(req);
+    return new Response(rangeBytes.slice(start, end + 1), { status: 206, headers: spanHeaders(start, end) });
+  } });
+  const queue = new HttpDownloadQueue({ root, rangeStreams: streams, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try {
+    expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('downloaded');
+    expect(ranges).toBe(streams === 0 ? 0 : 8); expect(heads).toBe(streams === 0 ? 0 : 1);
+    expect(readFileSync(join(root, 'large'))).toEqual(Buffer.from(rangeBytes));
+  } finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('whole-file range retry cannot publish a truncated protocol-completion file', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'http-range-short-retry-'));
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(req) {
+    if (req.method === 'HEAD') return new Response(null, { headers: rangeHeaders() });
+    if (req.headers.has('range')) return new Response(null, { status: 416 });
+    return new Response(rangeBytes.slice(1), { headers: { ETag: '"version-one"' } });
+  } });
+  const queue = new HttpDownloadQueue({ root, assertCurrent() {}, resolved: () => false, async refreshPackage() {}, progress() {} });
+  try { expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('fallback'); expect(readdirSync(root)).toEqual([]); }
+  finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
+});

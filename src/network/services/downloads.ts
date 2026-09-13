@@ -45,24 +45,45 @@ export class DownloadFile implements DownloadSource {
 
 export interface DownloadExpectation { readonly digest: ContentDigest; readonly byteLength: number; }
 export interface ProtocolDownloadExpectation { readonly kind: "protocol-completion"; readonly maximumBytes: number; }
+export interface DownloadSpan { readonly start: number; readonly end: number; }
+type DownloadWriteMode = { readonly kind: "sequential" }
+  | { readonly kind: "ranged"; readonly total: number; readonly spans: ReadonlyMap<number, { readonly end: number; written: number }> };
 export class DownloadSink {
   private readonly hash: Hash = createHash("sha256");
   private count = 0;
   private ended = false;
   private inspecting = false;
   private constructor(private readonly parent: number, private readonly descriptor: number, private readonly temporary: string,
-    private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation) {}
+    private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation, private readonly mode: DownloadWriteMode) {}
   static create(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation): DownloadSink {
+    return DownloadSink.open(root, name, expected, { kind: "sequential" });
+  }
+  static createRanged(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation, total: number, spans: readonly DownloadSpan[]): DownloadSink {
+    const limit = "kind" in expected ? expected.maximumBytes : expected.byteLength;
+    if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(total) || total < 0 || total > limit
+      || !("kind" in expected) && total !== expected.byteLength) throw new RangeError("Invalid ranged download size");
+    const ranges = new Map<number, { readonly end: number; written: number }>();
+    let next = 0;
+    for (const span of [...spans].sort((left, right) => left.start - right.start)) {
+      if (!Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end) || span.start !== next || span.end < span.start || span.end >= total)
+        throw new RangeError("Download spans must partition the complete file");
+      ranges.set(span.start, { end: span.end, written: 0 }); next = span.end + 1;
+    }
+    if (next !== total) throw new RangeError("Download spans must partition the complete file");
+    return DownloadSink.open(root, name, expected, { kind: "ranged", total, spans: ranges });
+  }
+  private static open(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation, mode: DownloadWriteMode): DownloadSink {
     const limit = "kind" in expected ? expected.maximumBytes : expected.byteLength;
     if (!Number.isSafeInteger(limit) || limit < 0) throw new RangeError("Invalid download size");
     const parent = openContainedParent(root, name, true), temporary = `.download-${randomUUID()}`;
     try {
-      const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${temporary}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      return new DownloadSink(parent.descriptor, descriptor, temporary, parent.leaf, expected);
+      const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${temporary}`, (mode.kind === "ranged" ? constants.O_RDWR : constants.O_WRONLY) | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      return new DownloadSink(parent.descriptor, descriptor, temporary, parent.leaf, expected, mode);
     } catch (error) { closeSync(parent.descriptor); throw error; }
   }
   get byteLength(): number { return this.count; }
   append(bytes: Uint8Array): void {
+    if (this.mode.kind !== "sequential") throw new Error("Ranged downloads require appendRange");
     if (this.ended) throw new Error("Download sink is closed");
     if (this.inspecting) throw new Error("Download inspection is in progress");
     const limit = "kind" in this.expected ? this.expected.maximumBytes : this.expected.byteLength;
@@ -75,12 +96,45 @@ export class DownloadSink {
     }
     this.hash.update(bytes); this.count += bytes.length;
   }
+  appendRange(spanStart: number, bytes: Uint8Array): void {
+    if (this.mode.kind !== "ranged") throw new Error("Sequential downloads require append");
+    if (this.ended) throw new Error("Download sink is closed");
+    if (this.inspecting) throw new Error("Download inspection is in progress");
+    const span = this.mode.spans.get(spanStart);
+    if (span === undefined) throw new RangeError("Unknown download span");
+    if (bytes.length > span.end - spanStart + 1 - span.written) throw new RangeError("Download exceeds span size");
+    let written = 0;
+    while (written < bytes.length) {
+      const count = writeSync(this.descriptor, bytes, written, bytes.length - written, spanStart + span.written);
+      if (count === 0) throw new Error("Download write made no progress");
+      written += count; span.written += count; this.count += count;
+    }
+  }
+  private requireCompleteRanges(): void {
+    if (this.mode.kind !== "ranged") return;
+    if (this.count !== this.mode.total || [...this.mode.spans].some(([start, span]) => span.written !== span.end - start + 1))
+      throw new Error("Ranged download is incomplete");
+    if (fstatSync(this.descriptor).size !== this.mode.total) throw new Error("Ranged download staged size changed");
+  }
+  private digest(): ContentDigest {
+    if (this.mode.kind === "ranged") {
+      const bytes = new Uint8Array(64 * 1024);
+      let offset = 0;
+      while (offset < this.mode.total) {
+        const count = readSync(this.descriptor, bytes, 0, Math.min(bytes.length, this.mode.total - offset), offset);
+        if (count === 0) throw new Error("Unexpected ranged download EOF");
+        this.hash.update(bytes.subarray(0, count)); offset += count;
+      }
+    }
+    return createContentDigest(this.hash.digest("hex"));
+  }
   finish(): ContentDigest {
     if (this.ended) throw new Error("Download sink is closed");
     if (this.inspecting) throw new Error("Download inspection is in progress");
     try {
+      this.requireCompleteRanges();
       if (!("kind" in this.expected) && this.count !== this.expected.byteLength) throw new Error("Download size differs from content identity");
-      const digest = createContentDigest(this.hash.digest("hex"));
+      const digest = this.digest();
       if (!("kind" in this.expected) && digest !== this.expected.digest) throw new Error("Download checksum differs from content identity");
       // link fails if the destination exists, avoiding replacement of installed game assets.
       linkSync(`/proc/self/fd/${this.parent}/${this.temporary}`, `/proc/self/fd/${this.parent}/${this.target}`);
@@ -91,6 +145,7 @@ export class DownloadSink {
   async inspectStaged(inspect: (path: string) => Promise<void>): Promise<void> {
     if (this.ended) throw new Error("Download sink is closed");
     if (this.inspecting) throw new Error("Download inspection is in progress");
+    this.requireCompleteRanges();
     const retained = openSync(`/proc/self/fd/${this.descriptor}`, constants.O_RDONLY);
     this.inspecting = true;
     try {
