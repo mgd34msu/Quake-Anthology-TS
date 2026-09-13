@@ -117,10 +117,11 @@ function inferredName(node: ts.Node): string {
   return "anonymous";
 }
 
-export function enumerateFunctions(repository: string, path: string, source: string): SourceFunction[] {
+export function enumerateFunctions(repository: string, path: string, source: string, inspect?: (node: ts.Node, sourceFile: ts.SourceFile) => void): SourceFunction[] {
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const found: SourceFunction[] = [];
   function visit(node: ts.Node): void {
+    inspect?.(node, sourceFile);
     if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)
       || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isConstructorDeclaration(node)) {
       const startOffset = node.getStart(sourceFile);

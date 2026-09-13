@@ -1,0 +1,53 @@
+{
+  "game": "q1",
+  "donorRevision": "6bc6a8bf29b66981e3b6ce7251ebbc6413120270",
+  "unifiedRevision": "3dc9ca6ca404dc4522ab9e9669fff458805b0993",
+  "limits": [
+    "All matches are review candidates, never behavioral verdicts.",
+    "Current worktree and post-baseline integration are outside this snapshot.",
+    "Export modifiers are lexical; re-export resolution is not attempted.",
+    "Signatures retain written syntax; inferred return/parameter types are not synthesized.",
+    "Import and basename matches are intentionally broad hints. All are retained."
+  ],
+  "repositories": [
+    {
+      "id": "q1-ts",
+      "revision": "6bc6a8bf29b66981e3b6ce7251ebbc6413120270",
+      "sourceSetSha256": "0ac1f6cd77fe09816ec1dac7c2a980dfea33c01ce1d2d8d786b5197cfadb67ba",
+      "files": 568,
+      "declarations": 84022,
+      "censusFunctions": 14540,
+      "unanchored": 82534,
+      "classifications": {
+        "runtime": 242,
+        "test": 326,
+        "tool": 0,
+        "declaration": 0
+      },
+      "unparseable": [],
+      "skipped": []
+    },
+    {
+      "id": "unified",
+      "revision": "3dc9ca6ca404dc4522ab9e9669fff458805b0993",
+      "sourceSetSha256": "2be25c00ece9a77d4e62006f7c9041b0cc5a393933152432c4cbea020bf3e22e",
+      "files": 1687,
+      "declarations": 203489,
+      "censusFunctions": 31643,
+      "unanchored": 203489,
+      "classifications": {
+        "runtime": 1440,
+        "test": 202,
+        "tool": 44,
+        "declaration": 1
+      },
+      "unparseable": [],
+      "skipped": []
+    }
+  ],
+  "statuses": {
+    "unmatched": 15319,
+    "single-candidate": 1054,
+    "ambiguous": 67649
+  }
+}
