@@ -1,5 +1,5 @@
 /* Replacement conventions from Ironwail and q2repro. GPL-2.0-or-later. */
-import type { Md5Model, Q1AliasModel, TimedFrames } from "../../contracts/scene.ts";
+import type { Md5Model, Q1AliasModel, Q2AliasModel, TimedFrames } from "../../contracts/scene.ts";
 
 export interface Md5Paths { readonly meshPath: string; readonly animPath: string; readonly scalePath: string; }
 
@@ -26,8 +26,9 @@ export function md5ReplacementAllowed(md2Rank: number | null, meshRank: number |
   return md2Rank === null || meshRank === null || meshRank <= md2Rank;
 }
 
-export function md2ReplacementSkinSelection(skins: readonly string[], scaleSource: string | null): Md5Model["skinSelection"] {
-  return { kind: "q2-md2-replacement", skins: skins.map(md5SkinPathFor), scaleSource };
+export function md2ReplacementSkinSelection(alias: Pick<Q2AliasModel, "skins" | "frames">, scaleSource: string | null,
+  diagnostics: readonly string[]): Md5Model["skinSelection"] {
+  return { kind: "q2-md2-replacement", skins: alias.skins.map(md5SkinPathFor), sourceFrameCount: alias.frames.length, scaleSource, diagnostics };
 }
 
 /** Quake rerelease animated skin groups use the mesh shader as their basename. */

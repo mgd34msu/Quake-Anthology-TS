@@ -26,6 +26,12 @@ function repairFrames(entity: SceneEntity): { frame: number; previousFrame: numb
   let { frame, previousFrame, backLerp } = entity.pose;
   if (!Number.isInteger(frame) || !Number.isInteger(previousFrame) || !Number.isFinite(backLerp)) throw new RangeError("Invalid scene model pose");
   if (entity.flags.kind === "q2" && (entity.flags.bits & 128) !== 0) return { frame, previousFrame, backLerp, fallback: false };
+  if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q2-md2-replacement") {
+    const count = entity.model.skinSelection.sourceFrameCount;
+    const fallback = frame < 0 || frame >= count || previousFrame < 0 || previousFrame >= count;
+    if (fallback) { frame = 0; previousFrame = 0; }
+    return { frame, previousFrame, backLerp: frame === previousFrame ? 0 : backLerp, fallback };
+  }
   const count = countFrames(entity.model);
   if (count === 0) throw new RangeError("Scene model has no animation frames");
   if (entity.model.kind === "q2-sp2" || entity.model.kind === "md5" && entity.model.skinSelection.kind !== "q1-mdl-replacement"
@@ -146,7 +152,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal) })) };
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
     surfaces.push({ name, entity, options, transform: entity.transform, image, localGeometry, geometry,
-      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? "front" : "back",
+      depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
       alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
       translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
   }

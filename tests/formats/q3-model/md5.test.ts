@@ -56,7 +56,7 @@ test("MD5 preserves frame identity, per-joint position scale and new-frame skin 
 test("replacement conventions preserve independent MD2 skins and source ranks", () => {
   expect(md5PathsFor("models/monster/tris.md2", "q2").meshPath).toBe("models/monster/md5/tris.md5mesh");
   expect(md5PathsFor("progs/player.mdl", "q1").meshPath).toBe("progs/player.md5mesh");
-  expect(md2ReplacementSkinSelection(["players/male/grunt.pcx"], "scale.md5scale")).toEqual({ kind: "q2-md2-replacement", skins: ["players/male/md5/grunt.pcx"], scaleSource: "scale.md5scale" });
+  expect(md2ReplacementSkinSelection({ skins: ["players/male/grunt.pcx"], frames: [] }, "scale.md5scale", [])).toEqual({ kind: "q2-md2-replacement", skins: ["players/male/md5/grunt.pcx"], sourceFrameCount: 0, scaleSource: "scale.md5scale", diagnostics: [] });
   expect(md5ReplacementAllowed(0, 1)).toBe(false);
   expect(md5ReplacementAllowed(2, 1)).toBe(true);
 });

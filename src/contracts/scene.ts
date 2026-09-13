@@ -335,7 +335,8 @@ export interface Md5Model {
     | { readonly kind: "q1-mdl-replacement"; readonly meshSkinGroups: readonly (readonly TimedFrames<string>[])[];
         readonly flags: number; readonly timing: { readonly kind: "entity-frame" }
           | { readonly kind: "elapsed-time"; readonly frameRate: number } }
-    | { readonly kind: "q2-md2-replacement"; readonly skins: readonly string[]; readonly scaleSource: string | null };
+    | { readonly kind: "q2-md2-replacement"; readonly skins: readonly string[]; readonly sourceFrameCount: number;
+        readonly scaleSource: string | null; readonly diagnostics: readonly string[] };
 }
 export type DecodedModel = Q1AliasModel | SpriteModel | Q2AliasModel | Q3MeshModel | Md4Model | Md5Model
   | { readonly kind: "brush-model"; readonly world: DecodedWorld; readonly model: number };
