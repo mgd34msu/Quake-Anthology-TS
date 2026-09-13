@@ -162,7 +162,12 @@ function geometryDigest(meshes: readonly ShadowMesh[]): string {
   const hash = new Bun.CryptoHasher("sha256");
   for (const mesh of meshes) {
     hash.update(new Float64Array([mesh.positions.length, mesh.indices.length]));
-    hash.update(new Float64Array(mesh.positions.flatMap(position => [position.x, position.y, position.z])));
+    const positions = new Float64Array(mesh.positions.length * 3);
+    let offset = 0;
+    for (const position of mesh.positions) {
+      positions[offset++] = position.x; positions[offset++] = position.y; positions[offset++] = position.z;
+    }
+    hash.update(positions);
     hash.update(new Float64Array(mesh.indices));
   }
   return hash.digest("hex");
