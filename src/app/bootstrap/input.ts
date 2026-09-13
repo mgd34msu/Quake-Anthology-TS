@@ -27,6 +27,7 @@ import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
 import { registerLlmCommands } from "../../console/llm.ts";
+import { registerQ2ClientCommands } from "./q2-client-commands.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
@@ -174,7 +175,8 @@ export class ApplicationInput {
     }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
-    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print)];
+    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print),
+      registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat))];
     this.commands.register("quit", () => actions.quit());
     for (const name of ["+weaponwheel", "-weaponwheel", "+powerupwheel", "-powerupwheel"]) this.commands.register(name, invocation => {
       let origin = invocation.source.origin;

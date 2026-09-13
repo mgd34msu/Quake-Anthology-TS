@@ -154,3 +154,26 @@ test("Q2 campaign death bookkeeping leaves a foreign character's body to its own
   expect(players.intermission).toMatchObject({ exit: false });
   active.advance(5.1); players.afterClientThink(entity, game); expect(players.intermission).toMatchObject({ exit: true });
 });
+
+test("Q2 catalogue dispatch retains native help, unknown chat, hooks, and intermission gates", () => {
+  const { players, entity, game, shared, events } = campaign();
+  const state = players.states.get(entity.actor.id);
+  if (state === undefined) throw new Error("player not admitted");
+  const run = (name: string, args: readonly string[] = []): boolean => players.clientCommand(entity, game, name, args);
+  expect(run("GoD")).toBe(true); expect(state.god).toBe(true);
+  expect(shared.combat.read(entity.actor.id)?.invulnerable).toBe(true);
+  run("give", ["health", "65"]); expect(shared.combat.read(entity.actor.id)?.health).toBe(65);
+  run("help"); expect(state.showHelp).toBe(true);
+  run("AnUnknownCommand", ["words"]);
+  expect(events.some(event => event.kind === "print" && event.text === "Ranger: AnUnknownCommand words\n")).toBe(true);
+  players.beginIntermission(game, "*base2");
+  run("god"); expect(state.god).toBe(true);
+  events.length = 0; run("AnotherUnknownCommand");
+  expect(events).toEqual([]);
+  run("say", ["intermission chat"]);
+  expect(events.some(event => event.kind === "print" && event.text.includes("intermission chat"))).toBe(true);
+  run("help"); expect(events.some(event => event.kind === "help")).toBe(true);
+  let hooked = false;
+  players.hooks.command = (_entity, _game, name, args) => { hooked = name === "god" && args[0] === "hook"; return true; };
+  run("GOD", ["hook"]); expect(hooked).toBe(true); expect(state.god).toBe(true);
+});

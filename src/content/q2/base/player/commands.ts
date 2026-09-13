@@ -1,3 +1,4 @@
+import type { CommandDocumentation } from "../../../../core/commands/documentation.ts";
 import type { Q2PlayerContext } from "./types.ts";
 import type { Q2Players } from "./index.ts";
 import { q2EnvironmentDamage } from "./environment.ts";
@@ -93,81 +94,154 @@ function say(players: Q2Players, context: Q2PlayerContext, args: readonly string
   return undefined;
 }
 
+type Q2CommandHandler = (players: Q2Players, context: Q2PlayerContext, args: readonly string[], command: string) => void;
+export interface Q2ClientCommandDefinition {
+  readonly name: string;
+  readonly documentation: CommandDocumentation;
+  readonly intermission: boolean;
+  readonly run: Q2CommandHandler;
+}
+
+const chat: Q2CommandHandler = (players, context, args, command) => { say(players, context, args, command === "say_team"); };
+
+const listPlayers: Q2CommandHandler = (players, context, _args, command) => {
+  const { game } = context;
+  const list = [...players.states.values()].filter(value => value.connected).sort((left, right) => command === "players" ? left.score - right.score : left.slot - right.slot);
+  let message = "";
+  for (const row of list) {
+    const seconds = Math.trunc(game.host.now() - row.enteredAt);
+    const line = command === "players" ? `${String(row.score).padStart(3)} ${row.name}\n`
+      : `${String(Math.trunc(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")} ${String(row.ping).padStart(4)} ${String(row.score).padStart(3)} ${row.name}${row.spectator ? " (spectator)" : ""}\n`;
+    if (message.length + line.length > 1280) { message += "...\n"; break; } message += line;
+  }
+  print(context, message + (command === "players" ? `\n${list.length} players\n` : ""));
+};
+
+const score: Q2CommandHandler = (players, context) => {
+  const { entity, game, state } = context;
+  state.showInventory = false; state.showHelp = false; state.showScores = !state.showScores;
+  if (state.showScores && game.options.mode !== "singleplayer") players.scoreboard(entity, game);
+};
+
+const showHelp: Q2CommandHandler = (players, context) => {
+  const { entity, game, state, hooks } = context;
+  state.showInventory = false; state.showScores = false;
+  if (game.options.mode === "deathmatch") { state.showScores = true; players.scoreboard(entity, game); }
+  else { state.showHelp = !state.showHelp; hooks.emit({ kind: "help", actor: entity.actor.id, visible: state.showHelp }); }
+};
+
+const useItem: Q2CommandHandler = (_players, context, args) => {
+  use(context, args.join(" "));
+};
+
+const dropItem: Q2CommandHandler = (players, context, args) => {
+  drop(players, context, args.join(" "));
+};
+
+const inventory: Q2CommandHandler = (_players, context) => {
+  const { entity, game, state, hooks } = context;
+  state.showScores = false; state.showHelp = false; state.showInventory = !state.showInventory;
+  if (state.showInventory) hooks.emit({ kind: "inventory", actor: entity.actor.id, entries: game.host.inventory.entries(entity.actor.id) });
+};
+
+const selectItem: Q2CommandHandler = (players, context, _args, command) => {
+  const { entity, game, state } = context;
+  if (state.chaseTarget !== null) players.chase(entity, game, command.startsWith("invnext") ? 1 : -1);
+  else select(context, command.startsWith("invnext") ? 1 : -1, command.endsWith("w") ? "weapon" : command.endsWith("p") ? "power" : "all");
+};
+
+const selectedItem: Q2CommandHandler = (players, context, _args, command) => {
+  const { entity, game, state } = context;
+  if (state.selectedItem === null || game.host.inventory.count(entity.actor.id, state.selectedItem) === 0) select(context, 1, "all");
+  if (state.selectedItem === null) print(context, "No item to use.\n");
+  else if (command === "invuse") use(context, state.selectedItem); else drop(players, context, state.selectedItem);
+};
+
+// The original next/previous names traverse the item table in reverse/forward order respectively.
+const previousWeapon: Q2CommandHandler = (_players, context) => {
+  weaponCycle(context, 1);
+};
+
+const nextWeapon: Q2CommandHandler = (_players, context) => {
+  weaponCycle(context, -1);
+};
+
+const lastWeapon: Q2CommandHandler = (_players, context) => {
+  const { entity, game } = context;
+  const weapon = context.weapons.states.get(entity.actor.id)?.lastWeapon;
+  if (weapon !== null && weapon !== undefined) context.weapons.requestWeapon(entity, game, weapon);
+};
+
+const killPlayer: Q2CommandHandler = (_players, context) => {
+  const { entity, game, state } = context;
+  if (game.host.now() - state.respawnTime < 5) return;
+  state.god = false; entity.flags &= ~16; game.host.combat.setTraits(entity.actor, { invulnerable: false });
+  q2EnvironmentDamage(context, Math.max(1, game.host.combat.read(entity.actor.id)?.health ?? 0) + 1, 23, 32);
+};
+
+const putAway: Q2CommandHandler = (_players, context) => {
+  const { state } = context;
+  state.showScores = false; state.showHelp = false; state.showInventory = false;
+};
+
+const gesture: Q2CommandHandler = (_players, context, args) => {
+  const { entity, state } = context;
+  if (context.movement.ducked || state.animationPriority > 1) return;
+  const wave = Number.parseInt(args[0] ?? "0", 10), animations: readonly (readonly [string, number, number])[] = [
+    ["flipoff", 72, 83], ["salute", 84, 94], ["taunt", 95, 111], ["wave", 112, 122], ["point", 123, 134],
+  ];
+  const animation = animations[wave] ?? animations[4];
+  if (animation !== undefined) { state.animationPriority = 1; entity.frame = animation[1] - 1; state.animationEnd = animation[2]; print(context, animation[0] + "\n"); }
+};
+
+const cheat: Q2CommandHandler = (_players, context, args, command) => {
+  const { entity, game, state, hooks } = context;
+  if (game.options.mode === "deathmatch" && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); return; }
+  if (command === "god") { state.god = !state.god; entity.flags ^= 16; game.host.combat.setTraits(entity.actor, { invulnerable: state.god }); print(context, `godmode ${state.god ? "ON" : "OFF"}\n`); }
+  else if (command === "notarget") { state.notarget = !state.notarget; entity.flags ^= 32; print(context, `notarget ${state.notarget ? "ON" : "OFF"}\n`); }
+  else if (command === "noclip") { state.noclip = !state.noclip; hooks.setMovement(entity.actor.id, { kind: "noclip", enabled: state.noclip }); print(context, `noclip ${state.noclip ? "ON" : "OFF"}\n`); }
+  else if (command === "target") { for (const target of game.targets(args.join(" "))) game.host.callbacks.use(target.actor, entity.actor.id, entity.actor.id); }
+  else give(context, args);
+};
+
+export const q2ClientCommands: readonly Q2ClientCommandDefinition[] = [
+  { name: "say", documentation: { summary: "Send a chat message.", usage: "say <message>", examples: [] }, intermission: true, run: chat },
+  { name: "say_team", documentation: { summary: "Send chat to your team when model or skin teams are enabled.", usage: "say_team <message>", examples: [] }, intermission: true, run: chat },
+  { name: "players", documentation: { summary: "List connected players sorted by score.", usage: "players", examples: [] }, intermission: true, run: listPlayers },
+  { name: "playerlist", documentation: { summary: "List connected players with time, ping, score, and spectator status.", usage: "playerlist", examples: [] }, intermission: true, run: listPlayers },
+  { name: "score", documentation: { summary: "Toggle the scoreboard.", usage: "score", examples: [] }, intermission: true, run: score },
+  { name: "help", documentation: { summary: "Toggle mission help, or show the deathmatch scoreboard.", usage: "help", examples: [] }, intermission: true, run: showHelp },
+  { name: "use", documentation: { summary: "Use an inventory item or select a weapon by name.", usage: "use <item name>", examples: [] }, intermission: false, run: useItem },
+  { name: "drop", documentation: { summary: "Drop an inventory item by name.", usage: "drop <item name>", examples: [] }, intermission: false, run: dropItem },
+  { name: "inven", documentation: { summary: "Toggle the inventory display.", usage: "inven", examples: [] }, intermission: false, run: inventory },
+  { name: "invnext", documentation: { summary: "Select the next usable item, or cycle chase targets.", usage: "invnext", examples: [] }, intermission: false, run: selectItem },
+  { name: "invprev", documentation: { summary: "Select the previous usable item, or cycle chase targets.", usage: "invprev", examples: [] }, intermission: false, run: selectItem },
+  { name: "invnextw", documentation: { summary: "Select the next weapon, or cycle chase targets.", usage: "invnextw", examples: [] }, intermission: false, run: selectItem },
+  { name: "invprevw", documentation: { summary: "Select the previous weapon, or cycle chase targets.", usage: "invprevw", examples: [] }, intermission: false, run: selectItem },
+  { name: "invnextp", documentation: { summary: "Select the next powerup, or cycle chase targets.", usage: "invnextp", examples: [] }, intermission: false, run: selectItem },
+  { name: "invprevp", documentation: { summary: "Select the previous powerup, or cycle chase targets.", usage: "invprevp", examples: [] }, intermission: false, run: selectItem },
+  { name: "invuse", documentation: { summary: "Use the selected inventory item.", usage: "invuse", examples: [] }, intermission: false, run: selectedItem },
+  { name: "invdrop", documentation: { summary: "Drop the selected inventory item.", usage: "invdrop", examples: [] }, intermission: false, run: selectedItem },
+  { name: "weapprev", documentation: { summary: "Select the previous available weapon.", usage: "weapprev", examples: [] }, intermission: false, run: previousWeapon },
+  { name: "weapnext", documentation: { summary: "Select the next available weapon.", usage: "weapnext", examples: [] }, intermission: false, run: nextWeapon },
+  { name: "weaplast", documentation: { summary: "Select the last weapon used.", usage: "weaplast", examples: [] }, intermission: false, run: lastWeapon },
+  { name: "kill", documentation: { summary: "Kill yourself after the five-second respawn delay.", usage: "kill", examples: [] }, intermission: false, run: killPlayer },
+  { name: "putaway", documentation: { summary: "Close score, help, and inventory displays.", usage: "putaway", examples: [] }, intermission: false, run: putAway },
+  { name: "wave", documentation: { summary: "Play a gesture: 0 flipoff, 1 salute, 2 taunt, 3 wave, 4 point.", usage: "wave [0-4]", examples: [] }, intermission: false, run: gesture },
+  { name: "god", documentation: { summary: "Toggle invulnerability; deathmatch requires cheats.", usage: "god", examples: [] }, intermission: false, run: cheat },
+  { name: "notarget", documentation: { summary: "Toggle monster targeting immunity; deathmatch requires cheats.", usage: "notarget", examples: [] }, intermission: false, run: cheat },
+  { name: "noclip", documentation: { summary: "Toggle movement through walls; deathmatch requires cheats.", usage: "noclip", examples: [] }, intermission: false, run: cheat },
+  { name: "give", documentation: { summary: "Give items, health, weapons, ammo, or armor; deathmatch requires cheats.", usage: "give <all|health [amount]|weapons|ammo|armor|item name [amount]>", examples: [] }, intermission: false, run: cheat },
+  { name: "target", documentation: { summary: "Activate entities with the supplied target name; deathmatch requires cheats.", usage: "target <targetname>", examples: [] }, intermission: false, run: cheat },
+];
+
 export function runQ2ClientCommand(players: Q2Players, context: Q2PlayerContext, sourceCommand: string, args: readonly string[]): boolean {
-  const { entity, game, state, hooks } = context, command = sourceCommand.toLowerCase();
-  if (hooks.command?.(entity, game, command, args) === true) return true;
-  if (command === "say" || command === "say_team") { say(players, context, args, command === "say_team"); return true; }
-  if (command === "players" || command === "playerlist") {
-    const list = [...players.states.values()].filter(value => value.connected).sort((left, right) => command === "players" ? left.score - right.score : left.slot - right.slot);
-    let message = "";
-    for (const row of list) {
-      const seconds = Math.trunc(game.host.now() - row.enteredAt);
-      const line = command === "players" ? `${String(row.score).padStart(3)} ${row.name}\n`
-        : `${String(Math.trunc(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")} ${String(row.ping).padStart(4)} ${String(row.score).padStart(3)} ${row.name}${row.spectator ? " (spectator)" : ""}\n`;
-      if (message.length + line.length > 1280) { message += "...\n"; break; } message += line;
-    }
-    print(context, message + (command === "players" ? `\n${list.length} players\n` : "")); return true;
-  }
-  if (command === "score") {
-    state.showInventory = false; state.showHelp = false; state.showScores = !state.showScores;
-    if (state.showScores && game.options.mode !== "singleplayer") players.scoreboard(entity, game);
-    return true;
-  }
-  if (command === "help") {
-    state.showInventory = false; state.showScores = false;
-    if (game.options.mode === "deathmatch") { state.showScores = true; players.scoreboard(entity, game); }
-    else { state.showHelp = !state.showHelp; hooks.emit({ kind: "help", actor: entity.actor.id, visible: state.showHelp }); }
-    return true;
-  }
-  if (players.intermission.kind !== "playing") return true;
-  switch (command) {
-    case "use": use(context, args.join(" ")); break;
-    case "drop": drop(players, context, args.join(" ")); break;
-    case "inven":
-      state.showScores = false; state.showHelp = false; state.showInventory = !state.showInventory;
-      if (state.showInventory) hooks.emit({ kind: "inventory", actor: entity.actor.id, entries: game.host.inventory.entries(entity.actor.id) });
-      break;
-    case "invnext": case "invprev": case "invnextw": case "invprevw": case "invnextp": case "invprevp":
-      if (state.chaseTarget !== null) players.chase(entity, game, command.startsWith("invnext") ? 1 : -1);
-      else select(context, command.startsWith("invnext") ? 1 : -1, command.endsWith("w") ? "weapon" : command.endsWith("p") ? "power" : "all");
-      break;
-    case "invuse": case "invdrop":
-      if (state.selectedItem === null || game.host.inventory.count(entity.actor.id, state.selectedItem) === 0) select(context, 1, "all");
-      if (state.selectedItem === null) print(context, "No item to use.\n");
-      else if (command === "invuse") use(context, state.selectedItem); else drop(players, context, state.selectedItem);
-      break;
-    // The original next/previous names traverse the item table in reverse/forward order respectively.
-    case "weapprev": weaponCycle(context, 1); break;
-    case "weapnext": weaponCycle(context, -1); break;
-    case "weaplast": {
-      const weapon = context.weapons.states.get(entity.actor.id)?.lastWeapon;
-      if (weapon !== null && weapon !== undefined) context.weapons.requestWeapon(entity, game, weapon); break;
-    }
-    case "kill":
-      if (game.host.now() - state.respawnTime < 5) break;
-      state.god = false; entity.flags &= ~16; game.host.combat.setTraits(entity.actor, { invulnerable: false });
-      q2EnvironmentDamage(context, Math.max(1, game.host.combat.read(entity.actor.id)?.health ?? 0) + 1, 23, 32); break;
-    case "putaway": state.showScores = false; state.showHelp = false; state.showInventory = false; break;
-    case "wave": {
-      if (context.movement.ducked || state.animationPriority > 1) break;
-      const wave = Number.parseInt(args[0] ?? "0", 10), animations: readonly (readonly [string, number, number])[] = [
-        ["flipoff", 72, 83], ["salute", 84, 94], ["taunt", 95, 111], ["wave", 112, 122], ["point", 123, 134],
-      ];
-      const animation = animations[wave] ?? animations[4];
-      if (animation !== undefined) { state.animationPriority = 1; entity.frame = animation[1] - 1; state.animationEnd = animation[2]; print(context, animation[0] + "\n"); }
-      break;
-    }
-    case "god": case "notarget": case "noclip": case "give": case "target": {
-      if (game.options.mode === "deathmatch" && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); break; }
-      if (command === "god") { state.god = !state.god; entity.flags ^= 16; game.host.combat.setTraits(entity.actor, { invulnerable: state.god }); print(context, `godmode ${state.god ? "ON" : "OFF"}\n`); }
-      else if (command === "notarget") { state.notarget = !state.notarget; entity.flags ^= 32; print(context, `notarget ${state.notarget ? "ON" : "OFF"}\n`); }
-      else if (command === "noclip") { state.noclip = !state.noclip; hooks.setMovement(entity.actor.id, { kind: "noclip", enabled: state.noclip }); print(context, `noclip ${state.noclip ? "ON" : "OFF"}\n`); }
-      else if (command === "target") { for (const target of game.targets(args.join(" "))) game.host.callbacks.use(target.actor, entity.actor.id, entity.actor.id); }
-      else give(context, args);
-      break;
-    }
-    default: say(players, context, [sourceCommand, ...args], false); break;
-  }
+  const command = sourceCommand.toLowerCase();
+  if (context.hooks.command?.(context.entity, context.game, command, args) === true) return true;
+  const definition = q2ClientCommands.find(candidate => candidate.name === command);
+  if (players.intermission.kind !== "playing" && definition?.intermission !== true) return true;
+  if (definition === undefined) say(players, context, [sourceCommand, ...args], false);
+  else definition.run(players, context, args, command);
   return true;
 }
 
