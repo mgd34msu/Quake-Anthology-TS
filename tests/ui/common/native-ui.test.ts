@@ -239,14 +239,19 @@ test("gyro menu calibrates the assigned controller and restores only its seat tu
   const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
   const commands = new CommandBuffer({ dialect: "q3", context });
   const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
-  const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat,
+  input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...input.gamepad.tuning.gyro, pitchSensitivity: 0.7 } };
+  const otherSeat = owner.seat(1), otherContext: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat: otherSeat, client: owner.client(1, 0) } };
+  const otherInput = new SeatInput({ seat: otherSeat, dialect: "q3", context: otherContext, commands, uiEvent: () => false });
+  otherInput.gamepad.tuning = { ...otherInput.gamepad.tuning, gyro: { ...otherInput.gamepad.tuning.gyro, yawSensitivity: 6 } };
+  const otherTuning = structuredClone(otherInput.gamepad.tuning);
+  const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }, { input: otherInput, controller: { kind: "none" } }], keyboardSeat: seat,
     now: () => 1000, ticks: () => 1000, subframe: false, unhandled: () => undefined,
     controllers: { setAssignments: () => undefined, assignments: [7], pollEvents: () => [], snapshot: () => null,
       setSensorEnabled: () => ({ kind: "accepted" }) } });
   const device: import("../../../src/platform/controller.ts").ControllerDevice = { instance: 7, name: "Test gyro controller", guid: "a".repeat(32), serial: "pad-A", ordinal: 0, virtual: true,
     capabilities: { axes: [], buttons: [], rumble: false, triggerRumble: false, led: false, touchpads: 0, sensors: [{ kind: "gyro", enabled: false, rateHz: 50 }] } };
   let devices: readonly import("../../../src/platform/controller.ts").ControllerDevice[] = [device];
-  const store = new ConfigStore(directory), settings = new ControllerSettings(router, [seat], () => devices, store);
+  const store = new ConfigStore(directory), settings = new ControllerSettings(router, [seat, otherSeat], () => devices, store);
   const ui = new NativeUiController({ seat, now: () => 1000, skin: () => defaultUiSkin(fontId), bindings: () => [],
     focus: focus => input.setFocus(focus, 1000), sound: () => undefined, executeScript: () => undefined });
   const menu = registerGyroSettingsMenu(ui, settings.ui(seat));
@@ -258,6 +263,8 @@ test("gyro menu calibrates the assigned controller and restores only its seat tu
   const loaded = async (): Promise<void> => { for (let attempt = 0; attempt < 100 && settings.busy(seat); attempt++) await Bun.sleep(1); expect(settings.busy(seat)).toBe(false); };
   try {
     router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 7 }); settings.update(); await loaded();
+    expect(input.gamepad.tuning.gyro.pitchSensitivity).toBe(0.7);
+    input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...input.gamepad.tuning.gyro, yawSensitivity: 2 } };
     ui.openMenu(menu.root); click(1); await loaded(); expect(input.gamepad.tuning.gyro.enabled).toBe(true);
     click(2); expect(router.gyroCalibration(seat).kind).toBe("calibrating");
     for (let index = 0; index <= 100; index++) router.handleController({ kind: "sensor", timestamp: 0, instance: 7, slot: 0, sensor: "gyro", timestampUs: BigInt((1000 + index * 20) * 1000), x: 0.01, y: -0.02, z: 0.03 });
@@ -268,11 +275,26 @@ test("gyro menu calibrates the assigned controller and restores only its seat tu
     router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 8 }); settings.update(); await loaded();
     expect(router.gyroCalibration(seat).kind).toBe("idle");
     expect(input.gamepad.tuning.gyro.enabled).toBe(false);
-    router.setGyroEnabled(seat, false);
+    expect(input.gamepad.tuning.gyro.yawSensitivity).toBe(1);
+    expect(input.gamepad.tuning.gyro.pitchSensitivity).toBe(0.7);
+    input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...input.gamepad.tuning.gyro, yawSensitivity: 3 } };
+    await settings.save(seat);
     router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 8, instance: null }); settings.update();
     devices = [{ ...device, instance: 9 }];
     router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 9 }); settings.update(); await loaded();
     expect(input.gamepad.tuning.gyro.enabled).toBe(true);
+    expect(input.gamepad.tuning.gyro.yawSensitivity).toBe(2);
     expect(router.gyroCalibration(seat).kind).toBe("idle");
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 9, instance: null }); settings.update();
+    devices = [{ ...device, instance: 10, serial: "pad-B" }];
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 10 }); settings.update(); await loaded();
+    expect(input.gamepad.tuning.gyro.enabled).toBe(false);
+    expect(input.gamepad.tuning.gyro.yawSensitivity).toBe(3);
+    await store.saveGyro("controllers/seat-1/seat.json", { version: 1, identity: { kind: "seat" }, tuning: { ...input.gamepad.tuning.gyro, yawSensitivity: 4 } });
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 10, instance: null }); settings.update();
+    devices = [{ ...device, instance: 11, serial: null }];
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 11 }); settings.update(); await loaded();
+    expect(input.gamepad.tuning.gyro.yawSensitivity).toBe(4);
+    expect(otherInput.gamepad.tuning).toEqual(otherTuning);
   } finally { ui.closeAll(); menu.dispose(); settings.close(); router.close(); await rm(directory, { recursive: true, force: true }); }
 });

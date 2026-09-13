@@ -14,12 +14,15 @@ type Profile = { readonly instance: number; readonly identity: GyroProfileIdenti
 /** Owns disk I/O only; active gyro tuning and calibration remain in the input router. */
 export class ControllerSettings {
   private readonly profiles = new Map<SeatId, Profile>();
+  private readonly seatFallbacks = new Map<SeatId, GamepadTuning["gyro"]>();
   private closed = false;
   private readonly pending = new Set<Promise<void>>();
   async settle(): Promise<void> { await Promise.all(this.pending); }
   constructor(readonly router: InputRouter, private readonly seats: readonly SeatId[], private readonly devices: () => readonly ControllerDevice[],
     private readonly store = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings")),
-    private readonly report: (message: string) => void = () => undefined) {}
+    private readonly report: (message: string) => void = () => undefined) {
+    for (const seat of seats) this.seatFallbacks.set(seat, { ...(router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) });
+  }
   update(): void {
     if (this.closed) return;
     for (const [index, seat] of this.seats.entries()) {
@@ -31,7 +34,7 @@ export class ControllerSettings {
       const identity: GyroProfileIdentity = device.guid !== null && device.serial !== null && device.serial.length > 0
         ? { kind: "device", guid: device.guid, serial: device.serial } : { kind: "seat" };
       const name = identity.kind === "seat" ? "seat" : `${identity.guid}-${createHash("sha256").update(identity.serial).digest("hex")}`;
-      const profile: Profile = { instance, identity, path: `controllers/seat-${index + 1}/${name}.json`, fallback: { ...(this.router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) }, busy: true, message: "Loading settings..." };
+      const profile: Profile = { instance, identity, path: `controllers/seat-${index + 1}/${name}.json`, fallback: this.seatFallbacks.get(seat) ?? defaultGamepadTuning.gyro, busy: true, message: "Loading settings..." };
       this.profiles.set(seat, profile);
       const input = this.router.seat(seat);
       if (input !== null) input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...defaultGamepadTuning.gyro } };
