@@ -25,6 +25,7 @@ import type { QvmModuleOptions } from '../../../compat/qvm/module.ts';
 import type { ApplicationQ3Assets } from './assets.ts';
 import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
+import { UserFileStore } from '../../../platform/files/writable.ts';
 
 export interface ApplicationQvmClientOptions {
   readonly seat: SeatId;
@@ -57,7 +58,9 @@ export class ApplicationQvmClient {
   private constructor(readonly options: ApplicationQvmClientOptions) {
     this.generation = options.connection.generation;
     this.marks = worldMarkProjector(options.media.assets.world);
-    const fileOptions = { mounts: options.media.provider.mounts, writable: null, assertCurrent: () => this.assertCurrent() };
+    const userContent = options.media.assets.content.catalog.product(options.media.content).userContent;
+    const fileOptions = { mounts: options.media.provider.mounts, writable: userContent === null ? null : new UserFileStore(userContent.root),
+      print: options.session.print, assertCurrent: () => this.assertCurrent() };
     this.files = { cgame: new QvmClientFiles(fileOptions), ui: new QvmClientFiles(fileOptions) };
     const scriptOptions = { mounts: fileOptions.mounts, globals: this.globals, assertCurrent: fileOptions.assertCurrent, print: options.session.print };
     this.scripts = { cgame: new QvmClientScripts(scriptOptions), ui: new QvmClientScripts(scriptOptions) };
@@ -110,7 +113,10 @@ export class ApplicationQvmClient {
       });
       await owner.cgame.init(options.session.serverMessageSequence, options.session.lastExecutedServerCommand, options.session.clientNumber);
       owner.assertCurrent(); return owner;
-    } catch (error) { owner.close(); throw error; }
+    } catch (error) {
+      try { owner.close(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], 'QVM initialization and cleanup failed'); }
+      throw error;
+    }
   }
   async updateScreen(call: QvmHostCall): Promise<void> {
     this.assertCurrent();
@@ -128,5 +134,15 @@ export class ApplicationQvmClient {
   async mouseEvent(x: number, y: number): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.mouseEvent(x, y); else await this.cgame?.mouseEvent(x, y); }
   async eventHandling(mode: Q3CgameEventHandling): Promise<void> { this.assertCurrent(); await this.cgame?.eventHandling(mode); }
   async shutdown(): Promise<void> { if (this.retired) return; try { await this.cgame?.shutdown(); await this.ui?.shutdown(); } finally { this.close(); } }
-  close(): void { if (this.retired) return; this.retired = true; this.ready = false; this.cgame?.retire(); this.ui?.retire(); this.files.cgame.closeAll(); this.files.ui.closeAll(); this.scripts.cgame.closeAll(); this.scripts.ui.closeAll(); this.globals.clear(); }
+  close(): void {
+    if (this.retired) return;
+    this.retired = true; this.ready = false;
+    const failures: unknown[] = [];
+    for (const cleanup of [() => this.cgame?.retire(), () => this.ui?.retire(),
+      () => this.files.cgame.closeAll(), () => this.files.ui.closeAll(),
+      () => this.scripts.cgame.closeAll(), () => this.scripts.ui.closeAll(), () => this.globals.clear()]) {
+      try { cleanup(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'QVM client cleanup failed');
+  }
 }

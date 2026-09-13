@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readdirSync, readlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +8,16 @@ import type { ArchiveMount, ResolvedMountPlan } from "../../../src/contracts/con
 import { digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 import { QvmClientFiles, qvmClientFileSyscall } from "../../../src/compat/qvm/client-file-syscalls.ts";
 import { QvmUiImport } from "../../../src/compat/qvm/abi.ts";
+import { UserFileStore } from "../../../src/platform/files/writable.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
+
+function descriptorsWithin(root: string): number {
+  return readdirSync("/proc/self/fd").filter(name => {
+    try { return readlinkSync(`/proc/self/fd/${name}`).startsWith(`${root}/`); }
+    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; }
+  }).length;
+}
 
 function zip(entries: readonly (readonly [string, string])[]): Uint8Array {
   const locals: Uint8Array[] = [], directory: Uint8Array[] = [];
@@ -127,4 +136,66 @@ test("retiring while file open is pending never publishes a guest handle", async
     await expect(Promise.resolve(pending)).rejects.toThrow("closed");
     expect(f.guest.view(256, 4).getInt32(0, true)).toBe(999);
   } finally { await f.close(); }
+});
+
+test("guest write, append and append-sync use scoped descriptors and mounted readback", async () => {
+  const f = await fixture();
+  const userRoot = join(f.root, "user-content"), user = { kind: "loose", rootPath: userRoot,
+    identity: createMountIdentity("mount:files:user", "q3:classic:baseq3:installed", 1) } satisfies ResolvedMountPlan["mounts"][number];
+  const mounted = await openMountPlan({ ...f.mounts.plan, mounts: [user, ...f.mounts.plan.mounts], defaultOrder: [user.identity.id, ...f.mounts.plan.defaultOrder] });
+  const files = new QvmClientFiles({ mounts: mounted, writable: new UserFileStore(userRoot), assertCurrent: () => undefined });
+  try {
+    f.guest.writeString(128, "profiles/test.cfg", 64);
+    const open = (mode: number) => qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, mode]), files);
+    const write = (slot: number, text: string) => {
+      const bytes = new TextEncoder().encode(text); f.guest.bytes.set(bytes, 512);
+      return qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_WRITE, [512, bytes.length, slot]), files);
+    };
+    expect(open(1)).toBe(0);
+    const first = f.guest.view(256, 4).getInt32(0, true);
+    expect(write(first, "abc")).toBe(0);
+    expect(files.seek(first, 1, 2)).toBe(0); write(first, "Z");
+    expect(files.seek(first, 2, 1)).toBe(0); write(first, "!");
+    files.close(first);
+    expect(open(2)).toBe(0);
+    const append = f.guest.view(256, 4).getInt32(0, true);
+    files.seek(append, 0, 2); write(append, "+");
+    expect(open(3)).toBe(0);
+    const synchronous = f.guest.view(256, 4).getInt32(0, true);
+    expect(synchronous).not.toBe(append);
+    files.seek(synchronous, 0, 2); write(synchronous, "+");
+    const active = await mounted.open("profiles/test.cfg");
+    expect(active?.reference.provenance.mount.identity.id).toBe(user.identity.id);
+    expect([...(active?.bytes ?? [])]).toEqual([97, 90, 99, 0, 0, 33, 43, 43]);
+    files.close(append); files.close(synchronous);
+    expect(await open(0)).toBe(8);
+    const read = f.guest.view(256, 4).getInt32(0, true), actual = new Uint8Array(8);
+    files.read(read, actual); expect([...actual]).toEqual([97, 90, 99, 0, 0, 33, 43, 43]); files.close(read);
+    expect(open(1)).toBe(0);
+    const truncated = f.guest.view(256, 4).getInt32(0, true); files.close(truncated);
+    expect((await mounted.open("profiles/test.cfg"))?.bytes.length).toBe(0);
+    expect(() => files.openWrite("../escape", "write", () => {})).toThrow("contained relative path");
+    await symlink(f.root, join(userRoot, "outside"));
+    expect(() => files.openWrite("outside/retail-overwrite", "write", () => {})).toThrow();
+    expect(open(3)).toBe(0);
+    const retired = f.guest.view(256, 4).getInt32(0, true);
+    expect(descriptorsWithin(userRoot)).toBe(1);
+    files.closeAll();
+    expect(descriptorsWithin(userRoot)).toBe(0);
+    expect(() => files.write(retired, Uint8Array.of(1))).toThrow("closed");
+    expect(() => files.closeAll()).not.toThrow();
+  } finally { files.closeAll(); mounted.close(); await f.close(); }
+});
+
+test("writable publication failure closes its descriptor without retaining a guest handle", async () => {
+  const f = await fixture();
+  const files = new QvmClientFiles({ mounts: f.mounts, writable: new UserFileStore(join(f.root, "user")), assertCurrent: () => undefined });
+  try {
+    expect(() => files.openWrite("test.cfg", "write", () => { throw new Error("Publication cancelled"); })).toThrow("Publication cancelled");
+    expect(descriptorsWithin(join(f.root, "user"))).toBe(0);
+    const handles: number[] = [];
+    expect(files.openWrite("test.cfg", "append-sync", slot => { handles.push(slot); })).toBe(0);
+    expect(handles).toEqual([1]);
+    files.closeAll();
+  } finally { files.closeAll(); await f.close(); }
 });
