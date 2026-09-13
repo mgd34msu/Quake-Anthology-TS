@@ -142,3 +142,83 @@ test('protocol68 UDP admission moves the shared Application actor and publishes 
     expect(app.simulation.players().some(actor => actor.equals(player.actor))).toBe(false);
   } finally { download.close(); transport.close(); await app.close(); rmSync(root, { recursive: true, force: true }); }
 }, 60000);
+
+test('production protocol68 remote adapter joins actual baseq3 and submits native movement', async () => {
+  const { Q3ClientNetwork } = await import('../../../src/app/bootstrap/network/q3-client.ts');
+  const { Q3RemotePresentation } = await import('../../../src/app/bootstrap/network/remote-q3.ts');
+  const { EngineSession } = await import('../../../src/world/session/session.ts');
+  const parsed = parseApplicationCommand(['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--dedicated', '--mode', 'deathmatch', '--listen', '0', '--bind', '127.0.0.1']);
+  if (parsed.kind !== 'run') throw new Error('Missing application options');
+  const app = await Application.open(parsed.options, { print: () => undefined });
+  app.simulation.q3Source()?.host.cvars.set('sv_pure', '0', true);
+  const address = app.networkAddress;
+  if (address === null || address.kind !== 'ipv4') throw new Error('Missing IPv4 listener');
+  const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+  const identity = createIdentityOwner('production-q3-remote'), session = new EngineSession(identity, { kind: 'local' });
+  const messages: string[] = [], maps: string[] = [];
+  let network: InstanceType<typeof Q3ClientNetwork> | null = null;
+  const remote = new Q3RemotePresentation({ identity, session, content: app.content,
+    userinfo: () => '\\name\\Production Ranger\\model\\sarge/default\\handicap\\100\\rate\\25000\\snaps\\20',
+    loadContent: async world => { maps.push(world.map); return app.content; },
+    sendCommand: text => { if (network === null) throw new Error('No connection'); network.command(text); }, print: text => { messages.push(text); } });
+  network = new Q3ClientNetwork({ transport, remote: address, host: remote, qport: 195 });
+  let now = 0;
+  const exchange = async (): Promise<void> => { now += 50; await network?.poll(now); await Bun.sleep(1); await app.step(50); await Bun.sleep(1); await network?.poll(now); remote.samplePresentation(now); };
+  try {
+    for (let count = 0; count < 80 && network.phase !== 'active'; count++) await exchange();
+    expect(network.phase).toBe('active');
+    expect(maps).toEqual(['maps/q3dm1.bsp']);
+    const player = remote.player, serverPlayer = app.networkClients[0];
+    if (player === null || serverPlayer === undefined) throw new Error(`No remote player: ${messages.join('')}`);
+    const before = app.simulation.bodies.read(serverPlayer.actor)?.origin;
+    for (let sequence = 1; sequence <= 12; sequence++) {
+      network.submit([{ actor: player.actor, source: { kind: 'remote-client', client: remote.client.id }, sequence,
+        command: { kind: 'q3', serverTimeMilliseconds: now, angleWords: [0, 0, 0], forwardMove: 127, rightMove: 0, upMove: 0, buttons: 0, weapon: 2 } }], now);
+      await exchange();
+    }
+    expect(app.simulation.bodies.read(serverPlayer.actor)?.origin).not.toEqual(before);
+    const body = app.simulation.bodies.read(serverPlayer.actor); if (body === null) throw new Error("Missing server body");
+    expect(remote.initialPlayer.origin).toEqual(body.origin);
+    expect(remote.cgameSource.commands.currentNumber).toBeGreaterThan(12);
+    expect(remote.cgameSource.current()?.number).toBeGreaterThan(0);
+    await expect(remote.systemInfo('\\sv_pure\\1\\fs_game\\baseq3')).rejects.toThrow('requires pure verification');
+  } finally { network.close(); session.close(); await app.close(); }
+}, 60000);
+
+test('production protocol68 shared remote frontend draws retail q3dm1 and travels without a simulation', async () => {
+  const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+  const { addressKey } = await import('../../../src/network/common/endpoint.ts');
+  const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+  if (selected.kind !== 'run') throw new Error('Missing server options');
+  const prints: string[] = [], host = { print: (text: string): undefined => { prints.push(text); return undefined; } };
+  const server = await Application.open(selected.options, host);
+  server.simulation.q3Source()?.host.cvars.set('sv_pure', '0', true);
+  let app: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
+  try {
+    const address = server.networkAddress; if (address === null) throw new Error('No listener');
+    const parsed = parseApplicationCommand([...common, '--connect-q3', addressKey(address), '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
+    if (parsed.kind !== 'run') throw new Error('Missing client options');
+    app = await RemoteApplication.open(parsed.options, host);
+    const remote = app;
+    const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await server.step(50); await Bun.sleep(1); await remote.step(50); };
+    for (let i = 0; i < 100 && remote.localPlayers.length === 0; i++) await exchange();
+    expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull();
+    const player = remote.localPlayers[0], peer = server.networkClients[0];
+    if (player === undefined || peer === undefined) throw new Error(`No player: ${prints.join('')}`);
+    expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
+    const before = server.simulation.bodies.read(peer.actor)?.origin;
+    const aim = server.simulation.playerView(peer.actor).angles;
+    remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
+    for (let i = 0; i < 10; i++) await exchange();
+    remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
+    expect(server.simulation.bodies.read(peer.actor)?.origin).not.toEqual(before);
+    expect(server.simulation.playerView(peer.actor).angles.y).toBeCloseTo(aim.y, 1);
+    await server.changeLevel('q3dm2');
+    for (let i = 0; i < 60 && remote.content.recipe.map.geometry.requestedPath !== 'maps/q3dm2.bsp'; i++) await exchange();
+    if (remote.content.recipe.map.geometry.requestedPath !== 'maps/q3dm2.bsp') throw new Error(`Travel failed ${remote.networkPhase}: ${prints.join('')}`);
+    expect(remote.content.recipe.map.geometry.requestedPath).toBe('maps/q3dm2.bsp');
+    expect(server.networkClients[0]?.client.equals(peer.client)).toBe(true);
+    expect(remote.session.world).toBeNull();
+  } finally { await app?.close(); await server.close(); }
+}, 60000);

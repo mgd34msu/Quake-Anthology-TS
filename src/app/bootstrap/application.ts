@@ -125,7 +125,7 @@ export class Application {
     private readonly localSeats: Map<ClientId, SessionSeat>) {}
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
-    if ((options.network.kind === "q1-client" || options.network.kind === "q2-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
+    if ((options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const content = await loadApplicationContent(options, recipe);
     try {
       if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);
@@ -573,7 +573,7 @@ export class Application {
     const q3Session = q3?.captureSession();
     const serverProfile = this.simulation.serverProfile();
     const q2Cvars = this.simulation.q2ServerCvars()?.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
-    const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname")
+    const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname" && variable.name !== "mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     let simulation: SharedSimulation | null = null, assets: ApplicationAssets | null = null, art: NativeUiArt | null = null;
     let nextBots: ApplicationBots | null = null;

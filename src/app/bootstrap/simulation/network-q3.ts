@@ -17,6 +17,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   if (source === null) throw new Error('Q3 network requires the Q3 source game provider');
   const cvars = source.host.cvars;
   for (const [name, value, flags] of [
+    ['protocol', String(Q3_PROTOCOL.version), CvarFlag.ServerInfo | CvarFlag.ReadOnly],
     ['sv_pure', '1', CvarFlag.SystemInfo], ['sv_allowDownload', '0', CvarFlag.ServerInfo],
     ['sv_maxRate', '0', CvarFlag.ServerInfo], ['sv_fps', '20', CvarFlag.None], ['sv_serverid', '0', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
     ['sv_paks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_pakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],

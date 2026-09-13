@@ -7,7 +7,7 @@ import type { Q3WorldGeometry } from "../../contracts/scene.ts";
 import { discoverInstalledContent, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { InstalledCatalog, LaunchPreset } from "../../content/catalog/index.ts";
 import { openMountPlan } from "../../content/mounts/index.ts";
-import type { MountedContent } from "../../content/mounts/index.ts";
+import type { MountedContent, PureMountPolicy } from "../../content/mounts/index.ts";
 import { readQ1Bsp } from "../../formats/q1-map/index.ts";
 import type { Q1Map } from "../../formats/q1-map/index.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
@@ -64,7 +64,8 @@ export class LoadedApplicationContent {
   private readonly opened = new Set<MountedContent>();
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
-    readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null) {}
+    readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null,
+    private readonly pure?: PureMountPolicy) {}
 
   openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
 
@@ -77,8 +78,12 @@ export class LoadedApplicationContent {
       const rules = content === this.recipe.map.entities.content && this.recipe.match.content !== content
         ? await this.catalog.mountsFor(this.recipe.match.content) : [];
       const mounts = [...new Map([...primary, ...rules].map(mount => [mount.identity.id, mount])).values()];
+      const digests = new Set(mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
+      const pure = this.pure === undefined ? undefined : { archives: this.pure.archives.filter(digest => digests.has(digest)) };
+      if (this.pure !== undefined && this.pure.archives.length > 0 && pure?.archives.length === 0)
+        throw new Error(`No server-approved archives provide ${content}`);
       const opened = await openMountPlan({ id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
-        mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+        mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, pure === undefined ? {} : { pure });
       if (this.closed) { opened.close(); throw new Error("Application content closed during mount"); }
       this.opened.add(opened);
       return opened;
@@ -131,13 +136,13 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
     mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
 }
 
-export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe): Promise<LoadedApplicationContent> {
+export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy): Promise<LoadedApplicationContent> {
   const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, discoverMods: false });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
-    return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
+    return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), ...(pure === undefined ? {} : { mounts: { pure } }) });
   };
-  const recipe = restoredRecipe ?? await resolveRecipe();
+  let recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
     if (module.kind === "quakec") {
       if (!options.dedicated || options.network.kind !== "offline" || catalog.product(recipe.map.entities.content).expectation.id !== "q1-classic-id1"
@@ -148,8 +153,14 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
   }
-  const mounts = await openMountPlan(recipe.mounts);
+  const mounts = await openMountPlan(recipe.mounts, pure === undefined ? {} : { pure });
   try {
+    if (pure !== undefined) {
+      const geometry = await resolveLaunchResource(catalog, mounts, { content: recipe.map.geometryContent, path: recipe.map.geometry.requestedPath }, "map");
+      const oldGeometry = recipe.map.geometry;
+      recipe = { ...recipe, mounts: mounts.plan, map: { ...recipe.map, geometry },
+        resources: recipe.resources.map(resource => resource.id === oldGeometry.id ? geometry : resource) };
+    }
     const bytes = await mounts.read(recipe.map.geometry);
     const family = catalog.product(recipe.map.geometry.provenance.mount.identity.content).expectation.family;
     const map = recipe.map.geometry.requestedPath;
@@ -170,7 +181,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     } else world = decodeQ3World(bytes, map);
     const execution = recipe.execution.find(module => module.kind === "quakec");
     const prepared = execution?.kind === "quakec" ? await prepareQuakeCSource(execution, mounts) : null;
-    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared);
+    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure);
   } catch (error) {
     mounts.close();
     throw error;
