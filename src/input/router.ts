@@ -21,7 +21,7 @@ export interface InputRouterOptions {
 
 /** Borrows platform event ownership. The caller can feed a shared event loop or use pump(). */
 export class InputRouter {
-  private readonly routes: readonly InputSeatRoute[];
+  private readonly routes: InputSeatRoute[];
   private keyboard: SeatInput | null = null;
   private readonly keyboardKeys = new Map<number, number>();
   private readonly deviceSeats = new Map<number, SeatInput>();
@@ -34,6 +34,13 @@ export class InputRouter {
     this.routes = [...options.seats];
     this.setKeyboardSeat(options.keyboardSeat);
     options.controllers?.setAssignments(this.routes.map(route => route.controller));
+  }
+  keyboardSeat(): SeatId | null { return this.keyboard?.seat ?? null; }
+  controllerSelection(id: SeatId): ControllerSelection { const route = this.routes.find(value => value.input.seat.equals(id)); if (route === undefined) throw new Error("Unknown input seat"); return route.controller; }
+  setControllerSelection(id: SeatId, selection: ControllerSelection): void {
+    const index = this.routes.findIndex(value => value.input.seat.equals(id)), route = this.routes[index];
+    if (route === undefined) throw new Error("Unknown input seat");
+    this.routes[index] = { input: route.input, controller: selection }; this.restart();
   }
   seat(id: SeatId): SeatInput | null { return this.routes.find(route => route.input.seat.equals(id))?.input ?? null; }
   controllerFor(id: SeatId): number | null {

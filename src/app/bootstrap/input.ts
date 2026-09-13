@@ -1,3 +1,5 @@
+import { ConfigStore } from "../../settings/config.ts";
+import type { SeatSettings } from "../../settings/config.ts";
 import { ControllerSettings } from "./controller-settings.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ContentId, ResourceRequest } from "../../contracts/content.ts";
@@ -88,9 +90,20 @@ export class ApplicationInput {
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
 
-  constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions,
+  static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions,
+    simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
+    now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner): Promise<ApplicationInput> {
+    const saved = await Promise.all(players.map((_, index) => settings.loadSeat(`input/seat-${index + 1}.json`)));
+    const routing = await settings.loadInputRouting("input/routing.json");
+    const input = new ApplicationInput(window, players, options, simulation, actions, now, settings, saved, routing, owner);
+    try { await input.controllerSettings.settle(); return input; }
+    catch (error) { input.close(); throw error; }
+  }
+
+  private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions,
     private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
-    readonly now: () => number, owner?: ApplicationInputCommandOwner) {
+    readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
+    routing: { readonly keyboardSeat: number | null } | null, owner?: ApplicationInputCommandOwner) {
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
     const dialect = movementDialect(options);
@@ -136,6 +149,13 @@ export class ApplicationInput {
         controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
         controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now }) });
     }
+    for (const [index, local] of locals.entries()) {
+      const profile = saved[index]; if (profile === undefined || profile === null) continue;
+      local.input.unbindAll(); for (const binding of profile.bindings) local.input.bind(binding);
+      local.input.gamepad.tuning = structuredClone(profile.gamepad);
+      local.builder.mouse.tuning = { ...profile.mouse };
+      local.console.history.replace(profile.history); local.haptics.setEnabled(profile.rumble); local.haptics.setStrength(profile.rumbleStrength ?? 1);
+    }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
     this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print)];
@@ -159,17 +179,13 @@ export class ApplicationInput {
     });
     this.controllers = SdlControllers.open();
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
-      controller: locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" } })),
-      keyboardSeat: first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
+      controller: saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),
+      keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
       unhandled: event => {
         if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
-        if (event.kind === "assignment" && event.instance !== null) {
-          const input = locals[event.slot]?.input;
-          if (input !== undefined) for (const binding of defaultBindings(event.instance, dialect)) input.bind(binding);
-        }
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
       } });
-    this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, undefined, actions.print);
+    this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, settings, actions.print);
     try { this.router.attachWindow(window); this.router.restart(); this.controllerSettings.update(); }
     catch (error) { this.controllers.close(); throw error; }
   }
@@ -294,6 +310,20 @@ export class ApplicationInput {
     this.simulation = simulation;
     this.q3Selections.clear();
     this.arsenalSelections.clear();
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.controllerSettings.settle();
+    for (const [index, local] of this.locals.entries()) {
+      const bindings = local.input.bindings.map(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis"
+        ? { ...binding, input: { ...binding.input, device: 0 } } : binding);
+      await this.settings.saveSeat(`input/seat-${index + 1}.json`, { version: 1, bindings,
+        gamepad: structuredClone(local.input.gamepad.tuning), mouse: { ...local.builder.mouse.tuning }, history: local.console.history.lines,
+        rumble: local.haptics.enabled, rumbleStrength: local.haptics.strength, controller: this.router.controllerSelection(local.player.seat.id) });
+      await this.controllerSettings.save(local.player.seat.id);
+    }
+    const keyboard = this.router.keyboardSeat(), index = keyboard === null ? -1 : this.locals.findIndex(local => local.player.seat.id.equals(keyboard));
+    await this.settings.saveInputRouting("input/routing.json", index < 0 ? null : index);
   }
 
   close(): undefined {

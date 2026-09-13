@@ -10,11 +10,13 @@ import type { ControllerDevice } from "../../platform/controller.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import type { GyroProfileIdentity } from "../../settings/config.ts";
 
-type Profile = { readonly instance: number; readonly identity: GyroProfileIdentity; readonly path: string; busy: boolean; message: string };
+type Profile = { readonly instance: number; readonly identity: GyroProfileIdentity; readonly path: string; readonly fallback: GamepadTuning["gyro"]; busy: boolean; message: string };
 /** Owns disk I/O only; active gyro tuning and calibration remain in the input router. */
 export class ControllerSettings {
   private readonly profiles = new Map<SeatId, Profile>();
   private closed = false;
+  private readonly pending = new Set<Promise<void>>();
+  async settle(): Promise<void> { await Promise.all(this.pending); }
   constructor(readonly router: InputRouter, private readonly seats: readonly SeatId[], private readonly devices: () => readonly ControllerDevice[],
     private readonly store = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings")),
     private readonly report: (message: string) => void = () => undefined) {}
@@ -29,12 +31,13 @@ export class ControllerSettings {
       const identity: GyroProfileIdentity = device.guid !== null && device.serial !== null && device.serial.length > 0
         ? { kind: "device", guid: device.guid, serial: device.serial } : { kind: "seat" };
       const name = identity.kind === "seat" ? "seat" : `${identity.guid}-${createHash("sha256").update(identity.serial).digest("hex")}`;
-      const profile: Profile = { instance, identity, path: `controllers/seat-${index + 1}/${name}.json`, busy: true, message: "Loading settings..." };
+      const profile: Profile = { instance, identity, path: `controllers/seat-${index + 1}/${name}.json`, fallback: { ...(this.router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) }, busy: true, message: "Loading settings..." };
       this.profiles.set(seat, profile);
       const input = this.router.seat(seat);
       if (input !== null) input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...defaultGamepadTuning.gyro } };
       this.router.setGyroEnabled(seat, false);
-      void this.load(seat, profile);
+      const pending = this.load(seat, profile); this.pending.add(pending);
+      void pending.finally(() => this.pending.delete(pending));
     }
   }
   private current(seat: SeatId, profile: Profile): boolean {
@@ -45,10 +48,11 @@ export class ControllerSettings {
       const saved = await this.store.loadGyro(profile.path);
       if (!this.current(seat, profile)) return;
       const input = this.router.seat(seat);
-      if (saved !== null && input !== null) {
-        if (saved.identity.kind !== profile.identity.kind || saved.identity.kind === "device" && (profile.identity.kind !== "device" || saved.identity.guid !== profile.identity.guid || saved.identity.serial !== profile.identity.serial)) throw new Error("Gyro settings belong to another controller");
-        input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...saved.tuning, enabled: false } };
-        const result = this.router.setGyroEnabled(seat, saved.tuning.enabled);
+      if (input !== null) {
+        if (saved !== null && (saved.identity.kind !== profile.identity.kind || saved.identity.kind === "device" && (profile.identity.kind !== "device" || saved.identity.guid !== profile.identity.guid || saved.identity.serial !== profile.identity.serial))) throw new Error("Gyro settings belong to another controller");
+        const tuning = saved?.tuning ?? profile.fallback;
+        input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...tuning, enabled: false } };
+        const result = this.router.setGyroEnabled(seat, tuning.enabled);
         if (result.kind !== "accepted") throw new Error(result.reason);
       }
       profile.message = profile.identity.kind === "seat" ? "Saved for this seat." : "Saved for this controller and seat.";

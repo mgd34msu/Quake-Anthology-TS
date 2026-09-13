@@ -25,7 +25,7 @@ test("seat controls and archived cvars survive actual config files", async () =>
     cvars.register("sensitivity", "3", CvarFlag.Archive); cvars.set("sensitivity", "4.5");
     const settings: SeatSettings = { version: 1, bindings: defaultBindings(17), gamepad: defaultGamepadTuning,
       mouse: defaultMouseTuning, history: ["map q3dm1"], rumble: true, controller: { kind: "automatic" } };
-    await store.saveSeat("seat-2.json", settings); expect(await store.loadSeat("seat-2.json")).toEqual(settings);
+    await store.saveSeat("seat-2.json", settings); expect(await store.loadSeat("seat-2.json")).toEqual({ ...settings, rumbleStrength: 1 });
     await store.saveCvars("config.cfg", cvars); cvars.set("sensitivity", "1");
     await store.execute("config.cfg", commands, context); commands.execute();
     expect(cvars.variableString("sensitivity")).toBe("4.5");

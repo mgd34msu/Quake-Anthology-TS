@@ -80,6 +80,7 @@ interface RemoteCommand { readonly name: string; readonly args: readonly string[
 export class RemoteApplication {
   readonly clientCommands: ApplicationInputCommandOwner | null;
   private readonly clientConfig: ConfigStore | null;
+  private readonly inputConfig: ConfigStore;
   private readonly downloadPermission: ClientDownloadPermission | null;
   readonly remote: QwRemotePresentation | Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
   private readonly network: QwClientNetwork | Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
@@ -112,6 +113,8 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
+    const inputProduct = loadedContent.catalog.require(launchOptions.network.kind === "qw-client" ? "q1-quakeworld" : launchOptions.product);
+    this.inputConfig = new ConfigStore(inputProduct.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), inputProduct.expectation.contentDirectory));
     if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client" || launchOptions.network.kind === "qw-client") {
       const family = launchOptions.network.kind === "q3-client" ? "q3" : launchOptions.network.kind === "qw-client" ? "qw" : "q2";
       const dialect = family === "q3" ? "q3" : family === "qw" ? "q1-quakeworld" : "q2-classic";
@@ -150,8 +153,7 @@ export class RemoteApplication {
         });
       }
       this.clientCommands = { cvars, commands };
-      const product = loadedContent.catalog.require(family === "qw" ? "q1-quakeworld" : launchOptions.product);
-      this.clientConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+      this.clientConfig = this.inputConfig;
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "qw-client") {
       const remote = new QwRemotePresentation({ identity, session, content: loadedContent,
@@ -447,7 +449,7 @@ export class RemoteApplication {
 
   private async bindSeat(connection?: Q3ClientConnection): Promise<void> {
     const generation = this.worldLoadGeneration;
-    const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
+    const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
     const player = connection !== undefined && this.remote instanceof Q3RemotePresentation ? this.remote.admittedPlayer : this.remote.player, frontend = this.frontend;
     if (connection === undefined && this.q3InitialViewPending && player !== null && this.remote.output !== null && this.controls !== null) {
       const local = this.controls.locals[0];
@@ -458,14 +460,16 @@ export class RemoteApplication {
     if (player === null || (connection === undefined && this.remote.output === null) || frontend === null || this.presentation !== null) return;
     if (this.controls === null) {
       const seat = this.session.createSeat(0, this.remote.client);
-      this.controls = new ApplicationInput(this.window, [{ seat, actor: player.actor }], this.options, this.remote,
+      const controls = await ApplicationInput.open(this.window, [{ seat, actor: player.actor }], this.options, this.remote,
         { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
           clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
           clientInput: event => {
             const client = this.presentation?.q3Client;
             if (client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
             this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
-          } }, () => performance.now(), this.clientCommands ?? undefined);
+          } }, () => performance.now(), this.inputConfig, this.clientCommands ?? undefined);
+      try { assertCurrent(); } catch (error) { controls.close(); throw error; }
+      this.controls = controls;
       this.capture = new ApplicationCapture(this.controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
     } else {
       const local = this.controls.locals[0];
@@ -646,6 +650,7 @@ export class RemoteApplication {
     }
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
+    try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }
     for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

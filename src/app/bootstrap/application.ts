@@ -1,5 +1,6 @@
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
@@ -114,6 +115,7 @@ export class Application {
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
   private readonly serverProfileStore = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings"));
+  private readonly inputConfig: ConfigStore;
   private readonly reportedEffectGaps = new Set<string>();
   private network: NativeServer | null = null;
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
@@ -126,7 +128,10 @@ export class Application {
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
-    private readonly localSeats: Map<ClientId, SessionSeat>) {}
+    private readonly localSeats: Map<ClientId, SessionSeat>) {
+    const product = loadedContent.catalog.require(launchOptions.product);
+    this.inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  }
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
     if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
@@ -498,8 +503,8 @@ export class Application {
         const player = this.simulation.admitPlayer(client.id);
         players.push({ seat, actor: player.actor });
       }
-      input = new ApplicationInput(renderer.window, players, this.options, this.simulation,
-        this.inputActions(), () => performance.now());
+      input = await ApplicationInput.open(renderer.window, players, this.options, this.simulation,
+        this.inputActions(), () => performance.now(), this.inputConfig);
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text));
       audio.bindHaptics(input);
       await audio.prepareEnvironment(this.simulation.scene);
@@ -659,9 +664,10 @@ export class Application {
         let input = previous.input;
         if (movementDialect(previous.input.options) !== movementDialect(options) || previous.input.commands.dialect !== this.sourceDialect()) {
           await this.capture?.close(); this.capture = null;
+          await previous.input.saveSettings();
           previous.input.close();
-          input = new ApplicationInput(previous.renderer.window, players, options, simulation,
-            this.inputActions(), () => performance.now());
+          input = await ApplicationInput.open(previous.renderer.window, players, options, simulation,
+            this.inputActions(), () => performance.now(), this.inputConfig);
           nextInput = input;
           this.capture = new ApplicationCapture(input, previous.renderer, applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));
         } else input.rebindPlayers(players, simulation);
@@ -1015,6 +1021,7 @@ export class Application {
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
+    try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

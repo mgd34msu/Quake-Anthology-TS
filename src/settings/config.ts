@@ -16,11 +16,13 @@ export interface SeatSettings {
   readonly mouse: MouseTuning;
   readonly history: readonly string[];
   readonly rumble: boolean;
+  readonly rumbleStrength?: number;
   readonly controller: ControllerSelection;
 }
 function object(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function record(value: unknown): Record<string, unknown> { if (!object(value)) throw new Error("Expected a settings object"); return value; }
 function number(value: unknown): number { if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Expected a finite settings number"); return value; }
+function rumbleStrength(value: unknown): number { const result = value === undefined ? 1 : number(value); if (result < 0 || result > 1) throw new Error("Vibration strength must be between zero and one"); return result; }
 function natural(value: unknown): number { const result = number(value); if (!Number.isSafeInteger(result) || result < 0) throw new Error("Expected a nonnegative settings integer"); return result; }
 function boolean(value: unknown): boolean { if (typeof value !== "boolean") throw new Error("Expected a settings boolean"); return value; }
 function string(value: unknown): string { if (typeof value !== "string") throw new Error("Expected settings text"); return value; }
@@ -92,7 +94,7 @@ export function parseSeatSettings(value: unknown): SeatSettings {
   const input = record(value), bindings = input["bindings"];
   if (input["version"] !== 1 || !Array.isArray(bindings)) throw new Error("Unsupported seat settings document");
   return { version: 1, bindings: bindings.map((item: unknown) => { const binding = record(item); return { input: physical(binding["input"]), target: target(binding["target"]) }; }),
-    gamepad: gamepad(input["gamepad"]), mouse: mouse(input["mouse"]), history: strings(input["history"]), rumble: boolean(input["rumble"]), controller: controller(input["controller"]) };
+    gamepad: gamepad(input["gamepad"]), mouse: mouse(input["mouse"]), history: strings(input["history"]), rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]), controller: controller(input["controller"]) };
 }
 export function settingsPath(root: string, name: string): string {
   const path = resolve(root, name), child = relative(resolve(root), path);
@@ -119,6 +121,16 @@ export class ConfigStore {
   async saveGyro(name: string, profile: GyroProfile): Promise<void> {
     const validated = parseGyroProfile(profile);
     await this.dump(name, `${JSON.stringify(validated)}\n`);
+  }
+  async saveInputRouting(name: string, keyboardSeat: number | null): Promise<void> {
+    if (keyboardSeat !== null) natural(keyboardSeat);
+    await this.dump(name, JSON.stringify({ version: 1, keyboardSeat }) + "\n");
+  }
+  async loadInputRouting(name: string): Promise<{ readonly keyboardSeat: number | null } | null> {
+    const text = await this.loadText(name); if (text === null) return null;
+    const value: unknown = JSON.parse(text), data = record(value);
+    if (data["version"] !== 1) throw new Error("Unsupported input routing document");
+    return { keyboardSeat: data["keyboardSeat"] === null ? null : natural(data["keyboardSeat"]) };
   }
   async saveSeat(name: string, settings: SeatSettings): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), `${JSON.stringify(settings, null, 2)}\n`);
