@@ -4,17 +4,46 @@ export { EditField, type FieldControls, type FieldClipboard } from "./source-fie
 /** Native menus and rerelease console edit Unicode by code point; source byte fields remain separate. */
 export class ConsoleField {
   private characters: string[] = [];
+  private completion: { text: string; cursor: number; marker: string; tail: string; matches: readonly string[]; index: number; selected: string } | null = null;
   cursor = 0;
   scroll = 0;
   overstrike = false;
   constructor(readonly maximumLength = 1023, public widthInChars = 78) {}
   get text(): string { return this.characters.join(""); }
+  get selectedCompletion(): string | null {
+    return this.completion?.text === this.text && this.completion.cursor === this.cursor ? this.completion.selected : null;
+  }
+  complete(names: readonly string[], reverse = false): void {
+    let cycle = this.completion;
+    if (cycle === null || cycle.text !== this.text || cycle.cursor !== this.cursor) {
+      this.completion = null;
+      const match = /^([\\/]?)([^\s]*)(.*)$/s.exec(this.text);
+      const marker = match?.[1] ?? "", token = match?.[2] ?? "", tail = match?.[3] ?? "";
+      const tokenStart = [...marker].length, tokenEnd = tokenStart + [...token].length;
+      if (this.cursor < tokenStart || this.cursor > tokenEnd) return;
+      const prefix = [...token].slice(0, this.cursor - tokenStart).join("");
+      const matches = completionMatches(prefix, names);
+      if (matches.length === 0) return;
+      cycle = { text: this.text, cursor: this.cursor, marker: "/", tail, matches, index: reverse ? 0 : -1, selected: "" };
+    }
+    const index = (cycle.index + (reverse ? -1 : 1) + cycle.matches.length) % cycle.matches.length;
+    const selected = cycle.matches[index];
+    if (selected === undefined) return;
+    const text = `${cycle.marker}${selected}${cycle.tail}`;
+    if ([...text].length > this.maximumLength) return;
+    this.setText(text);
+    this.cursor = [...cycle.marker, ...selected].length;
+    this.keepVisible();
+    this.completion = { ...cycle, text, cursor: this.cursor, index, selected };
+  }
   setText(text: string): void {
+    this.completion = null;
     this.characters = [...text.replace(/[\x00-\x1f\x7f]/g, "")].slice(0, this.maximumLength);
     this.cursor = this.characters.length; this.keepVisible();
   }
-  clear(): void { this.characters = []; this.cursor = 0; this.scroll = 0; }
+  clear(): void { this.completion = null; this.characters = []; this.cursor = 0; this.scroll = 0; }
   insert(text: string): void {
+    this.completion = null;
     for (const character of text) {
       if (character < " " || character === "\x7f") continue;
       if (this.overstrike && this.cursor < this.characters.length) this.characters[this.cursor++] = character;
@@ -23,6 +52,7 @@ export class ConsoleField {
     this.keepVisible();
   }
   key(code: number, control: boolean, shift: boolean, clipboard: () => string | null): boolean {
+    if (code !== KeyCode.Shift && code !== KeyCode.Control) this.completion = null;
     if ((code === 118 && control) || ((code === KeyCode.Insert || code === KeyCode.KeypadInsert) && shift)) {
       const text = clipboard(); if (text !== null) this.insert(text.split(/[\r\n\0]/, 1)[0] ?? ""); return true;
     }
@@ -66,6 +96,15 @@ export class ConsoleField {
 }
 
 export interface CompletionResult { readonly text: string; readonly matches: readonly string[]; }
+const foldCompletion = (value: string): string => value.replace(/[A-Z]/g, character => character.toLowerCase());
+function completionMatches(prefix: string, names: readonly string[]): readonly string[] {
+  const unique = new Map<string, string>();
+  for (const name of names) {
+    const folded = foldCompletion(name);
+    if (folded.startsWith(foldCompletion(prefix)) && !unique.has(folded)) unique.set(folded, name);
+  }
+  return [...unique.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, name]) => name);
+}
 export function completeCommand(text: string, names: readonly string[]): CompletionResult {
   const match = /^([\\/]?)([^\s]*)(.*)$/s.exec(text);
   const marker = match?.[1] ?? "", prefix = match?.[2] ?? "", tail = match?.[3] ?? "";

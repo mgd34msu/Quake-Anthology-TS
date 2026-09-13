@@ -9,6 +9,7 @@ import { cvarValueText } from "../cvars/numbers.ts";
 import { nativeAtof, nativeAtoi } from "../numeric.ts";
 import { asciiFold, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand } from "./text.ts";
 import { sourceFilter } from "./filter.ts";
+import type { CommandDocumentation } from "./documentation.ts";
 export { asciiFold, sourceCommandText, tokenizeCommand, expandCommandMacros } from "./text.ts";
 export { sourceFilter } from "./filter.ts";
 
@@ -50,7 +51,7 @@ export interface CommandBufferOptions {
   readonly builtins?: boolean;
 }
 
-interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; next: RegisteredEntry | undefined; }
+interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
 interface AliasEntry { readonly name: string; value: string; }
 interface TextChunk { readonly text: string; readonly source: CommandContext; }
 interface ExecutionFrame { readonly source: CommandContext; readonly parent: ExecutionFrame | undefined; active: boolean; }
@@ -134,7 +135,7 @@ export class CommandBuffer {
       registry.archiveCommands(name => this.cvarOwner(name, context) === registry)));
   }
 
-  register(nameInput: string, handler: CommandHandler | null): boolean {
+  register(nameInput: string, handler: CommandHandler | null, documentation?: CommandDocumentation): boolean {
     const name = sourceCommandText(nameInput);
     if (this.exists(name)) {
       if (handler !== null || this.dialect !== "q3") this.print(`Cmd_AddCommand: ${name} already defined\n`);
@@ -143,7 +144,7 @@ export class CommandBuffer {
     if (this.dialect !== "q3" && this.cvarOwner(name, this.frame?.source ?? this.context)?.variableString(name)) {
       this.print(`Cmd_AddCommand: ${name} already defined as a var\n`); return false;
     }
-    this.handlers = { name, handler, next: this.handlers };
+    this.handlers = { name, handler, documentation, next: this.handlers };
     return true;
   }
   registerFallbackName(name: string): boolean { return this.register(name, null); }
@@ -169,6 +170,14 @@ export class CommandBuffer {
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) names.push(entry.name);
     return Object.freeze(names);
   }
+  commandDocumentation(name: string): CommandDocumentation | undefined {
+    for (let entry = this.handlers; entry !== undefined; entry = entry.next) if (asciiFold(entry.name) === asciiFold(name)) return entry.documentation;
+    return undefined;
+  }
+  cvarDocumentation(name: string, source?: CommandContext): CommandDocumentation | undefined {
+    return this.cvarOwner(name, this.inputContext(source))?.documentation(name);
+  }
+  aliasValue(name: string): string | undefined { return this.aliases.find(alias => asciiFold(alias.name) === asciiFold(name))?.value; }
   completeNames(visitor: (name: string) => undefined): void {
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) visitor(entry.name);
   }
@@ -333,7 +342,8 @@ export class CommandBuffer {
 
   private registerBuiltins(): void {
     const handlers = new Map<string, CommandHandler>();
-    const register = (name: string, handler: CommandHandler): void => { handlers.set(name, handler); };
+    const documents = new Map<string, CommandDocumentation>();
+    const register = (name: string, handler: CommandHandler, documentation?: CommandDocumentation): void => { handlers.set(name, handler); if (documentation !== undefined) documents.set(name, documentation); };
     const install = (): void => {
       const order = this.dialect === "q1-netquake" ? ["stuffcmds", "exec", "echo", "alias", "cmd", "wait"]
         : this.dialect === "q1-quakeworld" ? ["stuffcmds", "exec", "echo", "alias", "wait", "cmd"]
@@ -341,11 +351,11 @@ export class CommandBuffer {
         : ["toggle", "set", "sets", "setu", "seta", "reset", "cvarlist", "cvar_restart", "cmdlist", "exec", "vstr", "echo", "wait", "cmd"];
       for (const name of [...order, ...["inc", "dec", "resetall", "seta", "setu", "sets", "reset", "toggle"].filter(name => !order.includes(name))]) {
         const handler = handlers.get(name);
-        if (handler !== undefined) this.register(name, handler);
+        if (handler !== undefined) this.register(name, handler, documents.get(name));
       }
     };
     register("wait", command => { this.waitFrames = this.dialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1; });
-    register("echo", command => { this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`); });
+    register("echo", command => { this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`); }, { summary: "Print text to the console.", usage: "echo <text>", examples: ["echo hello"] });
     register("cmd", command => { this.options.forwardToServer?.(command); });
     register("exec", command => {
       if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
@@ -382,13 +392,13 @@ export class CommandBuffer {
       if (script.length > 0) command.insert(script);
     });
     if (!isQ1(this.dialect)) {
-      register("set", command => { this.setCommand(command, 0); });
+      register("set", command => { this.setCommand(command, 0); }, { summary: "Set a console variable.", usage: "set <variable> <value>", examples: ['set name "Player"'] });
       register("cmdlist", command => {
         const pattern = this.dialect === "q3" ? command.argv[1] : undefined;
         const names = this.registeredNames().filter(name => pattern === undefined || sourceFilter(pattern, name, false));
         for (const name of names) this.print(`${name}\n`);
         this.print(`${names.length} commands\n`);
-      });
+      }, { summary: "List registered console commands.", usage: this.dialect === "q3" ? "cmdlist [pattern]" : "cmdlist", examples: ["cmdlist"] });
       register("cvarlist", command => {
         const variables = this.cvarSnapshots(command.source), pattern = this.dialect === "q3" ? command.argv[1] : undefined;
         for (const variable of variables) {
@@ -401,7 +411,7 @@ export class CommandBuffer {
         }
         const indexes = this.visibleCvars(command.source).reduce((total, registry) => total + registry.indexCount, 0);
         this.print(this.dialect === "q3" ? `\n${variables.length} total cvars\n${indexes} cvar indexes\n` : `${variables.length} cvars\n`);
-      });
+      }, { summary: "List visible console variables and their current values.", usage: this.dialect === "q3" ? "cvarlist [pattern]" : "cvarlist", examples: ["cvarlist"] });
     }
     for (const name of ["inc", "dec"]) register(name, command => {
       const variableName = command.argv[1];

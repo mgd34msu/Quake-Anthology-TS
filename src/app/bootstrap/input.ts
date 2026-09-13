@@ -25,6 +25,8 @@ import type { SessionSeat } from "../../world/session/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
+import { registerDiscoveryCommands } from "../../console/discovery.ts";
+import { registerLlmCommands } from "../../console/llm.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
@@ -145,8 +147,9 @@ export class ApplicationInput {
       const input = new SeatInput({ seat: player.seat.id, dialect, context: seatContext, commands: this.commands,
         uiEvent: (event, focus) => {
           const ui = this.seatUi.get(player.seat.id);
-          if (event.kind === "key" && event.down && !event.repeat && event.code === 96) {
-            ui?.closeMenus(); console?.toggle(); return true;
+          if (event.kind === "key" && (event.code === 96 || event.code === 126)) {
+            if (event.down) { if (!event.repeat) ui?.closeMenus(); console?.toggleFromKey(event.repeat); }
+            return true;
           }
           return (console?.input(event, focus) ?? false) || (actions.clientInput?.(event) ?? false) || (ui?.input(event, focus) ?? false);
         } });
@@ -171,7 +174,7 @@ export class ApplicationInput {
     }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
-    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print)];
+    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print)];
     this.commands.register("quit", () => actions.quit());
     for (const name of ["+weaponwheel", "-weaponwheel", "+powerupwheel", "-powerupwheel"]) this.commands.register(name, invocation => {
       let origin = invocation.source.origin;

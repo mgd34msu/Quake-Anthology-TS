@@ -48,6 +48,48 @@ export class ApplicationImageSettings {
     this.cvars.register("gl_md5_use", "1", CvarFlag.Archive);
     this.cvars.register("gl_md5_distance", "2048", CvarFlag.Archive);
     this.cvars.register("r_model_distance", "source", CvarFlag.Archive);
+    this.cvars.document("r_gamma", {
+      summary: "Display brightness for CPU and GL output: 1 is unchanged, above 1 brightens, below 1 darkens.",
+      usage: "r_gamma <0.5..3>", examples: ["r_gamma 1.3"], allowedValues: ["Finite numbers from 0.5 through 3"] });
+    this.cvars.document("r_customwidth", {
+      summary: "Window width in logical pixels, applied while windowed; 0 uses the current width. Restored oversized windows recover to desktop bounds.",
+      usage: "r_customwidth <width>", examples: ["r_customwidth 1280"], allowedValues: ["0: current width", "Integers from 64 through 16384"] });
+    this.cvars.document("r_customheight", {
+      summary: "Window height in logical pixels, applied while windowed; 0 uses the current height. Restored oversized windows recover to desktop bounds.",
+      usage: "r_customheight <height>", examples: ["r_customheight 720"], allowedValues: ["0: current height", "Integers from 64 through 16384"] });
+    this.cvars.document("r_fullscreen", {
+      summary: "Switch between a window and borderless desktop fullscreen; does not select an exclusive display mode.",
+      usage: "r_fullscreen <0|1>", examples: ["r_fullscreen 1"], allowedValues: ["0: windowed", "1: borderless desktop fullscreen"] });
+    this.cvars.document("r_swapInterval", {
+      summary: "GL vertical synchronization (vsync), when supported by the display backend. Has no effect on the CPU renderer.",
+      usage: "r_swapInterval <0|1>", examples: ["r_swapInterval 1"], allowedValues: ["0: off", "1: on"] });
+    this.cvars.document("gl_debug_distfrac", {
+      summary: "Distance culling factor for world text that requests distance culling: text is hidden when its cell size is smaller than forward camera distance times this factor. Not saved.",
+      usage: "gl_debug_distfrac <factor>", examples: ["gl_debug_distfrac 0.004"] });
+    this.cvars.document("r_override_textures", {
+      summary: "Replacement image priority: below 1 keeps requested files first, 1 prioritizes replacements for native images, above 1 also prioritizes them for truecolor images. Fallback image searches still run at 0.",
+      usage: "r_override_textures <level>", examples: ["r_override_textures 1", "r_override_textures 2"] });
+    this.cvars.document("r_texture_overrides", {
+      summary: "Usage bitmask for replacement image priority: skin 1, sprite 2, wall 4, picture 8, sky 16; add bits to combine. -1 selects all, 0 selects none. Does not disable fallback searches.",
+      usage: "r_texture_overrides <mask>", examples: ["r_texture_overrides -1", "r_texture_overrides 5"] });
+    this.cvars.document("r_texture_formats", {
+      summary: "Replacement image search order. source uses the content family's order; otherwise lists png, jpg, tga, jpeg, bmp, gif. Legacy format initials are accepted and unknown letters ignored.",
+      usage: "r_texture_formats <source|quoted format list>", examples: ['r_texture_formats "png tga jpg"', "r_texture_formats source"] });
+    this.cvars.document("r_enhancedmodels", {
+      summary: "Enable loading and drawing available mounted Quake I enhanced model replacements; native models remain the fallback.",
+      usage: "r_enhancedmodels <number>", examples: ["r_enhancedmodels 1"], allowedValues: ["0: disabled", "Nonzero: enabled"] });
+    this.cvars.document("gl_md5_load", {
+      summary: "Enable loading available mounted Quake II MD5 model replacements. Drawing them also requires gl_md5_use.",
+      usage: "gl_md5_load <number>", examples: ["gl_md5_load 1"], allowedValues: ["0: disabled", "Nonzero: enabled"] });
+    this.cvars.document("gl_md5_use", {
+      summary: "Draw loaded Quake II MD5 replacements instead of native models, subject to replacement distance limits. Requires gl_md5_load.",
+      usage: "gl_md5_use <number>", examples: ["gl_md5_use 1"], allowedValues: ["0: disabled", "Nonzero: enabled"] });
+    this.cvars.document("gl_md5_distance", {
+      summary: "Quake II replacement model view distance in map units when r_model_distance is source. Positive values fall back to native models beyond the limit; nonpositive values remove the cutoff. Shadows bypass this distance cutoff.",
+      usage: "gl_md5_distance <distance>", examples: ["gl_md5_distance 2048", "gl_md5_distance 0"] });
+    this.cvars.document("r_model_distance", {
+      summary: "Shared replacement model view distance in map units. source uses no cutoff for Quake I and gl_md5_distance for Quake II. Positive numeric overrides fall back to native models beyond the limit; nonpositive values remove it. Shadows bypass this cutoff.",
+      usage: "r_model_distance <source|finite distance>", examples: ["r_model_distance source", "r_model_distance 4096"] });
   }
   static async open(options: ImageSettingsOptions): Promise<ApplicationImageSettings> {
     const settings = new ApplicationImageSettings(options);

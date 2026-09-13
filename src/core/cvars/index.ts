@@ -6,6 +6,7 @@ import { asciiFold, isQ1, isQ2, sourceCommandText } from "../commands/text.ts";
 import { nativeAtof, nativeAtoi } from "../numeric.ts";
 import { cvarValueText, quakeAtof } from "./numbers.ts";
 import { setInfoValue } from "./info.ts";
+import type { CommandDocumentation } from "../commands/documentation.ts";
 
 /** The Q3 ABI flag words. Q1 uses Archive and ServerInfo for declaration booleans. */
 export enum CvarFlag {
@@ -130,6 +131,7 @@ export class CvarRegistry {
   private effects: CvarEffect[] = [];
   private userinfoDirty = false;
   private readonly consoleVariables = new Set<string>();
+  private readonly documents = new Map<string, CommandDocumentation>();
 
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
@@ -147,6 +149,11 @@ export class CvarRegistry {
   }
 
   find(name: string): CvarRead | undefined { return this.variables.get(this.key(name)); }
+  document(name: string, documentation: CommandDocumentation): void {
+    if (this.find(name) === undefined) throw new Error(`Cannot document unregistered cvar ${name}`);
+    this.documents.set(this.key(name), documentation);
+  }
+  documentation(name: string): CommandDocumentation | undefined { return this.find(name) === undefined ? undefined : this.documents.get(this.key(name)); }
   get(name: string): CvarSnapshot | undefined { const state = this.variables.get(this.key(name)); return state === undefined ? undefined : snapshot(state); }
   variableString(name: string): string { return this.find(name)?.value ?? ""; }
   variableValue(name: string): number { return this.find(name)?.numericValue ?? 0; }
@@ -379,6 +386,7 @@ export class CvarRegistry {
       if ((state.flags & CvarFlag.UserCreated) !== 0) {
         if (previous === undefined) this.first = state.next; else previous.next = state.next;
         this.variables.delete(this.key(state.name));
+        this.documents.delete(this.key(state.name));
         this.indexes[state.index] = undefined;
         state.next = undefined;
       } else { this.set(state.name, state.resetValue, true); previous = state; }

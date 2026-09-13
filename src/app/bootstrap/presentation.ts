@@ -226,7 +226,8 @@ export class WorldSeatPresentation implements SeatPresentation {
       const columns = Math.max(1, Math.trunc(camera.viewport.width / (8 * scale)) - 2);
       if (this.local.console.buffer.width !== columns) this.local.console.buffer.resize(columns);
       drawConsole({ draw, text: this.text, rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / (8 * scale)) - 2)),
-        field: this.local.console.field, height, scale, nowMilliseconds: this.preparedTime * 1000, background: null });
+        field: this.local.console.field, selectedEntry: this.local.console.selectedCompletionEntry,
+        height, scale, nowMilliseconds: this.preparedTime * 1000, background: null });
     }
     return this.frames.finish(false);
   }

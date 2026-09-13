@@ -23,11 +23,11 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     while (origin.kind === "script") origin = origin.caller;
     return origin.kind === "local-seat" ? origin.seat : null;
   };
-  const add = (name: string, handler: (invocation: CommandInvocation) => undefined): void => {
-    if (!services.commands.exists(name) && services.commands.register(name, handler)) names.push(name);
+  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => {
+    if (!services.commands.exists(name) && services.commands.register(name, handler, documentation)) names.push(name);
   };
   add("toggleconsole", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.toggle(); });
-  add("clear", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.buffer.clear(); });
+  add("clear", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.buffer.clear(); }, { summary: "Clear the invoking seat's console output.", usage: "clear", examples: ["clear"] });
   add("messagemode", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.message(false); });
   add("messagemode2", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.message(true); });
   add("condump", invocation => {
@@ -36,14 +36,14 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     const path = isQ2(invocation.dialect) && !name.endsWith(".txt") ? `${name}.txt` : name;
     const contents = console.buffer.dump(), store = services.config(id);
     services.queue(async () => { await store.dump(path, contents); services.print(`Dumped console text to ${path}\n`); });
-  });
+  }, { summary: "Write the invoking seat's console output to a file.", usage: "condump <filename>", examples: ["condump console.txt"] });
   add("writeconfig", invocation => {
     const id = seat(invocation);
     if (id === null || services.console(id) === null) { services.print("writeconfig requires an active local seat\n"); return; }
     const name = invocation.argv[1] ?? "config.cfg", path = name.endsWith(".cfg") ? name : `${name}.cfg`;
     const contents = services.configuration(invocation), store = services.config(id);
     services.queue(async () => { await store.dump(path, contents); services.print(`Wrote ${path}\n`); });
-  });
+  }, { summary: "Save the invoking seat's configuration.", usage: "writeconfig [filename]", examples: ["writeconfig config.cfg"] });
   for (const [name, format] of [["screenshot", "tga"], ["screenshotJPEG", "jpg"], ["screenshotPNG", "png"]] satisfies readonly (readonly [string, "tga" | "jpg" | "png"])[]) {
     add(name, invocation => {
       const id = seat(invocation), capture = id === null ? null : services.capture(id), argument = invocation.argv[1];

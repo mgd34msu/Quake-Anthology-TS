@@ -61,7 +61,7 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
     while (origin.kind === "script") origin = origin.caller;
     return origin.kind === "local-seat" ? lookup(origin.seat) : null;
   };
-  const add = (name: string, handler: (invocation: CommandInvocation) => undefined): void => { if (commands.register(name, handler)) registered.push(name); };
+  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => { if (commands.register(name, handler, documentation)) registered.push(name); };
   add("bind", invocation => {
     const seat = local(invocation), name = invocation.argv[1];
     if (seat === null || name === undefined) { print("bind <key> [command]\n"); return; }
@@ -73,7 +73,7 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
       const binding = seat.binding(input); print(binding?.kind === "command" ? `${name} = ${binding.text}\n` : `${name} is not bound to a command\n`); return;
     }
     seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
-  });
+  }, { summary: "Read or set a key binding for the invoking seat.", usage: "bind <key> [command]", examples: ['bind SPACE "+jump"'] });
   add("unbind", invocation => {
     const name = invocation.argv[1], seat = local(invocation);
     if (name === undefined || seat === null) return;
