@@ -10,6 +10,8 @@ import { StartupSelectionModel } from '../../src/app/bootstrap/startup-selection
 import { discoverInstalledContent } from '../../src/content/catalog/index.ts';
 import { sharedBindingActions } from '../../src/ui/settings/action-catalog.ts';
 import { Q2Ballistics } from "../../src/content/q2/foundation/weapons/ballistics.ts";
+import { encodePng } from "../../src/formats/images/png.ts";
+import { fitUi } from "../../src/ui/common/layout.ts";
 import type { PhysicalInput, SeatInputEvent } from '../../src/contracts/ui.ts';
 
 test('binding editor captures shared offhand and primary actions and restores the seat bindings', async () => {
@@ -23,7 +25,7 @@ test('binding editor captures shared offhand and primary actions and restores th
   const blaster = spyOn(Q2Ballistics.prototype, "fireBlaster"), thrown = spyOn(Q2Ballistics.prototype, "fireHandGrenade");
   let application: Application | null = null;
   try {
-    const parsed = parseApplicationCommand(['--menu', '--hidden', '--renderer', 'cpu', '--width', '320', '--height', '240', '--seats', '2', '--user-content-root', root]);
+    const parsed = parseApplicationCommand(['--menu', '--hidden', '--renderer', 'cpu', '--width', '640', '--height', '480', '--seats', '2', '--user-content-root', root]);
     if (parsed.kind !== 'menu') throw new Error('Missing startup');
     const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false }), parsed.options);
     await model.prepareMaps(); model.select('product', 'q2-classic-baseq2'); model.select('map', 'maps/base1.bsp');
@@ -34,11 +36,14 @@ test('binding editor captures shared offhand and primary actions and restores th
     application = await Application.open(launch.options, { print: text => { prints.push(text); } }, launch.recipe);
     const opened = attached[0]; if (opened === undefined) throw new Error('Missing binding UI');
     const { input, ui } = opened, local = ui.local, seat = local.player.seat.id;
+    let transform = { x: 0, y: 0, scale: 1 };
+    const draw = ui.controller.draw.bind(ui.controller);
+    spyOn(ui.controller, 'draw').mockImplementation(context => { transform = fitUi(context.binding.safeArea); return draw(context); });
     const other = input.locals[1]; if (other === undefined) throw new Error('Missing second seat');
     const event = (value: SeatInputEvent): void => { application?.input(value); };
     const key = (code: number, down: boolean): void => event({ kind: 'key', seat, timeMilliseconds: input.now(), code, down, repeat: false });
     const click = (x: number, y: number): void => {
-      event({ kind: 'mouse-motion', seat, timeMilliseconds: input.now(), position: { x, y }, delta: { x: 0, y: 0 } });
+      event({ kind: 'mouse-motion', seat, timeMilliseconds: input.now(), position: { x: transform.x + x * transform.scale, y: transform.y + y * transform.scale }, delta: { x: 0, y: 0 } });
       event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: 1, down: true });
       event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: 1, down: false });
     };
@@ -49,8 +54,8 @@ test('binding editor captures shared offhand and primary actions and restores th
       for (let page = 0; page < Math.floor(index / 9); page++) click(400, 386);
       return index % 9;
     };
-    const capture = (id: string, physical: PhysicalInput): void => {
-      click(200, 106 + row(id) * 28); expect(ui.controller.bindingCapture).toBe(true);
+    const capture = (id: string, physical: PhysicalInput, resolve: boolean = true): void => {
+      click(200, 106 + row(id) * 28); click(200, 106); expect(ui.controller.bindingCapture).toBe(true);
       if (physical.kind === 'key') { key(physical.code, true); key(physical.code, false); }
       else if (physical.kind === 'mouse-button') {
         event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: physical.button, down: true });
@@ -60,9 +65,11 @@ test('binding editor captures shared offhand and primary actions and restores th
         event({ kind: 'controller-button', seat, timeMilliseconds: input.now(), device: physical.device, button: physical.button, down: false });
       }
       expect(ui.controller.bindingCapture).toBe(false);
+      if (resolve && ui.controller.state().focus.kind === 'menu' && local.input.focus.kind === 'menu' && local.input.focus.menu === 'menu:bindings:conflict') click(200, 246);
     };
     capture('attack', { kind: 'mouse-button', button: 1 });
     capture('grenade', { kind: 'key', code: 103 });
+    capture('grenade', { kind: 'key', code: 104 });
     capture('grapple', { kind: 'controller-button', device: 0, button: 3 });
     expect(local.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
     expect(local.input.binding({ kind: 'controller-button', device: 0, button: 3 })).toEqual({ kind: 'command', text: '+grapple' });
@@ -70,6 +77,29 @@ test('binding editor captures shared offhand and primary actions and restores th
     click(550, 106 + row('forward') * 28);
     expect(local.input.binding({ kind: 'key', code: 122 })).toBeNull();
     capture('forward', { kind: 'key', code: 119 });
+    const beforeConflict = local.input.binding({ kind: 'key', code: 119 });
+    capture('back', { kind: 'key', code: 119 }, false);
+    expect(local.input.binding({ kind: 'key', code: 119 })).toEqual(beforeConflict);
+    expect(local.input.focus.kind === 'menu' && local.input.focus.menu).toBe('menu:bindings:conflict');
+    const conflictImage = application.captureNextFrame(); await application.step(1);
+    await Bun.write('/tmp/binding-conflict.png', encodePng(640, 480, await conflictImage));
+    key(13, true); key(13, false);
+    expect(local.input.binding({ kind: 'key', code: 119 })).toEqual(beforeConflict);
+    capture('back', { kind: 'key', code: 119 }, false);
+    for (const down of [true, false]) event({ kind: 'controller-button', seat, timeMilliseconds: input.now(), device: 0, button: 1, down });
+    expect(local.input.binding({ kind: 'key', code: 119 })).toEqual(beforeConflict);
+    capture('back', { kind: 'key', code: 119 }, false); click(200, 246);
+    expect(local.input.binding({ kind: 'key', code: 119 })).toEqual({ kind: 'command', text: '+back' });
+    capture('forward', { kind: 'key', code: 119 });
+    capture('grenade', { kind: 'key', code: 106 });
+    click(200, 106 + row('grenade') * 28);
+    const removable = local.input.bindings.filter(binding => binding.target.kind === 'command' && binding.target.text === '+grenade').findIndex(binding => binding.input.kind === 'key' && binding.input.code === 106);
+    expect(removable).toBeGreaterThanOrEqual(0); click(200, 106 + (removable + 2) * 28);
+    expect(local.input.binding({ kind: 'key', code: 106 })).toBeNull();
+    expect(local.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
+    expect(local.input.binding({ kind: 'key', code: 104 })).toEqual({ kind: 'command', text: '+grenade' });
+    const detailsImage = application.captureNextFrame(); await application.step(1);
+    await Bun.write('/tmp/binding-details.png', encodePng(640, 480, await detailsImage));
     ui.controller.closeAll();
     event({ kind: 'focus', seat, timeMilliseconds: input.now(), focused: true });
     const grenadeInput = spyOn(application.simulation, "setHandGrenadeInput");
@@ -83,6 +113,7 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(application.simulation.grappleState(local.player.actor)?.hook).toBeNull();
     ui.controller.closeAll();
     key(103, true);
+    key(104, true);
     event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: 1, down: true });
     for (let frame = 0; frame < 14; frame++) await application.step(100);
     expect(application.simulation.handGrenadeState(local.player.actor)?.action.kind).toBe('cooking');
@@ -90,17 +121,23 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(application.simulation.playerUi(local.player.actor).activeWeapon).toBe(primary);
     expect(local.input.button('attack').active).toBe(true);
     expect(blaster.mock.calls.some(call => call[0].actor.id.equals(local.player.actor))).toBe(true);
-    key(103, false); await application.step(100); await application.step(100); await application.step(100);
+    local.input.unbind({ kind: 'key', code: 103 });
+    key(103, false); await application.step(100);
+    expect(application.simulation.handGrenadeState(local.player.actor)?.action.kind).toBe('cooking');
+    expect(grenadeInput.mock.calls.map(call => call[1])).toEqual([true]);
+    key(104, false); await application.step(100); await application.step(100); await application.step(100);
     expect(grenadeInput.mock.calls.map(call => call[1])).toEqual([true, false]);
     expect(application.simulation.handGrenadeState(local.player.actor)?.action.kind).not.toBe('cooking');
     expect(thrown.mock.calls.some(call => call[0].equals(local.player.actor) && !call[2].held)).toBe(true);
     event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: 1, down: false });
+    capture('grenade', { kind: 'key', code: 103 });
     expect(prints.some(text => text.includes('does not match movement'))).toBe(false);
     await application.close(); application = null;
     attached.length = 0;
     application = await Application.open(launch.options, { print: () => undefined }, launch.recipe);
     const restored = attached[0]?.ui.local; if (restored === undefined) throw new Error('Missing restored bindings');
     expect(restored.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
+    expect(restored.input.binding({ kind: 'key', code: 104 })).toEqual({ kind: 'command', text: '+grenade' });
     expect(restored.input.bindings.some(binding => binding.input.kind === 'controller-button' && binding.input.button === 3 && binding.target.kind === 'command' && binding.target.text === '+grapple')).toBe(true);
   } finally { try { await application?.close(); } finally { observer.mockRestore(); blaster.mockRestore(); thrown.mockRestore(); await rm(root, { recursive: true, force: true }); } }
 }, 120000);
