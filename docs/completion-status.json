@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "9e55c75cd997bcb14d252e414140304018abb239",
-  "carriedVerdictsFrom": "c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d",
+  "sourceCutoff": "66e6136be8e0ee266672b4e98c401997ecc17c5b",
+  "carriedVerdictsFrom": "9e55c75cd997bcb14d252e414140304018abb239",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -1268,7 +1268,7 @@
       "title": "Player names, colors and setup",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Native Q1 source clients retain names/colors, but editable QW userinfo/skin sessions are not joined to an application QW client.",
+      "reason": "Accepted 66e6136 provides native QW application admission. Complete editable QW userinfo and custom-skin display/policy remain open; current skin work is unaccepted.",
       "paths": [
         "src/content/composition/q1/clients.ts",
         "src/app/bootstrap/remote-application.ts"
@@ -1362,7 +1362,7 @@
       "title": "Local players with QuakeWorld gameplay and native networking",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Application hosting/remote clients do not admit QW sessions with independent per-seat prediction and transport.",
+      "reason": "Accepted 66e6136 admits a single-seat native QW remote session with prediction and shared presentation. QW application hosting, split-screen transport extensions and independent multi-seat prediction remain open.",
       "paths": [
         "src/app/bootstrap/application.ts",
         "src/app/bootstrap/remote-application.ts",
@@ -1825,7 +1825,7 @@
       "title": "QuakeWorld demos, rerecord and spectator cameras",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "QW demo and spectator libraries are not connected to an application QW session or record/playback/rerecord workflow.",
+      "reason": "Accepted 66e6136 provides a live native QW remote session, but demo recording/playback/rerecord workflows and spectator cameras remain unjoined; spectator connections are rejected.",
       "paths": [
         "src/network/q1/demos.ts",
         "src/app/bootstrap/remote-application.ts"
@@ -1873,7 +1873,7 @@
       "title": "QuakeWorld protocol and prediction",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "QW netchan/prediction code exists without a complete application QW admission/client/server path.",
+      "reason": "Accepted 66e6136 joins native protocol 28 remote admission, shared Q1 presentation and SelectedMovementPrediction history. Root verified signon/render and authoritative movement against an independent TypeScript donor loopback server. Other-player two-pass/fractional prediction, complete effects and QW application hosting remain open; base aliases only, spectator and extension profiles are rejected.",
       "paths": [
         "src/network/q1/quakeworld.ts",
         "src/app/bootstrap/application.ts",
@@ -1920,7 +1920,7 @@
       "title": "QuakeWorld content download queues and policy",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "QW download protocol support is not joined to an application QW transfer queue and mounted resource admission workflow.",
+      "reason": "Accepted 66e6136 joins the QW sound/model transfer queue, contained resource admission and checksum2 spawn/begin workflow to the remote application. Full download policy and custom-skin display/admission remain open; current skin work is unaccepted.",
       "paths": [
         "src/network/q1/quakeworld.ts",
         "src/app/bootstrap/remote-application.ts"

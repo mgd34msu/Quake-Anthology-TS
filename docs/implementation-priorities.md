@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite MD5-replacement review at source cutoff `9e55c75cd997bcb14d252e414140304018abb239`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite QuakeWorld reason update at source cutoff `66e6136be8e0ee266672b4e98c401997ecc17c5b`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -45,6 +45,8 @@ Complete timing, streamed PCM, spatial sound, reverb, Doppler, music and pause b
 Complete NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 in both directions: signon, snapshots, prediction, pure checks, authorization and teardown.
 
 **Done when:** Actual native peers exercise all required NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 profiles in both directions, including signon, prediction, authorization, travel and disconnect. Missing required profiles remain open; explicit rejection is diagnostic only. Separate retail/private dialect limitations must not substitute for the required stock protocols.
+
+Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Hosting, spectator/extensions, split-screen, demos, full prediction/effects and custom-skin policy remain open; no requirement closes.
 
 ### 6. Actual mod execution
 
@@ -204,7 +206,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **190 open requirements** use source cutoff `9e55c75cd997bcb14d252e414140304018abb239`. Only `q2.assets.md5-replacements` changes in this review. All other 476 records carry unchanged from `c578714`, without a new audit. The accepted replacement-control row leaves this appendix; the completed Q2 screenshot row remains absent.
+The following **190 open requirements** use source cutoff `66e6136be8e0ee266672b4e98c401997ecc17c5b`. Five QuakeWorld reasons are narrowed by accepted remote admission; no verdict changes. All other 472 records carry unchanged from `9e55c75`, without a new audit. Every previously completed row remains absent.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 

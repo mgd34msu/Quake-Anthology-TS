@@ -1,5 +1,11 @@
 # Execution status
 
+## Accepted native QW remote admission
+
+Accepted `66e6136` joins native protocol 28 `--connect-qw` with default qw/id1 mounts, challenge/connect lists, sound/model download admission, checksum2 spawn/begin, shared Q1 presentation and prediction history. Root final checks passed 4 tests/46 assertions; earlier receiver/prediction/application checks passed 8/123. An independent TypeScript donor loopback server exercised retail start signon, CPU rendering and authoritative movement; root inspected its screenshot. Strict/scoped policy passed on snapshot `qw16-WMnsLt` (source `8b4ee3e6c1f4dc3f251a5e0f7daa9125bf606ae8419d92cb5e9f721e6e31684d`, accepted tree `c8c1a6ce7e93089bca0ebcf38ecb26d2534a9534`).
+
+Scope is base Q1 aliases and one remote seat. Spectator/extension profiles are rejected; other-player two-pass/fractional prediction, full effects, demos, hosting, split-screen and complete custom-skin display/policy remain open. Skin changes currently in progress are not accepted evidence. Counts remain 287 Done/190 Not done across 477 IDs; the installed binary remains source `3a073e87` with no rebuild.
+
 For the item-by-item implementation Done/Not done list, see [completion status](completion-status.md). It uses the fixed accepted source cutoff recorded there, separately from formal verification acceptance and installed-build status.
 
 Finite capture review at source cutoff `a5c4da3` moves `q2.capture.screenshots` to Done/shared-replacement and narrows `q3.recording.screenshots-levelshots` to remaining recording-clock/FPS-timescale/restart work. The ledger now records 281 Done and 196 Not done (Q2: 109/193); all other verdicts carry from `27c17a9`, without a new inventory-wide audit. The priority appendix removes the completed Q2 row. Multi-seat and resized-window screenshots remain an explicit unexercised verification case, not an identified capture implementation gap.
