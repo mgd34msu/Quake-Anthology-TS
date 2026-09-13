@@ -1,5 +1,6 @@
 import { weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
+import { ForeignHeldWeapons } from "./held-weapon.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -45,6 +46,7 @@ export class ApplicationWorldScene {
   private readonly objects = new Map<ModelPass, PresentationObject>();
   private readonly characters = new Map<string, Q3CharacterPresenter>();
   private readonly selectedWeapons = new Map<string, SelectedQ3WeaponPresenter>();
+  private readonly foreignWeapons: ForeignHeldWeapons;
   private readonly lightStyles = new Map<number, string>();
   private inlineModels: NonNullable<WorldViewInput["inlineModels"]> = [];
   private brushModels: readonly BrushPresentation[] = [];
@@ -52,7 +54,9 @@ export class ApplicationWorldScene {
   private previousTime = 0;
   private flares: { readonly flare: SceneFlare; readonly origin: Vec3; readonly image: RendererImage; readonly imagePath: string }[] = [];
 
-  constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null) {}
+  constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null) {
+    this.foreignWeapons = new ForeignHeldWeapons(assets);
+  }
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle")
@@ -137,13 +141,15 @@ export class ApplicationWorldScene {
         presenter.reset(character, Math.trunc(this.preparedTime * 1000));
         this.characters.set(key, presenter);
       }
-      const equipped = presentations.find(source => source.viewWeapon && source.visible && source.actor.equals(character.actor) && source.q3Weapon !== undefined);
+      const equipped = presentations.find(source => source.viewWeapon && source.visible && source.actor.equals(character.actor));
       let weapon: readonly import("../../content/q3/foundation/presentation.ts").Q3CharacterPass[] = [];
-      if (equipped !== undefined) {
+      if (equipped?.q3Weapon !== undefined) {
         const weaponKey = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
         let selected = this.selectedWeapons.get(weaponKey);
         if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets.animation); this.selectedWeapons.set(weaponKey, selected); }
         weapon = await selected.world(equipped, character, character.actor.equals(viewer));
+      } else if (equipped !== undefined && !character.actor.equals(viewer)) {
+        weapon = await this.foreignWeapons.frame(equipped, character);
       }
       const passes = presenter.frame(character, { timeMilliseconds: Math.trunc(this.preparedTime * 1000),
         frameMilliseconds: Math.max(0, Math.trunc(this.preparedTime * 1000) - Math.trunc(this.previousTime * 1000)), shaderTime: { kind: "seconds", value: 0 },
