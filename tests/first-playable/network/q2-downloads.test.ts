@@ -21,6 +21,7 @@ import { EngineSession } from '../../../src/world/session/session.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { blockChecksum } from '../../../src/core/md4.ts';
 import { readQ2Bsp, toQ2WorldGeometry } from '../../../src/formats/q2-map/index.ts';
+import { encodePng } from '../../../src/formats/images/png.ts';
 import { parseMd2 } from '../../../src/formats/q12-model/md2.ts';
 
 test('Q2 mounted downloads retain native empty EOF and close canceled source reads', async () => {
@@ -111,6 +112,15 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         const skinOffset = modelView.getInt32(44, true);
         model.fill(0, skinOffset, skinOffset + 64); model.set(new TextEncoder().encode(skinName), skinOffset);
         files.set(modelName, model); files.set(skinName, await installed.mounts.read(originalSkin));
+        const imagePaths = [originalSkin.replace(/\.pcx$/i, '.png'), originalSkin.replace(/\.pcx$/i, '.bmp')];
+        const invalidList = ['pics/blocked.cfg', 'pics/blocked.exe', '../escape.png', '/absolute.png', '@pak98.pak', '@pak98.pkz', 'pics/../escape.png'];
+        if (httpEnabled) {
+            expect(await installed.mounts.resolve(originalSkin)).not.toBeNull();
+            const bitmap = new Uint8Array(58), header = new DataView(bitmap.buffer);
+            bitmap.set([66, 77]); header.setUint32(2, 58, true); header.setUint32(10, 54, true); header.setUint32(14, 40, true);
+            header.setInt32(18, 1, true); header.setInt32(22, 1, true); header.setUint16(26, 1, true); header.setUint16(28, 24, true);
+            for (const imagePath of imagePaths) files.set(imagePath, imagePath.endsWith('.png') ? encodePng(1, 1, new Uint8Array([255, 0, 0, 255])) : bitmap);
+        }
         files.set('sound/download-fixture.wav', await installed.mounts.read('sound/weapons/blastf1a.wav'));
         const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Download fixture', serverState: 2 },
             configStrings: new Map([[30, '1'], [31, String(blockChecksum(map))], [33, mapName], [34, modelName], [289, 'download-fixture.wav']]), baselines: new Map<number, EntityStateT>() };
@@ -123,7 +133,7 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         packageView.setInt32(12 + packedSound.length + 56, 12, true); packageView.setInt32(12 + packedSound.length + 60, packedSound.length, true);
         const httpServer = httpEnabled ? Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
             const path = decodeURIComponent(new URL(request.url).pathname); httpPaths.push(path);
-            if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys()].join('\n'));
+            if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys(), ...invalidList].join('\n'));
             const asset = path.slice('/baseq2/'.length), bytes = asset === 'pak99.pak' ? packageBytes : files.get(asset);
             if (bytes === undefined || asset.endsWith('.wal')) return new Response(null, { status: 404 });
             activeHttp++; peakHttp = Math.max(peakHttp, activeHttp);
@@ -156,7 +166,7 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         }
         expect(client.phase).toBe('active'); expect(loaded).toBe(true); expect(session.world).toBeNull();
         expect(requests).toEqual(httpEnabled ? ['textures/download-fixture.wal'] : [mapName, modelName, skinName, 'sound/download-fixture.wav', 'textures/download-fixture.wal']);
-        if (httpEnabled) { expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(1); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
+        if (httpEnabled) { for (const path of imagePaths) expect(httpPaths).toContain(`/baseq2/${path}`); for (const path of invalidList) expect(httpPaths).not.toContain(`/baseq2/${path}`); expect(httpPaths).not.toContain('/baseq2/pak98.pak'); expect(httpPaths).not.toContain('/baseq2/pak98.pkz'); expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(1); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
         if (!httpEnabled) {
         const nextState = (sound: string): Q2ApplicationGameState => ({ ...state,
             configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, sound]]) });

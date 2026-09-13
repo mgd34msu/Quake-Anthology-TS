@@ -164,7 +164,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
                         downloadPath(line);
                         if (!/^[a-zA-Z0-9_+.-]+\.(?:pak|pkz)$/i.test(line)) throw new Error('Invalid package path');
                         if (this.refreshPackages !== undefined) packages.add(line);
-                    } else { const path = line.startsWith('@') ? line.slice(1) : line; this.validate(path); assets.add(path); }
+                    } else { const path = line.startsWith('@') ? line.slice(1) : line; this.validateHttpFilelistAsset(path); assets.add(path); }
                 } catch { this.print(`Ignoring invalid Q2 filelist entry: ${line.slice(0, 128)}\n`); }
             }
         }
@@ -180,6 +180,14 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
             if (name && !name.startsWith('*')) { const path = name.startsWith('#') ? name.slice(1) : `sound/${name}`; this.validate(path); assets.add(path); }
         }
         await Promise.all([...assets].map(path => this.httpAsset(path))); current();
+    }
+
+    private validateHttpFilelistAsset(path: string): void {
+        downloadPath(path);
+        // Donor HTTP whitelist plus JPEG/BMP/GIF supported by the shared image reader.
+        if (!/^[a-zA-Z0-9_+./-]+$/.test(path) || !path.includes('/')
+            || !/\.(?:bsp|dm2|ent|jpg|loc|md2|md3|ogg|pcx|png|sp2|tga|txt|wal|wav|jpeg|bmp|gif)$/i.test(path))
+            throw new Error(`Q2 filelist requested a non-asset download: ${path}`);
     }
 
     private validate(path: string): void {
