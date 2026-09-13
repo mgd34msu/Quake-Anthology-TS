@@ -4,6 +4,7 @@ import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import type { BrowserConnection } from "./server-browser.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { RemoteApplication } from "./remote-application.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +68,7 @@ export class StartupApplication {
   private readonly saves: StartupSaves;
   readonly preferences: FrontendPreferences;
   private applyDisplay = false;
+  private mouseBaselineProduct: string | null = null;
 
   private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost, saveDirectory: string) {
     this.preferences = new FrontendPreferences(() => movementDialect(model.options));
@@ -79,7 +81,18 @@ export class StartupApplication {
     catch (error) { await application.close(); throw error; }
   }
 
+  private async refreshMouseBaseline(force = false): Promise<void> {
+    const options = this.model.options;
+    if (!force && this.mouseBaselineProduct === options.product) return;
+    const product = this.model.catalog.product(options.product);
+    const settings = new ConfigStore(product.userContent?.root
+      ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+    await this.preferences.loadMouseBaseline(settings);
+    this.mouseBaselineProduct = options.product;
+  }
+
   private async openGraphics(display: StartupDisplay = this.model.options): Promise<StartupGraphics> {
+    await this.refreshMouseBaseline(true);
     const options = { ...this.model.options, ...display }, identity = createIdentityOwner("startup-menu"), seat = identity.seat(0), client = identity.client(0, 0);
     const owner = { identity: Symbol("startup renderer"), session: identity.session, generation: 0 };
     const images = new SceneImageRegistry(owner);
@@ -220,6 +233,7 @@ export class StartupApplication {
     if (graphics === null) throw new Error("Startup frame has no renderer");
     for (const event of graphics.renderer.window.pollEvents()) graphics.router.handlePlatform(event);
     for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
+    await this.refreshMouseBaseline();
     graphics.controllerSettings.update();
     graphics.router.updateCapture();
     if (this.refreshSaves) {

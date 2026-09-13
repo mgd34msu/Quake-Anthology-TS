@@ -1,5 +1,10 @@
 import type { CommandDialect } from "../../contracts/common.ts";
 import { defaultMouseTuning } from "../../input/mouse.ts";
+import type { MouseTuning } from "../../input/mouse.ts";
+import { MouseSettings } from "../../input/mouse-settings.ts";
+import { CvarRegistry } from "../../core/cvars/index.ts";
+import { createIdentityOwner } from "../../contracts/identity.ts";
+import type { ConfigStore } from "../../settings/config.ts";
 import { defaultViewInputTuning } from "../../input/user-command.ts";
 import { bindAudioSettings, bindPrimaryInputSettings, bindMouseMotionSettings, bindControllerVibration } from "../../ui/settings/index.ts";
 import type { AudioSettings, PrimaryInputSettings, MouseMotionSettings, ControllerVibrationSettings, SettingBinding } from "../../ui/settings/index.ts";
@@ -56,21 +61,29 @@ export function changedFrontendPreferences(before: FrontendPreferenceValues, aft
     ...(after.alwaysRun === before.alwaysRun ? {} : { alwaysRun: after.alwaysRun }) };
 }
 
-/** Only user-selected overrides cross into a game; unselected values retain source defaults. */
+/** Only user-selected overrides cross into a game; saved values stay with their seat. */
 export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
+  private mouseBaseline: MouseTuning = defaultMouseTuning;
   constructor(private readonly dialect: () => CommandDialect) {}
+  async loadMouseBaseline(settings: ConfigStore): Promise<void> {
+    const saved = await settings.loadSeat("input/seat-1.json"), identity = createIdentityOwner("frontend-mouse-baseline");
+    const mouse = new MouseSettings(new CvarRegistry({ dialect: this.dialect(), context: { session: identity.session,
+      origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } } }));
+    if (saved !== null) mouse.write(saved.mouse);
+    this.mouseBaseline = mouse.read();
+  }
   bindings(): readonly SettingBinding[] {
     return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true, controllerVibrationStrength: this.values.controllerVibrationStrength ?? 1 }),
       write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
       write: values => { this.values = { ...this.values, ...values }; } }),
-    ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? defaultMouseTuning.sensitivity,
-      pitch: this.values.pitch ?? defaultMouseTuning.pitch, yaw: this.values.yaw ?? defaultMouseTuning.yaw,
-      invertMouse: this.values.invertMouse ?? defaultMouseTuning.invertPitch,
+    ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,
+      pitch: this.values.pitch ?? this.mouseBaseline.pitch, yaw: this.values.yaw ?? this.mouseBaseline.yaw,
+      invertMouse: this.values.invertMouse ?? this.mouseBaseline.invertPitch,
       alwaysRun: this.values.alwaysRun ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
       write: values => { this.values = { ...this.values, ...values }; } }),
-    ...bindMouseMotionSettings({ read: () => ({ acceleration: this.values.acceleration ?? defaultMouseTuning.acceleration,
-      filter: this.values.filter ?? defaultMouseTuning.filter, freeLook: this.values.freeLook ?? defaultMouseTuning.freeLook }),
+    ...bindMouseMotionSettings({ read: () => ({ acceleration: this.values.acceleration ?? this.mouseBaseline.acceleration,
+      filter: this.values.filter ?? this.mouseBaseline.filter, freeLook: this.values.freeLook ?? this.mouseBaseline.freeLook }),
       write: values => { this.values = { ...this.values, ...values }; } })];
   }
 }
