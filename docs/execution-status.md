@@ -1,5 +1,19 @@
 # Execution status
 
+## Accepted world-text controls, source movement and guest preparation
+
+Source cutoff: `e5e51456d04a911528da8b52af9a50b794738318`. Accepted `200493b6` joins live `gl_debug_distfrac` to common world-text culling; root passed CPU/GL two-seat checks, 6 tests/82 assertions. Accepted `ef4d34d1` joins the actual native DLL's two world-text imports to the common store, root 1/16. The other eight debug-shape imports remain open.
+
+Accepted `e0409dc0` routes the exercised native QW commands through the shared ordered command phase, root 5/206. Spectators, pause, complete administration and arbitrary mods remain open.
+
+Accepted `98074c6` corrects native authored Q1 soldier/dog gib and head construction using existing helpers in source order. Root passed 14/301 and the actual dedicated rerelease e1m1 witness: heads clear ground, retain source bounds and signed spin, fly and remain alive at 23.5 seconds; gib pieces accelerate, bounce, settle and expire. Rerelease corpse-extension collision policy remains open.
+
+Accepted `3176aee` joins selected Q2 source movement profiles and native server configuration publication. Root actual authored bio/base travel checks passed 1/68. Rerelease remote-client admission and matching native prediction remain missing; local source/profile and decoded configuration checks do not qualify that remote path.
+
+Accepted `e5e51456` prepares the native Win64 Q2 guest source lifecycle, root 7/109. Complete bindings and normal application guest admission remain open. This does not turn the accepted world-text imports into full native-mod compatibility.
+
+The finite ledger review changes only the reasons for `q1.physics.rerelease-gibs-corpses` and `q2.rerelease.q64-movement`; both remain open. All 477 verdicts/methods and the other 475 records carry unchanged from `7964fc31bfa186e538994eea3ed71cb6b8d035f6`, whose verdicts carried from `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. Counts remain 288 Done/189 Not done, with no new full audit. The installed binary remains `3a073e87ec7a4126f396e15833b8afb9df569403`; no rebuild is claimed. The delivered [project-status snapshot](project-status-current.md) retains its earlier `98074c6e` cutoff.
+
 ## Accepted native QW hosting and shared SOCKS clients
 
 Source cutoff: `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. Transport `7b2d38b` and QC messages `d4b9f8c` precede shared native QC `60bbc638` (root 9 tests/718 assertions, including actual source execution and NQ retention) and dedicated QW host `88f84c10` (root 3/132 across source/host/transport). An independent donor protocol-28 client exercised firing (shells 25 to 23), authoritative movement (x 528 to 434) and travel from `e1m1` to `dm2` with servercount 2; evidence is in `/tmp/qw-host-donor-peer.log`. The accepted host uses base protocol 28 and the pinned CRC-54730 QW program, without spectators. Local graphical QW hosting, arbitrary mods, other commands/admin, master/rcon and full parity remain open. Later native-QW command work is outside this cutoff.
@@ -12,7 +26,7 @@ Four existing reasons are narrowed; no verdict changes. Counts remain 288 Done/1
 
 At source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`, accepted audio `0065d73b` passed root 31 tests/263 assertions: actual dummy SDL queued PCM/clock/music retention, CPU/GL menu/restart, and native NQ remote named-device travel from `e1m1` to `e1m2` in the same window. Device names/default selection and device/effects/music settings persist per product through ConfigStore. Output remains 44100 Hz, stereo, 16-bit. Physical audio quality/performance and injected remote failure races are not qualified.
 
-Accepted world text `39ea4c0c` passed root 6 tests/60 assertions through CPU/GL units and actual two-seat Q2 rerelease `base1`; root inspected images from both changes. Shared culling uses the native strict condition `cellSize < dot(origin-camera.origin, camera.axis[0]) * distanceCullFactor`, with producer default `0.004`, signed forward distance and rejection before glyph lookup. Native `size * 8` remains. Live `gl_debug_distfrac` control and guest debug imports remain unjoined. Both frozen source units passed scoped strict/policy checks.
+Accepted world text `39ea4c0c` passed root 6 tests/60 assertions through CPU/GL units and actual two-seat Q2 rerelease `base1`; root inspected images from both changes. Shared culling uses the native strict condition `cellSize < dot(origin-camera.origin, camera.axis[0]) * distanceCullFactor`, with producer default `0.004`, signed forward distance and rejection before glyph lookup. Native `size * 8` remains. Live `gl_debug_distfrac` control and guest debug imports were unjoined at this historical cutoff; the later control and two world-text import receipts appear above. Both frozen source units passed scoped strict/policy checks.
 
 The two reviewed ledger requirements remain open: configurable output formats/complete source audio workflow and the full display/video restart workflow are not established by these receipts. Counts remain 288 Done/189 Not done across 477 IDs; the other 475 records were not re-audited. The installed binary remains `3a073e87ec7a4126f396e15833b8afb9df569403`, without a rebuild.
 

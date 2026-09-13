@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "7964fc31bfa186e538994eea3ed71cb6b8d035f6",
-  "carriedVerdictsFrom": "39ea4c0cab9910c6b78d5f8d18d3bc36494dd519",
+  "sourceCutoff": "e5e51456d04a911528da8b52af9a50b794738318",
+  "carriedVerdictsFrom": "7964fc31bfa186e538994eea3ed71cb6b8d035f6",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -2035,7 +2035,7 @@
       "title": "Rerelease gib and corpse collision semantics",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Complete declared rerelease gib/corpse collision distinctions are not established in the Q1 physics projection; the shared Q1 paths do not provide a complete independently selected rerelease corpse policy.",
+      "reason": "Accepted 98074c6 corrects native authored soldier/dog gib and head construction through existing helpers in source order; root passed 14 tests/301 assertions and actual rerelease head flight/persistence plus gib gravity/bounce/removal. Complete independently selected rerelease corpse-extension collision semantics remain unestablished.",
       "paths": [
         "src/app/bootstrap/simulation/actor-execution.ts",
         "src/app/bootstrap/simulation/physics.ts",
@@ -3031,7 +3031,7 @@
       "title": "Match Q2 64 server movement and prediction",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Movement supports n64Physics, but the live server publishes airAccelerate=0 and a source-announced matching Q64 configuration is not joined end-to-end.",
+      "reason": "Accepted 3176aee joins selected Q2 movement profiles and source-announced server configuration, including actual authored bio/base travel; root passed 1 test/68 assertions. Rerelease remote-client admission and matching native prediction remain unsupported, so full Q2 64 server/client movement compatibility is not established.",
       "paths": [
         "src/movement/q2/index.ts",
         "src/app/bootstrap/simulation/network.ts",
