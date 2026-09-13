@@ -9,6 +9,11 @@ export interface QwApplicationDownloads {
 }
 export interface QwApplicationClientHost {
     readonly downloads?: QwApplicationDownloads;
+    readonly skins?: {
+        names(): readonly string[];
+        loading(value: boolean): void;
+        prepare(): Promise<void>;
+    };
     readonly prediction?: {
         sent(sequence: number, command: QwUserCommand, nowMilliseconds: number): void;
         acknowledged(sequence: number, nowMilliseconds: number): void;

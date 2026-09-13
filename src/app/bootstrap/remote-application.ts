@@ -97,6 +97,7 @@ export class RemoteApplication {
   private worldLoadGeneration = 0;
   private stepping = false;
   private q3Content: Q3ClientContent | null = null;
+  private qwAllSkins = '';
   private qwDownloads: QwDownloadReceiver | null = null;
   private qwMounts: MountedContent | null = null;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
@@ -111,21 +112,27 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
-    if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client") {
-      const family = launchOptions.network.kind === "q3-client" ? "q3" : "q2";
-      const dialect = family === "q3" ? "q3" : "q2-classic";
+    if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client" || launchOptions.network.kind === "qw-client") {
+      const family = launchOptions.network.kind === "q3-client" ? "q3" : launchOptions.network.kind === "qw-client" ? "qw" : "q2";
+      const dialect = family === "q3" ? "q3" : family === "qw" ? "q1-quakeworld" : "q2-classic";
       const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
       const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
         cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
-      this.downloadPermission = createClientDownloadPermission(cvars, family);
+      this.downloadPermission = family === "qw" ? null : createClientDownloadPermission(cvars, family);
+      if (family === "q3" || family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
       if (family === "q3") {
         cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
         cvars.register("cl_packetdup", "1", CvarFlag.Archive);
-        cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("snaps", "20", CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
+      }
+      if (family === "qw") {
+        cvars.register("noskins", "0", CvarFlag.Archive); cvars.register("baseskin", "base", CvarFlag.Archive);
+        for (const variable of [{ name: "name", value: "unnamed" }, { name: "team", value: "" }, { name: "skin", value: "" },
+          { name: "topcolor", value: "0" }, { name: "bottomcolor", value: "0" }, { name: "noaim", value: "0" }, { name: "msg", value: "1" }]) cvars.register(variable.name, variable.value, CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("password", "", CvarFlag.UserInfo);
       }
       const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => dialect, server: () => null,
         seat: () => null, shared: () => this.imageSettings.cvars });
@@ -134,12 +141,23 @@ export class RemoteApplication {
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
       } });
+      if (family === "qw") {
+        for (const name of ["skins", "allskins"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+        commands.register("color", invocation => {
+          if (invocation.args.length === 0) { this.print(`"color" is "${cvars.variableString('topcolor')} ${cvars.variableString('bottomcolor')}"\n`); return; }
+          const top = Math.min(13, nativeAtoi(invocation.args[0] ?? '') & 15), bottom = Math.min(13, nativeAtoi(invocation.args[1] ?? invocation.args[0] ?? '') & 15);
+          cvars.set("topcolor", String(top)); cvars.set("bottomcolor", String(bottom));
+        });
+      }
       this.clientCommands = { cvars, commands };
-      const product = loadedContent.catalog.require(launchOptions.product);
+      const product = loadedContent.catalog.require(family === "qw" ? "q1-quakeworld" : launchOptions.product);
       this.clientConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "qw-client") {
       const remote = new QwRemotePresentation({ identity, session, content: loadedContent,
+        skinOptions: { read: async path => (await (this.qwMounts ?? this.content.mounts).open(path))?.bytes ?? null,
+          noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
+          baseskin: () => this.clientCommands?.cvars.variableString("baseskin") ?? "base", allskins: () => this.qwAllSkins },
         downloads: {
           request: (path, category) => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.request(path, category); },
           receive: result => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.receive(result); },
@@ -150,7 +168,7 @@ export class RemoteApplication {
         loadContent: async world => { const content = await this.loadServerWorld(world, undefined, true); this.qwMounts?.close(); this.qwMounts = null; return content; },
         mapChecksum: async world => quakeWorldMapChecksum2(await this.content.mounts.read(world.map)) });
       this.remote = remote;
-      this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: "\\name\\Player\\rate\\2500\\topcolor\\0\\bottomcolor\\0" });
+      this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" });
     } else if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
@@ -313,7 +331,7 @@ export class RemoteApplication {
     this.qwDownloads?.close();
     this.qwDownloads = new QwDownloadReceiver({ gameRoot, skinRoot,
       exists: async (path, category) => existsSync(join(category === "skin" ? skinRoot : gameRoot, path)) || await (this.qwMounts ?? this.content.mounts).resolve(path) !== null,
-      sendCommand: text => this.network.command(text), print: text => this.print(text), noskins: () => 1, demoRecording: () => false, demoPlayback: () => false });
+      sendCommand: text => this.network.command(text), print: text => this.print(text), noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0, demoRecording: () => false, demoPlayback: () => false });
     this.launchOptions = { ...this.options, product: productId };
   }
 
@@ -505,6 +523,10 @@ export class RemoteApplication {
     for (const command of pending) {
       try {
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); continue; }
+        if (this.network instanceof QwClientNetwork && (command.name === "skins" || command.name === "allskins")) {
+          if (command.name === "allskins") this.qwAllSkins = command.args[0] ?? '';
+          await this.network.refreshSkins(); continue;
+        }
         if (this.frontend !== null && await this.frontend.audio.command({ name: command.name, args: command.args, seat: command.seat,
           registrations: this.presentation?.q3Client?.media.bank.registrations() ?? [], print: text => this.print(text) })) continue;
         if (["map", "save", "load"].includes(command.name)) throw new Error(`${command.name} requires the authoritative server console`);
@@ -540,6 +562,7 @@ export class RemoteApplication {
       else for (const event of this.window.pollEvents()) if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
       const now = performance.now();
       await this.network.poll(now);
+      if (this.remote instanceof QwRemotePresentation) { this.clientCommands?.cvars.takeEffects(); await this.remote.prepareSkins(); }
       this.frames++;
       const clientInputs = this.clientInputs; this.clientInputs = [];
       for (const input of clientInputs) {
@@ -566,6 +589,7 @@ export class RemoteApplication {
       this.network.submit(this.controls?.build(elapsedMilliseconds, this.elapsed, this.remote.output.snapshot.frame.frame) ?? [], now);
       await this.dispatchCommands();
       await this.network.poll(now);
+      if (this.remote instanceof QwRemotePresentation) await this.remote.prepareSkins();
       if (this.network.phase !== "active") { this.controls?.stopHaptics(); return null; }
       await this.bindSeat();
       await this.refreshImages();

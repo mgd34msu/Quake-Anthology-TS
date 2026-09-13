@@ -1,4 +1,8 @@
 /* QW decoded protocol state shares the Q1 scene/session presentation. GPL-2.0-or-later. */
+import type { IndexedModelSkin } from '../../../contracts/scene.ts';
+import { QwPlayerSkins } from './qw-skins.ts';
+import type { QwSkinOptions } from './qw-skins.ts';
+import { nativeAtoi } from '../../../core/numeric.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
 import { QuakeWorldPrediction } from '../simulation/prediction/qw-source-state.ts';
 import type { MovementPredictionSnapshot, MovementPredictionResult } from '../simulation/prediction/types.ts';
@@ -15,6 +19,7 @@ import type { Q1RemotePresentationOptions, Q1RemoteWorld } from './remote-q1.ts'
 import type { QwApplicationClientHost, QwApplicationDownloads, QwServerData } from './qw-types.ts';
 export interface QwRemotePresentationOptions extends Q1RemotePresentationOptions {
     readonly downloads?: QwApplicationDownloads;
+    readonly skinOptions: QwSkinOptions;
     prepareServerData(data: QwServerData): Promise<void>;
     mapChecksum(world: Q1RemoteWorld, gameDirectory: string): Promise<number>;
 }
@@ -48,6 +53,37 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         acknowledged: (sequence: number, now: number): void => { this.acknowledgedSequence = sequence; this.predictor?.acknowledged(sequence, now); },
     };
     private stats = new Map<number, number>();
+    private readonly userinfos = new Map<number, Map<string, string>>();
+    private readonly selectedSkins = new Map<number, IndexedModelSkin>();
+    private readonly playerSkins: QwPlayerSkins;
+    private skinLoading = false;
+    private skinSignature = '';
+    private skinPolicySignature = '';
+    private skinRevision = 0;
+    readonly skins = {
+        names: (): readonly string[] => this.options.skinOptions.noskins() !== 0 ? [] : [...new Set([...this.userinfos.values()].filter(info => (info.get('name') ?? '') !== '').map(info => `skins/${this.playerSkins.name(info.get('skin') ?? '')}.pcx`))],
+        loading: (value: boolean): void => { this.skinLoading = value; this.selectedSkins.clear(); if (!value) { this.playerSkins.clear(); this.skinSignature = ''; } },
+        prepare: (): Promise<void> => this.prepareSkins(),
+    };
+    async prepareSkins(): Promise<void> {
+        if (this.skinLoading) return;
+        const policy = this.options.skinOptions, policySignature = [policy.noskins(), policy.baseskin(), policy.allskins()].join('\0'), signature = `${policySignature}\0${this.skinRevision}`;
+        if (signature === this.skinSignature) return;
+        if (policySignature !== this.skinPolicySignature) { this.playerSkins.clear(); this.skinPolicySignature = policySignature; }
+        this.selectedSkins.clear();
+        for (const [slot, info] of this.userinfos) {
+            if ((info.get('name') ?? '') === '') continue;
+            const skin = await this.playerSkins.select(info.get('skin') ?? '');
+            if (skin !== null) this.selectedSkins.set(slot, skin);
+        }
+        this.skinSignature = signature;
+    }
+    private scoreboardInfo(slot: number, info: Map<string, string>, messages: NetQuakeMessage[]): void {
+        if (!Number.isInteger(slot) || slot < 0 || slot >= 32) throw new Error('Invalid QW userinfo slot');
+        const color = (key: string): number => { const value = nativeAtoi(info.get(key) ?? '0'); return value < 0 || value > 13 ? 13 : value; };
+        this.userinfos.set(slot, info); this.skinRevision++;
+        messages.push({ kind: 'name', slot, value: (info.get('name') ?? '').slice(0, 15) }, { kind: 'colors', slot, value: color('topcolor') * 16 + color('bottomcolor') });
+    }
     private ownPlayer: QwPlayerState | null = null;
     private records: readonly QuakeWorldMessage[] = [];
     private entities: readonly Q1ExtendedEntityState[] = [];
@@ -58,7 +94,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     private kick = 0;
     private intermission: Extract<QuakeWorldMessage, { kind: 'intermission' }> | null = null;
     private variables: QwMoveVariables | null = null;
-    constructor(readonly options: QwRemotePresentationOptions) { this.content = options.content; this.shared = new Q1RemotePresentation({ ...options, loadContent: async world => { this.content = await options.loadContent(world); return this.content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
+    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.content = options.content; this.shared = new Q1RemotePresentation({ ...options, loadContent: async world => { this.content = await options.loadContent(world); return this.content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
     get moveVariables(): QwMoveVariables | null { return this.variables; }
     get client() { return this.shared.client; }
     get player() { return this.shared.player; }
@@ -68,7 +104,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     get scoreboard() { return this.shared.scoreboard; }
     async serverData(data: QwServerData): Promise<void> { await this.options.prepareServerData(data); }
     async gameState(data: QwServerData, models: readonly string[], sounds: readonly string[]): Promise<number> {
-        this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
+        this.playerSkins.clear(); this.userinfos.clear(); this.selectedSkins.clear(); this.skinSignature = ''; this.skinLoading = false; this.skinRevision++; this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
         const map = models[0]; if (map === undefined) throw new Error('QW has no world model');
         await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0);
         this.soundCount = sounds.length; this.availableSounds.clear();
@@ -94,17 +130,10 @@ export class QwRemotePresentation implements QwApplicationClientHost {
                 case 'kick': this.kick = message.degrees; break;
                 case 'max-speed': if (this.variables !== null) this.variables = { ...this.variables, maxSpeed: message.value }; break;
                 case 'entity-gravity': if (this.variables !== null) this.variables = { ...this.variables, entityGravity: message.value }; break;
-                case 'userinfo': {
-                    const info = quakeWorldInfo(message.value), top = Number(info.get('topcolor') ?? 0), bottom = Number(info.get('bottomcolor') ?? 0);
-                    translated.push({ kind: 'name', slot: message.slot, value: info.get('name') ?? '' }, { kind: 'colors', slot: message.slot, value: ((top & 15) << 4) | (bottom & 15) }); break;
-                }
+                case 'userinfo': this.scoreboardInfo(message.slot, new Map(quakeWorldInfo(message.value)), translated); break;
                 case 'set-info': {
-                    if (message.key === 'name') translated.push({ kind: 'name', slot: message.slot, value: message.value });
-                    if (message.key === 'topcolor' || message.key === 'bottomcolor') {
-                        const old = this.scoreboard.get(message.slot)?.colors ?? 0, color = Number(message.value) & 15;
-                        translated.push({ kind: 'colors', slot: message.slot, value: message.key === 'topcolor' ? (old & 15) | (color << 4) : (old & 240) | color });
-                    }
-                    break;
+                    const info = new Map(this.userinfos.get(message.slot)); info.set(message.key, message.value);
+                    this.scoreboardInfo(message.slot, info, translated); break;
                 }
                 case 'print': translated.push({ kind: 'print', text: message.text }); break;
                 case 'intermission': this.intermission = message; translated.push({ kind: 'set-angle', angles: message.angles }, { kind: 'intermission' }); break;
@@ -132,6 +161,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
             this.kick = 0;
         }
         await this.shared.receive(translated, now);
+        await this.prepareSkins();
         if (frame) this.linkSolids(players, nails);
         if (players.some(player => player.number === this.data?.playerSlot)) this.receivePrediction(now);
     }
@@ -193,7 +223,10 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     playerCommand(...args: Parameters<Q1RemotePresentation['playerCommand']>) { return this.shared.playerCommand(...args); }
     characterViews() { return this.shared.characterViews(); }
     presentations() {
-        const models = this.shared.presentations(), player = this.player;
+        const models = this.shared.presentations().map(model => {
+            const slot = this.shared.playerSlot(model.actor), skin = slot === null ? undefined : this.selectedSkins.get(slot);
+            return !this.skinLoading && model.path === 'progs/player.mdl' && skin !== undefined ? { ...model, indexedSkin: skin } : model;
+        }), player = this.player;
         if (this.intermission !== null) return models.filter(model => !model.viewWeapon);
         if (player === null) return models;
         const view = this.playerView(player.actor);

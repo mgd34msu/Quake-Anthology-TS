@@ -15,7 +15,7 @@ const data: QwServerData = { kind: 'server-data', protocol: profile, serverCount
 test('QW UDP joins through lists, downloads, checksum prespawn, spawn and begin', async () => {
     const server = await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const channel = new QuakeWorldChannel('server', 241), commands: string[] = [], downloads: string[] = [], messages: QuakeWorldMessage[] = [];
-    const client = new QwClientNetwork({ transport, remote: server.address, qport: 241, userinfo: '\\name\\Loopback', host: {
+    const client = new QwClientNetwork({ transport, remote: server.address, qport: 241, userinfo: () => '\\name\\Loopback', host: {
         downloads: { request: async path => { downloads.push(path); return 'available'; }, receive: async () => 'complete', close() {} },
         serverData: async () => {},
         gameState: async (received, models, sounds) => { expect(received.playerSlot).toBe(3); expect(received.moveVariables.airAccelerate).toBeCloseTo(0.7); expect(models).toEqual(['maps/test.bsp', 'progs/player.mdl']); expect(sounds).toEqual(['misc/menu1.wav']); return -123; },

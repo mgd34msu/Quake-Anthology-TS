@@ -20,13 +20,16 @@ export interface QwClientNetworkOptions {
     readonly remote: IpAddress;
     readonly host: QwApplicationClientHost;
     readonly qport: number;
-    readonly userinfo: string;
+    readonly userinfo: () => string;
     readonly timeoutMilliseconds?: number;
 }
 export class QwClientNetwork implements ApplicationNetwork {
     readonly role = 'client';
     readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol: { kind: 'q1-quakeworld', version: 28 } };
-    private readonly handshake;
+    private handshake: QuakeWorldConnectClient;
+    private userinfo = '';
+    private skinPassPending = false;
+    private begun = false;
     private readonly channel;
     private readonly decoder = new QuakeWorldDecoder();
     private state: ApplicationNetworkPhase = 'connecting';
@@ -36,21 +39,43 @@ export class QwClientNetwork implements ApplicationNetwork {
     private data: QwServerData | null = null;
     private models: string[] = [];
     private sounds: string[] = [];
-    private readonly skins = new Set<string>();
     private downloads: { paths: readonly string[]; category: 'sound' | 'model' | 'skin'; index: number } | null = null;
     private lastDelta: number | null = null;
     private oldest = idle;
     private previous = idle;
     private readonly commands = new Map<number, QwUserCommand>();
     constructor(readonly options: QwClientNetworkOptions) {
-        if (/["\n\r]/.test(options.userinfo)) throw new Error('Invalid QW userinfo');
-        this.handshake = new QuakeWorldConnectClient(options.qport, options.userinfo);
+        this.handshake = new QuakeWorldConnectClient(options.qport, '');
         this.channel = new QuakeWorldChannel('client', options.qport);
     }
     get phase(): ApplicationNetworkPhase { return this.state; }
     command(text: string): void {
         if (!this.connected) throw new Error('QuakeWorld client is not connected');
         const bytes = new SizeBuf(1450); writeClientStringCommand(bytes, text); this.channel.queueReliable(bytes.bytes());
+    }
+    async refreshSkins(): Promise<void> {
+        this.skinPassPending = true;
+        if (this.downloads !== null || this.data === null) return;
+        this.skinPassPending = false;
+        this.options.host.skins?.loading(true);
+        this.downloads = { paths: this.options.host.skins?.names() ?? [], category: 'skin', index: 0 };
+        await this.resumeDownloads();
+    }
+    private syncUserinfo(): void {
+        const text = this.options.userinfo();
+        if (/["\n\r]/.test(text)) throw new Error('Invalid QW userinfo');
+        if (text === this.userinfo) return;
+        if (this.connected) {
+            const previous = quakeWorldInfo(this.userinfo), current = quakeWorldInfo(text);
+            for (const key of new Set([...previous.keys(), ...current.keys()])) {
+                const value = current.get(key) ?? '';
+                if (previous.get(key) !== value) this.command(`setinfo "${key}" "${value}"`);
+            }
+        } else {
+            const handshake = new QuakeWorldConnectClient(this.options.qport, text);
+            handshake.state = this.handshake.state; this.handshake = handshake;
+        }
+        this.userinfo = text;
     }
     async resumeDownloads(): Promise<void> {
         const queue = this.downloads, data = this.data;
@@ -65,7 +90,12 @@ export class QwClientNetwork implements ApplicationNetwork {
         else if (queue.category === 'model') {
             const checksum = await this.options.host.gameState(data, this.models, this.sounds);
             this.command(`prespawn ${data.serverCount} 0 ${checksum | 0}`);
-        } else this.command(`begin ${data.serverCount}`);
+        } else {
+            if (this.skinPassPending) { await this.refreshSkins(); return; }
+            this.options.host.skins?.loading(false);
+            await this.options.host.skins?.prepare();
+            if (!this.begun && this.state !== 'active') { this.command(`begin ${data.serverCount}`); this.begun = true; }
+        }
     }
     private async records(messages: readonly QuakeWorldMessage[], now: number): Promise<boolean> {
         for (const message of messages) {
@@ -75,7 +105,7 @@ export class QwClientNetwork implements ApplicationNetwork {
                 if (message.spectator) throw new Error('QW spectator presentation is not supported');
                 this.options.host.downloads?.close();
                 await this.options.host.serverData(message);
-                this.data = message; this.models = []; this.sounds = []; this.skins.clear(); this.lastDelta = null; this.commands.clear(); this.oldest = idle; this.previous = idle; this.state = 'loading'; this.downloads = null;
+                this.data = message; this.models = []; this.sounds = []; this.skinPassPending = false; this.begun = false; this.lastDelta = null; this.commands.clear(); this.oldest = idle; this.previous = idle; this.state = 'loading'; this.downloads = null;
                 this.command(`soundlist ${message.serverCount} 0`);
             } else if (message.kind === 'sound-list' || message.kind === 'model-list') {
                 const data = this.data; if (data === null) throw new Error('QW list before serverdata');
@@ -88,14 +118,11 @@ export class QwClientNetwork implements ApplicationNetwork {
                 const result = await this.options.host.downloads?.receive(message.result);
                 if (result === undefined) throw new Error('Unsolicited QW download');
                 if (result !== 'waiting') await this.resumeDownloads();
-            } else if (message.kind === 'userinfo') {
-                const skin = quakeWorldInfo(message.value).get('skin') ?? 'base';
-                if (/^[a-zA-Z0-9_-]+$/.test(skin)) this.skins.add(`skins/${skin}.pcx`);
             } else if (message.kind === 'stufftext') {
                 for (const line of message.text.split('\n')) {
                     const args = quakeWorldCommandArguments(line), name = args[0];
                     if (name === 'cmd' && (args[1] === 'prespawn' || args[1] === 'spawn') && args.slice(2).every(value => /^\d+$/.test(value)) && Number(args[2]) === this.data?.serverCount) this.command(args.slice(1).join(' '));
-                    else if (name === 'skins') { this.downloads = { paths: [...this.skins], category: 'skin', index: 0 }; await this.resumeDownloads(); }
+                    else if (name === 'skins') this.skinPassPending = true;
                     else if (name === 'reconnect') { this.state = 'loading'; this.command('new'); }
                     else if (name !== undefined && name !== 'fullserverinfo') this.options.host.print(`Unhandled QW server command: ${line}\n`);
                 }
@@ -104,11 +131,13 @@ export class QwClientNetwork implements ApplicationNetwork {
             else if (message.kind === 'disconnect') { this.state = 'closed'; this.options.host.disconnected('Server disconnected'); }
         }
         await this.options.host.receive(messages, now);
+        if (this.skinPassPending && this.downloads === null) await this.refreshSkins();
         return this.state === 'closed';
     }
     async poll(now: number): Promise<readonly ActorCommand[]> {
         if (this.state === 'closed' || this.state === 'rejected') return [];
         this.lastReceived ??= now;
+        this.syncUserinfo();
         if (!this.connected) { const bytes = this.handshake.next(now); if (bytes !== null) this.options.transport.send(this.options.remote, bytes); }
         for (;;) {
             const packet = this.options.transport.poll(); if (packet === null) break;
