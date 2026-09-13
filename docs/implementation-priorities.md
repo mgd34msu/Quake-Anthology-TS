@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite native-QW/SOCKS review at source cutoff `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with five bounded requirement completions at source cutoff `167bfbf19d06625ac2b350120647686e3e0170e9`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -219,7 +219,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **189 open requirements** use source cutoff `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. Four native-QW execution/networking reasons are narrowed; all verdicts and the other 473 records carry unchanged from `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`, without a new audit.
+The following **184 open requirements** use source cutoff `167bfbf19d06625ac2b350120647686e3e0170e9`. Five accepted requirements were removed from this appendix. The other 472 verdicts carry unchanged from `e5e51456d04a911528da8b52af9a50b794738318`, with only the status/kick remaining-work reason updated. No new audit was performed.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
@@ -342,10 +342,9 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q2.seats.remote-network` — Use multiple local players on a remote server
 - `q3.input.multiple-local-players` — Multiple local seats and remote participation
 
-### Priority 13: Input and controller behavior — 5 carried-forward open requirements
+### Priority 13: Input and controller behavior — 4 carried-forward open requirements
 
 - `q1.input.controller-tuning` — Controller deadzones, curves and per-seat settings UI
-- `q2.input.controller-assignment` — Persist controller-to-player assignments
 - `q2.input.per-player-tuning` — Tune controller axes independently
 - `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls
 - `q3.input.joystick-profiles-hotplug` — Joystick profiles, thresholds and device lifecycle
@@ -375,14 +374,13 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q3.ui.team-arena-scripts-feeders-visibility` — Team Arena scripts, feeders and owner draws
 - `q3.ui.team-arena-skirmish` — Team Arena skirmish launch and next match
 
-### Priority 17: HUD and gameplay interaction — 18 carried-forward open requirements
+### Priority 17: HUD and gameplay interaction — 17 carried-forward open requirements
 
 - `q1.multiplayer.identity` — Player names, colors and setup
 - `q1.ui.weapon-quickswitch` — Weapon-wheel data and quickswitch impulses
 - `q1.ui.radial-weapon-wheel` — Rendered radial weapon selection
 - `q1.ui.hud-inventory` — Classic, Hipnotic and Rogue HUD/inventory layouts
 - `q1.events.prompts` — Localized prompts and choice impulses
-- `q1.events.finale-acknowledgement` — Rerelease finale completion acknowledgement
 - `q2.hud.profile-selection` — Select the correct classic or rerelease HUD
 - `q2.hud.inventory` — Open and use the inventory display
 - `q2.hud.weapon-wheel` — Select a weapon with the radial wheel
@@ -396,7 +394,7 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q2.hud.centerprints-notifications` — Queue localized centerprints and notifications
 - `q2.admin.player-identity` — Configure player names, skins, handedness, and view settings
 
-### Priority 18: Server browser and administration — 19 carried-forward open requirements
+### Priority 18: Server browser and administration — 17 carried-forward open requirements
 
 - `q1.multiplayer.chat` — Public, team and private messages
 - `q1.multiplayer.pause-kick-status` — Pause, kick, ping and player status
@@ -407,8 +405,6 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q2.browser.master-lan` — Discover servers from UDP, HTTP, and LAN sources
 - `q2.browser.status-details` — Inspect server rules and player details
 - `q2.browser.sort-filter` — Filter and sort server results
-- `q2.browser.favorites` — Persist favorites and direct-connect addresses
-- `q2.admin.operator-console` — Use dedicated-server stdin
 - `q2.admin.status-kick` — Inspect clients and remove a player
 - `q2.admin.masters-heartbeat` — Configure masters and heartbeat publication
 - `q2.admin.spectator-chase` — Enter spectator mode and chase active players
@@ -428,12 +424,11 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q3.media.cinematic-clock-transitions` — Cinematic timing, looping, hold and skip
 - `q3.media.world-and-menu-video` — World material and menu cinematics
 
-### Priority 20: Localization and accessibility — 10 carried-forward open requirements
+### Priority 20: Localization and accessibility — 9 carried-forward open requirements
 
 - `q1.text.localization-overlays` — Localization, fallback and mod overlay precedence
 - `q1.accessibility.contrast-color` — Contrast and color-accessibility settings
 - `q1.accessibility.subtitles-captions` — Timed subtitles and sound captions
-- `q2.accessibility.language-reload` — Reload mounted localization tables
 - `q2.accessibility.contrast-typeface` — Choose contrast backgrounds and alternate typefaces
 - `q2.accessibility.independent-scales` — Scale menus, HUD, and console independently
 - `q2.accessibility.color-and-captions` — Complete readable non-color-only and caption workflows

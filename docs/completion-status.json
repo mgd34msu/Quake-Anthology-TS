@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "e5e51456d04a911528da8b52af9a50b794738318",
-  "carriedVerdictsFrom": "7964fc31bfa186e538994eea3ed71cb6b8d035f6",
+  "sourceCutoff": "167bfbf19d06625ac2b350120647686e3e0170e9",
+  "carriedVerdictsFrom": "e5e51456d04a911528da8b52af9a50b794738318",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -8,26 +8,26 @@
   "families": [
     {
       "family": "q1",
-      "done": 123,
-      "notDone": 57,
+      "done": 124,
+      "notDone": 56,
       "total": 180,
-      "percentage": 68.3,
+      "percentage": 68.9,
       "methods": {
         "integrated": 102,
         "sharedReplacement": 16,
-        "extendedCommon": 5
+        "extendedCommon": 6
       }
     },
     {
       "family": "q2",
-      "done": 114,
-      "notDone": 79,
+      "done": 118,
+      "notDone": 75,
       "total": 193,
-      "percentage": 59.1,
+      "percentage": 61.1,
       "methods": {
-        "integrated": 62,
-        "sharedReplacement": 31,
-        "extendedCommon": 21
+        "integrated": 63,
+        "sharedReplacement": 32,
+        "extendedCommon": 23
       }
     },
     {
@@ -44,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 288,
-    "notDone": 189,
+    "done": 293,
+    "notDone": 184,
     "total": 477,
-    "percentage": 60.4
+    "percentage": 61.4
   },
   "rows": [
     {
@@ -1964,13 +1964,16 @@
     {
       "id": "q1.events.finale-acknowledgement",
       "title": "Rerelease finale completion acknowledgement",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Native finale text/intermission is joined, but the complete rerelease gamecode acknowledgement/query protocol is not connected to the presentation owner.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 920f0ce connects source finale acknowledgement and the rerelease gamecode query to shared presentation state. Root checks passed 5 tests/118 assertions, including the authored Shub finale, save/restore and the retail QC query. Native QC application admission remains a separate open requirement.",
       "paths": [
-        "src/app/bootstrap/finale.ts",
         "src/content/composition/q1/runtime.ts",
-        "src/compat/qc/presentation-host.ts"
+        "src/content/q1/base/provider.ts",
+        "src/app/bootstrap/simulation/runtime.ts",
+        "src/compat/qc/presentation-host.ts",
+        "tests/composition/q1/source.test.ts",
+        "tests/compat/qc/finale-acknowledgement.test.ts"
       ]
     },
     {
@@ -3593,11 +3596,14 @@
     {
       "id": "q2.accessibility.language-reload",
       "title": "Reload mounted localization tables",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "The application caches catalogs by content with default English binding; no live selected-language reload/invalidation control is joined.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 05bfefb joins per-seat language selection and mounted-table reload to common settings and active presentation. Root checks passed 1 test/22 assertions for retail and mod overlays, repeated reload, fallback, independent seats and selection retention when content presentation is reconstructed.",
       "paths": [
-        "src/app/bootstrap/rerelease-presentation.ts"
+        "src/app/bootstrap/rerelease-presentation.ts",
+        "src/app/bootstrap/application.ts",
+        "src/app/bootstrap/ui.ts",
+        "tests/first-playable/localization-reload.test.ts"
       ]
     },
     {
@@ -3651,13 +3657,14 @@
     {
       "id": "q2.input.controller-assignment",
       "title": "Persist controller-to-player assignments",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Runtime seat routing/tuning/bindings work, but ConfigStore seat/device persistence is not connected to ApplicationInput startup/shutdown; the required restart persistence is unfinished.",
+      "status": "done",
+      "basis": "shared-replacement",
+      "reason": "Accepted 36f395ee connects shared ConfigStore seat settings to ApplicationInput startup and shutdown. Root Application restart check passed 1 test/20 assertions, including injected controller instance changes, preserving controller selection and custom bindings across transient instance changes. Physical-device qualification remains separate.",
       "paths": [
         "src/app/bootstrap/input.ts",
         "src/input/router.ts",
-        "src/settings/config.ts"
+        "src/settings/config.ts",
+        "tests/first-playable/application/controller-persistence.test.ts"
       ]
     },
     {
@@ -4337,12 +4344,15 @@
     {
       "id": "q2.browser.favorites",
       "title": "Persist favorites and direct-connect addresses",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "ServerBrowser discovery/state utilities are not constructed by the startup application, which lacks the required browser/favorite/status UI workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 8f92c90 extends the shared startup browser with saved favorites and direct addresses. Root menu and restart checks passed 2 tests/47 assertions, including favorite removal, recalled hostname preservation and fresh hostname resolution on reconnect.",
       "paths": [
-        "src/network/services/discovery.ts",
-        "src/app/bootstrap/startup-menu.ts"
+        "src/app/bootstrap/server-browser.ts",
+        "src/app/bootstrap/server-browser-addresses.ts",
+        "src/app/bootstrap/startup-menu.ts",
+        "src/app/bootstrap/startup.ts",
+        "tests/first-playable/server-browser-persistence.test.ts"
       ]
     },
     {
@@ -4423,13 +4433,14 @@
     {
       "id": "q2.admin.operator-console",
       "title": "Use dedicated-server stdin",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Dedicated stdin is nonblocking and joined to visible command execution, with say/map/quit routed, but the stated operator workflow also invokes status and the Q2 command registration has no status handler. Stdin integration alone does not complete that workflow.",
+      "status": "done",
+      "basis": "integrated",
+      "reason": "Accepted e06b6ee joins status, dumpuser and selected-player kick to dedicated stdin through the ordinary application console. Root actual classic and rerelease application checks passed 2 tests/34 assertions. Complete transport status and wire/profile qualification remain under q2.admin.status-kick.",
       "paths": [
         "src/console/dedicated.ts",
         "src/app/bootstrap/application.ts",
-        "src/app/bootstrap/q2-console.ts"
+        "src/app/bootstrap/q2-console.ts",
+        "tests/first-playable/operator-console.test.ts"
       ]
     },
     {
@@ -4437,7 +4448,7 @@
       "title": "Inspect clients and remove a player",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Client disconnect support exists, but complete native Q2 operator status/userinfo/kick command routing is not established in the cutoff application console.",
+      "reason": "Accepted e06b6ee joins local dedicated status, dumpuser and selected-player kick for classic and rerelease Q2. Complete native transport status columns, UDP kick-reason delivery and required wire/profile qualification remain open.",
       "paths": [
         "src/app/bootstrap/application.ts",
         "src/app/bootstrap/q2-console.ts",
