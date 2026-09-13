@@ -24,13 +24,13 @@ function fixturePk3(): Uint8Array<ArrayBuffer> {
   view.setUint32(end + 12, centralLength, true); view.setUint32(end + 16, localLength, true); return bytes;
 }
 
-function fixture(checksumDelta = 0) {
+function fixture(checksumDelta = 0, earlierLoaded = false, reload: () => Promise<void> = async () => {}) {
   const root = mkdtempSync(join(tmpdir(), 'q3-download-sink-')), bytes = fixturePk3(), archive = decodeArchive(bytes, 'pk3');
   const checksum = q3ArchiveChecksums(archive, 0).checksum ^ checksumDelta; archive.close();
   const commands: string[] = [], events: string[] = [];
   const client = new Q3ApplicationClientDownloads(root, { assertCurrent() {}, reliable: text => { commands.push(text); },
-    sendPacket: () => { events.push('packet'); }, progress() {}, async reloadPackages() { events.push('reload'); } });
-  client.begin([{ name: 'baseq3/custom', checksum }], [], name => existsSync(join(root, name)));
+    sendPacket: () => { events.push('packet'); }, progress() {}, async reloadPackages() { events.push('reload'); await reload(); } });
+  client.begin([...(earlierLoaded ? [{ name: 'baseq3/custom', checksum: checksum ^ 1 }] : []), { name: 'baseq3/custom', checksum }], earlierLoaded ? [checksum ^ 1] : [], name => existsSync(join(root, name)));
   let position = 0;
   const server = new Q3ServerDownload({ enabled: () => true, pure: () => false, print() {}, drop(reason) { throw new Error(reason); },
     open: () => ({ size: bytes.length, read(target) { const count = Math.min(target.length, bytes.length - position); target.set(bytes.subarray(position, position + count)); position += count; return count; }, close() {} }) });
@@ -102,4 +102,40 @@ test('a destination installed during transfer is never replaced', async () => {
     expect(readFileSync(path, 'utf8')).toBe('installed'); expect(readdirSync(join(f.root, 'baseq3'))).toEqual(['custom.pk3']);
     expect(f.commands).not.toContain('donedl');
   } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('a loaded same-name checksum does not replace the missing reference checksum', async () => {
+  const f = fixture(0, true);
+  try {
+    for (const block of f.blocks(2000)) { if (block.kind === 'start') f.client.publishSize(block.fileSize); await f.client.receive(block); }
+    expect(readFileSync(join(f.root, 'baseq3/custom.pk3'))).toEqual(Buffer.from(f.bytes));
+    expect(f.commands.at(-1)).toBe('donedl');
+  } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('stock and unsolicited packages never open a destination', async () => {
+  const f = fixture();
+  try {
+    f.client.close(); f.commands.length = 0;
+    expect(f.client.begin([{ name: 'baseq3/pak0', checksum: 1 }, { name: 'missionpack/pak8', checksum: 2 }], [], () => false)).toBe(false);
+    expect(f.commands).toEqual([]);
+    f.client.publishSize(10); await f.client.receive({ kind: 'start', fileSize: 10, data: new Uint8Array([1]) });
+    expect(f.commands).toEqual(['stopdl']); expect(readdirSync(f.root)).toEqual([]);
+    f.client.begin([{ name: 'baseq3/empty', checksum: 0 }], [], () => false);
+    f.client.publishSize(0);
+    await expect(f.client.receive({ kind: 'start', fileSize: 0, data: new Uint8Array() })).rejects.toThrow('temporary request');
+    expect(readdirSync(f.root)).toEqual([]);
+  } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('retiring a download epoch during package refresh cannot send donedl', async () => {
+  let release = () => {}, entered = () => {};
+  const waiting = new Promise<void>(resolve => { release = resolve; }), started = new Promise<void>(resolve => { entered = resolve; });
+  const f = fixture(0, false, async () => { entered(); await waiting; });
+  try {
+    const transfer = (async () => { for (const block of f.blocks(2000)) { if (block.kind === 'start') f.client.publishSize(block.fileSize); await f.client.receive(block); } })();
+    await started; f.client.close(); release();
+    await expect(transfer).rejects.toThrow('retired during filesystem refresh');
+    expect(f.commands).not.toContain('donedl');
+  } finally { release(); f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
 });

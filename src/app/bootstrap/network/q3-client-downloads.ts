@@ -69,6 +69,7 @@ export class Q3ApplicationClientDownloads {
     if (this.receiving) throw new Error('Cannot replace Q3 downloads during block processing');
     this.close();
     const list = compareQ3Packages(referenced, loadedChecksums, exists, true);
+    const loaded = new Set(loadedChecksums.map(checksum => checksum >>> 0));
     const fields = list.split('@');
     if (fields[0] !== '' || fields.length % 2 !== 1) throw new Error('Incomplete Q3 package download list');
     for (let index = 1; index < fields.length; index += 2) {
@@ -77,8 +78,11 @@ export class Q3ApplicationClientDownloads {
       checkQ3DownloadName(remote); checkQ3DownloadName(local);
       // The source server retains MAX_QPATH-1 bytes; never request a silently truncated path.
       if (remote.length >= 64) throw new RangeError('Q3 download name exceeds source server MAX_QPATH');
-      const pack = referenced.find(value => value.name !== null && `${value.name}.pk3` === remote);
+      const matching = referenced.filter(value => value.name !== null && `${value.name}.pk3` === remote && !loaded.has(value.checksum >>> 0));
+      const pack = matching[0];
       if (pack === undefined) throw new Error('Q3 download pair has no server reference');
+      if (matching.some(value => (value.checksum >>> 0) !== (pack.checksum >>> 0)))
+        throw new Error('Q3 server references conflicting checksums for one download name');
       this.queue.push({ remote, local, checksum: pack.checksum });
     }
     return this.startNext();
@@ -89,6 +93,7 @@ export class Q3ApplicationClientDownloads {
     this.source.begin(request.remote, request.local); return true;
   }
   publishSize(size: number): number {
+    this.bindings.assertCurrent();
     if (this.sink !== null && size !== this.size) throw new Error('Q3 download size changed during transfer');
     this.size = size;
     return this.source.publishSize(size);
