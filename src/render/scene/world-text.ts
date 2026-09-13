@@ -1,5 +1,5 @@
 import type { DrawBatch, RenderVertex, SceneCamera } from "../../contracts/render.ts";
-import { add3, anglesToAxis, scale3 } from "../../core/math.ts";
+import { add3, anglesToAxis, dot3, scale3, sub3 } from "../../core/math.ts";
 import type { WorldText } from "../../text/world.ts";
 import { glyphUv, resolveTextGlyph } from "../../text/atlas.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
@@ -10,6 +10,8 @@ export function prepareWorldText(texts: readonly WorldText[], camera: SceneCamer
   fontFor: (text: WorldText) => TextFontSelection): readonly DrawBatch[] {
   const project = createViewProjector(camera), batches: DrawBatch[] = [];
   for (const text of texts) {
+    if (text.distanceCullFactor !== undefined
+      && text.cellSize < dot3(sub3(text.origin, camera.origin), camera.axis[0]) * text.distanceCullFactor) continue;
     const selected = fontFor(text), font: TextFontSelection = text.font === "classic"
       ? { kind: "classic", classic: selected.classic, unicode: null } : selected;
     const axis = text.orientation.kind === "billboard" ? camera.axis : anglesToAxis(text.orientation.angles);

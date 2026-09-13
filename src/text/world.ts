@@ -6,6 +6,8 @@ export interface WorldTextInput {
   readonly origin: Vec3;
   readonly color: Vec4;
   readonly cellSize: number;
+  /** Cull when cell size is below signed camera-forward depth times this factor. */
+  readonly distanceCullFactor?: number;
   readonly orientation: { readonly kind: "billboard" } | { readonly kind: "fixed"; readonly angles: Vec3 };
   readonly depthTest: boolean;
   readonly font: "classic" | "selected";
@@ -22,6 +24,7 @@ export class WorldTextStore {
   submit(text: WorldText, nowSeconds: number, lifetimeSeconds: number): void {
     if (![nowSeconds, lifetimeSeconds, text.cellSize, text.origin.x, text.origin.y, text.origin.z,
       text.color.x, text.color.y, text.color.z, text.color.w,
+      ...(text.distanceCullFactor === undefined ? [] : [text.distanceCullFactor]),
       ...(text.orientation.kind === "fixed" ? [text.orientation.angles.x, text.orientation.angles.y, text.orientation.angles.z] : [])].every(Number.isFinite)
       || lifetimeSeconds < 0 || text.cellSize <= 0) throw new RangeError("Invalid world text geometry or lifetime");
     this.prune(nowSeconds);

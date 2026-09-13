@@ -13,6 +13,7 @@ import { SoftwareRenderer } from "../../src/render/cpu/rasterizer.ts";
 import { GlRenderer } from "../../src/render/gl/renderer.ts";
 import { SdlWindow } from "../../src/platform/sdl.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
+import { q2WorldText } from "../../src/content/q2/rerelease/world-text.ts";
 
 const source: WorldText = { content: "q2:rerelease:baseq2:test", text: "A\nBC", origin: { x: 32, y: 0, z: 8 },
   color: { x: 1, y: 0.5, z: 0.25, w: 0.5 }, cellSize: 8, font: "classic", depthTest: true, orientation: { kind: "billboard" } };
@@ -30,6 +31,14 @@ test("world text copies caller values, keeps both seats, expires on server time,
   expect(store.snapshot(4.8, 6)).toEqual([source]); expect(store.snapshot(4.8, 6)).toEqual([source]);
   expect(store.snapshot(4.8, 7)).toHaveLength(0);
   store.submit(source, 5, 1); store.clear(); expect(store.snapshot(5, 8)).toHaveLength(0);
+});
+
+test("Q2 text retains native cell conversion and distance factor", () => {
+  const native = q2WorldText({ ...source, angles: null, size: 0.2 });
+  expect(native.cellSize).toBe(1.6); expect(native.distanceCullFactor).toBe(0.004);
+  const store = new WorldTextStore();
+  expect(() => store.submit({ ...source, distanceCullFactor: Number.NaN }, 0, 1)).toThrow(RangeError);
+  expect(() => store.submit({ ...source, distanceCullFactor: -1 }, 0, 1)).not.toThrow();
 });
 
 async function renderText(kind: "cpu" | "gl"): Promise<void> {
@@ -60,6 +69,17 @@ async function renderText(kind: "cpu" | "gl"): Promise<void> {
     const store = new WorldTextStore(); store.submit(source, 0, 1); const snapshot = store.snapshot(0, 0);
     const batches = prepareWorldText(snapshot, camera, () => font);
     expect(batches).toHaveLength(3);
+    const limited = [{ ...source, distanceCullFactor: 0.25 }];
+    expect(prepareWorldText(limited, camera, () => font)).toHaveLength(3);
+    let fontLookups = 0;
+    const distantSeat = { ...camera, origin: { x: -1, y: 0, z: 0 } };
+    const culled = prepareWorldText(limited, distantSeat, () => { fontLookups++; return font; });
+    expect(culled).toHaveLength(0); expect(fontLookups).toBe(0);
+    begin(1); for (const batch of culled) draw(batch); expect(count(read())).toBe(0);
+    expect(prepareWorldText(limited, { ...camera, origin: { x: 0, y: 10000, z: 0 } }, () => font)).toHaveLength(3);
+    expect(prepareWorldText(limited, { ...camera, origin: { x: 64, y: 0, z: 0 } }, () => font)).toHaveLength(3);
+    expect(prepareWorldText([{ ...source, cellSize: 9, distanceCullFactor: 0.25 }], distantSeat, () => font)).toHaveLength(3);
+    expect(prepareWorldText(snapshot, distantSeat, () => font)).toHaveLength(3);
     begin(1); for (const batch of batches) draw(batch);
     const visible = read(); expect(count(visible)).toBeGreaterThan(30);
     await Bun.write(`/tmp/world-text-${kind}.png`, encodePng(96, 96, visible));
