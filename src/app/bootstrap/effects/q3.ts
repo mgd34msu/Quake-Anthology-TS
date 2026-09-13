@@ -190,7 +190,7 @@ export class Q3ApplicationEffects {
     return new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, new SceneModelRenderer(provider, assets.world), sounds, loadWeapons, bloodOwners);
   }
   async ballistic(event: Q3SharedBallisticEvent): Promise<void> {
-    this.state.time = event.timeMilliseconds;
+    this.state.time = Math.trunc(event.timeMilliseconds);
     if (event.kind === "remove") { this.projectiles.delete(event.actor); return; }
     this.weaponEffects ??= this.loadWeapons();
     const media = await this.weaponEffects; this.readyWeapons = media;

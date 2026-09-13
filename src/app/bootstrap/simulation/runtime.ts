@@ -2857,7 +2857,7 @@ export class SharedSimulation implements Simulation {
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }
   movementPlayer(actor: ActorId): Readonly<MovementPlayer> | null { return this.player(actor); }
   weaponPresentationClock(): { readonly content: ContentId; readonly timeMilliseconds: number } | null {
-    return this.selectedArsenal?.family !== "q3" ? null : { content: this.weaponProvider.content, timeMilliseconds: this.selectedMilliseconds };
+    return this.selectedArsenal?.family !== "q3" ? null : { content: this.weaponProvider.content, timeMilliseconds: Math.trunc(this.selectedMilliseconds) };
   }
   q2PlayerView(actor: ActorId): Q2PlayerView | null { return this.q2Views.get(actor) ?? null; }
   controlPlayer(actor: ActorId, control: { readonly kind: "cutscene"; readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 }): undefined {
@@ -2975,7 +2975,7 @@ export class SharedSimulation implements Simulation {
       const view = nativeView === undefined ? player.view() : this.playerView(actor), sourceView = q2 === undefined ? undefined : nativeView;
       const selected = this.selectedArsenal, arsenal = selected?.read(actor), body = this.bodies.read(actor);
       const q3Weapon = selected?.family !== "q3" || arsenal?.state.kind !== "q3" || body === null ? {} : { q3Weapon: {
-        ...selected.viewState(actor), timeMilliseconds: this.selectedMilliseconds, weapon: arsenal.state.sourceWeapon,
+        ...selected.viewState(actor), timeMilliseconds: Math.trunc(this.selectedMilliseconds), weapon: arsenal.state.sourceWeapon,
         firing: (player.buttons & 1) !== 0 && (this.combat.read(actor)?.health ?? 0) > 0,
         horizontalSpeed: Math.hypot(body.velocity.x, body.velocity.y), bobCycle: player.state.kind === "q3" ? player.state.bobCycle : 0 } };
       result.push({ actor, ...q3Weapon, content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame, oldFrame: model.frame,
