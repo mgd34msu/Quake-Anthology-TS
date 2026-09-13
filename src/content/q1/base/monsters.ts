@@ -152,7 +152,7 @@ export class BaseMonster {
     const { game, entity } = this;
     if (mode === "stand" || mode === "walk" || mode === "run") this.state.mode = mode;
     switch (mode) {
-      case "stand": if (!this.findTarget() && game.time > this.state.pauseUntil && this.route() !== null) this.play(this.spec.walk); return undefined;
+      case "stand": if (!this.findTarget() && game.time > this.state.pauseUntil && this.route() !== null && this.spec.walk !== this.spec.stand) this.play(this.spec.walk); return undefined;
       case "turn": if (!this.findTarget()) this.face(); return undefined;
       case "walk": {
         if (this.findTarget() || game.time < this.state.pauseUntil) return undefined;

@@ -1,3 +1,4 @@
+import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 
 /** Live map-script fields; source entity records can supply these fields directly. */
@@ -23,6 +24,7 @@ export interface AuthoredMonster extends AuthoredTarget {
   combatTarget: string;
   combatGoal: ActorId | null;
   standGround: boolean;
+  placement: { readonly kind: "ready" } | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: ActorId; readonly origin: Vec3 }[]; activator: ActorId | null };
   activation: { readonly kind: "active" } | { readonly kind: "dormant" } | { readonly kind: "scheduled"; readonly at: number; readonly activator: ActorId | null };
 }
 

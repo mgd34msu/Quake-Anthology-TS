@@ -62,7 +62,7 @@ export function defaultMonsterRoster(authoredFamily: "q1" | "q2", target: Provid
   if (selected === undefined) throw new RangeError(`Unknown monster source: ${target.provider}`);
   const byClassname: Record<string, MonsterSelectionTarget> = {};
   for (const slot of campaignMonsterSlots(authoredFamily)) {
-    const classname = selected.family === authoredFamily && Object.hasOwn(selected.creatures, slot.classname)
+    const classname = slot.role === "boss" || slot.role === "special" ? null : selected.family === authoredFamily && Object.hasOwn(selected.creatures, slot.classname)
       ? slot.classname : preferred[selected.family][slot.role];
     byClassname[slot.classname] = classname !== null && Object.hasOwn(selected.creatures, classname)
       ? { source: target, classname } : { kind: "map-defined" };

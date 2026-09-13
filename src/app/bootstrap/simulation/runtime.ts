@@ -1,3 +1,4 @@
+import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
 import type { WorldText } from "../../../text/world.ts";
 import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
@@ -13,9 +14,6 @@ import { Q1ClientVisibility } from "../../../world/gameplay/q1-client-visibility
 import type { Q1ClientEye } from "../../../world/gameplay/q1-client-visibility.ts";
 import { selectedMonsterDefinitions } from "../../../content/catalog/monsters.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
-import { Q2MissionPackProjectiles } from "../../../content/q2/missionpacks/projectiles/index.ts";
-import { registerQ2ClassicBaseMonsters } from "../../../content/q2/base/monsters/index.ts";
-import { registerQ2RereleaseOrdinaryMonsters } from "../../../content/q2/rerelease/monsters/index.ts";
 import { WeaponSlot } from "./weapon-slot.ts";
 import type { PrimaryWeaponHandoff, WeaponReference, WeaponSlotState } from "./weapon-slot.ts";
 import { projectWeaponSlot } from "./weapon-slot-projection.ts";
@@ -23,13 +21,13 @@ import type { WeaponSlotProjection } from "./weapon-slot-projection.ts";
 import { readWeaponSlots } from "./weapon-slot-checkpoint.ts";
 import { GrappleRuntime } from "./grapple-runtime.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
-import { preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
+import { nearbyMonsterPlacement, preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
+import { parseVector } from "../../../content/q1/foundation/entity.ts";
 import { parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { SelectedMonsterSource } from "./monster-runtime.ts";
 import { monsterSource } from "../../../content/monsters/definitions.ts";
 import type { MonsterMission } from "../../../content/monsters/authored.ts";
 import { setMonsterRoute } from "../../../content/q1/foundation/monsters.ts";
-import { Q2Monsters } from "../../../content/q2/foundation/monsters/index.ts";
 import type { GrappleSlotHost } from "./grapple-runtime.ts";
 import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound } from "../../../content/q2/foundation/weapons/presentation.ts";
 import { readGrappleRuntimeCheckpoint } from "./grapple-checkpoint.ts";
@@ -37,6 +35,7 @@ import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
 import { Q1Creatures, q1Creatures } from "../../../content/q1/base/creatures.ts";
 import { baseSpecies } from "../../../content/q1/base/species.ts";
+import { registerSelectedQ1Expansion } from "./monster-sources.ts";
 import { q1AmmoPickupSelection, q1WeaponPickupSelection } from "../../../content/q1/foundation/pickups.ts";
 import { threewaveCharacterPose } from "../../../content/q1/equipment/threewave-weapon.ts";
 import { ThreewaveGrapple } from "../../../content/q1/equipment/threewave-grapple.ts";
@@ -294,7 +293,8 @@ export class SharedSimulation implements Simulation {
         if (player !== undefined) return { actor, velocity: body.velocity, angularVelocity: zero,
           kind: this.q2Characters.get(actor)?.state.dead ? this.q2Characters.get(actor)?.state.gibbed ? "bounce" : "toss" : "step", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null };
         const entry = this.actorExecutions.get(actor.id);
-        return entry === undefined ? null : actorMotion(entry, body);
+        const motion = entry === undefined ? null : actorMotion(entry, body);
+        return motion === null || this.selectedMonsters?.active(actor.id) !== false ? motion : { ...motion, kind: "stationary", velocity: zero, angularVelocity: zero };
       },
       getFlags: actor => {
         const player = this.playerStates.get(actor), entry = this.actorExecutions.get(actor.id);
@@ -509,41 +509,59 @@ export class SharedSimulation implements Simulation {
     let source: SelectedMonsterSource;
     if (registered.family === "q1") {
       const game = new Q1EntityServices(this.q1ActorHost(reference, runtime), { ...common, deathmatch: 0, coop: this.options.mode === "coop", gravity: this.physics.gravity, precacheProgram: "id1" });
-      const creatures = new Q1Creatures(game, {
-        countMonsterKill: monster => { throw new Error(`Selected creature has no authored mission: ${monster.entity.classname}`); },
-        finale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
-        finishFinale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
-      });
-      creatures.registerSpecies(baseSpecies.filter(species => species.classnames.every(classname => Object.hasOwn(registered.creatures, classname))));
-      game.registerStateExtension({ id: "q1:selected-creatures",
-        capture: () => encodeCheckpointValue({ version: 1, ...creatures.captureFields() }),
-        restore: bytes => {
-          const reader = new SaveReader(decodeCheckpointValue(bytes), "q1:selected-creatures");
-          reader.field("version").literal(1);
-          return creatures.restoreFields(reader);
+      if (registered.program !== "id1") registerSelectedQ1Expansion(game, registered.program, {
+        emit: event => this.events.emit(reference.content, { kind: "q1-composition", event: { kind: "addon", event } }, clock.frame.time),
+        isMonster: actor => {
+          const execution = this.actorExecutions.get(actor);
+          return execution?.kind === "q1" ? (execution.entity.movementFlags & 32) !== 0
+            : execution?.kind === "q2" && (execution.entity.serverFlags & 4) !== 0;
         },
-        clone: (original, target) => creatures.clone(original, target),
+        cvar: name => this.source.kind === "q1" ? this.source.cvars.variableValue(name) : this.q2ServerRegistry?.variableValue(name) ?? 0,
+        setCvar: (name, value) => {
+          const registry = this.source.kind === "q1" ? this.source.cvars : this.q2ServerRegistry;
+          if (registry === null) throw new Error("Selected Q1 addon requires the shared server settings registry");
+          registry.set(name, value, true); return undefined;
+        },
       });
+      else {
+        const creatures = new Q1Creatures(game, {
+          countMonsterKill: monster => { throw new Error(`Selected creature has no authored mission: ${monster.entity.classname}`); },
+          finale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
+          finishFinale: monster => { throw new Error(`Selected creature finale is unavailable: ${monster.entity.classname}`); },
+        });
+        creatures.registerSpecies(baseSpecies.filter(species => species.classnames.every(classname => Object.hasOwn(registered.creatures, classname))));
+        game.registerStateExtension({ id: "q1:selected-creatures",
+          capture: () => encodeCheckpointValue({ version: 1, ...creatures.captureFields() }),
+          restore: bytes => {
+            const reader = new SaveReader(decodeCheckpointValue(bytes), "q1:selected-creatures");
+            reader.field("version").literal(1);
+            return creatures.restoreFields(reader);
+          },
+          clone: (original, target) => creatures.clone(original, target),
+        });
+      }
       game.pickupAdmission = this.selectedCreaturePickups();
       source = { kind: "q1", reference, random, clock, game };
     } else {
-      let monsters: Q2Monsters;
-      const weapons = new Q2Ballistics({ emit: event => this.weaponEvent(reference.content, event),
-        noise: (actor, origin, secondary) => monsters.reportNoise(actor, origin, secondary),
-        dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
-        ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
-        lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) });
-      monsters = new Q2Monsters(weapons, { mission: actor => this.monsterMissions.get(actor) ?? null });
-      const projectiles = registered.edition === "rerelease" ? new Q2MissionPackProjectiles({ base: weapons,
-        monster: actor => monsters.context(actor), gravity: () => this.physics.gravity,
-        playerEffect: event => this.events.emit(reference.content, { kind: "q2-composition", event: { kind: "missionpack-player", event } }, clock.frame.time) }) : null;
-      if (projectiles !== null) registerQ2RereleaseOrdinaryMonsters(monsters, projectiles);
-      const modules = registered.edition === "classic" ? [registerQ2ClassicBaseMonsters(monsters), monsters] : [monsters];
-      const game = new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
-        { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, modules);
-      weapons.registerCallbacks(game);
-      if (projectiles !== null) game.sourceCallbacks.register(projectiles.callbacks);
-      source = { kind: "q2", reference, random, clock, game, monsters, ballistics: weapons };
+      const modules = createSelectedQ2MonsterModules({ edition: registered.edition, program: registered.program,
+        behavior: { mission: actor => this.monsterMissions.get(actor) ?? null },
+        weapons: { emit: event => this.weaponEvent(reference.content, event),
+          dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
+          ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
+          lagCompensation: { kind: "current-world" }, canTarget: (attacker, target) => attacker === null || !attacker.equals(target) },
+        gravity: () => this.physics.gravity,
+        powerups: actor => {
+          if (this.source.kind === "q2") return this.source.product.powerups(actor);
+          if (this.source.kind === "q1") { const powers = this.source.game.player(actor)?.powerups;
+            return { quadUntil: powers?.get("quad") ?? 0, doubleUntil: 0, invulnerabilityUntil: powers?.get("invulnerability") ?? 0 }; }
+          if (this.source.kind !== "q3") throw new Error("Selected Q2 monster powerups require an admitted character source");
+          const powers = this.source.game.records.nativeByActor(actor)?.client?.ps.powerups;
+          return { quadUntil: (powers?.get(Powerup.PW_QUAD) ?? 0) / 1000, doubleUntil: 0, invulnerabilityUntil: (powers?.get(Powerup.PW_INVULNERABILITY) ?? 0) / 1000 };
+        },
+        playerEffect: event => this.events.emit(reference.content, { kind: "q2-composition", event: { kind: "missionpack-player", event } }, clock.frame.time),
+        createGame: (monsters, spawnModules) => new Q2EntityServices(this.q2ActorHost(reference, runtime, actor => monsters.context(actor)?.state),
+          { ...common, mode: this.options.mode === "coop" ? "coop" : "singleplayer", mapName: this.recipe.map.geometry.requestedPath, deathmatchFlags: 0 }, spawnModules) });
+      source = { kind: "q2", reference, random, clock, ...modules };
     }
     this.monsterSources.set(reference.provider, source);
     return source;
@@ -587,9 +605,65 @@ export class SharedSimulation implements Simulation {
               native: map.monsters.definition(entry.classname, map.game), game: source.game, entity: q2Entity, body });
           const preserved = source.kind === "q1" && this.options.world.kind === "q1-bsp" && entity !== null
             && preservesAuthoredQ1Placement({ map: this.recipe.map, authored: this.options.world.entityList[entry.sourceOrdinal], definition, game: source.game, entity, body });
-          if (!preserved && !preservedQ2) throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+          if (!preserved && !preservedQ2) {
+            const nativeBounds = map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.bounds
+              : baseSpecies.find(species => species.classnames.includes(entry.classname))?.bounds;
+            const position = map.kind === "q2" ? parseQ2Entities(this.options.world.entities, map.game.options.edition)[entry.sourceOrdinal]?.values.get("origin")
+              : this.options.world.kind === "q1-bsp" ? this.options.world.entityList[entry.sourceOrdinal]?.properties.find(property => property.key === "origin")?.value : undefined;
+            const flags = entity?.movementFlags ?? q2Entity?.flags ?? 0;
+            const locomotion = (flags & 2) !== 0 ? "swim" : (flags & 1) !== 0 ? "fly" : "walk";
+            const medium = (origin: Vec3): number => {
+              if (source.kind === "q2") return source.game.host.pointContents(origin) & 56;
+              const contents = source.game.host.contents(origin);
+              return contents === "water" ? 32 : contents === "slime" ? 16 : contents === "lava" ? 8 : 0;
+            };
+            const originalMedium = medium(body.origin);
+            const blockers: ActorId[] = [];
+            const search = (excluded: readonly ActorId[]) => nativeBounds === undefined || position === undefined ? null : nearbyMonsterPlacement({ body, locomotion, worldActor: this.worldActor(),
+              sameMedium: origin => medium(origin) === originalMedium,
+              authored: { origin: parseVector(position), bounds: nativeBounds },
+              query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
+                policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
+              blockedBy: actor => { if (!blockers.some(value => value.equals(actor))) blockers.push(actor); return undefined; },
+              trace: query => this.scene.traceExcluding(query, excluded) });
+            const placement = search([]);
+            if (placement === null) {
+              const candidates = map.kind === "q2" && entry.targetname !== "" ? map.game.targets(entry.targetname).filter(door => {
+                const state = map.movers.traversal(door);
+                return door.classname === "func_door" && (state.locked || state.destination !== null);
+              }) : [];
+              let doors = candidates.filter(door => blockers.some(actor => actor.equals(door.actor.id)));
+              let future: ReturnType<typeof nearbyMonsterPlacement> = null;
+              while (doors.length > 0) {
+                future = search(doors.map(door => door.actor.id));
+                if (future !== null) break;
+                const next = candidates.filter(door => blockers.some(actor => actor.equals(door.actor.id)));
+                if (next.length === doors.length) break;
+                doors = next;
+              }
+              if (map.kind === "q2" && future !== null) {
+                entry.placement = { kind: "waiting", barriers: doors.map(door => ({ actor: door.actor.id, origin: map.game.body(door).origin })), activator: null };
+                this.combat.setTraits(entry.actor, { canTakeDamage: false });
+                this.bodies.link(entry.actor);
+                return false;
+              }
+              throw new Error(`Selected monster placement obstructed in ${this.recipe.map.geometry.requestedPath}: source ${entry.sourceOrdinal} ${entry.classname} -> ${definition.source.provider}/${definition.classname}`);
+            }
+            this.bodies.write(entry.actor, { ...body, ...placement });
+            if (entity !== null && locomotion === "walk") entity.movementFlags |= 512;
+            this.bodies.link(entry.actor);
+          }
         }
-        return undefined;
+        return true;
+      },
+      placementReady: entry => {
+        if (entry.placement.kind !== "waiting" || map.kind !== "q2") return false;
+        return entry.placement.barriers.every(barrier => {
+          const door = map.game.entity(barrier.actor);
+          if (door === null) return true;
+          const traversal = map.movers.traversal(door), origin = map.game.body(door).origin;
+          return !traversal.locked && traversal.destination === null && (origin.x !== barrier.origin.x || origin.y !== barrier.origin.y || origin.z !== barrier.origin.z);
+        });
       },
       resume: (actor, activator) => {
         const entry = this.actorExecutions.get(actor);
@@ -635,7 +709,7 @@ export class SharedSimulation implements Simulation {
     return { version: 2, authored: this.selectedMonsters.capture(), sources: [...this.monsterSources.values()].map(source => {
       const common = { reference: source.reference, frame: source.clock.frame, random: source.random.checkpoint() };
       return source.kind === "q1" ? { ...common, kind: "q1", entities: source.game.capture() }
-        : { ...common, kind: "q2", entities: source.game.capture(), monsters: source.monsters.capture(), ballistics: source.ballistics.captureProjectiles() };
+        : { ...common, kind: "q2", entities: source.game.capture(), monsters: source.monsters.capture(), ballistics: source.ballistics.captureProjectiles(), movers: source.movers.capture(source.game), packs: source.packs.map(pack => ({ pack: pack.pack, state: pack.monsters.capture(source.game) })) };
     }) };
   }
 
@@ -656,7 +730,8 @@ export class SharedSimulation implements Simulation {
       if (source === undefined || source.reference.content !== state.reference.content || source.kind !== state.kind) throw new Error("Saved monster source differs from selected module");
       source.clock.frame = state.frame; source.clock.advanced = false; source.random.restore(state.random);
       if (source.kind === "q1" && state.kind === "q1") source.game.restore(state.entities, { scheduleThinks: false });
-      else if (source.kind === "q2" && state.kind === "q2") { source.game.restore(state.entities); source.monsters.restore(source.game, state.monsters); source.ballistics.restoreProjectiles(source.game, state.ballistics); }
+      else if (source.kind === "q2" && state.kind === "q2") { source.game.restore(state.entities); source.monsters.restore(source.game, state.monsters); source.ballistics.restoreProjectiles(source.game, state.ballistics); if (state.movers !== null) source.movers.restore(source.game, state.movers);
+        for (const savedPack of state.packs) { const pack = source.packs.find(value => value.pack === savedPack.pack); if (pack === undefined) throw new Error("Saved monster pack is not registered"); pack.monsters.restore(source.game, savedPack.state); } }
     }
     return undefined;
   }

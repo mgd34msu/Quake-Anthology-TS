@@ -1,4 +1,4 @@
-import type { Q2Ballistics } from "../../../content/q2/foundation/weapons/ballistics.ts";
+import type { SelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../contracts/content.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
@@ -7,10 +7,8 @@ import type { Q1Foundation } from "../../../content/q1/foundation/runtime.ts";
 import type { Q2Foundation } from "../../../content/q2/foundation/runtime.ts";
 import type { Q2SpawnFields } from "../../../content/q2/foundation/host.ts";
 import type { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
-import type { Q2EntityServices } from "../../../content/q2/foundation/entity-services.ts";
 import type { Q2ItemModule } from "../../../content/q2/foundation/items.ts";
 import { placeTriggeredMonster } from "../../../content/q2/foundation/monsters/index.ts";
-import type { Q2Monsters } from "../../../content/q2/foundation/monsters/index.ts";
 import type { Q2PathFollower, Q2CombatFollower } from "../../../content/q2/foundation/monsters/index.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
 import type { SourceRandom } from "./random.ts";
@@ -21,11 +19,12 @@ export type SelectedMonsterSource = {
   readonly random: SourceRandom;
   readonly clock: { frame: FrameContext; advanced: boolean };
 } & ({ readonly kind: "q1"; readonly game: Q1EntityServices }
-  | { readonly kind: "q2"; readonly game: Q2EntityServices; readonly monsters: Q2Monsters; readonly ballistics: Q2Ballistics });
+  | ({ readonly kind: "q2" } & SelectedQ2MonsterModules));
 
 export interface SelectedMonsterBehavior {
   attach(actor: OwnedActor, definition: MonsterDefinitionReference, mission: MonsterMission): undefined;
-  validatePlacement(entry: AuthoredMonster, definition: MonsterDefinitionReference): undefined;
+  validatePlacement(entry: AuthoredMonster, definition: MonsterDefinitionReference): boolean;
+  placementReady(entry: AuthoredMonster): boolean;
   enemy(actor: ActorId): ActorId | null;
   oldEnemy(actor: ActorId): ActorId | null;
   setRoute(actor: ActorId, goal: ActorId | null, pauseUntil: number): undefined;
@@ -35,8 +34,8 @@ export interface SelectedMonsterBehavior {
 export type MonsterMap = { readonly kind: "q1"; readonly game: Q1Foundation }
   | { readonly kind: "q2"; readonly game: Q2Foundation; readonly items: Q2ItemModule };
 
-const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie"]);
-const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander", "monster_flipper", "monster_brain"]);
+const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie", "monster_scourge", "monster_gremlin", "monster_eel", "monster_sword", "monster_wrath", "monster_mummy", "monster_lava_man"]);
+const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander", "monster_flipper", "monster_brain", "monster_gekk", "monster_chick_heat", "monster_soldier_ripper", "monster_soldier_hypergun", "monster_soldier_lasergun", "monster_stalker", "monster_daedalus"]);
 
 /** Authored links and counters remain in the map program while behavior attaches to its actual actor. */
 export class SelectedMonsters {
@@ -66,7 +65,7 @@ export class SelectedMonsters {
     return this.admit(actor, source.values, source.ordinal, definition);
   }
 
-  active(actor: ActorId): boolean { return (this.authored.get(actor)?.activation.kind ?? "active") === "active"; }
+  active(actor: ActorId): boolean { const entry = this.authored.get(actor); return entry === undefined || entry.activation.kind === "active" && entry.placement.kind === "ready"; }
 
   capture(): readonly SavedAuthoredMonster[] {
     const save = (actor: ActorId) => ({ slot: actor.slot, generation: actor.generation });
@@ -74,6 +73,7 @@ export class SelectedMonsters {
       const definition = this.definitions.get(entry.actor.id);
       if (definition === undefined) throw new Error("Authored monster has no selected definition");
       return { ...entry, definition, actor: save(entry.actor.id), routeGoal: entry.routeGoal === null ? null : save(entry.routeGoal), combatGoal: entry.combatGoal === null ? null : save(entry.combatGoal),
+        placement: entry.placement.kind === "ready" ? entry.placement : { ...entry.placement, barriers: entry.placement.barriers.map(barrier => ({ ...barrier, actor: save(barrier.actor) })), activator: entry.placement.activator === null ? null : save(entry.placement.activator) },
         activation: entry.activation.kind === "scheduled" ? { ...entry.activation, activator: entry.activation.activator === null ? null : save(entry.activation.activator) } : entry.activation };
     });
   }
@@ -89,7 +89,15 @@ export class SelectedMonsters {
         || actors.observe(actor.id)?.definition !== `${expected.source.provider}/${expected.classname}`) throw new Error("Saved monster definition differs from selected actor");
       const { definition, ...fields } = saved;
       const entry: AuthoredMonster = { ...fields, actor, routeGoal: saved.routeGoal === null ? null : actors.referenceSaved(saved.routeGoal), combatGoal: saved.combatGoal === null ? null : actors.referenceSaved(saved.combatGoal),
+        placement: saved.placement.kind === "ready" ? saved.placement : { ...saved.placement, barriers: saved.placement.barriers.map(barrier => ({ ...barrier, actor: actors.referenceSaved(barrier.actor) })), activator: saved.placement.activator === null ? null : actors.referenceSaved(saved.placement.activator) },
         activation: saved.activation.kind === "scheduled" ? { ...saved.activation, activator: saved.activation.activator === null ? null : actors.referenceSaved(saved.activation.activator) } : saved.activation };
+      if (entry.placement.kind === "waiting") {
+        if (this.map.kind !== "q2" || entry.targetname === "" || entry.placement.barriers.length === 0) throw new Error("Saved waiting monster has no authored door encounter");
+        for (const barrier of entry.placement.barriers) {
+          const door = this.map.game.entity(barrier.actor);
+          if (door === null ? actors.isLive(barrier.actor) : door.classname !== "func_door" || door.targetname !== entry.targetname) throw new Error("Saved waiting monster barrier differs from its authored encounter");
+        }
+      }
       this.authored.set(actor.id, entry); this.definitions.set(actor.id, definition); this.map.game.authoredTargets.set(actor.id, entry);
     }
     return undefined;
@@ -97,7 +105,19 @@ export class SelectedMonsters {
 
   beforeTurn(actor: ActorId): boolean {
     const entry = this.authored.get(actor);
-    if (entry === undefined || entry.activation.kind === "active") return true;
+    if (entry === undefined) return true;
+    if (entry.placement.kind === "waiting") {
+      if (!this.behavior.placementReady(entry)) return false;
+      const definition = this.definitions.get(actor);
+      if (definition === undefined) throw new Error("Waiting monster has no selected definition");
+      const activator = entry.placement.activator;
+      if (!this.behavior.validatePlacement(entry, definition)) return false;
+      entry.placement = { kind: "ready" };
+      this.map.game.host.combat.setTraits(entry.actor, { canTakeDamage: true });
+      this.map.game.host.bodies.link(entry.actor);
+      this.behavior.resume(actor, activator);
+    }
+    if (entry.activation.kind === "active") return this.active(actor);
     const activation = entry.activation;
     if (this.map.kind !== "q2") throw new Error("Triggered monster activation requires its Q2 map program");
     if (activation.kind === "dormant" || activation.at > this.map.game.host.now()) return false;
@@ -108,7 +128,7 @@ export class SelectedMonsters {
     game.host.combat.setTraits(entry.actor, { canTakeDamage: true });
     game.host.bodies.link(entry.actor);
     this.behavior.resume(actor, (entry.spawnflags & 1) === 0 ? activation.activator : null);
-    return game.host.actors.isLive(actor);
+    return game.host.actors.isLive(actor) && this.active(actor);
   }
 
   q1PathFollower(actor: ActorId): { readonly targetname: string; readonly enemy: ActorId | null; advance(name: string, goal: ActorId | null, pauseUntil: number): undefined } | null {
@@ -145,6 +165,7 @@ export class SelectedMonsters {
       spawnflags: Number(fields.get("spawnflags") ?? 0), deathTarget: fields.get("deathtarget") ?? "", dropItem: fields.get("item") ?? "", targetname: fields.get("targetname") ?? "", target,
       killtarget: fields.get("killtarget") ?? "", message: fields.get("message") ?? "", delay: Number(fields.get("delay") ?? 0), route: target, routeGoal: null, routeResolved: false, countedDeath: false,
       combatTarget: fields.get("combattarget") ?? "", combatGoal: null, standGround: false,
+      placement: { kind: "ready" },
       activation: this.map.kind === "q2" && (Number(fields.get("spawnflags") ?? 0) & 2) !== 0 ? { kind: "dormant" } : { kind: "active" } };
     this.authored.set(actor.id, entry); this.definitions.set(actor.id, definition);
     this.map.game.authoredTargets.set(actor.id, entry);
@@ -173,7 +194,8 @@ export class SelectedMonsters {
     return { ambush: (entry.spawnflags & 1) !== 0, started: () => {
       const definition = this.definitions.get(entry.actor.id);
       if (definition === undefined) throw new Error("Started monster has no selected definition");
-      return this.behavior.validatePlacement(entry, definition);
+      this.behavior.validatePlacement(entry, definition);
+      return undefined;
     }, route: () => this.route(entry), foundTarget: () => {
       if (entry.combatTarget !== "" && this.behavior.enemy(entry.actor.id) !== null && this.map.kind === "q2") {
         const target = this.map.game.pickTarget(entry.combatTarget);
@@ -184,6 +206,7 @@ export class SelectedMonsters {
       }
       return undefined;
     }, combatRoute: () => ({ goal: entry.combatGoal, standGround: entry.standGround }), use: activator => {
+      if (entry.placement.kind === "waiting") { entry.placement.activator = activator; return true; }
       if (entry.activation.kind === "active") return false;
       if (this.map.kind !== "q2") throw new Error("Triggered monster use requires its Q2 map program");
       if (entry.activation.kind === "dormant") entry.activation = { kind: "scheduled", at: this.map.game.host.now() + (this.map.game.options.edition === "rerelease" ? this.map.game.host.frameSeconds() : 0.1), activator };

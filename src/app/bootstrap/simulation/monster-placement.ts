@@ -1,9 +1,11 @@
+import type { ActorId } from "../../../contracts/identity.ts";
+import type { TraceQuery, TraceResult } from "../../../contracts/scene.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnFields } from "../../../content/q2/foundation/host.ts";
 import type { Q2MonsterDefinition } from "../../../content/q2/foundation/monsters/types.ts";
 import { add, integerField, vectorField } from "../../../content/q2/foundation/fields.ts";
 import { monsterSolidMask } from "../../../content/q2/foundation/monsters/ai.ts";
 import type { MonsterDefinitionReference, ResolvedMap } from "../../../contracts/content.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
+import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
 import { q1EntityValue } from "../../../formats/q1-map/index.ts";
@@ -64,4 +66,106 @@ export function preservesAuthoredQ2Placement(input: {
   const floor = game.host.trace({ start, end: add(start, { x: 0, y: 0, z: -256 }), bounds: body.bounds,
     ignore: entity.actor.id, mask: monsterSolidMask(game) });
   return floor.fraction !== 1 && !floor.allSolid && floor.hit.kind === "world" && sameVector(body.origin, floor.end);
+}
+
+
+const placementOffsets = new Map<number, readonly { readonly x: number; readonly y: number }[]>();
+function offsetsWithin(radius: number): readonly { readonly x: number; readonly y: number }[] {
+  const cached = placementOffsets.get(radius);
+  if (cached !== undefined) return cached;
+  const offsets: { readonly x: number; readonly y: number }[] = [];
+  for (let x = -Math.ceil(radius / 4); x <= Math.ceil(radius / 4); x++) {
+    for (let y = -Math.ceil(radius / 4); y <= Math.ceil(radius / 4); y++) {
+      if ((x * x + y * y) * 16 <= radius * radius) offsets.push({ x: x * 4, y: y * 4 });
+    }
+  }
+  offsets.sort((a, b) => a.x * a.x + a.y * a.y - b.x * b.x - b.y * b.y || a.y - b.y || a.x - b.x);
+  placementOffsets.set(radius, offsets);
+  return offsets;
+}
+
+/** Keep the authored encounter reachable by its original hull while fitting the selected hull. */
+export function nearbyMonsterPlacement(input: {
+  readonly body: BodyState;
+  readonly locomotion: "walk" | "fly" | "swim";
+  readonly worldActor: ActorId | null;
+  readonly sameMedium: (origin: Vec3) => boolean;
+  readonly authored: { readonly origin: Vec3; readonly bounds: Bounds };
+  readonly query: Omit<TraceQuery, "start" | "end" | "shape">;
+  readonly trace: (query: TraceQuery) => TraceResult;
+  readonly blockedBy?: (actor: ActorId) => undefined;
+}): Pick<BodyState, "origin" | "ground"> | null {
+  const { body, authored, query, trace } = input;
+  const routeTrace = (value: TraceQuery): TraceResult => {
+    const result = trace({ ...value, policy: value.policy.kind === "q1" ? { ...value.policy, move: "no-monsters" } : value.policy });
+    if (result.fraction < 1 && result.hit.kind === "actor") input.blockedBy?.(result.hit.actor);
+    return result;
+  };
+  const sourceStart = { ...authored.origin, z: authored.origin.z + 1 };
+  const sourceFloor = routeTrace({ ...query, start: sourceStart, end: { ...sourceStart, z: sourceStart.z - 256 }, shape: { kind: "box", bounds: authored.bounds } });
+  const supported = !sourceFloor.startSolid && !sourceFloor.allSolid && sourceFloor.fraction < 1;
+  if (!supported && input.locomotion === "walk") return null;
+  const sourceOrigin = supported ? sourceFloor.end : authored.origin;
+  const feet = sourceOrigin.z + authored.bounds.min.z;
+  const anchor = { x: sourceFloor.end.x, y: sourceFloor.end.y, z: feet - body.bounds.min.z };
+  const radius = 2 * Math.max(body.bounds.max.x - body.bounds.min.x, body.bounds.max.y - body.bounds.min.y,
+    authored.bounds.max.x - authored.bounds.min.x, authored.bounds.max.y - authored.bounds.min.y);
+  const offsets = offsetsWithin(radius);
+  if (input.locomotion !== "walk") {
+    const vertical = [0];
+    for (let z = 4; z <= body.bounds.max.z - body.bounds.min.z; z += 4) vertical.push(-z, z);
+    for (const offset of offsets) for (const z of vertical) {
+      const origin = { x: body.origin.x + offset.x, y: body.origin.y + offset.y, z: body.origin.z + z };
+      if (!input.sameMedium(origin)) continue;
+      const fit = trace({ ...query, start: origin, end: origin, shape: { kind: "box", bounds: body.bounds } });
+      if (fit.startSolid || fit.allSolid) continue;
+      const sourceEnd = { ...origin, z: origin.z + body.bounds.min.z - authored.bounds.min.z };
+      const route = routeTrace({ ...query, start: sourceOrigin, end: sourceEnd, shape: { kind: "box", bounds: authored.bounds } });
+      if (!route.startSolid && !route.allSolid && route.fraction === 1) return { origin, ground: null };
+    }
+  }
+  if (input.locomotion === "walk") for (const offset of offsets) for (const lift of [1, 18]) {
+    const start = { x: anchor.x + offset.x, y: anchor.y + offset.y, z: anchor.z + lift };
+    const floor = trace({ ...query, start, end: { ...start, z: anchor.z - 18 }, shape: { kind: "box", bounds: body.bounds } });
+    if (floor.startSolid || floor.allSolid || floor.fraction === 1 || floor.contact.kind !== "plane" || floor.contact.plane.normal.z < 0.7) continue;
+    if (!input.sameMedium(floor.end)) continue;
+    const fit = trace({ ...query, start: floor.end, end: floor.end, shape: { kind: "box", bounds: body.bounds } });
+    if (fit.startSolid || fit.allSolid) continue;
+    const sourceEnd = { ...floor.end, z: floor.end.z + body.bounds.min.z - authored.bounds.min.z };
+    const route = routeTrace({ ...query, start: sourceOrigin, end: sourceEnd, shape: { kind: "box", bounds: authored.bounds } });
+    if (route.startSolid || route.allSolid || route.fraction !== 1) continue;
+    return { origin: floor.end, ground: floor.hit.kind === "actor" ? floor.hit.actor : input.worldActor };
+  }
+  if (!supported) return null;
+  // Tight authored pockets can open around a corner: follow walkable source-hull edges.
+  const pending: Vec3[] = [sourceOrigin];
+  const visited = new Set<string>(["0,0"]);
+  const reach = Math.max(512, radius);
+  for (let index = 0; index < pending.length && index < 4096; index++) {
+    const current = pending[index];
+    if (current === undefined) break;
+    for (const direction of [{ x: 8, y: 0 }, { x: -8, y: 0 }, { x: 0, y: 8 }, { x: 0, y: -8 }]) {
+      const x = current.x + direction.x, y = current.y + direction.y;
+      const key = `${x - sourceOrigin.x},${y - sourceOrigin.y}`;
+      if (visited.has(key) || Math.hypot(x - sourceOrigin.x, y - sourceOrigin.y) > reach) continue;
+      for (const lift of [0, 18]) {
+        const start = { ...current, z: current.z + lift };
+        const raised = routeTrace({ ...query, start: current, end: start, shape: { kind: "box", bounds: authored.bounds } });
+        if (raised.startSolid || raised.allSolid || raised.fraction !== 1) continue;
+        const across = routeTrace({ ...query, start, end: { x, y, z: start.z }, shape: { kind: "box", bounds: authored.bounds } });
+        if (across.startSolid || across.allSolid || across.fraction !== 1) continue;
+        const floor = routeTrace({ ...query, start: across.end, end: { x, y, z: current.z - 18 }, shape: { kind: "box", bounds: authored.bounds } });
+        if (floor.startSolid || floor.allSolid || floor.fraction === 1 || floor.contact.kind !== "plane" || floor.contact.plane.normal.z < 0.7) continue;
+        visited.add(key);
+        pending.push(floor.end);
+        const origin = { ...floor.end, z: floor.end.z + authored.bounds.min.z - body.bounds.min.z };
+        if (input.sameMedium(origin)) {
+          const fit = trace({ ...query, start: origin, end: origin, shape: { kind: "box", bounds: body.bounds } });
+          if (!fit.startSolid && !fit.allSolid) return { origin, ground: input.locomotion !== "walk" ? null : floor.hit.kind === "actor" ? floor.hit.actor : input.worldActor };
+        }
+        break;
+      }
+    }
+  }
+  return null;
 }

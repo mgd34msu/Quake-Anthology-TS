@@ -19,7 +19,8 @@ test("campaign slot catalogs cover all registered species, expansions and bosses
     for (const classname of Object.keys(source.creatures)) expect(slots.some(slot => slot.classname === classname)).toBe(true);
     for (const classname of Object.keys(source.creatures)) {
       const reference = { provider: source.provider, content: source.family === "q1" ? q1.content : q2.content };
-      expect(target(source.family, reference, classname)).toEqual({ source: reference, classname });
+      const role = slots.find(slot => slot.classname === classname)?.role;
+      expect(target(source.family, reference, classname)).toEqual(role === "boss" || role === "special" ? { kind: "map-defined" } : { source: reference, classname });
     }
   }
   expect(campaignMonsterSlots("q1").some(slot => slot.classname === "monster_armagon")).toBe(true);
@@ -49,6 +50,15 @@ test("role defaults preserve flight, water, boss scripts and explicit overrides"
   expect(roster.byClassname["monster_custom"]).toEqual(override);
   expect(roster.default).toEqual({ kind: "map-defined" });
   expect(defaultMonsterRoster("q2", q1)).toEqual(defaultMonsterRoster("q2", q1));
+});
+
+test("an available boss controller does not replace authored boss scripts automatically", () => {
+  const source: ProviderReference = { provider: "q1:monsters/rerelease/hipnotic", content: "q1:rerelease:hipnotic:test" };
+  expect(monsterSources.find(entry => entry.provider === source.provider)?.creatures["monster_armagon"]).toBeDefined();
+  expect(defaultMonsterRoster("q1", source).byClassname["monster_armagon"]).toEqual({ kind: "map-defined" });
+  const replacement = { source, classname: "monster_armagon" };
+  expect(defaultMonsterRoster("q1", source, { monster_armagon: replacement }).byClassname["monster_armagon"]).toEqual(replacement);
+  expect(defaultMonsterRoster("q1", source, { monster_army: replacement }).byClassname["monster_army"]).toEqual(replacement);
 });
 
 test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {

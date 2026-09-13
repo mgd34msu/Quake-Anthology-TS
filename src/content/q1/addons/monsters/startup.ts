@@ -17,7 +17,9 @@ export function initMg3Monster(monster: BaseMonster, context: Q1AddonContext, mo
   const { game, entity } = monster;
   if (game.options.deathmatch !== 0 || context.removedForRunes(entity) || context.removedOutsideCoop(entity)) return game.live(entity) ? game.remove(entity) : undefined;
   entity.movementFlags |= 16384; entity.fields.set("mdl", model); context.setNumber(entity, "lefty", type); context.setNumber(entity, "state", size); monster.lefty = true;
-  if (context.program === "mg3" || context.services.cvar("horde") === 0 || (entity.spawnflags & 4) === 0) game.totalMonsters++;
+  const mission = game.monsterMissions.get(entity.actor.id);
+  if (mission !== undefined) mission.spawned();
+  else if (context.program === "mg3" || context.services.cvar("horde") === 0 || (entity.spawnflags & 4) === 0) game.totalMonsters++;
   if (context.program === "mg3" && entity.text("health_target") !== "") entity.maxHealth = game.health(entity.actor.id);
   if ((entity.spawnflags & 4) !== 0) { entity.use = game.named.use(entity, `${prefix(monster)}:start`); return undefined; }
   return game.schedule(entity, Math.max(0, entity.nextThink) + game.host.random() * 0.5 - game.time, game.named.action(entity, `${prefix(monster)}:monster_start`));
@@ -41,6 +43,11 @@ export function startMg3Monster(monster: BaseMonster, context: Q1AddonContext): 
   entity.aimedDamage = true; entity.damageable = true; entity.idealYaw = game.body(entity).angles.y; entity.yawSpeed ||= 20;
   context.setVector(entity, "view_ofs", { x: 0, y: 0, z: 25 }); entity.use = game.named.use(entity, `${name}:monster_use`);
   entity.movementFlags |= 32 | (type === 2 ? 1 : type === 3 ? 2 : 0); game.host.combat.setTraits(entity.actor, { team: "q1:monsters" }); game.link(entity);
+  const mission = game.monsterMissions.get(entity.actor.id);
+  if (mission !== undefined) {
+    mission.started(); monster.updateRoute();
+    return monster.delay(entity.nextThink - game.time + game.host.random() * 0.5);
+  }
   const targets = entity.target === "" ? [] : game.find(entity.target);
   if ((entity.spawnflags & 32) !== 0 && entity.target !== "") {
     const alive = targets.filter(target => target.damageable), chosen = alive[Math.floor(game.host.random() * alive.length)]; if (chosen !== undefined) return monster.found(chosen.actor.id);

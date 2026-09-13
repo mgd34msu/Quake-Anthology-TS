@@ -1,5 +1,7 @@
 import { q1MonsterSources } from "./q1.ts";
 import { q2MonsterSources } from "./q2.ts";
+import { q1ExpansionMonsterSources, q1AddonMonsterSources } from "./expansions.ts";
+import { q2ExpansionSources, q2ExpandedBaseCreatures, q2ExpandedClassicCreatures } from "./q2-expansions.ts";
 import type { MonsterDefinitionReference, ProviderTiming } from "../../contracts/content.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { Q1_DONOR_PROFILE, Q2_DONOR_PROFILE } from "../../core/numeric.ts";
@@ -8,12 +10,16 @@ export type MonsterSourceDefinition = {
   readonly provider: ProviderId;
   readonly edition: "classic" | "rerelease";
   readonly creatures: Readonly<Record<string, { readonly resources: readonly string[] }>>;
-} & ({ readonly family: "q1"; readonly program: "id1" } | { readonly family: "q2"; readonly program: "baseq2" });
+} & ({ readonly family: "q1"; readonly program: "id1" | "hipnotic" | "rogue" | "dopa" | "mg1" } | { readonly family: "q2"; readonly program: "baseq2" | "xatrix" | "rogue" | "mg2" });
 
 /** These identities bind the existing source modules, including their edition-specific continuations. */
 export const monsterSources: readonly MonsterSourceDefinition[] = [
   ...q1MonsterSources,
-  ...q2MonsterSources,
+  ...q2MonsterSources.map(source => ({ ...source, creatures: { ...source.creatures,
+    ...(source.edition === "rerelease" ? q2ExpandedBaseCreatures : q2ExpandedClassicCreatures) } })),
+  ...q1ExpansionMonsterSources,
+  ...q1AddonMonsterSources,
+  ...q2ExpansionSources,
 ];
 
 export function monsterSource(definition: MonsterDefinitionReference): MonsterSourceDefinition {

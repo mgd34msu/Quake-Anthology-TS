@@ -48,7 +48,7 @@ function awake(monster: MissionMonster, activator: ActorId | null): undefined {
   entity.pain = game.named.pain(entity, "rogue:monster_pain"); entity.die = game.named.die(entity, "rogue:monster_die");
   game.effect("lava-splash", monster.origin);
   if (activator !== null && game.isPlayer(activator) && (game.player(activator)?.powerups.get("invisibility") ?? 0) <= game.time && ((game.entity(activator)?.movementFlags ?? 0) & 128) === 0) monster.enemy = activator;
-  dropToFloor(monster); return monster.play("lavaman_rise1");
+  dropToFloor(monster); game.monsterMissions.get(entity.actor.id)?.started(); return monster.play("lavaman_rise1");
 }
 export const lavamanDefinition: PackMonsterDefinition = {
   spec: { species: "lava-man", classnames: ["monster_lava_man"], model: "lavaman", head: null, health: 1500, gibHealth: -Infinity, gibs: [],
@@ -70,7 +70,7 @@ export const lavamanDefinition: PackMonsterDefinition = {
     "lavaman:lavaman_death9": monster => { monster.game.sound(monster.entity, "boss1/out1.wav", "body"); return monster.game.effect("lava-splash", monster.origin); },
     "lavaman:lavaman_death10": monster => monster.game.remove(monster.entity),
   },
-  spawn: monster => { monster.game.totalMonsters++; if ((monster.entity.spawnflags & 2) !== 0) { monster.entity.use = monster.game.named.use(monster.entity, "rogue:monster_use"); return undefined; } return awake(monster, monster.entity.activator); },
+  spawn: monster => { const mission = monster.game.monsterMissions.get(monster.entity.actor.id); if (mission === undefined) monster.game.totalMonsters++; else mission.spawned(); if ((monster.entity.spawnflags & 2) !== 0) { monster.entity.use = monster.game.named.use(monster.entity, "rogue:monster_use"); return undefined; } return awake(monster, monster.entity.activator); },
   use: awake,
   checkAttack,
   melee: monster => monster.play("lavaman_fire1"),
