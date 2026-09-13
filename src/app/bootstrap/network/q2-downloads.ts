@@ -1,4 +1,5 @@
 import { readQ2DownloadServer } from "../../../network/q2/handshake.ts";
+import { dirname, resolve } from 'node:path';
 import { mkdir } from "node:fs/promises";
 import { HttpDownloadQueue, fetchHttpDownloadMetadata } from '../../../network/services/http-downloads.ts';
 import { openArchive } from '../../../content/archive/index.ts';
@@ -88,6 +89,8 @@ export class Q2PeerDownload {
     close(): void { this.generation++; this.sender?.close(); this.sender = null; }
 }
 
+type HttpAssetScope = 'search-path' | 'game-local';
+
 type Q2DownloadBlock = Extract<Q2ServerEvent, { readonly kind: 'download' }>;
 export type Q2DownloadPreparation = 'ready' | 'waiting' | 'canceled';
 export interface Q2ApplicationClientDownloads {
@@ -146,13 +149,24 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         const game = state.data.gamedir || 'baseq2', map = state.configStrings.get(33);
         if (!/^[a-zA-Z0-9_-]+$/.test(game)) throw new Error('Invalid Q2 download game directory');
         await mkdir(this.root(), { recursive: true }); current();
+        const assets = new Map<string, HttpAssetScope>(), packages = new Set<string>();
+        const addAsset = (path: string, scope: HttpAssetScope = 'search-path'): void => {
+            if (assets.get(path) !== 'game-local') assets.set(path, scope);
+        };
         this.http = new HttpDownloadQueue({ root: this.root(), assertCurrent: current,
-            resolved: async path => { const found = await this.content().mounts.resolve(path); current(); return found !== null; },
+            resolved: async path => {
+                const content = this.content(), product = content.catalog.product(content.recipe.map.entities.content);
+                const directory = product.expectation.contentDirectory;
+                const roots = new Set([resolve(content.catalog.corpusRoot, directory), resolve(this.root())]);
+                if (product.looseRoot !== null) roots.add(resolve(product.looseRoot));
+                const found = await content.mounts.open(path, mount => assets.get(path) !== 'game-local'
+                    || roots.has(resolve(mount.kind === 'archive' ? dirname(mount.archivePath) : mount.rootPath)));
+                current(); return found !== null;
+            },
             refreshPackage: async () => { if (this.refreshPackages === undefined) throw new Error('Q2 package refresh is unavailable'); await this.refreshPackages(); current(); },
             progress: () => undefined });
-        const assets = new Set<string>(), packages = new Set<string>();
         const lists = [`${game}.filelist`];
-        if (map !== undefined) { this.validate(map); lists.push(`${game}/${map.slice(0, -4)}.filelist`); assets.add(map); }
+        if (map !== undefined) { this.validate(map); lists.push(`${game}/${map.slice(0, -4)}.filelist`); addAsset(map); }
         for (const list of lists) {
             const bytes = await fetchHttpDownloadMetadata(new URL(list, server), 1 << 20, signal); current();
             if (bytes === null) continue;
@@ -164,7 +178,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
                         downloadPath(line);
                         if (!/^[a-zA-Z0-9_+.-]+\.(?:pak|pkz)$/i.test(line)) throw new Error('Invalid package path');
                         if (this.refreshPackages !== undefined) packages.add(line);
-                    } else { const path = line.startsWith('@') ? line.slice(1) : line; this.validateHttpFilelistAsset(path); assets.add(path); }
+                    } else { const path = line.startsWith('@') ? line.slice(1) : line; this.validateHttpFilelistAsset(path); addAsset(path, line.startsWith('@') ? 'game-local' : 'search-path'); }
                 } catch { this.print(`Ignoring invalid Q2 filelist entry: ${line.slice(0, 128)}\n`); }
             }
         }
@@ -173,13 +187,13 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         const layout = q2ApplicationLayout({ kind: 'q2-classic', version: 34 });
         for (let index = 1; index < layout.maxModels; index++) {
             const path = state.configStrings.get(layout.models + index);
-            if (path && !path.startsWith('*') && !path.startsWith('#')) { this.validate(path); assets.add(path); }
+            if (path && !path.startsWith('*') && !path.startsWith('#')) { this.validate(path); addAsset(path); }
         }
         for (let index = 1; index < layout.maxSounds; index++) {
             const name = state.configStrings.get(layout.sounds + index);
-            if (name && !name.startsWith('*')) { const path = name.startsWith('#') ? name.slice(1) : `sound/${name}`; this.validate(path); assets.add(path); }
+            if (name && !name.startsWith('*')) { const path = name.startsWith('#') ? name.slice(1) : `sound/${name}`; this.validate(path); addAsset(path); }
         }
-        await Promise.all([...assets].map(path => this.httpAsset(path))); current();
+        await Promise.all([...assets.keys()].map(path => this.httpAsset(path))); current();
     }
 
     private validateHttpFilelistAsset(path: string): void {

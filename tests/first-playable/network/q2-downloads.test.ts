@@ -94,8 +94,13 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
     let activeHttp = 0, peakHttp = 0; const httpPaths: string[] = [];
     try {
         const selected = installed.recipe.map.entities.content;
-        const mounts = await openMountPlan({ ...installed.mounts.plan, mounts: installed.mounts.plan.mounts.map(mount =>
-            mount.kind === 'loose' && mount.identity.content === selected ? { ...mount, rootPath: root } : mount) });
+        const inheritedRoot = join(temporary, 'inherited-base');
+        await mkdir(inheritedRoot);
+        const inherited: LooseMount = { kind: 'loose', identity: createMountIdentity('mount:scope:inherited', selected, 0), rootPath: inheritedRoot };
+        const mounts = await openMountPlan({ ...installed.mounts.plan,
+            defaultOrder: [...installed.mounts.plan.defaultOrder, inherited.identity.id],
+            mounts: [...installed.mounts.plan.mounts.map(mount =>
+                mount.kind === 'loose' && mount.identity.content === selected ? { ...mount, rootPath: root } : mount), inherited] });
         content = new LoadedApplicationContent(installed.catalog, installed.recipe, installed.world, mounts);
         const mapName = 'maps/download-fixture.bsp', modelName = 'models/download-fixture/tris.md2', skinName = 'models/download-fixture/skin.pcx';
         const map = (await installed.mounts.read(installed.recipe.map.geometry)).slice(), view = new DataView(map.buffer, map.byteOffset, map.byteLength);
@@ -119,7 +124,12 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
             const bitmap = new Uint8Array(58), header = new DataView(bitmap.buffer);
             bitmap.set([66, 77]); header.setUint32(2, 58, true); header.setUint32(10, 54, true); header.setUint32(14, 40, true);
             header.setInt32(18, 1, true); header.setInt32(22, 1, true); header.setUint16(26, 1, true); header.setUint16(28, 24, true);
-            for (const imagePath of imagePaths) files.set(imagePath, imagePath.endsWith('.png') ? encodePng(1, 1, new Uint8Array([255, 0, 0, 255])) : bitmap);
+            for (const imagePath of imagePaths) {
+                files.set(imagePath, imagePath.endsWith('.png') ? encodePng(1, 1, new Uint8Array([255, 0, 0, 255])) : bitmap);
+                await Bun.write(join(inheritedRoot, imagePath), new Uint8Array([1, 2, 3]));
+                expect((await mounts.open(imagePath))?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+            }
+            await Bun.write(join(inheritedRoot, 'pics/inherited-only.png'), bitmap);
         }
         files.set('sound/download-fixture.wav', await installed.mounts.read('sound/weapons/blastf1a.wav'));
         const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Download fixture', serverState: 2 },
@@ -133,7 +143,7 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         packageView.setInt32(12 + packedSound.length + 56, 12, true); packageView.setInt32(12 + packedSound.length + 60, packedSound.length, true);
         const httpServer = httpEnabled ? Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
             const path = decodeURIComponent(new URL(request.url).pathname); httpPaths.push(path);
-            if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys(), ...invalidList].join('\n'));
+            if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys(), ...imagePaths.map(path => `@${path}`), ...imagePaths, '@sound/download-fixture.wav', 'pics/inherited-only.png', ...invalidList].join('\n'));
             const asset = path.slice('/baseq2/'.length), bytes = asset === 'pak99.pak' ? packageBytes : files.get(asset);
             if (bytes === undefined || asset.endsWith('.wal')) return new Response(null, { status: 404 });
             activeHttp++; peakHttp = Math.max(peakHttp, activeHttp);
@@ -152,7 +162,10 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         let loaded = false;
         const remote = new Q2RemotePresentation({ identity, session, content, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
             sendCommand: text => { if (client === null) throw new Error('No client'); client.command(text); },
-            refreshDownloads: async assertCurrent => { const fresh = await loadApplicationContent({ ...command.options, userContentRoot: temporary }); refreshed.push(fresh); assertCurrent(); content = fresh; return fresh; }, loadContent: async () => {
+            refreshDownloads: async assertCurrent => { const fresh = await loadApplicationContent({ ...command.options, userContentRoot: temporary }); refreshed.push(fresh); assertCurrent();
+                const remounted = await openMountPlan({ ...fresh.mounts.plan, mounts: [...fresh.mounts.plan.mounts, inherited], defaultOrder: [...fresh.mounts.plan.defaultOrder, inherited.identity.id] });
+                const scoped = new LoadedApplicationContent(fresh.catalog, fresh.recipe, fresh.world, remounted);
+                refreshed.push(scoped); content = scoped; return scoped; }, loadContent: async () => {
                 if (content === null) throw new Error('No client content');
                 for (const [path, bytes] of files) expect((await content.mounts.open(path))?.bytes).toEqual(bytes);
                 const resource = await content.mounts.resolve(mapName);
@@ -165,8 +178,11 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
             await client.poll(step * 10); await Bun.sleep(1); await server.poll(step * 10); await Bun.sleep(1);
         }
         expect(client.phase).toBe('active'); expect(loaded).toBe(true); expect(session.world).toBeNull();
+        const beforeMismatch = httpPaths.length;
+        await expect(remote.downloads.prepare({ ...state, data: { ...state.data, gamedir: 'wrongmod' } })).rejects.toThrow('differs from selected installed game');
+        expect(httpPaths).toHaveLength(beforeMismatch);
         expect(requests).toEqual(httpEnabled ? ['textures/download-fixture.wal'] : [mapName, modelName, skinName, 'sound/download-fixture.wav', 'textures/download-fixture.wal']);
-        if (httpEnabled) { for (const path of imagePaths) expect(httpPaths).toContain(`/baseq2/${path}`); for (const path of invalidList) expect(httpPaths).not.toContain(`/baseq2/${path}`); expect(httpPaths).not.toContain('/baseq2/pak98.pak'); expect(httpPaths).not.toContain('/baseq2/pak98.pkz'); expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(1); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
+        if (httpEnabled) { for (const path of imagePaths) { expect(httpPaths).toContain(`/baseq2/${path}`); const expected = files.get(path); if (expected === undefined) throw new Error(path); expect(new Uint8Array(await Bun.file(join(root, path)).arrayBuffer())).toEqual(new Uint8Array(expected)); } expect(httpPaths).not.toContain('/baseq2/pics/inherited-only.png'); for (const path of invalidList) expect(httpPaths).not.toContain(`/baseq2/${path}`); expect(httpPaths).not.toContain('/baseq2/pak98.pak'); expect(httpPaths).not.toContain('/baseq2/pak98.pkz'); expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(2); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
         if (!httpEnabled) {
         const nextState = (sound: string): Q2ApplicationGameState => ({ ...state,
             configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, sound]]) });
