@@ -129,7 +129,8 @@ export function prepareSceneEntity(entity: SceneEntity, context: ModelPreparatio
 function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, context: ModelPreparationContext): PreparedModelEntity {
   const options = context.options?.(source) ?? {}, pose = repairFrames(entity), surfaces: PreparedModelSurface[] = [];
   const native = entity;
-  entity = selectModelEntity(entity, context.camera.origin, context.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY, context.purpose);
+  if (entity.model.kind !== "q1-mdl" || options.indexedSkin === undefined)
+    entity = selectModelEntity(entity, context.camera.origin, context.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY, context.purpose);
   const flags = entity.flags, bits = flags.bits, model = entity.model;
   const shell = flags.kind === "q2" ? q2ShellColor(bits) : null;
   const portal = context.camera.clip.kind === "portal";
@@ -174,8 +175,9 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const skinFrames = at(model.skins, skin, "MDL skin");
       const pixels = sampleTimedFrame(skinFrames, context.timeSeconds, options.syncBase ?? 0);
       const skinFrame = skinFrames.kind === "single" ? 0 : skinFrames.frames.findIndex(item => item.frame === pixels);
-      append("alias", { kind: "indexed", name: `${entity.resource.id}:skin:${skin}:${skinFrame}`, width: model.skinWidth,
-        height: model.skinHeight, pixels, transparentIndex: null, fullbright: true }, geometry.vertices, geometry.indices);
+      append("alias", options.indexedSkin === undefined ? { kind: "indexed", name: `${entity.resource.id}:skin:${skin}:${skinFrame}`, width: model.skinWidth,
+        height: model.skinHeight, pixels, transparentIndex: null, fullbright: true }
+        : { kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true }, geometry.vertices, geometry.indices);
       break;
     }
     case "q2-md2": {

@@ -84,7 +84,7 @@ export class SceneModelRenderer {
     const visit = (entity: SceneEntity): void => {
       const source = options(entity), selections = this.selections(entity, source);
       for (const selection of selections) work.push(this.load(entity, selection, source));
-      const replacement = replacementEntity(entity);
+      const replacement = entity.model.kind === "q1-mdl" && source.indexedSkin !== undefined ? null : replacementEntity(entity);
       if (replacement !== null) for (const selection of this.selections(replacement, source)) work.push(this.load(replacement, selection, source));
       for (const attachment of entity.attachments) visit(attachment.entity);
     };
@@ -100,6 +100,10 @@ export class SceneModelRenderer {
     const model = entity.model;
     switch (model.kind) {
       case "q1-mdl":
+        if (options.indexedSkin !== undefined) {
+          result.push({ kind: "indexed", ...options.indexedSkin, transparentIndex: null, fullbright: true });
+          break;
+        }
         for (const [skin, group] of model.skins.entries()) for (const [frame, pixels] of frames(group).entries()) result.push({ kind: "indexed",
           name: `${entity.resource.id}:skin:${skin}:${frame}`, width: model.skinWidth, height: model.skinHeight, pixels, transparentIndex: null, fullbright: true });
         break;

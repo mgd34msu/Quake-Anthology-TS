@@ -2,7 +2,7 @@
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { DrawBatch, RenderImage, RenderState, SceneCamera } from "../../../contracts/render.ts";
-import type { ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
+import type { IndexedModelSkin, ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
 
@@ -14,6 +14,7 @@ export type ModelImageSelection = { readonly kind: "external"; readonly name: st
 
 /** Source renderer fields supplement the family-independent SceneEntity. */
 export interface ModelSourceOptions {
+  readonly indexedSkin?: IndexedModelSkin;
   readonly modelBeam?: { readonly segmentLength: number };
   readonly syncBase?: number;
   readonly spriteRoll?: number;

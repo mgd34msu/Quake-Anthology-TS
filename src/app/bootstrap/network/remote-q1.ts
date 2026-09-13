@@ -97,9 +97,10 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         this.actors.set(number, value);
         return value;
     }
-    isPlayer(actor: ActorId): boolean { for (let i = 1; i <= this.maxClients; i++)
+    playerSlot(actor: ActorId): number | null { for (let i = 1; i <= this.maxClients; i++)
         if (this.actors.get(i)?.equals(actor))
-            return true; return false; }
+            return i - 1; return null; }
+    isPlayer(actor: ActorId): boolean { return this.playerSlot(actor) !== null; }
     private emit(event: Q1Event, sourceEntity: number | null = null): void {
         this.events.push({ kind: 'q1', event, content: this.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
     }
@@ -268,7 +269,9 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 return;
             if (path === undefined)
                 throw new Error(`Unknown NetQuake model ${state.modelIndex}`);
-            result.push({ actor: this.actor(number), content: this.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, scale: 1, visible: number !== this.viewEntity, viewWeapon: false });
+            const colors = state.colorMap > 0 && state.colorMap <= this.maxClients ? this.scoreboard.get(state.colorMap - 1)?.colors : undefined;
+            result.push({ actor: this.actor(number), content: this.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, scale: 1, visible: number !== this.viewEntity, viewWeapon: false,
+                ...(colors === undefined ? {} : { playerColors: { top: Math.min(colors >> 4 & 15, 13), bottom: Math.min(colors & 15, 13) } }) });
         };
         for (const state of this.current.values())
             append(this.sampled(state), state.number);

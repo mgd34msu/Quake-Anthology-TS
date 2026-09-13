@@ -107,6 +107,8 @@ export class ApplicationWorldScene {
         opacity: source.alpha ?? 1, color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
       await append(source.content, entity, () => ({ viewModel: source.viewWeapon, ...(source.modelBeam === undefined ? {} : { modelBeam: source.modelBeam }),
+        ...(source.indexedSkin === undefined ? {} : { indexedSkin: source.indexedSkin }),
+        ...(source.playerColors === undefined ? {} : { playerColors: source.playerColors }),
         player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null }));
     }
     if (this.characterAssets !== null) for (const character of characters) {

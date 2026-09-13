@@ -8,6 +8,12 @@ import type { NumericProfile } from "./numeric.ts";
 import type { SourceTime } from "./time.ts";
 
 export interface IndexRange { readonly first: number; readonly count: number; }
+export interface IndexedModelSkin {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8Array;
+}
 export interface BspPlane extends Plane { readonly type: number; readonly signbits: number; }
 export type BspChild = { readonly kind: "node"; readonly index: number }
   | { readonly kind: "leaf"; readonly index: number };

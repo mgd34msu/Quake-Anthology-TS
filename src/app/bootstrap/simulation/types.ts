@@ -1,4 +1,5 @@
 import type { WorldText } from "../../../text/world.ts";
+import type { IndexedModelSkin } from "../../../contracts/scene.ts";
 import type { PreparedQuakeCSource } from "./quakec-source.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.ts";
 import type { WeaponReference } from "./weapon-slot.ts";
@@ -99,6 +100,8 @@ export interface SimulationPresentation {
   readonly backLerp?: number;
   readonly skin: number;
   readonly skinPath?: string | null;
+  readonly indexedSkin?: IndexedModelSkin;
+  readonly playerColors?: { readonly top: number; readonly bottom: number };
   readonly effects: number;
   readonly renderFlags: number;
   readonly origin: Vec3;
