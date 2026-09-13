@@ -8,12 +8,12 @@ export function registerLlmSettingsMenu(controller: NativeUiController, service:
   const root: UiMenuId = "menu:settings:llm";
   let key = "", model: string | null = null, baseUrl: string | null = null, busy = false, status = "", generation = 0;
   const clear = (): void => { key = ""; model = null; baseUrl = null; };
-  const run = (operation: () => Promise<void>): void => {
+  const run = (operation: () => Promise<void>, success = (): void => { clear(); status = "Saved"; }): void => {
     if (busy) return;
     const current = generation;
     busy = true; status = "Working...";
     void (async () => {
-      try { await operation(); if (current === generation) { clear(); status = "Saved"; } }
+      try { await operation(); if (current === generation) success(); }
       catch (error) { if (current === generation) status = error instanceof LlmSettingsError ? error.message : "Operation failed. Check settings and retry."; }
       finally { if (current === generation) busy = false; }
     })();
@@ -37,7 +37,11 @@ export function registerLlmSettingsMenu(controller: NativeUiController, service:
       field("model", "Model", 2, model ?? selected.model, value => { model = value; }),
     ];
     if (provider === "chatgpt-subscription") {
-      controls.push(button("signin", "Sign in with ChatGPT", 3, () => run(() => service.signInSubscription()), !busy && !pending),
+      controls.push(button("signin", "Sign in with ChatGPT", 3, () => run(() => service.signInSubscription(), () => {
+        key = "";
+        status = (model ?? selected.model).trim() === "" ? "Signed in. Enter a model name, then save settings."
+          : model !== null ? "Signed in. Save settings to use this model." : "Signed in.";
+      }), !busy && !pending),
         button("cancel-signin", "Cancel sign-in", 4, () => { generation++; service.cancelSignIn(); busy = false; clear(); status = "Sign-in canceled"; }, pending),
         button("signout", "Sign out", 5, () => run(() => service.removeCredential(provider)), !busy && selected.configured));
     } else {

@@ -102,7 +102,7 @@ export async function loginSubscription(options: SubscriptionAuthOptions, signal
         return new Response("Sign-in was not authorized.", { status: 400 });
       }
       resolveCode(code);
-      return new Response("Authorization received. You can return to the game.");
+      return new Response("Authorization received. You can return to the game.", { headers: { Connection: "close" } });
     },
   });
   const redirect = `http://localhost:${server.port}/auth/callback`;
@@ -125,7 +125,7 @@ export async function loginSubscription(options: SubscriptionAuthOptions, signal
     if ("error" in result) throw result.error;
     clearTimeout(timeout);
     controller.abort();
-    await server.stop(true);
+    await server.stop(false);
     checkAbort(signal);
     return await tokenRequest(options, new URLSearchParams({ grant_type: "authorization_code", client_id: CLIENT_ID, redirect_uri: redirect, code: result.code, code_verifier: verifier }), signal);
   } catch (error) {

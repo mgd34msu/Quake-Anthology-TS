@@ -171,6 +171,19 @@ describe("subscription OAuth", () => {
     expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
   });
 
+  test("successful callback sends the browser its full response before closing the listener", async () => {
+    const launched = Promise.withResolvers<string>();
+    const { service } = await fixture({ callbackPort: 0, fetch: async () => tokens(), openBrowser: async url => { launched.resolve(url); } });
+    const login = service.signInSubscription();
+    const target = callbackUrl(await launched.promise);
+    target.hostname = "localhost";
+    const browser = fetch(target).then(async response => ({ status: response.status, body: await response.text() }), () => ({ status: 0, body: "connection failed" }));
+    await login;
+    expect(await browser).toEqual({ status: 200, body: "Authorization received. You can return to the game." });
+    expect(service.read().providers["chatgpt-subscription"].configured).toBe(true);
+    await expect(fetch(target)).rejects.toThrow();
+  });
+
   test("callback timeout and occupied callback port settle with safe errors", async () => {
     const { service } = await fixture({ callbackPort: 0, callbackTimeoutMs: 10, openBrowser: async () => { await new Promise<void>(() => {}); } });
     await expect(service.signInSubscription()).rejects.toThrow("timed out");

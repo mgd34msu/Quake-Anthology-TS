@@ -78,6 +78,45 @@ test("LLM saves model and key only on Save; sign-in cancel and disposal abort pe
   } finally { await service.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+for (const draft of ["", "draft-model"]) test(`subscription sign-in preserves model draft and explains the next step: ${draft || "empty"}`, async () => {
+  const directory = await mkdtemp("/tmp/llm-menu-signin-");
+  const service = await LlmSettingsService.open({ baseDirectory: directory });
+  try {
+    const owner = createIdentityOwner("llm-signin-feedback"), seat = owner.seat(0);
+    const controller = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin("resource:test:font"), bindings: () => [],
+      focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+    const menu = registerLlmSettingsMenu(controller, {
+      read: () => service.read(), selectProvider: value => service.selectProvider(value), setModel: (provider, value) => service.setModel(provider, value),
+      saveApiKey: (provider, value) => service.saveApiKey(provider, value), removeCredential: provider => service.removeCredential(provider),
+      saveOtherService: value => service.saveOtherService(value), signInSubscription: async () => {}, cancelSignIn: () => {},
+    });
+    const key = (code: number): void => { controller.input({ seat, timeMilliseconds: 0, kind: "key", code, down: true, repeat: false }); };
+    const focus = (id: string): void => {
+      for (let index = 0; index < 30; index++) { const current = controller.state().focus; if (current.kind === "menu" && current.control === id) return; key(KeyCode.Tab); }
+      throw new Error(`No focusable control ${id}`);
+    };
+    const provider = { provider: "ui:test", content: "q1:rerelease:id1:retail" } satisfies { readonly provider: "ui:test"; readonly content: "q1:rerelease:id1:retail" };
+    const context: UiDrawContext = { timeMilliseconds: 0, binding: { seat, client: owner.client(0, 0), viewport: { x: 0, y: 0, width: 640, height: 480 },
+      safeArea: { x: 0, y: 0, width: 640, height: 480 }, hudScale: 1,
+      presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } } };
+    controller.openMenu(menu.root);
+    if (draft !== "") { focus("ui:llm:model"); controller.input({ seat, timeMilliseconds: 0, kind: "text", text: draft }); }
+    focus("ui:llm:signin"); key(KeyCode.Enter);
+    await Promise.resolve(); await Promise.resolve();
+    const drawn = JSON.stringify(controller.draw(context));
+    expect(drawn).toContain("Signed in.");
+    expect(drawn).toContain(draft === "" ? "Enter a model name" : "Save settings to use this model");
+    expect(service.read().model).toBe("");
+    if (draft !== "") {
+      expect(drawn).toContain(draft);
+      focus("ui:llm:save"); key(KeyCode.Enter);
+      for (let index = 0; index < 50 && service.read().model !== draft; index++) await Bun.sleep(2);
+      expect(service.read().model).toBe(draft);
+    }
+    menu.dispose();
+  } finally { await service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("provider arrow releases preserve focus across sequential asynchronous choices", async () => {
   const directory = await mkdtemp("/tmp/llm-menu-provider-");
   const service = await LlmSettingsService.open({ baseDirectory: directory });
