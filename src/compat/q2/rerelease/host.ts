@@ -22,6 +22,9 @@ import type { RereleaseMessageServices } from "./messages.ts";
 
 import { RereleaseSoundImports } from "./sounds.ts";
 import type { RereleaseSoundEvent } from "./sounds.ts";
+import { RereleaseForeignActors } from "./foreign-actors.ts";
+import type { RereleaseForeignDamageServices } from "./foreign-actors.ts";
+import type { RereleaseNativeEntries } from "./native-entries.ts";
 
 export interface RereleaseActorBindings {
   readonly body: BodyStateBinding;
@@ -53,12 +56,15 @@ export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "in
   readonly messages?: RereleaseMessageServices;
   readonly worldText?: (event: RereleaseWorldTextEvent) => void;
   readonly sound?: (event: RereleaseSoundEvent) => void;
+  readonly nativeEntries?: RereleaseNativeEntries;
+  readonly foreignDamage?: RereleaseForeignDamageServices;
 }
 
 /** Source bytes back the shared actor authorities. This class owns no simulation clock. */
 export class RereleaseQ2GuestHost {
   readonly module: RereleaseGuestModule;
   readonly core: RereleaseCoreImports;
+  readonly foreignActors: RereleaseForeignActors | null;
   readonly #messages: RereleaseMessageImports | null;
   readonly #worldText: RereleaseWorldTextImports | null;
   readonly #sounds: RereleaseSoundImports | null;
@@ -77,7 +83,9 @@ export class RereleaseQ2GuestHost {
     this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
     this.#sounds = options.sound === undefined ? null : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
     this.#messages = options.messages === undefined ? null : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
-    this.#unsubscribe = options.engine.actors.onRelease(actor => { this.#botEntities.delete(actor.id); return undefined; });
+    if (options.foreignDamage !== undefined && options.nativeEntries === undefined) throw new Error("Foreign native damage requires verified entry points");
+    this.foreignActors = options.foreignDamage === undefined || options.nativeEntries === undefined ? null : new RereleaseForeignActors(this, options.nativeEntries, options.foreignDamage);
+    this.#unsubscribe = options.engine.actors.onRelease(actor => { try { this.foreignActors?.released(actor); } finally { this.#botEntities.delete(actor.id); } return undefined; });
   }
   #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
   #vector(address: GuestAddress): Vec3 {
@@ -89,6 +97,8 @@ export class RereleaseQ2GuestHost {
     memory.writeFloat32(address, vector.x); memory.writeFloat32(memory.offset(address, 4n), vector.y); memory.writeFloat32(memory.offset(address, 8n), vector.z);
   }
   actor(view: RawEntityView): OwnedActor | null {
+    const projected = this.foreignActors?.lookup(view);
+    if (projected !== undefined) return projected;
     const { memory } = this.module, engine = this.options.engine;
     const live = memory.readUint8(this.#at(view, "inuse")) !== 0;
     const generation = this.options.semantics.generation(view);
@@ -128,7 +138,7 @@ export class RereleaseQ2GuestHost {
   addressForActor(actor: ActorId): GuestAddress {
     const source = this.options.engine.actors.sourceOf(actor);
     if (source !== null && source.provider === this.module.memory.module.id) return this.module.entities().atSlot(source.slot).address;
-    return this.options.semantics.foreignAddress(actor);
+    return this.foreignActors?.address(actor) ?? this.options.semantics.foreignAddress(actor);
   }
   preInit(): void { this.core.refreshCvars(); this.module.preInit(); }
   init(): void {
@@ -139,7 +149,7 @@ export class RereleaseQ2GuestHost {
   shutdown(): void {
     if (this.#closed) return;
     this.#closed = true;
-    try { if (this.#initialized) this.module.callGame("Shutdown"); }
+    try { try { this.foreignActors?.close(); } finally { if (this.#initialized) this.module.callGame("Shutdown"); } }
     finally { try { this.#releaseActors(); } finally { this.#unsubscribe(); } }
   }
   #releaseActors(): void {
@@ -148,7 +158,7 @@ export class RereleaseQ2GuestHost {
   }
   spawnEntities(map: string, entities: string, spawnpoint = ""): void { this.core.refreshCvars(); this.module.spawnEntities(map, entities, spawnpoint); this.reconcile(); }
   prepFrame(): void { this.core.refreshCvars(); this.module.prepFrame(); this.reconcile(); }
-  runFrame(mainLoop: boolean): void { this.core.refreshCvars(); this.module.runFrame(mainLoop); this.reconcile(); }
+  runFrame(mainLoop: boolean): void { this.core.refreshCvars(); this.foreignActors?.synchronize(); this.module.runFrame(mainLoop); this.reconcile(); }
   clientConnect(...arguments_: Parameters<RereleaseGuestModule["clientConnect"]>): ReturnType<RereleaseGuestModule["clientConnect"]> {
     this.core.refreshCvars(); const result = this.module.clientConnect(...arguments_); this.reconcile(); return result;
   }
@@ -185,6 +195,7 @@ export class RereleaseQ2GuestHost {
     switch (call.name) {
       case "Bot_RegisterEdict": case "Bot_UnRegisterEdict": {
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
+        if (this.foreignActors?.lookup(view) !== undefined) return { kind: "void" };
         const actor = this.actor(view);
         if (call.name === "Bot_RegisterEdict") {
           if (actor === null) throw new Error("Q2 bot registration requires a live source edict");
@@ -196,7 +207,7 @@ export class RereleaseQ2GuestHost {
         // g_local.h TAG_GAME/TAG_LEVEL: native level resets can zero spawn_count
         // and reuse the same allocation; retire borrowed actor lifetimes first.
         const tag = integer(args, 0);
-        if (tag === 765n || tag === 766n) this.#releaseActors();
+        if (tag === 765n || tag === 766n) { this.foreignActors?.clear(); this.#releaseActors(); }
         return this.core.invoke(call);
       }
       case "BoxEdicts": {
@@ -243,6 +254,7 @@ export class RereleaseQ2GuestHost {
         if (this.#filterDepth !== 0) throw new Error("Q2 BoxEdicts filter cannot modify world links");
         const view = this.module.entities().fromPointer(requiredPointer(args, 0));
         if (view.slot === 0) return { kind: "void" };
+        if (this.foreignActors?.lookup(view) !== undefined) return { kind: "void" };
         const actor = this.actor(view);
         if (actor === null) { memory.writeUint8(this.#at(view, "linked"), 0); return { kind: "void" }; }
         if (call.name === "unlinkentity") { engine.bodies.unlink(actor); memory.writeUint8(this.#at(view, "linked"), 0); return { kind: "void" }; }

@@ -148,3 +148,36 @@ test("integer register aliases preserve high bits and 32-bit writes clear the x6
   expect(cpu.simd.xmm.byteLength).toBe(256);
   expect(cpu.registers.read("rsp", 64)).toBe(0x20000n);
 });
+
+test("range write observers follow aliases and stop after removal or backing replacement", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.allocate({ byteLength: 16 }), alias = memory.mapAlias({ source: base, base: 0x200000n, byteLength: 16, permissions: "read-write" });
+  const values: number[] = [];
+  const remove = memory.observeWrites(base, 4, () => { values.push(memory.readInt32(base)); });
+  memory.writeInt32(memory.offset(base, 4n), 9);
+  memory.writeInt32(alias, 3);
+  expect(values).toEqual([3]);
+  let nested = false;
+  const removeNested = memory.observeWrites(base, 4, () => { if (!nested) { nested = true; memory.writeInt32(alias, 5); } });
+  memory.writeUint8(base, 4);
+  expect(values).toEqual([3, 4, 5]);
+  removeNested();
+  const removeThrow = memory.observeWrites(base, 4, () => { throw new Error("observer failure"); });
+  let deliveredAfterThrow = false;
+  const removeAfterThrow = memory.observeWrites(base, 4, () => { deliveredAfterThrow = true; });
+  try { expect(() => memory.writeInt32(alias, 6)).toThrow("observer failure"); }
+  finally { removeThrow(); removeAfterThrow(); }
+  expect(deliveredAfterThrow).toBe(true);
+  expect(memory.readInt32(base)).toBe(6);
+  memory.unmap(base, 16); memory.map({ base: base.byteOffset, byteLength: 16, permissions: "read-write" });
+  memory.writeInt32(base, 7);
+  expect(values).toEqual([3, 4, 5, 6]);
+  remove(); remove(); memory.writeInt32(alias, 8);
+  expect(values).toEqual([3, 4, 5, 6]);
+  let lateCalls = 0;
+  let removeLate = (): void => {};
+  const removeFirst = memory.observeWrites(base, 4, () => { removeLate(); });
+  removeLate = memory.observeWrites(base, 4, () => { lateCalls++; });
+  memory.writeInt32(base, 9); removeFirst();
+  expect(lateCalls).toBe(0);
+});

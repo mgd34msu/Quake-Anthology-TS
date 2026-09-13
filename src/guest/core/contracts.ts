@@ -64,6 +64,8 @@ export interface MappedGuestMemory extends GuestMemory {
   unmap(address: GuestAddress, byteLength: number): undefined;
   protect(address: GuestAddress, byteLength: number, permissions: GuestPermissions): undefined;
   mappings(): readonly GuestMapping[];
+  /** Observe committed stores to this backing range, including writes through aliases. */
+  observeWrites(address: GuestAddress, byteLength: number, afterWrite: () => void): () => void;
   check(address: GuestAddress, byteLength: number, access: GuestAccess): undefined;
   fetch(address: GuestAddress, byteLength: number): Uint8Array;
   checkpoint(): GuestMemorySnapshot;

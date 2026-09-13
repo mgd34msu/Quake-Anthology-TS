@@ -4,7 +4,8 @@ import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rereleas
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { createMountPlanId } from "../../../../src/contracts/content.ts";
 import type { GuestAddress } from "../../../../src/contracts/execution.ts";
-import type { AttackProvenance } from "../../../../src/contracts/gameplay.ts";
+import type { AttackProvenance, DamageOutcome } from "../../../../src/contracts/gameplay.ts";
+import type { OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
 import { GuestCallStopped } from "../../../../src/guest/abi/index.ts";
@@ -18,7 +19,12 @@ import type { RereleaseSoundEvent } from "../../../../src/compat/q2/rerelease/so
 import { nativeWorld } from "./world.ts";
 import { rereleaseInventoryItems } from "../../../../src/compat/q2/rerelease/semantics.ts";
 import { RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import { resultPointer } from "../../../../src/compat/q2/rerelease/module.ts";
+import { rereleaseFreeSignature, rereleaseSpawnSignature } from "../../../../src/compat/q2/rerelease/native-entries.ts";
 import type { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
+import type { RereleaseForeignDamageServices } from "../../../../src/compat/q2/rerelease/foreign-actors.ts";
+import { createQ2CombatPolicy } from "../../../../src/world/gameplay/policies.ts";
+import { absorbNativeArmor } from "../../../../src/world/gameplay/armor.ts";
 import { SizeBuf, SZ_Init } from "../../../../src/network/q2/message.ts";
 import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compat/q2/rerelease/messages.ts";
 import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
@@ -27,7 +33,7 @@ const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", im
 const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
-export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => []) {
+export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices) {
   const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
   const product = catalog.require("q2-rerelease-baseq2");
   using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
@@ -90,10 +96,14 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
     const base = world.semantics.bind(view, actor, module), edict = new RereleaseSourceEdict(view, module);
     const client = edict.client === null ? null : new RereleaseSourceClient(edict.client, module, retailRereleaseClientProfile);
     if (client !== null && inventoryItems === null) inventoryItems = rereleaseInventoryItems(module, value => owner().core.string(value));
-    return { ...base, inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
+    const classname = module.memory.readPointer(edict.at("classname"));
+    const barrel = foreignDamage !== undefined && classname !== null && readGuestString(module.memory, classname) === "misc_explobox";
+    return { ...base, combat: !barrel ? base.combat : edict.combat({ armor: () => ({ kind: "none" }), writeArmor: () => { throw new Error("Native barrel has no armor"); }, traits: () => ({ invulnerable: false, team: null, noKnockback: false }) }),
+      inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
       callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
   } };
   const source = RereleaseGuestSource.create(prepared, { services,
+    ...(foreignDamage === undefined ? {} : { foreignDamage }),
     clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
     ...(worldText === undefined ? {} : { worldText }),
     sound: event => { sounds.push(event); },
@@ -448,4 +458,132 @@ test.skipIf(!available)("retail inventory roster and native death callbacks bind
   } finally { unsubscribe(); }
   source.close();
   expect(world.engine.actors.isLive(foreign.id)).toBe(true);
+});
+
+test.skipIf(!available)("retail projectile and native damage share foreign actor health armor and callback ownership", async () => {
+  let tick = 0, sequence = 0;
+  let commands: readonly string[] = [];
+  const { source, host, guest, world, memory, cvars, core } = await nativeFixture(undefined, true, () => commands, { provenance: () => ({ sequence: ++sequence, time: { kind: "milliseconds", value: tick * 25 },
+    weapon: "q2:weapon_blaster", weaponProvider: "q2:guest", combatProvider: "test:q2-combat", inventoryProvider: "q2:guest", movementProvider: "q3:movement" }) });
+  host.preInit(); source.init();
+  host.spawnEntities("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${world.origin}" } { "classname" "misc_explobox" "origin" "0 0 512" }`);
+  expect(host.clientConnect(1, "\\name\\Native Shooter\\skin\\male/grunt\\ip\\127.0.0.1", "mixed", false).accepted).toBe(true); host.clientBegin(1);
+  const bridge = host.foreignActors; if (bridge === null) throw new Error("Missing native foreign bridge");
+  const playerView = guest.entities().atSlot(1), player = host.actor(playerView);
+  if (player === null) throw new Error("Missing native shooter");
+  // The minimal entity fixture omits base1's moving spawn platform. Hold the native shooter via its own cheat command.
+  cvars.set("cheats", "1", true); core.refreshCvars(); commands = ["noclip"]; guest.callGame("ClientCommand", [guestPointer(playerView.address)]);
+  for (let index = 0; index < 40; index++) {
+    tick++; host.clientThink(1, { kind: "q2-rerelease", milliseconds: 25, buttons: 0, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, serverFrame: tick }); host.runFrame(true);
+  }
+  const playerBody = world.engine.bodies.read(player.id); if (playerBody === null) throw new Error("Missing player body");
+  const start = { ...playerBody.origin, z: playerBody.origin.z + 22 };
+  const yaw = [0, 90, 180, 270].find(angle => {
+    const end = { x: start.x + Math.cos(angle * Math.PI / 180) * 160, y: start.y + Math.sin(angle * Math.PI / 180) * 160, z: start.z };
+    return world.engine.trace({ start, end, bounds: null, ignore: player.id, mask: 1 }).fraction === 1;
+  });
+  if (yaw === undefined) throw new Error("Fixture player has no clear native firing direction");
+  const victim = world.engine.actors.allocate("q3:foreign", "q3:armored-target");
+  const origin = { x: playerBody.origin.x + Math.cos(yaw * Math.PI / 180) * 128, y: playerBody.origin.y + Math.sin(yaw * Math.PI / 180) * 128, z: playerBody.origin.z };
+  world.engine.bodies.create(victim, { origin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, bounds: { min: { x: -20, y: -20, z: -24 }, max: { x: 20, y: 20, z: 40 } }, ground: null });
+  world.engine.bodies.link(victim);
+  world.engine.combat.create(victim, { health: 20, mass: 200, armor: { kind: "q3", points: 20, protection: 0.66 }, canTakeDamage: true, invulnerable: false, team: null });
+  world.engine.inventory.create(victim, [{ item: "q3:ammo_cells", count: 12, capacity: 200 }]);
+  const reactions: AttackProvenance[] = [], drops: OwnedActor[] = [];
+  const barrelView = guest.entities().atSlot(18), barrel = host.actor(barrelView);
+  if (barrel === null) throw new Error("Missing native barrel");
+  const counter: { attack: AttackProvenance | null; outcome: DamageOutcome | null } = { attack: null, outcome: null };
+  world.engine.callbacks.bind(victim, { think: null, touch: null, use: null, pain: reaction => {
+    if (reaction.attack === null) throw new Error("Missing native attack provenance"); reactions.push(reaction.attack);
+    if (counter.outcome === null) {
+      counter.attack = { ...reaction.attack, sequence: ++sequence, attacker: victim.id, inflictor: victim.id, weapon: "q2:weapon_rocketlauncher", cause: { kind: "q2", meansOfDeath: 8, damageFlags: 0 } };
+      counter.outcome = bridge.damageNative({ attack: counter.attack, target: barrel.id, amount: 95, knockback: 5, direction: { x: 1, y: 0, z: 0 }, point: { x: 0, y: 0, z: 512 }, normal: { x: 0, y: 0, z: 1 }, delivery: "direct" });
+    }
+    return undefined;
+  },
+    die: reaction => {
+      if (reaction.attack === null) throw new Error("Missing lethal attack provenance"); reactions.push(reaction.attack);
+      const count = world.engine.inventory.count(victim.id, "q3:ammo_cells"); world.engine.inventory.consume(victim, "q3:ammo_cells", count);
+      const drop = world.engine.actors.allocate("q3:foreign", "q3:item-drop");
+      world.engine.inventory.create(drop, [{ item: "q3:ammo_cells", count, capacity: 200 }]); drops.push(drop); return undefined;
+    } });
+  world.engine.combat.register(createQ2CombatPolicy({ id: "test:q2-combat", armor: (_request, armor, damage, flags) => absorbNativeArmor(armor, damage, flags, { arithmetic: "binary32", screenFacingDot: 1 }),
+    context: () => ({ arithmetic: "binary32", player: true, monster: false, attackerPlayer: true, hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false,
+      teamDamageEnabled: false, friendlyFire: true, nuke: false, noKnockback: false, movable: true, rejectTeamDamage: false, suppressPain: false }) }));
+  const projection = bridge.address(victim.id), projectedView = guest.entities().fromPointer(projection);
+  expect(host.actor(projectedView)).toBe(victim);
+  expect(world.engine.actors.sourceOf(victim.id)).toBeNull();
+  const frame = (buttons: number): void => { tick++; host.clientThink(1, { kind: "q2-rerelease", milliseconds: 25, buttons, angles: { x: 0, y: yaw, z: 0 }, forwardMove: 0, sideMove: 0, serverFrame: tick }); host.runFrame(true); };
+  for (let index = 0; index < 24; index++) frame(0);
+  expect(world.engine.bodies.read(victim.id)?.origin).toEqual(origin);
+  for (let index = 0; index < 100 && reactions.length === 0; index++) frame(1);
+  expect(reactions.length).toBeGreaterThan(0);
+  const first = reactions[0]; if (first === undefined) throw new Error("No real projectile hit");
+  expect(first.attacker).toEqual(player.id); expect(first.cause.kind).toBe("q2");
+  const victimState = world.engine.combat.read(victim.id);
+  if (victimState === null) throw new Error("Foreign combat state was removed");
+  expect(victimState.health).toBeLessThan(20);
+  const armor = victimState.armor;
+  if (armor?.kind !== "q3") throw new Error("Foreign armor was replaced");
+  expect(armor.points).toBeLessThan(20);
+  expect(world.engine.inventory.count(victim.id, "q3:ammo_cells")).toBe(12);
+  expect(new RereleaseSourceEdict(projectedView, guest).health).toBe(victimState.health);
+  const outcome = counter.outcome;
+  expect(outcome?.kind).toBe("committed");
+  if (outcome?.kind !== "committed") throw new Error("Nested native counterattack did not commit");
+  const counterAttack = counter.attack;
+  if (counterAttack === null) throw new Error("Counterattack provenance was not captured");
+  expect(outcome.decision.request.attack).toEqual(counterAttack);
+  expect(outcome.decision.mutations).toContainEqual({ kind: "health", before: 10, after: -85 });
+  const impulse = outcome.decision.mutations.find(mutation => mutation.kind === "source-velocity");
+  if (impulse?.kind !== "source-velocity") throw new Error("Native velocity store was not observed");
+  expect(impulse.after.x).toBeGreaterThan(impulse.before.x);
+  expect(outcome.decision.reaction).toBe("death");
+  expect(new RereleaseSourceEdict(barrelView, guest).health).toBe(-85);
+  expect(memory.readPointer(new RereleaseSourceEdict(barrelView, guest).at("activator"))).toEqual(projection);
+  for (let index = 0; index < 100 && drops.length === 0; index++) frame(1);
+  expect(drops).toHaveLength(1); expect(world.engine.inventory.count(victim.id, "q3:ammo_cells")).toBe(0);
+  const drop = drops[0]; if (drop === undefined) throw new Error("Foreign death did not drop its inventory");
+  expect(world.engine.inventory.count(drop.id, "q3:ammo_cells")).toBe(12);
+  const survivor = world.engine.actors.allocate("q3:foreign", "q3:survivor");
+  const body = world.engine.bodies.read(victim.id); if (body === null) throw new Error("Foreign body disappeared");
+  world.engine.bodies.create(survivor, body);
+  world.engine.combat.create(survivor, { health: 100, mass: 200, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+  bridge.address(survivor.id);
+  world.engine.actors.release(victim);
+  expect(host.actor(projectedView)).toBeNull();
+  expect(world.scene.spatial.get(victim.id)).toBeNull();
+  source.close();
+  expect(world.engine.actors.isLive(survivor.id)).toBe(true); expect(world.engine.combat.read(survivor.id)?.health).toBe(100);
+  expect(() => world.engine.actors.release(survivor)).not.toThrow();
+  expect(world.engine.actors.isLive(drop.id)).toBe(true); world.engine.actors.release(drop);
+});
+
+test.skipIf(!available)("retail reused native slot stops foreign damage interception", async () => {
+  const { source, host, guest, world } = await nativeFixture(undefined, true, () => [], {
+    provenance: () => ({ sequence: 1, time: { kind: "milliseconds", value: 0 }, weapon: null,
+      weaponProvider: "q2:guest", combatProvider: "test:q2-combat", inventoryProvider: "q2:guest", movementProvider: "q3:movement" }),
+  });
+  host.preInit(); source.init(); host.spawnEntities("base1", '{ "classname" "worldspawn" }');
+  const bridge = host.foreignActors; if (bridge === null) throw new Error("No foreign bridge");
+  const actor = world.engine.actors.allocate("q3:foreign", "review:reused-slot");
+  world.engine.bodies.create(actor, { origin: { x: 0, y: 0, z: 512 }, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
+    bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } }, ground: null });
+  world.engine.combat.create(actor, { health: 100, mass: 200, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+  const address = bridge.address(actor.id), view = guest.entities().fromPointer(address);
+  const generation = new RereleaseSourceEdict(view, guest).generation();
+  const { cpu, callbacks } = guest.options.runner.options;
+  cpu.state.registers.write("rcx", 64, address.byteOffset);
+  expect(callbacks.resolve(bridge.entries.damage)).not.toBeNull();
+  guest.invoke(bridge.entries.free, rereleaseFreeSignature, [guestPointer(address)], view);
+  const native = resultPointer(guest.invoke(bridge.entries.spawn, rereleaseSpawnSignature, []));
+  if (native === null) throw new Error("Native allocation failed");
+  expect(native.byteOffset).toBe(address.byteOffset);
+  const reused = guest.entities().fromPointer(native);
+  expect(new RereleaseSourceEdict(reused, guest).generation()).not.toBe(generation);
+  cpu.state.registers.write("rcx", 64, native.byteOffset);
+  expect(callbacks.resolve(bridge.entries.damage)).toBeNull();
+  expect(bridge.lookup(reused)).toBeUndefined();
+  expect(world.engine.combat.read(actor.id)?.health).toBe(100);
+  source.close(); world.engine.actors.release(actor);
 });

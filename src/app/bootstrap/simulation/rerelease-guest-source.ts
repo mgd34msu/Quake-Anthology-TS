@@ -4,6 +4,7 @@ import type { MountedContent } from '../../../content/mounts/index.ts';
 import { RereleaseQ2GuestHost } from '../../../compat/q2/rerelease/host.ts';
 import type { RereleaseQ2HostOptions } from '../../../compat/q2/rerelease/host.ts';
 import type { RereleaseCoreServices } from '../../../compat/q2/rerelease/imports.ts';
+import { retailRereleaseEntries } from '../../../compat/q2/rerelease/native-entries.ts';
 import { rereleaseAbi } from '../../../compat/q2/rerelease/api.ts';
 import { GuestCallRunner } from '../../../guest/abi/index.ts';
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from '../../../guest/core/index.ts';
@@ -46,14 +47,15 @@ export class RereleaseGuestSource {
             const callbacks = new GuestCallbackTable(memory);
             const state = createGuestProcessorState({ architecture: 'x86-64', instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_576n,
                 flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
-            const cpu = new X64Cpu({ state, memory, isHostCall: address => callbacks.resolve(address) !== null });
+            const cpu = new X64Cpu({ state, memory, isHostCall: address => callbacks.enter(address) });
             const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned });
             const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: options.clock }); runtime.attachRunner(runner);
             const game = resolvePeExport(image, { kind: 'name', name: 'GetGameAPI', version: null }, () => null).address;
             const cgame = resolvePeExport(image, { kind: 'name', name: 'GetCGameAPI', version: null }, () => null).address;
             const context: GuestCallContext = { module, callback: { kind: 'native-guest', module, address: game, abi: rereleaseAbi }, parent: null, self: null, other: null };
             const budget = options.instructionBudget ?? 5_000_000;
-            host = new RereleaseQ2GuestHost({ ...options, runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
+            const nativeEntries = options.foreignDamage === undefined ? undefined : retailRereleaseEntries({ memory }, image.base);
+            host = new RereleaseQ2GuestHost({ ...options, ...(nativeEntries === undefined ? {} : { nativeEntries }), runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
             source = new RereleaseGuestSource(host, runtime, memory, image, context, budget);
             runtime.initialize(image, { context, instructionBudget: budget });
             return source;

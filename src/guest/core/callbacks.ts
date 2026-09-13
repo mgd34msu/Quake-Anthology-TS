@@ -12,13 +12,39 @@ export interface SavedHostCallbackAddress {
 interface CallbackEntry extends Omit<SavedHostCallbackAddress, "binding"> {
   readonly address: GuestAddress;
   callback: GuestHostCallback | null;
+  readonly accepts?: () => boolean;
 }
 
 /** Host callbacks have guest-owned trap addresses, never host function pointers. */
 export class GuestCallbackTable {
   readonly #byId = new Map<CallbackId, CallbackEntry>();
   readonly #byAddress = new Map<bigint, CallbackEntry>();
+  readonly #entryObservers = new Map<bigint, Set<() => void>>();
   constructor(readonly memory: MappedGuestMemory) {}
+
+  /** Host-owned native entry hooks leave the guest instruction bytes untouched. */
+  bindEntry(address: GuestAddress, callback: GuestHostCallback, accepts: () => boolean): () => void {
+    this.memory.check(address, 1, "execute");
+    if (callback.signature.abi.pointerBytes !== this.memory.pointerBytes || this.#byAddress.has(address.byteOffset)) throw new Error("Invalid or occupied native callback entry");
+    const entry: CallbackEntry = { id: callback.id, signature: callback.signature, address, byteOffset: address.byteOffset, callback, accepts };
+    this.#byAddress.set(address.byteOffset, entry);
+    return () => { if (this.#byAddress.get(address.byteOffset) === entry) this.#byAddress.delete(address.byteOffset); };
+  }
+
+  observeEntry(address: GuestAddress, before: () => void): () => void {
+    this.memory.check(address, 1, "execute");
+    let observers = this.#entryObservers.get(address.byteOffset);
+    if (observers === undefined) { observers = new Set<() => void>(); this.#entryObservers.set(address.byteOffset, observers); }
+    const owned = observers; owned.add(before);
+    return () => { owned.delete(before); if (owned.size === 0 && this.#entryObservers.get(address.byteOffset) === owned) this.#entryObservers.delete(address.byteOffset); };
+  }
+
+  /** Called once at instruction entry; ABI lookup must not notify observers again. */
+  enter(address: GuestAddress): boolean {
+    const observers = this.#entryObservers.get(address.byteOffset);
+    if (observers !== undefined) for (const observer of [...observers]) if (observers.has(observer)) observer();
+    return this.resolve(address) !== null;
+  }
 
   bind(callback: GuestHostCallback): GuestAddress {
     if (callback.signature.abi.pointerBytes !== this.memory.pointerBytes) throw new RangeError("Callback ABI differs from its guest address space");
@@ -51,6 +77,7 @@ export class GuestCallbackTable {
     this.memory.check(address, 1, "execute");
     const entry = this.#byAddress.get(address.byteOffset);
     if (entry === undefined) return null;
+    if (entry.accepts !== undefined && !entry.accepts()) return null;
     if (entry.callback === null) throw new Error(`Guest callback ${entry.id} at 0x${entry.byteOffset.toString(16)} is unbound`);
     return entry.callback;
   }

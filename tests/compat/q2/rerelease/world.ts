@@ -2,6 +2,7 @@
 import type { ActorId } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { NumericProfile } from "../../../../src/contracts/numeric.ts";
+import type { DamageDecision, DamageOutcome } from "../../../../src/contracts/gameplay.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { parseEntities } from "../../../../src/core/common-parse.ts";
 import { decodeQ2Map } from "../../../../src/formats/q2-map/index.ts";
@@ -32,7 +33,12 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
     if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= world.models.length) throw new Error(`Native inline model index ${index} does not resolve into the loaded BSP`);
     return ordinal;
   };
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: (actor, state) => rereleaseLinkBounds(state, raw(actor.id).bytes.getUint8(fieldOffset(edictLayout, "solid"))), onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
+  const native = (actor: ActorId): boolean => actors.sourceOf(actor)?.provider === owner().module.memory.module.id;
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: (actor, state) => native(actor.id) ? rereleaseLinkBounds(state, raw(actor.id).bytes.getUint8(fieldOffset(edictLayout, "solid"))) : {
+    min: { x: state.origin.x + state.bounds.min.x, y: state.origin.y + state.bounds.min.y, z: state.origin.z + state.bounds.min.z },
+    max: { x: state.origin.x + state.bounds.max.x, y: state.origin.y + state.bounds.max.y, z: state.origin.z + state.bounds.max.z },
+  }, onUnlink: actor => { scene.unlink(actor); return undefined; }, onLink: body => {
+    if (!native(body.actor)) { scene.link(body, { family: "q3", shape: { kind: "box" }, contents: 0x2000000, owner: null, role: "solid", monster: false, deadMonster: false }); return undefined; }
     const view = raw(body.actor), solid = view.bytes.getUint8(fieldOffset(edictLayout, "solid")), flags = integer(body.actor, "svflags");
     if (view.slot === 0 || solid === 0) { scene.unlink(body.actor); return undefined; }
     const ownerAddress = owner().module.memory.readPointer(owner().module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, "owner"))));
@@ -41,7 +47,15 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
     return undefined;
   } });
   scene.bindActorState(actor => bodies.read(actor));
-  const combat = new GameplayAuthority(actors, callbacks, { impulse: unavailable, beforeReaction: unavailable, confirmed: unavailable });
+  const decisions: DamageDecision[] = [], outcomes: DamageOutcome[] = [];
+  const combat = new GameplayAuthority(actors, callbacks, {
+    impulse: (actor, impulse) => {
+      const body = bodies.read(actor.id); if (body === null) throw new Error("Damage impulse has no body");
+      bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } }); return undefined;
+    },
+    beforeReaction: (_actor, decision) => { decisions.push(decision); return undefined; },
+    confirmed: outcome => { outcomes.push(outcome); return undefined; },
+  });
   let traceCalls = 0;
   const engine: RereleaseQ2HostOptions["engine"] = { actors, bodies, callbacks, combat, inventory: new SharedInventoryTable(actors),
     trace: request => { traceCalls++; return scene.trace({ start: request.start, end: request.end, shape: request.bounds === null ? { kind: "point" } : { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q2", contentsMask: request.mask, leafContents: "merged" }, numeric, passActor: request.ignore }); },
@@ -74,5 +88,5 @@ export async function nativeWorld(modelName: (index: number) => string | undefin
           use: (_self, other, activator) => { source.call("use", [guestPointer(other === null ? null : owner().addressForActor(other)), guestPointer(activator === null ? null : owner().addressForActor(activator))]); return undefined; }, touch: null, pain: null, die: null } };
     },
   };
-  return { engine, spatial, semantics, scene, world, origin: start.get("origin") ?? "", get traceCalls() { return traceCalls; }, attach: (value: RereleaseQ2GuestHost) => { host = value; } };
+  return { engine, spatial, semantics, scene, world, outcomes, decisions, origin: start.get("origin") ?? "", get traceCalls() { return traceCalls; }, attach: (value: RereleaseQ2GuestHost) => { host = value; } };
 }

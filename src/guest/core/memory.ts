@@ -55,6 +55,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #limit: bigint;
   readonly #allocationBase: bigint;
   #mappings: Mapping[] = [];
+  readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: () => void }>();
 
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;
@@ -156,7 +157,27 @@ export class SparseGuestMemory implements MappedGuestMemory {
       chunk.mapping.bytes.set(source.subarray(consumed, consumed + chunk.byteLength), chunk.offset);
       consumed += chunk.byteLength;
     }
+    if (this.#writeObservers.size === 0) return undefined;
+    const errors: unknown[] = [];
+    for (const observer of [...this.#writeObservers]) {
+      if (!this.#writeObservers.has(observer)) continue;
+      const overlaps = observer.chunks.some(watched => chunks.some(written => {
+        const a = watched.mapping.bytes, b = written.mapping.bytes;
+        const start = a.byteOffset + watched.offset, end = start + watched.byteLength;
+        const other = b.byteOffset + written.offset;
+        return a.buffer === b.buffer && start < other + written.byteLength && other < end;
+      }));
+      if (overlaps) { try { observer.notify(); } catch (error) { errors.push(error); } }
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Guest write observers failed");
     return undefined;
+  }
+
+  observeWrites(address: GuestAddress, byteLength: number, afterWrite: () => void): () => void {
+    const observer = { chunks: this.#chunks(address, byteLength, "read"), notify: afterWrite };
+    this.#writeObservers.add(observer);
+    return () => { this.#writeObservers.delete(observer); };
   }
 
   readUint8(address: GuestAddress): number { return this.#readView(address, 1).getUint8(0); }
