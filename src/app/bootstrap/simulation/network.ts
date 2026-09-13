@@ -95,6 +95,13 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             wire.modelindex3 = model(entity.model3);
             wire.modelindex4 = model(entity.model4);
             wire.frame = presentation?.frame ?? entity.frame;
+            const flare = entity.flare;
+            if (flare !== null) {
+                wire.modelindex = 1;
+                wire.modelindex2 = flare.fadeStart;
+                wire.modelindex3 = flare.fadeEnd;
+                wire.frame = (entity.renderFlags & 256) !== 0 ? image(flare.image) : 0;
+            }
             wire.skinnum = presentation?.skin ?? entity.skin;
             wire.effects = presentation?.effects ?? entity.effects;
             wire.renderfx = presentation?.renderFlags ?? entity.renderFlags;

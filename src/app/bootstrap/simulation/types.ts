@@ -1,3 +1,4 @@
+import type { SceneFlare } from "../../../contracts/flare.ts";
 import type { WorldText } from "../../../text/world.ts";
 import type { IndexedModelSkin } from "../../../contracts/scene.ts";
 import type { PreparedQuakeCSource } from "./quakec-source.ts";
@@ -99,6 +100,7 @@ export interface PlayerUi {
 }
 
 export interface SimulationPresentation {
+  readonly flare?: SceneFlare;
   readonly actor: ActorId;
   readonly content: ContentId;
   readonly family: GameFamily;

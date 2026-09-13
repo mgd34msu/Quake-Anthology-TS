@@ -34,6 +34,7 @@ varying vec2 coordinates1;
 varying vec3 worldPosition;
 varying vec3 worldNormal;
 uniform int u_lighting_mode;
+uniform int u_luminance_alpha;
 uniform int u_light_count;
 uniform sampler2D u_shadow_map;
 uniform float u_shadow_texel;
@@ -96,6 +97,7 @@ ${shadowFactorLines().join("\n")}
 }
 void main() {
   vec4 texel = texture2D(primaryTexture, coordinates0);
+  if (u_luminance_alpha != 0) texel.rgb *= (texel.r + texel.g + texel.b) / 3.0 * vertexColor.a;
   vec4 color = clamp(texel * vertexColor, 0.0, 1.0);
   if (u_lighting_mode == 1) color = vec4(texel.rgb + dynamicLights(), 1.0);
   else if (u_lighting_mode == 2) color.rgb += dynamicLights();
@@ -201,12 +203,13 @@ void main() { gl_FragColor = vec4(1.0); }
     return location;
   }
 
-  use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }): void {
+  use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }, luminanceAlpha = false): void {
     if (this.closed) throw new Error("OpenGL stage program is closed");
     const gl = this.library.symbols;
     gl.glUseProgram(this.program);
     gl.glUniform1i(this.uniform("secondaryMode"), environment === null ? 0 : secondaryModes[environment]);
     gl.glUniform1i(this.uniform("alphaMode"), alphaModes[alphaTest]);
+    gl.glUniform1i(this.uniform("u_luminance_alpha"), luminanceAlpha ? 1 : 0);
     gl.glUniform1i(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
     if (lighting.kind === "vertex") { gl.glUniform1i(this.uniform("u_light_count"), 0); return; }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");

@@ -14,6 +14,10 @@ import type { WorldScene, WorldViewInput } from "../../render/scene/world.ts";
 import type { ModelTransform } from "../../render/scene/view.ts";
 import { SceneModelRenderer } from "../../render/scene/models/index.ts";
 import type { ModelSourceOptions } from "../../render/scene/models/types.ts";
+import { prepareFlare } from "../../render/scene/flare.ts";
+import type { SceneFlare } from "../../contracts/flare.ts";
+import type { Vec3 } from "../../contracts/math.ts";
+import type { RendererImage } from "../../contracts/render.ts";
 
 interface ModelPass {
   readonly entity: SceneEntity;
@@ -46,6 +50,7 @@ export class ApplicationWorldScene {
   private brushModels: readonly BrushPresentation[] = [];
   private preparedTime = 0;
   private previousTime = 0;
+  private flares: { readonly flare: SceneFlare; readonly origin: Vec3; readonly image: RendererImage; readonly imagePath: string }[] = [];
 
   constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null) {}
 
@@ -61,6 +66,7 @@ export class ApplicationWorldScene {
 
   async prepare(viewer: ActorId, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.objects.clear();
+    this.flares = [];
     this.previousTime = this.preparedTime;
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     for (const group of this.groups.values()) group.passes.length = 0;
@@ -78,7 +84,19 @@ export class ApplicationWorldScene {
       logical.passes.push({ group, pass }); this.objects.set(pass, logical);
     };
     for (const source of presentations) {
-      if (!source.visible || source.path === "") continue;
+      if (!source.visible) continue;
+      if (source.flare !== undefined) {
+        const provider = await this.assets.provider(source.content), flare = source.flare;
+        let imagePath = flare.image;
+        let texture = await provider.textures.load(imagePath, { family: "q2", wrap: "clamp", mipmap: false, usage: "sprite" });
+        if (texture === null && imagePath !== "misc/flare.tga") {
+          imagePath = "misc/flare.tga";
+          texture = await provider.textures.load(imagePath, { family: "q2", wrap: "clamp", mipmap: false, usage: "sprite" });
+        }
+        if (texture !== null) this.flares.push({ flare, origin: source.origin, image: texture.image, imagePath });
+        continue;
+      }
+      if (source.path === "") continue;
       if (source.viewWeapon ? !source.actor.equals(viewer) : source.actor.equals(viewer)) continue;
       if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
       if (source.q3Weapon !== undefined) {
@@ -169,6 +187,7 @@ export class ApplicationWorldScene {
         batches: object.passes.flatMap(pass => prepare(pass.group, pass.pass)) });
     }
     flush();
+    if (this.flares.length > 0) modelOperations.push({ kind: "draw", batches: this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath)) });
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
       materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
     return this.assets.world.prepareView({ ...input, operations: [...brushes, ...modelOperations, ...operations] });

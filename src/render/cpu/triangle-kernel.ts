@@ -409,6 +409,7 @@ export interface Framebuffer {
 }
 
 export interface TriangleSetup {
+  readonly textureEffect?: "luminance-alpha";
   readonly lighting: CpuTriangleLighting;
   readonly minX: number;
   readonly maxX: number;
@@ -571,6 +572,11 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
         else samplePerspectiveBound(texture, u, v, reciprocal, derivative, sampled);
         didSample = true;
         texelR = sampled.r; texelG = sampled.g; texelB = sampled.b; texelA = primaryAlpha ? sampled.a : 1;
+        if (setup.textureEffect === "luminance-alpha") {
+          const modulation = (sampled.r + sampled.g + sampled.b) / 3 * alpha;
+          sampled.r *= modulation; sampled.g *= modulation; sampled.b *= modulation;
+          texelR = sampled.r; texelG = sampled.g; texelB = sampled.b;
+        }
         r *= sampled.r;
         g *= sampled.g;
         blue *= sampled.b;

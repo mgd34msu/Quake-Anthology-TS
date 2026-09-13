@@ -70,6 +70,14 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
       return false;
     }
     switch (name) {
+      case "misc_flare":
+        entity.renderFlags = 0x200000 | ((entity.spawnflags & 7) << 10) | ((entity.spawnflags & 8) !== 0 ? 1 : 0)
+          | (entity.spawn.values.get("image") ? 256 : 0);
+        entity.scale = numberField(entity.spawn, "radius");
+        game.solid(entity, "none");
+        game.move(entity, { bounds: { min: { x: -32, y: -32, z: -32 }, max: { x: 32, y: 32, z: 32 } } }, false);
+        if (entity.targetname !== "") entity.use = this.flareUse;
+        game.link(entity); return true;
       case "info_world_text":
         if (!entity.spawn.values.has("message")) { game.host.diagnostic("info_world_text: no message"); game.remove(entity); return true; }
         entity.think = this.worldTextThink; entity.use = this.worldTextUse;
@@ -231,6 +239,7 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
     return undefined;
   };
 
+  private readonly flareUse: Q2Use = (entity, game) => { entity.serverFlags ^= 1; game.link(entity); return undefined; };
   private readonly musicUse: Q2Use = (entity, game) => game.host.emit({ kind: "music", track: entity.spawn.values.get("sounds") ?? "0" });
   private readonly skyUse: Q2Use = (entity) => {
     const values = entity.spawn.values;
@@ -349,7 +358,7 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
   get callbacks(): Q2CallbackDefinitions { return {
     think: { "rr.info_world_text_think": this.worldTextThink, "rr.target_poi_setup": this.poiSetup, "rr.trigger_coop_relay_think": this.coopRelayThink, "rr.target_crossunit_target_think": this.crossUnitThink, "rr.check_target_healthbar": this.healthbarCheck },
     touch: { "rr.trigger_flashlight_touch": this.flashlightTouch, "rr.trigger_fog_touch": this.fogTouch },
-    use: { "rr.info_world_text_use": this.worldTextUse, "rr.trigger_coop_relay_use": this.coopRelayUse, "rr.target_poi_use": this.poiUse, "rr.use_target_music": this.musicUse,
+    use: { "rr.misc_flare_use": this.flareUse, "rr.info_world_text_use": this.worldTextUse, "rr.trigger_coop_relay_use": this.coopRelayUse, "rr.target_poi_use": this.poiUse, "rr.use_target_music": this.musicUse,
       "rr.use_target_sky": this.skyUse, "rr.trigger_crossunit_trigger_use": this.crossUnitUse, "rr.use_target_autosave": this.autosaveUse,
       "rr.use_target_achievement": this.achievementUse, "rr.use_target_story": this.storyUse, "rr.use_target_healthbar": this.healthbarUse, "rr.use_target_changelevel": this.changeLevelUse },
   }; }

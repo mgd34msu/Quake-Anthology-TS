@@ -2826,7 +2826,7 @@ export class SharedSimulation implements Simulation {
       if (entry.kind === "q3" || entry.kind === "quakec") continue;
       const body = this.bodies.read(entry.entity.actor.id);
       if (this.selectedMonsters?.active(entry.entity.actor.id) === false) continue;
-      if (body === null || this.player(entry.entity.actor.id) !== null || entry.entity.model === "") continue;
+      if (body === null || this.player(entry.entity.actor.id) !== null || entry.entity.model === "" && !(entry.kind === "q2" && entry.entity.flare !== null)) continue;
       if (entry.kind === "q1") {
         const entity = entry.entity, alpha = entity.number("alpha"), scale = entity.number("scale");
         if (entity.model === this.recipe.map.geometry.requestedPath) continue;
@@ -2837,6 +2837,7 @@ export class SharedSimulation implements Simulation {
         const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
         if (entity.classname === "worldspawn") continue;
         result.push({ actor: entity.actor.id, content: entry.content, family: "q2", path: entity.model,
+          ...(entity.flare === null ? {} : { flare: entity.flare }),
           frame: model?.frame ?? entity.frame, oldFrame: model?.oldFrame ?? entity.frame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
           renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles,
           previousOrigin: entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? entity.pos2 : body.origin,

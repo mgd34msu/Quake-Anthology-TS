@@ -1081,6 +1081,11 @@ export class SoftwareRenderer implements RendererBackend {
     if (textureConsumed && texture.kind !== "incomplete") {
       sampleLineBound(texture, fragment.texCoord, fragment.texCoordDerivative, this.sampled);
       texel = { ...this.sampled, a: textureHasAlpha(texture.internalFormat) ? this.sampled.a : 1 };
+      if (batch.textureEffect === "luminance-alpha") {
+        const modulation = (this.sampled.r + this.sampled.g + this.sampled.b) / 3 * alpha;
+        this.sampled.r *= modulation; this.sampled.g *= modulation; this.sampled.b *= modulation;
+        texel = { ...texel, r: this.sampled.r, g: this.sampled.g, b: this.sampled.b };
+      }
       r *= this.sampled.r; g *= this.sampled.g; b *= this.sampled.b;
       if (textureHasAlpha(texture.internalFormat)) alpha *= this.sampled.a;
     }
@@ -1192,6 +1197,7 @@ export class SoftwareRenderer implements RendererBackend {
     const ar = ia.r, br = ib.r, cr = ic.r, ag = ia.g, bg = ib.g, cg = ic.g;
     const ab = ia.b, bb = ib.b, cb = ic.b, aa = ia.a, ba = ib.a, ca = ic.a;
     const setup: TriangleSetup = {
+      ...(batch.textureEffect === undefined ? {} : { textureEffect: batch.textureEffect }),
       minX, maxX, minY, maxY, inverseArea, depthNear,
       depthFar, edgeAX, edgeAY, edgeAC, edgeBX, edgeBY,
       edgeBC, edgeCX, edgeCY, edgeCC, attributeAX, attributeAY,

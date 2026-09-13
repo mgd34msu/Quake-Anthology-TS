@@ -11,6 +11,8 @@ import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 import type { Q2CallbackDefinitions, Q2SourceCallbacks } from "./callbacks.ts";
 import type { Q2EntityServices } from "./entity-services.ts";
+import type { SceneFlare } from "../../../contracts/flare.ts";
+import { numberField } from "./fields.ts";
 import type { AuthoredTarget } from "../../monsters/authored.ts";
 
 export type Q2Edition = "classic" | "rerelease";
@@ -217,6 +219,16 @@ export class Q2Entity {
   pain: Q2Pain | null = null;
   die: Q2Die | null = null;
   blocked: ((entity: Q2Entity, game: Q2GameServices, other: ActorId) => undefined) | null = null;
+
+  get flare(): SceneFlare | null {
+    if ((this.renderFlags & 0x200000) === 0) return null;
+    const shell = this.renderFlags & 0x1c00;
+    return { image: (this.renderFlags & 256) !== 0 ? this.spawn.values.get("image") || "misc/flare.tga" : "misc/flare.tga",
+      fadeStart: Math.trunc(numberField(this.spawn, "fade_start_dist", 96)), fadeEnd: Math.trunc(numberField(this.spawn, "fade_end_dist", 384)),
+      scale: this.scale || 1, lockAngle: (this.renderFlags & 1) !== 0,
+      color: this.skin === 0 ? { x: 255, y: 255, z: 255 } : { x: this.skin >>> 24, y: this.skin >>> 16 & 255, z: this.skin >>> 8 & 255 },
+      rimColor: shell === 0 ? null : { x: shell & 0x400 ? 255 : 0, y: shell & 0x800 ? 255 : 0, z: shell & 0x1000 ? 255 : 0 } };
+  }
 
   constructor(readonly actor: OwnedActor, readonly spawn: Q2SpawnFields) {
     this.classname = spawn.classname;

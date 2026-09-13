@@ -264,7 +264,7 @@ export class GlRenderer implements RendererBackend {
         this.drawTarget();
         this.state(state);
         this.identityMatrices();
-        this.program.use(environment, state.alphaTest, batch.lighting);
+        this.program.use(environment, state.alphaTest, batch.lighting, batch.textureEffect === "luminance-alpha");
         this.activeArrays = arrays;
         const gl = this.gl;
         gl.glEnableClientState(0x8074);

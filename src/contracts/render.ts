@@ -185,6 +185,7 @@ export type BatchLighting = { readonly kind: "vertex" }
   | { readonly kind: "q2-model-shadow"; readonly worldPositions: readonly Vec3[];
       readonly lights: readonly Q2ModelShadowLight[]; readonly shadeScale: number; readonly atlas: Q2ShadowAtlas };
 interface BatchData {
+  readonly textureEffect?: "luminance-alpha";
   readonly indices: readonly number[]; readonly texture: TextureBinding; readonly state: RenderState;
   readonly lighting: BatchLighting;
 }
