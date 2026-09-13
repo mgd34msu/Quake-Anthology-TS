@@ -1,6 +1,6 @@
 import type { ImageLevel, Palette, RenderImage, RendererImage, TextureSampling } from "../../contracts/render.ts";
 import type { Q1MipTexture } from "../../contracts/scene.ts";
-import { decodeBmp, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeQpic, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
+import { decodeBmp, decodeGif, decodeJpeg, decodePcx, decodePng, decodeQ3Tga, decodeQpic, decodeTga, decodeWal, generateMipChain, indexedRenderImage } from "../../formats/images/index.ts";
 import { SceneImageRegistry } from "./resources.ts";
 import { q2MipmappedImage } from "./q2-image.ts";
 
@@ -22,11 +22,16 @@ export interface SceneTexture {
   readonly fullbright: RendererImage | null;
 }
 
+type AnimatedFrame = Exclude<RenderImage, { readonly kind: "depth32f" }>;
+
 const repeat: TextureSampling = { wrap: "repeat", filter: "linear-mipmap-nearest" };
 
 /** Images retain palette data until the backend upload, including translated skins. */
 export class SceneTextureLoader {
   private readonly loaded = new Map<string, Promise<SceneTexture | null>>();
+  private animationFrames = new WeakMap<RendererImage, readonly [AnimatedFrame, ...AnimatedFrame[]]>();
+  private readonly stopAnimations = new Set<() => void>();
+  private closed = false;
   readonly white: SceneTexture;
   readonly missing: SceneTexture;
 
@@ -45,6 +50,7 @@ export class SceneTextureLoader {
 
   register(name: string, content: RenderImage, sampling: TextureSampling = repeat,
     source: RendererImage["source"] = { kind: "generated", name }, logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0]): SceneTexture {
+    this.requireOpen();
     const image = this.images.register(name, content, sampling, source);
     let fullbright: RendererImage | null = null;
     if (content.kind === "indexed8" && content.fullbright !== null) {
@@ -76,6 +82,7 @@ export class SceneTextureLoader {
   }
 
   async sampleSurface(texture: SceneTexture, options: { readonly mipmap: boolean; readonly wrap: TextureSampling["wrap"] }): Promise<SceneTexture> {
+    this.requireOpen();
     if (options.mipmap && options.wrap === "repeat") return texture;
     const key = `\0surface:${texture.image.ordinal}\0${options.mipmap}\0${options.wrap}`;
     const existing = this.loaded.get(key);
@@ -89,11 +96,17 @@ export class SceneTextureLoader {
       ? { ...original, levels: [original.levels[0]] } : { ...original, levels: [original.levels[0]] };
     const sampled = this.register(texture.name, content, { wrap: options.wrap, filter: options.mipmap ? "linear-mipmap-nearest" : "linear" },
       texture.image.source, texture);
+    const frames = this.animationFrames.get(texture.image);
+    if (frames !== undefined) {
+      const surfaceFrame = (frame: AnimatedFrame): AnimatedFrame => options.mipmap ? frame : { ...frame, levels: [frame.levels[0]] };
+      this.animate(sampled, [surfaceFrame(frames[0]), ...frames.slice(1).map(surfaceFrame)]);
+    }
     this.loaded.set(key, Promise.resolve(sampled));
     return sampled;
   }
 
   load(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" } = {}): Promise<SceneTexture | null> {
+    this.requireOpen();
     const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}`;
     const existing = this.loaded.get(key);
     if (existing !== undefined) return existing;
@@ -105,15 +118,27 @@ export class SceneTextureLoader {
   private async loadUncached(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" }): Promise<SceneTexture | null> {
     const dot = name.lastIndexOf("."), slash = name.lastIndexOf("/");
     const explicit = dot > slash, base = explicit ? name.slice(0, dot) : name;
-    const extensions = options.family === "q2" ? [".png", ".tga", ".jpg", ".wal", ".pcx"]
-      : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp"];
+    const extensions = options.family === "q2" ? [".png", ".tga", ".jpg", ".wal", ".pcx", ".gif"]
+      : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"];
     const candidates = explicit ? [name, ...extensions.map(extension => base + extension).filter(path => path !== name)] : extensions.map(extension => name + extension);
     for (const path of candidates) {
       const asset = await this.reader.read(path);
+      this.requireOpen();
       if (asset === null) continue;
       const suffix = path.slice(path.lastIndexOf(".")).toLowerCase();
       let content: RenderImage;
-      if (suffix === ".lmp") {
+      let animation: readonly [AnimatedFrame, ...AnimatedFrame[]] | null = null;
+      if (suffix === ".gif") {
+        const decoded = decodeGif(asset.bytes, path);
+        const convert = (image: ImageLevel): AnimatedFrame => {
+          const rgba = this.rgba(image, options.mipmap !== false);
+          const result = options.family === "q2" && options.mipmap !== false ? q2MipmappedImage(rgba) : rgba;
+          if (result.kind === "depth32f") throw new Error("GIF mip processing produced depth pixels");
+          return result;
+        };
+        animation = [convert(decoded.frames[0].image), ...decoded.frames.slice(1).map(frame => convert(frame.image))];
+        content = animation[0];
+      } else if (suffix === ".lmp") {
         if (this.palette === null) throw new Error("Quake picture textures require their content palette");
         const pic = decodeQpic(asset.bytes, path);
         content = indexedRenderImage([{ width: pic.width, height: pic.height, pixels: pic.indices }], this.palette,
@@ -153,17 +178,46 @@ export class SceneTextureLoader {
       }
       const original = await this.reader.readOriginal?.(path);
       if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
-        if (suffix === ".png") logicalSize = decodePng(original.bytes, path);
+        if (suffix === ".gif") logicalSize = decodeGif(original.bytes, path);
+        else if (suffix === ".png") logicalSize = decodePng(original.bytes, path);
         else if (suffix === ".tga") logicalSize = decodeTga(original.bytes, path);
         else if (suffix === ".jpg" || suffix === ".jpeg") logicalSize = decodeJpeg(original.bytes, path);
       }
-      if (options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
-      return this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
+      if (animation === null && options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
+      const texture = this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
+      if (animation !== null) this.animate(texture, animation);
+      return texture;
     }
     return null;
   }
 
-  private rgba(image: ImageLevel, mipmap: boolean): RenderImage {
+  close(): void {
+    this.closed = true;
+    for (const stop of this.stopAnimations) stop();
+    this.stopAnimations.clear();
+    this.animationFrames = new WeakMap();
+    this.loaded.clear();
+  }
+
+  private requireOpen(): void { if (this.closed) throw new Error("Scene texture loader is closed"); }
+
+  private animate(texture: SceneTexture, frames: readonly [AnimatedFrame, ...AnimatedFrame[]]): void {
+    if (frames.length < 2) return;
+    this.animationFrames.set(texture.image, frames);
+    let previous = 0;
+    const stop: () => void = this.images.trackAnimation(texture.image, milliseconds => {
+      // The Q2 donor deliberately ignores GIF delays and loops forever at 10 Hz.
+      const beat = Math.floor(milliseconds / 100), index = ((beat % frames.length) + frames.length) % frames.length;
+      if (index === previous) return;
+      const frame = frames[index];
+      if (frame === undefined) throw new Error("GIF frame index is outside the decoded sequence");
+      for (const [level, content] of frame.levels.entries()) this.images.update(texture.image, level, content);
+      previous = index;
+    }, () => { this.stopAnimations.delete(stop); this.animationFrames.delete(texture.image); });
+    this.stopAnimations.add(stop);
+  }
+
+  private rgba(image: ImageLevel, mipmap: boolean): Extract<RenderImage, { readonly kind: "rgba8" }> {
     return { kind: "rgba8", levels: mipmap ? generateMipChain(image) : [image], borderColor: { x: 0, y: 0, z: 0, w: 0 } };
   }
 }

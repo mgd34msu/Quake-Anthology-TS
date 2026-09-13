@@ -69,6 +69,7 @@ async function shaderPaths(content: LoadedApplicationContent, mounts: MountedCon
 export class ApplicationAssets {
   readonly images: SceneImageRegistry;
   private readonly movies = new Map<string, Promise<RegisteredShaderVideo | null>>();
+  private readonly activeTextures = new Set<SceneTextureLoader>();
   private readonly activeMovies = new Set<MaterialCinematic>();
   private closed = false;
   private readonly providers = new Map<ContentId, Promise<ProviderSceneAssets>>();
@@ -81,7 +82,7 @@ export class ApplicationAssets {
   private loadedTypography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() }) {
-    this.images = new SceneImageRegistry(owner);
+    this.images = new SceneImageRegistry(owner, mediaClock);
   }
 
   get world(): WorldScene {
@@ -96,15 +97,18 @@ export class ApplicationAssets {
     const pending = (async (): Promise<ProviderSceneAssets> => {
       const family = this.content.catalog.product(content).expectation.family;
       const mounts = await this.content.forContent(content), palette = await paletteFor(mounts, family);
+      if (this.closed) throw new Error("Scene provider loaded after assets closed");
       const textures = new SceneTextureLoader(this.images, { read: async path => {
         const asset = await mounts.open(path);
         return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
       } }, palette);
+      this.activeTextures.add(textures);
       const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
       for (const path of await shaderPaths(this.content, mounts)) {
         const asset = await mounts.open(path);
         if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
       }
+      if (this.closed) throw new Error("Scene provider loaded after assets closed");
       return { family, mounts, palette, textures, shaders };
     })();
     this.providers.set(content, pending);
@@ -202,6 +206,8 @@ export class ApplicationAssets {
   close(): undefined {
     if (this.closed) return;
     this.closed = true;
+    for (const textures of this.activeTextures) textures.close();
+    this.activeTextures.clear();
     for (const movie of this.activeMovies) movie.close();
     this.activeMovies.clear(); this.movies.clear();
     this.loadedTypography?.close();
