@@ -39,6 +39,28 @@ These are corrections to the next investigation, not automatic “done” verdic
 | Config/startup persistence requirements | Treating ConfigStore as entirely unjoined. | `src/app/bootstrap/application.ts:112` constructs server-profile storage; `startup.ts:73,116` constructs browser/controller stores. Donor command/cvar and key-binding paths remain references, including Q3 `src/engine/common-console.ts:641` and `client-keys.ts:147`. | Verify arbitrary archived cvars and per-seat binds across fresh startup/shutdown, separately from already joined preference stores. |
 | `q3.execution.qvm-roles` | “No application QVM constructor.” | Baseline `src/app/bootstrap/q3-client.ts:192–195` constructs `ApplicationQvmClient`; current checked HEAD has the call at line 196. Donor `src/engine/client-modules.ts:85,97` and `src/vm/interpreter.ts:102` remain references. | Review game/cgame/UI role selection, syscall coverage, executable mod selection and actual bytecode execution in the common application. A constructor does not prove all roles. |
 
+## Current followups — 2026-09-12
+
+These followups record current source findings and the user’s clarified scaling requirement. They do not revise the extraction baseline, the historical seven-lead count or the 477 requirement verdicts.
+
+### Image formats and replacement selection — priorities 2 and 3
+
+The production decoder union already includes PCX, WAL, TGA, PNG, JPG/JPEG, BMP and GIF. GIF playback is accepted in `e05343b`; do not queue another decoder implementation. Accepted `185c06e` adds Q2 JPEG/BMP replacement fallback and PCX/BMP original logical-dimension recovery. Remaining work is a common replacement priority instead of inconsistent caller-specific ordering, and application ownership for the absent `r_override_textures`, `r_texture_overrides` and `r_texture_formats` controls. The previously dormant `readOriginal` now has a production reader through accepted `aeb059d`. Replacement pixel dimensions must not silently change the intended world/UI dimensions.
+
+A separate model-replacement join is also missing: `src/app/bootstrap/model-loader.ts:68` selects Q1 replacements only. Q2 MD5 helpers exist, but no application replacement-selection path uses them. Preserve the existing Q1 MD5 join while adding the missing Q2 selection.
+
+Root accepted image-resolution `185c06e` after 14 tests/82 assertions and corrected-fixture checks; isolated strict/policy passed. Reader `aeb059d` was accepted with the exact Hipnotic/reader batch: 37 tests/1755 assertions, no skips, and strict/policy passed. These bounded receipts do not complete the remaining override controls or Q2 MD5 selection.
+
+The finite review at accepted `185c06e` reopens exactly `q2.assets.md5-replacements` and `q2.assets.md5-animation`; all other 475 verdicts carry unchanged from the `a5c4da3` capture-review cutoff. Counts become 279 Done/198 Not done, with Q2 at 107/193. This is not a new full-ledger audit.
+
+### Map-relative actor scaling — priorities 1 and 7
+
+The user expanded the scaling scope to all Q1/Q2/Q3 source/map combinations, with authored relative actor sizes preserved. Stock Q3 has player/bot characters rather than a campaign monster roster; preserve the relative sizes of those characters too.
+
+Calibrate actual model/source units and existing replacement transforms first. Root independently reran both TypeScript measurement probes: Q1 MDL height is 51.8381, Q2 male MD2 is 49.8092, Q1 rerelease MD5 is 52.0984 and Q2 male MD5 is 50.0221. Assembled Q3 heights are Sarge 57.8448, Xaero 59.6382 and Anarki 62.2117. All standing hulls are 56 high; Q3 width/view height are 30/26, versus Q1/Q2 32/22. Visual reference calibration is a separate choice from physics-unit conversion. Root inspected `/tmp/q12-scale-native.png` and `/tmp/q12-scale-fixed-ratio.png`: Q2 `base1`, equal depth and floor placement, Q2 soldier/male beside Q1 shambler/Ranger, comparing native factor 1 with a common Q1 factor of 0.960860619. This comparison did not establish automatic enlargement. Root also reran `/tmp/map-scale-measure.ts` (`/tmp/root-map-scale-measure.log`): all three BSP vertex paths retain unscaled coordinates; reviewed defaults use step 18 and gravity 800. Room clearances 96/320/276 come from different rooms and are not a unit calibration. Equal actor hulls do not prove equivalent world scale.
+
+Native source/map pairs use factor 1. If calibration establishes that cross-game conversion is needed, use a reciprocal source/map policy with one factor per game pair, preserving relative actor sizes. Distinguish a cosmetic family adjustment from physical unit conversion. Cosmetic adjustment must preserve feet, attachments and native physics. Physical conversion must carry collision dimensions, view placement, attack geometry and rendering together. Measurements remain read-only. No scale factor has been selected; no required physical conversion, engine scaling change or acceptance is claimed by this note.
+
 ## Reproducible complete records
 
 Run the per-game commands in the linked declaration reports, then:

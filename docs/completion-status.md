@@ -1,18 +1,18 @@
 # Implementation completion status
 
-Source cutoff: `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf`. All other verdicts carry from 27c17a9 without a new inventory-wide audit. This finite update reviews only q2.capture.screenshots and q3.recording.screenshots-levelshots against accepted fc0c15e: Q2 capture becomes Done/shared-replacement; Q3 remains Not done for recording-clock/FPS-timescale/restart integration. Multi-seat and resized-window screenshots were not separately exercised in the current capture fixture. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
+Source cutoff: `185c06edc6ad8d02702cfaeed00a21df9235edf5`. This finite review reopens only q2.assets.md5-replacements and q2.assets.md5-animation: shared parsing exists, but Q2 application replacement selection is not joined. All other 475 verdicts carry unchanged from the a5c4da3 capture-review cutoff, without a new inventory-wide audit. Existing Q1 MD5 selection and separately tested BSPX behavior remain intact. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
 | Q1 | 122 | 58 | 180 | 67.8% |
-| Q2 | 109 | 84 | 193 | 56.5% |
+| Q2 | 107 | 86 | 193 | 55.4% |
 | Q3 | 50 | 54 | 104 | 48.1% |
-| Overall inventory | 281 | 196 | 477 | 58.9% |
+| Overall inventory | 279 | 198 | 477 | 58.5% |
 
 | Game | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: |
 | Q1 | 102 | 15 | 5 |
-| Q2 | 61 | 33 | 15 |
+| Q2 | 61 | 31 | 15 |
 | Q3 | 39 | 7 | 4 |
 
 ## Q1 requirements
@@ -721,14 +721,14 @@ Source cutoff: `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf`. All other verdicts ca
 | --- | --- | --- | --- | --- |
 | `q2.diagnostics.runtime-camera` — Execute authored target cameras | done | integrated | Registered Q64 target_camera callbacks move source intermission cameras through authored targets, preserve the dummy/player state and restore normal play through player hooks. | [src/content/q2/rerelease/q64/index.ts](../src/content/q2/rerelease/q64/index.ts), [src/content/q2/rerelease/players.ts](../src/content/q2/rerelease/players.ts), [src/content/composition/q2/index.ts](../src/content/composition/q2/index.ts), [src/app/bootstrap/presentation.ts](../src/app/bootstrap/presentation.ts) |
 
-### assets — 4 done / 4 total
+### assets — 2 done / 4 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
 | `q2.assets.bspx-lightmaps` — Load decoupled BSPX lightmaps | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
 | `q2.assets.lightgrid` — Light entities from BSPX light grids | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
-| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
-| `q2.assets.md5-animation` — Animate skeletal models with authored scale | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
+| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | not-done | missing-work | At accepted 185c06e, loadApplicationModel selects enhanced replacements only for Q1 MDL assets. Q2 MD5 helpers exist, but Q2 application replacement discovery, selection and authored-scale attachment are not joined. Preserve the working Q1 replacement path; common parsing alone does not complete the Q2 requirement. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/md5.ts](../src/formats/q3-model/md5.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts) |
+| `q2.assets.md5-animation` — Animate skeletal models with authored scale | not-done | missing-work | At accepted 185c06e, Q2 skeletal helpers do not reach application model selection, so required Q2 MD5 animation/frame mapping and authored-scale behavior are not exercised through the normal application model path. Join Q2 replacement selection and its animation/scale semantics; the existing Q1 MD5 join and separately tested BSPX lighting remain intact. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/md5.ts](../src/formats/q3-model/md5.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts) |
 
 ### visual — 2 done / 2 total
 

@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "a5c4da305b9597e9a06b773bf63c25f2e7d60aaf",
-  "carriedVerdictsFrom": "27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4",
+  "sourceCutoff": "185c06edc6ad8d02702cfaeed00a21df9235edf5",
+  "carriedVerdictsFrom": "a5c4da305b9597e9a06b773bf63c25f2e7d60aaf",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -20,13 +20,13 @@
     },
     {
       "family": "q2",
-      "done": 109,
-      "notDone": 84,
+      "done": 107,
+      "notDone": 86,
       "total": 193,
-      "percentage": 56.5,
+      "percentage": 55.4,
       "methods": {
         "integrated": 61,
-        "sharedReplacement": 33,
+        "sharedReplacement": 31,
         "extendedCommon": 15
       }
     },
@@ -44,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 281,
-    "notDone": 196,
+    "done": 279,
+    "notDone": 198,
     "total": 477,
-    "percentage": 58.9
+    "percentage": 58.5
   },
   "rows": [
     {
@@ -4593,27 +4593,25 @@
     {
       "id": "q2.assets.md5-replacements",
       "title": "Select correctly scaled skeletal model replacements",
-      "status": "done",
-      "basis": "shared-replacement",
-      "reason": "Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL.",
+      "status": "not-done",
+      "basis": "missing-work",
+      "reason": "At accepted 185c06e, loadApplicationModel selects enhanced replacements only for Q1 MDL assets. Q2 MD5 helpers exist, but Q2 application replacement discovery, selection and authored-scale attachment are not joined. Preserve the working Q1 replacement path; common parsing alone does not complete the Q2 requirement.",
       "paths": [
-        "src/app/bootstrap/assets.ts",
-        "src/render/scene/world.ts",
-        "src/render/scene/models/renderer.ts",
-        "src/render/scene/models/light-sampler.ts"
+        "src/app/bootstrap/model-loader.ts",
+        "src/formats/q3-model/md5.ts",
+        "src/render/scene/models/renderer.ts"
       ]
     },
     {
       "id": "q2.assets.md5-animation",
       "title": "Animate skeletal models with authored scale",
-      "status": "done",
-      "basis": "shared-replacement",
-      "reason": "Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL.",
+      "status": "not-done",
+      "basis": "missing-work",
+      "reason": "At accepted 185c06e, Q2 skeletal helpers do not reach application model selection, so required Q2 MD5 animation/frame mapping and authored-scale behavior are not exercised through the normal application model path. Join Q2 replacement selection and its animation/scale semantics; the existing Q1 MD5 join and separately tested BSPX lighting remain intact.",
       "paths": [
-        "src/app/bootstrap/assets.ts",
-        "src/render/scene/world.ts",
-        "src/render/scene/models/renderer.ts",
-        "src/render/scene/models/light-sampler.ts"
+        "src/app/bootstrap/model-loader.ts",
+        "src/formats/q3-model/md5.ts",
+        "src/render/scene/models/renderer.ts"
       ]
     },
     {
