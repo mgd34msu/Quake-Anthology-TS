@@ -23,7 +23,7 @@ export interface Id1EnvironmentalDamage {
   readonly knockback: number;
 }
 
-/** Classifies real calls in the pinned artifact; QC still executes every damage store and reaction. */
+/** Classifies proven artifact sites; other native source calls retain unclassified provenance. */
 export class Id1Environment {
   private readonly binding: Id1ProgramBinding;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,

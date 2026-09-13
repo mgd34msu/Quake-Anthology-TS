@@ -48,6 +48,7 @@ export class Id1SynchronousAttacks {
   }
   compose(damage: QcFunctionBoundary): QcFunctionBoundary {
     const layout = this.binding.attacks;
+    if (layout === null) return damage;
     return { functions: new Set([...damage.functions, layout.axe, layout.shotgun, layout.superShotgun, layout.addMulti]), run: (call, execute) => {
       if (damage.functions.has(call.functionIndex)) return damage.run(call, execute);
       const vm = this.vm();
@@ -71,6 +72,7 @@ export class Id1SynchronousAttacks {
   }
   resolve(call: Id1DamageCall): Id1SynchronousAttack | null {
     const layout = this.binding.attacks;
+    if (layout === null) return null;
     const axe = call.call.caller === layout.axe && layout.axeDamage.includes(call.call.statement);
     const shotgun = call.call.caller === layout.applyMultiDamage[0] && call.call.statement === layout.applyMultiDamage[1];
     if (!axe && !shotgun) return null;

@@ -1,3 +1,4 @@
+import { id1ProgramBinding } from "./id1-program.ts";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { ItemId } from '../../../contracts/gameplay.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -27,7 +28,12 @@ export class Id1ProjectileAttacks {
   constructor(private readonly source: Pick<QcWorldHostOptions, 'program' | 'entities' | 'actors' | 'slots'>,
     private readonly machine: () => QcMachine) {
     const p = source.program, qw = p.digest === 'sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830';
-    if (!qw && p.digest !== 'sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580') throw new QcProgramError('Unverified projectile program');
+    if (id1ProgramBinding(p).attribution === 'native') {
+      this.damageFunction = p.functionNamed('T_Damage').index;
+      this.radiusFunction = 0; this.lightningFunction = 0; this.launchSpikeFunction = 0;
+      this.sites = new Map<number, number>(); this.ownerField = -1;
+      return;
+    }
     for (const [name, weapon] of [['W_FireRocket', 'q1:weapon/rocketlauncher'], ['W_FireGrenade', 'q1:weapon/grenadelauncher'],
       ['W_FireSpikes', 'q1:weapon/nailgun'], ['W_FireSuperSpikes', 'q1:weapon/supernailgun'], ['W_FireLightning', 'q1:weapon/lightning']] satisfies readonly (readonly [string, ItemId])[]) this.weapons.set(p.functionNamed(name).index, weapon);
     this.damageFunction = p.functionNamed('T_Damage').index;

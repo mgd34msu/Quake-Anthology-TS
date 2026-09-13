@@ -15,7 +15,7 @@ export interface Id1DamageCall {
   readonly amount: number;
 }
 
-/** Only the supplied classic id1 artifact has these source field and statement meanings. */
+/** Observes validated source damage operations inside the shared authority. */
 export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
   private readonly active: { readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; result: SourceDamageResult }[] = [];
@@ -78,17 +78,36 @@ export class Id1DamageBinding {
     const layout = this.binding.damage;
     if (frame === undefined || call.caller !== layout.index || (call.statement !== layout.death[0] && call.statement !== layout.pain[0])) return undefined;
     const vm = this.vm();
+    if (this.binding.attribution === "native") {
+      const target = this.source.entities.fromReference(frame.targetReference);
+      const death = call.statement === layout.death[0];
+      if (death ? vm.argInt(0) !== frame.targetReference || target.float(this.health) > 0
+        : vm.globals.int(vm.globalOffset("self")) !== frame.targetReference || target.float(this.health) <= 0 || vm.argFloat(1) !== frame.result.appliedDamage)
+        throw new QcProgramError("Unsupported native damage reaction context");
+    }
     if (call.functionIndex !== vm.globals.int(call.statement === layout.death[0] ? layout.death[1] : layout.pain[1])) return undefined;
-    const result: SourceDamageResult = { appliedDamage: vm.globals.float(this.binding.damage.take), reaction: call.statement === layout.death[0] ? "death" : "pain" };
+    const result: SourceDamageResult = { appliedDamage: this.binding.attribution === "native" ? frame.result.appliedDamage : vm.globals.float(this.binding.damage.take), reaction: call.statement === layout.death[0] ? "death" : "pain" };
     frame.result = result;
     frame.observer.beforeReaction(result);
     return undefined;
   }
   observeEntityStore(store: QcEntityStoreObservation): undefined {
     const frame = this.active.at(-1);
-    if (frame === undefined || store.functionIndex !== this.binding.damage.index || store.reference !== frame.targetReference) return undefined;
+    if (frame === undefined) return undefined;
+    const combatStore = [this.health, this.velocity, this.armorValue, this.armorType, this.items].includes(store.word);
+    if (this.binding.attribution === "native" && frame.result.reaction === "none" && combatStore && store.reference !== frame.targetReference)
+      throw new QcProgramError("Unsupported native damage redirects a combat store to another actor");
+    if (store.reference !== frame.targetReference) return undefined;
+    if (store.functionIndex !== this.binding.damage.index) {
+      if (this.binding.attribution === "native" && frame.result.reaction === "none"
+        && combatStore)
+        throw new QcProgramError("Unsupported native damage helper mutates target combat state before reaction");
+      return undefined;
+    }
     const vm = this.vm(), before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength), after = new DataView(store.after.buffer, store.after.byteOffset, store.after.byteLength);
     if (store.word === this.health) {
+      if (this.binding.attribution === "native" && store.statement !== this.binding.damage.healthStore)
+        throw new QcProgramError("Unsupported native damage health store");
       frame.observer.stored({ kind: "health", before: before.getFloat32(0, true), after: after.getFloat32(0, true) });
       frame.result = { appliedDamage: vm.globals.float(this.binding.damage.take), reaction: "none" };
     } else if (store.word === this.armorValue || store.word === this.armorType || store.word === this.items) {

@@ -1235,7 +1235,15 @@ export class SharedSimulation implements Simulation {
                 weapon: projectile.weapon, weaponProvider: this.weaponProvider.provider, combatProvider: recipe.combat.provider,
                 inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: game.deathType(call.target) } } };
           }
-          if (environment === null) throw new Error(`Unsupported QuakeC damage provenance: ${game.prepared.program.functionAt(call.call.caller).name} statement ${call.call.statement}`);
+          if (environment === null) {
+            const target = this.bodies.read(call.target);
+            if (target === null) throw new Error("Native QuakeC damage lost its target body");
+            return { target: call.target, amount: call.amount, knockback: 0, direction: zero, point: target.origin, normal: zero, delivery: "direct",
+              attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: game.machine.globals.float(game.machine.globalOffset("time")) },
+                attacker: call.attacker, inflictor: call.inflictor, weapon: null, weaponProvider: this.weaponProvider.provider,
+                combatProvider: recipe.combat.provider, inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider,
+                cause: { kind: "q1", deathType: game.deathType(call.target) } } };
+          }
           return { target: call.target, amount: call.amount, knockback: environment.knockback, direction: environment.direction,
             point: environment.point, normal: zero, delivery: "direct",
             attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: environment.time }, attacker: call.attacker, inflictor: call.inflictor,

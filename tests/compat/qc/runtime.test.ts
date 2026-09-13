@@ -279,7 +279,9 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
           vm.execute(program.functionNamed("T_Damage").index, 4);
         } else vm.execute(program.functionNamed("door_blocked").index);
       };
-      expect(() => new Id1DamageBinding({ ...source, program: otherProgram }, authority, () => vm, () => { throw new Error("Unknown artifact reached resolver"); })).toThrow("verified classic id1");
+      const foreignBinding = new Id1DamageBinding({ ...source, program: otherProgram }, authority, () => vm, () => { throw new Error("Foreign machine reached resolver"); });
+      expect(() => foreignBinding.functionBoundary.run({ functionIndex: otherProgram.functionNamed("T_Damage").index, caller: 0, statement: -1 },
+        () => { throw new Error("Foreign machine executed source damage"); })).toThrow("binding belongs to another machine");
       if (variant === "failure") {
         expect(invoke).toThrow(); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
         words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
@@ -941,6 +943,8 @@ test.skipIf(!haveCorpus)("verified id1 attacks and environmental callbacks prese
         if (attack === null) {
           const hazard = environment.resolve(call, environmentalCallback);
           if (hazard === null) throw new Error("Unexpected damage source");
+          expect(hazard.cause.kind).toBe("environment");
+          if (hazard.cause.kind !== "environment") throw new Error("Expected source environment hazard");
           if (hazard.cause.hazard === "fall") expect(vm.strings.get(entities.at(2).int(field("deathtype")))).toBe("");
           return { target: call.target, amount: call.amount, knockback: hazard.knockback, direction: hazard.direction, point: hazard.point,
             normal: { x: 0, y: 0, z: 0 }, delivery: "direct", attack: { sequence: outcomes.length, time: { kind: "seconds", value: hazard.time },
