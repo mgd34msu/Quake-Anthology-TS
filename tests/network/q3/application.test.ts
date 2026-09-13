@@ -7,7 +7,7 @@ import { QvmUi } from "../../../src/compat/qvm/ui.ts";
 import { Q3SceneRecorder } from "../../../src/content/q3/presentation/scene.ts";
 import { UnifiedAudio } from "../../../src/audio/index.ts";
 import { expect, test, spyOn } from 'bun:test';
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, copyFileSync, constants, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, copyFileSync, constants, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { Q3ClientDownload } from '../../../src/network/q3/download.ts';
@@ -24,8 +24,8 @@ import { Q3ClientConnection } from '../../../src/network/q3/client.ts';
 import { q3ChannelDelivery } from '../../../src/network/q3/transport.ts';
 import type { Snapshot } from '../../../src/network/q3/server-message.ts';
 
-function fixturePk3(): Uint8Array<ArrayBuffer> {
-  const name = new TextEncoder().encode('wire-probe.cfg'), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(400));
+function fixturePk3(path = 'wire-probe.cfg'): Uint8Array<ArrayBuffer> {
+  const name = new TextEncoder().encode(path), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(400));
   const localLength = 30 + name.length + data.length, centralLength = 46 + name.length;
   const bytes = new Uint8Array(localLength + centralLength + 22), view = new DataView(bytes.buffer), crc = Bun.hash.crc32(data);
   view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(14, crc, true);
@@ -310,4 +310,78 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     await closing;
     expect(lifecycle.slice(-2)).toEqual(["cg-shutdown:maps/q3dm2.bsp", "ui-shutdown:maps/q3dm2.bsp"]);
   } finally { shutdownGate.resolve(); await app?.close(); await server.close(); cgShutdown.mockRestore(); uiShutdown.mockRestore(); uiInit.mockRestore(); guestFrames.mockRestore(); scenes.mockRestore(); audio.mockRestore(); guestUiFrames.mockRestore(); guestKeys.mockRestore(); pure.mockRestore(); shaders.mockRestore(); pictures.mockRestore(); }
+}, 60000);
+
+
+test('native Q3 downloads a referenced user package before guest init and pure admission', async () => {
+  const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+  const root = mkdtempSync(join(tmpdir(), 'q3-remote-download-')), corpus = join(root, 'server'), base = join(corpus, 'q3a/baseq3');
+  const original = join(homedir(), 'Projects/qfiles'), users = join(root, 'user-content');
+  mkdirSync(base, { recursive: true });
+  for (const name of readdirSync(join(original, 'q3a/baseq3'))) if (name.endsWith('.pk3')) copyFileSync(join(original, 'q3a/baseq3', name), join(base, name), constants.COPYFILE_FICLONE);
+  const bytes = fixturePk3('wire-probe.dat'); writeFileSync(join(base, 'zzz-wire-fixture.pk3'), bytes);
+  const common = ['--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const selected = parseApplicationCommand([...common, '--content-root', corpus, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+  if (selected.kind !== 'run') throw new Error('Missing server options');
+  const messages: string[] = [], host = { print: (text: string): undefined => { messages.push(text); return undefined; } };
+  let server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-user-content') }, host);
+  const opened = await server.content.mounts.open('wire-probe.dat'); if (opened === null) throw new Error('Server did not open fixture resource');
+  server.simulation.q3Source()?.host.cvars.set('sv_allowDownload', '1', true);
+  let client: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
+  const init = spyOn(QvmCgame.prototype, 'init'), pure = spyOn(Q3ServerConnection.prototype, 'verifyPure');
+  try {
+    const address = server.networkAddress; if (address === null) throw new Error('Missing listener');
+    const selectedClient = parseApplicationCommand([...common, '--content-root', original, '--connect-q3', `127.0.0.1:${address.port}`, '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
+    if (selectedClient.kind !== 'run') throw new Error('Missing client options');
+    const disabledUsers = join(root, 'disabled-content');
+    mkdirSync(join(disabledUsers, 'q3a/baseq3/settings'), { recursive: true });
+    writeFileSync(join(disabledUsers, 'q3a/baseq3/settings/client.cfg'), 'seta cl_allowDownload "0"\nseta rate "10000"\n');
+    client = await RemoteApplication.open({ ...selectedClient.options, userContentRoot: disabledUsers }, host);
+    expect(client.clientCommands?.cvars.get('rate')?.integerValue).toBe(10000);
+    for (let tick = 0; tick < 100 && !messages.some(text => text.includes('Downloads are disabled')); tick++) {
+      await client.step(50); await Bun.sleep(2); await server.step(50); await Bun.sleep(2);
+    }
+    expect(messages.some(text => text.includes('Missing server packages: baseq3/zzz-wire-fixture.pk3'))).toBe(true);
+    expect(messages.some(text => text.startsWith('Downloading '))).toBe(false);
+    expect(existsSync(join(disabledUsers, 'q3a/baseq3/zzz-wire-fixture.pk3'))).toBe(false);
+    await client.close(); client = null; await server.close();
+    server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-user-content') }, host);
+    await server.content.mounts.open('wire-probe.dat');
+    server.simulation.q3Source()?.host.cvars.set('sv_allowDownload', '1', true);
+    const nextAddress = server.networkAddress; if (nextAddress === null) throw new Error('Missing restarted listener');
+    init.mockClear(); pure.mockClear();
+    client = await RemoteApplication.open({ ...selectedClient.options, network: { kind: "q3-client", remote: `127.0.0.1:${nextAddress.port}` }, userContentRoot: users }, host);
+    const remote = client;
+    expect(remote.clientCommands?.cvars.get("cl_allowDownload")?.integerValue).toBe(0);
+    remote.clientCommands?.commands.executeNow("seta cl_allowDownload 1");
+    expect(existsSync(users)).toBe(false);
+    let downloading = false, initializedDuringDownload = false;
+    for (let tick = 0; tick < 300 && remote.networkPhase !== 'active'; tick++) {
+      await remote.step(50); await Bun.sleep(2); await server.step(50); await Bun.sleep(2);
+      if (remote.remote instanceof Q3RemotePresentation && remote.remote.downloading) {
+        downloading = true; initializedDuringDownload ||= remote.localPlayers.length !== 0 || init.mock.calls.length !== 0;
+      }
+    }
+    if (remote.networkPhase !== 'active') throw new Error(`Download admission failed: ${messages.join('')}`);
+    expect(downloading).toBe(true);
+    expect(initializedDuringDownload).toBe(false);
+    expect(await Bun.file(join(users, 'q3a/baseq3/zzz-wire-fixture.pk3')).bytes()).toEqual(bytes);
+    expect(init.mock.calls.length).toBe(1);
+    expect(pure.mock.results.some(result => result.type === 'return' && result.value.kind === 'authentic')).toBe(true);
+    expect(remote.session.world).toBeNull();
+    const resource = await remote.content.mounts.open('wire-probe.dat');
+    if (resource?.reference.provenance.kind !== 'archive') throw new Error('Downloaded resource lacks archive provenance');
+    expect(resource.reference.provenance.mount.archivePath).toBe(join(users, 'q3a/baseq3/zzz-wire-fixture.pk3'));
+    const plays = spyOn(UnifiedAudio.prototype, 'play');
+    try {
+      remote.queueCommand('soundinfo', [], null);
+      remote.queueCommand('play', ['sound/weapons/machinegun/machgf1b.wav'], null);
+      remote.queueCommand('soundlist', [], null);
+      await remote.step(50);
+      expect(plays.mock.calls.some(call => call[0].sound.name.includes('machgf1b'))).toBe(true);
+      expect(messages.some(text => text.includes('machgf1b.wav'))).toBe(true);
+    } finally { plays.mockRestore(); }
+    await remote.close(); client = null;
+    expect(await Bun.file(join(users, 'q3a/baseq3/settings/client.cfg')).text()).toContain('seta cl_allowDownload "1"');
+  } finally { await client?.close(); await server.close(); init.mockRestore(); pure.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 }, 60000);

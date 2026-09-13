@@ -9,7 +9,7 @@ import { q3InfoValue } from '../../../network/q3/admission.ts';
 import { Q3ClientClock } from '../../../network/q3/clock.ts';
 import { toQ3PlayerState } from '../../../network/q3/adapters.ts';
 import type { WireUserCommand } from '../../../network/q3/message.ts';
-import type { Gamestate, Snapshot } from '../../../network/q3/server-message.ts';
+import type { Download, Gamestate, Snapshot } from '../../../network/q3/server-message.ts';
 import { HistorySnapshotSource } from '../../../content/q3/presentation/snapshots.ts';
 import { retailSnapshot } from '../../../content/q3/presentation/retail-snapshot.ts';
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from '../../../content/q3/foundation/arsenal.ts';
@@ -35,6 +35,12 @@ export interface Q3RemotePresentationOptions {
   readonly content: LoadedApplicationContent;
   readonly userinfo: () => string;
   loadContent(world: Q3RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent>;
+  readonly downloads?: {
+    prepare(connection: Q3ClientConnection): Promise<boolean>;
+    publishSize(size: number): number;
+    receive(block: Download): Promise<void>;
+    close(): void;
+  };
   shutdown?(): Promise<void>;
   initialize?(connection: Q3ClientConnection): Promise<void>;
   sendCommand(text: string): void;
@@ -54,6 +60,8 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private generation = 0;
   private ordinal = 0;
   private current: Snapshot | null = null;
+  private loadingDownloads = false;
+  get downloading(): boolean { return this.loadingDownloads; }
   private published: SimulationOutput | null = null;
   private gameStateMessage = 0;
   private gameStateCommands = 0;
@@ -92,7 +100,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
       } },
     };
   }
-  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
+  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.options.downloads?.close(); this.loadingDownloads = false; this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
   async systemInfo(info: string): Promise<void> {
     if (Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
     const game = q3InfoValue(info, 'fs_game'); if (game !== '' && game !== 'baseq3') throw new Error(`Unsupported Q3 remote game directory: ${game}`);
@@ -106,9 +114,19 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     const map = q3InfoValue(info, 'mapname'); if (!/^[A-Za-z0-9_/-]+$/.test(map) || map.includes('..')) throw new Error('Invalid Q3 remote map name');
     const names = (first: number, count: number): string[] => Array.from({ length: count }, (_, i) => connection.gameState.get(first + i) ?? '').filter(value => value.length > 0);
     this.gameStateMessage = connection.serverMessageSequence; this.gameStateCommands = state.commandSequence;
+    this.loadingDownloads = await this.options.downloads?.prepare(connection) ?? false;
+    if (this.loadingDownloads) return;
     this.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
     this.collision = createSceneQueries(this.content.world);
     await this.options.initialize?.(connection);
+  }
+  downloadSize(size: number): number {
+    if (this.options.downloads === undefined) throw new Error("Q3 package downloads have no writable content owner");
+    return this.options.downloads.publishSize(size);
+  }
+  async download(block: Download): Promise<void> {
+    if (this.options.downloads === undefined) throw new Error("Q3 package downloads have no writable content owner");
+    await this.options.downloads.receive(block);
   }
   snapshot(snapshot: Snapshot, _ping: number): void {
     this.current = snapshot; this.clock.publish(snapshot);

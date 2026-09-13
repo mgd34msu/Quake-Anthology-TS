@@ -1,3 +1,14 @@
+import { CommandBuffer } from "../../core/commands/index.ts";
+import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
+import { ConfigStore } from "../../settings/config.ts";
+import { compareQ3Packages } from "../../network/q3/pure.ts";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
+import { existsSync } from "node:fs";
+import { ServerPakSet } from "../../network/q3/pak-references.ts";
+import { Q3ApplicationPackages } from "./network/q3-downloads.ts";
+import { Q3ApplicationClientDownloads } from "./network/q3-client-downloads.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { q3InfoValue } from "../../network/q3/admission.ts";
 import { Q3ClientContent } from "./network/q3-client-content.ts";
@@ -23,7 +34,7 @@ import type { LoadedApplicationContent } from "./content.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
 import { ApplicationInput } from "./input.ts";
-import type { LocalPlayer } from "./input.ts";
+import type { ApplicationInputCommandOwner, LocalPlayer } from "./input.ts";
 import { readMenuArt } from "./menu-art.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
@@ -55,6 +66,8 @@ interface RemoteCommand { readonly name: string; readonly args: readonly string[
 
 /** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
+  readonly clientCommands: ApplicationInputCommandOwner | null;
+  private readonly clientConfig: ConfigStore | null;
   readonly remote: Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
   private readonly network: Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
   private frontend: RemoteWorldFrontend | null = null;
@@ -70,6 +83,8 @@ export class RemoteApplication {
   private worldLoadGeneration = 0;
   private stepping = false;
   private q3Content: Q3ClientContent | null = null;
+  private q3Downloads: Q3ApplicationClientDownloads | null = null;
+  private q3CatalogSeed: LoadedApplicationContent | null = null;
   private q3InitialViewPending = false;
   private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
@@ -80,6 +95,27 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
+    if (launchOptions.network.kind === "q3-client") {
+      const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
+      const cvars = new CvarRegistry({ dialect: "q3", context, print: text => this.print(text),
+        cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
+      cvars.register("cl_allowDownload", "0", CvarFlag.Archive);
+      cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
+      cvars.register("cl_packetdup", "1", CvarFlag.Archive);
+      cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
+      cvars.register("snaps", "20", CvarFlag.Archive | CvarFlag.UserInfo);
+      cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
+      cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
+      cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
+      const commands = new CommandBuffer({ dialect: "q3", context, cvars, print: text => this.print(text), forwardToServer: invocation => {
+        const name = invocation.argv[0]; if (name === undefined) return undefined;
+        let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
+        this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
+      } });
+      this.clientCommands = { cvars, commands };
+      const product = loadedContent.catalog.require(launchOptions.product);
+      this.clientConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+    } else { this.clientCommands = null; this.clientConfig = null; }
     if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
@@ -90,11 +126,22 @@ export class RemoteApplication {
     } else if (launchOptions.network.kind === "q3-client") {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
       const remote = new Q3RemotePresentation({ identity, session, content: loadedContent,
-        userinfo: () => `\\name\\Player\\model\\${launchOptions.characterModel}/default\\handicap\\100\\rate\\25000\\snaps\\20`,
+        userinfo: () => this.clientCommands?.cvars.infoString(CvarFlag.UserInfo) ?? "",
         print: text => this.print(text), sendCommand: text => this.network.command(text),
-        loadContent: (world, connection) => this.loadQ3ServerWorld(world, connection), initialize: connection => this.bindSeat(connection), shutdown: async () => { await this.presentation?.q3Client?.shutdown(); } });
+        loadContent: (world, connection) => this.loadQ3ServerWorld(world, connection), initialize: connection => this.bindSeat(connection),
+        downloads: { prepare: connection => this.prepareQ3Downloads(connection),
+          publishSize: size => { if (this.q3Downloads === null) throw new Error("Q3 download has no content owner"); return this.q3Downloads.publishSize(size); },
+          receive: async block => { if (this.q3Downloads === null) throw new Error("Q3 download has no content owner"); await this.q3Downloads.receive(block); },
+          close: () => { this.q3Downloads?.close(); this.q3Downloads = null; } }, shutdown: async () => {
+          const presentation = this.presentation;
+          if (presentation !== null) {
+            this.uiPreferences = { ...presentation.ui.preferences.values };
+            await presentation.q3Client?.shutdown();
+            this.session.closeWorld(); this.presentation = null; this.clientInputs = [];
+          }
+        } });
       this.remote = remote;
-      this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
+      this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, ...(this.clientCommands === null ? {} : { cvars: this.clientCommands.cvars }), qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
       const remote = new Q2RemotePresentation({ identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
@@ -125,6 +172,8 @@ export class RemoteApplication {
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       application = new RemoteApplication(options, content, session, renderer, host, transport, address, identity);
+      const saved = await application.clientConfig?.loadText("settings/client.cfg");
+      if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
       application.frontend = await application.loadFrontend(content);
       host.print(`Connecting to ${q1 ? "Quake" : q3 ? "Quake III" : "Quake II"} server ${addressKey(address)}.\n`);
       return application;
@@ -186,14 +235,50 @@ export class RemoteApplication {
     const names = (first: number, maximum: number): string[] => Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
     return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) });
   }
+  private async prepareQ3Downloads(connection: Q3ClientConnection): Promise<boolean> {
+    const generation = connection.generation;
+    const assertCurrent = (): void => {
+      if (this.closed || !(this.network instanceof Q3ClientNetwork) || this.network.native !== connection || generation !== connection.generation)
+        throw new Error("Q3 package download belongs to a retired connection");
+    };
+    assertCurrent();
+    const seed = this.q3CatalogSeed ?? this.content, product = seed.catalog.require(this.options.product);
+    const directory = product.userContent?.root ?? userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
+    const root = dirname(directory), packages = await Q3ApplicationPackages.open(seed, connection.checksumFeed);
+    assertCurrent();
+    const info = connection.gameState.get(1) ?? "", referenced = new ServerPakSet();
+    referenced.setChecksums(q3InfoValue(info, "sv_referencedPaks"));
+    referenced.setNames(q3InfoValue(info, "sv_referencedPakNames"));
+    this.q3Downloads?.close();
+    const downloads = new Q3ApplicationClientDownloads(root, { assertCurrent: () => { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package download was replaced"); },
+      reliable: text => connection.reliable.add(text), sendPacket: () => { assertCurrent(); if (this.network instanceof Q3ClientNetwork) this.network.sendPacket(); },
+      progress: (name, count, size) => { if (count === 0 || count === size) this.print(`Downloading ${name}: ${count}/${size} bytes\n`); },
+      reloadPackages: async () => {
+        const fresh = await loadApplicationContent({ ...this.options, map: this.content.recipe.map.geometry.requestedPath });
+        try { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package refresh was cancelled"); } catch (error) { await fresh.close(); throw error; }
+        const old = this.q3CatalogSeed; this.q3CatalogSeed = fresh; await old?.close();
+      } });
+    this.q3Downloads = downloads;
+    const loadedChecksums = packages.packs.map(pack => pack.pack.checksum), exists = (path: string): boolean => existsSync(join(root, path));
+    if ((this.clientCommands?.cvars.get("cl_allowDownload")?.integerValue ?? 0) === 0) {
+      const missing = compareQ3Packages(referenced.snapshot(), loadedChecksums, exists, false);
+      if (missing.length !== 0) this.print(`Missing server packages: ${missing}\nDownloads are disabled. Enable cl_allowDownload to download server packages.\n`);
+      return false;
+    }
+    const pending = downloads.begin(referenced.snapshot(), loadedChecksums, exists);
+    if (pending) { await mkdir(root, { recursive: true }); assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 download setup was cancelled"); }
+    return pending;
+  }
+
   private async loadQ3ServerWorld(world: Q1RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent> {
     const generation = connection.generation;
-    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.content);
+    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.q3CatalogSeed ?? this.content);
     try {
       if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
       const content = await this.loadServerWorld(world, prepared.content);
       if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
       this.q3Content = prepared;
+      const seed = this.q3CatalogSeed; this.q3CatalogSeed = null; await seed?.close();
       return content;
     } catch (error) { await prepared.close(); throw error; }
   }
@@ -278,7 +363,7 @@ export class RemoteApplication {
             const client = this.presentation?.q3Client;
             if (client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
             this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
-          } }, () => performance.now());
+          } }, () => performance.now(), this.clientCommands ?? undefined);
     } else {
       const local = this.controls.locals[0];
       if (local === undefined) throw new Error("Remote input lost its local seat");
@@ -298,7 +383,7 @@ export class RemoteApplication {
       if (remote instanceof Q3RemotePresentation) {
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
         q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
-          commandBuffer: input.commands, renderer: this.renderer,
+          commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer,
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
           assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
@@ -335,6 +420,8 @@ export class RemoteApplication {
     for (const command of pending) {
       try {
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); continue; }
+        if (this.frontend !== null && await this.frontend.audio.command({ name: command.name, args: command.args, seat: command.seat,
+          registrations: this.presentation?.q3Client?.media.bank.registrations() ?? [], print: text => this.print(text) })) continue;
         if (["map", "save", "load"].includes(command.name)) throw new Error(`${command.name} requires the authoritative server console`);
         const player = this.localPlayers.find(player => command.seat === null || player.seat.id.equals(command.seat));
         if (player === undefined || this.network.phase !== "active") throw new Error("Remote command requires a connected local player");
@@ -443,10 +530,12 @@ export class RemoteApplication {
     }
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
-    for (const close of [() => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
+    for (const close of [() => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }
+    try { await this.q3CatalogSeed?.close(); this.q3CatalogSeed = null; } catch (error) { errors.push(error); }
+    try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");
   }

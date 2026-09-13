@@ -73,6 +73,7 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
   snapshotPing?(number: number): number | null;
 }
 interface ApplicationQ3ClientCommonOptions {
+  readonly cvars?: CvarRegistry;
   readonly weaponHud?: WeaponHudReader;
   assertCurrent?(): void;
   readonly assets: ApplicationAssets;
@@ -140,7 +141,7 @@ export class ApplicationQ3Client {
     this.latestCamera = { origin: player === null ? { x: 0, y: 0, z: 0 } : { ...player.origin, z: player.origin.z + player.viewheight },
       axis: anglesToAxis(player?.viewangles ?? { x: 0, y: 0, z: 0 }), viewport: this.viewportValue,
       projection: perspectiveProjection(90, 73.739795, 16384), clip: { kind: "none" } };
-    this.cvars = new CvarRegistry({ dialect: "q3", context: this.commandContext(), print: options.commands.print,
+    this.cvars = options.cvars ?? new CvarRegistry({ dialect: "q3", context: this.commandContext(), print: options.commands.print,
       cheatsAllowed: () => {
         const source = options.serverSettings?.().find(setting => setting.name.toLowerCase() === "sv_cheats");
         return source === undefined ? this.source.systemInfo === undefined ? undefined : infoValueForKey(this.source.systemInfo(), "sv_cheats") === "1" : source.integerValue !== 0;
@@ -157,7 +158,7 @@ export class ApplicationQ3Client {
     const fields = info.split("\\");
     for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
       const name = fields[index], value = fields[index + 1];
-      if (name !== undefined && name.length > 0 && value !== undefined) this.cvars.set(name, value, true);
+      if (name !== undefined && name.length > 0 && value !== undefined && name.toLowerCase() !== "cl_allowdownload") this.cvars.set(name, value, true);
     }
   }
   static async create(options: ApplicationQ3ClientOptions): Promise<ApplicationQ3Client> {

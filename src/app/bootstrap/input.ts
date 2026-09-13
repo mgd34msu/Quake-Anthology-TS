@@ -65,6 +65,11 @@ export function movementDialect(options: Pick<ApplicationOptions, "movement">): 
   return options.movement === "q1" ? "q1-netquake" : options.movement === "q2" ? "q2-classic" : "q3";
 }
 
+export interface ApplicationInputCommandOwner {
+  readonly cvars: CvarRegistry;
+  readonly commands: CommandBuffer;
+}
+
 export class ApplicationInput {
   readonly commands: CommandBuffer;
   readonly cvars: CvarRegistry;
@@ -82,7 +87,7 @@ export class ApplicationInput {
 
   constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions,
     private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
-    readonly now: () => number) {
+    readonly now: () => number, owner?: ApplicationInputCommandOwner) {
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
     const dialect = movementDialect(options);
@@ -91,13 +96,14 @@ export class ApplicationInput {
       actions.print(text);
       for (const local of this.locals ?? []) local.console.print(text);
     };
-    this.cvars = new CvarRegistry({ dialect, context, print });
+    if (owner !== undefined && (owner.cvars.dialect !== dialect || actions.console !== undefined)) throw new Error("Input command owner does not match its console dialect");
+    this.cvars = owner?.cvars ?? new CvarRegistry({ dialect, context, print });
     const sourceDialect = actions.console?.dialect() ?? dialect;
     const consoleCvars = sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print });
     this.consoleRouting = actions.console === undefined ? null : new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
       seat: id => actions.console?.seat(id) ?? null, movement: () => this.cvars });
-    this.commands = new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
+    this.commands = owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
       ...(this.consoleRouting === null ? {} : { cvarRouting: this.consoleRouting }), print, forwardToServer: invocation => {
       const name = invocation.argv[0]; if (name === undefined) return undefined;
       let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
