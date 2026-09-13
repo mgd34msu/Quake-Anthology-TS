@@ -10,7 +10,7 @@ import { blockChecksum } from '../../../core/md4.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
 import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
 import { anglesVectors } from '../../../content/q2/foundation/monsters/ai.ts';
-import { fromQ2Command, readElement, toQ2Command, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
+import { fromQ2Command, readElement, toQ2Command, toQ2Player } from '../../../network/q2/index.ts';
 import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
 import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import { createSceneQueries } from '../../../world/collision/index.ts';
@@ -81,8 +81,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         },
     };
     constructor(readonly options: Q2RemotePresentationOptions) {
-        if (options.protocol.kind !== 'q2-classic')
-            throw new Error('Remote application presentation currently binds native Q2 protocol 34');
+        if (options.protocol.kind !== 'q2-classic' && !(options.protocol.kind === 'q2-r1q2' && options.protocol.revision === 1904))
+            throw new Error('Remote application presentation binds Q2 protocol 34 or R1Q2 revision 1904');
         this.protocol = options.protocol;
         this.layout = q2ApplicationLayout(options.protocol);
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
@@ -123,6 +123,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         return actor;
     }
     async gameState(state: Q2ApplicationGameState): Promise<void> {
+        if (this.protocol.kind === 'q2-r1q2' && (state.data.r1q2Version !== this.protocol.revision || state.data.r1q2StrafejumpHack))
+            throw new Error('Remote R1Q2 requires negotiated revision 1904 with stock movement; strafejump prediction is unbound');
         const revision = this.downloads.revision;
         const content = this.options.loadContent === undefined ? this.content : await this.options.loadContent(state);
         if (revision !== this.downloads.revision) return;
@@ -169,8 +171,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             throw new Error('Remote Q2 player has no decoded frame');
         return { player: this.currentPlayer, frame: this.current };
     }
-    private nativePlayer(frame: Q2WireFrame) { return this.protocol.kind === 'q2-classic' ? toQ2Player(frame.player) : toQ2RereleasePlayer(frame.player); }
-    private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-classic' ? { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 } : movement.origin; }
+    private nativePlayer(frame: Q2WireFrame) { return toQ2Player(frame.player); }
+    private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
     worldText(): readonly WorldText[] { return []; }
 
     playerView(actor: ActorId): PlayerView {
@@ -251,7 +253,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.predicted = null;
         this.fraction = 1;
         this.receivedAt = nowMilliseconds;
-        const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = movement.kind === 'q2-classic' ? { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 } : movement.velocity;
+        const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
         const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
             const size = entity.solid & 31, down = entity.solid >> 5 & 31, up = (entity.solid >> 10 & 63) * 8 - 32;
             return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds: { min: { x: -size * 8, y: -size * 8, z: -down * 8 }, max: { x: size * 8, y: size * 8, z: up } }, ground: null } };

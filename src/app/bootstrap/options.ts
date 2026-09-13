@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
-import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
+import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export interface ApplicationOptions {
   readonly q1Protocol?: Q1ProtocolIdentity;
+  readonly q2Protocol?: Extract<Q2ProtocolIdentity, { kind: "q2-classic" }> | { readonly kind: "q2-r1q2"; readonly version: 35; readonly revision: 1904 };
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
@@ -66,6 +67,7 @@ Usage: bun run src/main.ts [options]
   --connect-q1 ADDRESS       Join a native Quake server (id1, protocols 15/666/999)
   --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
+  --q2-protocol 34|35        Q2 remote protocol (default 34; R1Q2 revision 1904)
   --connect-q2 ADDRESS       Join a native Quake II server
   --seed N                   Gameplay random seed
   --frames N                 Close after N simulation steps
@@ -151,6 +153,10 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (listen !== null && listenKind !== kind) throw new Error("Choose either --listen or --listen-q2");
         listenKind = kind; listen = integer(value, flag, 0, 65535); break;
       }
+      case "--q2-protocol":
+        if (value !== "34" && value !== "35") throw new Error("--q2-protocol requires 34 or 35");
+        options = { ...options, q2Protocol: value === "34" ? { kind: "q2-classic", version: 34 } : { kind: "q2-r1q2", version: 35, revision: 1904 } };
+        break;
       case "--q1-protocol": options = { ...options, q1Protocol: defaultNetQuakeProfile(integer(value, flag, 15, 999)) }; break;
       case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3":
         if (remote !== null) throw new Error("Choose one native remote connection");
@@ -185,6 +191,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
+  if (options.q2Protocol !== undefined && options.network.kind !== "q2-client") throw new Error("--q2-protocol requires --connect-q2");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };

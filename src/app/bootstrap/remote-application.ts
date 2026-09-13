@@ -204,7 +204,7 @@ export class RemoteApplication {
       this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, ...(this.clientCommands === null ? {} : { cvars: this.clientCommands.cvars }), qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
-      const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
+      const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshDownloadCatalog(assertCurrent) });
@@ -229,7 +229,7 @@ export class RemoteApplication {
     try {
       const product = content.catalog.product(options.product);
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === "q1-quakeworld") || q3 && options.product !== "q3-baseq3")
-        throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34 or baseq3 protocol 68 content");
+        throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34/35 or baseq3 protocol 68 content");
       imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
         dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
         print: text => { if (application === null) host.print(text); else application.print(text); } });
