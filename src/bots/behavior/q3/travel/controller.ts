@@ -267,7 +267,14 @@ class TravelStep implements BotTravelContext {
       const result = new BotMoveResult(); result.failure = true; return result;
     }
     switch (reach.travelType & TravelType.MASK) {
-      case TravelType.WALK: return travelWalk(this, state, reach);
+      case TravelType.WALK: {
+        const boarding = this.graph.runtime.boardingElevator(reach.graphEdge.to);
+        if (!airborne && boarding !== null && boarding.platform.phase !== "bottom") {
+          const elevator = this.graph.describe(boarding.edge);
+          if (!this.onMover(state, elevator) && !this.moverDown(elevator)) return travelElevator(this, state, { ...elevator, start: reach.start });
+        }
+        return travelWalk(this, state, reach);
+      }
       case TravelType.CROUCH: return airborne ? null : travelCrouch(this, state, reach);
       case TravelType.BARRIERJUMP: return airborne ? finishTravelBarrierJump(this, state, reach) : travelBarrierJump(this, state, reach);
       case TravelType.LADDER: return travelLadder(this, state, reach);
@@ -276,7 +283,12 @@ class TravelStep implements BotTravelContext {
       case TravelType.SWIM: return travelSwim(this, state, reach);
       case TravelType.WATERJUMP: return airborne ? finishTravelWaterJump(this, state, reach) : travelWaterJump(this, state, reach);
       case TravelType.TELEPORT: return airborne ? null : travelTeleport(this, state, reach);
-      case TravelType.ELEVATOR: return airborne ? finishTravelElevator(this, state, reach) : travelElevator(this, state, reach);
+      case TravelType.ELEVATOR: {
+        const boarding = this.graph.runtime.boardingElevator(reach.graphEdge.from);
+        const selected = boarding !== null && boarding.platform.phase !== "bottom" && !this.onMover(state, reach) && !this.moverDown(reach)
+          ? { ...reach, start: reach.graphEdge.hint?.funnel ?? reach.start } : reach;
+        return airborne ? finishTravelElevator(this, state, selected) : travelElevator(this, state, selected);
+      }
       case TravelType.GRAPPLEHOOK: return yield* travelGrappleCalls(this, state, reach);
       case TravelType.ROCKETJUMP: return airborne ? finishTravelWeaponJump(this, state, reach) : travelRocketJump(this, state, reach);
       case TravelType.BFGJUMP: return airborne ? finishTravelWeaponJump(this, state, reach) : travelBFGJump(this, state, reach);

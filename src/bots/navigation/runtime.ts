@@ -71,6 +71,14 @@ export class NavigationRuntime {
   get generation(): number { this.#refresh(); return this.#generation; }
   node(id: number): NavigationNode | null { return this.#nodes.get(id) ?? null; }
   outgoing(id: number): readonly NavigationEdge[] { return this.#outgoing.get(id) ?? []; }
+  boardingElevator(node: number) {
+    for (const edge of this.outgoing(node)) {
+      if (edge.source.kind !== "nav3" || edge.mode !== "mover" || edge.sourceTravelType !== 6 || edge.entity === null) continue;
+      const state = this.world.entity(edge.entity);
+      if (state?.elevator !== undefined && state.enabled && !state.locked) return { edge, actor: state.actor, platform: state.elevator };
+    }
+    return null;
+  }
   enableArea(id: number, enabled: boolean): boolean {
     const node = this.node(id);
     if (node === null) throw new RangeError(`Unknown navigation area ${id}`);
@@ -119,7 +127,7 @@ export class NavigationRuntime {
     }
     return crossed.sort((a, b) => a.fraction - b.fraction).slice(0, maximum).map(({ area, point }) => ({ area, point }));
   }
-  #nodeAllowed(node: NavigationNode, query?: NavigationRouteQuery): boolean {
+  #nodeAllowed(node: NavigationNode, query?: NavigationRouteQuery, awaitElevator = false): boolean {
     const profile = nodeProfile(this.graph.profile, node);
     if (profile === null) return false;
     if (this.#enabled.get(node.id) === false || query?.disabledAreas?.has(node.id)) return false;
@@ -131,13 +139,13 @@ export class NavigationRuntime {
     const medium = contents(this.world, profile, node.origin);
     if ((medium & 6) !== 0 || (medium & 1) !== 0 && !profile.capabilities.has("swim")) return false;
     if (this.world.hazard(translated(node.origin, profile.shape.bounds))) return false;
-    if (!clear(this.world, profile, node.origin, node.origin)) return false;
+    if (!awaitElevator && !clear(this.world, profile, node.origin, node.origin)) return false;
     if (node.source.kind === "nav3" && (node.flags & 2048) !== 0 && (medium & 7) === 0) return false;
     if (node.source.kind === "nav3" && (node.flags & 64) !== 0) {
       const result = this.world.scene.trace({ start: node.origin, end: { ...node.origin, z: node.origin.z - 96 },
         shape: { kind: "box", bounds: { min: { ...profile.shape.bounds.min, z: 0 }, max: { ...profile.shape.bounds.max, z: 0 } } },
         target: { kind: "world" }, policy: profile.policy, numeric: profile.movement.numeric, passActor: this.world.passActor });
-      if (result.fraction === 1) return false;
+      if (result.fraction === 1 && !awaitElevator) return false;
     }
     return true;
   }
@@ -146,7 +154,8 @@ export class NavigationRuntime {
     if (!profile.capabilities.has(edge.mode) || edge.mode === "unknown" || this.#blocked.has(edge.id)) return false;
     if (query?.edgeFilter !== undefined && !query.edgeFilter(edge)) return false;
     const target = this.node(edge.to);
-    if (target === null || !this.#nodeAllowed(target, query)) return false;
+    const elevator = this.boardingElevator(edge.to);
+    if (target === null || !this.#nodeAllowed(target, query, elevator !== null && elevator.platform.phase !== "bottom")) return false;
     if (edge.mode === "drop" && edge.start.z - edge.end.z > profile.maximumDrop) return false;
     if (edge.source.kind === "aas") {
       if (query?.travelFlags !== undefined && (aasTravelFlag(edge.sourceTravelType) & query.travelFlags) === 0) return false;
@@ -234,14 +243,15 @@ export class NavigationRuntime {
           rejected.add(edge.id); failed = true; break;
         }
         let landing = edge.end;
-        const boarding = edge.mode === "walk" && edge.source.kind === "nav3"
-          ? this.outgoing(edge.to).find(next => next.mode === "mover" && next.sourceTravelType === 6 && next.entity !== null) : undefined;
-        const platform = boarding?.entity === undefined || boarding.entity === null ? null : this.world.entity(boarding.entity);
-        if (platform?.elevator !== undefined && platform.enabled && !platform.locked) {
+        const boarding = edge.mode === "walk" && edge.source.kind === "nav3" ? this.boardingElevator(edge.to) : null;
+        if (boarding !== null && boarding.platform.phase !== "bottom") {
+          // The source elevator action waits at the supported approach, not at its absent deck.
+          landing = edge.start;
+        } else if (boarding !== null) {
           const floor = this.world.scene.trace({ start: edge.end, end: { ...edge.end, z: edge.end.z - 96 },
             shape: this.graph.profile.shape, target: { kind: "world" }, policy: this.graph.profile.policy,
             numeric: this.graph.profile.movement.numeric, passActor: this.world.passActor });
-          if (!floor.startSolid && !floor.allSolid && floor.hit.kind === "actor" && floor.hit.actor.equals(platform.actor)
+          if (!floor.startSolid && !floor.allSolid && floor.hit.kind === "actor" && floor.hit.actor.equals(boarding.actor)
             && floor.contact.kind === "plane" && floor.contact.plane.normal.z >= this.graph.profile.minimumFloorNormal) landing = floor.end;
         }
         const result = admit({ from: cursor, to: landing, mode: edge.mode, hint: edge.hint, entity: edge.entity });
