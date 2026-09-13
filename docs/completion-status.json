@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "a68b43edd5f2167d34ade98d55922e9dd0eff934",
-  "carriedVerdictsFrom": "185c06edc6ad8d02702cfaeed00a21df9235edf5",
+  "sourceCutoff": "c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d",
+  "carriedVerdictsFrom": "a68b43edd5f2167d34ade98d55922e9dd0eff934",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -20,34 +20,34 @@
     },
     {
       "family": "q2",
-      "done": 108,
-      "notDone": 85,
+      "done": 113,
+      "notDone": 80,
       "total": 193,
-      "percentage": 56,
+      "percentage": 58.5,
       "methods": {
         "integrated": 62,
         "sharedReplacement": 31,
-        "extendedCommon": 15
+        "extendedCommon": 20
       }
     },
     {
       "family": "q3",
-      "done": 50,
-      "notDone": 54,
+      "done": 51,
+      "notDone": 53,
       "total": 104,
-      "percentage": 48.1,
+      "percentage": 49,
       "methods": {
         "integrated": 39,
         "sharedReplacement": 7,
-        "extendedCommon": 4
+        "extendedCommon": 5
       }
     }
   ],
   "overall": {
-    "done": 280,
-    "notDone": 197,
+    "done": 286,
+    "notDone": 191,
     "total": 477,
-    "percentage": 58.7
+    "percentage": 60
   },
   "rows": [
     {
@@ -4347,61 +4347,76 @@
     {
       "id": "q2.download.path-policy",
       "title": "Validate and contain content downloads",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Common download policy/queue utilities exist, but Q2 native precache does not join HTTP/filelist/archive-rescan/UDP transfer; missing installed resources prevent the required connection workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted b48bfea joins native/HTTP requests to shared contained staging and archived client permission before signon. Root receiver/Application checks (8 tests/156 assertions) cover rejected filelist paths, installed-map validation with downloads disabled, zero disabled requests/writes, cancellation and no-overwrite publication.",
       "paths": [
+        "src/app/bootstrap/network/q2-downloads.ts",
+        "src/network/services/http-downloads.ts",
         "src/network/services/downloads.ts",
-        "src/app/bootstrap/network/q2.ts",
-        "src/app/bootstrap/remote-application.ts"
+        "src/app/bootstrap/remote-application.ts",
+        "tests/first-playable/network/q2-downloads.test.ts",
+        "tests/first-playable/remote-application/download-permission.test.ts"
       ]
     },
     {
       "id": "q2.download.http-queue",
       "title": "Download content through concurrent HTTP queues",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Common download policy/queue utilities exist, but Q2 native precache does not join HTTP/filelist/archive-rescan/UDP transfer; missing installed resources prevent the required connection workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Shared HTTP queue is joined to Q2 precache with bounded concurrency, progress, destination deduplication, package barriers, cancellation and per-file native fallback. Accepted 8637652 covers parallel ranges (60/557 focused checks); b48bfea receiver/Application checks (8/156) retain concurrent asset requests, connection continuation and canceled staging cleanup.",
       "paths": [
+        "src/app/bootstrap/network/q2-downloads.ts",
+        "src/network/services/http-downloads.ts",
         "src/network/services/downloads.ts",
-        "src/app/bootstrap/network/q2.ts",
-        "src/app/bootstrap/remote-application.ts"
+        "src/app/bootstrap/remote-application.ts",
+        "tests/first-playable/network/q2-downloads.test.ts",
+        "tests/first-playable/remote-application/download-permission.test.ts"
       ]
     },
     {
       "id": "q2.download.filelists",
       "title": "Expand validated server filelists",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Common download policy/queue utilities exist, but Q2 native precache does not join HTTP/filelist/archive-rescan/UDP transfer; missing installed resources prevent the required connection workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Q2 game/map filelists feed the shared queue with deduplicated validated assets and packages; map availability/checksum validation remains mandatory while invalid optional list entries are ignored. The @ marker selects game-local lookup, not required/optional status. Accepted 30d872a validation (4/79), 95ede754 game-local @ scope (4/88), and b48bfea receiver/Application checks (8/156) prove scoped assets, rejected entries and permission enforcement.",
       "paths": [
+        "src/app/bootstrap/network/q2-downloads.ts",
+        "src/network/services/http-downloads.ts",
         "src/network/services/downloads.ts",
-        "src/app/bootstrap/network/q2.ts",
-        "src/app/bootstrap/remote-application.ts"
+        "src/app/bootstrap/remote-application.ts",
+        "tests/first-playable/network/q2-downloads.test.ts",
+        "tests/first-playable/remote-application/download-permission.test.ts"
       ]
     },
     {
       "id": "q2.download.mount-rescan",
       "title": "Mount downloaded archives and rescan missing assets",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Common download policy/queue utilities exist, but Q2 native precache does not join HTTP/filelist/archive-rescan/UDP transfer; missing installed resources prevent the required connection workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Downloaded validated archives publish through shared contained storage, refresh the selected content mounts and prune satisfied queued assets before precache. Accepted 30f824f actual remote shell used a downloaded PAK as its active map; b48bfea receiver/Application checks (8/156) retain package remount and no redundant packaged-sound request.",
       "paths": [
+        "src/app/bootstrap/network/q2-downloads.ts",
+        "src/network/services/http-downloads.ts",
         "src/network/services/downloads.ts",
-        "src/app/bootstrap/network/q2.ts",
-        "src/app/bootstrap/remote-application.ts"
+        "src/app/bootstrap/remote-application.ts",
+        "tests/first-playable/network/q2-downloads.test.ts",
+        "tests/first-playable/remote-application/download-permission.test.ts"
       ]
     },
     {
       "id": "q2.download.udp-fallback",
       "title": "Fall back from HTTP to UDP transfer",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Common download policy/queue utilities exist, but Q2 native precache does not join HTTP/filelist/archive-rescan/UDP transfer; missing installed resources prevent the required connection workflow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 30f824f actual remote shell completes precache after required WAL HTTP 404 falls back to native UDP and renders the downloaded map with no local simulation. Accepted b48bfea receiver/Application checks (8/156) also prove saved HTTP-off retains native transfer, disabled transfers issue zero requests/writes, installed maps remain usable and settings persist.",
       "paths": [
+        "src/app/bootstrap/network/q2-downloads.ts",
+        "src/network/services/http-downloads.ts",
         "src/network/services/downloads.ts",
-        "src/app/bootstrap/network/q2.ts",
-        "src/app/bootstrap/remote-application.ts"
+        "src/app/bootstrap/remote-application.ts",
+        "tests/first-playable/network/q2-downloads.test.ts",
+        "tests/first-playable/remote-application/download-permission.test.ts"
       ]
     },
     {
@@ -5253,12 +5268,15 @@
     {
       "id": "q3.content.client-download-restart",
       "title": "Client package download, contained writes and restart",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Q3 client download receive/write/restart is not joined to RemoteApplication; its existing Q2 download integration does not implement this protocol flow.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Native Q3 validates referenced package pairs, receives source blocks into shared contained staging, verifies checksums and refreshes mounts before pure and guest initialization. Accepted b48bfea single-package admission passed 1/16. Accepted c578714 actual two-package workflow passed root 1/134: first package retained, second partial removed on close, reopen completed byte-identical packages with authentic pure admission and exactly one guest initialization. Strict/scoped policy passed; no local simulation was created.",
       "paths": [
+        "src/app/bootstrap/network/q3-client-downloads.ts",
+        "src/app/bootstrap/network/remote-q3.ts",
         "src/app/bootstrap/remote-application.ts",
-        "src/network/services/downloads.ts"
+        "tests/network/q3/client-downloads.test.ts",
+        "tests/network/q3/application.test.ts"
       ]
     },
     {

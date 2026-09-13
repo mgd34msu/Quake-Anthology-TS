@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite MD5 review at source cutoff `a68b43edd5f2167d34ade98d55922e9dd0eff934`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite six-download-record review at source cutoff `c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -22,7 +22,9 @@ Complete format and mod discovery, expansion dependencies, authored map database
 
 **Done when:** Each supported product and mod resolves its required assets, start maps and dependencies through the common catalog with explicit missing-data errors. Accepted PKZ support and downloaded-package remounting remain in place.
 
-Image-format subrequirements: preserve the production decoder union PCX, WAL, TGA, PNG, JPG/JPEG, BMP and GIF; GIF is already accepted. Q2 JPEG/BMP replacement fallback is accepted in `185c06e`. Shared resolver `8e4230f` consolidates caller-specific resolution while preserving source skin semantics. Wire the still-missing application `r_override_textures`, `r_texture_overrides` and `r_texture_formats` controls through common image selection. PCX/BMP original logical-dimension recovery is accepted in `185c06e`; `aeb059d` connects the production original-image reader. Preserve these joins while completing the remaining controls. Q2 default application MD5 selection and animation are accepted in `a68b43e`, alongside the existing Q1 join. User-selectable Q2 replacement tiers, `gl_md5_load`/`gl_md5_use` configuration and distance selection remain unfinished.
+Image-format subrequirements: preserve the production decoder union PCX, WAL, TGA, PNG, JPG/JPEG, BMP and GIF; GIF is already accepted. Q2 JPEG/BMP replacement fallback is accepted in `185c06e`. Shared resolver `8e4230f` consolidates caller-specific resolution while preserving source skin semantics. Accepted `0022dc2` joins archived `r_override_textures`, `r_texture_overrides` and `r_texture_formats` with transactional runtime refresh, preserving active connections, Q3 cgame and seat state. Root passed 18 tests/305 assertions and strict/scoped checks, and inspected CPU/GL and Q3 snapshot evidence. Accepted menu `58e715e` adds shared visible controls with actual CPU/GL mouse checks (2/38, strict/scoped 0). Startup-selector font policy and Q2 MD5 load/use/tier/distance controls remain open; these receipts do not establish full renderer parity. PCX/BMP original logical-dimension recovery is accepted in `185c06e`; `aeb059d` connects the production original-image reader. Preserve these accepted joins. Q2 default application MD5 selection and animation are accepted in `a68b43e`, alongside the existing Q1 join. User-selectable Q2 replacement tiers, `gl_md5_load`/`gl_md5_use` configuration and distance selection remain unfinished.
+
+Known Q1 followup: a source MD5 bare `.lmp` image request can lose its source intent and select PNG even with overrides disabled or its mask off when PNG formats are selected. The actual dog-model probe confirms this gap; its correction is still WIP and is not covered by the accepted Q2/Q3 image-control witnesses. Startup-selector font policy and MD5 load/use/tier/distance controls remain open.
 
 ### 3. Shared CPU and GL rendering
 
@@ -30,7 +32,7 @@ Complete the rendering feature union: effects, fog, shadows, transparency, view 
 
 **Done when:** The same scene commands express the required features on CPU and GL, with source-grounded visual comparisons for the affected scenes. Accepted GIF playback is retained; bounded matching images do not imply universal renderer parity.
 
-Image-replacement rendering must consume the common priority and format choices from priority 2. Preserve original logical dimensions independently of replacement pixel dimensions, including PCX/BMP, so replacement textures keep the intended world/UI scale on CPU and GL. The bounded image fixes in `185c06e` and production original reader in `aeb059d` are accepted; `8e4230f` adds the common resolver. Runtime override controls and refresh lifecycle remain in progress and are not accepted by these receipts.
+Image-replacement rendering must consume the common priority and format choices from priority 2. Preserve original logical dimensions independently of replacement pixel dimensions, including PCX/BMP, so replacement textures keep the intended world/UI scale on CPU and GL. The bounded image fixes in `185c06e` and production original reader in `aeb059d` are accepted; `8e4230f` adds the common resolver. Accepted `0022dc2` joins archived `r_override_textures`, `r_texture_overrides` and `r_texture_formats` with transactional runtime refresh, preserving active connections, Q3 cgame and seat state. Root passed 18 tests/305 assertions and strict/scoped checks, and inspected CPU/GL and Q3 snapshot evidence. Accepted menu `58e715e` adds shared visible controls with actual CPU/GL mouse checks (2/38, strict/scoped 0). Startup-selector font policy and Q2 MD5 load/use/tier/distance controls remain open; these receipts do not establish full renderer parity.
 
 ### 4. Common audio
 
@@ -96,7 +98,9 @@ Complete keyboard/mouse binds, hotplug, per-seat assignments, deadzones, curves,
 
 ### 14. Common downloads
 
-Complete per-wire extensions, filelists, queues, remounting, fallback, resume, redirects, policy and user feedback.
+Complete remaining per-wire extensions, resume, redirects and user feedback.
+
+Accepted `b48bfea` completes the five listed Q2 download requirements through shared services: root production receiver/Application checks passed 8/156, including HTTP/native precache, filelist validation and package rescan, cancellation, saved master permission and HTTP-off native fallback. Accepted `95ede754` adds game-local `@` scope (4/88). Accepted `c578714` closes the Q3 workflow with root actual two-package interruption/retry checks (1/134, strict/scoped policy 0): the completed package survives, closing removes the second partial, and reopening finishes both exact packages before authentic pure admission and one guest initialization. Broader resume, redirects, browser/download UI and cross-wire generalization remain separate work.
 
 **Done when:** Actual missing-content joins finish through the shared contained storage and catalog path, with cancellation and recovery. Accepted concurrent HTTP ranges, package remounting and native fallback are retained, not reimplemented.
 
@@ -190,8 +194,8 @@ These dispositions do not change the historical ledger or invent new requirement
 | SOCKS5 | Open source-inventory lead. Priority 24. |
 | Q3 event/config journals | Open source-inventory lead. Priority 22. |
 | MOTD | Open source-inventory lead. Priority 24. |
-| Shared resolver | Accepted `8e4230f`: one image-resolution path retains source skin semantics; root actual CPU/GL resolver tests passed 8/151 with no skips. Runtime controls/refresh remain in progress. |
-| HTTP filelist validation | Accepted `30d872a`: image and asset entry validation, root 4/79. Game-local `@` scope and client permission remain in progress. |
+| Shared resolver | Accepted `8e4230f`: one image-resolution path retains source skin semantics; root actual CPU/GL resolver tests passed 8/151 with no skips. Runtime controls/refresh are accepted in `0022dc2`; visible controls are accepted in `58e715e`. Startup-selector font policy remains open. |
+| HTTP filelist validation | Accepted `30d872a`: image and asset entry validation, root 4/79. Game-local `@` scope is accepted in `95ede754` (4/88); application permission is accepted in `b48bfea` (8/156). |
 | Q2 camera and MD5 | Camera `0c05d78` passed native 2/154, cross-Q1 1/6 and normal CPU/GL application checks. MD5 `a68b43e` passed 6/148 plus exact normal CPU/GL runs; root inspected corrected textured blaster/hand and soldier placement. Animation is complete; replacement controls/distance and full fidelity remain open. |
 | Shared screenshot capture | Accepted in `fc0c15e`: actual local/remote CPU and GL captures and reviewed complete-frame, dimension and file-ownership paths close `q2.capture.screenshots` as Done/shared-replacement. Multi-seat and resized-window screenshots were not separately exercised in the current five tests. Q3 recording-clock/FPS-timescale/restart integration remains open. |
 | Local game prompts | Accepted in `d07700b`: actual application proof passed 25 assertions, with source review and CPU image inspection. Local UI pagination/lifecycle and the Q1 player lifecycle recursion correction are included. Private native remote prompt transport remains unsupported. Priority 17 retains that boundary. |
@@ -200,7 +204,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **197 open requirements** use source cutoff `a68b43edd5f2167d34ade98d55922e9dd0eff934`. This finite review changes only the two MD5 records: `q2.assets.md5-animation` is now Done/integrated and leaves the appendix; `q2.assets.md5-replacements` remains Not done for user-selectable tiers, application configuration and distance selection. All other 475 verdicts carry unchanged from cutoff `185c06edc6ad8d02702cfaeed00a21df9235edf5`. The remaining rows were not newly audited. The completed Q2 screenshot row stays out of this appendix.
+The following **191 open requirements** use source cutoff `c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d`. Only the five `q2.download.*` records and `q3.content.client-download-restart` were reviewed here: all six records leave this appendix after accepted source/application checks. All other 471 verdicts and reasons carry unchanged from `a68b43edd5f2167d34ade98d55922e9dd0eff934`, without a new audit. Historical broad protocol/browser reasons are not re-endorsed. The completed Q2 screenshot row remains absent.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
@@ -333,15 +337,9 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls
 - `q3.input.joystick-profiles-hotplug` — Joystick profiles, thresholds and device lifecycle
 
-### Priority 14: Common downloads — 7 carried-forward open requirements
+### Priority 14: Common downloads — 1 open requirement
 
 - `q1.network.downloads` — QuakeWorld content download queues and policy
-- `q2.download.path-policy` — Validate and contain content downloads
-- `q2.download.http-queue` — Download content through concurrent HTTP queues
-- `q2.download.filelists` — Expand validated server filelists
-- `q2.download.mount-rescan` — Mount downloaded archives and rescan missing assets
-- `q2.download.udp-fallback` — Fall back from HTTP to UDP transfer
-- `q3.content.client-download-restart` — Client package download, contained writes and restart
 
 ### Priority 15: Console, cvars and profile persistence — 5 carried-forward open requirements
 
