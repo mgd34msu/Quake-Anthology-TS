@@ -118,7 +118,7 @@ export class SceneTextureLoader {
   private async loadUncached(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" }): Promise<SceneTexture | null> {
     const dot = name.lastIndexOf("."), slash = name.lastIndexOf("/");
     const explicit = dot > slash, base = explicit ? name.slice(0, dot) : name;
-    const extensions = options.family === "q2" ? [".png", ".tga", ".jpg", ".wal", ".pcx", ".gif"]
+    const extensions = options.family === "q2" ? [".png", ".jpg", ".tga", ".jpeg", ".bmp", ".gif", name.startsWith("textures/") ? ".wal" : ".pcx"]
       : options.family === "q1" ? [".lmp", ".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"] : [".tga", ".jpg", ".png", ".jpeg", ".pcx", ".bmp", ".gif"];
     const candidates = explicit ? [name, ...extensions.map(extension => base + extension).filter(path => path !== name)] : extensions.map(extension => name + extension);
     for (const path of candidates) {
@@ -172,9 +172,13 @@ export class SceneTextureLoader {
         content = this.rgba(decoded, options.mipmap !== false);
       }
       let logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0];
-      if (options.family === "q2" && suffix !== ".wal") {
+      if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && name.startsWith("textures/"))) {
         const original = await this.reader.read(`${base}.wal`);
         if (original !== null) logicalSize = decodeWal(original.bytes, `${base}.wal`);
+      }
+      if (options.family === "q2" && name.toLowerCase().endsWith(".pcx") && suffix !== ".pcx") {
+        const requested = await this.reader.readOriginal?.(name) ?? await this.reader.read(name);
+        if (requested !== null) logicalSize = decodePcx(requested.bytes, name);
       }
       const original = await this.reader.readOriginal?.(path);
       if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
@@ -182,6 +186,7 @@ export class SceneTextureLoader {
         else if (suffix === ".png") logicalSize = decodePng(original.bytes, path);
         else if (suffix === ".tga") logicalSize = decodeTga(original.bytes, path);
         else if (suffix === ".jpg" || suffix === ".jpeg") logicalSize = decodeJpeg(original.bytes, path);
+        else if (suffix === ".bmp") logicalSize = decodeBmp(original.bytes, path);
       }
       if (animation === null && options.family === "q2" && options.mipmap !== false) content = q2MipmappedImage(content);
       const texture = this.register(name, content, { wrap: options.wrap ?? "repeat", filter: options.mipmap === false ? "linear" : "linear-mipmap-nearest" }, asset.source, logicalSize);
