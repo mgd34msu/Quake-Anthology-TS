@@ -1,3 +1,5 @@
+import { createClientDownloadPermission } from "./network/client-download-policy.ts";
+import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
@@ -71,6 +73,7 @@ interface RemoteCommand { readonly name: string; readonly args: readonly string[
 export class RemoteApplication {
   readonly clientCommands: ApplicationInputCommandOwner | null;
   private readonly clientConfig: ConfigStore | null;
+  private readonly downloadPermission: ClientDownloadPermission | null;
   readonly remote: Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
   private readonly network: Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
   private frontend: RemoteWorldFrontend | null = null;
@@ -99,21 +102,25 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
-    if (launchOptions.network.kind === "q3-client") {
+    if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client") {
+      const family = launchOptions.network.kind === "q3-client" ? "q3" : "q2";
+      const dialect = family === "q3" ? "q3" : "q2-classic";
       const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
-      const cvars = new CvarRegistry({ dialect: "q3", context, print: text => this.print(text),
+      const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
         cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
-      cvars.register("cl_allowDownload", "0", CvarFlag.Archive);
-      cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
-      cvars.register("cl_packetdup", "1", CvarFlag.Archive);
-      cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
-      cvars.register("snaps", "20", CvarFlag.Archive | CvarFlag.UserInfo);
-      cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
-      cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
-      cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
-      const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => "q3", server: () => null,
+      this.downloadPermission = createClientDownloadPermission(cvars, family);
+      if (family === "q3") {
+        cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
+        cvars.register("cl_packetdup", "1", CvarFlag.Archive);
+        cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("snaps", "20", CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
+      }
+      const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => dialect, server: () => null,
         seat: () => null, shared: () => this.imageSettings.cvars });
-      const commands = new CommandBuffer({ dialect: "q3", context, cvars, cvarRouting, print: text => this.print(text), forwardToServer: invocation => {
+      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting, print: text => this.print(text), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
@@ -121,7 +128,7 @@ export class RemoteApplication {
       this.clientCommands = { cvars, commands };
       const product = loadedContent.catalog.require(launchOptions.product);
       this.clientConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
-    } else { this.clientCommands = null; this.clientConfig = null; }
+    } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
@@ -149,7 +156,8 @@ export class RemoteApplication {
       this.remote = remote;
       this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, ...(this.clientCommands === null ? {} : { cvars: this.clientCommands.cvars }), qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
-      const remote = new Q2RemotePresentation({ identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
+      if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
+      const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: { kind: "q2-classic", version: 34 },
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshDownloadCatalog(assertCurrent) });
@@ -292,7 +300,7 @@ export class RemoteApplication {
       } });
     this.q3Downloads = downloads;
     const loadedChecksums = packages.packs.map(pack => pack.pack.checksum), exists = (path: string): boolean => existsSync(join(root, path));
-    if ((this.clientCommands?.cvars.get("cl_allowDownload")?.integerValue ?? 0) === 0) {
+    if (this.downloadPermission?.({ transport: "native", category: "package" }) !== true) {
       const missing = compareQ3Packages(referenced.snapshot(), loadedChecksums, exists, false);
       if (missing.length !== 0) this.print(`Missing server packages: ${missing}\nDownloads are disabled. Enable cl_allowDownload to download server packages.\n`);
       return false;

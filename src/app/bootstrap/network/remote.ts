@@ -1,3 +1,4 @@
+import type { ClientDownloadPermission } from './client-download-policy.ts';
 import type { WorldText } from "../../../text/world.ts";
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
@@ -29,6 +30,7 @@ export interface Q2RemotePresentationOptions {
     readonly content: LoadedApplicationContent;
     readonly protocol: Q2ProtocolIdentity;
     readonly userinfo: () => string;
+    readonly downloadPermission?: ClientDownloadPermission;
     print(text: string): void;
     sendCommand(text: string): void;
     loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
@@ -94,7 +96,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 const fresh = await refreshDownloads(assertCurrent);
                 assertCurrent();
                 this.content = fresh;
-            });
+            }, options.downloadPermission);
         this.collision = createSceneQueries(options.content.world);
         this.client = options.session.createClient(0);
         this.client.connect('remote');

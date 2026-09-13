@@ -1,8 +1,9 @@
+import { createClientDownloadPermission } from '../../../src/app/bootstrap/network/client-download-policy.ts';
 import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createQ2ApplicationDownloads, Q2PeerDownload } from '../../../src/app/bootstrap/network/q2-downloads.ts';
+import { createQ2ApplicationDownloads, Q2PeerDownload, Q2DownloadReceiver } from '../../../src/app/bootstrap/network/q2-downloads.ts';
 import { createMountIdentity } from '../../../src/contracts/content.ts';
 import type { LooseMount } from '../../../src/contracts/content.ts';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
@@ -78,7 +79,7 @@ test('protocol-completion staging stays bounded and cannot overwrite installed f
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-for (const httpEnabled of [false, true]) test(`native Q2 client receives missing map and dependencies before loading its remote world (HTTP ${httpEnabled})`, async () => {
+for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode === 'http'; test(`native Q2 client receives missing map and dependencies before loading its remote world (${mode})`, async () => {
     const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
     if (command.kind !== 'run') throw new Error('Missing Q2 launch');
     const temporary = await mkdtemp(join(tmpdir(), 'q2-client-assets-')), root = join(temporary, 'q2/baseq2');
@@ -141,7 +142,7 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         packageBytes.set(new TextEncoder().encode('PACK')); packageView.setInt32(4, 12 + packedSound.length, true); packageView.setInt32(8, 64, true);
         packageBytes.set(packedSound, 12); packageBytes.set(new TextEncoder().encode(packedPath), 12 + packedSound.length);
         packageView.setInt32(12 + packedSound.length + 56, 12, true); packageView.setInt32(12 + packedSound.length + 60, packedSound.length, true);
-        const httpServer = httpEnabled ? Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+        const httpServer = mode !== 'native' ? Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
             const path = decodeURIComponent(new URL(request.url).pathname); httpPaths.push(path);
             if (path.endsWith('.filelist')) return new Response(['pak99.pak', ...files.keys(), ...imagePaths.map(path => `@${path}`), ...imagePaths, '@sound/download-fixture.wav', 'pics/inherited-only.png', ...invalidList].join('\n'));
             const asset = path.slice('/baseq2/'.length), bytes = asset === 'pak99.pak' ? packageBytes : files.get(asset);
@@ -160,7 +161,10 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
             } } };
         server = new Q2ServerNetwork({ transport: serverTransport, host, random: () => 12345 });
         let loaded = false;
-        const remote = new Q2RemotePresentation({ identity, session, content, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
+        const clientCvars = new CvarRegistry({ dialect: 'q2-classic', context: { session: identity.session, origin: { kind: 'local-console' } } });
+        const downloadPermission = createClientDownloadPermission(clientCvars, 'q2');
+        if (mode === 'http-off') clientCvars.set('cl_http_downloads', '0');
+        const remote = new Q2RemotePresentation({ identity, session, content, downloadPermission, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
             sendCommand: text => { if (client === null) throw new Error('No client'); client.command(text); },
             refreshDownloads: async assertCurrent => { const fresh = await loadApplicationContent({ ...command.options, userContentRoot: temporary }); refreshed.push(fresh); assertCurrent();
                 const remounted = await openMountPlan({ ...fresh.mounts.plan, mounts: [...fresh.mounts.plan.mounts, inherited], defaultOrder: [...fresh.mounts.plan.defaultOrder, inherited.identity.id] });
@@ -181,6 +185,7 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         const beforeMismatch = httpPaths.length;
         await expect(remote.downloads.prepare({ ...state, data: { ...state.data, gamedir: 'wrongmod' } })).rejects.toThrow('differs from selected installed game');
         expect(httpPaths).toHaveLength(beforeMismatch);
+        if (mode === 'http-off') expect(httpPaths).toEqual([]);
         expect(requests).toEqual(httpEnabled ? ['textures/download-fixture.wal'] : [mapName, modelName, skinName, 'sound/download-fixture.wav', 'textures/download-fixture.wal']);
         if (httpEnabled) { for (const path of imagePaths) { expect(httpPaths).toContain(`/baseq2/${path}`); const expected = files.get(path); if (expected === undefined) throw new Error(path); expect(new Uint8Array(await Bun.file(join(root, path)).arrayBuffer())).toEqual(new Uint8Array(expected)); } expect(httpPaths).not.toContain('/baseq2/pics/inherited-only.png'); for (const path of invalidList) expect(httpPaths).not.toContain(`/baseq2/${path}`); expect(httpPaths).not.toContain('/baseq2/pak98.pak'); expect(httpPaths).not.toContain('/baseq2/pak98.pkz'); expect(peakHttp).toBe(2); expect(refreshed).toHaveLength(2); expect(httpPaths).not.toContain('/baseq2/sound/download-fixture.wav'); expect(httpPaths).toContain('/baseq2/pak99.pak'); expect(httpPaths).toContain('/baseq2.filelist'); expect(httpPaths).toContain(`/baseq2/${mapName.slice(0, -4)}.filelist`); }
         if (!httpEnabled) {
@@ -219,4 +224,36 @@ for (const httpEnabled of [false, true]) test(`native Q2 client receives missing
         await stopHttp(); client?.close(); server?.close(); clientTransport.close(); serverTransport.close(); session.close();
         await content?.close(); for (const fresh of refreshed) await fresh.close(); await installed.close(); await rm(temporary, { recursive: true, force: true });
     }
-}, 30000);
+}, 30000); }
+
+ test('Q2 local permission skips requests and writes but validates installed maps', async () => {
+    const temporary = await mkdtemp(join(tmpdir(), 'q2-client-policy-'));
+    const command = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated']);
+    if (command.kind !== 'run') throw new Error('launch');
+    const content = await loadApplicationContent({ ...command.options, userContentRoot: temporary });
+    const requests: string[] = [], httpPaths: string[] = [];
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => { httpPaths.push(request.url); return new URL(request.url).pathname.endsWith('.filelist') ? new Response('sound/forbidden.wav\npak98.pak\n') : new Response(new Uint8Array([1,2,3])); } });
+    const cvars = new CvarRegistry({ dialect: 'q2-classic', context: { session: createIdentityOwner('permission').session, origin: { kind: 'local-console' } } });
+    const permission = createClientDownloadPermission(cvars, 'q2');
+    const receiver = new Q2DownloadReceiver(() => content, text => requests.push(text), () => undefined, async () => { throw new Error('Forbidden package remount'); }, permission);
+    try {
+        const map = await content.mounts.read(content.recipe.map.geometry), mapName = content.recipe.map.geometry.requestedPath;
+        const state: Q2ApplicationGameState = { data: { servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'Policy', serverState: 2 },
+            configStrings: new Map([[31, String(blockChecksum(map))], [33, mapName], [289, 'forbidden.wav']]), baselines: new Map<number, EntityStateT>() };
+        for (const value of ['0', '-1']) {
+            cvars.set('allow_download', value); receiver.setHttpServer(new URL('http://127.0.0.1:'+server.port+'/'));
+            while (await receiver.prepare(state) === 'waiting') await Bun.sleep(1);
+            expect(requests).toEqual([]); expect(httpPaths).toEqual([]);
+            expect(await Bun.file(join(temporary, 'q2/baseq2/sound/forbidden.wav')).exists()).toBe(false);
+        }
+        cvars.set('allow_download', '1'); cvars.set('allow_download_sounds', '0'); receiver.setHttpServer(new URL('http://127.0.0.1:'+server.port+'/'));
+        while (await receiver.prepare(state) === 'waiting') await Bun.sleep(1);
+        expect(requests).toEqual([]); expect(httpPaths.length).toBeGreaterThan(0); expect(httpPaths.every(path => path.endsWith('.filelist'))).toBe(true);
+        expect(await Bun.file(join(temporary, 'q2/baseq2/sound/forbidden.wav')).exists()).toBe(false);
+        expect(await Bun.file(join(temporary, 'q2/baseq2/pak98.pak')).exists()).toBe(false);
+        expect(permission({transport:'http',category:'package'})).toBe(false);
+        expect(permission({transport:'native',category:'map'})).toBe(true);
+        cvars.set('allow_download_maps','0'); expect(permission({transport:'http',category:'map'})).toBe(false);
+        receiver.setHttpServer(null); await expect(receiver.prepare({...state, configStrings:new Map([[31,'0'],[33,mapName]])})).rejects.toThrow('checksum');
+    } finally { receiver.close(); await server.stop(true); await content.close(); await rm(temporary,{recursive:true,force:true}); }
+ });
