@@ -66,8 +66,10 @@ export class RereleaseQ2GuestHost {
   readonly #surfaces = new Map<Q2SurfaceInfo, GuestAddress>();
   readonly #botEntities = new Map<ActorId, RawEntityView>();
   #filterDepth = 0;
+  readonly #unsubscribe: () => undefined;
+  #initialized = false;
+  #closed = false;
   constructor(readonly options: RereleaseQ2HostOptions) {
-    options.engine.actors.onRelease(actor => { this.#botEntities.delete(actor.id); return undefined; });
     this.core = new RereleaseCoreImports(options.runner.options.cpu.memory, options.services);
     this.module = new RereleaseGuestModule({ ...options,
       actorAtSlot: slot => options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null,
@@ -75,6 +77,7 @@ export class RereleaseQ2GuestHost {
     this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
     this.#sounds = options.sound === undefined ? null : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
     this.#messages = options.messages === undefined ? null : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
+    this.#unsubscribe = options.engine.actors.onRelease(actor => { this.#botEntities.delete(actor.id); return undefined; });
   }
   #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
   #vector(address: GuestAddress): Vec3 {
@@ -120,10 +123,16 @@ export class RereleaseQ2GuestHost {
     return this.options.semantics.foreignAddress(actor);
   }
   preInit(): void { this.core.refreshCvars(); this.module.preInit(); }
-  init(): void { this.core.refreshCvars(); this.module.init(); this.reconcile(); }
+  init(): void {
+    if (this.#closed) throw new Error("Q2 guest host is closed");
+    try { this.core.refreshCvars(); this.module.init(); this.#initialized = true; this.reconcile(); }
+    catch (error) { this.shutdown(); throw error; }
+  }
   shutdown(): void {
-    this.module.callGame("Shutdown");
-    this.#releaseActors();
+    if (this.#closed) return;
+    this.#closed = true;
+    try { if (this.#initialized) this.module.callGame("Shutdown"); }
+    finally { try { this.#releaseActors(); } finally { this.#unsubscribe(); } }
   }
   #releaseActors(): void {
     for (const entry of this.#lifetimes.values()) if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor);

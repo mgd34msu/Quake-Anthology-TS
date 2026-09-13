@@ -1,48 +1,41 @@
 import { WorldTextStore } from "../../../../src/text/world.ts";
 import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rerelease/world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { expect, test } from "bun:test";
-import { createContentDigest } from "../../../../src/contracts/content.ts";
-import type { GuestAddress, GuestCallContext, ModuleIdentity } from "../../../../src/contracts/execution.ts";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import { createMountPlanId } from "../../../../src/contracts/content.ts";
+import type { GuestAddress } from "../../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
-import { GuestCallRunner, GuestCallStopped } from "../../../../src/guest/abi/index.ts";
-import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../src/guest/core/index.ts";
-import { mapPeImage, resolvePeExport } from "../../../../src/guest/pe/index.ts";
-import { WindowsGuestRuntime } from "../../../../src/guest/runtime/windows/index.ts";
-import { X64Cpu } from "../../../../src/guest/x64/index.ts";
+import { GuestCallStopped } from "../../../../src/guest/abi/index.ts";
 import { integer, pointer, requiredPointer } from "../../../../src/guest/runtime/common/memory.ts";
 import { readGuestString } from "../../../../src/compat/q2/rerelease/imports.ts";
 import type { RereleaseCoreServices } from "../../../../src/compat/q2/rerelease/imports.ts";
-import { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
+import { prepareRereleaseGuest, RereleaseGuestSource } from "../../../../src/app/bootstrap/simulation/rerelease-guest-source.ts";
+import { discoverInstalledContent } from "../../../../src/content/catalog/index.ts";
+import { openMountPlan } from "../../../../src/content/mounts/index.ts";
 import type { RereleaseSoundEvent } from "../../../../src/compat/q2/rerelease/sounds.ts";
 import { nativeWorld } from "./world.ts";
 import { SizeBuf, SZ_Init } from "../../../../src/network/q2/message.ts";
 import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compat/q2/rerelease/messages.ts";
-import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, rereleaseAbi, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
+import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
 
 const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url);
 const available = await Bun.file(dll).exists();
+const activeSources: RereleaseGuestSource[] = [];
+afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
 async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void) {
-  const bytes = new Uint8Array(await Bun.file(dll).arrayBuffer());
-  const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-  expect(hash).toBe("045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
-  const module: ModuleIdentity = { id: "q2:rerelease-native-host", artifactPath: dll.pathname, digest: createContentDigest(hash), revision: "retail-2025-10-23" };
-  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
-  const image = mapPeImage({ bytes, memory, base: 0x280000000n });
-  const stack = memory.allocate({ byteLength: 1_048_576, alignment: 16n, label: "test guest stack" });
-  const returned = memory.allocate({ byteLength: 16, permissions: "read-execute", label: "test guest return" });
-  const callbacks = new GuestCallbackTable(memory);
-  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_576n, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
-  const cpu = new X64Cpu({ state, memory, isHostCall: address => callbacks.resolve(address) !== null });
-  const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned });
-  const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n } });
-  runtime.attachRunner(runner);
+  const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
+  const product = catalog.require("q2-rerelease-baseq2");
+  using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
+  const artifact = await mounts.resolve("game_x64.dll"); if (artifact === null) throw new Error("Missing mounted native DLL");
+  expect(artifact.digest).toBe("sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
+  const prepared = await prepareRereleaseGuest({ kind: "native", owner: { provider: "q2:rerelease-native-host", content: product.id }, role: "server-game",
+    artifact, api: { kind: "q2-rerelease-game", version: 2023 }, profile: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" } }, mounts);
   const cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: createIdentityOwner("rerelease-native").session, origin: { kind: "server-console" } } });
   const prints: string[] = [], configstrings = new Map<number, string>(), reached: string[] = [];
   const localized: { readonly destination: GuestAddress | null; readonly level: number; readonly base: string; readonly arguments: readonly string[] }[] = [];
   const resources = new Map<string, Map<string, number>>();
-  const services: RereleaseCoreServices = {
+  const services = (memory: import("../../../../src/guest/core/index.ts").MappedGuestMemory): RereleaseCoreServices => ({
     cvars, print: text => { prints.push(text); return undefined; }, getConfigstring: index => configstrings.get(index) ?? "",
     setConfigstring: (index, text) => { configstrings.set(index, text); return undefined; },
     resourceIndex: (kind, name) => {
@@ -71,26 +64,33 @@ async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => voi
       }
       return undefined;
     },
-  };
-  const entry = (name: string): GuestAddress => resolvePeExport(image, { kind: "name", name, version: null }, () => null).address;
+  });
   const world = await nativeWorld(index => { for (const [name, value] of resources.get("model") ?? []) if (value === index) return name; return undefined; });
+  const releaseListeners = { active: 0 }, subscribe = world.engine.actors.onRelease.bind(world.engine.actors);
+  spyOn(world.engine.actors, 'onRelease').mockImplementation(callback => {
+    releaseListeners.active++; const unsubscribe = subscribe(callback);
+    return () => { releaseListeners.active--; return unsubscribe(); };
+  });
   // SV_SpawnServer reserves source resource indices for the loaded BSP and inline models.
-  services.resourceIndex("model", "maps/base1.bsp");
-  for (let index = 1; index < world.world.models.length; index++) services.resourceIndex("model", `*${index}`);
+  const resourceIndex = (name: string): void => { let table = resources.get("model"); if (table === undefined) { table = new Map<string, number>(); resources.set("model", table); } if (!table.has(name)) table.set(name, table.size + 1); };
+  resourceIndex("maps/base1.bsp");
+  for (let index = 1; index < world.world.models.length; index++) resourceIndex(`*${index}`);
   const buffer = new SizeBuf();
   SZ_Init(buffer, new Uint8Array(65536), 65536);
   const sounds: RereleaseSoundEvent[] = [];
   const unicasts: RereleaseUnicast[] = [], multicasts: RereleaseMulticast[] = [];
-  const host = new RereleaseQ2GuestHost({ runner, getGameApi: entry("GetGameAPI"), getCgameApi: entry("GetCGameAPI"), services,
+  const source = RereleaseGuestSource.create(prepared, { services,
+    clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
     ...(worldText === undefined ? {} : { worldText }),
     sound: event => { sounds.push(event); },
     messages: { buffer, acceptsClient: slot => slot === 1, unicast: message => { unicasts.push(message); }, multicast: message => { multicasts.push(message); } },
     engine: world.engine, spatial: world.spatial, semantics: world.semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });
+  activeSources.push(source);
+  const { host, memory, runtime } = source;
+  expect(host.options.engine).toBe(world.engine); expect(host.options.spatial).toBe(world.spatial); expect(host.options.semantics).toBe(world.semantics);
   world.attach(host);
   const guest = host.module, core = host.core;
-  const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: entry("GetGameAPI"), abi: rereleaseAbi }, parent: null, self: null, other: null };
-  runtime.initialize(image, { context, instructionBudget: 1_000_000 });
-  return { guest, core, host, world, memory, runtime, cvars, prints, reached, resources, configstrings, localized, unicasts, multicasts, sounds };
+  return { source, prepared, services, releaseListeners, guest, core, host, world, memory, runtime, cvars, prints, reached, resources, configstrings, localized, unicasts, multicasts, sounds };
 }
 
 test("source x64 public layouts retain padded bools, float movement and full trace fields", () => {
@@ -133,6 +133,22 @@ test.skipIf(!available)("retail DLL attaches and returns both source API tables;
   expect(runtime.coverage.filter(value => value.reached > 0).every(value => value.supported)).toBe(true);
 });
 
+test.skipIf(!available)("production guest lifecycle unwinds attach and Init failures without retaining shared release listeners", async () => {
+  const { source, prepared, services, host, world, releaseListeners, memory } = await nativeFixture();
+  expect(releaseListeners.active).toBe(1);
+  const failed: { memory: import("../../../../src/guest/core/index.ts").MappedGuestMemory | null } = { memory: null };
+  expect(() => RereleaseGuestSource.create(prepared, { ...host.options,
+    services: value => { failed.memory = value; return services(value); }, instructionBudget: 1,
+    clock: { nowMilliseconds: () => 0, performanceCounter: () => 0n, performanceFrequency: 1000n } })).toThrow();
+  expect(failed.memory?.mappings()).toEqual([]); expect(releaseListeners.active).toBe(1);
+  spyOn(host.module, 'init').mockImplementation(() => { throw new Error('Injected Init failure'); });
+  expect(() => source.init()).toThrow('Injected Init failure');
+  expect(memory.mappings()).toEqual([]); expect(releaseListeners.active).toBe(0);
+  const later = world.engine.actors.allocate('q2:unrelated', 'q2:later-world-actor');
+  expect(() => world.engine.actors.release(later)).not.toThrow();
+  expect(() => source.close()).not.toThrow();
+});
+
 test.skipIf(!available)("rerelease positioned sound callback preserves source floats through the guest ABI", async () => {
   const { guest, memory, sounds } = await nativeFixture();
   const address = memory.readPointer(memory.offset(guest.gameImportAddress, BigInt(fieldOffset(gameImportLayout, "positioned_sound"))));
@@ -167,10 +183,10 @@ test.skipIf(!available)("rerelease message callbacks encode floats and preserve 
 });
 
 test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame use shared BSP, body and inventory authorities", async () => {
-  const { guest, core, host, world, memory, cvars, prints, reached, unicasts, multicasts } = await nativeFixture();
+  const { source, guest, core, host, world, memory, cvars, prints, reached, unicasts, multicasts, releaseListeners } = await nativeFixture();
   host.preInit();
   expect(cvars.variableString("maxclients")).toBe("8");
-  try { host.init(); } catch (error) {
+  try { source.init(); } catch (error) {
     if (error instanceof GuestCallStopped) throw new Error(`Init ${JSON.stringify(error.stop, (_key, value: unknown) => typeof value === "bigint" ? value.toString(16) : value)} RIP ${guest.options.runner.options.cpu.state.instructionPointer.toString(16)} imports ${reached.slice(-10).join(",")}`);
     throw error;
   }
@@ -260,15 +276,21 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
       throw error;
     }
   }
+  expect(world.engine.actors.ownedBy(memory.module.id).length).toBeGreaterThan(0);
+  const unrelated = world.engine.actors.allocate('q2:unrelated', 'q2:survives-guest');
+  source.close();
+  expect(world.engine.actors.ownedBy(memory.module.id)).toEqual([]); expect(memory.mappings()).toEqual([]);
+  expect(releaseListeners.active).toBe(0); expect(world.engine.actors.isLive(unrelated.id)).toBe(true);
+  expect(() => world.engine.actors.release(unrelated)).not.toThrow();
 });
 
 
 test.skipIf(!available)("retail info_world_text RunFrame submits both guest imports into the shared world store", async () => {
   const store = new WorldTextStore(), emitted: RereleaseWorldTextEvent[] = [];
   let now = 0;
-  const { host, world } = await nativeFixture(event => { emitted.push(event); store.submit({ ...event.text, content: "q2:rerelease:baseq2:pak0" }, now, event.lifetime); });
+  const { source, host, world } = await nativeFixture(event => { emitted.push(event); store.submit({ ...event.text, content: "q2:rerelease:baseq2:pak0" }, now, event.lifetime); });
   try {
-    host.preInit(); host.init();
+    host.preInit(); source.init();
     host.spawnEntities("base1", '{\n"classname" "worldspawn"\n}\n' +
       '{\n"classname" "info_player_start" "origin" "' + world.origin + '"\n}\n' +
       '{\n"classname" "info_world_text" "message" "BILLBOARD" "origin" "1 2 3" "angle" "-3" "radius" "0.5" "sounds" "1"\n}\n' +
