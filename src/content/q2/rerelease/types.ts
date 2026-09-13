@@ -3,6 +3,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { Q2Entity, Q2GameServices, Q2LandmarkCarry } from "../foundation/host.ts";
 import type { Q2RereleaseLevelEntry } from "./campaign.ts";
+import type { WorldTextInput } from "../../../text/world.ts";
 
 export interface Q2Fog { readonly density: number; readonly color: Vec3; readonly skyFactor: number; }
 export interface Q2HeightFog {
@@ -75,6 +76,7 @@ export function createQ2RereleaseOptions(changes: Partial<Q2RereleaseOptions> = 
     deathmatchForceRespawn: false, deathmatchNoFallDamage: false, deathmatchSpawnFarthest: false, deathmatchForceRespawnTime: 0, deathmatchAllowExit: false, coopPlayerCollision: true, autoSaveMinimumTime: 60, ...changes };
 }
 export type Q2RereleaseEvent =
+  | { readonly kind: "world-text"; readonly text: WorldTextInput; readonly lifetime: number }
   | { readonly kind: "localized-print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string; readonly args: readonly string[] }
   | { readonly kind: "mission-objective"; readonly actor: ActorId; readonly text: string; readonly args: readonly string[]; readonly talkSound: boolean }
   | { readonly kind: "mission-status"; readonly actor: ActorId; readonly iconVisible: boolean }

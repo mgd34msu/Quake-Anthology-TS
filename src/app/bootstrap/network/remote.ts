@@ -1,3 +1,4 @@
+import type { WorldText } from "../../../text/world.ts";
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -168,6 +169,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     }
     private nativePlayer(frame: Q2WireFrame) { return this.protocol.kind === 'q2-classic' ? toQ2Player(frame.player) : toQ2RereleasePlayer(frame.player); }
     private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-classic' ? { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 } : movement.origin; }
+    worldText(): readonly WorldText[] { return []; }
+
     playerView(actor: ActorId): PlayerView {
         const { frame } = this.requirePlayer(actor), origin = this.playerOrigin(frame), previous = this.previousFrame;
         const predicted = this.predicted;

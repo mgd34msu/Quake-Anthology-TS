@@ -9,7 +9,7 @@ import type { SimulationPresentationAccess, SimulationPresentationEvent } from '
 import type { Q2ApplicationDownloads, Q2ApplicationClientDownloads } from './q2-downloads.ts';
 import type { Q2ConnectionlessHost } from '../../../network/q2/connectionless.ts';
 /** Input/render consumers never acquire authority to step a remote server. */
-export type RemotePresentationAccess = Pick<SimulationPresentationAccess, 'playerUi' | 'characterViews' | 'presentations' | 'registerResource' | 'playerView' | 'playerCommand'>;
+export type RemotePresentationAccess = Pick<SimulationPresentationAccess, 'worldText' | 'playerUi' | 'characterViews' | 'presentations' | 'registerResource' | 'playerView' | 'playerCommand'>;
 export type ApplicationNetworkPhase = 'challenging' | 'connecting' | 'loading' | 'active' | 'closed' | 'rejected';
 export interface ApplicationNetwork {
     readonly role: 'server' | 'client';

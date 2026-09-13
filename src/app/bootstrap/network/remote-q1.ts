@@ -1,3 +1,4 @@
+import type { WorldText } from "../../../text/world.ts";
 /* WinQuake cl_parse.c and cl_main.c decoded presentation. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
@@ -234,6 +235,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             return state;
         return { ...state, origin: lerp(old.origin, state.origin, this.fraction), angles: angles(old.angles, state.angles, this.fraction) };
     }
+    worldText(): readonly WorldText[] { return []; }
+
     playerView(actor: ActorId): PlayerView {
         const player = this.player, data = this.data;
         if (player === null || !player.actor.equals(actor) || data === null)

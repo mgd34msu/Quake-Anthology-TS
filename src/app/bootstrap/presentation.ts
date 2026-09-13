@@ -1,3 +1,7 @@
+import type { ContentId } from "../../contracts/content.ts";
+import type { WorldText } from "../../text/world.ts";
+import { prepareWorldText } from "../../render/scene/world-text.ts";
+import { loadMenuFont } from "./menu-font.ts";
 import { weaponViewCamera } from "./weapon-view.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import { ApplicationWorldScene } from "./presentation-scene.ts";
@@ -48,10 +52,12 @@ export class WorldSeatPresentation implements SeatPresentation {
   private readonly text: SeatTextPresentation;
   private readonly finale: SourceFinale;
   private preparedTime = 0;
+  private worldText: readonly WorldText[] = [];
+  private readonly worldFonts = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
   private readonly scene: ApplicationWorldScene;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
-    private readonly simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly seatCount: number,
+    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, private readonly seatCount: number,
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null) {
@@ -122,6 +128,12 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     await this.ui.prepare(this.assets);
+    this.worldText = this.simulation.worldText();
+    for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
+      const provider = await this.assets.provider(text.content);
+      this.worldFonts.set(text.content, await loadMenuFont({ mounts: provider.mounts, family: provider.family,
+        rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease", images: this.assets.images }));
+    }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }
     await this.finale.prepare();
@@ -147,6 +159,12 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
       this.frames.command(command);
     }
+    if (this.worldText.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
+      beforeView: [], operations: [{ kind: "draw", batches: prepareWorldText(this.worldText, camera, text => {
+        const font = this.worldFonts.get(text.content);
+        if (font === undefined) throw new Error("World text font was not prepared");
+        return font.font;
+      }) }] });
     const material = (draw: Parameters<typeof prepareMaterialText>[0]): void => {
       this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: camera.viewport, clear: null, clipPlane: null,
         beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, camera.viewport, this.assets.world.materialContext(input)) }] });
@@ -180,5 +198,5 @@ export class WorldSeatPresentation implements SeatPresentation {
     return this.native.execute(frame);
   }
 
-  close(): undefined { this.q3Client?.close(); this.ui.close(); this.scene.close(); return undefined; }
+  close(): undefined { for (const font of this.worldFonts.values()) font.close(); this.worldFonts.clear(); this.worldText = []; this.q3Client?.close(); this.ui.close(); this.scene.close(); return undefined; }
 }

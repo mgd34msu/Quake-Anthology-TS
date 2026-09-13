@@ -1,3 +1,4 @@
+import type { WorldText } from "../../../text/world.ts";
 import type { PreparedQuakeCSource } from "./quakec-source.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../contracts/ui.ts";
 import type { WeaponReference } from "./weapon-slot.ts";
@@ -127,6 +128,7 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
 export type SimulationPresentationEvent = SourcePresentationEvent & { readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
 
 export interface SimulationPresentationAccess {
+  worldText(): readonly WorldText[];
   playerUi(actor: ActorId): PlayerUi;
   captureTravel(spawnPoint?: string): SimulationTravel;
   admitTravel(client: ClientId, travel: SimulationTravel): PlayerAdmission;

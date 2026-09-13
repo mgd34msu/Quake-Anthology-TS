@@ -16,6 +16,7 @@ import type { Q2RereleaseEvent, Q2RereleaseHooks } from "../../../src/content/q2
 import { decodeQ2PlayersCheckpoint, encodeQ2PlayersCheckpoint, decodeQ2CharacterCheckpoint, encodeQ2CharacterCheckpoint } from "../../../src/persistence/q2-players.ts";
 import { decodeQ2RereleasePlayersCheckpoint, encodeQ2RereleasePlayersCheckpoint, decodeQ2RereleaseModuleCheckpoint, encodeQ2RereleaseModuleCheckpoint } from "../../../src/persistence/q2-rerelease-state.ts";
 import { killQ2RereleaseBox } from "../../../src/content/q2/rerelease/killbox.ts";
+import { q2WorldText } from "../../../src/content/q2/rerelease/world-text.ts";
 
 function rerelease(initializeInventory = true, worldFields = "") {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
@@ -65,6 +66,47 @@ function rerelease(initializeInventory = true, worldFields = "") {
   if (first === null || second === null) throw new Error("source players missing");
   return { game, players, module, items, events, messages, transitions, first, second, movement, movements, combat, inventory, advance(value: number) { now = value; } };
 }
+
+test("rerelease world text emits authored orientation, refresh lifetime and trigger behavior", () => {
+  const active = rerelease(), { game, first, events } = active;
+  const label = game.spawn({ classname: "info_world_text", ordinal: 10, values: new Map([
+    ["message", "Door\nAbove"], ["angle", "-3"], ["sounds", "1"], ["spawnflags", "1"], ["target", "label-target"],
+  ]) });
+  const target = game.spawn({ classname: "trigger_relay", ordinal: 11, values: new Map([["targetname", "label-target"]]) });
+  let used = 0;
+  target.use = (_entity, _services, other, activator) => { expect(other).toBe(label.actor.id); expect(activator).toBe(label.actor.id); used++; return undefined; };
+  expect(label.nextThink).toBeNull(); expect(events.filter(event => event.kind === "world-text")).toHaveLength(0);
+  label.use?.(label, game, first.actor.id, first.actor.id);
+  const draw = events.find(event => event.kind === "world-text");
+  if (draw === undefined || draw.kind !== "world-text") throw new Error("world text event missing");
+  expect(draw.text).toMatchObject({ text: "Door\nAbove", cellSize: 1.6, color: { x: 1, y: 0, z: 0, w: 1 }, orientation: { kind: "billboard" }, depthTest: true, font: "classic" });
+  expect(draw.lifetime).toBe(0.025); expect(label.nextThink).toBe(0.025); expect(used).toBe(1);
+  active.advance(0.025); label.think?.(label, game);
+  expect(events.filter(event => event.kind === "world-text")).toHaveLength(2); expect(label.nextThink).toBe(0.05);
+  label.use?.(label, game, first.actor.id, first.actor.id);
+  expect(label.nextThink).toBeNull(); expect(label.activator).toBeNull(); expect(used).toBe(2);
+  expect(game.sourceCallbacks.think.name(label.think)).toBe("rr.info_world_text_think");
+  expect(game.sourceCallbacks.use.name(label.use)).toBe("rr.info_world_text_use");
+
+  const fixed = game.spawn({ classname: "info_world_text", ordinal: 12, values: new Map([
+    ["message", "Fixed"], ["angle", "90"], ["radius", "0.5"], ["spawnflags", "3"],
+  ]) });
+  fixed.use?.(fixed, game, first.actor.id, first.actor.id);
+  expect(fixed.use).toBeNull();
+  const last = events.at(-1);
+  if (last?.kind !== "world-text") throw new Error("fixed world text event missing");
+  expect(last.text.orientation).toEqual({ kind: "fixed", angles: { x: 0, y: 270, z: 0 } }); expect(last.text.cellSize).toBe(4);
+  const removed = game.spawn({ classname: "info_world_text", ordinal: 13, values: new Map([["message", "Once"], ["spawnflags", "5"]]) });
+  removed.use?.(removed, game, first.actor.id, first.actor.id); expect(game.entity(removed.actor.id)).toBeNull();
+});
+
+test("Q2 world text adapter preserves byte glyph truncation and copies source vectors", () => {
+  const origin = { x: 1, y: 2, z: 3 }, angles = { x: 0, y: 90, z: 0 };
+  const text = q2WorldText({ origin, angles, text: "\u0141" + "b".repeat(140), color: { x: 1, y: 1, z: 1, w: 1 }, size: 0.2, depthTest: false });
+  origin.x = 99; angles.y = 180;
+  expect(text.text).toBe("A" + "b".repeat(126)); expect(text.origin.x).toBe(1);
+  expect(text.orientation).toEqual({ kind: "fixed", angles: { x: 0, y: 90, z: 0 } }); expect(text.depthTest).toBe(false);
+});
 
 test("rerelease liquid damage remains 10 Hz with 40 Hz source frames", () => {
   const active = rerelease(), { first, players, game } = active;

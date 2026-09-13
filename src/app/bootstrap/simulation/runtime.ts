@@ -1,3 +1,5 @@
+import { WorldTextStore } from "../../../text/world.ts";
+import type { WorldText } from "../../../text/world.ts";
 import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
 import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../../../settings/server/index.ts";
 import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
@@ -213,6 +215,9 @@ export class SharedSimulation implements Simulation {
   private readonly monsterSources = new Map<ProviderId, SelectedMonsterSource>();
   private readonly monsterMissions = new Map<ActorId, MonsterMission>();
   private q2ServerRegistry: CvarRegistry | null = null;
+  private readonly worldTextStore = new WorldTextStore();
+  private worldTextFrame = -1;
+  private worldTextSnapshot: readonly WorldText[] = [];
   private source: SourceRuntime = { kind: "loading" };
   private sourceFrame: FrameContext;
   private hostMilliseconds = 0;
@@ -1376,7 +1381,7 @@ export class SharedSimulation implements Simulation {
       if (program !== "baseq2" && program !== "xatrix" && program !== "rogue" && program !== "mg2" && program !== "n64") throw new Error(`Unsupported Q2 rerelease program ${program}`);
       const rereleaseHooks: Q2RereleaseHooks = {
         lightStyle: style => this.events.lightStyle(style),
-        emit: event => { if (event.kind === "screen-blend") { const view = this.q2Views.get(event.actor); if (view !== undefined) this.q2Views.set(event.actor, { ...view, blend: event.blend }); } return this.events.emit(content, { kind: "q2-rerelease", event }); },
+        emit: event => { if (event.kind === "world-text") { this.worldTextStore.submit({ ...event.text, content }, this.timeSeconds, event.lifetime); return undefined; } if (event.kind === "screen-blend") { const view = this.q2Views.get(event.actor); if (view !== undefined) this.q2Views.set(event.actor, { ...view, blend: event.blend }); } return this.events.emit(content, { kind: "q2-rerelease", event }); },
         playerIdentity: actor => { const identity = this.options.playerIdentity; if (identity === undefined) throw new Error("Q2 rerelease admission requires session seat identity"); return identity(this.requirePlayer(actor).client); },
         clipTrigger: (trigger, actor, game) => {
           const body = this.bodies.read(actor), brush = game.body(trigger), model = sourceModel(trigger.model);
@@ -2665,6 +2670,14 @@ export class SharedSimulation implements Simulation {
   }
   private requirePlayer(actor: ActorId): MovementPlayer { const player = this.player(actor); if (player === null) throw new Error("Actor is not an admitted player"); return player; }
   registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined { return this.events.registerResource(content, path, resource); }
+  worldText(): readonly WorldText[] {
+    if (this.worldTextFrame !== this.sourceFrame.frame) {
+      this.worldTextFrame = this.sourceFrame.frame;
+      this.worldTextSnapshot = this.worldTextStore.snapshot(this.timeSeconds, this.sourceFrame.frame);
+    }
+    return this.worldTextSnapshot;
+  }
+
   drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.takePresentation(); }
 
   presentations(): readonly SimulationPresentation[] {
@@ -3022,7 +3035,7 @@ export class SharedSimulation implements Simulation {
     if (this.events.nextSequence !== save.nextEventSequence) throw new Error("Save event sequence disagrees with its source journal");
     return undefined;
   }
-  close(): undefined { if (this.closed) return undefined; this.closed = true; this.actors.close(); this.scheduler.close(); return undefined; }
+  close(): undefined { if (this.closed) return undefined; this.closed = true; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
   private assertOpen(): undefined { if (this.closed) throw new Error("Simulation is closed"); return undefined; }
 }
 

@@ -11,6 +11,8 @@ import { createQ2RereleaseCampaignState, q2RereleaseUnitReport, updateQ2Rereleas
 import type { Q2RereleaseCampaignState } from "./campaign.ts";
 import { unrotateQ2Landmark } from "../foundation/targets.ts";
 import type { Q2LandmarkCarry } from "../foundation/host.ts";
+import { angleMod } from "../../../core/math.ts";
+import { q2WorldText } from "./world-text.ts";
 export { createQ2RereleaseCampaignState } from "./campaign.ts";
 export type { Q2RereleaseCampaignState } from "./campaign.ts";
 
@@ -68,6 +70,11 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
       return false;
     }
     switch (name) {
+      case "info_world_text":
+        if (!entity.spawn.values.has("message")) { game.host.diagnostic("info_world_text: no message"); game.remove(entity); return true; }
+        entity.think = this.worldTextThink; entity.use = this.worldTextUse;
+        if ((entity.spawnflags & 1) === 0) { entity.activator = entity.actor.id; game.schedule(entity, game.host.frameSeconds(), this.worldTextThink); }
+        return true;
       case "trigger_flashlight": this.trigger(entity, game); entity.movedir = { ...entity.movedir, z: numberField(entity.spawn, "height") }; entity.touch = this.flashlightTouch; return true;
       case "trigger_fog":
         this.trigger(entity, game); entity.delay ||= 0.5; entity.goal = game.pickTarget(entity.target)?.actor.id ?? null; entity.touch = this.fogTouch;
@@ -312,10 +319,37 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
     return undefined;
   }
 
+  private readonly worldTextThink: Q2Think = (entity, game) => {
+    const colors = [
+      { x: 1, y: 1, z: 1, w: 1 }, { x: 1, y: 0, z: 0, w: 1 }, { x: 0, y: 0, z: 1, w: 1 },
+      { x: 0, y: 1, z: 0, w: 1 }, { x: 1, y: 1, z: 0, w: 1 }, { x: 0, y: 0, z: 0, w: 1 },
+      { x: 0, y: 1, z: 1, w: 1 }, { x: 116 / 255, y: 61 / 255, z: 50 / 255, w: 1 },
+    ];
+    const selected = colors[numberField(entity.spawn, "sounds")];
+    if (selected === undefined) game.host.diagnostic("info_world_text: invalid color");
+    const body = game.body(entity), yaw = angleMod(body.angles.y) + 180;
+    const radius = numberField(entity.spawn, "radius");
+    if (radius < 0) return game.schedule(entity, game.host.frameSeconds(), this.worldTextThink);
+    this.hooks.emit({ kind: "world-text", lifetime: game.host.frameSeconds(), text: q2WorldText({
+      origin: body.origin, angles: body.angles.y === -3 ? null : { x: 0, y: yaw > 360 ? yaw - 360 : yaw, z: 0 },
+      text: entity.message, color: selected ?? { x: 1, y: 1, z: 1, w: 1 }, size: radius === 0 ? 0.2 : radius, depthTest: true }) });
+    return game.schedule(entity, game.host.frameSeconds(), this.worldTextThink);
+  };
+
+  private readonly worldTextUse: Q2Use = (entity, game, _other, activator) => {
+    if (entity.activator === null) { entity.activator = activator; this.worldTextThink(entity, game); }
+    else { game.cancel(entity); entity.think = this.worldTextThink; entity.activator = null; }
+    if ((entity.spawnflags & 2) !== 0) entity.use = null;
+    const target = game.pickTarget(entity.target);
+    target?.use?.(target, game, entity.actor.id, entity.actor.id);
+    if ((entity.spawnflags & 4) !== 0) game.remove(entity);
+    return undefined;
+  };
+
   get callbacks(): Q2CallbackDefinitions { return {
-    think: { "rr.target_poi_setup": this.poiSetup, "rr.trigger_coop_relay_think": this.coopRelayThink, "rr.target_crossunit_target_think": this.crossUnitThink, "rr.check_target_healthbar": this.healthbarCheck },
+    think: { "rr.info_world_text_think": this.worldTextThink, "rr.target_poi_setup": this.poiSetup, "rr.trigger_coop_relay_think": this.coopRelayThink, "rr.target_crossunit_target_think": this.crossUnitThink, "rr.check_target_healthbar": this.healthbarCheck },
     touch: { "rr.trigger_flashlight_touch": this.flashlightTouch, "rr.trigger_fog_touch": this.fogTouch },
-    use: { "rr.trigger_coop_relay_use": this.coopRelayUse, "rr.target_poi_use": this.poiUse, "rr.use_target_music": this.musicUse,
+    use: { "rr.info_world_text_use": this.worldTextUse, "rr.trigger_coop_relay_use": this.coopRelayUse, "rr.target_poi_use": this.poiUse, "rr.use_target_music": this.musicUse,
       "rr.use_target_sky": this.skyUse, "rr.trigger_crossunit_trigger_use": this.crossUnitUse, "rr.use_target_autosave": this.autosaveUse,
       "rr.use_target_achievement": this.achievementUse, "rr.use_target_story": this.storyUse, "rr.use_target_healthbar": this.healthbarUse, "rr.use_target_changelevel": this.changeLevelUse },
   }; }

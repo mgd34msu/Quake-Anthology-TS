@@ -1,3 +1,4 @@
+import type { WorldText } from "../../../text/world.ts";
 /* Q3 CL_ParseGamestate / CL_SetCGameTime and cgame host projection. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner, SeatId } from '../../../contracts/identity.ts';
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
@@ -137,6 +138,8 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private requirePlayer(actor: ActorId): Snapshot {
     if (this.current === null || !this.actorAt(this.current.playerState.clientNum).equals(actor)) throw new Error('No decoded Q3 player state'); return this.current;
   }
+  worldText(): readonly WorldText[] { return []; }
+
   playerView(actor: ActorId): PlayerView { if (this.current === null && this.admittedPlayer.actor.equals(actor)) return { origin: zero, angles: zero, viewHeight: 0 }; const ps = this.requirePlayer(actor).playerState; return { origin: ps.origin, angles: ps.viewangles, viewHeight: ps.viewheight }; }
   playerUi(actor: ActorId): PlayerUi {
     const ps = this.requirePlayer(actor).playerState, weapon = q3WeaponItem(ps.weapon), source = this.content.recipe.weapons[0];
