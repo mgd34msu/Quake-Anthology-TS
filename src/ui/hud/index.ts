@@ -11,6 +11,7 @@ import type { CenterPrintState, UiDrawCommand, UiDrawContext, UiNotification } f
 import { createViewProjector } from "../../render/scene/view.ts";
 import type { ActiveCaption } from "../../text/captions.ts";
 import { fitUi, transformUi } from "../common/layout.ts";
+import type { UiTransform } from "../common/layout.ts";
 import type { UiSkin } from "../common/skin.ts";
 import type { UiPreferenceValues } from "../settings/index.ts";
 import type { CarouselPresentation, WheelPresentation } from "./wheel.ts";
@@ -22,13 +23,23 @@ export function hudVitalRects(count: number, scale: number): readonly Rect[] {
   return Array.from({ length: count }, (_, index) => ({ x: start + index * width, y: 434, width: width - 4, height: 42 }));
 }
 
-export function hudVitalOccupiedRects(context: UiDrawContext, count: number, hudScale: number): readonly Rect[] {
-  const fitted = fitUi(context.binding.safeArea), scale = hudScale * context.binding.hudScale;
-  return hudVitalRects(count, scale).map(rect => ({
-    x: fitted.x + (320 + (rect.x - 320) * scale) * fitted.scale,
-    y: fitted.y + (480 + (rect.y - 480) * scale) * fitted.scale,
-    width: rect.width * scale * fitted.scale, height: rect.height * scale * fitted.scale
-  }));
+function statusLayout(context: UiDrawContext, count: number, hudScale: number, textScale: number, capHeight = 8): { readonly rects: readonly Rect[]; readonly transform: UiTransform; readonly minimumTextScale: number } {
+  const area = context.binding.safeArea, fitted = fitUi(area), group = hudScale * context.binding.hudScale;
+  const requested = fitted.scale * group;
+  if (requested * textScale * capHeight < 8) {
+    const width = Math.min(180, (area.width - 8) / Math.max(1, count));
+    return { rects: Array.from({ length: count }, (_, index) => ({ x: area.x + (area.width - width * count) / 2 + index * width,
+      y: area.y + area.height - 36, width: width - 4, height: 32 })), transform: { scale: 1, x: 0, y: 0 }, minimumTextScale: 8 / capHeight };
+  }
+  const scale = requested;
+  return { rects: hudVitalRects(count, group), minimumTextScale: 8 / capHeight / scale,
+    transform: { scale, x: fitted.x + 320 * fitted.scale * (1 - group), y: fitted.y + 480 * fitted.scale * (1 - group) } };
+}
+
+export function hudVitalOccupiedRects(context: UiDrawContext, count: number, hudScale: number, textScale = 1.5, capHeight = 8): readonly Rect[] {
+  const layout = statusLayout(context, count, hudScale, textScale, capHeight);
+  return layout.rects.map(rect => ({ x: layout.transform.x + rect.x * layout.transform.scale, y: layout.transform.y + rect.y * layout.transform.scale,
+    width: rect.width * layout.transform.scale, height: rect.height * layout.transform.scale }));
 }
 
 export interface HudValue { readonly label: string; readonly value: number; readonly icon: ResourceId | null; readonly warning: boolean; }
@@ -116,6 +127,7 @@ export class SeatHudMessages {
 
 export interface CommonHudDrawOptions {
   readonly skin: UiSkin;
+  readonly measureText?: (text: string, scale: number) => number;
   readonly preferences: UiPreferenceValues;
   readonly messages: SeatHudMessages;
   readonly camera: SceneCamera | null;
@@ -125,12 +137,14 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   if (!data.seat.equals(context.binding.seat) || !data.seat.equals(options.messages.seat)) throw new Error("HUD frame belongs to another seat");
   if (!data.visible) return [];
   const preferences = options.preferences, skin = options.skin;
-  const commands: { readonly command: UiDrawCommand; readonly anchor: Vec2; readonly scale: number }[] = [];
+  const commands: { readonly command: UiDrawCommand; readonly anchor: Vec2; readonly scale: number; readonly transform?: UiTransform }[] = [];
   let anchor: Vec2 = { x: 320, y: 240 }, groupScale = preferences.hudScale * context.binding.hudScale;
   const color = preferences.highContrast ? { x: 1, y: 1, z: 1, w: 1 } : skin.colors.text;
   const accent = preferences.highContrast ? { x: 1, y: 1, z: 0, w: 1 } : skin.colors.accent;
   const background = preferences.highContrast ? { x: 0, y: 0, z: 0, w: 1 } : skin.colors.panel;
   const textScale = skin.fontScale * preferences.textScale, lineHeight = skin.lineHeight * preferences.textScale;
+  const status = statusLayout(context, data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1), preferences.hudScale, textScale, skin.capInk?.height);
+  const statusCommand = (command: UiDrawCommand): void => { commands.push({ command, anchor, scale: groupScale, transform: status.transform }); };
   const text = (value: string, x: number, y: number, tint: Vec4 = color, align: "left" | "center" | "right" = "left"): void => {
     commands.push({ command: { kind: "text", origin: { x, y }, text: options.localize(value), font: skin.font, scale: textScale, color: tint, align, shadow: true }, anchor, scale: groupScale });
   };
@@ -150,22 +164,35 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   }
   if (data.vitals.length > 0) {
     anchor = { x: 320, y: 480 };
-    const rects = hudVitalRects(data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1), groupScale);
+    const rects = status.rects;
     for (const [index, vital] of data.vitals.entries()) {
       const rect = rects[index];
       if (rect === undefined) continue;
       const x = rect.x;
-      fill(rect, background);
-      if (vital.icon !== null) image(vital.icon, { x: x + 6, y: 442, width: 24, height: 24 });
-      text(`${vital.label} ${vital.value}`, x + (vital.icon === null ? 8 : 34), 446, vital.warning ? accent : color);
+      const compact = status.transform.scale === 1 && status.minimumTextScale * (skin.capInk?.height ?? 8) === 8;
+      statusCommand({ kind: "fill", rect, color: background });
+      if (vital.icon !== null) statusCommand({ kind: "image", resource: vital.icon, rect: { x: x + 6, y: rect.y + 8, width: 24, height: 24 }, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color });
+      const scale = compact ? status.minimumTextScale : textScale;
+      const label = options.localize(vital.label), value = String(vital.value), full = label + " " + value;
+      const left = x + (vital.icon === null ? 4 : 34), available = rect.x + rect.width - 4 - left;
+      const measure = (text: string): number => options.measureText?.(text, scale) ?? text.length * 8 * scale;
+      const lines = measure(full) <= available ? [full] : [label, value];
+      for (const [row, line] of lines.entries()) {
+        const chars = Array.from(line);
+        while (chars.length > 0 && measure(chars.join("")) > available) chars.pop();
+        statusCommand({ kind: "text", origin: { x: left, y: rect.y + (compact ? 4 + row * 14 - (skin.capInk?.top ?? 0) * scale : 12) }, text: chars.join(""), font: skin.font,
+          scale, color: vital.warning ? accent : color, align: "left", shadow: true });
+      }
     }
   }
   if (data.weapon !== undefined) {
     const rect = data.weapon.nativeStatus ? { x: 8, y: 434, width: 152, height: 42 }
-      : hudVitalRects(data.vitals.length + 1, groupScale)[data.vitals.length];
+      : status.rects[data.vitals.length];
     if (rect !== undefined) {
       anchor = { x: data.weapon.nativeStatus ? 0 : 320, y: 480 };
-      for (const command of drawWeaponHud(data.weapon, rect, { ...skin, colors: { ...skin.colors, text: color, accent, panel: background } }, textScale)) commands.push({ command, anchor, scale: groupScale });
+      for (const command of drawWeaponHud(data.weapon, rect, { ...skin, colors: { ...skin.colors, text: color, accent, panel: background } }, textScale, data.weapon.nativeStatus ? 0 : status.minimumTextScale)) {
+        if (data.weapon.nativeStatus) commands.push({ command, anchor, scale: groupScale }); else statusCommand(command);
+      }
     }
   }
   anchor = { x: 320, y: 0 };
@@ -244,7 +271,7 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   }
   const transform = fitUi(context.binding.safeArea);
   const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];
-  result.push(...commands.map(item => transformUi(item.command, { scale: transform.scale * item.scale,
+  result.push(...commands.map(item => transformUi(item.command, item.transform ?? { scale: transform.scale * item.scale,
     x: transform.x + item.anchor.x * transform.scale * (1 - item.scale), y: transform.y + item.anchor.y * transform.scale * (1 - item.scale) })));
   if (options.camera !== null) {
     const project = createViewProjector(options.camera), area = context.binding.safeArea;

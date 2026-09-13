@@ -18,6 +18,7 @@ export interface UiSkin {
   readonly titleFont?: ResourceId;
   readonly titleScale?: number;
   readonly fontScale: number;
+  readonly capInk?: { readonly top: number; readonly height: number };
   readonly lineHeight: number;
   readonly panel: UiImageSlice | null;
   readonly button: UiImageSlice | null;
@@ -36,6 +37,10 @@ export function uiSkinFont(skin: UiSkin, font: TextFontSelection, lineHeight = 1
   if (height <= 0 || lineHeight <= 0) throw new RangeError("Menu font line height must be positive");
   // W21 normalizes every atlas to an eight-unit text line before applying scale.
   return { ...skin, fontScale: lineHeight / 8, lineHeight };
+}
+export function hudSkinFont(skin: UiSkin, font: TextFontSelection): UiSkin {
+  const atlas = font.kind === "atlas" ? font.font : font.classic;
+  return { ...skin, capInk: atlas.capInk ?? { top: 0, height: 8 } };
 }
 /** Insets are pixels in the atlas region, independently scaled down for small destinations. */
 export function nineSlice(slice: UiImageSlice, rect: Rect, color: Vec4): readonly UiDrawCommand[] {

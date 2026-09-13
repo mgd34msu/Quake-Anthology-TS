@@ -1,3 +1,4 @@
+import { hudSkinFont } from "../../ui/common/skin.ts";
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import { registerServerSettingsMenu } from "../../ui/settings/server.ts";
 import type { HostServerSettingsUi } from "../../ui/settings/server.ts";
@@ -191,7 +192,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   weaponOcclusion(context: UiDrawContext, gameVisible: boolean): readonly Rect[] {
     if (!gameVisible || this.local.input.focus.kind !== "game") return [];
     const player = this.simulation.playerUi(this.local.player.actor);
-    return hudVitalOccupiedRects(context, player.weaponStatus === null ? 2 : 3, this.preferences.values.hudScale);
+    return hudVitalOccupiedRects(context, player.weaponStatus === null ? 2 : 3, this.preferences.values.hudScale, this.art.skin.fontScale * this.preferences.values.textScale, hudSkinFont(this.art.skin, this.font).capInk?.height);
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
@@ -206,7 +207,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
         measureText: this.measureHudText, nativeStatus } }),
       vitals: nativeStatus ? [] : [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false }] };
-    const commands = [...drawCommonHud(context, hud, { skin: this.art.skin, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
+    const commands = [...drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.font), measureText: this.measureHudText, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
       ];
     renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
     renderUiCommands(context, this.controller.activeMenu === null ? [] : [menuPanel(context), ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],

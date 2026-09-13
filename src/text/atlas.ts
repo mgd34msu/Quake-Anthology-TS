@@ -16,6 +16,7 @@ export interface TextAtlas {
   readonly name: string;
   readonly picture: ImagePicture;
   readonly lineHeight: number;
+  readonly capInk?: { readonly top: number; readonly height: number };
   readonly glyphs: ReadonlyMap<number, AtlasGlyph>;
 }
 export type TextFontSelection = { readonly kind: "classic"; readonly classic: TextAtlas; readonly unicode: TextAtlas | null }
@@ -112,7 +113,18 @@ export class TextFontRegistry {
     const image = await this.services.registerImage(name, { kind: "rgba8", levels: [level], borderColor: { x: 0, y: 0, z: 0, w: 0 } });
     if (this.closed) { this.services.releaseImage(image); throw new Error("Text font registry closed during image registration"); }
     this.images.add(image);
-    return { kind, name, picture: { kind: "image", name, image }, lineHeight, glyphs };
+    let top = lineHeight, bottom = -1;
+    for (const code of [72, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57]) {
+      const glyph = glyphs.get(code);
+      if (glyph === undefined) continue;
+      for (let y = 0; y < glyph.height; y++) for (let x = 0; x < glyph.width; x++) {
+        if ((level.pixels[((glyph.y + y) * level.width + glyph.x + x) * 4 + 3] ?? 0) > 127) {
+          top = Math.min(top, y); bottom = Math.max(bottom, y);
+        }
+      }
+    }
+    return { kind, name, picture: { kind: "image", name, image }, lineHeight, glyphs,
+      ...(bottom < top ? {} : { capInk: { top: top * 8 / lineHeight, height: (bottom - top + 1) * 8 / lineHeight } }) };
   }
 }
 

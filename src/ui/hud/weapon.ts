@@ -14,11 +14,26 @@ export interface CommonWeaponHud {
   readonly measureText?: (text: string, scale: number) => number;
 }
 
-export function drawWeaponHud(data: CommonWeaponHud, rect: Rect, skin: UiSkin, textScale: number): readonly UiDrawCommand[] {
+export function drawWeaponHud(data: CommonWeaponHud, rect: Rect, skin: UiSkin, textScale: number, minimumTextScale = 0): readonly UiDrawCommand[] {
   const ammo = data.status.ammo, unavailable = ammo.kind === "finite" && !ammo.hasAmmoToStart;
   const activeWarning = data.status.source.provider.startsWith("q3:") ? null : unavailable ? "NO AMMO" : ammo.kind === "finite" && ammo.low ? "LOW AMMO" : null;
   const warning = data.warning === "empty" ? "OUT OF AMMO" : data.warning === "low" ? "LOW AMMO WARNING" : activeWarning;
   const color = warning === null && !unavailable ? skin.colors.text : skin.colors.accent;
+  if (minimumTextScale > 0 && rect.height === 32) {
+    const scale = minimumTextScale, top = (skin.capInk?.top ?? 0) * scale;
+    const commands: UiDrawCommand[] = [{ kind: "fill", rect, color: skin.colors.panel }];
+    const icon = data.weaponIcon ?? data.ammoIcon;
+    if (icon !== null) commands.push({ kind: "image", resource: icon, rect: { x: rect.x + 4, y: rect.y + 4, width: 24, height: 24 / (data.iconAspect ?? 1) },
+      texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: { x: 1, y: 1, z: 1, w: 1 } });
+    const left = rect.x + (icon === null ? 4 : 32), available = rect.x + rect.width - 4 - left;
+    const labels = [ammo.kind === "finite" ? String(ammo.count) : icon === null ? data.status.label : "", warning === "LOW AMMO WARNING" ? "LOW AMMO" : warning ?? ""];
+    for (const [row, label] of labels.entries()) {
+      const chars = Array.from(label);
+      while (chars.length > 0 && (data.measureText?.(chars.join(""), scale) ?? chars.length * 8 * scale) > available) chars.pop();
+      if (chars.length > 0) commands.push({ kind: "text", origin: { x: left, y: rect.y + 4 + row * 14 - top }, text: chars.join(""), font: skin.font, scale, color, align: "left", shadow: true });
+    }
+    return commands;
+  }
   const commands: UiDrawCommand[] = [{ kind: "fill", rect, color: skin.colors.panel }];
   const icon = data.weaponIcon ?? data.ammoIcon;
   const aspect = data.iconAspect ?? 1, maxWidth = warning === null ? 48 : 30, maxHeight = warning === null ? 32 : 20;
@@ -29,11 +44,31 @@ export function drawWeaponHud(data: CommonWeaponHud, rect: Rect, skin: UiSkin, t
   if (ammo.kind === "finite") commands.push({ kind: "text", origin: { x, y: rect.y + 4 }, text: String(ammo.count),
     font: skin.font, scale: textScale * 1.5, color, align: "left", shadow: true });
   if (warning !== null || icon === null) {
-    const text = warning ?? data.status.label, left = warning === null ? x : rect.x + 4;
+    const original = warning ?? data.status.label, left = warning === null ? x : rect.x + 4;
+    const available = rect.x + rect.width - 4 - left;
+    const text = warning === "LOW AMMO WARNING" && (data.measureText?.(original, 1) ?? original.length * 8) * minimumTextScale > available ? "LOW AMMO" : original;
     const width = data.measureText?.(text, 1) ?? Array.from(text).length * 8;
-    const scale = Math.min(textScale * 0.9, (rect.x + rect.width - 4 - left) / Math.max(1, width));
-    commands.push({ kind: "text", origin: { x: left, y: rect.y + 25 }, text,
-      font: skin.font, scale, color, align: "left", shadow: true });
+    const scale = Math.max(minimumTextScale, Math.min(textScale * 0.9, available / Math.max(1, width)));
+    const measure = (value: string): number => (data.measureText?.(value, 1) ?? Array.from(value).length * 8) * scale;
+    const lines: string[] = [];
+    let line = "";
+    for (const word of text.split(" ")) {
+      const next = line === "" ? word : `${line} ${word}`;
+      if (line !== "" && measure(next) > available) { lines.push(line); line = word; } else line = next;
+    }
+    if (line !== "") lines.push(line);
+    const maximumLines = Math.max(1, Math.floor((rect.height - 29) / (8 * scale)));
+    for (const [index, value] of lines.slice(0, maximumLines).entries()) {
+      let visible = value;
+      const truncated = index === maximumLines - 1 && lines.length > maximumLines || measure(visible) > available;
+      if (truncated) {
+        const characters = Array.from(visible);
+        while (characters.length > 0 && measure(characters.join("") + "…") > available) characters.pop();
+        visible = characters.join("") + "…";
+      }
+      commands.push({ kind: "text", origin: { x: left, y: rect.y + 25 + index * 8 * scale }, text: visible,
+        font: skin.font, scale, color, align: "left", shadow: true });
+    }
   }
   const ammoAspect = data.ammoAspect ?? 1, ammoWidth = Math.min(18, 18 * ammoAspect);
   if (data.ammoIcon !== null && data.weaponIcon !== null && ammo.kind === "finite") commands.push({ kind: "image", resource: data.ammoIcon,
