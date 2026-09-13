@@ -1,0 +1,105 @@
+import { expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { decodeArchive } from '../../../src/content/archive/index.ts';
+import { Q3ApplicationClientDownloads } from '../../../src/app/bootstrap/network/q3-client-downloads.ts';
+import { Q3ServerDownload } from '../../../src/network/q3/download.ts';
+import { q3ArchiveChecksums } from '../../../src/network/q3/pure.ts';
+import { MessageWriter } from '../../../src/network/q3/message.ts';
+import { decodeServerMessage, ServerOpcode } from '../../../src/network/q3/server-message.ts';
+import { DownloadSink } from '../../../src/network/services/downloads.ts';
+
+function fixturePk3(): Uint8Array<ArrayBuffer> {
+  const name = new TextEncoder().encode('wire-probe.cfg'), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(400));
+  const localLength = 30 + name.length + data.length, centralLength = 46 + name.length;
+  const bytes = new Uint8Array(localLength + centralLength + 22), view = new DataView(bytes.buffer), crc = Bun.hash.crc32(data);
+  view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(14, crc, true);
+  view.setUint32(18, data.length, true); view.setUint32(22, data.length, true); view.setUint16(26, name.length, true);
+  bytes.set(name, 30); bytes.set(data, 30 + name.length);
+  view.setUint32(localLength, 0x02014b50, true); view.setUint16(localLength + 4, 20, true); view.setUint16(localLength + 6, 20, true);
+  view.setUint32(localLength + 16, crc, true); view.setUint32(localLength + 20, data.length, true); view.setUint32(localLength + 24, data.length, true);
+  view.setUint16(localLength + 28, name.length, true); bytes.set(name, localLength + 46);
+  const end = localLength + centralLength; view.setUint32(end, 0x06054b50, true); view.setUint16(end + 8, 1, true); view.setUint16(end + 10, 1, true);
+  view.setUint32(end + 12, centralLength, true); view.setUint32(end + 16, localLength, true); return bytes;
+}
+
+function fixture(checksumDelta = 0) {
+  const root = mkdtempSync(join(tmpdir(), 'q3-download-sink-')), bytes = fixturePk3(), archive = decodeArchive(bytes, 'pk3');
+  const checksum = q3ArchiveChecksums(archive, 0).checksum ^ checksumDelta; archive.close();
+  const commands: string[] = [], events: string[] = [];
+  const client = new Q3ApplicationClientDownloads(root, { assertCurrent() {}, reliable: text => { commands.push(text); },
+    sendPacket: () => { events.push('packet'); }, progress() {}, async reloadPackages() { events.push('reload'); } });
+  client.begin([{ name: 'baseq3/custom', checksum }], [], name => existsSync(join(root, name)));
+  let position = 0;
+  const server = new Q3ServerDownload({ enabled: () => true, pure: () => false, print() {}, drop(reason) { throw new Error(reason); },
+    open: () => ({ size: bytes.length, read(target) { const count = Math.min(target.length, bytes.length - position); target.set(bytes.subarray(position, position + count)); position += count; return count; }, close() {} }) });
+  server.begin('baseq3/custom.pk3');
+  const blocks = (time: number) => {
+    const writer = new MessageWriter(); writer.writeLong(0); server.write(writer, time, { rate: 1000000, maxRate: 0, snapshotMsec: 50 }); writer.writeByte(ServerOpcode.Eof);
+    return decodeServerMessage(writer.toBytes(), { product: 'baseq3', messageNumber: 1, reliableSequence: 0, serverCommandSequence: 0, parseEntitiesNumber: 0, baseline: () => null, history: () => null }).operations.flatMap(operation => operation.kind === 'download' ? [operation.block] : []);
+  };
+  return { root, bytes, client, server, blocks, commands, events };
+}
+
+test('native Q3 block retry and EOF publish a checked package atomically before donedl', async () => {
+  const f = fixture();
+  try {
+    const initial = f.blocks(2000), first = initial[0];
+    if (first?.kind !== 'start') throw new Error('Expected source download start');
+    f.client.publishSize(first.fileSize); await f.client.receive(first);
+    expect(existsSync(join(f.root, 'baseq3/custom.pk3'))).toBe(false);
+    // A source resend includes the already accepted first block; it must not append twice.
+    const resend = f.blocks(3101);
+    for (const block of resend) { if (block.kind === 'start') f.client.publishSize(block.fileSize); await f.client.receive(block); }
+    expect(readFileSync(join(f.root, 'baseq3/custom.pk3'))).toEqual(Buffer.from(f.bytes));
+    expect(f.commands.filter(text => text === 'nextdl 0')).toHaveLength(1);
+    expect(f.commands.at(-1)).toBe('donedl'); expect(f.events).toEqual(['packet', 'packet', 'reload']);
+    expect(readdirSync(join(f.root, 'baseq3'))).toEqual(['custom.pk3']);
+    for (const text of f.commands) if (text.startsWith('nextdl ')) f.server.acknowledge(Number(text.slice(7)), 3200);
+    expect(f.server.name).toBe('');
+  } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('wrong package checksum and cancellation leave no installed or temporary archive', async () => {
+  for (const wrong of [false, true]) {
+    const f = fixture(wrong ? 1 : 0);
+    try {
+      const blocks = f.blocks(2000);
+      if (!wrong) {
+        const first = blocks[0]; if (first?.kind !== 'start') throw new Error('Missing start');
+        f.client.publishSize(first.fileSize); await f.client.receive(first); f.client.close();
+      } else {
+        await expect((async () => { for (const block of blocks) { if (block.kind === 'start') f.client.publishSize(block.fileSize); await f.client.receive(block); } })()).rejects.toThrow('checksum');
+      }
+      expect(readdirSync(join(f.root, 'baseq3'))).toEqual([]); expect(f.commands).not.toContain('donedl');
+    } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test('staged inspection pins the inode and excludes append/publication through cancellation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'download-inspect-')), sink = DownloadSink.create(root, 'test.pk3', { kind: 'protocol-completion', maximumBytes: 8 });
+  sink.append(new Uint8Array([1, 2, 3]));
+  let release = () => {};
+  const ready = new Promise<void>(resolve => { release = resolve; });
+  const inspect = sink.inspectStaged(async path => { await ready; expect(readFileSync(path)).toEqual(Buffer.from([1, 2, 3])); });
+  try {
+    expect(() => sink.append(new Uint8Array())).toThrow('inspection'); expect(() => sink.finish()).toThrow('inspection');
+    sink.close(); writeFileSync(join(root, 'other'), 'unrelated'); release();
+    await expect(inspect).rejects.toThrow('closed during inspection');
+    expect(readdirSync(root)).toEqual(['other']);
+  } finally { release(); sink.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a destination installed during transfer is never replaced', async () => {
+  const f = fixture();
+  try {
+    const blocks = f.blocks(2000), first = blocks[0];
+    if (first?.kind !== 'start') throw new Error('Missing start');
+    f.client.publishSize(first.fileSize); await f.client.receive(first);
+    const path = join(f.root, 'baseq3/custom.pk3'); writeFileSync(path, 'installed');
+    await expect((async () => { for (const block of blocks.slice(1)) await f.client.receive(block); })()).rejects.toThrow();
+    expect(readFileSync(path, 'utf8')).toBe('installed'); expect(readdirSync(join(f.root, 'baseq3'))).toEqual(['custom.pk3']);
+    expect(f.commands).not.toContain('donedl');
+  } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});

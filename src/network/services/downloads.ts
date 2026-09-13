@@ -71,6 +71,7 @@ export class DownloadSink {
   private readonly hash: Hash = createHash("sha256");
   private count = 0;
   private ended = false;
+  private inspecting = false;
   private constructor(private readonly parent: number, private readonly descriptor: number, private readonly temporary: string,
     private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation) {}
   static create(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation): DownloadSink {
@@ -85,6 +86,7 @@ export class DownloadSink {
   get byteLength(): number { return this.count; }
   append(bytes: Uint8Array): void {
     if (this.ended) throw new Error("Download sink is closed");
+    if (this.inspecting) throw new Error("Download inspection is in progress");
     const limit = "kind" in this.expected ? this.expected.maximumBytes : this.expected.byteLength;
     if (this.count + bytes.length > limit) throw new RangeError("Download exceeds expected size");
     let written = 0;
@@ -97,6 +99,7 @@ export class DownloadSink {
   }
   finish(): ContentDigest {
     if (this.ended) throw new Error("Download sink is closed");
+    if (this.inspecting) throw new Error("Download inspection is in progress");
     try {
       if (!("kind" in this.expected) && this.count !== this.expected.byteLength) throw new Error("Download size differs from content identity");
       const digest = createContentDigest(this.hash.digest("hex"));
@@ -105,6 +108,18 @@ export class DownloadSink {
       linkSync(`/proc/self/fd/${this.parent}/${this.temporary}`, `/proc/self/fd/${this.parent}/${this.target}`);
       return digest;
     } finally { this.close(); }
+  }
+  /** Inspect the retained inode before publication; cancellation still removes its staged name. */
+  async inspectStaged(inspect: (path: string) => Promise<void>): Promise<void> {
+    if (this.ended) throw new Error("Download sink is closed");
+    if (this.inspecting) throw new Error("Download inspection is in progress");
+    const retained = openSync(`/proc/self/fd/${this.descriptor}`, constants.O_RDONLY);
+    this.inspecting = true;
+    try {
+      await inspect(`/proc/self/fd/${retained}`);
+      if (this.ended) throw new Error("Download sink closed during inspection");
+    } catch (error) { this.close(); throw error; }
+    finally { this.inspecting = false; closeSync(retained); }
   }
   close(): void {
     if (this.ended) return;

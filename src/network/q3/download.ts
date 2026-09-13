@@ -96,7 +96,7 @@ export interface Q3DownloadClientBindings {
   assertCurrent(): void;
   /** Mount/filesystem owner enforces exclusive creation, containment and no replacement. */
   openTemporary(path: string): Q3DownloadWriteFile | null;
-  publishTemporary(temporary: string, destination: string): void;
+  publishTemporary(temporary: string, destination: string): void | Promise<void>;
   reliable(text: string): void;
   sendPacket(): void;
   progress(name: string, count: number, size: number): void;
@@ -131,7 +131,7 @@ export class Q3ClientDownload {
     this.count = (this.count + download.data.length) | 0; this.bindings.progress(this.name, this.count, this.size);
     if (download.data.length === 0) {
       this.file.close(); this.file = null; this.bindings.assertCurrent();
-      this.bindings.publishTemporary(this.temporary, this.name); this.bindings.assertCurrent();
+      await this.bindings.publishTemporary(this.temporary, this.name); this.bindings.assertCurrent();
       this.name = ""; this.temporary = ""; this.bindings.progress("", this.count, this.size);
       this.bindings.sendPacket(); this.bindings.assertCurrent(); this.bindings.sendPacket(); this.bindings.assertCurrent();
       await this.bindings.completed();
