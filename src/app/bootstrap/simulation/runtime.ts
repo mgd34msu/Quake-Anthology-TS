@@ -2362,7 +2362,10 @@ export class SharedSimulation implements Simulation {
           player.arsenal = result.arsenal; player.animation = result.animation;
         }
         if (this.source.kind === "q1" && this.actors.isLive(player.actor.id)) { this.source.game.playerAfterPhysics(player.actor, this.timeSeconds); this.source.composition.playerPostThink(player.actor.id); }
-        if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.afterClientThink(entity, this.source.game); }
+        if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
+          if (!player.intermission) entity.viewHeight = player.viewHeight;
+          this.source.players.afterClientThink(entity, this.source.game);
+        } }
         this.q2Characters.get(player.actor)?.afterClientThink();
         const q1Character = this.q1Characters.get(player.actor); if (q1Character !== undefined) q1Character.postMove();
         if (!paused) this.physics.commitAttachments();
@@ -2533,7 +2536,7 @@ export class SharedSimulation implements Simulation {
     const primary = { active: ui.activeWeapon === null ? null : { provider: this.weaponProvider.provider, item: ui.activeWeapon },
       pending: pendingItem === null ? null : { provider: this.weaponProvider.provider, item: pendingItem }, ui, model };
     if (slot === undefined || grapple === null) return primary;
-    const gear = grapple.weaponView(actor), view = player.view(), weapon = grapple.weapon();
+    const gear = grapple.weaponView(actor), view = this.source.kind === "q2" && player.character === "q2" ? this.playerView(actor) : player.view(), weapon = grapple.weapon();
     const gearModel: SimulationPresentation | null = gear === null ? null : { actor, content: grapple.selection.source.content, family: grapple.source.kind === "q1-threewave" ? "q1" : "q2",
       path: gear.path, frame: gear.frame, oldFrame: gear.frame, skin: 0, effects: 0, renderFlags: 0,
       origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), gear.kickOrigin), angles: add(view.angles, { x: gear.kickPitch, y: 0, z: 0 }),
@@ -2592,8 +2595,10 @@ export class SharedSimulation implements Simulation {
     const player = this.requirePlayer(actor), view = player.view(), source = this.q2Views.get(actor);
     if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z };
     const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
+    // Classic viewoffset includes eye height; rerelease sends it separately in pmove.viewheight.
     return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch }
-      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch, viewHeight: source.offset.z };
+      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch,
+        viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
   }
   get sourceEntityText(): string { return this.options.world.entities; }
 
@@ -2746,7 +2751,9 @@ export class SharedSimulation implements Simulation {
     }));
     for (const [actor, model] of weaponModels) {
       const player = this.player(actor); if (player === null || player.intermission || player.cutscene !== null) continue;
-      const view = player.view(), q2 = providerFamily(this.weaponProvider.provider) === "q2" ? this.viewModels.get(actor)?.q2 : undefined;
+      const q2 = providerFamily(this.weaponProvider.provider) === "q2" ? this.viewModels.get(actor)?.q2 : undefined;
+      const nativeView = this.source.kind === "q2" && player.character === "q2" ? this.q2Views.get(actor) : undefined;
+      const view = nativeView === undefined ? player.view() : this.playerView(actor), sourceView = q2 === undefined ? undefined : nativeView;
       const selected = this.selectedArsenal, arsenal = selected?.read(actor), body = this.bodies.read(actor);
       const q3Weapon = selected?.family !== "q3" || arsenal?.state.kind !== "q3" || body === null ? {} : { q3Weapon: {
         ...selected.viewState(actor), timeMilliseconds: this.selectedMilliseconds, weapon: arsenal.state.sourceWeapon,
@@ -2754,7 +2761,7 @@ export class SharedSimulation implements Simulation {
         horizontalSpeed: Math.hypot(body.velocity.x, body.velocity.y), bobCycle: player.state.kind === "q3" ? player.state.bobCycle : 0 } };
       result.push({ actor, ...q3Weapon, content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame, oldFrame: model.frame,
         skin: q2?.skin ?? 0, effects: 0, renderFlags: providerFamily(this.weaponProvider.provider) === "q2" ? 1 | 4 | 16 : 0,
-        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), q2?.kickOrigin ?? zero), angles: add(view.angles, q2?.kickAngles ?? zero),
+        origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), sourceView?.gunOffset ?? q2?.kickOrigin ?? zero), angles: add(view.angles, sourceView?.gunAngles ?? q2?.kickAngles ?? zero),
         scale: 1, visible: (this.combat.read(actor)?.health ?? 0) > 0, viewWeapon: true });
     }
     return result;
