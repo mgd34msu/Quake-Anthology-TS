@@ -18,6 +18,8 @@ export const sourceRereleaseClientProfile: RereleaseClientProfile = {
  * no_weapon_chains0x1b68, item bound84. Bot_UseItem RVA11c1b0: selected_item0xa70.
  * Executed Init allocates7344/client; ClientConnect initializes twelve int16 ammo
  * capacities at3024 to p_client.cpp InitClientPersistant's distinct source values.
+ * Native give/use Invulnerability writes int64 milliseconds at6672 (RVA66f52):
+ * zero to30000 to60000; g_items.cpp Use_Invulnerability extends the deadline.
  */
 export const retailRereleaseClientProfile: RereleaseClientProfile = {
   authority: { kind: "artifact", digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd" },
@@ -29,6 +31,7 @@ export const retailRereleaseClientProfile: RereleaseClientProfile = {
     { name: "pers.max_ammo", byteOffset: 3024, storage: "int16", count: 12 },
     { name: "pers.weapon", byteOffset: 3048, storage: "pointer", count: 1 },
     { name: "newweapon", byteOffset: 6296, storage: "pointer", count: 1 },
+    { name: "invincible_time", byteOffset: 6672, storage: "int64", count: 1 },
     { name: "no_weapon_chains", byteOffset: 7016, storage: "uint8", count: 1 },
   ] },
 };

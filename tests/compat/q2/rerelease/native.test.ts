@@ -4,6 +4,7 @@ import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rereleas
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { createMountPlanId } from "../../../../src/contracts/content.ts";
 import type { GuestAddress } from "../../../../src/contracts/execution.ts";
+import type { AttackProvenance } from "../../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
 import { GuestCallStopped } from "../../../../src/guest/abi/index.ts";
@@ -15,6 +16,9 @@ import { discoverInstalledContent } from "../../../../src/content/catalog/index.
 import { openMountPlan } from "../../../../src/content/mounts/index.ts";
 import type { RereleaseSoundEvent } from "../../../../src/compat/q2/rerelease/sounds.ts";
 import { nativeWorld } from "./world.ts";
+import { rereleaseInventoryItems } from "../../../../src/compat/q2/rerelease/semantics.ts";
+import { RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source-state.ts";
+import type { RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/host.ts";
 import { SizeBuf, SZ_Init } from "../../../../src/network/q2/message.ts";
 import type { RereleaseUnicast, RereleaseMulticast } from "../../../../src/compat/q2/rerelease/messages.ts";
 import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLayout, entityStateLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestBool, guestPointer, playerStateLayout, pmoveLayout, pmoveStateLayout, privateClientLayout, privateEdictPrefixLayout, readRereleasePlayerState, RereleaseCgame, RereleaseSourceClient, retailRereleaseClientProfile, signature, traceLayout, usercmdLayout } from "../../../../src/compat/q2/rerelease/index.ts";
@@ -23,7 +27,7 @@ const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", im
 const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
-async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void) {
+export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => []) {
   const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
   const product = catalog.require("q2-rerelease-baseq2");
   using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
@@ -46,7 +50,7 @@ async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => voi
       if (previous !== undefined) return previous;
       const index = table.size + 1; table.set(name, index); return index;
     },
-    serverFrame: () => 123, commandArguments: () => [], commandTail: () => "",
+    serverFrame: () => 123, commandArguments, commandTail: () => commandArguments().slice(1).join(" "),
     addCommand: () => { throw new Error("This fixture has no command executor"); }, extension: () => null,
     invoke: call => {
       reached.push(`${call.api}.${call.name}`);
@@ -79,15 +83,26 @@ async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => voi
   SZ_Init(buffer, new Uint8Array(65536), 65536);
   const sounds: RereleaseSoundEvent[] = [];
   const unicasts: RereleaseUnicast[] = [], multicasts: RereleaseMulticast[] = [];
+  let attached: RereleaseQ2GuestHost | null = null;
+  let inventoryItems: ReturnType<typeof rereleaseInventoryItems> | null = null;
+  const owner = (): RereleaseQ2GuestHost => { if (attached === null) throw new Error("Fixture host is not attached"); return attached; };
+  const semantics = !nativeBindings ? world.semantics : { ...world.semantics, bind: (view: import("../../../../src/contracts/execution.ts").RawEntityView, actor: import("../../../../src/contracts/identity.ts").OwnedActor, module: import("../../../../src/compat/q2/rerelease/module.ts").RereleaseGuestModule) => {
+    const base = world.semantics.bind(view, actor, module), edict = new RereleaseSourceEdict(view, module);
+    const client = edict.client === null ? null : new RereleaseSourceClient(edict.client, module, retailRereleaseClientProfile);
+    if (client !== null && inventoryItems === null) inventoryItems = rereleaseInventoryItems(module, value => owner().core.string(value));
+    return { ...base, inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
+      callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
+  } };
   const source = RereleaseGuestSource.create(prepared, { services,
     clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
     ...(worldText === undefined ? {} : { worldText }),
     sound: event => { sounds.push(event); },
     messages: { buffer, acceptsClient: slot => slot === 1, unicast: message => { unicasts.push(message); }, multicast: message => { multicasts.push(message); } },
-    engine: world.engine, spatial: world.spatial, semantics: world.semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });
+    engine: world.engine, spatial: world.spatial, semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });
   activeSources.push(source);
   const { host, memory, runtime } = source;
-  expect(host.options.engine).toBe(world.engine); expect(host.options.spatial).toBe(world.spatial); expect(host.options.semantics).toBe(world.semantics);
+  attached = host;
+  expect(host.options.engine).toBe(world.engine); expect(host.options.spatial).toBe(world.spatial); expect(host.options.semantics).toBe(semantics);
   world.attach(host);
   const guest = host.module, core = host.core;
   return { source, prepared, services, releaseListeners, guest, core, host, world, memory, runtime, cvars, prints, reached, resources, configstrings, localized, unicasts, multicasts, sounds };
@@ -316,3 +331,121 @@ test.skipIf(!available)("retail info_world_text RunFrame submits both guest impo
     host.shutdown();
   } finally { store.clear(); }
 }, 60000);
+
+test.skipIf(!available)("retail inventory roster and native death callbacks bind the injected actor tables", async () => {
+  let commands: readonly string[] = [];
+  const { source, host, guest, core, world, memory } = await nativeFixture(undefined, true, () => commands);
+  host.preInit(); source.init();
+  const items = rereleaseInventoryItems(guest, value => core.string(value));
+  expect(items).toHaveLength(84);
+  expect(items.map(item => item.sourceIndex)).toEqual(Array.from({ length: 84 }, (_, index) => index));
+  expect(items.find(item => item.item === "q2:ammo_cells")).toEqual({ item: "q2:ammo_cells", sourceIndex: 30, capacity: { kind: "ammo", sourceIndex: 4 } });
+  host.spawnEntities("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${world.origin}" } { "classname" "misc_explobox" "origin" "0 0 512" }`);
+  expect(host.clientConnect(1, "\\name\\Bindings\\skin\\male/grunt\\ip\\127.0.0.1", "bindings", false).accepted).toBe(true);
+  host.clientBegin(1);
+  const playerView = guest.entities().atSlot(1), player = host.actor(playerView);
+  if (player === null) throw new Error("Missing native player");
+  const playerSource = new RereleaseSourceEdict(playerView, guest);
+  if (playerSource.client === null) throw new Error("Missing native client");
+  const client = new RereleaseSourceClient(playerSource.client, guest, retailRereleaseClientProfile);
+  expect(client.invincibleUntilMilliseconds()).toBe(0n);
+  expect(world.engine.inventory.count(player.id, "q2:weapon_blaster")).toBe(1);
+  expect(world.engine.inventory.give(player, "q2:ammo_cells", 17)).toBe(17);
+  expect(client.powerArmorCells().read()).toBe(17);
+  client.powerArmorCells().write(9);
+  expect(world.engine.inventory.count(player.id, "q2:ammo_cells")).toBe(9);
+  expect(world.engine.inventory.give(player, "q2:ammo_cells", 1000)).toBe(191);
+  expect(client.powerArmorCells().read()).toBe(200);
+  const barrelView = guest.entities().atSlot(18), barrel = host.actor(barrelView);
+  if (barrel === null) throw new Error("Missing native barrel");
+  const barrelSource = new RereleaseSourceEdict(barrelView, guest);
+  expect(barrelSource.health).toBe(10);
+  const beforeThink = memory.readPointer(barrelSource.at("think.value"));
+  expect(memory.readPointer(barrelSource.at("die.value"))).not.toBeNull();
+  const attack: AttackProvenance = { sequence: 1, time: { kind: "milliseconds", value: 25 }, attacker: player.id, inflictor: player.id,
+    weapon: "q2:weapon_rocketlauncher", weaponProvider: "q2:guest", combatProvider: "q2:guest", inventoryProvider: "q2:guest", movementProvider: "q2:guest",
+    cause: { kind: "q2", meansOfDeath: 0x8000000 + 57, damageFlags: 0, native: { edition: "rerelease", id: 22, friendlyFire: true, noPointLoss: true } } };
+  const P = { kind: "scalar", storage: "pointer" } satisfies import("../../../../src/contracts/execution.ts").GuestValueLayout;
+  const oldPain = memory.readPointer(barrelSource.at("pain.value"));
+  let painCalls = 0;
+  const pain = guest.options.runner.options.callbacks.bind({ id: "native:semantic-pain-abi", signature: signature([P, P, { kind: "scalar", storage: "float32" }, { kind: "scalar", storage: "int32" }, P]), invoke: (_context, args) => {
+    painCalls++;
+    expect(pointer(args, 0)).toEqual(barrelView.address); expect(pointer(args, 1)).toEqual(playerView.address);
+    expect(args[2]).toEqual({ kind: "float32", value: 1.5 }); expect(integer(args, 3)).toBe(7n);
+    expect(memory.copy(requiredPointer(args, 4), 3)).toEqual(new Uint8Array([22, 1, 1]));
+    return { kind: "void" };
+  } });
+  try {
+    memory.writePointer(barrelSource.at("pain.value"), pain);
+    const regions = memory.mappings().length;
+    expect(world.engine.callbacks.pain({ self: barrel, attacker: player.id, damage: 7, kick: 1.5, attack })).toBe(true);
+    expect(painCalls).toBe(1); expect(memory.mappings()).toHaveLength(regions);
+    memory.writePointer(barrelSource.at("pain.value"), null);
+    world.engine.callbacks.pain({ self: barrel, attacker: player.id, damage: 7, kick: 1.5, attack });
+    expect(painCalls).toBe(1);
+  } finally { memory.writePointer(barrelSource.at("pain.value"), oldPain); }
+  const trace = world.engine.trace({ start: { x: 0, y: 0, z: 512 }, end: { x: 0, y: 0, z: -512 }, bounds: null, ignore: player.id, mask: 1 });
+  if (trace.kind !== "q2") throw new Error("Expected native Q2 trace");
+  const encoded = host.encodeTrace(trace);
+  if (encoded.kind !== "aggregate") throw new Error("Expected encoded trace aggregate");
+  const oldTouch = memory.readPointer(barrelSource.at("touch.value"));
+  const touch = guest.options.runner.options.callbacks.bind({ id: "native:semantic-touch-abi", signature: signature([P, P, P, { kind: "scalar", storage: "uint8" }]), invoke: (_context, args) => {
+    expect(pointer(args, 0)).toEqual(barrelView.address); expect(pointer(args, 1)).toEqual(playerView.address);
+    expect(memory.copy(requiredPointer(args, 2), traceLayout.byteLength)).toEqual(encoded.bytes);
+    expect(integer(args, 3)).toBe(1n);
+    throw new Error("Fixture touch failure");
+  } });
+  try {
+    memory.writePointer(barrelSource.at("touch.value"), touch);
+    const regions = memory.mappings().length;
+    expect(() => world.engine.callbacks.touch({ self: barrel, other: player.id, plane: null, surface: null, sourceTrace: { kind: "q2-rerelease", trace, ent: player.id, inverted: true } })).toThrow("Fixture touch failure");
+    expect(memory.mappings()).toHaveLength(regions);
+  } finally { memory.writePointer(barrelSource.at("touch.value"), oldTouch); }
+  // Calls the retail barrel_delay function through the shared callback table.
+  expect(world.engine.callbacks.die({ self: barrel, attacker: player.id, inflictor: player.id, damage: 95, kick: 0, point: { x: 1, y: 2, z: 3 }, attack })).toBe(true);
+  expect(memory.readPointer(barrelSource.at("think.value"))).not.toEqual(beforeThink);
+  expect(memory.readPointer(barrelSource.at("activator"))).toEqual(playerView.address);
+  const foreign = world.engine.actors.allocate("test:foreign", "test:foreign");
+  expect(() => world.engine.callbacks.die({ self: barrel, attacker: foreign.id, inflictor: foreign.id, damage: 95, kick: 0, point: { x: 0, y: 0, z: 0 }, attack: null })).toThrow("foreign actors");
+  const defender = items.find(item => item.item === "q2:item_sphere_defender");
+  if (defender === undefined) throw new Error("Missing native defender item");
+  const launch = (): void => {
+    world.engine.inventory.give(player, defender.item, 1);
+    commands = ["use", "Defender Sphere"];
+    guest.callGame("ClientCommand", [guestPointer(playerView.address)]);
+    host.reconcile();
+  };
+  const sphereSlot = guest.entities().count;
+  launch();
+  const sphereView = guest.entities().atSlot(sphereSlot), sphere = host.actor(sphereView);
+  if (sphere === null) throw new Error("Native defender did not spawn");
+  const sphereSource = new RereleaseSourceEdict(sphereView, guest), sphereGeneration = sphereSource.generation();
+  let releaseCount = 0;
+  const unsubscribe = world.engine.actors.onRelease(released => {
+    if (released === sphere) { releaseCount++; host.reconcile(); }
+    return undefined;
+  });
+  try {
+    expect(world.engine.callbacks.die({ self: sphere, attacker: player.id, inflictor: player.id, damage: 95, kick: 0, point: { x: 0, y: 0, z: 0 }, attack })).toBe(true);
+    expect(world.engine.actors.isLive(sphere.id)).toBe(false);
+    expect(releaseCount).toBe(1); expect(host.actor(sphereView)).toBeNull();
+    expect(sphereSource.generation()).toBe(sphereGeneration + 1);
+    launch();
+    const reused = host.actor(sphereView);
+    if (reused === null) throw new Error("Native sphere slot was not reused");
+    expect(reused.id).not.toEqual(sphere.id);
+    const nativeDie = memory.readPointer(sphereSource.at("die.value"));
+    if (nativeDie === null) throw new Error("Native sphere has no death function");
+    const deathSignature = signature([P, P, P, { kind: "scalar", storage: "int32" }, P, P]);
+    const throwingDie = guest.options.runner.options.callbacks.bind({ id: "native:free-then-throw", signature: deathSignature, invoke: (_context, args) => {
+      guest.invoke(nativeDie, deathSignature, args, sphereView, playerView);
+      throw new Error("Fixture error after native free");
+    } });
+    memory.writePointer(sphereSource.at("die.value"), throwingDie);
+    expect(() => world.engine.callbacks.die({ self: reused, attacker: player.id, inflictor: player.id, damage: 95, kick: 0, point: { x: 0, y: 0, z: 0 }, attack })).toThrow("Fixture error after native free");
+    expect(world.engine.actors.isLive(reused.id)).toBe(false);
+    expect(host.actor(sphereView)).toBeNull();
+  } finally { unsubscribe(); }
+  source.close();
+  expect(world.engine.actors.isLive(foreign.id)).toBe(true);
+});

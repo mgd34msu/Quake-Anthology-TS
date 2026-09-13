@@ -3,14 +3,17 @@
 import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
-import type { ArmorState, ItemId } from "../../../contracts/gameplay.ts";
+import type { ArmorState, AttackProvenance, ItemId } from "../../../contracts/gameplay.ts";
+import type { ActorCallbacks } from "../../../contracts/world.ts";
+import type { TraceResult } from "../../../contracts/scene.ts";
+import { nativeCauseFromCanonical } from "../../../content/q2/missionpacks/damage.ts";
 import type { BodyStateBinding } from "../../../world/actors/body.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import type { CombatStateBinding, PowerArmorCellBinding } from "../../../world/gameplay/authority.ts";
 import { fieldOffset, privateEdictPrefixLayout } from "./layouts.ts";
 import type { RereleaseClientProfile } from "./client-profile.ts";
 import { signature } from "./api.ts";
-import { guestPointer } from "./module.ts";
+import { guestBool, guestInt, guestPointer } from "./module.ts";
 import type { RereleaseGuestModule } from "./module.ts";
 
 export interface RereleaseActorAddresses {
@@ -33,6 +36,7 @@ export class RereleaseSourceClient {
     module.memory.check(address, profile.layout.byteLength, "read");
   }
   at(name: string): GuestAddress { return this.module.memory.offset(this.address, BigInt(fieldOffset(this.profile.layout, name))); }
+  invincibleUntilMilliseconds(): bigint { return this.module.memory.readInt64(this.at("invincible_time")); }
   #item(index: number): GuestAddress {
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.profile.inventoryCount) throw new RangeError("Rerelease inventory index is outside the selected IT_TOTAL");
     return this.module.memory.offset(this.at("pers.inventory"), BigInt(index * 4));
@@ -109,6 +113,57 @@ export class RereleaseSourceEdict {
         this.writeVector("shared.mins", state.bounds.min); this.writeVector("shared.maxs", state.bounds.max);
         this.module.memory.writePointer(this.at("groundentity"), state.ground === null ? null : addresses.address(state.ground));
         return undefined;
+      },
+    };
+  }
+  callbacks(addresses: RereleaseActorAddresses, encodeTrace: (trace: TraceResult) => GuestCallResult): ActorCallbacks {
+    const memory = this.module.memory;
+    const present = (name: string): boolean => memory.readPointer(this.at(`${name}.value`)) !== null;
+    const address = (actor: ActorId | null): GuestAddress | null => actor === null ? null : addresses.address(actor);
+    const withCause = (attack: AttackProvenance | null, invoke: (mod: GuestAddress) => void): undefined => {
+      if (attack !== null && attack.cause.kind !== "q2") throw new Error("Native rerelease callback requires a classified Q2 damage cause");
+      const cause = attack?.cause;
+      const native = cause?.kind === "q2" && cause.native?.edition === "rerelease" ? cause.native
+        : nativeCauseFromCanonical({ edition: "rerelease" }, cause?.kind === "q2" ? cause.meansOfDeath : 0);
+      if (native === null || native.edition !== "rerelease") throw new Error("Damage cause has no rerelease mod_t representation");
+      const mod = memory.allocate({ byteLength: 3, label: "Q2 callback mod_t" });
+      try {
+        memory.writeUint8(mod, native.id); memory.writeUint8(memory.offset(mod, 1n), native.friendlyFire ? 1 : 0); memory.writeUint8(memory.offset(mod, 2n), native.noPointLoss ? 1 : 0);
+        invoke(mod);
+      } finally { memory.unmap(mod, 3); }
+      return undefined;
+    };
+    return {
+      think: () => { this.call("think", []); return undefined; },
+      use: (_self, other, activator) => {
+        if (present("use")) this.call("use", [guestPointer(address(other)), guestPointer(address(activator))]);
+        return undefined;
+      },
+      touch: contact => {
+        if (!present("touch")) return undefined;
+        if (contact.sourceTrace === undefined) throw new Error("Native rerelease touch requires its source trace");
+        const other = addresses.address(contact.other), encoded = encodeTrace(contact.sourceTrace.trace);
+        if (encoded.kind !== "aggregate") throw new Error("Native rerelease trace encoder must return an aggregate");
+        const trace = memory.allocate({ byteLength: encoded.bytes.length, alignment: 8n, label: "Q2 callback trace" });
+        try { memory.write(trace, encoded.bytes); this.call("touch", [guestPointer(other), guestPointer(trace), guestBool(contact.sourceTrace.inverted)]); }
+        finally { memory.unmap(trace, encoded.bytes.length); }
+        return undefined;
+      },
+      pain: reaction => {
+        if (!present("pain")) return undefined;
+        const other = address(reaction.attacker);
+        return withCause(reaction.attack, mod => { this.call("pain", [guestPointer(other), { kind: "float32", value: reaction.kick }, guestInt(reaction.damage), guestPointer(mod)]); });
+      },
+      die: reaction => {
+        if (!present("die")) return undefined;
+        const inflictor = address(reaction.inflictor), attacker = address(reaction.attacker);
+        return withCause(reaction.attack, mod => {
+          const point = memory.allocate({ byteLength: 12, alignment: 4n, label: "Q2 callback damage point" });
+          try {
+            memory.writeFloat32(point, reaction.point.x); memory.writeFloat32(memory.offset(point, 4n), reaction.point.y); memory.writeFloat32(memory.offset(point, 8n), reaction.point.z);
+            this.call("die", [guestPointer(inflictor), guestPointer(attacker), guestInt(reaction.damage), guestPointer(point), guestPointer(mod)]);
+          } finally { memory.unmap(point, 12); }
+        });
       },
     };
   }

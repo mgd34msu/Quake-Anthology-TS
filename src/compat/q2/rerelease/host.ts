@@ -94,8 +94,8 @@ export class RereleaseQ2GuestHost {
     const generation = this.options.semantics.generation(view);
     const previous = this.#lifetimes.get(view.slot);
     if (previous !== undefined && (!live || previous.generation !== generation || previous.address !== view.address.byteOffset || !engine.actors.isLive(previous.actor.id))) {
-      if (engine.actors.isLive(previous.actor.id)) engine.actors.release(previous.actor);
       this.#lifetimes.delete(view.slot);
+      if (engine.actors.isLive(previous.actor.id)) engine.actors.release(previous.actor);
     }
     if (!live) return null;
     const current = this.#lifetimes.get(view.slot);
@@ -106,13 +106,21 @@ export class RereleaseQ2GuestHost {
     if (binding.combat !== null) engine.combat.bind(actor, binding.combat);
     if (binding.powerArmorCells !== null) engine.combat.bindPowerArmorCells(actor, binding.powerArmorCells);
     if (binding.inventory !== null) engine.inventory.bind(actor, binding.inventory);
-    engine.callbacks.bind(actor, binding.callbacks);
+    const callbacks = binding.callbacks;
+    const invoke = (call: () => undefined): undefined => { try { return call(); } finally { this.reconcile(); } };
+    engine.callbacks.bind(actor, {
+      think: callbacks.think === null ? null : (self, frame) => invoke(() => callbacks.think?.(self, frame)),
+      touch: callbacks.touch === null ? null : contact => invoke(() => callbacks.touch?.(contact)),
+      use: callbacks.use === null ? null : (self, other, activator) => invoke(() => callbacks.use?.(self, other, activator)),
+      pain: callbacks.pain === null ? null : reaction => invoke(() => callbacks.pain?.(reaction)),
+      die: callbacks.die === null ? null : reaction => invoke(() => callbacks.die?.(reaction)),
+    });
     this.#lifetimes.set(view.slot, { actor, generation, address: view.address.byteOffset });
     return actor;
   }
   reconcile(): void {
     const table = this.module.entities();
-    for (const [slot, entry] of this.#lifetimes) if (slot >= table.count) { if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor); this.#lifetimes.delete(slot); }
+    for (const [slot, entry] of this.#lifetimes) if (slot >= table.count) { this.#lifetimes.delete(slot); if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor); }
     for (let slot = 0; slot < table.count; slot++) this.actor(table.atSlot(slot));
   }
   /** Bot registration indexes the same live actors and raw server records. */
