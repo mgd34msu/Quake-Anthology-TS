@@ -28,6 +28,7 @@ export class ApplicationImageSettings {
   private constructor(private readonly options: ImageSettingsOptions) {
     this.store = new ConfigStore(join(options.userContentRoot ?? defaultUserContentRoot(), "settings"));
     this.cvars = new CvarRegistry(options);
+    this.cvars.register("gl_debug_distfrac", "0.004", CvarFlag.None);
     this.cvars.register("r_override_textures", "1", CvarFlag.Archive);
     this.cvars.register("r_texture_overrides", "-1", CvarFlag.Archive);
     this.cvars.register("r_texture_formats", "source", CvarFlag.Archive);
@@ -45,7 +46,7 @@ export class ApplicationImageSettings {
       commands.append(text, options.context); commands.execute();
     }
     settings.applied = settings.signature(); settings.saved = settings.applied;
-    settings.appliedValues = settings.cvars.snapshots();
+    settings.appliedValues = settings.archivedValues();
     return settings;
   }
   get policy(): ImagePolicy {
@@ -60,7 +61,8 @@ export class ApplicationImageSettings {
       q2Load: this.cvars.variableValue("gl_md5_load") !== 0, q2Use: this.cvars.variableValue("gl_md5_use") !== 0,
       q2Distance: this.cvars.variableValue("gl_md5_distance"), distance };
   }
-  private signature(): string { return JSON.stringify(this.cvars.snapshots().map(value => [value.name, value.value])); }
+  private archivedValues() { return this.cvars.snapshots().filter(value => (value.flags & CvarFlag.Archive) !== 0); }
+  private signature(): string { return JSON.stringify(this.archivedValues().map(value => [value.name, value.value])); }
   async refresh(assets: ApplicationAssets, presentations: readonly WorldSeatPresentation[], rerelease: ApplicationRereleasePresentation | null): Promise<void> {
     const selected = this.signature();
     if (selected === this.applied) return;
@@ -84,7 +86,7 @@ export class ApplicationImageSettings {
     images?.commit(); for (const binding of bindings) binding.commit(); sky?.();
     assets.finishImageRefresh();
     this.applied = selected;
-    this.appliedValues = this.cvars.snapshots();
+    this.appliedValues = this.archivedValues();
     await this.save();
   }
   private async save(): Promise<void> {

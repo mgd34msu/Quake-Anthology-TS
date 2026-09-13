@@ -64,7 +64,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, private readonly seatCount: number,
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
-    private readonly rerelease: ApplicationRereleasePresentation | null = null) {
+    private readonly rerelease: ApplicationRereleasePresentation | null = null,
+    private readonly worldTextCullFactor: (() => number) | null = null) {
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets);
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -201,7 +202,7 @@ export class WorldSeatPresentation implements SeatPresentation {
         const font = this.worldFonts.get(text.content);
         if (font === undefined) throw new Error("World text font was not prepared");
         return font.font;
-      }) }] });
+      }, this.worldTextCullFactor?.()) }] });
     const material = (draw: Parameters<typeof prepareMaterialText>[0]): void => {
       this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: camera.viewport, clear: null, clipPlane: null,
         beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, camera.viewport, this.assets.world.materialContext(input)) }] });

@@ -537,7 +537,7 @@ export class Application {
         if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease);
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
@@ -715,7 +715,7 @@ export class Application {
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore });
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease);
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
           local.player.seat.attachPresentation(presentation, () => presentation.close());
           presentations.push(presentation);
         }

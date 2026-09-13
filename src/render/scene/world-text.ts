@@ -7,11 +7,11 @@ import { createViewProjector } from "./view.ts";
 
 /** Shared triangles retain the world's depth buffer and render after fog. */
 export function prepareWorldText(texts: readonly WorldText[], camera: SceneCamera,
-  fontFor: (text: WorldText) => TextFontSelection): readonly DrawBatch[] {
+  fontFor: (text: WorldText) => TextFontSelection, distanceCullFactor?: number): readonly DrawBatch[] {
   const project = createViewProjector(camera), batches: DrawBatch[] = [];
   for (const text of texts) {
     if (text.distanceCullFactor !== undefined
-      && text.cellSize < dot3(sub3(text.origin, camera.origin), camera.axis[0]) * text.distanceCullFactor) continue;
+      && text.cellSize < dot3(sub3(text.origin, camera.origin), camera.axis[0]) * (distanceCullFactor ?? text.distanceCullFactor)) continue;
     const selected = fontFor(text), font: TextFontSelection = text.font === "classic"
       ? { kind: "classic", classic: selected.classic, unicode: null } : selected;
     const axis = text.orientation.kind === "billboard" ? camera.axis : anglesToAxis(text.orientation.angles);

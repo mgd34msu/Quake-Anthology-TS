@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { ApplicationAssets } from "../../src/app/bootstrap/assets.ts";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -33,6 +34,27 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_WORLD_TEXT_A
       expect(first.every(text => text.distanceCullFactor === 0.004)).toBe(true);
       const capture = app.captureNextFrame(); await app.step(25); const visible = await capture;
       await Bun.write(`/tmp/world-text-app-${backend}.png`, encodePng(320, 240, visible));
+      const reload = spyOn(ApplicationAssets.prototype, "prepareImageRefresh");
+      try {
+        const local = app.localPlayers[0]; if (local === undefined) throw new Error("No console seat");
+        const key = (code: number): void => { for (const down of [true, false]) app.input({ seat: local.seat.id, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
+        const command = async (value: string): Promise<Uint8Array> => {
+          key(96); app.input({ seat: local.seat.id, kind: "text", text: 'gl_debug_distfrac ' + value, timeMilliseconds: performance.now() }); key(13);
+          await app.step(1); key(96); await app.step(1);
+          const capture = app.captureNextFrame(); await app.step(1); return capture;
+        };
+        const culled = await command("1"), restored = await command("0");
+        expect(culled).not.toEqual(restored);
+        for (const half of [0, 1]) {
+          const start = half * 320 * 120 * 4, end = start + 320 * 120 * 4;
+          expect(culled.slice(start, end)).not.toEqual(restored.slice(start, end));
+        }
+        expect(app.simulation.worldText().every(text => text.distanceCullFactor === 0.004)).toBe(true);
+        expect(reload).not.toHaveBeenCalled();
+        expect(await Bun.file(join(userRoot, "settings/images.cfg")).exists()).toBe(false);
+        await Bun.write('/tmp/world-text-live-' + backend + '-culled.png', encodePng(320, 240, culled));
+        await Bun.write('/tmp/world-text-live-' + backend + '-visible.png', encodePng(320, 240, restored));
+      } finally { reload.mockRestore(); }
       for (const entity of entities) source.game.remove(entity); await app.step(50);
       expect(app.simulation.worldText()).toHaveLength(0);
       const clean = app.captureNextFrame(); await app.step(25); const absent = await clean;

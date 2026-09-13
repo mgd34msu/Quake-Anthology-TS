@@ -524,7 +524,7 @@ export class RemoteApplication {
       }
     } catch (error) { q3?.close(); ui.close(); throw error; }
     if (q3 !== null) input.registerClientCommands([...q3.commandNames]);
-    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3);
+    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"));
     local.player.seat.attachPresentation(presentation, () => presentation.close());
     this.presentation = presentation;
     this.q3InitialViewPending = connection !== undefined;

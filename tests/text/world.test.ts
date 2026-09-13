@@ -80,6 +80,11 @@ async function renderText(kind: "cpu" | "gl"): Promise<void> {
     expect(prepareWorldText(limited, { ...camera, origin: { x: 64, y: 0, z: 0 } }, () => font)).toHaveLength(3);
     expect(prepareWorldText([{ ...source, cellSize: 9, distanceCullFactor: 0.25 }], distantSeat, () => font)).toHaveLength(3);
     expect(prepareWorldText(snapshot, distantSeat, () => font)).toHaveLength(3);
+    expect(prepareWorldText(limited, distantSeat, () => font, 0)).toHaveLength(3);
+    expect(prepareWorldText(limited, distantSeat, () => font, -1)).toHaveLength(3);
+    expect(prepareWorldText(limited, camera, () => font, 0.25)).toHaveLength(3);
+    expect(prepareWorldText(limited, camera, () => font, 1)).toHaveLength(0);
+    expect(prepareWorldText(snapshot, distantSeat, () => font, 100)).toHaveLength(3);
     begin(1); for (const batch of batches) draw(batch);
     const visible = read(); expect(count(visible)).toBeGreaterThan(30);
     await Bun.write(`/tmp/world-text-${kind}.png`, encodePng(96, 96, visible));
