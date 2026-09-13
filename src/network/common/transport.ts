@@ -89,15 +89,20 @@ export class UdpTransport implements DatagramTransport<IpAddress> {
   get droppedPackets(): number { return this.queue.dropped; }
   private opened(): void { if (this.ended) throw new Error("UDP transport is closed"); }
   async connectSocks(options: SocksOptions): Promise<void> {
-    this.opened(); this.socks?.close();
+    this.opened();
+    if (this.address.kind !== "ipv4") throw new Error("SOCKS UDP association requires IPv4");
+    this.socks?.close();
     const association = new SocksAssociation(); this.socks = association;
     try { await association.open(options, this.address.port); this.opened(); }
-    catch (error) { association.close(); if (this.socks === association) this.socks = null; throw error; }
+    catch (error) { association.close(); throw error; }
   }
   send(to: IpAddress, payload: Uint8Array): boolean {
     this.opened(); portNumber(to.port);
     if (payload.byteLength > this.queue.limits.maxBytes) throw new RangeError("Datagram exceeds selected transport limit");
     const relay = this.socks?.relay;
+    if (this.socks !== null && (relay === null || relay === undefined || to.kind !== "ipv4")) {
+      throw new Error("SOCKS association unavailable or destination unsupported");
+    }
     const proxied = to.kind === "ipv4" && relay !== undefined && relay !== null && !to.host.every(value => value === 255);
     const destination = proxied ? relay : to;
     const bytes = proxied ? socksDatagram(to, payload) : payload.slice();

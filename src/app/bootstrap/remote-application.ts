@@ -1,3 +1,4 @@
+import { ClientSocksSettings } from "./network/socks-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { createClientDownloadPermission } from "./network/client-download-policy.ts";
 import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
@@ -81,6 +82,7 @@ interface RemoteCommand { readonly name: string; readonly args: readonly string[
 /** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
   readonly clientCommands: ApplicationInputCommandOwner | null;
+  private readonly socksSettings: ClientSocksSettings;
   private readonly clientConfig: ConfigStore | null;
   private readonly inputConfig: ConfigStore;
   private readonly downloadPermission: ClientDownloadPermission | null;
@@ -117,13 +119,14 @@ export class RemoteApplication {
     private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
     const inputProduct = loadedContent.catalog.require(launchOptions.network.kind === "qw-client" ? "q1-quakeworld" : launchOptions.product);
     this.inputConfig = new ConfigStore(inputProduct.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), inputProduct.expectation.contentDirectory));
-    if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client" || launchOptions.network.kind === "qw-client") {
-      const family = launchOptions.network.kind === "q3-client" ? "q3" : launchOptions.network.kind === "qw-client" ? "qw" : "q2";
-      const dialect = family === "q3" ? "q3" : family === "qw" ? "q1-quakeworld" : "q2-classic";
+    this.socksSettings = new ClientSocksSettings({ session: session.session, origin: { kind: "local-console" } }, text => this.print(text));
+    if (launchOptions.network.kind === "q3-client" || launchOptions.network.kind === "q2-client" || launchOptions.network.kind === "qw-client" || launchOptions.network.kind === "q1-client") {
+      const family = launchOptions.network.kind === "q3-client" ? "q3" : launchOptions.network.kind === "qw-client" ? "qw" : launchOptions.network.kind === "q1-client" ? "nq" : "q2";
+      const dialect = family === "q3" ? "q3" : family === "qw" ? "q1-quakeworld" : family === "nq" ? "q1-netquake" : "q2-classic";
       const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
       const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
         cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
-      this.downloadPermission = family === "qw" ? null : createClientDownloadPermission(cvars, family);
+      this.downloadPermission = family === "qw" || family === "nq" ? null : createClientDownloadPermission(cvars, family);
       if (family === "q3" || family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
       if (family === "q3") {
         cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
@@ -141,7 +144,7 @@ export class RemoteApplication {
       }
       const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => dialect, server: () => null,
         seat: () => null, shared: () => this.imageSettings.cvars });
-      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting, print: text => this.print(text), forwardToServer: invocation => {
+      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: text => this.print(text), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
@@ -235,6 +238,7 @@ export class RemoteApplication {
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
       if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
+      await application.socksSettings.connect(transport);
       application.frontend = await application.loadFrontend(content);
       host.print(`Connecting to ${qw ? "QuakeWorld" : q1 ? "Quake" : q3 ? "Quake III" : "Quake II"} server ${addressKey(address)}.\n`);
       return application;
@@ -668,12 +672,12 @@ export class RemoteApplication {
     const frontend = this.frontend; this.frontend = null;
     try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }
     try { if (frontend !== null) await saveAudioSettings(this.inputConfig, frontend.audio); } catch (error) { errors.push(error); }
-    for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
+    for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.transport.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }
     try { await this.downloadCatalogSeed?.close(); this.downloadCatalogSeed = null; } catch (error) { errors.push(error); }
-    try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars); } catch (error) { errors.push(error); }
+    try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars, this.socksSettings.cvars.archiveCommands()); } catch (error) { errors.push(error); }
     try { await this.imageSettings.close(); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");
