@@ -120,6 +120,7 @@ export class WorldScene {
   private readonly owned: RendererImage[] = [];
   private q2Sky: readonly RendererImage[] = [];
   private readonly remapped = new Map<CompiledMaterial, { readonly shader: CompiledMaterial; readonly timeOffset: number }>();
+  private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
 
   private constructor(readonly map: DecodedWorld, readonly shaders: SceneShaderRegistry,
     surfaces: readonly WorldSurface[], readonly options: WorldSceneOptions) {
@@ -325,7 +326,8 @@ export class WorldScene {
       return surface.q1Sky !== null || surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0 ? 2 : surface.material.alpha < 1 ? 9 : 3;
     };
     surfaces.sort((a, b) => order(a) - order(b));
-    for (const surface of surfaces) operations.push(...this.surfaceOperations(surface, input, context));
+    const frustum = cameraFrustum(input.camera);
+    for (const surface of surfaces) if (boundsInFrustum(surface.bounds, frustum)) operations.push(...this.surfaceOperations(surface, input, context));
     for (const model of input.inlineModels ?? []) {
       const childInput = { ...input, animationFrame: model.animationFrame ?? input.animationFrame ?? 0,
         materialContext: { ...input.materialContext, ...(model.entityRGBA === undefined ? {} : { entityRGBA: model.entityRGBA }) },
@@ -343,7 +345,6 @@ export class WorldScene {
   }
 
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly RenderOperation[] {
-    if (model === undefined && !boundsInFrustum(surface.bounds, cameraFrustum(input.camera))) return [];
     if (surface.kind === "q3") return this.shaderOperations(surface, surface.shader, input, context, model);
     const material = surface.material;
     if (surface.shader === null) {
@@ -360,10 +361,28 @@ export class WorldScene {
         return { ...light, origin: localPoint(light.origin, model), radius: light.radius / scale, minimum: light.minimum / scale,
           color: { x: light.color.x * scale, y: light.color.y * scale, z: light.color.z * scale } };
       });
-      const built = material.kind === "q1" ? buildQ1Lightmap(lightmap.face, input.q1Styles ?? q1DefaultStyles, { encoding: lightmap.encoding, dynamicLights: lights })
-        : buildQ2Lightmap(lightmap.face, input.q2Styles ?? q2DefaultStyles, { dynamicLights: lights, modulate: this.options.q2LightModulate ?? 1 });
-      this.shaders.textures.images.update(lightmap.image, 0, built.image);
-      this.shaders.textures.images.update(lightmap.direct, 0, directLightmapPixels(built));
+      const styles: number[] = [this.options.q2LightModulate ?? 1];
+      for (const index of lightmap.face.styles) {
+        if (index === 255) break;
+        if (material.kind === "q1") styles.push(at(input.q1Styles ?? q1DefaultStyles, index));
+        else {
+          const rgb = at(input.q2Styles ?? q2DefaultStyles, index).rgb;
+          styles.push(rgb.x, rgb.y, rgb.z);
+        }
+      }
+      const cached = this.staticLightStyles.get(surface);
+      const reusable = model === undefined && lights.length === 0;
+      if (!reusable || cached === undefined || cached.length !== styles.length || styles.some((value, index) => value !== cached[index])) {
+        this.staticLightStyles.delete(surface);
+        const built = material.kind === "q1" ? buildQ1Lightmap(lightmap.face, input.q1Styles ?? q1DefaultStyles, { encoding: lightmap.encoding, dynamicLights: lights })
+          : buildQ2Lightmap(lightmap.face, input.q2Styles ?? q2DefaultStyles, { dynamicLights: lights, modulate: this.options.q2LightModulate ?? 1 });
+        this.shaders.textures.images.update(lightmap.image, 0, built.image);
+        this.shaders.textures.images.update(lightmap.direct, 0, directLightmapPixels(built));
+        if (reusable) this.staticLightStyles.set(surface, styles);
+      } else {
+        this.shaders.textures.images.require(lightmap.image);
+        this.shaders.textures.images.require(lightmap.direct);
+      }
     }
     if (surface.shader !== null) return this.shaderOperations(surface, surface.shader, input, context, model);
     const fragmentLighting = input.q2FragmentLighting;
@@ -438,7 +457,7 @@ export class WorldScene {
     return [{ kind: "depth-range", range: [1, 1] }, ...q2SkySides(geometry, input.camera.origin, sky, seconds, context.project), { kind: "depth-range", range: context.depthRange }];
   }
 
-  close(): void { this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+  close(): void { this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
 
   /** Replace only renderer data; BSP identity and source light/style owners remain live. */
   async prepareImages(shaders: SceneShaderRegistry): Promise<WorldScene> {
