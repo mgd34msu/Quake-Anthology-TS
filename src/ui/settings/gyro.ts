@@ -23,7 +23,7 @@ export function registerGyroSettingsMenu(controller: NativeUiController, setting
     const capable = device?.capabilities.sensors.some(sensor => sensor.kind === "gyro") ?? false;
     const enabled = capable && !settings.busy(), calibration = settings.router.gyroCalibration(seat);
     const status = device === null ? "No controller connected." : !capable ? "This controller has no gyroscope."
-      : calibration.kind === "calibrating" ? `Keep still: ${Math.round(calibration.progress * 100)}% (${calibration.samples} samples)`
+      : calibration.kind === "calibrating" ? `Keep still: ${Math.round(calibration.progress * 100)}%`
       : calibration.kind === "ready" ? "Calibration complete." : "Place the controller on a steady surface.";
     const controls: UiControl[] = [button("ui:gyro:device", (device?.name ?? "Controller").slice(0, 50), 0, () => undefined, false),
       { id: "ui:gyro:enabled", kind: "toggle", label: "Gyro aiming", rect: menuRow(1), visible: true, enabled,

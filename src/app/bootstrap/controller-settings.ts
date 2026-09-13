@@ -51,7 +51,7 @@ export class ControllerSettings {
         const result = this.router.setGyroEnabled(seat, saved.tuning.enabled);
         if (result.kind !== "accepted") throw new Error(result.reason);
       }
-      profile.message = profile.identity.kind === "seat" ? "Saved for this seat (no device serial)." : "Saved for this controller and seat.";
+      profile.message = profile.identity.kind === "seat" ? "Saved for this seat." : "Saved for this controller and seat.";
     } catch (cause: unknown) { if (this.current(seat, profile)) this.failed(profile, cause); }
     finally { if (this.current(seat, profile)) profile.busy = false; }
   }
