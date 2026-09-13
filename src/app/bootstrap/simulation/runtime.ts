@@ -5,6 +5,8 @@ import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../
 import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
 import { QuakeCSource } from "./quakec-source.ts";
+import type { QwUserCommand } from "../../../contracts/protocol.ts";
+import { id1DamageMultiplier } from "../../../content/q1/quakec/id1-program.ts";
 import { createNativeQ1PusherServices } from "./native-q1-pusher.ts";
 import { q1WeaponStatus, q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "./arsenal/weapon-status.ts";
 import { Q1ClientVisibility } from "../../../world/gameplay/q1-client-visibility.ts";
@@ -234,6 +236,8 @@ export class SharedSimulation implements Simulation {
   private q1Restart = false;
   private readonly lastAttack = new Map<OwnedActor, AttackProvenance>();
   private readonly areaPortals = new Map<number, boolean>();
+  private readonly quakeWorldCommands: { readonly client: ClientId; readonly commands: readonly QwUserCommand[]; readonly sequence: number }[] = [];
+  private quakeWorldTouched: Set<number> | null = null;
 
   constructor(readonly options: SimulationOptions) {
     this.session = options.identity.session;
@@ -242,9 +246,11 @@ export class SharedSimulation implements Simulation {
     const quakec = options.recipe.execution.find(module => module.kind === "quakec");
     if (quakec !== undefined) {
       if (options.dedicated !== true || options.preparedQuakeC === undefined || !isDeepStrictEqual(quakec, options.preparedQuakeC.execution)
-        || options.world.kind !== "q1-bsp" || options.recipe.execution.length !== 1 || !options.recipe.map.entities.content.startsWith("q1:classic:id1:")
+        || options.world.kind !== "q1-bsp" || options.recipe.execution.length !== 1 || !options.recipe.map.entities.content.startsWith(quakec.api.kind === "q1-quakeworld" ? "q1:quakeworld:id1:" : "q1:classic:id1:")
         || options.recipe.enemies.kind !== "map-defined" || options.recipe.weapons.some(weapon => !isDeepStrictEqual(weapon, options.recipe.map.entities)))
         throw new Error("QuakeC simulation requires the prepared dedicated native classic id1 artifact and map-defined actors");
+      if (quakec.api.kind === "q1-quakeworld" && (options.mode !== "deathmatch" || options.maxClients > 32 || providerTiming(options.recipe, options.recipe.movement.provider).clock.kind !== "q1-quakeworld"))
+        throw new Error("Native QuakeWorld requires deathmatch, at most 32 clients and QuakeWorld movement");
       if (options.restore !== undefined || options.travel !== undefined || (options.restoredClients?.length ?? 0) !== 0
         || options.initialSourceMilliseconds !== undefined && options.initialSourceMilliseconds !== 1000)
         throw new Error("QuakeC application clients, travel and saved games are not yet supported");
@@ -1206,8 +1212,23 @@ export class SharedSimulation implements Simulation {
             direction: attack.direction, point: attack.point, normal: attack.normal, delivery: "direct",
             attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: attack.time }, attacker: call.attacker, inflictor: call.inflictor,
               weapon: attack.weapon, weaponProvider: this.weaponProvider.provider, combatProvider: recipe.combat.provider,
-              inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: "" } } };
+              inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: game.deathType(call.target) } } };
           const environment = game.environment.resolve(call, game.currentPhysicsCallback);
+          const projectile = game.projectiles.resolve(call);
+          if (projectile !== null) {
+            const target = this.bodies.read(call.target), inflictor = this.bodies.read(call.inflictor);
+            if (target === null || inflictor === null) throw new Error("QC projectile damage lost its source bodies");
+            const delta = { x: target.origin.x - inflictor.origin.x - (inflictor.bounds.min.x + inflictor.bounds.max.x) * 0.5,
+              y: target.origin.y - inflictor.origin.y - (inflictor.bounds.min.y + inflictor.bounds.max.y) * 0.5,
+              z: target.origin.z - inflictor.origin.z - (inflictor.bounds.min.z + inflictor.bounds.max.z) * 0.5 };
+            const length = Math.hypot(delta.x, delta.y, delta.z), direction = length === 0 ? zero : { x: delta.x / length, y: delta.y / length, z: delta.z / length };
+            return { target: call.target, amount: call.amount, knockback: call.amount * id1DamageMultiplier(game.machine, game.worldHost.reference(call.attacker), game.worldHost.reference(call.inflictor)),
+              direction, point: projectile.trace?.point ?? target.origin, normal: projectile.trace?.normal ?? zero, delivery: "direct",
+              attack: { sequence: this.attackSequence++, time: { kind: "seconds", value: projectile.time }, attacker: call.attacker, inflictor: call.inflictor,
+                ...(projectile.launch === null ? {} : { originatingProjectile: call.inflictor }),
+                weapon: projectile.weapon, weaponProvider: this.weaponProvider.provider, combatProvider: recipe.combat.provider,
+                inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider, cause: { kind: "q1", deathType: game.deathType(call.target) } } };
+          }
           if (environment === null) throw new Error(`Unsupported QuakeC damage provenance: ${game.prepared.program.functionAt(call.call.caller).name} statement ${call.call.statement}`);
           return { target: call.target, amount: call.amount, knockback: environment.knockback, direction: environment.direction,
             point: environment.point, normal: zero, delivery: "direct",
@@ -1606,7 +1627,7 @@ export class SharedSimulation implements Simulation {
 
   private createPlayer(actor: OwnedActor, client: ClientId, origin: Vec3, angles: Vec3, arsenal: ArsenalState): MovementPlayer {
     const source = this.source;
-    const netQuake: NetQuakeClientBinding | undefined = source.kind === "quakec" ? {
+    const netQuake: NetQuakeClientBinding | undefined = source.kind === "quakec" && source.game.kind === "netquake" ? {
       projection: { read: state => source.game.readClientState(actor.id, state), write: state => source.game.writeClientState(actor.id, state) },
       jumpAuthority: "source-gamecode", input: command => source.game.clientInput(actor.id, command),
       beforePhysics: () => source.game.clientPreThink(actor), think: frame => source.game.runThink(actor, frame), afterPhysics: () => source.game.clientPostThink(actor),
@@ -1623,7 +1644,14 @@ export class SharedSimulation implements Simulation {
       afterPhysics: frame => { source.game.playerAfterPhysics(actor, seconds(frame.time)); source.composition.playerPostThink(actor.id);
         this.q2Characters.get(actor)?.afterClientThink(); this.q1Characters.get(actor)?.postMove(); return undefined; },
     } : undefined;
-    const player = new MovementPlayer(actor, client, this.recipe, { ...(netQuake === undefined ? {} : { netQuake }), actors: this.actors, bodies: this.bodies, combat: this.combat, scene: this.scene, rereleaseMovement: this.physics.rereleaseMovement,
+    const player = new MovementPlayer(actor, client, this.recipe, { ...(netQuake === undefined ? {} : { netQuake }),
+      ...(source.kind !== "quakec" || source.game.kind !== "quakeworld" ? {} : { quakeWorld: {
+        read: (state: import("../../../contracts/movement.ts").QwMovementState) => source.game.readQuakeWorldState(actor.id, state),
+        write: (state: import("../../../contracts/movement.ts").QwMovementState) => source.game.writeQuakeWorldState(actor.id, state),
+        beforePhysics: (command: QwUserCommand, frame: FrameContext) => source.game.quakeWorldPreThink(actor, command, frame),
+        water: (level: number, type: number) => source.game.quakeWorldWater(actor.id, level, type),
+        profile: (profile: import("../../../contracts/movement.ts").QwMovementProfile) => source.game.quakeWorldProfile(actor.id, profile),
+      } }), actors: this.actors, bodies: this.bodies, combat: this.combat, scene: this.scene, rereleaseMovement: this.physics.rereleaseMovement,
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
       sourcePunch: actor => this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? null,
       worldActor: () => this.worldActor(), touchTriggers: owned => this.source.kind === "q3" ? undefined : this.physics.touchTriggers(owned), isBrush: id => this.physics.isBrush(id), jump: (owned, action) => this.jump(owned, action),
@@ -1796,7 +1824,7 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind === "quakec") {
       if (travel !== undefined || this.options.dedicated !== true || providerFamily(this.recipe.character.definition.provider) !== "q1"
-        || providerTiming(this.recipe, this.recipe.movement.provider).clock.kind !== "q1-netquake")
+        || providerTiming(this.recipe, this.recipe.movement.provider).clock.kind !== (source.game.kind === "quakeworld" ? "q1-quakeworld" : "q1-netquake"))
         throw new Error("QuakeC internal clients require dedicated native NetQuake movement and Q1 character; graphical clients and travel are unsupported");
       const actor = source.game.admitClient(client), body = this.bodies.read(actor.id);
       if (body === null) throw new Error("QC reserved client has no shared body");
@@ -2152,7 +2180,14 @@ export class SharedSimulation implements Simulation {
     const other = contact.other.kind === "actor" ? contact.other.actor : this.worldActor();
     if (other !== null) {
       const { sourceTrace, ...sharedContact } = contact;
-      if (state.kind === "q2-classic" || state.kind === "q2-rerelease") {
+      const sourceQw = state.kind === "q1-quakeworld" && this.source.kind === "quakec" && this.source.game.kind === "quakeworld";
+      if (sourceQw) {
+        const slot = this.sourcePosition(other)[1];
+        if (this.quakeWorldTouched?.has(slot) === true) return { kind: "continue", state: player.readState() };
+        const owner = this.actors.resolveOwned(other);
+        if (owner !== null) this.callbacks.touch({ ...sharedContact, self: owner, other: contact.self.id });
+        this.quakeWorldTouched?.add(slot);
+      } else if (state.kind === "q2-classic" || state.kind === "q2-rerelease") {
         // Q2 ClientThink invokes only the touched entity's callback.
         const owner = this.actors.resolveOwned(other);
         if (owner !== null) this.callbacks.touch({ ...sharedContact, self: owner, other: contact.self.id,
@@ -2195,6 +2230,49 @@ export class SharedSimulation implements Simulation {
     }
     if (!paused && this.grapple?.selection.binding === "slot") this.grapple.input(player.actor.id, (command.command.buttons & 1) !== 0);
     return command;
+  }
+
+  queueQuakeWorldCommands(client: ClientId, commands: readonly QwUserCommand[], sequence: number): void {
+    this.assertOpen();
+    if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld" || !this.options.identity.owns(client)
+      || !Number.isSafeInteger(sequence) || sequence < 0 || commands.length < 1 || commands.length > 20)
+      throw new Error("Invalid native QuakeWorld command group");
+    const player = [...this.playerStates.values()].find(player => player.client.equals(client));
+    if (player === undefined) throw new Error("QuakeWorld command client has not begun");
+    for (const command of commands) if (!Number.isInteger(command.milliseconds) || command.milliseconds < 0 || command.milliseconds > 255)
+      throw new Error("Invalid QuakeWorld command duration");
+    this.quakeWorldCommands.push({ client, commands: structuredClone(commands), sequence });
+  }
+  private runQuakeWorldNewMissile(): void {
+    if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld") return;
+    const actor = this.source.game.takeNewMissile();
+    if (actor === null) return;
+    const entry = this.actorExecutions.get(actor.id);
+    if (entry?.kind !== "quakec") throw new Error("QW newmis has no shared source execution");
+    executeActor(entry, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
+      frame: { ...this.sourceFrame, elapsed: { kind: "seconds", value: 0.05 } }, timeSeconds: this.timeSeconds, elapsed: 0.05, visited: new Set<OwnedActor>() });
+    this.physics.commitAttachments();
+  }
+  private runQuakeWorldCommands(): void {
+    if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld") return;
+    const source = this.source.game;
+    for (const group of this.quakeWorldCommands.splice(0)) {
+      const player = [...this.playerStates.values()].find(player => player.client.equals(group.client));
+      if (player === undefined || group.sequence <= player.lastSequence) continue;
+      this.quakeWorldTouched = new Set<number>();
+      try {
+        for (const command of group.commands) {
+          if (!this.actors.isLive(player.actor.id)) break;
+          player.move({ actor: player.actor.id, source: { kind: "remote-client", client: group.client }, command, sequence: group.sequence },
+            { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: command.milliseconds } });
+        }
+        if (this.actors.isLive(player.actor.id)) {
+          source.clientPostThink(player.actor); this.runQuakeWorldNewMissile();
+          player.arsenal = source.clientArsenal(player.actor.id); player.animation = source.clientAnimation(player.actor.id);
+          player.state = player.readState(); this.syncQuakeCClientView(player);
+        }
+      } finally { this.quakeWorldTouched = null; }
+    }
   }
 
   step(input: InputBatch): SimulationOutput {
@@ -2415,6 +2493,7 @@ export class SharedSimulation implements Simulation {
             execution.source.beforeActor(actor);
             if (this.actors.isLive(actor.id)) executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler,
               frame: this.sourceFrame, timeSeconds: this.timeSeconds, elapsed, visited });
+            this.runQuakeWorldNewMissile();
             this.physics.commitAttachments(); continue;
           }
           if (execution?.kind === "q3") {
@@ -2508,7 +2587,10 @@ export class SharedSimulation implements Simulation {
         }
       }
       if (run) {
-        if (this.source.kind === "quakec") this.source.game.endFrame();
+        if (this.source.kind === "quakec") {
+          this.source.game.endFrame();
+          if (this.source.game.kind === "quakeworld") { this.runQuakeWorldCommands(); this.source.game.messages.flush(); }
+        }
         if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) this.source.game.forceRetouch--;
         if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
         else { this.sourceFrame = this.clock.enter("frame-exit"); if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }

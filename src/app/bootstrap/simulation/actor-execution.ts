@@ -109,6 +109,7 @@ function moveQ1Noclip(actor: OwnedActor, angularVelocity: Vec3, context: ActorEx
 function executeQuakeCActor(entry: Extract<ActorExecution, { readonly kind: "quakec" }>, context: ActorExecutionFrame): undefined {
   const { source, actor } = entry;
   if (source.isReservedClient(actor.id)) return undefined;
+  if (!source.runActorOnce(actor.id, context.frame)) return undefined;
   const move = source.readMoveType(actor.id);
   if (move === null) return undefined;
   if (move === 7) {

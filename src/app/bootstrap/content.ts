@@ -38,12 +38,20 @@ function execution(provider: ProviderReference, family: GameFamily, rerelease: b
 
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
+  const quakeworld = product.expectation.id === "q1-quakeworld" && options.network.kind !== "qw-client";
+  if (quakeworld && (!options.dedicated || options.mode !== "deathmatch" || options.movement !== "q1" || options.character !== "q1"
+    || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
+    throw new Error("Native QuakeWorld currently requires dedicated deathmatch with Q1 movement and character; NetQuake protocol overrides and mixed roles are unsupported");
   const provider: ProviderReference = { provider: `${family}:official`, content: product.id };
-  const movement: ProviderReference = { provider: `${options.movement}:movement`, content: catalog.require(baseProduct(options.movement)).id };
-  const character: ProviderReference = { provider: `${options.character}:character`, content: catalog.require(baseProduct(options.character)).id };
+  const movement: ProviderReference = { provider: `${options.movement}:movement`, content: quakeworld ? product.id : catalog.require(baseProduct(options.movement)).id };
+  const character: ProviderReference = { provider: `${options.character}:character`, content: quakeworld ? product.id : catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
-  const providerTiming = nativeProviderTiming(provider, family, rerelease);
+  const timing = (reference: ProviderReference, source: GameFamily, edition: boolean) => {
+    const native = nativeProviderTiming(reference, source, edition);
+    return quakeworld ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } satisfies typeof native.clock } : native;
+  };
+  const providerTiming = timing(provider, family, rerelease);
   const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
   if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
   const match: ProviderReference = rules === "standard" ? provider : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
@@ -53,8 +61,9 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, provider, match), enemies: { kind: "map-defined" },
     presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
-    execution: [execution(provider, family, rerelease)],
-    timing: [providerTiming, nativeProviderTiming(movement, options.movement, false), nativeProviderTiming(character, options.character, false)],
+    execution: [quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
+      api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : execution(provider, family, rerelease)],
+    timing: [providerTiming, timing(movement, options.movement, false), timing(character, options.character, false)],
     ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 
@@ -146,10 +155,14 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   let recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
     if (module.kind === "quakec") {
-      if (!options.dedicated || options.network.kind !== "offline" || catalog.product(recipe.map.entities.content).expectation.id !== "q1-classic-id1"
+      const product = catalog.product(recipe.map.entities.content).expectation.id;
+      const nativeQw = product === "q1-quakeworld" && module.api.kind === "q1-quakeworld" && options.mode === "deathmatch"
+        && (options.network.kind === "offline" || options.network.kind === "native-server") && options.q1Protocol === undefined;
+      const nativeNq = product === "q1-classic-id1" && module.api.kind === "q1-netquake" && options.network.kind === "offline";
+      if (!options.dedicated || !nativeQw && !nativeNq
         || recipe.map.geometryContent !== recipe.map.entities.content || module.owner.provider !== recipe.map.entities.provider
         || module.owner.content !== recipe.map.entities.content || recipe.execution.length !== 1)
-        throw new Error("QuakeC application execution currently requires an explicit dedicated native classic id1 map and one known id1 server artifact; clients and saves are unsupported");
+        throw new Error("QuakeC application execution requires a dedicated native classic id1 or QuakeWorld map and its verified server artifact; mixed roles and saves are unsupported");
       continue;
     }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);

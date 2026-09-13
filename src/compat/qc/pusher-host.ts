@@ -35,13 +35,13 @@ export function createQcPusherServices(world: QcWorldHost, vm: QcMachine, option
       localTimeSeconds: words.float(field("ltime")), nextThinkSeconds: words.float(field("nextthink")),
       state: { kind: "q1-netquake", origin: body.origin, velocity: body.velocity, angles: body.angles,
         oldOrigin: words.vector(field("oldorigin")), angularVelocity: words.vector(field("avelocity")),
-        viewAngles: words.vector(field("v_angle")), punchAngles: words.vector(field("punchangle")),
+        viewAngles: words.vector(field("v_angle")), punchAngles: program.api.kind === "q1-quakeworld" ? { x: 0, y: 0, z: 0 } : words.vector(field("punchangle")),
         moveType: words.float(field("movetype")), flags,
         ground: (flags & 512) === 0 ? { kind: "none" } : ground === 0 ? { kind: "world", model: 0 }
           : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor.id },
         waterLevel: words.float(field("waterlevel")), waterType: words.float(field("watertype")),
         teleportTimeSeconds: words.float(field("teleport_time")), waterJumpDirection: words.vector(field("movedir")),
-        idealPitch: words.float(field("idealpitch")), fixAngle: words.float(field("fixangle")) !== 0, health: words.float(field("health")) } };
+        idealPitch: program.api.kind === "q1-quakeworld" ? 0 : words.float(field("idealpitch")), fixAngle: words.float(field("fixangle")) !== 0, health: words.float(field("health")) } };
   };
   const write = (entity: Q1PhysicsEntity): undefined => {
     const slot = sourceSlot(entity.actor.id);

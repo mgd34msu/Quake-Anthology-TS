@@ -1,7 +1,7 @@
 import { prepareNetQuake, physicsNetQuake } from "../../../movement/q1/netquake.ts";
 import type { Q1MovementOptions } from "../../../movement/q1/types.ts";
-import type { Q1MovementState, Q1MovementResult } from "../../../contracts/movement.ts";
-import type { Q1UserCommand } from "../../../contracts/protocol.ts";
+import type { Q1MovementState, Q1MovementResult, QwMovementState, QwMovementProfile } from "../../../contracts/movement.ts";
+import type { Q1UserCommand, QwUserCommand } from "../../../contracts/protocol.ts";
 import type { Q2RereleaseMovementContext } from "../../../movement/q2/index.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { ExecutableRecipe, GameFamily, ProviderTiming } from "../../../contracts/content.ts";
@@ -33,6 +33,13 @@ export interface NetQuakeClientBinding {
 
 export interface PlayerMovementHost {
   readonly netQuake?: NetQuakeClientBinding;
+  readonly quakeWorld?: {
+    read(state: QwMovementState): QwMovementState;
+    write(state: QwMovementState): undefined;
+    beforePhysics(command: QwUserCommand, frame: FrameContext): undefined;
+    water(level: number, type: number): undefined;
+    profile(profile: QwMovementProfile): QwMovementProfile;
+  };
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
@@ -166,7 +173,10 @@ export class MovementPlayer {
           health: this.host.combat.read(this.actor.id)?.health ?? 0 };
         return this.host.netQuake?.projection?.read(current) ?? current;
       }
-      case "q1-quakeworld": return { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
+      case "q1-quakeworld": {
+        const current = { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
+        return this.host.quakeWorld?.read(current) ?? current;
+      }
       case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 2 : state.type };
       case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 4 : state.type };
       case "q3": return { ...state, origin: body.origin, velocity: body.velocity, ground: this.ground, movementType: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 3 : state.movementType };
@@ -183,7 +193,9 @@ export class MovementPlayer {
     if (body === null) throw new Error("Player has no body during movement");
     if (state.kind === "q1-netquake" && this.host.netQuake !== undefined) this.bounds = body.bounds;
     const angles = state.kind === "q1-netquake" || state.kind === "q1-quakeworld" ? state.angles : this.viewAngles;
-    this.host.bodies.write(this.actor, { ...body, origin: movementOrigin(state), velocity: movementVelocity(state), angles,
+    if (state.kind === "q1-quakeworld" && this.host.quakeWorld !== undefined) {
+      this.host.quakeWorld.write(state); this.bounds = body.bounds;
+    } else this.host.bodies.write(this.actor, { ...body, origin: movementOrigin(state), velocity: movementVelocity(state), angles,
       bounds: this.bounds, ground: this.ground.kind === "actor" ? this.ground.actor : this.ground.kind === "world" ? this.host.worldActor() : null });
     if (state.kind === "q1-netquake") this.host.netQuake?.projection?.write(state);
     if (link) this.host.bodies.link(this.actor);
@@ -272,13 +284,20 @@ export class MovementPlayer {
     const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.standingBounds },
       environment: playerMovementEnvironment(this, combat),
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
-    const state = this.state, profile = selectedMovementProfile(this), command = input.command;
+    const state = this.state, selectedProfile = selectedMovementProfile(this), command = input.command;
+    const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
     const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
       playerAction: (actor: OwnedActor, action: "jump" | "swim") => this.host.jump(actor, action),
       link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
       isBsp: (hit: TraceHit) => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),
-      beforePhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
+      qwState: (level: number, type: number): undefined => this.host.quakeWorld?.water(level, type),
+      beforePhysics: (input: MovementInput, next: MovementState) => {
+        const committed = this.commit(next, false, false);
+        if (committed.kind === "actor-removed") return committed;
+        if (input.kind === "q1-quakeworld") this.host.quakeWorld?.beforePhysics(input.command, input.frame);
+        return { kind: "continue", state: this.readState() } satisfies MovementContinuation;
+      },
       afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
     } };
     const provider = createPlayerMovementProvider(this, { q1: q1Options, q2: this.host.rereleaseMovement, q3: {

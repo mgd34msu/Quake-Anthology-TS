@@ -250,6 +250,7 @@ class QuakeWorldMove {
     this.friction();
     if (this.waterLevel >= 2) this.waterMove(); else this.airMove();
     this.categorize();
+    c.options.hooks?.qwState?.(this.waterLevel, this.waterType);
     this.setState(c.link(this.state, true));
     // QW records impacts during PMove, then invokes each target once after linking.
     for (const contact of c.contacts.slice(contactStart)) {

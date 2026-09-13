@@ -1,3 +1,4 @@
+import { id1ProgramBinding, id1DamageMultiplier, type Id1ProgramBinding } from "./id1-program.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { DamageRequest } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -13,25 +14,7 @@ export interface Id1PhysicsCallback {
   readonly other: ActorId;
   readonly functionIndex: number;
 }
-type EnvironmentCause = Extract<DamageRequest["attack"]["cause"], { readonly kind: "environment" }>;
-interface Site {
-  readonly caller: number;
-  readonly name: string;
-  readonly statement: number;
-  readonly hazard: EnvironmentCause["hazard"];
-  readonly context: "world" | "touch" | "blocked";
-}
-const sites: readonly Site[] = [
-  { caller: 239, name: "WaterMove", statement: 6446, hazard: "drown", context: "world" },
-  { caller: 239, name: "WaterMove", statement: 6489, hazard: "lava", context: "world" },
-  { caller: 239, name: "WaterMove", statement: 6509, hazard: "slime", context: "world" },
-  { caller: 243, name: "PlayerPostThink", statement: 6935, hazard: "fall", context: "world" },
-  { caller: 434, name: "hurt_touch", statement: 10462, hazard: "trigger", context: "touch" },
-  { caller: 375, name: "door_blocked", statement: 8690, hazard: "crush", context: "blocked" },
-  { caller: 397, name: "secret_blocked", statement: 9589, hazard: "crush", context: "blocked" },
-  { caller: 448, name: "plat_crush", statement: 10736, hazard: "crush", context: "blocked" },
-  { caller: 451, name: "train_blocked", statement: 10877, hazard: "crush", context: "blocked" },
-];
+type EnvironmentCause = DamageRequest["attack"]["cause"];
 export interface Id1EnvironmentalDamage {
   readonly cause: EnvironmentCause;
   readonly time: number;
@@ -42,22 +25,22 @@ export interface Id1EnvironmentalDamage {
 
 /** Classifies real calls in the pinned artifact; QC still executes every damage store and reaction. */
 export class Id1Environment {
+  private readonly binding: Id1ProgramBinding;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     private readonly machine: () => QcMachine) {
-    if (source.program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580")
-      throw new QcProgramError("id1 environment requires the verified classic id1 program");
-    for (const site of sites) {
+    this.binding = id1ProgramBinding(source.program);
+    for (const site of this.binding.environment) {
       const statement = source.program.statements[site.statement];
       if (source.program.functionAt(site.caller).name !== site.name || statement?.opcode !== QcOpcode.Call4
-        || statement.a !== 520 || statement.b !== 0 || statement.c !== 0)
+        || statement.a !== this.binding.damage.global || statement.b !== 0 || statement.c !== 0)
         throw new QcProgramError(`id1 environmental statement ${site.statement} mismatch`);
     }
   }
   resolve(call: Id1DamageCall, callback: Id1PhysicsCallback | null): Id1EnvironmentalDamage | null {
-    const site = sites.find(value => value.caller === call.call.caller && value.statement === call.call.statement);
+    const site = this.binding.environment.find(value => value.caller === call.call.caller && value.statement === call.call.statement);
     if (site === undefined) return null;
     const vm = this.machine();
-    if (vm.program !== this.source.program || vm.entities !== this.source.entities || vm.globals.int(520) !== 117 || call.call.functionIndex !== 117)
+    if (vm.program !== this.source.program || vm.entities !== this.source.entities || vm.globals.int(this.binding.damage.global) !== this.binding.damage.index || call.call.functionIndex !== this.binding.damage.index)
       throw new QcProgramError("Unmatched id1 environmental machine or function");
     const reference = (actor: ActorId): number => {
       const owned = this.source.actors.sourceOf(actor);
@@ -67,19 +50,59 @@ export class Id1Environment {
     };
     const target = reference(call.target), inflictor = reference(call.inflictor), attacker = reference(call.attacker);
     const self = vm.globals.int(vm.globalOffset("self")), other = vm.globals.int(vm.globalOffset("other"));
-    if (site.context === "world") {
-      if (target !== self || inflictor !== 0 || attacker !== 0 || vm.globals.int(vm.globalOffset("world")) !== 0)
-        throw new QcProgramError("Unmatched id1 world hazard arguments");
-    } else if (callback === null || callback.kind !== site.context || callback.functionIndex !== site.caller
-      || !call.target.equals(callback.other) || !call.inflictor.equals(callback.actor) || !call.attacker.equals(callback.actor)
-      || self !== inflictor || other !== target || attacker !== inflictor) {
-      throw new QcProgramError("Unmatched id1 environmental callback");
-    }
     const field = (name: string): number => {
       const value = this.source.program.fieldsByName.get(name);
       if (value === undefined) throw new QcProgramError(`Missing environmental field ${name}`);
       return value.offset;
     };
+    const expectedAttacker = site.attacker === "goalentity" ? vm.entities.fromReference(inflictor).int(field("goalentity")) : inflictor;
+    const text = (entity: number, name: string): string => vm.strings.get(vm.entities.fromReference(entity).int(field(name)));
+    let cause: EnvironmentCause = { kind: "environment", hazard: site.hazard };
+    if (site.native !== undefined) {
+      if (vm.argInt(0) !== target || vm.argInt(1) !== inflictor || vm.argInt(2) !== attacker || vm.argFloat(3) !== call.amount)
+        throw new QcProgramError("Native map damage arguments changed");
+      if (site.native === "barrel") {
+        // This radius site is shared with weapons; only a native exploding box belongs here.
+        if (text(inflictor, "classname") !== "explo_box") return null;
+        if (self !== inflictor || attacker !== inflictor || vm.entities.fromReference(inflictor).int(field("th_die")) !== vm.program.functionNamed("barrel_explode").index)
+          throw new QcProgramError("Unmatched native barrel damage");
+      } else {
+        if (callback === null || callback.kind !== "touch" || callback.functionIndex !== site.caller
+          || !callback.actor.equals(call.inflictor) || reference(callback.other) !== other || self !== inflictor)
+          throw new QcProgramError("Unmatched native map touch");
+        const owner = vm.entities.fromReference(inflictor).int(field("owner"));
+        if (site.native === "teledeath") {
+          const classname = text(inflictor, "classname");
+          const expectedClass = site.statement === 9808 || site.statement === 9817 ? "teledeath3" : site.statement === 9828 ? "teledeath2" : classname;
+          const victimMatches = site.statement === 9828 ? target === owner : site.statement === 9817 ? owner === other && target === vm.globals.int(vm.program.functionAt(site.caller).parameterStart) && target !== other && target !== inflictor : target === other;
+          if (attacker !== inflictor || call.amount !== 50000 || !victimMatches || classname !== expectedClass
+            || !["teledeath", "teledeath2", "teledeath3"].includes(classname))
+            throw new QcProgramError("Unmatched native teledeath branch");
+          cause = { kind: "q1", deathType: classname };
+        } else {
+          if (target !== other) throw new QcProgramError("Unmatched native map victim");
+          if (site.native === "spike" || site.native === "laser") {
+            const ownerClass = text(owner, "classname");
+            if (ownerClass !== "trap_spikeshooter" && ownerClass !== "trap_shooter") return null;
+            if (attacker !== owner || call.amount !== (site.native === "laser" ? 15 : site.statement === 3900 ? 9 : 18))
+              throw new QcProgramError("Unmatched native trap owner or damage");
+          } else if (attacker !== inflictor) throw new QcProgramError("Unmatched native map attacker");
+          if (site.native === "fireball" && (text(inflictor, "classname") !== "fireball" || call.amount !== 20))
+            throw new QcProgramError("Unmatched native fireball");
+          if (site.native === "exit" && (text(inflictor, "classname") !== "trigger_changelevel" || call.amount !== 50000))
+            throw new QcProgramError("Unmatched native exit punishment");
+          cause = { kind: "q1", deathType: text(target, "deathtype") };
+        }
+      }
+      if (site.native === "barrel") cause = { kind: "q1", deathType: text(target, "deathtype") };
+    } else if (site.context === "world") {
+      if (target !== self || inflictor !== 0 || attacker !== 0 || vm.globals.int(vm.globalOffset("world")) !== 0)
+        throw new QcProgramError("Unmatched id1 world hazard arguments");
+    } else if (callback === null || callback.kind !== site.context || callback.functionIndex !== site.caller
+      || !call.target.equals(callback.other) || !call.inflictor.equals(callback.actor)
+      || self !== inflictor || other !== target || attacker !== expectedAttacker) {
+      throw new QcProgramError("Unmatched id1 environmental callback");
+    }
     const victim = vm.entities.fromReference(target), point = victim.vector(field("origin")), direction = { x: 0, y: 0, z: 0 };
     let knockback = 0;
     const time = vm.globals.float(vm.globalOffset("time"));
@@ -91,8 +114,8 @@ export class Id1Environment {
       math.VectorScale(direction, 0.5, direction); store();
       math.VectorSubtract(point, direction, direction); store();
       math.VectorNormalize(direction); store();
-      knockback = vm.numeric.multiply(call.amount, vm.entities.fromReference(attacker).float(field("super_damage_finished")) > time ? 4 : 1);
+      knockback = vm.numeric.multiply(call.amount, id1DamageMultiplier(vm, attacker, inflictor));
     }
-    return { cause: { kind: "environment", hazard: site.hazard }, time, direction, point, knockback };
+    return { cause, time, direction, point, knockback };
   }
 }

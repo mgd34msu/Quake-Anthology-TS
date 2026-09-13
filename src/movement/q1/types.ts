@@ -29,6 +29,7 @@ export const Q1_STEP_HEIGHT = 18;
 
 /** Source callbacks publish state before invoking game code and return its changes. */
 export interface Q1MovementHooks {
+  qwState?(waterLevel: number, waterType: number): undefined;
   shape?(): TraceShape;
   link(actor: OwnedActor, state: MovementState, touchTriggers: boolean): MovementContinuation;
   isBsp(hit: TraceHit): boolean;

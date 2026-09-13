@@ -1,12 +1,12 @@
+import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ArmorState, DamageRequest } from "../../../contracts/gameplay.ts";
 import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
-import { QcOpcode, QcProgramError } from "../../../compat/qc/program.ts";
+import { QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult } from "../../../world/gameplay/authority.ts";
 
-const digest = "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580";
 export interface Id1DamageCall {
   readonly call: QcCallSite;
   readonly target: ActorId;
@@ -19,6 +19,7 @@ export interface Id1DamageCall {
 export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
   private readonly active: { readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; result: SourceDamageResult }[] = [];
+  private readonly binding: Id1ProgramBinding;
   private readonly health: number;
   private readonly velocity: number;
   private readonly armorValue: number;
@@ -28,27 +29,21 @@ export class Id1DamageBinding {
     authority: GameplayAuthority, private readonly machine: () => QcMachine,
     resolveRequest: (call: Id1DamageCall) => DamageRequest) {
     const { program } = source;
-    if (program.digest !== digest) throw new QcProgramError("id1 damage binding requires the verified classic id1 program");
-    const damage = program.functionNamed("T_Damage");
-    if (damage.index !== 117 || damage.firstStatement !== 1421 || damage.parameterStart !== 1580 || damage.localWords !== 10
+    this.binding = id1ProgramBinding(program);
+    const layout = this.binding.damage, damage = program.functionNamed("T_Damage");
+    if (damage.index !== layout.index || damage.firstStatement !== layout.firstStatement || damage.parameterStart !== layout.parameterStart || damage.localWords !== layout.localWords
       || damage.parameterSizes.length !== 4 || damage.parameterSizes.some(size => size !== 1)) throw new QcProgramError("id1 damage function layout mismatch");
-    const site = (index: number, opcode: QcOpcode, a: number, b: number, c: number): void => {
+    for (const [index, opcode, a, b, c] of layout.statements) {
       const value = program.statements[index];
       if (value?.opcode !== opcode || value.a !== a || value.b !== b || value.c !== c) throw new QcProgramError(`id1 damage statement ${index} mismatch`);
-    };
-    site(1421, QcOpcode.LoadF, 1580, 163, 1590);
-    site(1442, QcOpcode.StorePF, 213, 1600, 0); site(1450, QcOpcode.StorePF, 1607, 1601, 0);
-    site(1454, QcOpcode.StorePF, 1610, 1608, 0); site(1492, QcOpcode.StorePV, 1655, 1643, 0);
-    site(1526, QcOpcode.StorePF, 1677, 1675, 0);
-    site(1532, QcOpcode.Call2, 1559, 0, 0); site(1568, QcOpcode.Call2, 1701, 0, 0);
+    }
     const field = (name: string): number => {
       const value = program.fieldsByName.get(name);
       if (value === undefined) throw new QcProgramError(`missing id1 field ${name}`);
       return value.offset;
     };
     this.health = field("health"); this.velocity = field("velocity"); this.armorValue = field("armorvalue"); this.armorType = field("armortype"); this.items = field("items");
-    if (this.health !== 48 || this.velocity !== 16 || this.armorValue !== 82 || this.armorType !== 81 || this.items !== 58) throw new QcProgramError("id1 damage field layout mismatch");
-    this.functionBoundary = { functions: new Set([117]), run: (call, execute) => {
+    this.functionBoundary = { functions: new Set([layout.index]), run: (call, execute) => {
       const vm = this.vm(), reference = vm.argInt(0);
       const actor = (reference: number): ActorId => {
         const value = source.slots.at(source.entities.slot(reference));
@@ -80,21 +75,22 @@ export class Id1DamageBinding {
   }
   observeCall(call: QcCallSite): undefined {
     const frame = this.active.at(-1);
-    if (frame === undefined || call.caller !== 117 || (call.statement !== 1532 && call.statement !== 1568)) return undefined;
+    const layout = this.binding.damage;
+    if (frame === undefined || call.caller !== layout.index || (call.statement !== layout.death[0] && call.statement !== layout.pain[0])) return undefined;
     const vm = this.vm();
-    if (call.functionIndex !== vm.globals.int(call.statement === 1532 ? 1559 : 1701)) return undefined;
-    const result: SourceDamageResult = { appliedDamage: vm.globals.float(1589), reaction: call.statement === 1532 ? "death" : "pain" };
+    if (call.functionIndex !== vm.globals.int(call.statement === layout.death[0] ? layout.death[1] : layout.pain[1])) return undefined;
+    const result: SourceDamageResult = { appliedDamage: vm.globals.float(this.binding.damage.take), reaction: call.statement === layout.death[0] ? "death" : "pain" };
     frame.result = result;
     frame.observer.beforeReaction(result);
     return undefined;
   }
   observeEntityStore(store: QcEntityStoreObservation): undefined {
     const frame = this.active.at(-1);
-    if (frame === undefined || store.functionIndex !== 117 || store.reference !== frame.targetReference) return undefined;
+    if (frame === undefined || store.functionIndex !== this.binding.damage.index || store.reference !== frame.targetReference) return undefined;
     const vm = this.vm(), before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength), after = new DataView(store.after.buffer, store.after.byteOffset, store.after.byteLength);
     if (store.word === this.health) {
       frame.observer.stored({ kind: "health", before: before.getFloat32(0, true), after: after.getFloat32(0, true) });
-      frame.result = { appliedDamage: vm.globals.float(1589), reaction: "none" };
+      frame.result = { appliedDamage: vm.globals.float(this.binding.damage.take), reaction: "none" };
     } else if (store.word === this.armorValue || store.word === this.armorType || store.word === this.items) {
       const current = this.source.entities.fromReference(store.reference), previous = new QcWords(current.bytes.slice());
       previous.bytes.set(store.before, store.word * 4);

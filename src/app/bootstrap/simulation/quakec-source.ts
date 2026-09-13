@@ -1,9 +1,12 @@
 import { Id1Environment, type Id1PhysicsCallback } from "../../../content/q1/quakec/id1-environment.ts";
+import { id1ProgramBinding } from "../../../content/q1/quakec/id1-program.ts";
+import { donorAngleVectors } from "../../../core/math.ts";
+import { Id1ProjectileAttacks } from "../../../content/q1/quakec/id1-projectiles.ts";
 import { QcBroadcastMessages } from "../../../compat/qc/presentation-host.ts";
 import { Id1SynchronousAttacks } from "../../../content/q1/quakec/id1-attacks.ts";
-import type { Q1UserCommand } from "../../../contracts/protocol.ts";
+import type { Q1UserCommand, QwUserCommand } from "../../../contracts/protocol.ts";
 import type { ClientId } from "../../../contracts/identity.ts";
-import type { Q1MovementState, ArsenalState, ActorAnimationState } from "../../../contracts/movement.ts";
+import type { Q1MovementState, QwMovementState, QwMovementProfile, ArsenalState, ActorAnimationState } from "../../../contracts/movement.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
 import type { InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
 import { WEAPONS, weaponItem } from "../../../content/q1/foundation/types.ts";
@@ -23,12 +26,12 @@ import { parseQ12Model } from "../../../formats/q12-model/index.ts";
 import { readQ1Bsp } from "../../../formats/q1-map/index.ts";
 import { parseEntities } from "../../../core/common-parse.ts";
 import { CvarRegistry } from "../../../core/cvars/index.ts";
-import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../core/numeric.ts";
+import { Q1_DONOR_PROFILE, createNumericOperations, nativeAtoi } from "../../../core/numeric.ts";
 import { QcMachine, QcEntityMemory, loadQcProgram, classicQcEntityLayout, createQcSourceSlotStorage, QcWorldHost,
   createQcBuiltins, createQcPresentationBindings, applyQcEntityPairs } from "../../../compat/qc/index.ts";
 import { qcByteString } from "../../../compat/qc/program.ts";
 import type { QcProgram } from "../../../compat/qc/program.ts";
-import type { QcPrecachedResource } from "../../../compat/qc/presentation-host.ts";
+import type { QcPrecachedResource, QcMessageDestination, QcRoutedMessage, QcQuakeWorldMessageServices } from "../../../compat/qc/presentation-host.ts";
 import { createQcMovementBindings } from "../../../compat/qc/movement-host.ts";
 import { createQcPusherServices } from "../../../compat/qc/pusher-host.ts";
 import { QcClientHost, createQcAimBinding } from "../../../compat/qc/client-host.ts";
@@ -43,7 +46,6 @@ import type { SharedPhysics, SharedSolid, SharedPhysicsFlags } from "./physics.t
 import type { SimulationEvents } from "./events.ts";
 import type { SourceRandom } from "./random.ts";
 
-const id1Digest = "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580";
 type QuakeCExecution = Extract<ExecutableRecipe["execution"][number], { readonly kind: "quakec" }>;
 export interface PreparedQuakeCSource {
   readonly execution: QuakeCExecution;
@@ -57,8 +59,9 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   if (artifact === null || artifact.reference.digest !== execution.artifact.digest || artifact.reference.id !== execution.artifact.id)
     throw new Error("Selected QuakeC artifact no longer matches its resolved identity");
   const program = loadQcProgram(artifact.bytes);
-  if (program.digest !== id1Digest || execution.api.kind !== "q1-netquake" || execution.api.programVersion !== 6 || execution.api.systemCrc !== 5927)
-    throw new Error("Shared QuakeC application supports only the verified classic id1 program");
+  id1ProgramBinding(program);
+  if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
+    throw new Error("Shared QuakeC artifact API differs from the selected execution");
   const resources = new Map<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>();
   const names = new Set<string>();
   for (let offset = 0; offset < program.strings.length;) {
@@ -109,6 +112,7 @@ export interface QuakeCSourceOptions {
 export class QuakeCSource {
   readonly machine: QcMachine;
   readonly attacks: Id1SynchronousAttacks;
+  readonly projectiles: Id1ProjectileAttacks;
   readonly environment: Id1Environment;
   readonly messages: QcBroadcastMessages;
   readonly entities: QcEntityMemory;
@@ -117,8 +121,15 @@ export class QuakeCSource {
   readonly cvars: CvarRegistry;
   readonly clients: QcClientHost;
   readonly pusherServices: Q1PusherServices;
+  readonly reservedClientSlots: number;
   private currentTime: number;
   private readonly activeClients = new Set<ActorId>();
+  private readonly userInfo = new Map<number, ReadonlyMap<string, string>>();
+  private readonly spawnParameters = new Map<number, readonly number[]>();
+  private readonly preparedClients = new Set<number>();
+  private readonly fragRecords: { readonly killer: ActorId; readonly victim: ActorId }[] = [];
+  private readonly routed: { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] = [];
+  private readonly signon: QcRoutedMessage[] = [];
   private physicsCallback: QuakeCPhysicsCallback | null = null;
   private spawning = true;
   private readonly models = new Map<string, { readonly index: number; readonly bounds: Bounds }>();
@@ -126,41 +137,70 @@ export class QuakeCSource {
   private modelCount: number;
   private soundCount = 1;
   constructor(readonly prepared: PreparedQuakeCSource, readonly options: QuakeCSourceOptions) {
-    if (prepared.program.digest !== id1Digest || !options.recipe.execution.some(value => value.kind === "quakec" && value.owner.provider === prepared.execution.owner.provider
+    const binding = id1ProgramBinding(prepared.program);
+    if (!options.recipe.execution.some(value => value.kind === "quakec" && value.owner.provider === prepared.execution.owner.provider
       && value.owner.content === prepared.execution.owner.content && value.artifact.digest === prepared.execution.artifact.digest)) throw new Error("QC source differs from selected execution");
     if (!Number.isFinite(options.initialSourceTimeSeconds) || options.initialSourceTimeSeconds < 0 || !Number.isSafeInteger(options.maxClients) || options.maxClients < 1 || options.maxClients >= 2048)
       throw new Error("Invalid dedicated QC source timing or reserved clients");
     this.currentTime = options.initialSourceTimeSeconds;
+    if (binding.kind === "quakeworld" && options.maxClients > 32) throw new Error("Native QuakeWorld supports at most 32 clients");
+    this.reservedClientSlots = binding.kind === "quakeworld" ? 32 : options.maxClients;
     options.actors.onRelease(actor => { this.activeClients.delete(actor.id); return undefined; });
-    this.entities = new QcEntityMemory(classicQcEntityLayout(prepared.program), 2048, options.maxClients + 1);
+    this.entities = new QcEntityMemory(classicQcEntityLayout(prepared.program), binding.kind === "quakeworld" ? 768 : 2048, this.reservedClientSlots + 1);
     this.slots = new SourceActorSlots(options.actors, { provider: prepared.execution.owner.provider, capacity: this.entities.capacity,
-      lifetime: quakeEdictLifetime(options.maxClients + 1), storage: createQcSourceSlotStorage({ program: prepared.program, entities: this.entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }),
+      lifetime: quakeEdictLifetime(this.reservedClientSlots + 1), storage: createQcSourceSlotStorage({ program: prepared.program, entities: this.entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: binding.kind === "quakeworld" ? 100 : 92 }),
       now: () => ({ kind: "seconds", value: this.currentTime }), unlink: actor => options.physics.bodies.unlink(actor), exhausted: () => { throw new Error("QC source edicts exhausted"); } });
-    for (let slot = 0; slot <= options.maxClients; slot++) this.slots.bindExisting(slot, slot === 0 ? "quakec:worldspawn" : "quakec:reserved-client");
+    for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.slots.bindExisting(slot, slot === 0 ? "quakec:worldspawn" : "quakec:reserved-client");
     this.modelCount = options.world.models.length + 1;
     this.models.set(options.recipe.map.geometry.requestedPath, { index: 1, bounds: options.scene.modelBounds(0) });
     for (let model = 1; model < options.world.models.length; model++) this.models.set(`*${model}`, { index: model + 1, bounds: options.scene.modelBounds(model) });
     this.worldHost = new QcWorldHost({ program: prepared.program, entities: this.entities, actors: options.actors, slots: this.slots,
       bodies: options.physics.bodies, scene: options.scene, numeric: Q1_DONOR_PROFILE, model: name => this.models.get(name) ?? null,
       foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
-    this.cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
+    this.cvars = new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
     for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
       teamplay: "0", sv_aim: "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
-    this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: options.maxClients, serverTime: () => this.currentTime });
-    const presentation = createQcPresentationBindings(this.worldHost, { content: prepared.execution.owner.content, events: options.events,
+    this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
+    const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
+      loading: () => this.spawning, client: actor => this.isReservedClient(actor), phs: () => this.cvars.variableValue("sv_phs") !== 0,
+      route: (entries, destination) => { if (destination.kind === "signon") this.signon.push(...entries); else this.routed.push({ entries, destination }); return undefined; },
+    } : undefined;
+    const presentation = createQcPresentationBindings(this.worldHost, { ...(qw === undefined ? {} : { qw }), content: prepared.execution.owner.content, events: options.events,
       loading: () => this.spawning, print: options.print, message: (event, actor) => { if (!this.activeClients.has(actor)) throw new Error("QC message requires an admitted client"); return options.events.message(event, actor); }, precache: (kind, name) => this.precache(kind, name), lookup: (kind, name) => this.precached.get(`${kind}:${name}`) ?? null });
     const movement = createQcMovementBindings(this.worldHost, { scene: options.scene, random: options.random, touchTriggers: actor => options.physics.touchTriggers(actor) });
-    this.messages = new QcBroadcastMessages(this.worldHost, event => options.events.emit(prepared.execution.owner.content, { kind: "q1", event }));
+    this.messages = new QcBroadcastMessages(this.worldHost, event => options.events.emit(prepared.execution.owner.content, { kind: "q1", event }), qw);
     const host = new Map([...this.worldHost.host, ...presentation, ...movement, ...this.clients.host, ...this.messages.host]);
     host.set("cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); });
     host.set("cvar_set", vm => { const name = vm.argString(0); this.cvars.set(name, vm.argString(1)); if (name === "sv_gravity") options.physics.setWorldGravity(this.cvars.variableValue(name)); });
-    host.set("aim", createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay") }));
+    const aim = createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay") });
+    host.set("aim", vm => {
+      if (binding.kind === "quakeworld" && nativeAtoi(this.userInfo.get(this.entities.slot(vm.argInt(0)))?.get("noaim") ?? "0") > 0) {
+        vm.returnVector(vm.globals.vector(vm.globalOffset("v_forward"))); return undefined;
+      }
+      return aim(vm);
+    });
+    if (binding.kind === "quakeworld") {
+      this.cvars.register("sv_phs", "1");
+      for (const [name, value] of Object.entries({ sv_stopspeed: "100", sv_spectatormaxspeed: "500", sv_accelerate: "10", sv_airaccelerate: "0.7",
+        sv_wateraccelerate: "10", sv_friction: "4", sv_waterfriction: "4" })) this.cvars.register(name, value);
+      host.set("infokey", vm => {
+        const slot = this.entities.slot(vm.argInt(0)), key = vm.argString(1);
+        const value = this.userInfo.get(slot)?.get(key) ?? (slot === 0 ? this.cvars.variableString(key) : "");
+        vm.returnInt(vm.strings.setEngine(`qw-infokey:${slot}:${key}`, value, 1024));
+      });
+      host.set("logfrag", vm => {
+        const killer = this.slots.at(this.entities.slot(vm.argInt(0))), victim = this.slots.at(this.entities.slot(vm.argInt(1)));
+        if (killer !== null && victim !== null && this.isReservedClient(killer.id) && this.isReservedClient(victim.id)) this.fragRecords.push({ killer: killer.id, victim: victim.id });
+      });
+    }
     this.attacks = new Id1SynchronousAttacks(this.worldHost.options, () => this.machine);
+    this.projectiles = new Id1ProjectileAttacks(this.worldHost.options, () => this.machine);
     this.environment = new Id1Environment(this.worldHost.options, () => this.machine);
     const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, options.damageRequest);
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
-      builtins: createQcBuiltins({ kind: "netquake", random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
-      functionBoundary: this.attacks.compose(damage.functionBoundary), observeCall: call => damage.observeCall(call), observeEntityStore: store => damage.observeEntityStore(store) });
+      builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
+      functionBoundary: this.projectiles.compose(this.attacks.compose(damage.functionBoundary)), observeCall: call => damage.observeCall(call),
+      observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
     const pushers = createQcPusherServices(this.worldHost, this.machine, { physical: projection => options.physics.q1PusherServices(projection),
       foreign: { read: actor => options.physics.readQ1Pusher(actor), write: entity => options.physics.writeQ1Pusher(entity) },
       touchTriggers: actor => options.physics.touchTriggers(actor), serverTime: () => this.currentTime });
@@ -170,18 +210,56 @@ export class QuakeCSource {
       this.physicsCallback = { kind: "blocked", actor: actor.id, other, functionIndex: this.entities.at(slot).int(this.field("blocked")) };
       try { return pushers.blocked(actor, other); } finally { this.physicsCallback = prior; }
     } };
-    for (let slot = 0; slot <= options.maxClients; slot++) this.worldHost.actor(slot);
+    for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.worldHost.actor(slot);
   }
   get currentPhysicsCallback(): QuakeCPhysicsCallback | null { return this.physicsCallback; }
   get worldActor(): OwnedActor { return this.worldHost.actor(0); }
   get timeSeconds(): number { return this.currentTime; }
   get loading(): boolean { return this.spawning; }
+  get kind(): "netquake" | "quakeworld" { return id1ProgramBinding(this.prepared.program).kind; }
+  deathType(actor: ActorId): string {
+    const field = this.prepared.program.fieldsByName.get("deathtype");
+    return field === undefined ? "" : this.machine.strings.get(this.entities.fromReference(this.reference(actor)).int(field.offset));
+  }
+  setClientInfo(client: ClientId, values: ReadonlyMap<string, string>): void {
+    if (client.slot < 0 || client.slot >= this.options.maxClients) throw new Error("QC userinfo slot is unavailable");
+    this.userInfo.set(client.slot + 1, new Map(values));
+    const actor = this.slots.at(client.slot + 1);
+    if (actor !== null && (this.activeClients.has(actor.id) || this.preparedClients.has(client.slot + 1))) this.entities.at(client.slot + 1).setInt(this.field("netname"),
+      this.kind === "quakeworld" ? this.machine.strings.setEngine(`qw-name:${client.slot + 1}`, values.get("name") ?? "unnamed", 32) : this.machine.strings.allocate(values.get("name") ?? "unnamed"));
+  }
+  reservedClient(client: ClientId): OwnedActor {
+    if (client.slot < 0 || client.slot >= this.options.maxClients || this.spawning) throw new Error("QC reserved client is unavailable");
+    if (this.kind === "quakeworld" && !this.spawnParameters.has(client.slot + 1)) {
+      this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
+      this.spawnParameters.set(client.slot + 1, Array.from({ length: 16 }, (_, index) => this.machine.globals.float(this.machine.globalOffset(`parm${index + 1}`))));
+    }
+    return this.worldHost.actor(client.slot + 1);
+  }
+  prepareClientSpawn(client: ClientId): void {
+    const actor = this.reservedClient(client), slot = client.slot + 1;
+    if (this.kind !== "quakeworld" || this.activeClients.has(actor.id)) throw new Error("QW spawn requires an inactive reserved client");
+    const words = this.entities.at(slot); words.bytes.fill(0);
+    words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 0);
+    words.setInt(this.field("netname"), this.machine.strings.setEngine(`qw-name:${slot}`, this.userInfo.get(slot)?.get("name") ?? "unnamed", 32));
+    for (const [name, value] of [["gravity", 1], ["maxspeed", this.cvars.variableValue("sv_maxspeed")]] satisfies readonly (readonly [string, number])[]) {
+      const field = this.prepared.program.fieldsByName.get(name); if (field !== undefined) words.setFloat(field.offset, value);
+    }
+    this.preparedClients.add(slot);
+  }
+  drainFragLog(): readonly { readonly killer: ActorId; readonly victim: ActorId }[] { return this.fragRecords.splice(0); }
+  drainMessages(): readonly { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] { this.messages.flush(); return this.routed.splice(0); }
+  signonMessages(): readonly QcRoutedMessage[] { return this.signon; }
+  precacheNames(kind: "model" | "sound"): readonly string[] {
+    if (kind === "model") return [...this.models.entries()].sort((a, b) => a[1].index - b[1].index).map(([name]) => name);
+    return [...this.precached.entries()].filter(([key]) => key.startsWith("sound:")).sort((a, b) => a[1].index - b[1].index).map(([key]) => key.slice(6));
+  }
   private field(name: string): number { const field = this.prepared.program.fieldsByName.get(name); if (field === undefined) throw new Error(`Missing id1 field ${name}`); return field.offset; }
   sourceSlot(actor: ActorId): number | null {
     if (!this.options.actors.isLive(actor)) return null;
     const source = this.options.actors.sourceOf(actor); return source?.provider === this.prepared.execution.owner.provider ? source.slot : null;
   }
-  isReservedClient(actor: ActorId): boolean { const slot = this.sourceSlot(actor); return slot !== null && slot > 0 && slot <= this.options.maxClients; }
+  isReservedClient(actor: ActorId): boolean { const slot = this.sourceSlot(actor); return slot !== null && slot > 0 && slot <= this.reservedClientSlots; }
   isActiveClient(actor: ActorId): boolean { return this.activeClients.has(actor); }
   admitClient(client: ClientId): OwnedActor {
     const slot = client.slot + 1;
@@ -191,21 +269,28 @@ export class QuakeCSource {
     if (reserved !== null && this.classname(reserved.id) === "player") this.options.actors.release(reserved);
     const actor = this.worldHost.actor(slot);
     const words = this.entities.at(slot);
-    words.bytes.fill(0);
-    words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 1);
-    words.setInt(this.field("netname"), this.machine.strings.allocate(`Player ${slot}`));
+    if (this.kind === "quakeworld") {
+      const parameters = this.spawnParameters.get(slot);
+      if (!this.preparedClients.has(slot) || parameters === undefined) throw new Error("QW begin requires completed source spawn preparation");
+      for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
+    } else {
+      words.bytes.fill(0);
+      words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 1);
+      words.setInt(this.field("netname"), this.machine.strings.allocate(this.userInfo.get(slot)?.get("name") ?? `Player ${slot}`));
+      this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
+    }
     this.activeClients.add(actor.id);
     this.bindClientInventory(actor, slot);
-    this.invoke(this.prepared.program.functionNamed("SetNewParms").index, 0, 0, this.currentTime);
     this.invoke(this.prepared.program.functionNamed("ClientConnect").index, slot, 0, this.currentTime);
     this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
     return actor;
   }
   disconnectClient(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id);
-    if (slot === null || !this.activeClients.has(actor.id)) throw new Error("QC disconnect requires an active client");
-    this.invoke(this.prepared.program.functionNamed("ClientDisconnect").index, slot, 0, this.currentTime);
+    if (slot === null || !this.isReservedClient(actor.id)) throw new Error("QC disconnect requires a reserved client");
+    if (this.activeClients.has(actor.id)) this.invoke(this.prepared.program.functionNamed("ClientDisconnect").index, slot, 0, this.currentTime);
     this.activeClients.delete(actor.id);
+    this.preparedClients.delete(slot); this.spawnParameters.delete(slot); this.userInfo.delete(slot);
     return undefined;
   }
   private bindClientInventory(actor: OwnedActor, slot: number): undefined {
@@ -235,6 +320,70 @@ export class QuakeCSource {
     words.setFloat(this.field("button0"), command.buttons & 1); words.setFloat(this.field("button2"), (command.buttons >> 1) & 1);
     if (command.impulse !== 0) words.setFloat(this.field("impulse"), command.impulse);
     return undefined;
+  }
+  readQuakeWorldState(actor: ActorId, state: QwMovementState): QwMovementState {
+    const words = this.entities.fromReference(this.reference(actor)), origin = words.vector(this.field("origin")), mins = words.vector(this.field("mins"));
+    return { ...state, origin: { x: origin.x + mins.x + 16, y: origin.y + mins.y + 16, z: origin.z + mins.z + 24 },
+      velocity: words.vector(this.field("velocity")), angles: words.vector(this.field("v_angle")),
+      waterJumpTimeSeconds: words.float(this.field("teleport_time")), dead: words.float(this.field("health")) <= 0, spectator: 0 };
+  }
+  writeQuakeWorldState(actor: ActorId, state: QwMovementState): undefined {
+    const words = this.entities.fromReference(this.reference(actor)), mins = words.vector(this.field("mins"));
+    words.setVector(this.field("origin"), { x: state.origin.x - mins.x - 16, y: state.origin.y - mins.y - 16, z: state.origin.z - mins.z - 24 });
+    words.setVector(this.field("velocity"), state.velocity); words.setVector(this.field("v_angle"), state.angles);
+    words.setFloat(this.field("teleport_time"), state.waterJumpTimeSeconds);
+    const grounded = state.ground.kind !== "none";
+    words.setFloat(this.field("flags"), (Math.trunc(words.float(this.field("flags"))) & ~512) | (grounded ? 512 : 0));
+    if (grounded) words.setInt(this.field("groundentity"), state.ground.kind === "actor" ? this.reference(state.ground.actor) : 0);
+    return undefined;
+  }
+  quakeWorldWater(actor: ActorId, level: number, type: number): undefined {
+    const words = this.entities.fromReference(this.reference(actor));
+    words.setFloat(this.field("waterlevel"), level); words.setFloat(this.field("watertype"), type); return undefined;
+  }
+  quakeWorldProfile(actor: ActorId, profile: QwMovementProfile): QwMovementProfile {
+    const words = this.entities.fromReference(this.reference(actor));
+    const field = (name: string, fallback: number): number => { const value = this.prepared.program.fieldsByName.get(name); return value === undefined ? fallback : words.float(value.offset); };
+    return { ...profile, parameters: { ...profile.parameters, gravity: this.cvars.variableValue("sv_gravity"),
+      stopSpeed: this.cvars.variableValue("sv_stopspeed"), spectatorMaxSpeed: this.cvars.variableValue("sv_spectatormaxspeed"),
+      accelerate: this.cvars.variableValue("sv_accelerate"), airAccelerate: this.cvars.variableValue("sv_airaccelerate"),
+      waterAccelerate: this.cvars.variableValue("sv_wateraccelerate"), friction: this.cvars.variableValue("sv_friction"), waterFriction: this.cvars.variableValue("sv_waterfriction"),
+      maxSpeed: field("maxspeed", this.cvars.variableValue("sv_maxspeed")), entityGravity: field("gravity", 1) } };
+  }
+  quakeWorldPreThink(actor: OwnedActor, command: QwUserCommand, frame: FrameContext): undefined {
+    if (this.kind !== "quakeworld" || !this.activeClients.has(actor.id)) throw new Error("QW movement requires a begun native client");
+    const words = this.entities.fromReference(this.reference(actor.id));
+    if (words.float(this.field("fixangle")) === 0) {
+      words.setVector(this.field("v_angle"), command.angles);
+    }
+    words.setFloat(this.field("button0"), command.buttons & 1); words.setFloat(this.field("button2"), (command.buttons >> 1) & 1);
+    if (command.impulse !== 0) words.setFloat(this.field("impulse"), command.impulse);
+    if (words.float(this.field("health")) > 0) {
+      const angles = { ...words.vector(this.field("angles")) };
+      if (words.float(this.field("fixangle")) === 0) { angles.x = -command.angles.x / 3; angles.y = command.angles.y; }
+      const right = { x: 0, y: 0, z: 0 }, velocity = words.vector(this.field("velocity"));
+      donorAngleVectors(angles, null, right, null);
+      const side = velocity.x * right.x + velocity.y * right.y + velocity.z * right.z;
+      angles.z = (Math.abs(side) < 200 ? Math.abs(side) * 2 / 200 : 2) * (side < 0 ? -1 : 1) * 4;
+      words.setVector(this.field("angles"), angles);
+    }
+    this.machine.globals.setFloat(this.machine.globalOffset("frametime"), command.milliseconds * 0.001);
+    this.clientPreThink(actor);
+    return this.runThink(actor, { ...frame, time: { kind: "seconds", value: this.currentTime }, elapsed: { kind: "seconds", value: command.milliseconds * 0.001 } });
+  }
+  takeNewMissile(): OwnedActor | null {
+    if (this.kind !== "quakeworld") return null;
+    const offset = this.machine.globalOffset("newmis"), reference = this.machine.globals.int(offset);
+    if (reference === 0) return null;
+    this.machine.globals.setInt(offset, 0);
+    return this.slots.at(this.entities.slot(reference));
+  }
+  runActorOnce(actor: ActorId, frame: FrameContext): boolean {
+    if (this.kind !== "quakeworld") return true;
+    const time = Math.fround(frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000);
+    const words = this.entities.fromReference(this.reference(actor)), field = this.field("lastruntime");
+    if (words.float(field) === time) return false;
+    words.setFloat(field, time); return true;
   }
   readClientState(actor: ActorId, state: Q1MovementState): Q1MovementState {
     const slot = this.sourceSlot(actor); if (slot === null) throw new Error("QC player has no source slot");
@@ -347,7 +496,10 @@ export class QuakeCSource {
     world.setInt(this.field("model"), this.machine.strings.allocate(map)); world.setFloat(this.field("modelindex"), 1);
     world.setFloat(this.field("solid"), 4); world.setFloat(this.field("movetype"), 7);
     this.machine.globals.setFloat(this.machine.globalOffset("time"), this.currentTime);
-    for (const name of ["skill", "deathmatch", "coop", "teamplay"]) this.machine.globals.setFloat(this.machine.globalOffset(name), this.cvars.variableValue(name));
+    for (const name of ["skill", "deathmatch", "coop", "teamplay"]) {
+      const offset = this.prepared.program.globalsByName.get(name)?.offset;
+      if (offset !== undefined) this.machine.globals.setFloat(offset, this.cvars.variableValue(name));
+    }
     this.machine.globals.setInt(this.machine.globalOffset("mapname"), this.machine.strings.allocate(map.replace(/^maps\//, "").replace(/\.bsp$/, "")));
     for (const [ordinal, pairs] of parseEntities(this.options.world.entities).entries()) {
       const actor = ordinal === 0 ? this.worldActor : this.slots.allocate("quakec:authored");
@@ -358,8 +510,10 @@ export class QuakeCSource {
       if ((Math.trunc(this.entities.at(slot).float(this.field("spawnflags"))) & excluded) !== 0) { this.slots.free(actor); continue; }
       const classname = this.machine.strings.get(this.entities.at(slot).int(this.field("classname")));
       this.invoke(this.prepared.program.functionNamed(classname).index, slot, 0, this.currentTime);
+      this.messages.flushSignon();
     }
     this.spawning = false; this.options.physics.setWorldGravity(this.cvars.variableValue("sv_gravity"));
+    this.messages.flush();
     return undefined;
   }
   beginFrame(frame: FrameContext): undefined {
