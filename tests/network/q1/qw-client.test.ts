@@ -8,7 +8,7 @@ import { writeQuakeWorldMessage, writeQuakeWorldEntities } from '../../../src/ne
 import type { QuakeWorldMessage } from '../../../src/network/q1/quakeworld.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
 import { QwClientNetwork } from '../../../src/app/bootstrap/network/qw-client.ts';
-import { quakeWorldMapChecksum2 } from '../../../src/app/bootstrap/network/remote-qw.ts';
+import { quakeWorldMapChecksum2 } from '../../../src/network/q1/checksum.ts';
 import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.ts';
 const profile = { kind: 'q1-quakeworld', version: 28 } satisfies QwServerData['protocol'];
 const data: QwServerData = { kind: 'server-data', protocol: profile, serverCount: 7, gameDirectory: 'id1', playerSlot: 3, spectator: false, level: 'Loopback', moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } };
