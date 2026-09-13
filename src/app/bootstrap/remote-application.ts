@@ -57,6 +57,7 @@ export class RemoteApplication {
   private frames = 0;
   private stopping = false;
   private closed = false;
+  private worldLoadGeneration = 0;
   private stepping = false;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
@@ -152,6 +153,7 @@ export class RemoteApplication {
 
   private releaseFrontend(frontend: RemoteWorldFrontend): void {
     frontend.audio.close(); frontend.effects.close(); frontend.art.close(); frontend.assets.close();
+    if (this.closed) return;
     this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
       commands: frontend.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
   }
@@ -164,6 +166,9 @@ export class RemoteApplication {
     return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) });
   }
   private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }): Promise<LoadedApplicationContent> {
+    const generation = ++this.worldLoadGeneration;
+    const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
+    assertCurrent();
     this.controls?.stopHaptics();
     const path = world.map;
     const map = mapResourcePath(path);
@@ -172,7 +177,11 @@ export class RemoteApplication {
     if (differentMap || this.remote.player !== null) {
       const options = { ...this.options, map }, content = differentMap ? await loadApplicationContent(options) : this.content;
       let frontend: RemoteWorldFrontend;
-      try { frontend = await this.loadFrontend(content); }
+      try {
+        assertCurrent();
+        frontend = await this.loadFrontend(content);
+        try { assertCurrent(); } catch (error) { this.releaseFrontend(frontend); throw error; }
+      }
       catch (error) { if (differentMap) await content.close(); throw error; }
       const previous = this.frontend, oldContent = this.content;
       this.session.closeWorld(); this.presentation = null;
@@ -189,15 +198,18 @@ export class RemoteApplication {
     const frontend = this.frontend;
     if (frontend === null) throw new Error("Remote frontend has not loaded");
     const provider = await frontend.assets.provider(this.content.recipe.map.entities.content);
+    assertCurrent();
     for (const model of world.models) {
       if (model === path || model.startsWith("#")) continue;
       const asset = await frontend.assets.model(this.content.recipe.map.entities.content, model);
+      assertCurrent();
       this.remote.registerResource(this.content.recipe.map.entities.content, model, asset.resource);
     }
     for (const sound of world.sounds) {
       if (sound.startsWith("*")) continue;
       const path = sound.startsWith("#") ? sound.slice(1) : `sound/${sound}`;
       const resource = await provider.mounts.resolve(path);
+      assertCurrent();
       if (resource === null) throw new Error(`Server sound is absent from mounted content: ${path}`);
       this.remote.registerResource(this.content.recipe.map.entities.content, path, resource);
     }
@@ -205,6 +217,7 @@ export class RemoteApplication {
       const path = image.startsWith("/") || image.startsWith("\\") ? image.slice(1) : `pics/${image}.pcx`;
       if (await provider.textures.load(path, { mipmap: false, wrap: "clamp" }) === null) throw new Error(`Server image is absent from mounted content: ${path}`);
     }
+    assertCurrent();
     this.commands = [];
     this.sourceEvents = [];
     this.print(`Loaded remote world ${map}.\n`);
@@ -332,7 +345,7 @@ export class RemoteApplication {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true; this.stopping = true;
+    this.closed = true; this.stopping = true; this.worldLoadGeneration++;
     const frontend = this.frontend; this.frontend = null;
     const errors: unknown[] = [];
     for (const close of [() => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),

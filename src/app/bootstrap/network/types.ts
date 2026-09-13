@@ -6,7 +6,7 @@ import type { WireAdmission, WireSelection } from '../../../network/common/sessi
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import type { EntityStateT, Q2ConnectRequest, Q2ServerMessageOptions, Q2ServerRecord, Q2ServerWriteEvent, Q2WireFrame, ServerDataParamsT, UsercmdT } from '../../../network/q2/index.ts';
 import type { SimulationPresentationAccess, SimulationPresentationEvent } from '../simulation/types.ts';
-import type { Q2ApplicationDownloads } from './q2-downloads.ts';
+import type { Q2ApplicationDownloads, Q2ApplicationClientDownloads } from './q2-downloads.ts';
 /** Input/render consumers never acquire authority to step a remote server. */
 export type RemotePresentationAccess = Pick<SimulationPresentationAccess, 'playerUi' | 'characterViews' | 'presentations' | 'registerResource' | 'playerView' | 'playerCommand'>;
 export type ApplicationNetworkPhase = 'challenging' | 'connecting' | 'loading' | 'active' | 'closed' | 'rejected';
@@ -65,6 +65,7 @@ export interface Q2ApplicationServerHost {
     print(text: string): void;
 }
 export interface Q2ApplicationClientHost {
+    readonly downloads?: Q2ApplicationClientDownloads;
     readonly protocol: Q2ProtocolIdentity;
     readonly messageOptions: Q2ServerMessageOptions;
     readonly userinfo: () => string;

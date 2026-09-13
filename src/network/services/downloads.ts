@@ -66,14 +66,16 @@ export class DownloadFile implements DownloadSource {
 }
 
 export interface DownloadExpectation { readonly digest: ContentDigest; readonly byteLength: number; }
+export interface ProtocolDownloadExpectation { readonly kind: "protocol-completion"; readonly maximumBytes: number; }
 export class DownloadSink {
   private readonly hash: Hash = createHash("sha256");
   private count = 0;
   private ended = false;
   private constructor(private readonly parent: number, private readonly descriptor: number, private readonly temporary: string,
-    private readonly target: string, readonly expected: DownloadExpectation) {}
-  static create(root: string, name: string, expected: DownloadExpectation): DownloadSink {
-    if (!Number.isSafeInteger(expected.byteLength) || expected.byteLength < 0) throw new RangeError("Invalid download size");
+    private readonly target: string, readonly expected: DownloadExpectation | ProtocolDownloadExpectation) {}
+  static create(root: string, name: string, expected: DownloadExpectation | ProtocolDownloadExpectation): DownloadSink {
+    const limit = "kind" in expected ? expected.maximumBytes : expected.byteLength;
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new RangeError("Invalid download size");
     const parent = openParent(root, name, true), temporary = `.download-${randomUUID()}`;
     try {
       const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${temporary}`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -83,7 +85,8 @@ export class DownloadSink {
   get byteLength(): number { return this.count; }
   append(bytes: Uint8Array): void {
     if (this.ended) throw new Error("Download sink is closed");
-    if (this.count + bytes.length > this.expected.byteLength) throw new RangeError("Download exceeds expected size");
+    const limit = "kind" in this.expected ? this.expected.maximumBytes : this.expected.byteLength;
+    if (this.count + bytes.length > limit) throw new RangeError("Download exceeds expected size");
     let written = 0;
     while (written < bytes.length) {
       const count = writeSync(this.descriptor, bytes, written, bytes.length - written);
@@ -95,9 +98,9 @@ export class DownloadSink {
   finish(): ContentDigest {
     if (this.ended) throw new Error("Download sink is closed");
     try {
-      if (this.count !== this.expected.byteLength) throw new Error("Download size differs from content identity");
+      if (!("kind" in this.expected) && this.count !== this.expected.byteLength) throw new Error("Download size differs from content identity");
       const digest = createContentDigest(this.hash.digest("hex"));
-      if (digest !== this.expected.digest) throw new Error("Download checksum differs from content identity");
+      if (!("kind" in this.expected) && digest !== this.expected.digest) throw new Error("Download checksum differs from content identity");
       // link fails if the destination exists, avoiding replacement of installed game assets.
       linkSync(`/proc/self/fd/${this.parent}/${this.temporary}`, `/proc/self/fd/${this.parent}/${this.target}`);
       return digest;

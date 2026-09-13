@@ -410,6 +410,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     private previous: UsercmdT = new UsercmdT();
     private oldest: UsercmdT = new UsercmdT();
     private pendingCommands: UsercmdT[] = [];
+    private pendingGameState: Q2ApplicationGameState | null = null;
     constructor(readonly options: Q2ClientNetworkOptions<TAddress>) {
         this.wire = { kind: 'source', protocol: options.host.protocol };
         this.reader = new Q2ServerMessageReader(options.host.protocol, options.host.messageOptions);
@@ -419,6 +420,21 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     get acknowledgedFrame(): number { return this.lastFrame; }
     command(text: string): void { const channel = this.channel; if (channel === null)
         throw new Error('Q2 client is not connected'); channel.queueReliable(encodeQ2ClientControl({ kind: 'command', text })); }
+    private cancelLoading(): void {
+        this.pendingGameState = null;
+        this.options.host.downloads?.close();
+    }
+    private async prepareGameState(): Promise<void> {
+        const state = this.pendingGameState;
+        if (state === null) return;
+        const preparation = await this.options.host.downloads?.prepare(state) ?? 'ready';
+        if (this.pendingGameState !== state || preparation !== 'ready') return;
+        await this.options.host.gameState(state);
+        if (this.pendingGameState !== state) return;
+        this.pendingGameState = null;
+        this.command(`begin ${state.data.servercount}`);
+        this.state = 'active';
+    }
     private async serverCommands(text: string): Promise<void> {
         for (const line of text.split(/\n|;/)) {
             const words = tokens(line), name = words[0];
@@ -428,11 +444,12 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 const data = this.serverData;
                 if (data === null || integer(words[1]) !== data.servercount)
                     throw new Error('Q2 precache refers to another server generation');
-                await this.options.host.gameState({ data, configStrings: new Map(this.reader.configStrings), baselines: new Map(this.reader.history().baselines) });
-                this.command(`begin ${data.servercount}`);
-                this.state = 'active';
+                this.cancelLoading();
+                this.pendingGameState = { data, configStrings: new Map(this.reader.configStrings), baselines: new Map(this.reader.history().baselines) };
+                await this.prepareGameState();
             }
             else if (name === 'changing') {
+                this.cancelLoading();
                 this.lastFrame = -1;
                 this.state = 'loading';
             }
@@ -444,6 +461,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
         for (const record of records) {
             switch (record.event.kind) {
                 case 'server-data':
+                    this.cancelLoading();
                     this.serverData = record.event.data;
                     this.lastFrame = -1;
                     this.previous = new UsercmdT();
@@ -460,16 +478,21 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                         this.options.host.frame(record.event.frame, records, now);
                     break;
                 case 'disconnect':
+                    this.cancelLoading();
                     this.state = 'closed';
                     this.options.host.disconnected('Server disconnected');
                     break;
                 case 'reconnect':
+                    this.cancelLoading();
                     this.lastFrame = -1;
                     this.state = 'loading';
                     this.command('new');
                     break;
                 case 'print':
                     this.options.host.print(record.event.text);
+                    break;
+                case 'download':
+                    if (this.options.host.downloads?.receive(record.event) === 'complete') await this.prepareGameState();
                     break;
                 default: break;
             }
@@ -523,6 +546,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             }
         }
         if (this.lastReceived !== null && nowMilliseconds - this.lastReceived > (this.options.timeoutMilliseconds ?? 120000)) {
+            this.cancelLoading();
             this.state = 'rejected';
             this.options.host.disconnected('Connection timed out');
         }
@@ -552,6 +576,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     }
     publish(_output: SimulationOutput, _events: readonly SimulationPresentationEvent[], _nowMilliseconds: number): void { throw new Error('Remote Q2 client cannot publish authoritative server state'); }
     close(): void {
+        this.cancelLoading();
         if (this.options.transport.closed)
             return;
         if (this.channel !== null && this.state !== 'closed') {

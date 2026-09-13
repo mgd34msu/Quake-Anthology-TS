@@ -17,6 +17,7 @@ import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentati
 import type { Q2ApplicationClientHost, Q2ApplicationGameState, Q2ApplicationPlayer, RemotePresentationAccess } from './types.ts';
 import { q2WeaponStatus } from "../simulation/arsenal/weapon-status.ts";
 import { q2ApplicationLayout } from './q2-layout.ts';
+import { Q2DownloadReceiver } from './q2-downloads.ts';
 import { q2EffectFromWire } from './q2-effects.ts';
 import { SelectedMovementPrediction } from '../simulation/prediction.ts';
 import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
@@ -40,6 +41,7 @@ function interpolateAngles(from: Vec3, to: Vec3, fraction: number): Vec3 {
 }
 /** Decoded source records are presentation state. This owner has no Simulation or combat table. */
 export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePresentationAccess {
+    readonly downloads: Q2DownloadReceiver;
     readonly client: SessionClient;
     readonly protocol: Q2ProtocolIdentity;
     readonly messageOptions;
@@ -82,6 +84,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
         this.userinfo = options.userinfo;
         this.content = options.content;
+        this.downloads = new Q2DownloadReceiver(() => this.content, options.sendCommand, options.print);
         this.collision = createSceneQueries(options.content.world);
         this.client = options.session.createClient(0);
         this.client.connect('remote');
@@ -108,16 +111,20 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         return actor;
     }
     async gameState(state: Q2ApplicationGameState): Promise<void> {
-        if (this.options.loadContent !== undefined)
-            this.content = await this.options.loadContent(state);
+        const revision = this.downloads.revision;
+        const content = this.options.loadContent === undefined ? this.content : await this.options.loadContent(state);
+        if (revision !== this.downloads.revision) return;
         const path = state.configStrings.get(this.layout.models + 1);
-        if (path !== this.content.recipe.map.geometry.requestedPath)
+        if (path !== content.recipe.map.geometry.requestedPath)
             throw new Error(`Q2 server map ${path ?? '<missing>'} requires application content replacement`);
         const checksum = state.configStrings.get(this.layout.mapChecksum);
-        if (checksum === undefined || (Number(checksum) >>> 0) !== blockChecksum(await this.content.mounts.read(this.content.recipe.map.geometry)))
+        const mapBytes = await content.mounts.read(content.recipe.map.geometry);
+        if (revision !== this.downloads.revision) return;
+        if (checksum === undefined || (Number(checksum) >>> 0) !== blockChecksum(mapBytes))
             throw new Error('Q2 server map checksum differs from mounted content');
         if (state.data.clientnum < 0)
             throw new Error('Q2 remote multi-seat/cinematic serverdata requires its source presentation binding');
+        this.content = content;
         this.generation++;
         this.actors.clear();
         this.configs.clear();
