@@ -517,7 +517,7 @@ export class Application {
         const player = this.simulation.admitPlayer(client.id);
         players.push({ seat, actor: player.actor });
       }
-      input = await ApplicationInput.open(renderer.window, players, this.options, this.simulation,
+      input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig);
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));
       audio.bindHaptics(input);
@@ -679,11 +679,11 @@ export class Application {
         previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames,
           commands: previous.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
         let input = previous.input;
-        if (movementDialect(previous.input.options) !== movementDialect(options) || previous.input.commands.dialect !== this.sourceDialect()) {
+        if (previous.input.dialect !== movementDialect(options, simulation.recipe) || previous.input.commands.dialect !== this.sourceDialect()) {
           await this.capture?.close(); this.capture = null;
           await previous.input.saveSettings();
           previous.input.close();
-          input = await ApplicationInput.open(previous.renderer.window, players, options, simulation,
+          input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
             this.inputActions(), () => performance.now(), this.inputConfig);
           nextInput = input;
           this.capture = new ApplicationCapture(input, previous.renderer, applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));

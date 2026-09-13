@@ -40,7 +40,7 @@ import { loadApplicationContent } from "./content.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
-import { ApplicationInput } from "./input.ts";
+import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommandOwner, LocalPlayer } from "./input.ts";
 import { readMenuArt } from "./menu-art.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
@@ -480,7 +480,7 @@ export class RemoteApplication {
     if (player === null || (connection === undefined && this.remote.output === null) || frontend === null || this.presentation !== null) return;
     if (this.controls === null) {
       const seat = this.session.createSeat(0, this.remote.client);
-      const controls = await ApplicationInput.open(this.window, [{ seat, actor: player.actor }], this.options, this.remote,
+      const controls = await ApplicationInput.open(this.window, [{ seat, actor: player.actor }], this.options, movementDialect(this.options), this.remote,
         { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
           clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
           clientInput: event => {

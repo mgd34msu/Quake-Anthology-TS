@@ -2,7 +2,7 @@ import { ConfigStore } from "../../settings/config.ts";
 import type { SeatSettings } from "../../settings/config.ts";
 import { ControllerSettings } from "./controller-settings.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
-import type { ContentId, ResourceRequest } from "../../contracts/content.ts";
+import type { ContentId, ExecutableRecipe, ResourceRequest } from "../../contracts/content.ts";
 import type { AudioAudience } from "../../audio/types.ts";
 import { SeatHaptics } from "../../input/haptics.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
@@ -65,7 +65,12 @@ export interface ApplicationInputUi {
 
 export interface Q3CommandSelection { readonly weapon: number; readonly sensitivity: number; }
 
-export function movementDialect(options: Pick<ApplicationOptions, "movement"> & Partial<Pick<ApplicationOptions, "network">>): CommandDialect {
+export function movementDialect(options: Pick<ApplicationOptions, "movement"> & Partial<Pick<ApplicationOptions, "network">>, recipe?: ExecutableRecipe): CommandDialect {
+  if (recipe !== undefined) {
+    const timing = recipe.timing.find(profile => profile.provider === recipe.movement.provider);
+    if (timing === undefined) throw new Error(`Recipe has no timing for ${recipe.movement.provider}`);
+    return timing.clock.kind;
+  }
   return options.network?.kind === "qw-client" ? "q1-quakeworld" : options.movement === "q1" ? "q1-netquake" : options.movement === "q2" ? "q2-classic" : "q3";
 }
 
@@ -90,23 +95,22 @@ export class ApplicationInput {
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
 
-  static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions,
+  static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions, dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
     now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner): Promise<ApplicationInput> {
     const saved = await Promise.all(players.map((_, index) => settings.loadSeat(`input/seat-${index + 1}.json`)));
     const routing = await settings.loadInputRouting("input/routing.json");
-    const input = new ApplicationInput(window, players, options, simulation, actions, now, settings, saved, routing, owner);
+    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, owner);
     try { await input.controllerSettings.settle(); return input; }
     catch (error) { input.close(); throw error; }
   }
 
-  private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions,
+  private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
     private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
     routing: { readonly keyboardSeat: number | null } | null, owner?: ApplicationInputCommandOwner) {
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
-    const dialect = movementDialect(options);
     const context: CommandContext = { session: first.actor.session, origin: { kind: "local-console" } };
     const print = (text: string): void => {
       actions.print(text);
@@ -223,7 +227,7 @@ export class ApplicationInput {
   }
 
   build(elapsedMilliseconds: number, serverMilliseconds: number, serverFrame: number): readonly ActorCommand[] {
-    const dialect = movementDialect(this.options);
+    const dialect = this.dialect;
     const frame: UserCommandFrame = dialect === "q1-netquake" ? { kind: "q1-netquake", acknowledgedServerTimeSeconds: serverMilliseconds / 1000 }
       : dialect === "q2-classic" ? { kind: "q2-classic", deltaAngles: { x: 0, y: 0, z: 0 }, lightLevel: 128, attackAllowed: true }
       : dialect === "q2-rerelease" ? { kind: "q2-rerelease", deltaAngles: { x: 0, y: 0, z: 0 }, serverFrame, attackAllowed: true }
