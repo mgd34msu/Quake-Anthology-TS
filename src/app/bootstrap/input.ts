@@ -27,6 +27,8 @@ import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
+import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
+import { InputButton } from "../../input/buttons.ts";
 
 export interface LocalPlayer {
   readonly seat: SessionSeat;
@@ -42,6 +44,7 @@ export interface LocalInput {
 }
 
 export interface ApplicationInputCommands {
+  bindingCapabilities?(): BindingCapabilities;
   readonly sharedCvars?: CvarRegistry;
   quit(): undefined;
   execute(name: string, arguments_: readonly string[], seat: SeatId | null): undefined;
@@ -80,6 +83,11 @@ export interface ApplicationInputCommandOwner {
 }
 
 export class ApplicationInput {
+  get bindingCapabilities(): BindingCapabilities {
+    return this.actions.bindingCapabilities?.() ?? { chat: this.options.network.kind.endsWith("-client"),
+      scoreCommand: this.options.network.kind === "q2-client" ? "score" : this.options.network.kind === "q3-client" ? "+scores" : null,
+      offhandGrapple: false, offhandGrenades: false };
+  }
   get sharedCvars(): CvarRegistry | null { return this.actions.sharedCvars ?? null; }
   readonly commands: CommandBuffer;
   readonly cvars: CvarRegistry;
@@ -92,6 +100,7 @@ export class ApplicationInput {
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
   private readonly q3Selections = new Map<SeatId, Q3CommandSelection>();
   private readonly arsenalSelections = new Map<SeatId, Pick<ArsenalIntent, "provider" | "weapon">>();
+  private readonly offhandButtons = new Map<SeatId, { readonly grapple: InputButton; readonly grenade: InputButton }>();
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
 
@@ -176,6 +185,31 @@ export class ApplicationInput {
       const local = origin.kind === "local-seat" ? locals.find(local => local.player.seat.id.equals(origin.seat)) : locals[0];
       local?.console.toggle(); return undefined;
     });
+    for (const name of ["messagemode", "messagemode2"]) this.commands.register(name, invocation => {
+      let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
+      if (origin.kind === "local-seat" && this.bindingCapabilities.chat) {
+        const seat = origin.seat;
+        locals.find(local => local.player.seat.id.equals(seat))?.console.message(name === "messagemode2");
+      }
+      return undefined;
+    });
+    for (const name of ["+grapple", "-grapple", "+grenade", "-grenade"]) this.commands.register(name, invocation => {
+      let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
+      if (origin.kind !== "local-seat") return undefined;
+      const capabilities = this.bindingCapabilities;
+      if (!(name.endsWith("grapple") ? capabilities.offhandGrapple : capabilities.offhandGrenades)) {
+        if (name.startsWith("+")) print("This session has no selected offhand action.\n");
+        return undefined;
+      }
+      let buttons = this.offhandButtons.get(origin.seat);
+      if (buttons === undefined) { buttons = { grapple: new InputButton(), grenade: new InputButton() }; this.offhandButtons.set(origin.seat, buttons); }
+      const button = name.endsWith("grapple") ? buttons.grapple : buttons.grenade, active = button.active;
+      const key = invocation.args[0] ?? "console", time = this.now();
+      if (name.startsWith("+")) button.down(key, time);
+      else if (invocation.args[0] === undefined) button.release(time);
+      else button.up(key, time);
+      return active === button.active ? undefined : actions.execute(name, [], origin.seat);
+    });
     for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) this.commands.register(name, invocation => {
       let origin = invocation.source.origin;
       while (origin.kind === "script") origin = origin.caller;
@@ -195,6 +229,7 @@ export class ApplicationInput {
   }
 
   pump(): void {
+    this.releaseOffhand(false);
     this.synchronizeClientFocus();
     for (const event of this.window.pollEvents()) {
       if (event.kind === "window" && event.event === 13) this.stopHaptics();
@@ -207,6 +242,18 @@ export class ApplicationInput {
     for (const local of this.locals) {
       local.haptics.setActive(local.input.focused && local.input.focus.kind === "game");
       local.haptics.update();
+    }
+  }
+
+  private releaseOffhand(all: boolean): void {
+    for (const local of this.locals) {
+      if (!all && local.input.focused && local.input.focus.kind === "game") continue;
+      const buttons = this.offhandButtons.get(local.player.seat.id);
+      if (buttons === undefined) continue;
+      for (const name of ["grapple", "grenade"] satisfies readonly ("grapple" | "grenade")[]) {
+        if (!buttons[name].active) continue;
+        buttons[name].release(this.now()); this.actions.execute(`-${name}`, [], local.player.seat.id);
+      }
     }
   }
 
@@ -301,6 +348,7 @@ export class ApplicationInput {
   }
 
   rebindPlayers(players: readonly LocalPlayer[], simulation: Pick<SimulationPresentationAccess, "playerView">): void {
+    this.releaseOffhand(true);
     if (players.length !== this.locals.length) throw new Error("World travel changed the local seat count");
     for (const local of this.locals) {
       const player = players.find(player => player.seat.id.equals(local.player.seat.id));
@@ -331,6 +379,7 @@ export class ApplicationInput {
   }
 
   close(): undefined {
+    this.releaseOffhand(true);
     this.controllerSettings.close();
     for (const local of this.locals) local.haptics.close();
     this.router.close();

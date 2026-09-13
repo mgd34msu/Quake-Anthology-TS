@@ -17,6 +17,7 @@ import type { NativeUiArt } from "../../ui/common/index.ts";
 import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
 import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
+import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 import type { SettingBinding, SettingsMenus } from "../../ui/settings/index.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
@@ -107,10 +108,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: this.wheelIcons.get(item.id) ?? null, selectedIcon: this.wheelIcons.get(item.id) ?? null })),
       activeItem: () => simulation.playerUi(local.player.actor).activeWeapon,
       select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
-    const keys: readonly (readonly [string, string])[] = [["Move forward", "+forward"], ["Move back", "+back"], ["Strafe left", "+moveleft"],
-      ["Strafe right", "+moveright"], ["Jump", local.builder.dialect.startsWith("q1") ? "+jump" : "+moveup"], ["Attack", "+attack"], ["Weapon wheel", "+weaponwheel"]];
+    const bindingItems = simulation.playerUi(local.player.actor).items;
     this.bindings = registerBindingMenus(this.controller, local.input,
-      keys.map(([label, text], index) => ({ id: String(index), label, target: { kind: "command", text } })));
+      () => sharedBindingActions(local.builder.dialect, bindingItems, input.bindingCapabilities));
     const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),

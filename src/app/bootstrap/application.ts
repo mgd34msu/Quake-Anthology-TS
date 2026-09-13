@@ -264,6 +264,10 @@ export class Application {
 
   private inputActions(): ApplicationInputCommands {
     return { quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
+      bindingCapabilities: () => ({ chat: this.simulation.q2Source() !== null || this.simulation.q3Source() !== null,
+        scoreCommand: this.simulation.q2Source() !== null ? "score" : this.simulation.q3Source() !== null ? "+scores" : null,
+        offhandGrapple: this.simulation.recipe.equipment.grapple.kind === "enabled" && this.simulation.recipe.equipment.grapple.binding === "offhand",
+        offhandGrenades: this.simulation.recipe.equipment.handGrenades.kind === "enabled" }),
       ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
       console: { dialect: () => this.sourceDialect(), server: () => {
         const source = this.simulation.q3Source();
@@ -844,6 +848,17 @@ export class Application {
     this.requestedCommands = [];
     for (const command of pending) {
       try {
+        if (["+grapple", "-grapple", "+grenade", "-grenade"].includes(command.name)) {
+          if (command.seat === null) throw new Error("Offhand commands require an invoking local seat");
+          const actor = this.commandActor(command.seat), held = command.name.startsWith("+");
+          const equipment = this.simulation.recipe.equipment;
+          const available = command.name.endsWith("grapple") ? equipment.grapple.kind === "enabled" && equipment.grapple.binding === "offhand"
+            : equipment.handGrenades.kind === "enabled";
+          if (!available) { if (held) throw new Error("No selected offhand action is available"); continue; }
+          if (command.name.endsWith("grapple")) this.simulation.setGrappleInput(actor, held);
+          else this.simulation.setHandGrenadeInput(actor, held);
+          continue;
+        }
         if (applicationAudioCommands.includes(command.name)) {
           const graphical = this.graphical;
           if (graphical === null) throw new Error("Sound system is not started");

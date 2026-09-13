@@ -19,31 +19,42 @@ function sameTarget(a: InputBindingTarget, b: InputBindingTarget): boolean {
     : a.kind === "command" && b.kind === "command" && a.text === b.text;
 }
 /** Each capture replaces that action's binding in the selected device family. */
-export function registerBindingMenus(controller: NativeUiController, input: SeatInput, actions: readonly BindingAction[]): { readonly root: UiMenuId; dispose(): void } {
+export function registerBindingMenus(controller: NativeUiController, input: SeatInput, source: readonly BindingAction[] | (() => readonly BindingAction[])): { readonly root: UiMenuId; dispose(): void } {
   if (!controller.seat.equals(input.seat)) throw new Error("Binding menu belongs to another input seat");
   const root: UiMenuId = "menu:bindings:0", unregister: (() => void)[] = [];
-  const pages = Math.max(1, Math.ceil(actions.length / 9));
-  for (let page = 0; page < pages; page++) {
+  const registered = new Set<number>();
+  const registerPage = (page: number): void => {
+    if (registered.has(page)) return;
+    registered.add(page);
     const id: UiMenuId = `menu:bindings:${page}`;
     unregister.push(controller.register(id, () => {
-      const controls = actions.slice(page * 9, page * 9 + 9).map((action, index): UiControl => ({
+      const actions = typeof source === "function" ? source() : source;
+      const pages = Math.max(1, Math.ceil(actions.length / 9));
+      const controls: UiControl[] = [];
+      for (const [index, action] of actions.slice(page * 9, page * 9 + 9).entries()) {
+        controls.push({
         id: `ui:bindings:${action.id}`, kind: "button", label: `${action.label}: ${input.bindings.filter(binding => sameTarget(binding.target, action.target)).map(binding => physicalInputLabel(binding.input)).join(", ") || "Unbound"}`,
-        rect: menuRow(index), enabled: true, visible: true,
+        rect: menuRow(index, { x: 48, width: 464 }), enabled: true, visible: true,
         activate: () => {
           controller.captureBinding(physical => {
             for (const binding of input.bindings) if (sameTarget(binding.target, action.target) && binding.input.kind === physical.kind) input.unbind(binding.input);
             input.bind({ input: physical, target: action.target });
           }, () => undefined); return undefined;
         },
-      }));
+        });
+        controls.push({ id: `ui:bindings:clear:${action.id}`, kind: "button", label: "Clear",
+          rect: menuRow(index, { x: 520, width: 80 }), enabled: input.bindings.some(binding => sameTarget(binding.target, action.target)), visible: true,
+          activate: () => { for (const binding of input.bindings) if (sameTarget(binding.target, action.target)) input.unbind(binding.input); return undefined; } });
+      }
       for (const direction of [-1, 1]) if (page + direction >= 0 && page + direction < pages) controls.push({
         id: `ui:bindings:page:${direction}`, kind: "button", label: direction < 0 ? "Previous page" : "Next page",
         rect: menuRow(10, { x: direction < 0 ? 64 : 336, width: 240 }), enabled: true, visible: true,
-        activate: () => { controller.closeMenu(); return controller.openMenu(`menu:bindings:${page + direction}`); },
+        activate: () => { registerPage(page + direction); controller.closeMenu(); return controller.openMenu(`menu:bindings:${page + direction}`); },
       });
       controls.push({ id: "ui:bindings:back", kind: "button", label: "Back", rect: menuRow(11), enabled: true, visible: true, activate: () => controller.closeMenu() });
-      return { id, title: "Key and controller bindings", fullScreen: false, controls, open: () => undefined, close: () => undefined };
+      return { id, title: `Bindings (${page + 1}/${pages})`, fullScreen: false, controls, open: () => undefined, close: () => undefined };
     }));
-  }
+  };
+  registerPage(0);
   return { root, dispose() { for (const dispose of unregister.reverse()) dispose(); } };
 }
