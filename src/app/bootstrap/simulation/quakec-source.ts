@@ -48,6 +48,20 @@ import type { SimulationEvents } from "./events.ts";
 import type { SourceRandom } from "./random.ts";
 
 type QuakeCExecution = Extract<ExecutableRecipe["execution"][number], { readonly kind: "quakec" }>;
+interface NativeWeapon {
+  readonly item: ItemId;
+  readonly bit: number;
+  readonly impulse: number;
+  readonly via?: number;
+}
+function nativeWeapons(program: QcProgram): readonly NativeWeapon[] {
+  const base = WEAPONS.map((weapon, index) => ({ item: weaponItem(weapon), bit: index === 0 ? 4096 : 1 << (index - 1), impulse: index + 1 }));
+  if (program.digest !== "sha256:35a2fdc3acb04bdafe8d0269f5327cd1d5b47971f1ef024429f1572d3201dc82") return base;
+  // This artifact's W_ChangeWeapon uses 225/226 and toggles grenade/proximity with impulse 6.
+  return [...base, { item: weaponItem("hipnotic:laser"), bit: 8388608, impulse: 225 },
+    { item: weaponItem("hipnotic:mjolnir"), bit: 128, impulse: 226 },
+    { item: weaponItem("hipnotic:proximity"), bit: 65536, impulse: 6, via: 16 }];
+}
 export interface PreparedQuakeCSource {
   readonly execution: QuakeCExecution;
   readonly program: QcProgram;
@@ -129,6 +143,8 @@ export class QuakeCSource {
   private currentTime: number;
   private changeLevelIssued = false;
   private readonly activeClients = new Set<ActorId>();
+  private readonly weapons: readonly NativeWeapon[];
+  private readonly pendingWeapons = new Map<ActorId, { readonly weapon: NativeWeapon; readonly following: boolean }>();
   private readonly userInfo = new Map<number, ReadonlyMap<string, string>>();
   private readonly spawnParameters = new Map<number, readonly number[]>();
   private readonly clientIdentities = new Map<number, ClientId>();
@@ -144,6 +160,7 @@ export class QuakeCSource {
   private soundCount = 1;
   constructor(readonly prepared: PreparedQuakeCSource, readonly options: QuakeCSourceOptions) {
     const binding = id1ProgramBinding(prepared.program);
+    this.weapons = nativeWeapons(prepared.program);
     if (!options.recipe.execution.some(value => value.kind === "quakec" && value.owner.provider === prepared.execution.owner.provider
       && value.owner.content === prepared.execution.owner.content && value.artifact.digest === prepared.execution.artifact.digest)) throw new Error("QC source differs from selected execution");
     if (!Number.isFinite(options.initialSourceTimeSeconds) || options.initialSourceTimeSeconds < 0 || !Number.isSafeInteger(options.maxClients) || options.maxClients < 1 || options.maxClients >= 2048)
@@ -151,7 +168,7 @@ export class QuakeCSource {
     this.currentTime = options.initialSourceTimeSeconds;
     if (binding.kind === "quakeworld" && options.maxClients > 32) throw new Error("Native QuakeWorld supports at most 32 clients");
     this.reservedClientSlots = binding.kind === "quakeworld" ? 32 : options.maxClients;
-    options.actors.onRelease(actor => { this.activeClients.delete(actor.id); return undefined; });
+    options.actors.onRelease(actor => { this.activeClients.delete(actor.id); this.pendingWeapons.delete(actor.id); return undefined; });
     this.entities = new QcEntityMemory(classicQcEntityLayout(prepared.program), binding.kind === "quakeworld" ? 768 : 2048, this.reservedClientSlots + 1);
     this.slots = new SourceActorSlots(options.actors, { provider: prepared.execution.owner.provider, capacity: this.entities.capacity,
       lifetime: quakeEdictLifetime(this.reservedClientSlots + 1), storage: createQcSourceSlotStorage({ program: prepared.program, entities: this.entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: binding.kind === "quakeworld" ? 100 : 92 }),
@@ -343,12 +360,13 @@ export class QuakeCSource {
     if (slot === null || !this.isReservedClient(actor.id)) throw new Error("QC disconnect requires a reserved client");
     if (this.activeClients.has(actor.id)) this.invoke(this.prepared.program.functionNamed("ClientDisconnect").index, slot, 0, this.currentTime);
     this.activeClients.delete(actor.id);
+    this.pendingWeapons.delete(actor.id);
     this.preparedClients.delete(slot); this.spawnParameters.delete(slot); this.userInfo.delete(slot); this.clientIdentities.delete(slot);
     return undefined;
   }
   private bindClientInventory(actor: OwnedActor, slot: number): undefined {
     const words = this.entities.at(slot), itemOffset = this.field("items");
-    const weapons = WEAPONS.map((weapon, index) => ({ item: weaponItem(weapon), bit: index === 0 ? 4096 : 1 << (index - 1) }));
+    const weapons = this.weapons;
     const ammo: readonly { readonly item: ItemId; readonly field: string; readonly capacity: number }[] = [
       { item: "q1:ammo/shells", field: "ammo_shells", capacity: 100 }, { item: "q1:ammo/nails", field: "ammo_nails", capacity: 200 },
       { item: "q1:ammo/rockets", field: "ammo_rockets", capacity: 100 }, { item: "q1:ammo/cells", field: "ammo_cells", capacity: 100 },
@@ -371,7 +389,7 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     words.setVector(this.field("v_angle"), command.viewAngles);
     words.setFloat(this.field("button0"), command.buttons & 1); words.setFloat(this.field("button2"), (command.buttons >> 1) & 1);
-    if (command.impulse !== 0) words.setFloat(this.field("impulse"), command.impulse);
+    if (command.impulse !== 0) { this.pendingWeapons.delete(actor); words.setFloat(this.field("impulse"), command.impulse); }
     return undefined;
   }
   readQuakeWorldState(actor: ActorId, state: QwMovementState): QwMovementState {
@@ -463,9 +481,14 @@ export class QuakeCSource {
     return words.vector(this.field("angles"));
   }
   requestClientWeapon(actor: ActorId, item: ItemId): boolean {
-    const slot = this.sourceSlot(actor), index = WEAPONS.findIndex(weapon => weaponItem(weapon) === item);
-    if (slot === null || index < 0 || this.options.inventory.count(actor, item) <= 0) return false;
-    this.entities.at(slot).setFloat(this.field("impulse"), index + 1);
+    const slot = this.sourceSlot(actor), weapon = this.weapons.find(weapon => weapon.item === item);
+    if (slot === null || weapon === undefined || this.options.inventory.count(actor, item) <= 0) return false;
+    const words = this.entities.at(slot), current = words.float(this.field("weapon"));
+    this.pendingWeapons.delete(actor);
+    if (current === weapon.bit) { words.setFloat(this.field("impulse"), 0); return true; }
+    if (weapon.via !== undefined && current !== weapon.via && (Math.trunc(words.float(this.field("items"))) & weapon.via) !== 0)
+      this.pendingWeapons.set(actor, { weapon, following: false });
+    words.setFloat(this.field("impulse"), weapon.impulse);
     return true;
   }
   clientPreThink(actor: OwnedActor): undefined {
@@ -475,15 +498,28 @@ export class QuakeCSource {
   }
   clientPostThink(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id); if (slot === null) return undefined;
-    return this.invoke(this.prepared.program.functionNamed("PlayerPostThink").index, slot, 0, this.currentTime);
+    const words = this.entities.at(slot), pending = this.pendingWeapons.get(actor.id), impulse = words.float(this.field("impulse"));
+    if (pending !== undefined && (this.options.inventory.count(actor.id, pending.weapon.item) <= 0 || words.float(this.field("health")) <= 0)) {
+      this.pendingWeapons.delete(actor.id);
+      if (impulse === pending.weapon.impulse) words.setFloat(this.field("impulse"), 0);
+    } else if (pending !== undefined && impulse !== 0 && impulse !== pending.weapon.impulse) this.pendingWeapons.delete(actor.id);
+    this.invoke(this.prepared.program.functionNamed("PlayerPostThink").index, slot, 0, this.currentTime);
+    const selection = this.pendingWeapons.get(actor.id);
+    if (selection !== undefined && words.float(this.field("impulse")) === 0) {
+      this.pendingWeapons.delete(actor.id);
+      if (!selection.following && words.float(this.field("weapon")) === selection.weapon.via && this.options.inventory.count(actor.id, selection.weapon.item) > 0) {
+        this.pendingWeapons.set(actor.id, { weapon: selection.weapon, following: true });
+        words.setFloat(this.field("impulse"), selection.weapon.impulse);
+      }
+    }
+    return undefined;
   }
   clientArsenal(actor: ActorId): ArsenalState {
     const slot = this.sourceSlot(actor); if (slot === null) throw new Error("Missing QC arsenal actor");
     const words = this.entities.at(slot), value = words.float(this.field("weapon"));
-    const index = value === 4096 ? 0 : WEAPONS.findIndex((_weapon, index) => index > 0 && 1 << (index - 1) === value);
-    const weapon = WEAPONS[index];
+    const weapon = this.weapons.find(weapon => weapon.bit === value);
     if (weapon === undefined) throw new Error(`Unsupported actual QC weapon ${value}`);
-    return { provider: this.prepared.execution.owner.provider, activeWeapon: weaponItem(weapon), ammo: this.options.inventory.entries(actor),
+    return { provider: this.prepared.execution.owner.provider, activeWeapon: weapon.item, ammo: this.options.inventory.entries(actor),
       state: { kind: "q1", sourceWeapon: value, frame: words.float(this.field("weaponframe")), attackFinishedSeconds: words.float(this.field("attack_finished")) } };
   }
   clientAnimation(actor: ActorId): ActorAnimationState {

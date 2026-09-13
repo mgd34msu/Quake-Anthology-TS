@@ -6,8 +6,9 @@ import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { applicationPreset, loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
+import type { ItemId } from "../../src/contracts/gameplay.ts";
 
-test("normal dedicated Hipnotic launch executes its authored start, client and stock weapon in the shared world", async () => {
+test("explicit Hipnotic executes native weapons and authored travel through the shared world", async () => {
   const root = await mkdtemp(join(tmpdir(), "hipnotic-application-"));
   let application: Application | null = null;
   try {
@@ -44,10 +45,8 @@ test("normal dedicated Hipnotic launch executes its authored start, client and s
     for (const name of ["SetNewParms", "ClientConnect", "PutClientInServer"])
       expect(vm.profiling[vm.program.functionNamed(name).index]).toBeGreaterThan(0);
     expect(source.clientArsenal(player.actor).activeWeapon).toBe("q1:weapon/shotgun");
-    for (const weapon of [128, 65536, 8388608]) {
-      words.setFloat(field("weapon"), weapon);
-      expect(() => source.clientArsenal(player.actor)).toThrow(`Unsupported actual QC weapon ${weapon}`);
-    }
+    words.setFloat(field("weapon"), 999);
+    expect(() => source.clientArsenal(player.actor)).toThrow("Unsupported actual QC weapon 999");
     words.setFloat(field("weapon"), 1);
     const shells = words.float(field("ammo_shells"));
     for (let tick = 0; tick < 12; tick++) app.session.step({ elapsedMilliseconds: 100, commands: [{ actor: player.actor,
@@ -57,6 +56,56 @@ test("normal dedicated Hipnotic launch executes its authored start, client and s
     expect(words.float(field("ammo_shells"))).toBeLessThan(shells);
     expect(vm.profiling[vm.program.functionNamed("W_FireShotgun").index]).toBeGreaterThan(0);
     expect(simulation.inventory.count(player.actor, "q1:ammo/shells")).toBe(words.float(field("ammo_shells")));
+    const owner = simulation.actors.resolveOwned(player.actor);
+    if (owner === null) throw new Error("Missing native inventory owner");
+    simulation.inventory.give(owner, "q1:ammo/cells", 100);
+    simulation.inventory.give(owner, "q1:ammo/rockets", 100);
+    simulation.inventory.give(owner, "q1:weapon/grenadelauncher", 1);
+    words.setFloat(field("health"), 10000);
+    let sequence = 20;
+    const advance = (buttons: number, impulse = 0) => app.session.step({ elapsedMilliseconds: 100, commands: [{ actor: player.actor,
+      source: { kind: "remote-client", client: client.id }, sequence: sequence++,
+      command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: source.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 },
+        forwardMove: 0, sideMove: 0, upMove: 0, buttons, impulse } }] });
+    const cases: readonly { readonly item: ItemId; readonly bit: number; readonly ammo: "ammo_cells" | "ammo_rockets"; readonly attack: string }[] = [
+      { item: "q1:weapon/hipnotic:laser", bit: 8388608, ammo: "ammo_cells", attack: "HIP_FireLaser" },
+      { item: "q1:weapon/hipnotic:mjolnir", bit: 128, ammo: "ammo_cells", attack: "HIP_FireMjolnir" },
+      { item: "q1:weapon/hipnotic:proximity", bit: 65536, ammo: "ammo_rockets", attack: "W_FireProximityGrenade" },
+    ];
+    for (const weapon of cases) {
+      expect(simulation.inventory.give(owner, weapon.item, 1)).toBe(1);
+      expect(Math.trunc(words.float(field("items"))) & weapon.bit).toBe(weapon.bit);
+      expect(simulation.requestWeapon(player.actor, { provider: source.prepared.execution.owner.provider, item: weapon.item })).toBe(true);
+      for (let tick = 0; tick < 15 && words.float(field("weapon")) !== weapon.bit; tick++) advance(0);
+      expect(source.clientArsenal(player.actor).activeWeapon).toBe(weapon.item);
+      const beforeAmmo = words.float(field(weapon.ammo)), attack = vm.program.functionNamed(weapon.attack).index, beforeCalls = vm.profiling[attack] ?? 0;
+      const actorsBefore = simulation.actors.observations().length;
+      let spawned = false;
+      for (let tick = 0; tick < 12; tick++) { advance(1); spawned ||= simulation.actors.observations().length > actorsBefore; }
+      expect(vm.profiling[attack]).toBeGreaterThan(beforeCalls);
+      if (weapon.bit !== 128) expect(spawned).toBe(true);
+      else expect(vm.profiling[vm.program.functionNamed("HIP_FireMjolnirLightning").index]).toBeGreaterThan(0);
+      expect(words.float(field(weapon.ammo))).toBeLessThan(beforeAmmo);
+      expect(simulation.inventory.count(player.actor, weapon.ammo === "ammo_cells" ? "q1:ammo/cells" : "q1:ammo/rockets")).toBe(words.float(field(weapon.ammo)));
+      for (let tick = 0; tick < 12; tick++) advance(0);
+    }
+    const request = (item: ItemId) => simulation.requestWeapon(player.actor, { provider: source.prepared.execution.owner.provider, item });
+    expect(request("q1:weapon/shotgun")).toBe(true); advance(0);
+    expect(request("q1:weapon/hipnotic:proximity")).toBe(true); advance(0);
+    expect(words.float(field("weapon"))).toBe(16); expect(words.float(field("impulse"))).toBe(6);
+    advance(0, 225); advance(0);
+    expect(source.clientArsenal(player.actor).activeWeapon).toBe("q1:weapon/hipnotic:laser");
+    expect(words.float(field("impulse"))).toBe(0);
+    expect(request("q1:weapon/shotgun")).toBe(true); advance(0);
+    expect(request("q1:weapon/hipnotic:proximity")).toBe(true); advance(0);
+    expect(simulation.inventory.consume(owner, "q1:weapon/hipnotic:proximity", 1)).toBe(true);
+    advance(0); advance(0);
+    expect(words.float(field("weapon"))).toBe(16); expect(words.float(field("impulse"))).toBe(0);
+    expect(simulation.inventory.give(owner, "q1:weapon/hipnotic:proximity", 1)).toBe(1);
+    expect(request("q1:weapon/hipnotic:proximity")).toBe(true); advance(0);
+    expect(source.clientArsenal(player.actor).activeWeapon).toBe("q1:weapon/hipnotic:proximity");
+    expect(request("q1:weapon/hipnotic:proximity")).toBe(true); advance(0);
+    expect(source.clientArsenal(player.actor).activeWeapon).toBe("q1:weapon/hipnotic:proximity");
     words.setFloat(field("armorvalue"), 60); words.setFloat(field("armortype"), 0.6);
     words.setFloat(field("items"), words.float(field("items")) | 16384);
     vm.globals.setFloat(vm.globalOffset("serverflags"), 1);
