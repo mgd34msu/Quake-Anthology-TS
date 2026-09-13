@@ -1,4 +1,6 @@
-# Project status at 98074c6e
+# Historical project status at 98074c6e
+
+This full report preserves the 2026-09-13 source snapshot at `98074c6e`, including its historical counts and installation claims. See [installed executable and recent fixes](execution-status.md#installed-executable-and-recent-fixes) for the newer verified installation and bounded checks. No new full requirement audit is claimed.
 
 **ENGINE NOT COMPLETE.** One Bun application and shared actor, body, collision, combat, inventory, session, rendering, and device ownership are implemented. The complete Q1/Q2/Q3 feature union, every required content combination, every native compatibility profile, and full campaign and presentation fidelity are not achieved.
 

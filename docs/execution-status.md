@@ -1,5 +1,23 @@
 # Execution status
 
+## Installed executable and recent fixes
+
+Verified installation on 2026-09-13 at `21:22:05.971Z`: `/home/buzzkill/Projects/qfiles/quake-typescript`, source `c9a3a455079a04764dfc8413e26d3ab592274e13`, tree `656cb0004a6b0d3681863b7614bfbcec0699502f`. The executable is 121,419,904 bytes with mode `0755` and SHA-256 `2951f8fc9c731f4d880ddad6aba35845231e382466eb37e23a5e44f07213f7b4`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+
+```sh
+/home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
+```
+
+This build includes run-loop yielding for actual HTTP and timers at `5795a79`, complete OAuth browser-response flushing at `a26b6b7`, quoted binding semicolons at `cee9970`, and the provider model picker and reasoning effort at `c9a3a45`. Q2 fix `df356aca` maps the `oldFrame=-1` sentinel to the current frame, avoiding a renderer reset to frame zero.
+
+Root checks exercised actual Q2 `base1`, Q1 movement, Q3 `sarge`, and Q2 arsenal/monsters, with 1 test and 38 assertions. A stationary GL infantry check visibly changed pose from frame 60 to 50 with a fixed camera. Combined LLM checks passed 52 tests and 227 assertions. Native CPU and GL menus selected and saved settings with fake providers. The compiled executable made two loopback HTTP requests under private Xvfb, answered a prompt, executed `sensitivity 4` and `echo`, and exited normally with code 0. Root inspected the image. Live ChatGPT account connectivity remains unverified.
+
+The original main-menu “Working” state was not reproduced. Independent Save completed, existing credentials were preserved, and the new UI separates model-catalog loading. The explicit QuakeC loader and deferred monster-damage work are outside this installed build. The engine remains incomplete; this update does not re-audit the 477 requirements or change their counts.
+
+## Historical execution records
+
+All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
+
 ## Accepted world-text controls, source movement and guest preparation
 
 Source cutoff: `e5e51456d04a911528da8b52af9a50b794738318`. Accepted `200493b6` joins live `gl_debug_distfrac` to common world-text culling; root passed CPU/GL two-seat checks, 6 tests/82 assertions. Accepted `ef4d34d1` joins the actual native DLL's two world-text imports to the common store, root 1/16. The other eight debug-shape imports remain open.
