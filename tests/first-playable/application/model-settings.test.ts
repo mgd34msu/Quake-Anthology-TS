@@ -124,22 +124,31 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
       for (const down of [true, false]) application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down, timeMilliseconds: performance.now() });
       await application.step(1);
     };
+    const focus = (id: string): void => {
+      for (let attempts = 0; attempts < 30; attempts++) {
+        const state = presentation.ui.controller.state().focus;
+        if (state.kind === "menu" && state.control === id) return;
+        key(KeyCode.Tab);
+      }
+      throw new Error(`Missing setting ${id}`);
+    };
+    const activate = async (id: string): Promise<void> => { focus(id); key(KeyCode.Enter); await application.step(1); };
     for (let i = 0; i < 4; i++) await application.step(25);
     await capture("enhanced"); expect(native.replacement?.model.kind).toBe("md5");
     expect([...gunImages].some(name => name.includes("v_shot") && name.endsWith(".lmp"))).toBe(true);
     await command("r_model_distance 1"); await capture("distance-original"); expect(gunImages.has("indexed-native")).toBe(true);
-    key(27); await application.step(1); await click(3); await click(0); await click(10, 450);
+    key(27); await application.step(1); await click(3); await activate("ui:settings:category:video"); await click(10, 450);
     expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:1");
-    await click(2, 540); key(KeyCode.End); key(KeyCode.Backspace);
+    focus("ui:settings:r_model_distance"); key(KeyCode.End); key(KeyCode.Backspace);
     for (const character of "source") { text(character); await application.step(1); expect(assets.modelPolicy.distance).toBe(1); }
     key(13); await application.step(1); expect(assets.modelPolicy.distance).toBe("source");
     await capture("page2");
     key(KeyCode.End); for (let i = 0; i < 6; i++) key(KeyCode.Backspace); text("12"); await application.step(1);
     key(27); await application.step(1); expect(assets.modelPolicy.distance).toBe("source");
-    await click(0); await click(10, 450); await capture("cancelled");
-    await click(10, 150); await click(8); expect(assets.modelPolicy.q1Enhanced).toBe(false); expect(native.replacement).toBeNull();
+    await activate("ui:settings:category:video"); await click(10, 450); await capture("cancelled");
+    await click(10, 150); await activate("ui:settings:r_enhancedmodels"); expect(assets.modelPolicy.q1Enhanced).toBe(false); expect(native.replacement).toBeNull();
     await capture("page1");
-    await click(8); expect(native.replacement?.model.kind).toBe("md5");
+    await activate("ui:settings:r_enhancedmodels"); expect(native.replacement?.model.kind).toBe("md5");
     await click(11); await click(11); await click(1); await capture("restored");
     expect([...gunImages].some(name => name.includes("v_shot") && name.endsWith(".lmp"))).toBe(true);
     expect(application.simulation).toBe(simulation); expect(local.seat.presentation).toBe(presentation);

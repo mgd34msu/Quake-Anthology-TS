@@ -20,7 +20,7 @@ export class NativeRenderer {
   private closed = false;
   private readonly captures: { readonly resolve: (pixels: Uint8Array) => void; readonly reject: (reason: Error) => void }[] = [];
 
-  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private readonly gamma: number) {
+  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private gamma: number) {
     this.current = backend;
   }
 
@@ -40,6 +40,8 @@ export class NativeRenderer {
   }
 
   get backend(): RendererBackend { return this.current; }
+  get outputGamma(): number { return this.gamma; }
+  setOutputGamma(gamma: number): void { this.current.setOutputGamma(gamma); this.gamma = gamma; }
 
   private resize(): void {
     if (!(this.current instanceof SoftwareRenderer)) return;

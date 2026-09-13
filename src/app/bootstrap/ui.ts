@@ -17,7 +17,7 @@ import type { NativeUiArt } from "../../ui/common/index.ts";
 import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
 import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
-import { bindWindowResolution } from "../../ui/settings/services.ts";
+import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 import type { SettingBinding, SettingsMenus } from "../../ui/settings/index.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
@@ -118,13 +118,13 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } },
       { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
         report: text => local.console.print(`${text}\n`) });
-    const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
+    const display = bindNativeVideoSettings(input.window, input.sharedCvars, message => local.console.print(`${message}\n`));
     const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
     const gyro = this.gyroSettings = registerGyroSettingsMenu(this.controller, input.controllerSettings.ui(local.input.seat));
-    this.settings = registerSettingsMenus(this.controller, [resolution, ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
+    this.settings = registerSettingsMenus(this.controller, [...display, ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
       write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });

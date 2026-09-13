@@ -177,7 +177,7 @@ export class Application {
       else {
         const frontend = application;
         application.imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
-          dialect: application.sourceDialect(), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
+          dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
             host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
           } });
         await application.openGraphical();
@@ -514,6 +514,7 @@ export class Application {
       const characters = this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
         { model: this.options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
       renderer = NativeRenderer.open(this.host.loading?.deferWindowVisibility ? { ...this.options, hidden: true } : this.options, owner);
+      await this.imageSettings?.refreshDisplay(renderer);
       const players: LocalPlayer[] = [];
       for (let index = 0; index < this.options.seats; index++) {
         const client = this.session.createClient(index);
@@ -1010,7 +1011,7 @@ export class Application {
       await this.commands();
       await this.sourceActions();
       const currentGraphics = this.graphical;
-      if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease);
+      if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       return output;
     } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
     finally { this.stepping = false; }

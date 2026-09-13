@@ -318,6 +318,7 @@ export interface SdlDisplay {
   readonly name: string;
   readonly count: number;
   readonly refreshRate: number;
+  readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 export type SdlGammaCapability =
   | { readonly kind: "api-accepted"; readonly displayIndex: number; readonly displayName: string }
@@ -589,6 +590,12 @@ export class SdlWindow {
     sdl().SDL_SetWindowSize(this.opened().window, width, height);
   }
 
+  get fullscreen(): boolean { return (this.flags & 1) !== 0; }
+  setFullscreen(enabled: boolean): void {
+    if (this.renderContextLease !== null) throw new Error("SDL render context is reserved for the worker");
+    checked(sdl().SDL_SetWindowFullscreen(this.opened().window, enabled ? 0x1001 : 0), "SDL_SetWindowFullscreen");
+  }
+
   retainProcedures(): () => void {
     this.makeCurrent();
     this.procedureLeases++;
@@ -606,7 +613,25 @@ export class SdlWindow {
     // SDL_DisplayMode has four 32-bit fields followed by a pointer; only refresh_rate is read.
     const mode = new Uint8Array(24);
     checked(api.SDL_GetCurrentDisplayMode(index, mode), "SDL_GetCurrentDisplayMode");
-    return { index, count, name: String(api.SDL_GetDisplayName(index)), refreshRate: new DataView(mode.buffer).getInt32(12, littleEndian) };
+    const bounds = new Int32Array(4);
+    checked(api.SDL_GetDisplayBounds(index, bounds), "SDL_GetDisplayBounds");
+    const [x, y, width, height] = bounds;
+    if (x === undefined || y === undefined || width === undefined || height === undefined || width <= 0 || height <= 0) throw new Error("SDL returned invalid display bounds");
+    return { index, count, name: String(api.SDL_GetDisplayName(index)), refreshRate: new DataView(mode.buffer).getInt32(12, littleEndian), bounds: { x, y, width, height } };
+  }
+
+  get displayModes(): readonly SdlDisplayMode[] {
+    const api = sdl(), index = this.display.index, count = api.SDL_GetNumDisplayModes(index), modes: SdlDisplayMode[] = [];
+    checked(count, "SDL_GetNumDisplayModes");
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const bytes = new Uint8Array(24);
+      checked(api.SDL_GetDisplayMode(index, ordinal, bytes), "SDL_GetDisplayMode");
+      modes.push(displayMode(bytes));
+    }
+    const desktop = new Uint8Array(24);
+    checked(api.SDL_GetCurrentDisplayMode(index, desktop), "SDL_GetCurrentDisplayMode");
+    modes.push(displayMode(desktop));
+    return modes;
   }
 
   /** One selected gamma window, on one display. SDL owns native focus restoration.

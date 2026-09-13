@@ -35,10 +35,12 @@ import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
+import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 
 type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
+  readonly imageSettings: ApplicationImageSettings;
   readonly display: StartupDisplay;
   readonly renderer: NativeRenderer;
   readonly menu: StartupMenu;
@@ -91,7 +93,7 @@ export class StartupApplication {
     let renderer: NativeRenderer | null = null, controllers: SdlControllers | null = null, router: InputRouter | null = null, menu: StartupMenu | null = null;
     try {
       const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client } };
-      const imageSettings = await ApplicationImageSettings.open({ context, dialect: "q3", print: this.host.print,
+      const imageSettings = await ApplicationImageSettings.open({ context, dialect: "q3", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), print: this.host.print,
         ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }) });
       font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images, imagePolicy: imageSettings.policy });
       typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy);
@@ -99,6 +101,7 @@ export class StartupApplication {
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);
       renderer = NativeRenderer.open(options, owner);
+      await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
       const commands = new CommandBuffer({ dialect: "q3", context });
       menu = new StartupMenu({ seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
@@ -107,7 +110,7 @@ export class StartupApplication {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
         },
-        quit: () => this.requestQuit(), settings: this.preferences.bindings(), applyDisplay: () => { this.applyDisplay = true; }, saves: () => this.saves.list, refreshSaves: () => { this.refreshSaves = true; } });
+        quit: () => this.requestQuit(), settings: [...this.preferences.bindings(), ...bindNativeVideoSettings(renderer.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message))], applyDisplay: () => { this.applyDisplay = true; }, saves: () => this.saves.list, refreshSaves: () => { this.refreshSaves = true; } });
       menu.setStatus(this.status);
       const activeMenu = menu;
       const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: event => activeMenu.input(event) });
@@ -122,7 +125,7 @@ export class StartupApplication {
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
       const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
       const presentation: PresentationSelection = { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider };
-      this.graphics = { display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
+      this.graphics = { imageSettings, display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
         draw: () => {
           const viewport = { x: 0, y: 0, ...native.window.drawableSize };
           builder.begin("back", true);
@@ -221,6 +224,8 @@ export class StartupApplication {
       this.refreshSaves = false; graphics.menu.setStatus("Reading saved games...", true); graphics.draw();
       await this.saves.refresh(); graphics.menu.setStatus(this.saves.list.error ?? "");
     }
+    await graphics.imageSettings.refreshDisplay(graphics.renderer);
+    this.model.setDisplay({ ...graphics.renderer.window.logicalSize, gamma: graphics.renderer.outputGamma });
     let frameGraphics = graphics;
     if (this.applyDisplay) {
       this.applyDisplay = false; graphics.close(); this.graphics = null;

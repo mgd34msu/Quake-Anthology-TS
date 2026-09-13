@@ -83,29 +83,38 @@ for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl
         for (const down of [true, false]) application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down, timeMilliseconds: performance.now() });
         await application.step(25);
       };
+      const focus = (id: string): void => {
+        for (let attempts = 0; attempts < 30; attempts++) {
+          const state = presentation.ui.controller.state().focus;
+          if (state.kind === "menu" && state.control === id) return;
+          key(KeyCode.Tab);
+        }
+        throw new Error(`Missing setting ${id}`);
+      };
+      const activate = async (id: string): Promise<void> => { focus(id); key(KeyCode.Enter); await application.step(25); };
       const video = async (): Promise<void> => {
         key(27); await application.step(25);
         expect(presentation.ui.controller.activeMenu).toBe("menu:application:game");
         await clickRow(3); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:root");
-        await clickRow(0); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:0");
+        await activate("ui:settings:category:video"); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:0");
       };
       const resume = async (): Promise<void> => { await clickRow(11); await clickRow(11); await clickRow(1); };
       await video();
       expect(application.window?.drawableSize).toEqual({ width: 640, height: 480 });
-      await clickRow(2, 540);
+      focus("ui:settings:r_texture_formats");
       key(KeyCode.End);
       for (let index = 0; index < 6; index++) key(KeyCode.Backspace);
       application.input({ seat: local.seat.id, kind: "text", text: "png", timeMilliseconds: performance.now() });
       await application.step(25);
       expect(assets.imagePolicy?.formats).toEqual(["png"]);
-      await clickRow(1);
+      await activate("ui:settings:r_override_textures");
       expect(assets.imagePolicy?.overrideLevel).toBe(1);
       const menu = await capture();
       await Bun.write(`/tmp/image-video-menu-${backend}.png`, encodePng(640, 480, menu));
       expect(await Bun.file(join(users, "settings/images.cfg")).text()).toContain('"png"');
       await resume(); expect(presentation.ui.controller.activeMenu).toBeNull();
       expect(pink(await capture())).toBeGreaterThan(baseline + 100);
-      await video(); await clickRow(5);
+      await video(); await activate("ui:settings:image-wall");
       expect(assets.imagePolicy?.overrideUsages.includes("wall")).toBe(false);
       const mask = await capture();
       await Bun.write(`/tmp/image-video-menu-${backend}-mask.png`, encodePng(640, 480, mask));

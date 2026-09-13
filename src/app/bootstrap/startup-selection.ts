@@ -17,7 +17,7 @@ import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
 import { applicationPreset } from "./content.ts";
 import type { ApplicationOptions } from "./options.ts";
 
-export type StartupSelectionField = "doppler" | "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer" | "gamma" | "resolution";
+export type StartupSelectionField = "doppler" | "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
@@ -51,6 +51,8 @@ function productChoice(product: CatalogProduct): StartupSelectionChoice {
 /** The draft stores UI choices; the existing launch resolver remains the recipe authority. */
 export class StartupSelectionModel {
   private readonly values: Record<StartupSelectionField, string>;
+  private display: Pick<ApplicationOptions, "width" | "height" | "gamma">;
+  private displayOverridesConsumed = false;
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
   private readonly authoredDefaultMaps = new Map<string, string>();
   private readonly looseModels = new Map<string, readonly string[]>();
@@ -59,12 +61,13 @@ export class StartupSelectionModel {
   private readonly selectedModels = new Map<string, string>();
   private readonly modelChoices = new Map<string, readonly StartupSelectionChoice[]>();
   constructor(readonly catalog: InstalledCatalog, private readonly initial: ApplicationOptions) {
+    this.display = { width: initial.width, height: initial.height, gamma: initial.gamma };
     const product = catalog.product(initial.product), campaign = product.expectation.campaign;
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, map: initial.map,
       movement: baseProduct(initial.movement), character: baseProduct(initial.character), model: initial.characterModel,
       doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
-      skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer, gamma: String(initial.gamma), resolution: `${initial.width}x${initial.height}` };
+      skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
   async prepareMaps(): Promise<void> {
@@ -313,9 +316,7 @@ export class StartupSelectionModel {
           : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-classic-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
       row("seats", "Local players", [1, 2, 3, 4].map(value => choice(String(value)))),
-      row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")]),
-      row("gamma", "Display gamma", [...new Set(["0.5", "0.75", "1", "1.3", "1.5", "2", "2.5", "3", String(this.initial.gamma)])].map(value => choice(value))),
-      row("resolution", "Resolution", [...new Set(["640x480", "960x600", "1280x720", "1920x1080", `${this.initial.width}x${this.initial.height}`])].map(value => choice(value)))];
+      row("renderer", "Renderer", [choice("gl", "OpenGL"), choice("cpu", "Software")])];
   }
   select(field: StartupSelectionField, id: string): void {
     const selected = this.rows().find(row => row.id === field)?.choices.find(option => option.id === id);
@@ -339,18 +340,22 @@ export class StartupSelectionModel {
       this.selectedModels.set(id, this.values.model);
     }
   }
+  setDisplay(display: Pick<ApplicationOptions, "width" | "height" | "gamma">): void {
+    if (![display.width, display.height].every(value => Number.isSafeInteger(value) && value > 0 && value <= 16384)
+      || !Number.isFinite(display.gamma) || display.gamma < 0.5 || display.gamma > 3) throw new RangeError("Invalid display settings");
+    this.display = { ...display };
+    this.displayOverridesConsumed = true;
+  }
   get options(): ApplicationOptions {
     const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
-    const [width, height] = this.values.resolution.split("x").map(Number);
-    if (width === undefined || height === undefined) throw new Error("Invalid display resolution");
     return { ...this.initial, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
-      seats: Number(this.values.seats), renderer, gamma: Number(this.values.gamma), width, height };
+      seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) };
   }
   summary(): readonly string[] {
-    return [...this.rows().filter(row => !["renderer", "gamma", "resolution"].includes(row.id)).map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
+    return [...this.rows().filter(row => row.id !== "renderer").map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
       "Pickups: authored map items supply the selected arsenal through its admitted mappings. Independent pickup replacement is not implemented."];
   }
   async resolve(): Promise<StartupLaunch> {

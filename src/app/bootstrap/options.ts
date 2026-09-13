@@ -18,6 +18,7 @@ export interface ApplicationOptions {
   readonly characterModel: string;
   readonly renderer: "cpu" | "gl";
   readonly gamma: number;
+  readonly displayOverrides?: { readonly width?: number; readonly height?: number; readonly gamma?: number };
   readonly dedicated: boolean;
   readonly width: number;
   readonly height: number;
@@ -138,13 +139,19 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--renderer":
         if (value !== "cpu" && value !== "gl") throw new Error(`Unknown renderer: ${value}`);
         options = { ...options, renderer: value }; break;
-      case "--width": options = { ...options, width: integer(value, flag, 64, 16384) }; break;
+      case "--width": {
+        const width = integer(value, flag, 64, 16384);
+        options = { ...options, width, displayOverrides: { ...options.displayOverrides, width } }; break;
+      }
       case "--gamma": {
         const gamma = Number(value);
         if (!Number.isFinite(gamma) || gamma < 0.5 || gamma > 3) throw new RangeError("Display gamma must be between 0.5 and 3");
-        options = { ...options, gamma }; break;
+        options = { ...options, gamma, displayOverrides: { ...options.displayOverrides, gamma } }; break;
       }
-      case "--height": options = { ...options, height: integer(value, flag, 64, 16384) }; break;
+      case "--height": {
+        const height = integer(value, flag, 64, 16384);
+        options = { ...options, height, displayOverrides: { ...options.displayOverrides, height } }; break;
+      }
       case "--seats": options = { ...options, seats: integer(value, flag, 1, 4) }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;
       case "--frames": options = { ...options, frameLimit: integer(value, flag, 1, Number.MAX_SAFE_INTEGER) }; break;

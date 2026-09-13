@@ -13,7 +13,7 @@ import { menuRow } from "../common/layout.ts";
 export * from "./bindings.ts";
 export * from "./services.ts";
 
-export type SettingCategory = "video" | "audio" | "input" | "network" | "accessibility" | "language";
+export type SettingCategory = "display" | "video" | "audio" | "input" | "network" | "accessibility" | "language";
 interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; }
 export type SettingBinding = SettingBase & (
   | { readonly kind: "toggle"; readonly read: () => boolean; readonly write: (value: boolean) => void }
@@ -83,7 +83,7 @@ export function bindCvarSetting(registry: CvarRegistry, spec: CvarSettingSpec, r
 
 export interface SettingsMenus { readonly root: UiMenuId; dispose(): void; }
 const categories: readonly { readonly id: SettingCategory; readonly label: string }[] = [
-  { id: "video", label: "Video" }, { id: "audio", label: "Audio" }, { id: "input", label: "Controls" },
+  { id: "display", label: "Display" }, { id: "video", label: "Graphics" }, { id: "audio", label: "Audio" }, { id: "input", label: "Controls" },
   { id: "network", label: "Network" }, { id: "accessibility", label: "Accessibility" }, { id: "language", label: "Language" },
 ];
 /** Pagination keeps every bound option reachable at the smallest native menu size. */
@@ -94,11 +94,11 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
   for (const category of categories) {
     const selected = bindings.filter(binding => binding.category === category.id);
     if (selected.length === 0) continue;
-    const pages = Math.ceil(selected.length / 9);
+    const pages = Math.ceil(selected.length / 10);
     for (let page = 0; page < pages; page++) {
       const id: UiMenuId = `menu:settings:${category.id}:${page}`;
       disposers.push(controller.register(id, () => {
-        const controls = selected.slice(page * 9, page * 9 + 9).map((binding, index) => settingControl(binding, menuRow(index), controller.seat));
+        const controls = selected.slice(page * 10, page * 10 + 10).map((binding, index) => settingControl(binding, menuRow(index), controller.seat));
         for (const direction of [-1, 1]) {
           const target = page + direction;
           if (target < 0 || target >= pages) continue;
@@ -109,7 +109,7 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
         controls.push(back());
         return { id, title: `${category.label}${pages > 1 ? ` ${page + 1}/${pages}` : ""}`, fullScreen: false,
           controls, open: () => undefined, close: () => {
-            for (const binding of selected.slice(page * 9, page * 9 + 9)) if (binding.kind === "text-entry") binding.commit?.cancel();
+            for (const binding of selected.slice(page * 10, page * 10 + 10)) if (binding.kind === "text-entry") binding.commit?.cancel();
             return undefined;
           } };
       }));

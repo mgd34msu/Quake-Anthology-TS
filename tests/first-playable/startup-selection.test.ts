@@ -25,7 +25,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   expect(model.rows().find(row => row.id === "map")?.choices.some(map => map.id === "maps/b_bh10.bsp")).toBe(false);
   expect(() => model.select("map", "maps/b_bh10.bsp")).toThrow("Unknown map");
   model.select("map", "maps/dm4.bsp");
-  model.select("mode", "deathmatch"); model.select("resolution", "1280x720"); model.select("gamma", "1.3");
+  model.select("mode", "deathmatch"); model.setDisplay({ width: 1280, height: 720, gamma: 1.3 });
   const selected = await model.resolve();
   expect(selected.recipe.map.geometryContent).toBe(catalog.require("q1-rerelease-id1").id);
   expect(selected.recipe.map.geometry.requestedPath).toBe("maps/dm4.bsp");

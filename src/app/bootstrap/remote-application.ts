@@ -231,9 +231,10 @@ export class RemoteApplication {
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === "q1-quakeworld") || q3 && options.product !== "q3-baseq3")
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34/35 or baseq3 protocol 68 content");
       imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
-        dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
+        dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
         print: text => { if (application === null) host.print(text); else application.print(text); } });
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
+      await imageSettings.refreshDisplay(renderer);
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
@@ -296,7 +297,7 @@ export class RemoteApplication {
   private async refreshImages(): Promise<void> {
     const frontend = this.frontend;
     if (frontend === null) return;
-    await this.imageSettings.refresh(frontend.assets, this.presentation === null ? [] : [this.presentation], null);
+    await this.imageSettings.refresh(frontend.assets, this.presentation === null ? [] : [this.presentation], null, this.renderer);
     frontend.font = await frontend.assets.loadConsoleFont();
   }
 

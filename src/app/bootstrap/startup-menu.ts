@@ -11,7 +11,7 @@ import { NativeUiController, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { menuBackdrop, menuPanel, menuSkin, menuTitleFont } from "../../ui/common/menu-theme.ts";
 import { contains, fitUi, transformUi } from "../../ui/common/layout.ts";
-import { settingControl } from "../../ui/settings/index.ts";
+import { registerSettingsMenus, settingControl } from "../../ui/settings/index.ts";
 import type { SettingBinding } from "../../ui/settings/index.ts";
 import { layoutText } from "../../text/layout.ts";
 import type { StartupSaveList } from "./startup-saves.ts";
@@ -42,7 +42,7 @@ const browserMenu: UiMenuId = "menu:startup:servers";
 const browserOptionsMenu: UiMenuId = "menu:startup:server-filters";
 const session: UiMenuId = "menu:startup:session";
 const optionsMenu: UiMenuId = "menu:startup:options";
-const displayMenu: UiMenuId = "menu:startup:display";
+const displayMenu: UiMenuId = "menu:settings:display:0";
 const soundMenu: UiMenuId = "menu:startup:sound";
 const controlsMenu: UiMenuId = "menu:startup:controls";
 const selectMenu: UiMenuId = "menu:startup:select";
@@ -99,10 +99,12 @@ export class StartupMenu {
       this.button("sound", "Sound", 1, () => this.controller.openMenu(soundMenu), true),
       this.button("controls", "Controls", 2, () => this.controller.openMenu(controlsMenu), true), this.back(),
     ]);
-    this.register(displayMenu, () => [
-      ...this.rows(["renderer", "resolution", "gamma"]).map((row, index) => this.row(row, index)),
-      this.button("apply-display", "Apply display settings", 5, options.applyDisplay, true), this.back(),
-    ]);
+    const display = registerSettingsMenus(this.controller, [...(options.settings ?? []).filter(binding => binding.category === "display"),
+      { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (requires Apply)", enabled: () => !this.busy,
+        read: () => options.model.options.renderer, choices: () => [{ id: "gl", label: "OpenGL" }, { id: "cpu", label: "Software" }],
+        write: value => options.model.select("renderer", value) },
+      { id: "ui:startup:apply-display", category: "display", kind: "button", label: "Apply renderer change", enabled: () => !this.busy, activate: options.applyDisplay }]);
+    this.disposers.push(display.dispose);
     for (const [id, category] of [[soundMenu, "audio"], [controlsMenu, "input"]] satisfies readonly (readonly [UiMenuId, string])[])
       this.register(id, () => {
         const bindings = (options.settings ?? []).filter(binding => binding.category === category);
@@ -284,7 +286,7 @@ export class StartupMenu {
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (!active?.startsWith("menu:settings:display:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
