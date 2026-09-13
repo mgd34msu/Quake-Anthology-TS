@@ -42,17 +42,17 @@ export class SceneShaderRegistry {
     return this.remaps.get(this.key(name)) ?? { name, timeOffset: 0 };
   }
 
-  register(name: string, lightmap: RendererImage | null = null, lightmapIndex = -1, baseTexture: SceneTexture | null = null): Promise<CompiledMaterial> {
+  register(name: string, lightmap: RendererImage | null = null, lightmapIndex = -1, baseTexture: SceneTexture | null = null, mipmap = lightmapIndex !== -4): Promise<CompiledMaterial> {
     const key = `${this.key(name)}\0${lightmapIndex}\0${lightmap?.ordinal ?? -1}\0${baseTexture?.image.ordinal ?? -1}`;
     const previous = this.compiled.get(key);
     if (previous !== undefined) return previous;
-    const pending = this.compile(name, lightmap, lightmapIndex, baseTexture);
+    const pending = this.compile(name, lightmap, lightmapIndex, baseTexture, mipmap);
     this.compiled.set(key, pending);
     return pending;
   }
 
-  async registerPicture(name: string): Promise<MaterialPicture> {
-    const compiled = await this.register(name, null, -4);
+  async registerPicture(name: string, mipmap = false): Promise<MaterialPicture> {
+    const compiled = await this.register(name, null, -4, null, mipmap);
     let order = this.pictureOrders.get(compiled);
     if (order === undefined) { order = this.pictureOrders.size + 1; this.pictureOrders.set(compiled, order); }
     return { kind: "material", name, material: { order, compiled } };
@@ -60,7 +60,7 @@ export class SceneShaderRegistry {
 
   private key(name: string): string { return normalizeShaderName(stripShaderExtension(name)); }
 
-  private async compile(name: string, lightmap: RendererImage | null, lightmapIndex: number, baseTexture: SceneTexture | null): Promise<CompiledMaterial> {
+  private async compile(name: string, lightmap: RendererImage | null, lightmapIndex: number, baseTexture: SceneTexture | null, mipmap: boolean): Promise<CompiledMaterial> {
     const registered = (image: RendererImage, tmu: 0 | 1 = 0): RegisteredImage => ({ frame: { image }, tmu });
     const program = this.programs.get(this.key(name));
     if (program !== undefined) {
@@ -75,7 +75,7 @@ export class SceneShaderRegistry {
       return { registered: result, material: shaderRenderMaterial(result.definition), finished: finishShader({ definition: result.definition,
         images: result.stages, lightmapIndex, profile: this.profile }) };
     }
-    const loaded = await this.textures.load(name, { mipmap: lightmapIndex !== -4, wrap: lightmapIndex === -4 ? "clamp" : "repeat", family: this.family }), texture = loaded ?? this.textures.missing;
+    const loaded = await this.textures.load(name, { mipmap, wrap: mipmap ? "repeat" : "clamp", family: this.family }), texture = loaded ?? this.textures.missing;
     const implicitImage = { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } } satisfies Parameters<typeof compileImplicitMaterial>[0]["baseImage"];
     if (loaded === null) {
       this.warnings.push(`${name}: missing shader image, using the source default material`);

@@ -1,3 +1,9 @@
+import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
+import { SceneTextureLoader } from "../../src/render/scene/textures.ts";
+import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
+import { encodePng } from "../../src/formats/images/png.ts";
+import { prepareMaterialText } from "../../src/render/commands/material2d.ts";
+import { SoftwareRenderer } from "../../src/render/cpu/rasterizer.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { RendererImage, RendererResourceOwner } from "../../src/contracts/render.ts";
@@ -139,4 +145,34 @@ describe("source material paths", () => {
     expect(batches[1]?.state.depthWrite).toBe(false);
     expect(batches[1]?.vertices[0]?.color).toEqual({ x: 1, y: 1, z: 1, w: 1 });
   });
+});
+
+
+test("mipmapped implicit pictures retain 2D alpha blending and native first-registration sampling", async () => {
+  const images = new SceneImageRegistry(owner);
+  const pixels = Uint8Array.from({ length: 64 }, (_, index) => index % 4 === 3 ? 128 : 255);
+  const png = encodePng(4, 4, pixels);
+  const textures = new SceneTextureLoader(images, { read: async path => path.endsWith(".png") ? { bytes: png, source: { kind: "generated", name: path } } : null });
+  const registry = new SceneShaderRegistry(textures);
+  const picture = await registry.registerPicture("icons/noammo-fixture", true);
+  expect(picture.material.compiled.material.stages[0]?.color.kind).toBe("vertex");
+  expect(picture.material.compiled.material.stages[0]?.blend).toEqual({ source: "src-alpha", destination: "one-minus-src-alpha" });
+  expect((await registry.registerPicture("icons/noammo-fixture", false)).material.compiled).toBe(picture.material.compiled);
+  const noMip = await registry.registerPicture("icons/default-preview");
+  expect(noMip.material.compiled.material.stages[0]?.color.kind).toBe("vertex");
+  const operations = images.drainOperations();
+  const mip = operations.find(operation => operation.kind === "create-image" && operation.image.source.kind === "generated" && operation.image.source.name === "icons/noammo-fixture.png");
+  if (mip?.kind !== "create-image") throw new Error("Missing mipmapped image registration");
+  expect(mip.content.levels).toHaveLength(3); expect(mip.sampling.wrap).toBe("repeat");
+  const preview = operations.find(operation => operation.kind === "create-image" && operation.image.source.kind === "generated" && operation.image.source.name === "icons/default-preview.png");
+  if (preview?.kind !== "create-image") throw new Error("Missing default preview image");
+  expect(preview.content.levels).toHaveLength(1); expect(preview.sampling.wrap).toBe("clamp");
+  const renderer = new SoftwareRenderer(4, 4, owner);
+  try {
+    for (const operation of operations) renderer.applyImageResource(operation);
+    const rect = { x: 0, y: 0, width: 4, height: 4 };
+    renderer.beginView({ viewport: rect, clipPlane: null, clear: { color: { x: 0, y: 0, z: 1, w: 1 }, depth: 1, stencil: true } });
+    for (const batch of prepareMaterialText({ seat: createIdentityOwner("picture").seat(0), rect, uv: { s: 0, t: 0, s2: 1, t2: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, picture }, rect, context)) renderer.draw(batch);
+    expect(Array.from(renderer.pixels.slice(20, 23))).toEqual([128, 128, 255]);
+  } finally { renderer.close(); }
 });
