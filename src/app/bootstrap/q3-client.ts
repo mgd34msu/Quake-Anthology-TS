@@ -1,4 +1,13 @@
+import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
+import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
+import { ApplicationQvmClient } from "./q3-client/qvm.ts";
+import { QvmApplicationScalars } from "./q3-client/qvm-scalars.ts";
+import type { QvmApplicationScalarOptions } from "./q3-client/qvm-scalars.ts";
+import type { Q3ClientConnection } from "../../network/q3/client.ts";
+import type { CommandBuffer } from "../../core/commands/index.ts";
+import type { NativeRenderer } from "./renderer.ts";
+import type { Q3PresentationSession } from "../../content/q3/presentation/client.ts";
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
 import type { CommandSource } from "../../content/q3/presentation/prediction.ts";
 import type { Snapshot } from "../../network/q3/server-message.ts";
@@ -18,11 +27,8 @@ import { CvarRegistry } from "../../core/cvars/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { createQ3ClientPresentation } from "../../content/q3/presentation/client.ts";
 import { cvarTable } from "../../content/q3/presentation/config.ts";
-import type { Q3ClientPresentation, Q3ClientPresentationOptions, Q3ClientSound } from "../../content/q3/presentation/client.ts";
-import { Q3SceneRecorder } from "../../content/q3/presentation/scene.ts";
+import type { Q3ClientPresentation, Q3ClientPresentationOptions } from "../../content/q3/presentation/client.ts";
 import type { Q3PresentedScene, PresentedModel } from "../../content/q3/presentation/scene.ts";
-import { Q3RendererResources } from "../../content/q3/presentation/resources.ts";
-import { Q3PresentationAudio } from "../../content/q3/presentation/audio.ts";
 import type { PresentationMovementHost } from "../../content/q3/presentation/movement-host.ts";
 import type { UserCommand } from "../../content/q3/base/shared/player-state.ts";
 import { RDF_NOWORLDMODEL } from "../../content/q3/presentation/refdef.ts";
@@ -37,7 +43,6 @@ import { visibleWorld } from "../../render/scene/visibility.ts";
 import { portalCamera, portalSurfaceOffscreen } from "../../render/scene/portal.ts";
 import { createViewProjector, perspectiveProjection } from "../../render/scene/view.ts";
 import type { WorldViewInput } from "../../render/scene/world.ts";
-import { Draw2D, TextCommandSink } from "../../text/draw2d.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { LocalInput } from "./input.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "./assets.ts";
@@ -48,7 +53,8 @@ import type { Q3SourcePresentationState } from "./simulation/q3/presentation.ts"
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import { ApplicationQ3Source } from "./q3-client/source.ts";
 import { ApplicationQ3Assets } from "./q3-client/assets.ts";
-import { q3ClientCollision } from "./q3-client/collision.ts";
+import { createApplicationQ3Services } from "./q3-client/services.ts";
+import type { ApplicationQ3Services } from "./q3-client/services.ts";
 import { ApplicationQ3Cinematics } from "./q3-client/cinematics.ts";
 import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
 import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
@@ -68,9 +74,10 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
 }
 interface ApplicationQ3ClientCommonOptions {
   readonly weaponHud?: WeaponHudReader;
+  assertCurrent?(): void;
   readonly assets: ApplicationAssets;
   readonly queries: SceneQueries & Pick<SharedSceneQueries, "pointLeaf" | "leafCluster" | "leafArea" | "areaBits">;
-  readonly local: LocalInput; readonly audio: ApplicationAudio; readonly movement: PresentationMovementHost;
+  readonly local: LocalInput; readonly audio: ApplicationAudio;
   readonly settings?: readonly CvarSnapshot[];
   readonly splitScreen?: boolean;
   serverSettings?(): readonly CvarSnapshot[];
@@ -80,10 +87,13 @@ interface ApplicationQ3ClientCommonOptions {
   readonly hooks?: Pick<Q3ClientPresentationOptions, "character" | "event" | "predictItem" | "viewWeapon" | "playerWeapon">;
 }
 export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
-  { readonly kind?: "local"; readonly initial: Q3SourcePresentationState;
+  { readonly kind?: "local"; readonly movement: PresentationMovementHost; readonly initial: Q3SourcePresentationState;
     linkBounds(number: number): Bounds | null; sourceActor(number: number): ActorId | null;
     predictionCommand?(command: ActorCommand, sourceTimeMilliseconds: number): UserCommand; }
-  | { readonly kind: "remote"; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
+  | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
+  | { readonly kind: "qvm"; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientConnection;
+      readonly queries: SharedSceneQueries; readonly commandBuffer: CommandBuffer; readonly renderer: NativeRenderer;
+      readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
 type Submission = { readonly kind: "scene"; readonly scene: Q3PresentedScene }
   | { readonly kind: "text"; readonly draw: MaterialTextDraw }
@@ -98,7 +108,7 @@ export class ApplicationQ3Client {
   private readonly product: Q3SourcePresentationState["product"];
   readonly cvars: CvarRegistry;
   readonly commandNames = new Set<string>();
-  private game: Q3ClientPresentation | null = null;
+  private backend: { readonly kind: "typescript"; readonly game: Q3ClientPresentation } | { readonly kind: "qvm"; readonly game: ApplicationQvmClient } | null = null;
   private readonly submissions: Submission[] = [];
   private readonly audioOperations: Q3SeatAudioOperation[] = [];
   private readonly renderers = new Map<ProviderSceneAssets, SceneModelRenderer>();
@@ -112,22 +122,23 @@ export class ApplicationQ3Client {
   private selection = { weapon: 2, sensitivity: 1 };
   private cinematics: ApplicationQ3Cinematics | null = null;
   private eventCount = 0;
+  private services: ApplicationQ3Services | null = null;
   private readonly sharedCvarNames: ReadonlySet<string>;
   private readonly foreign: ApplicationQ3ForeignModels;
   private constructor(readonly options: ApplicationQ3ClientOptions, readonly media: ApplicationQ3Assets) {
-    this.product = options.kind === "remote" ? "baseq3" : options.initial.product;
-    this.localSource = options.kind === "remote" ? null : new ApplicationQ3Source(options.local.player.actor, options.initial,
+    this.product = (options.kind === "remote" || options.kind === "qvm") ? "baseq3" : options.initial.product;
+    this.localSource = (options.kind === "remote" || options.kind === "qvm") ? null : new ApplicationQ3Source(options.local.player.actor, options.initial,
       (player, source) => selectApplicationQ3Snapshot(player, source, options.queries, options.linkBounds, options.assets.world.map.leaves.length, options.commands.print),
       options.sourceActor, options.predictionCommand);
-    const source = options.kind === "remote" ? options.source : this.localSource;
+    const source = (options.kind === "remote" || options.kind === "qvm") ? options.source : this.localSource;
     if (source === null) throw new Error("Local Q3 client has no snapshot source");
     this.source = source;
     this.foreign = new ApplicationQ3ForeignModels(options.assets, options.local.player.actor, number => this.source.actorAt(number));
     this.viewportValue = { ...options.viewport() };
-    const player = options.kind === "remote" ? options.initialPlayer : options.initial.clients.find(client => client.actor.equals(options.local.player.actor))?.state;
+    const player = options.kind === "qvm" ? null : options.kind === "remote" ? options.initialPlayer : options.initial.clients.find(client => client.actor.equals(options.local.player.actor))?.state;
     if (player === undefined) throw new Error("Q3 cgame seat lacks a source player");
-    this.latestCamera = { origin: { ...player.origin, z: player.origin.z + player.viewheight },
-      axis: anglesToAxis(player.viewangles), viewport: this.viewportValue,
+    this.latestCamera = { origin: player === null ? { x: 0, y: 0, z: 0 } : { ...player.origin, z: player.origin.z + player.viewheight },
+      axis: anglesToAxis(player?.viewangles ?? { x: 0, y: 0, z: 0 }), viewport: this.viewportValue,
       projection: perspectiveProjection(90, 73.739795, 16384), clip: { kind: "none" } };
     this.cvars = new CvarRegistry({ dialect: "q3", context: this.commandContext(), print: options.commands.print,
       cheatsAllowed: () => {
@@ -138,7 +149,7 @@ export class ApplicationQ3Client {
     this.sharedCvarNames = new Set(cvarTable(this.product).map(definition => definition.name.toLowerCase()));
     for (const setting of options.serverSettings?.() ?? []) if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);
     this.applySystemInfo();
-    this.cvars.set("sv_running", options.kind === "remote" ? "0" : "1", true);
+    this.cvars.set("sv_running", (options.kind === "remote" || options.kind === "qvm") ? "0" : "1", true);
     this.frames = new SceneFrameBuilder(options.assets.images); this.lightSampler = new ModelLightSampler(options.assets.world);
   }
   private applySystemInfo(): void {
@@ -150,43 +161,48 @@ export class ApplicationQ3Client {
     }
   }
   static async create(options: ApplicationQ3ClientOptions): Promise<ApplicationQ3Client> {
-    const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print);
+    options.assertCurrent?.();
+    const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.kind === "qvm" ? "guest-async" : "source-sync");
     const client = new ApplicationQ3Client(options, media);
-    try { await client.initialize(); return client; } catch (error) { client.close(); throw error; }
+    try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); return client; } catch (error) { client.close(); throw error; }
   }
   private commandContext(): CommandContext { const player = this.options.local.player; return { session: player.actor.session,
     origin: { kind: "local-seat", seat: player.seat.id, client: player.seat.client.id } }; }
-  private requireGame(): Q3ClientPresentation { if (this.closed || this.game === null) throw new Error("Q3 cgame seat is closed or uninitialized"); return this.game; }
+  private requireServices(): ApplicationQ3Services { if (this.closed || this.services === null) throw new Error("Q3 presentation services are closed or uninitialized"); return this.services; }
+  private requireBackend() { if (this.closed || this.backend === null) throw new Error("Q3 cgame seat is closed or uninitialized"); return this.backend; }
+  private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
     const o = this.options, seat = o.local.player.seat.id, source = this.source, media = this.media;
-    const recorder = new Q3SceneRecorder({ seat, viewport: this.viewportValue, farClip: 16384, nearClip: 4, rail: DEFAULT_RAIL_SETTINGS,
-      actor: () => null, publish: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; } });
-    const resources = new Q3RendererResources(await media.resourceHost(recorder));
-    const soundTarget = new Q3PresentationAudio({ seat, sounds: media.bank, actor: number => source.actorAt(number), frameNumber: () => this.frameNumber,
-      play: sound => { this.audioOperations.push({ kind: "play", sound }); }, loop: sound => { this.audioOperations.push({ kind: "loop", sound }); },
-      updateActor: (actor, origin) => { this.audioOperations.push({ kind: "position", actor, origin }); },
-      stopLoop: (_seat, actor) => { this.audioOperations.push({ kind: "stop-loop", actor }); } });
-    const sound: Q3ClientSound = { bank: media.bank,
-      startSound: (origin, entity, channel, pcm) => soundTarget.startSound(origin, entity, channel, pcm),
-      startSourceSound: (pcm, settings) => soundTarget.startSourceSound(pcm, settings), startLocalSound: (pcm, channel) => soundTarget.startLocalSound(pcm, channel),
-      addLoopSound: (entity, origin, velocity, pcm, real) => soundTarget.addLoopSound(entity, origin, velocity, pcm, real),
-      updateSoundPosition: (entity, position) => soundTarget.updateSoundPosition(entity, position), stopLoopingSound: entity => soundTarget.stopLoopingSound(entity),
-      clearLoopingSounds: killAll => { this.audioOperations.push({ kind: "clear-loops", killAll }); },
-      setListener: (_client, origin, axis) => { this.latestCamera = { ...this.latestCamera, origin, axis }; },
-      startBackgroundTrack: (intro, loop) => o.audio.playMusic(media.content, `${intro} ${loop}`) };
-    const draw = new Draw2D(new TextCommandSink(seat, this.viewportValue, command => {
-      if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
-      this.submissions.push({ kind: "command", command });
-    }, draw => { this.submissions.push({ kind: "text", draw }); }), "stretch-640");
-    const cinematics = new ApplicationQ3Cinematics(media, o.audio, seat, o.now); this.cinematics = cinematics;
-    this.game = await createQ3ClientPresentation({ ...(o.weaponHud === undefined ? {} : { weaponHud: o.weaponHud }), assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
-      world: o.assets.world, collision: q3ClientCollision(o.queries), movement: o.movement, target: this.viewportValue, hardware: "generic", commandContext: this.commandContext(),
-      session: { product: this.product, clientNumber: source.clientNumber, serverMessageSequence: source.serverMessageSequence ?? 0, lastExecutedServerCommand: source.lastExecutedServerCommand ?? 0,
+    const services = await createApplicationQ3Services({ media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
+      actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
+        scene: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; },
+        command: command => { this.submissions.push({ kind: "command", command }); }, text: draw => { this.submissions.push({ kind: "text", draw }); },
+        audio: operation => { this.audioOperations.push(operation); }, listener: (origin, axis) => { this.latestCamera = { ...this.latestCamera, origin, axis }; },
+      } });
+    this.services = services;
+    const { scene: recorder, resources, sound, draw, cinematics } = services;
+    this.cinematics = cinematics;
+    const session: Q3PresentationSession = { product: this.product, clientNumber: source.clientNumber, serverMessageSequence: source.serverMessageSequence ?? 0, lastExecutedServerCommand: source.lastExecutedServerCommand ?? 0,
         mode: { kind: "live" }, commands: source.commands, snapshots: source, cvars: this.cvars,
         getGameState: () => source.getGameState(), getServerCommand: sequence => source.getServerCommand(sequence), snapshotPing: number => source.snapshotPing?.(number) ?? 0,
         addReliableCommand: o.commands.reliable, appendConsoleCommand: o.commands.console, registerCgameCommand: name => { this.commandNames.add(name); },
         setUserCommandValue: (weapon, sensitivity) => { this.selection = { weapon, sensitivity }; },
-        assertCurrent: () => { if (this.closed) throw new Error("Q3 cgame belongs to a retired world"); }, print: o.commands.print },
+        assertCurrent: () => { o.assertCurrent?.(); if (this.closed) throw new Error("Q3 cgame belongs to a retired world"); }, print: o.commands.print };
+    if (o.kind === "qvm") {
+      const scalar = new QvmApplicationScalars({ renderer: o.renderer, local: o.local, media, services, now: o.now,
+        keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
+        lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
+      const game = await ApplicationQvmClient.create({ seat, services, media, session, connection: o.connection, queries: o.queries,
+        commands: o.commandBuffer, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
+        removeCommand: name => { this.commandNames.delete(name); o.commandBuffer.unregister(name); },
+        scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });
+      this.backend = { kind: "qvm", game };
+      this.submissions.length = 0;
+      return;
+    }
+    const game = await createQ3ClientPresentation({ ...(o.weaponHud === undefined ? {} : { weaponHud: o.weaponHud }), assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
+      world: o.assets.world, collision: services.collision, movement: o.movement, target: this.viewportValue, hardware: "generic", commandContext: this.commandContext(),
+      session,
       clock: { milliseconds: o.now, serverTime: () => source.time, frameNumber: () => this.frameNumber },
       menus: this.product === "baseq3" ? { kind: "baseq3" } : { kind: "missionpack", cinematics,
         setKeyCatcher: mask => { this.keyCatcher = mask; }, audio: { playLocal: pcm => {
@@ -210,12 +226,14 @@ export class ApplicationQ3Client {
         else if (o.assets.content.recipe.weapons.some(weapon => weapon.provider.startsWith("q3:"))) render();
       },
     });
+    this.backend = { kind: "typescript", game };
     this.submissions.length = 0;
   }
   get cgame(): Q3ClientPresentation { return this.requireGame(); }
   get userCommandSelection(): { readonly weapon: number; readonly sensitivity: number } { return this.selection; }
   get presentedEvents(): number { return this.eventCount; }
   weaponHudView(): { readonly visible: boolean; readonly aggregateWarning: boolean } {
+    if (this.requireBackend().kind === "qvm") return { visible: false, aggregateWarning: false };
     const state = this.requireGame().state, ps = state.snap?.playerState;
     return { visible: ps !== undefined && !state.levelShot && !state.showScores && ps.health > 0
       && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
@@ -226,23 +244,41 @@ export class ApplicationQ3Client {
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
   async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = []): Promise<void> {
     this.applySystemInfo();
-    const game = this.requireGame(); this.frameNumber = frameNumber; Object.assign(this.viewportValue, viewport); this.submissions.length = 0;
+    const backend = this.requireBackend(); this.frameNumber = frameNumber; Object.assign(this.viewportValue, viewport); this.submissions.length = 0;
     for (const setting of this.options.serverSettings?.() ?? []) {
       if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);
     }
-    await this.foreign.prepare(presentations);
-    await game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: false, engineFrameNumber: frameNumber });
+    if (backend.kind === "typescript") {
+      await this.foreign.prepare(presentations);
+      await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: false, engineFrameNumber: frameNumber });
+    } else await backend.game.draw(this.source.time);
     for (const submission of this.submissions) if (submission.kind === "scene") {
       for (const [provider, models] of this.models(submission.scene)) await this.renderer(provider).preload(models.map(model => model.entity), entity => models.find(model => model.entity === entity)?.options ?? {});
     }
     await Promise.all([...this.renderers.values()].map(renderer => renderer.refreshShaderRemaps()));
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
   }
-  command(argv: readonly string[]): Promise<boolean> { return this.requireGame().console.execute(argv); }
-  handlesCommand(name: string): boolean { return this.requireGame().console.handles(name); }
-  keyEvent(key: number, down: boolean): Promise<void> { return this.requireGame().keyEvent(key, down); }
-  mouseEvent(x: number, y: number): Promise<void> { return this.requireGame().mouseEvent(x, y); }
-  eventHandling(type: number): Promise<void> { return this.requireGame().eventHandling(type); }
+  command(argv: readonly string[]): Promise<boolean> { const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.console.execute(argv) : backend.game.command(argv); }
+  handlesCommand(name: string): boolean { const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.console.handles(name) : this.commandNames.has(name); }
+  keyEvent(key: number, down: boolean): Promise<void> { return this.requireBackend().game.keyEvent(key, down); }
+  mouseEvent(x: number, y: number): Promise<void> { return this.requireBackend().game.mouseEvent(x, y); }
+  eventHandling(type: number): Promise<void> { if (!Number.isInteger(type) || type < 0 || type > 3) throw new RangeError("Invalid Q3 event handling mode"); const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.eventHandling(type) : backend.game.eventHandling(type === 0 ? "none" : type === 1 ? "team-menu" : type === 2 ? "scoreboard" : "edit-hud"); }
+  async input(event: SeatInputEvent): Promise<void> {
+    this.requireBackend();
+    if (!event.seat.equals(this.options.local.player.seat.id)) throw new Error("Q3 input belongs to another seat");
+      switch (event.kind) {
+        case "key": await this.keyEvent(event.code, event.down); break;
+        case "text": for (const character of event.text) { const code = character.codePointAt(0); if (code !== undefined) await this.keyEvent(code | KEY_CHAR_FLAG, true); } break;
+        case "mouse-button": await this.keyEvent(KeyCode.Mouse1 + event.button - 1, event.down); break;
+        case "mouse-motion": await this.mouseEvent(event.delta.x, event.delta.y); break;
+        case "mouse-wheel": for (let count = 0; count < Math.abs(event.delta.y); count++) {
+          const key = event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown;
+          await this.keyEvent(key, true); await this.keyEvent(key, false);
+        } break;
+        case "controller-button": if (event.button >= 0 && event.button < 32) await this.keyEvent(KeyCode.Joy1 + event.button, event.down); break;
+        case "controller-axis": case "focus": break;
+      }
+  }
   get capturesInput(): boolean { return this.keyCatcher !== 0; }
   private renderer(provider: ProviderSceneAssets): SceneModelRenderer { let renderer = this.renderers.get(provider); if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.options.assets.world); this.renderers.set(provider, renderer); } return renderer; }
   private models(scene: Q3PresentedScene): ReadonlyMap<ProviderSceneAssets, readonly PresentedModel[]> {
@@ -268,12 +304,12 @@ export class ApplicationQ3Client {
       batches.push(...this.renderer(provider).prepare([model.entity], selected,
         () => ({ ...model.options, noWorldModel, shaderTexCoord: model.source.shaderTexCoord })));
     }
-    if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) batches.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
+    if (this.requireBackend().kind === "typescript" && (scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) batches.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
       (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponViewCamera(weaponInput.camera,
         this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []))));
     const context = this.options.assets.world.materialContext(input);
     for (const effect of scene.effects) {
-      const picture = this.requireGame().media.resources.picture(effect.shader), source = effect.source;
+      const picture = this.requireServices().resources.picture(effect.shader), source = effect.source;
       const geometry = "kind" in source ? source.kind === "sprite"
         ? spriteGeometry(source, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
         : source.kind === "beam" ? effect.geometry : railGeometry(source, input.camera.origin, DEFAULT_RAIL_SETTINGS) : effect.geometry;
@@ -298,7 +334,7 @@ export class ApplicationQ3Client {
     return null;
   }
   frame(additionalEffects?: (camera: SceneCamera) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera): RenderFrame {
-    this.requireGame(); this.frames.begin();
+    this.requireBackend(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
       if (submission.kind === "command") { this.frames.command(submission.command); continue; }
@@ -332,9 +368,10 @@ export class ApplicationQ3Client {
     }
     return this.frames.finish(false);
   }
+  async shutdown(): Promise<void> { if (this.backend?.kind === "qvm") await this.backend.game.shutdown(); this.close(); }
   close(): void {
     if (this.closed) return;
-    this.game?.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
+    this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
     this.closed = true; this.cinematics?.close(); this.media.close(); this.foreign.close(); this.renderers.clear(); this.submissions.length = 0;
   }

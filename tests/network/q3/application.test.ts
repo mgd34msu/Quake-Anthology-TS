@@ -1,4 +1,12 @@
-import { expect, test } from 'bun:test';
+import { Q3RemotePresentation } from "../../../src/app/bootstrap/network/remote-q3.ts";
+import { Q3ServerConnection } from "../../../src/network/q3/server.ts";
+import { Q3RendererResources } from "../../../src/content/q3/presentation/resources.ts";
+import { Draw2D } from "../../../src/text/draw2d.ts";
+import { QvmCgame } from "../../../src/compat/qvm/cgame.ts";
+import { QvmUi } from "../../../src/compat/qvm/ui.ts";
+import { Q3SceneRecorder } from "../../../src/content/q3/presentation/scene.ts";
+import { UnifiedAudio } from "../../../src/audio/index.ts";
+import { expect, test, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, copyFileSync, constants, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -181,44 +189,125 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
     expect(remote.initialPlayer.origin).toEqual(body.origin);
     expect(remote.cgameSource.commands.currentNumber).toBeGreaterThan(12);
     expect(remote.cgameSource.current()?.number).toBeGreaterThan(0);
+    const native = network.native, retained = native?.history.latest;
+    if (native === null || retained === undefined || retained === null) throw new Error('No retained source snapshot');
+    const receiptPing = native.snapshotPing(retained.messageNumber);
+    expect(receiptPing).not.toBeNull();
+    await exchange(); await exchange();
+    expect(native.snapshotPing(retained.messageNumber)).toBe(receiptPing);
+    expect(remote.cgameSource.snapshotPing?.(retained.messageNumber)).toBe(receiptPing);
     await expect(remote.systemInfo('\\sv_pure\\1\\fs_game\\baseq3')).rejects.toThrow('requires pure verification');
   } finally { network.close(); session.close(); await app.close(); }
 }, 60000);
 
 test('production protocol68 shared remote frontend draws retail q3dm1 and travels without a simulation', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
-  const { addressKey } = await import('../../../src/network/common/endpoint.ts');
   const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
   const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
   if (selected.kind !== 'run') throw new Error('Missing server options');
   const prints: string[] = [], host = { print: (text: string): undefined => { prints.push(text); return undefined; } };
   const server = await Application.open(selected.options, host);
-  server.simulation.q3Source()?.host.cvars.set('sv_pure', '0', true);
+  expect(server.simulation.q3Source()?.host.cvars.get('sv_pure')?.integerValue).toBe(1);
+  const guestFrames = spyOn(QvmCgame.prototype, 'drawActiveFrame'), scenes = spyOn(Q3SceneRecorder.prototype, 'renderScene'), audio = spyOn(UnifiedAudio.prototype, 'play');
+  const pure = spyOn(Q3ServerConnection.prototype, 'verifyPure'), shaders = spyOn(Q3RendererResources.prototype, 'registerShader'), pictures = spyOn(Draw2D.prototype, 'stretchPixels');
+  const guestUiFrames = spyOn(QvmUi.prototype, 'refresh'), guestKeys = spyOn(QvmUi.prototype, 'keyEvent');
   let app: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
+  const lifecycle: string[] = [], shutdownGate = Promise.withResolvers<void>();
+  let pauseShutdown = false;
+  const originalCgShutdown = QvmCgame.prototype.shutdown, originalUiShutdown = QvmUi.prototype.shutdown, originalUiInit = QvmUi.prototype.init;
+  const cgShutdown = spyOn(QvmCgame.prototype, "shutdown").mockImplementation(async function(this: QvmCgame) {
+    lifecycle.push(`cg-shutdown:${app?.content.recipe.map.geometry.requestedPath}`);
+    if (pauseShutdown) await shutdownGate.promise;
+    await originalCgShutdown.call(this);
+    return undefined;
+  });
+  const uiShutdown = spyOn(QvmUi.prototype, "shutdown").mockImplementation(async function(this: QvmUi) {
+    lifecycle.push(`ui-shutdown:${app?.content.recipe.map.geometry.requestedPath}`);
+    await originalUiShutdown.call(this); return undefined;
+  });
+  const uiInit = spyOn(QvmUi.prototype, "init").mockImplementation(async function(this: QvmUi, connecting: boolean) {
+    lifecycle.push(`ui-init:${app?.content.recipe.map.geometry.requestedPath}`);
+    await originalUiInit.call(this, connecting); return undefined;
+  });
+
   try {
     const address = server.networkAddress; if (address === null) throw new Error('No listener');
-    const parsed = parseApplicationCommand([...common, '--connect-q3', addressKey(address), '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
+    const parsed = parseApplicationCommand([...common, '--connect-q3', `localhost:${address.port}`, '--renderer', process.env["Q3_REMOTE_RENDERER"] ?? 'cpu', '--width', '640', '--height', '480', '--hidden']);
     if (parsed.kind !== 'run') throw new Error('Missing client options');
     app = await RemoteApplication.open(parsed.options, host);
     const remote = app;
     const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await server.step(50); await Bun.sleep(1); await remote.step(50); };
-    for (let i = 0; i < 100 && remote.localPlayers.length === 0; i++) await exchange();
+    for (let i = 0; i < 100 && remote.networkPhase !== 'active'; i++) await exchange();
     expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull();
     const player = remote.localPlayers[0], peer = server.networkClients[0];
     if (player === undefined || peer === undefined) throw new Error(`No player: ${prints.join('')}`);
-    expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
+    if (!(remote.remote instanceof Q3RemotePresentation)) throw new Error("Missing native Q3 presentation");
+    expect(remote.remote.initialPlayer.ammo.get(1)).toBe(-1);
+    if (process.env["Q3_NOAMMO_PROBE"] === "1") {
+      const source = server.simulation.q3Source()?.records.byActor(peer.actor)?.client;
+      if (source === undefined || source === null) throw new Error("No native source client for ammo diagnostic");
+      source.ps.ammo.set(1, 0);
+      await exchange();
+    }
+    const capture = remote.captureNextFrame();
+    await exchange();
+    const pixels = await capture;
+    expect(pure.mock.results.some(result => result.type === "return" && result.value.kind === "authentic")).toBe(true);
+    expect(shaders.mock.calls.some(([name]) => name === "icons/iconw_gauntlet")).toBe(true);
+    const gauntletDraw = pictures.mock.calls.find(([, , picture]) => (typeof picture === "function" ? picture() : picture).name === "icons/iconw_gauntlet");
+    if (process.env["Q3_REMOTE_CAPTURE"] !== undefined) {
+      const draw = gauntletDraw;
+      const registration = shaders.mock.results[shaders.mock.calls.findIndex(([name]) => name === "icons/iconw_gauntlet")];
+      const shader = registration?.type === "return" ? await registration.value : null;
+      const picture = draw === undefined ? null : (typeof draw[2] === "function" ? draw[2]() : draw[2]);
+      console.log("guest gauntlet", JSON.stringify({ shader: shader?.name, rect: draw?.[0], picture: picture?.name, stages: picture?.kind === "material" ? picture.material.compiled.material.stages.map(stage => ({ color: stage.color, blend: stage.blend, map: stage.map })) : null }));
+      console.log("guest selector", JSON.stringify({ ammo: remote.remote instanceof Q3RemotePresentation ? remote.remote.initialPlayer.ammo.get(1) : null,
+        draws: pictures.mock.calls.filter(([rect]) => rect.x === 280 && rect.y === 380).map(([, , value]) => {
+          const picture = typeof value === "function" ? value() : value;
+          return { name: picture.name, stages: picture.kind === "material" ? picture.material.compiled.material.stages.map(stage => ({ color: stage.color, blend: stage.blend })) : null };
+        }) }));
+    }
+    expect(new Set(pixels).size).toBeGreaterThan(16);
+    if (process.env["Q3_REMOTE_CAPTURE"] !== undefined) {
+      const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
+      await Bun.write(process.env["Q3_REMOTE_CAPTURE"], encodePng(640, 480, pixels));
+    }
     const before = server.simulation.bodies.read(peer.actor)?.origin;
     const aim = server.simulation.playerView(peer.actor).angles;
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
+    remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: true, timeMilliseconds: performance.now() });
     for (let i = 0; i < 10; i++) await exchange();
+    remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: false, timeMilliseconds: performance.now() });
+    expect(guestFrames.mock.calls.length).toBeGreaterThan(0);
+    expect(scenes.mock.calls.length).toBeGreaterThan(0);
+    expect(audio.mock.calls.some(([sound]) => sound.family === 'q3')).toBe(true);
+    remote.queueCommand('ui_cinematics', [], player.seat.id);
+    await exchange();
+    expect(guestUiFrames.mock.calls.length).toBeGreaterThan(0);
+    remote.input({ seat: player.seat.id, kind: 'key', code: 27, down: true, repeat: false, timeMilliseconds: performance.now() });
+    await exchange();
+    expect(guestKeys.mock.calls.some(([key]) => key === 27)).toBe(true);
     remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
     expect(server.simulation.bodies.read(peer.actor)?.origin).not.toEqual(before);
     expect(server.simulation.playerView(peer.actor).angles.y).toBeCloseTo(aim.y, 1);
+    if (!('cgameSource' in remote.remote)) throw new Error('Missing Q3 remote source');
+    const oldSource = remote.remote.cgameSource, oldNumber = oldSource.current()?.number;
+    if (oldNumber === undefined) throw new Error('No old snapshot');
     await server.changeLevel('q3dm2');
     for (let i = 0; i < 60 && remote.content.recipe.map.geometry.requestedPath !== 'maps/q3dm2.bsp'; i++) await exchange();
     if (remote.content.recipe.map.geometry.requestedPath !== 'maps/q3dm2.bsp') throw new Error(`Travel failed ${remote.networkPhase}: ${prints.join('')}`);
     expect(remote.content.recipe.map.geometry.requestedPath).toBe('maps/q3dm2.bsp');
+    expect(oldSource.snapshotPing?.(oldNumber)).toBeNull();
     expect(server.networkClients[0]?.client.equals(peer.client)).toBe(true);
     expect(remote.session.world).toBeNull();
-  } finally { await app?.close(); await server.close(); }
+    expect(lifecycle).toEqual(["ui-init:maps/q3dm1.bsp", "cg-shutdown:maps/q3dm1.bsp", "ui-shutdown:maps/q3dm1.bsp", "ui-init:maps/q3dm2.bsp"]);
+    pauseShutdown = true;
+    const closing = remote.close();
+    expect(remote.close()).toBe(closing);
+    await expect(remote.step(50)).rejects.toThrow("closed");
+    expect(() => remote.input({ seat: player.seat.id, kind: "key", code: 119, down: true, repeat: false, timeMilliseconds: performance.now() })).toThrow("closed");
+    shutdownGate.resolve();
+    await closing;
+    expect(lifecycle.slice(-2)).toEqual(["cg-shutdown:maps/q3dm2.bsp", "ui-shutdown:maps/q3dm2.bsp"]);
+  } finally { shutdownGate.resolve(); await app?.close(); await server.close(); cgShutdown.mockRestore(); uiShutdown.mockRestore(); uiInit.mockRestore(); guestFrames.mockRestore(); scenes.mockRestore(); audio.mockRestore(); guestUiFrames.mockRestore(); guestKeys.mockRestore(); pure.mockRestore(); shaders.mockRestore(); pictures.mockRestore(); }
 }, 60000);

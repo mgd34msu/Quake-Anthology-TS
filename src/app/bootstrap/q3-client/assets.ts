@@ -32,7 +32,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
     this.fonts = new RendererFontRegistry(this.fontReader, path => provider.shaders.registerPicture(path), () => undefined);
     this.fontRegistry = new UiAssetRegistry({ fonts: this.fonts, registerPicture: path => provider.shaders.registerPicture(path) }, print);
   }
-  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void): Promise<ApplicationQ3Assets> {
+  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void, mode: "source-sync" | "guest-async" = "source-sync"): Promise<ApplicationQ3Assets> {
     const provider = await assets.provider(content), result = new ApplicationQ3Assets(assets, content, provider, print);
     const archives = new Set(provider.mounts.plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : []));
     for (const product of assets.content.catalog.products) for (const archive of product.archives) if (archives.has(archive.path))
@@ -47,7 +47,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
         result.names.add(path.toLowerCase());
       }
     }
-    const synchronous = [...result.names].filter(path => /\.(?:menu|hud|txt|cfg|voice|vc|h)$/i.test(path) || /^sound\/.*\.(?:wav|ogg)$/i.test(path));
+    const synchronous = mode === "guest-async" ? [] : [...result.names].filter(path => /\.(?:menu|hud|txt|cfg|voice|vc|h)$/i.test(path) || /^sound\/.*\.(?:wav|ogg)$/i.test(path));
     for (let start = 0; start < synchronous.length; start += 32) await Promise.all(synchronous.slice(start, start + 32).map(async path => {
       const opened = await provider.mounts.open(path); if (opened !== null) result.retained.set(path, opened);
     }));
@@ -101,10 +101,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       },
       skin: async path => { const provider = await this.assets.provider(contentFor(path)), opened = await provider.mounts.open(path);
         return opened === null ? null : { path, surfaces: parseSkin(new TextDecoder().decode(opened.bytes)) }; },
-      shader: async (path, mip) => {
-        const picture = await this.provider.shaders.registerPicture(path);
-        return mip ? { ...picture, material: { ...picture.material, compiled: await this.provider.shaders.register(path) } } : picture;
-      },
+      shader: (path, mip) => this.provider.shaders.registerPicture(path, mip),
       world: async () => ({ map: { models: this.assets.world.map.models } }),
       remapShader: async (original, replacement, offset) => {
         const value = Number.parseFloat(offset), timeOffset = Number.isNaN(value) ? 0 : value;

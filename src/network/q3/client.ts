@@ -15,7 +15,7 @@ import { SourceParseEntities } from "./parse-entities.ts";
 import { ClientReliableCommands } from "./reliable.ts";
 import { ServerMessageCursor } from "./server-message.ts";
 import type { Download, Gamestate, GamestateEntry, ServerMessage, ServerOperation, Snapshot } from "./server-message.ts";
-import { SnapshotHistory } from "./snapshot-history.ts";
+import { SNAPSHOT_BACKUP, SnapshotHistory } from "./snapshot-history.ts";
 import { EntityStateRecord } from "./state/entity.ts";
 import type { Product } from "./state/product.ts";
 
@@ -24,7 +24,7 @@ export interface Q3ClientBindings {
   /** Session retirement invalidates continuation after an awaited source callback. */
   assertCurrent(): void;
   print(text: string): void;
-  clearActive(): void;
+  clearActive(): void | Promise<void>;
   systemInfo(info: string): Promise<void>;
   gamestate(state: Gamestate, generation: number): Promise<void>;
   snapshot(snapshot: Snapshot, ping: number): void;
@@ -79,6 +79,7 @@ export class Q3ClientConnection {
   readonly channel: Netchannel | null;
   private readonly serverCommands = Array.from({ length: 64 }, () => "");
   private readonly outPackets: SentPacket[] = Array.from({ length: 32 }, () => ({ commandNumber: 0, serverTime: 0, realTime: 0 }));
+  private readonly snapshotPings = new Map<number, number>();
   private bigConfigString = "";
   serverMessageSequence = 0;
   serverCommandSequence = 0;
@@ -98,12 +99,18 @@ export class Q3ClientConnection {
     if (value === undefined) throw new RangeError("Missing server command ring slot");
     return value;
   }
-  private clearActive(): void {
-    this.history.clear(); this.parseEntities.clear(); this.gameState.clear(); this.commands.clear();
+  private async clearActive(): Promise<void> {
+    await this.bindings.clearActive();
+    this.bindings.assertCurrent();
+    this.history.clear(); this.snapshotPings.clear(); this.parseEntities.clear(); this.gameState.clear(); this.commands.clear();
     this.serverId = 0;
     for (const baseline of this.baselines) baseline.copyFrom(new EntityStateRecord<number>(0));
     this.outPackets.fill({ commandNumber: 0, serverTime: 0, realTime: 0 });
-    this.generation++; this.bindings.clearActive();
+    this.generation++;
+  }
+  snapshotPing(number: number): number | null {
+    const entry = this.history.readSlot(number);
+    return entry?.status === "valid" && entry.snapshot.messageNumber === number ? this.snapshotPings.get(number) ?? null : null;
   }
   private ping(snapshot: Snapshot, realTime: number): number {
     for (let index = 0; index < 32; index++) {
@@ -129,7 +136,7 @@ export class Q3ClientConnection {
         baseline: number => this.baselines[number] ?? null, history: number => this.history.borrowSlot(number, this.product) });
       switch (step.kind) {
         case "acknowledge": acknowledge = step.sequence; this.reliable.assignAcknowledgement(step.sequence); break;
-        case "gamestate-start": this.clearActive(); entries = []; break;
+        case "gamestate-start": await this.clearActive(); entries = []; break;
         case "gamestate-sequence": commandSequence = step.sequence; this.serverCommandSequence = step.sequence; this.gameState.beginEntries(); break;
         case "gamestate-entry": {
           entries.push(step.entry);
@@ -156,7 +163,15 @@ export class Q3ClientConnection {
           switch (operation.kind) {
             case "nop": break;
             case "command": this.serverCommandSequence = operation.sequence; this.serverCommands[operation.sequence & 63] = operation.text.slice(0, 1023); break;
-            case "snapshot": if (this.history.publish(operation)) this.bindings.snapshot(operation.snapshot, this.ping(operation.snapshot, realTime)); break;
+            case "snapshot": {
+              if (this.history.publish(operation)) {
+                const snapshot = operation.snapshot, ping = this.ping(snapshot, realTime);
+                for (const number of this.snapshotPings.keys()) if (((snapshot.messageNumber - number) | 0) >= SNAPSHOT_BACKUP) this.snapshotPings.delete(number);
+                this.snapshotPings.set(snapshot.messageNumber, ping);
+                this.bindings.snapshot(snapshot, ping);
+              }
+              break;
+            }
             case "download": await this.bindings.download(operation.block); break;
           }
           break;

@@ -1,3 +1,7 @@
+import { nativeAtoi } from "../../core/numeric.ts";
+import { q3InfoValue } from "../../network/q3/admission.ts";
+import { Q3ClientContent } from "./network/q3-client-content.ts";
+import type { Q3ClientConnection } from "../../network/q3/client.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
@@ -61,8 +65,13 @@ export class RemoteApplication {
   private frames = 0;
   private stopping = false;
   private closed = false;
+  private closing = false;
+  private closeResult: Promise<void> | null = null;
   private worldLoadGeneration = 0;
   private stepping = false;
+  private q3Content: Q3ClientContent | null = null;
+  private q3InitialViewPending = false;
+  private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
   private readonly reportedEffectGaps = new Set<string>();
@@ -82,7 +91,8 @@ export class RemoteApplication {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
       const remote = new Q3RemotePresentation({ identity, session, content: loadedContent,
         userinfo: () => `\\name\\Player\\model\\${launchOptions.characterModel}/default\\handicap\\100\\rate\\25000\\snaps\\20`,
-        print: text => this.print(text), sendCommand: text => this.network.command(text), loadContent: world => this.loadServerWorld(world) });
+        print: text => this.print(text), sendCommand: text => this.network.command(text),
+        loadContent: (world, connection) => this.loadQ3ServerWorld(world, connection), initialize: connection => this.bindSeat(connection), shutdown: async () => { await this.presentation?.q3Client?.shutdown(); } });
       this.remote = remote;
       this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
@@ -176,7 +186,19 @@ export class RemoteApplication {
     const names = (first: number, maximum: number): string[] => Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
     return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) });
   }
-  private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }): Promise<LoadedApplicationContent> {
+  private async loadQ3ServerWorld(world: Q1RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent> {
+    const generation = connection.generation;
+    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.content);
+    try {
+      if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
+      const content = await this.loadServerWorld(world, prepared.content);
+      if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
+      this.q3Content = prepared;
+      return content;
+    } catch (error) { await prepared.close(); throw error; }
+  }
+
+  private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent): Promise<LoadedApplicationContent> {
     const generation = ++this.worldLoadGeneration;
     const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
     assertCurrent();
@@ -185,15 +207,16 @@ export class RemoteApplication {
     const map = mapResourcePath(path);
     if (this.presentation !== null) this.uiPreferences = { ...this.presentation.ui.preferences.values };
     const differentMap = map !== this.content.recipe.map.geometry.requestedPath;
-    if (differentMap || this.presentation !== null || this.remote.player !== null) {
-      const options = { ...this.options, map }, content = differentMap ? await loadApplicationContent(options) : this.content;
+    const replaceContent = differentMap || preparedContent !== undefined;
+    if (replaceContent || this.presentation !== null || this.remote.player !== null) {
+      const options = { ...this.options, map }, content = preparedContent ?? (differentMap ? await loadApplicationContent(options) : this.content);
       let frontend: RemoteWorldFrontend;
       try {
         assertCurrent();
         frontend = await this.loadFrontend(content);
         try { assertCurrent(); } catch (error) { this.releaseFrontend(frontend); throw error; }
       }
-      catch (error) { if (differentMap) await content.close(); throw error; }
+      catch (error) { if (replaceContent) await content.close(); throw error; }
       const previous = this.frontend, oldContent = this.content;
       this.session.closeWorld(); this.presentation = null;
       if (previous !== null) {
@@ -202,7 +225,7 @@ export class RemoteApplication {
         this.releaseFrontend(previous);
       }
       this.frontend = frontend; this.loadedContent = content; this.launchOptions = options;
-      if (differentMap) await oldContent.close();
+      if (replaceContent) await oldContent.close();
     } else {
       this.session.closeWorld(); this.presentation = null;
     }
@@ -235,15 +258,27 @@ export class RemoteApplication {
     return this.content;
   }
 
-  private async bindSeat(): Promise<void> {
+  private async bindSeat(connection?: Q3ClientConnection): Promise<void> {
     const generation = this.worldLoadGeneration;
     const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
-    const player = this.remote.player, frontend = this.frontend;
-    if (player === null || this.remote.output === null || frontend === null || this.presentation !== null) return;
+    const player = connection !== undefined && this.remote instanceof Q3RemotePresentation ? this.remote.admittedPlayer : this.remote.player, frontend = this.frontend;
+    if (connection === undefined && this.q3InitialViewPending && player !== null && this.remote.output !== null && this.controls !== null) {
+      const local = this.controls.locals[0];
+      if (local === undefined) throw new Error("Q3 first snapshot lost its seat");
+      this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], this.remote);
+      this.q3InitialViewPending = false;
+    }
+    if (player === null || (connection === undefined && this.remote.output === null) || frontend === null || this.presentation !== null) return;
     if (this.controls === null) {
       const seat = this.session.createSeat(0, this.remote.client);
       this.controls = new ApplicationInput(this.window, [{ seat, actor: player.actor }], this.options, this.remote,
-        { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text) }, () => performance.now());
+        { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text),
+          clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
+          clientInput: event => {
+            const client = this.presentation?.q3Client;
+            if (client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
+            this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
+          } }, () => performance.now());
     } else {
       const local = this.controls.locals[0];
       if (local === undefined) throw new Error("Remote input lost its local seat");
@@ -260,26 +295,37 @@ export class RemoteApplication {
     const remote = this.remote;
     let q3: ApplicationQ3Client | null = null;
     try {
-      if (remote instanceof Q3RemotePresentation) q3 = await ApplicationQ3Client.create({ kind: "remote", source: remote.cgameSource, initialPlayer: remote.initialPlayer,
-      assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio, movement: remote.movement(local.player.seat.id),
-      viewport: () => { const size = this.window.drawableSize; return { x: 0, y: 0, width: size.width, height: size.height }; }, now: () => performance.now(),
-      commands: { reliable: text => this.network.command(text), console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }), print: text => this.print(text) } });
+      if (remote instanceof Q3RemotePresentation) {
+        if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
+        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
+          commandBuffer: input.commands, renderer: this.renderer,
+          clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
+            connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
+          assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
+          viewport: () => { const size = this.window.drawableSize; return { x: 0, y: 0, width: size.width, height: size.height }; }, now: () => performance.now(),
+          commands: { reliable: text => this.network.command(text), console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }), print: text => this.print(text) } });
+      }
       assertCurrent();
+      if (connection !== undefined) {
+        if (this.q3Content === null) throw new Error("Q3 guest initialization has no content owner");
+        connection.reliable.add(this.q3Content.referencedPureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1) ?? "", "sv_serverid"))));
+      }
     } catch (error) { q3?.close(); ui.close(); throw error; }
     if (q3 !== null) input.registerClientCommands([...q3.commandNames]);
     const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3);
     local.player.seat.attachPresentation(presentation, () => presentation.close());
     this.presentation = presentation;
-    await frontend.audio.startWorldMusic();
+    this.q3InitialViewPending = connection !== undefined;
+    if (q3 === null) await frontend.audio.startWorldMusic();
   }
 
   input(event: SeatInputEvent): boolean {
-    if (this.closed) throw new Error("Remote application is closed");
+    if (this.closed || this.closing) throw new Error("Remote application is closed");
     return this.controls?.input(event) ?? false;
   }
 
   queueCommand(name: string, args: readonly string[], seat: SeatId | null): undefined {
-    if (this.closed) throw new Error("Remote application is closed");
+    if (this.closed || this.closing) throw new Error("Remote application is closed");
     this.commands.push({ name, args: [...args], seat });
     return undefined;
   }
@@ -311,7 +357,7 @@ export class RemoteApplication {
   }
 
   async step(elapsedMilliseconds: number): Promise<SimulationOutput | null> {
-    if (this.closed) throw new Error("Remote application is closed");
+    if (this.closed || this.closing) throw new Error("Remote application is closed");
     if (this.stepping) throw new Error("Remote application step is already in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Remote application step requires positive elapsed milliseconds");
     this.stepping = true;
@@ -323,6 +369,10 @@ export class RemoteApplication {
       const now = performance.now();
       await this.network.poll(now);
       this.frames++;
+      const clientInputs = this.clientInputs; this.clientInputs = [];
+      for (const input of clientInputs) {
+        if (!this.closed && input.generation === this.worldLoadGeneration && this.presentation?.q3Client === input.client) await input.client.input(input.event);
+      }
       if (this.network.phase === "closed" || this.network.phase === "rejected") { this.controls?.stopHaptics(); this.requestQuit(); return null; }
       if (this.network.phase !== "active" || this.remote.output === null) {
         this.controls?.stopHaptics();
@@ -380,11 +430,19 @@ export class RemoteApplication {
   readPixels(): Uint8Array { return this.renderer.readPixels(); }
   captureNextFrame(): Promise<Uint8Array> { return this.renderer.captureNextFrame(); }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true; this.stopping = true; this.worldLoadGeneration++;
-    const frontend = this.frontend; this.frontend = null;
+  close(): Promise<void> {
+    if (this.closeResult !== null) return this.closeResult;
+    this.closing = true; this.stopping = true;
+    this.closeResult = this.closeOwned();
+    return this.closeResult;
+  }
+  private async closeOwned(): Promise<void> {
     const errors: unknown[] = [];
+    if (!this.stepping) {
+      try { await this.presentation?.q3Client?.shutdown(); } catch (error) { errors.push(error); }
+    }
+    this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
+    const frontend = this.frontend; this.frontend = null;
     for (const close of [() => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

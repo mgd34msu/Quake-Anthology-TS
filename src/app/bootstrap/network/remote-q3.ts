@@ -34,7 +34,9 @@ export interface Q3RemotePresentationOptions {
   readonly session: EngineSession;
   readonly content: LoadedApplicationContent;
   readonly userinfo: () => string;
-  loadContent(world: Q3RemoteWorld): Promise<LoadedApplicationContent>;
+  loadContent(world: Q3RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent>;
+  shutdown?(): Promise<void>;
+  initialize?(connection: Q3ClientConnection): Promise<void>;
   sendCommand(text: string): void;
   print(text: string): void;
 }
@@ -55,7 +57,6 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private published: SimulationOutput | null = null;
   private gameStateMessage = 0;
   private gameStateCommands = 0;
-  private currentPing = 0;
   private prediction: PresentationPredictionAdapter | null = null;
   private source: ApplicationQ3ClientSource | null = null;
   constructor(readonly options: Q3RemotePresentationOptions) {
@@ -66,6 +67,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   get scene() { return this.collision; }
   get output(): SimulationOutput | null { return this.published; }
   get player() { return this.current === null ? null : { actor: this.actorAt(this.current.playerState.clientNum), client: this.client.id, sourceEntity: this.current.playerState.clientNum }; }
+  get admittedPlayer() { const connection = this.connection; if (connection === null) throw new Error("Q3 seat has no decoded connection"); return { actor: this.actorAt(connection.clientNumber), client: this.client.id, sourceEntity: connection.clientNumber }; }
   get initialPlayer(): Snapshot['playerState'] { if (this.current === null) throw new Error('Q3 cgame needs its first decoded player state'); return this.current.playerState; }
   get cgameSource(): ApplicationQ3ClientSource { if (this.source === null) throw new Error('Q3 cgame has no connection source'); return this.source; }
   get sourceRecords(): readonly string[] { return this.connection?.gameState.copyStrings() ?? []; }
@@ -84,15 +86,15 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
       get time() { return remote.clock.time; }, get clientNumber() { return connection.clientNumber; },
       get serverMessageSequence() { return remote.gameStateMessage; }, get lastExecutedServerCommand() { return remote.gameStateCommands; },
       current: () => history.current(), read: number => history.read(number), actorAt: number => remote.actorAt(number),
-      getGameState: () => connection.gameState.copyStrings(), systemInfo: () => connection.gameState.get(1) ?? '', getServerCommand: sequence => connection.getServerCommand(sequence), snapshotPing: () => remote.currentPing,
+      getGameState: () => connection.gameState.copyStrings(), systemInfo: () => connection.gameState.get(1) ?? '', getServerCommand: sequence => connection.getServerCommand(sequence), snapshotPing: number => connection.snapshotPing(number),
       commands: { get currentNumber() { return connection.commands.currentNumber; }, read: number => {
         const value = connection.commands.read(number); return value === null ? null : { ...value, angles: { x: value.angles[0], y: value.angles[1], z: value.angles[2] } };
       } },
     };
   }
-  clearActive(): void { this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
+  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
   async systemInfo(info: string): Promise<void> {
-    if (Number(q3InfoValue(info, 'sv_pure')) !== 0) throw new Error('This server requires pure verification, which is not supported yet.');
+    if (Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
     const game = q3InfoValue(info, 'fs_game'); if (game !== '' && game !== 'baseq3') throw new Error(`Unsupported Q3 remote game directory: ${game}`);
   }
   async gamestate(state: Gamestate, _generation: number): Promise<void> {
@@ -104,11 +106,12 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     const map = q3InfoValue(info, 'mapname'); if (!/^[A-Za-z0-9_/-]+$/.test(map) || map.includes('..')) throw new Error('Invalid Q3 remote map name');
     const names = (first: number, count: number): string[] => Array.from({ length: count }, (_, i) => connection.gameState.get(first + i) ?? '').filter(value => value.length > 0);
     this.gameStateMessage = connection.serverMessageSequence; this.gameStateCommands = state.commandSequence;
-    this.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) });
+    this.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
     this.collision = createSceneQueries(this.content.world);
+    await this.options.initialize?.(connection);
   }
-  snapshot(snapshot: Snapshot, ping: number): void {
-    this.current = snapshot; this.currentPing = ping; this.clock.publish(snapshot);
+  snapshot(snapshot: Snapshot, _ping: number): void {
+    this.current = snapshot; this.clock.publish(snapshot);
     if (this.prediction !== null) this.prediction.capture(this.predictionSnapshot());
     this.publish(snapshot.serverTime);
   }
@@ -116,7 +119,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private requirePlayer(actor: ActorId): Snapshot {
     if (this.current === null || !this.actorAt(this.current.playerState.clientNum).equals(actor)) throw new Error('No decoded Q3 player state'); return this.current;
   }
-  playerView(actor: ActorId): PlayerView { const ps = this.requirePlayer(actor).playerState; return { origin: ps.origin, angles: ps.viewangles, viewHeight: ps.viewheight }; }
+  playerView(actor: ActorId): PlayerView { if (this.current === null && this.admittedPlayer.actor.equals(actor)) return { origin: zero, angles: zero, viewHeight: 0 }; const ps = this.requirePlayer(actor).playerState; return { origin: ps.origin, angles: ps.viewangles, viewHeight: ps.viewheight }; }
   playerUi(actor: ActorId): PlayerUi {
     const ps = this.requirePlayer(actor).playerState, weapon = q3WeaponItem(ps.weapon), source = this.content.recipe.weapons[0];
     if (source === undefined) throw new Error('Q3 remote has no native weapon provider');

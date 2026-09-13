@@ -25,7 +25,6 @@ import { UdpTransport, Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_
 import { CommandBuffer, tokenizeCommand } from "../../core/commands/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
-import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
 import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
@@ -250,18 +249,7 @@ export class Application {
     const events = this.clientInputs; this.clientInputs = [];
     for (const event of events) {
       const client = this.graphical?.q3.get(event.seat)?.client; if (client === undefined) continue;
-      switch (event.kind) {
-        case "key": await client.keyEvent(event.code, event.down); break;
-        case "text": for (const character of event.text) { const code = character.codePointAt(0); if (code !== undefined) await client.keyEvent(code | KEY_CHAR_FLAG, true); } break;
-        case "mouse-button": await client.keyEvent(KeyCode.Mouse1 + event.button - 1, event.down); break;
-        case "mouse-motion": await client.mouseEvent(event.delta.x, event.delta.y); break;
-        case "mouse-wheel": for (let count = 0; count < Math.abs(event.delta.y); count++) {
-          const key = event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown;
-          await client.keyEvent(key, true); await client.keyEvent(key, false);
-        } break;
-        case "controller-button": if (event.button >= 0 && event.button < 32) await client.keyEvent(KeyCode.Joy1 + event.button, event.down); break;
-        case "controller-axis": case "focus": break;
-      }
+      await client.input(event);
     }
   }
 

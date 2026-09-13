@@ -41,6 +41,7 @@ export class Q3ClientNetwork implements ApplicationNetwork {
   }
   get phase(): ApplicationNetworkPhase { return this.state; }
   get native(): Q3ClientConnection | null { return this.connection; }
+  get connectPacketCount(): number { return this.admission.connectPacketCount; }
   command(text: string): void {
     if (this.connection === null) throw new Error('Q3 client has no connection');
     this.connection.reliable.add(text);
@@ -62,12 +63,13 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         if (result.address.kind !== 'ipv4') throw new Error('Q3 application requires IPv4');
         this.peer = result.address; this.state = 'loading'; this.lastReceived = now;
         const host = this.options.host;
+        const assertCurrent = (): void => { if (this.connection !== connection || this.state === 'closed' || this.state === 'rejected') throw new Error('Q3 callback belongs to a retired connection'); };
         const connection = new Q3ClientConnection(host.identity, 'baseq3', { kind: 'network', challenge: result.challenge, qport: result.qport }, {
-          assertCurrent: () => { if (this.connection !== connection || this.state === 'closed' || this.state === 'rejected') throw new Error('Q3 callback belongs to a retired connection'); },
+          assertCurrent,
           print: text => host.print(text),
-          clearActive: () => { this.state = 'loading'; this.primed = false; this.entered = false; host.clearActive(); },
+          clearActive: async () => { await host.clearActive(); assertCurrent(); this.state = 'loading'; this.primed = false; this.entered = false; },
           systemInfo: info => host.systemInfo(info),
-          gamestate: async (state, generation) => { await host.gamestate(state, generation); this.primed = true; },
+          gamestate: async (state, generation) => { await host.gamestate(state, generation); assertCurrent(); this.primed = true; },
           snapshot: (snapshot, ping) => { host.snapshot(snapshot, ping); if ((snapshot.flags & 2) === 0 && this.primed) this.state = 'active'; },
           downloadSize: () => { throw new Error('Q3 remote package downloads are not supported'); },
           download: async () => { throw new Error('Q3 remote package downloads are not supported'); },
