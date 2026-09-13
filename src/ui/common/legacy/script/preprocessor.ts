@@ -61,6 +61,10 @@ export interface IncludeResolver {
   resolve(request: IncludeRequest): ScriptSource | undefined;
 }
 
+export interface AsyncIncludeResolver {
+  resolve(request: IncludeRequest): ScriptSource | undefined | Promise<ScriptSource | undefined>;
+}
+
 export interface ScriptPreprocessorOptions {
   readonly memory?: ScriptMemory;
   readonly initialDefines?: readonly string[];
@@ -574,9 +578,19 @@ class ExpressionParser {
 }
 
 class SourceReadFalse extends Error {}
+type SourceOperation<T> = Generator<Promise<ScriptSource | undefined>, T, ScriptSource | undefined>;
+
+function synchronousSource<T>(operation: SourceOperation<T>): T {
+  const result = operation.next();
+  if (result.done) return result.value;
+  void result.value.then(source => { if (source instanceof SourceScriptStorage) source.dispose(); }, () => {});
+  const error = new Error("Synchronous script read requires synchronous includes");
+  operation.throw(error);
+  throw error;
+}
 
 class PreprocessorEngine {
-  private readonly resolver: IncludeResolver;
+  private readonly resolver: AsyncIncludeResolver;
   private readonly limits: Limits;
   private readonly now: () => Date;
   private readonly report: ((diagnostic: ScriptDiagnostic) => void) | undefined;
@@ -600,8 +614,9 @@ class PreprocessorEngine {
   private expansionCount = 0;
   private outputCount = 0;
   private disposed = false;
+  private readingAsync = false;
 
-  constructor(root: ScriptSource, resolver: IncludeResolver, options: ScriptPreprocessorOptions,
+  constructor(root: ScriptSource, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions,
     private readonly lifetime: "source" | "global" = "source", heap?: PrecompMemory) {
     if (root.path.length === 0) throw new RangeError("root source path cannot be empty");
     this.resolver = { resolve: request => this.invokeCallback(() => resolver.resolve(request)) };
@@ -648,11 +663,36 @@ class PreprocessorEngine {
   private get currentFrame(): SourceFrame { return this.frame(this.source.script); }
 
   nextToken(): ScriptToken | undefined {
+    if (this.readingAsync) throw new Error("Script source already has a pending token read");
+    return synchronousSource(this.tokenOperation());
+  }
+
+  async nextRecordAsync(validate: () => void): Promise<ScriptTokenRecord | undefined> {
+    this.requireLive();
+    if (this.readingAsync) throw new Error("Script source already has a pending token read");
+    validate();
+    this.readingAsync = true;
+    const operation = this.tokenOperation();
+    try {
+      let next = operation.next();
+      while (!next.done) {
+        try {
+          const source = await next.value;
+          try { this.requireLive(); validate(); }
+          catch (error) { if (source instanceof SourceScriptStorage) source.dispose(); throw error; }
+          next = operation.next(source);
+        } catch (error) { next = operation.throw(error); }
+      }
+      return next.value === undefined ? undefined : this.currentRecord;
+    } finally { this.readingAsync = false; }
+  }
+
+  private *tokenOperation(): SourceOperation<ScriptToken | undefined> {
     this.requireLive();
     const output = localToken();
     this.output = output;
     let token: ScriptToken | undefined;
-    try { token = this.readToken(output); }
+    try { token = yield* this.readToken(output); }
     catch (error) {
       if (error instanceof SourceReadFalse) { this.output = output; return undefined; }
       if (this.isSourceFailure(error)) this.output = output;
@@ -858,7 +898,7 @@ class PreprocessorEngine {
   }
 
   parseGlobal(): PrecompDefine | undefined {
-    this.defineDirective(this.cursor, this.currentFrame.lexer.currentLocation);
+    synchronousSource(this.defineDirective(this.cursor, this.currentFrame.lexer.currentLocation));
     return this.macros.first();
   }
 
@@ -947,12 +987,12 @@ class PreprocessorEngine {
     return this.snapshotToken(output);
   }
 
-  private readToken(output: PrecompToken): ScriptToken | undefined {
+  private *readToken(output: PrecompToken): SourceOperation<ScriptToken | undefined> {
     while (true) {
       let token = this.readSourceToken(output);
       if (token === undefined) return undefined;
       if (this.isPunctuation(token, Punctuation.Preprocessor)) {
-        this.directive(this.cursor, token.location);
+        yield* this.directive(this.cursor, token.location);
         continue;
       }
       if (this.isPunctuation(token, Punctuation.Dollar)) {
@@ -961,7 +1001,7 @@ class PreprocessorEngine {
       }
       if (token.kind === "string") {
         let next: ScriptToken | undefined;
-        try { next = this.readToken(localToken()); }
+        try { next = yield* this.readToken(localToken()); }
         catch (error) {
           if (!(error instanceof SourceReadFalse) && !this.isSourceFailure(error)) throw error;
         }
@@ -1048,10 +1088,10 @@ class PreprocessorEngine {
     }
   }
 
-  private directive(
+  private *directive(
     cursor: LineTokenReader,
     hashLocation: SourceLocation,
-  ): void {
+  ): SourceOperation<void> {
     const directive = cursor.next();
     if (directive === undefined || directive.linesCrossed > 0) {
       if (directive !== undefined) {
@@ -1086,10 +1126,10 @@ class PreprocessorEngine {
     }
     switch (directive.value) {
       case "include":
-        if (this.isSourceActive()) this.includeDirective(cursor, this.currentScriptFilename, directive.location);
+        if (this.isSourceActive()) yield* this.includeDirective(cursor, this.currentScriptFilename, directive.location);
         return;
       case "define":
-        if (this.isSourceActive()) this.defineDirective(cursor, directive.location);
+        if (this.isSourceActive()) yield* this.defineDirective(cursor, directive.location);
         return;
       case "undef": {
         if (this.isSourceActive()) {
@@ -1196,7 +1236,7 @@ class PreprocessorEngine {
     }
   }
 
-  private defineDirective(cursor: LineTokenReader, location: SourceLocation): void {
+  private *defineDirective(cursor: LineTokenReader, location: SourceLocation): SourceOperation<void> {
     const name = this.readLineToken(cursor);
     if (name === undefined || name.kind !== "name") {
       if (name !== undefined) cursor.unread(name);
@@ -1221,7 +1261,7 @@ class PreprocessorEngine {
     const opening = this.tokenValue(token).token;
     if (token.text === "(" && opening.whitespaceEnd - opening.whitespaceStart <= 0) {
       let last: PrecompToken | undefined;
-      const checked = this.readToken(localToken());
+      const checked = yield* this.readToken(localToken());
       if (checked?.text !== ")") {
         if (checked !== undefined) cursor.unread(checked);
         while (true) {
@@ -1283,11 +1323,11 @@ class PreprocessorEngine {
     this.macros.delete(name.value);
   }
 
-  private includeDirective(
+  private *includeDirective(
     cursor: LineTokenReader,
     sourcePath: string,
     location: SourceLocation,
-  ): void {
+  ): SourceOperation<void> {
     const first = cursor.next();
     if (first === undefined || first.linesCrossed > 0) {
       this.fail("#include without file name", location);
@@ -1325,7 +1365,8 @@ class PreprocessorEngine {
     if (this.frames.size >= this.limits.includeDepth) {
       this.fail(`include depth exceeds ${this.limits.includeDepth}`, location);
     }
-    const included = this.resolver.resolve(request);
+    const resolved = this.resolver.resolve(request);
+    const included = resolved instanceof Promise ? yield resolved : resolved;
     if (included === undefined) {
       const zero = request.requestedPath.indexOf("\0");
       const converted = (zero < 0 ? request.requestedPath : request.requestedPath.slice(0, zero)).replace(/[\\/]+/g, "/");
@@ -1740,13 +1781,14 @@ export class ScriptSourceReader {
 
   static open(
     root: ScriptSource,
-    resolver: IncludeResolver,
+    resolver: AsyncIncludeResolver,
     options: ScriptPreprocessorOptions = {},
   ): ScriptSourceReader {
     return new ScriptSourceReader(new PreprocessorEngine(root, resolver, options));
   }
 
   next(): ScriptTokenRecord | undefined { return this.engine.nextRecord(); }
+  nextAsync(validate: () => void = () => {}): Promise<ScriptTokenRecord | undefined> { return this.engine.nextRecordAsync(validate); }
   get rawToken(): SourceTokenMemory { return this.engine.rawToken; }
   get currentRecord(): ScriptTokenRecord { return this.engine.currentRecord; }
   unread(record: ScriptTokenRecord): void { this.engine.unread(record); }
