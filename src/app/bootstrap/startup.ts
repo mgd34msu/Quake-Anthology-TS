@@ -1,3 +1,4 @@
+import { serviceLoading } from "./loading.ts";
 import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import type { BrowserConnection } from "./server-browser.ts";
@@ -149,28 +150,46 @@ export class StartupApplication {
     this.graphics?.draw();
     try {
       if (action.kind === "connect") { await this.connect(action.connection); return; }
-      const selected = action.kind === "play" ? await this.model.resolve() : await (async () => {
-        const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
-        return { recipe: image.recipe, options: { ...this.model.options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
-          seats: Math.min(this.model.options.seats, Math.max(1, settings.clientSlots.length)) } };
-      })();
+      const loading = this.graphics;
+      loading?.controllerSettings.close(); loading?.router.close(); loading?.controllers.close();
+      const game = await serviceLoading(async () => {
+        loading?.menu.setStatus("Loading map...", true);
+        const selected = action.kind === "play" ? await this.model.resolve() : await (async () => {
+          const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
+          return { recipe: image.recipe, options: { ...this.model.options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
+            seats: Math.min(this.model.options.seats, Math.max(1, settings.clientSlots.length)) } };
+        })();
+        loading?.menu.setStatus("Preparing world...", true);
+        const game = await Application.open(selected.options, { ...this.host, loading: { deferWindowVisibility: true,
+          stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values);
+        this.game = game;
+        try {
+          if (action.kind === "load") await game.loadGame(action.path);
+          loading?.menu.setStatus("Starting game...", true);
+          if (!this.stopping) { const started = performance.now(); await Bun.sleep(4); await game.step(performance.now() - started); }
+          return game;
+        } catch (error) { this.game = null; await game.close(); throw error; }
+      }, () => {
+        if (loading === null) return;
+        for (const event of loading.renderer.window.pollEvents()) {
+          if (event.kind === "quit" || event.kind === "window" && event.event === 14) { this.requestQuit(); loading.renderer.window.setVisible(false); }
+        }
+        loading.draw();
+      });
       this.graphics?.close(); this.graphics = null;
-      const game = await Application.open(selected.options, this.host, selected.recipe, this.preferences.values);
-      this.game = game;
+      if (!this.stopping) game.window?.setVisible(!game.options.hidden);
       try {
-        if (action.kind === "load") await game.loadGame(action.path);
         if (this.stopping) game.requestQuit();
         await game.run();
       } finally { this.preferences.values = game.frontendSettings; this.game = null; await game.close(); }
       this.status = "";
     } catch (error) {
+      if (this.game !== null) { const game = this.game; this.game = null; await game.close(); }
+      this.graphics?.close(); this.graphics = null;
       this.status = error instanceof Error ? error.message : String(error);
       this.host.print(`${this.status}\n`);
     }
-    if (!this.stopping) {
-      if (this.graphics === null) await this.openGraphics();
-      else this.graphics.menu.setStatus(this.status);
-    }
+    if (!this.stopping) await this.openGraphics();
   }
 
   private async connect(connection: BrowserConnection): Promise<void> {

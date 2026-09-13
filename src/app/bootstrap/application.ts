@@ -98,6 +98,7 @@ interface GraphicalApplication {
 }
 
 export interface ApplicationHost {
+  readonly loading?: { readonly deferWindowVisibility: boolean; stage(message: string): void };
   print(text: string): undefined;
 }
 
@@ -142,6 +143,7 @@ export class Application {
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
     if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
+    host.loading?.stage("Loading map...");
     const content = await loadApplicationContent(options, recipe);
     try {
       if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);
@@ -155,6 +157,7 @@ export class Application {
     const localSeats = new Map<ClientId, SessionSeat>();
     let application: Application | null = null;
     try {
+      host.loading?.stage("Preparing world...");
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
       const simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
@@ -179,6 +182,7 @@ export class Application {
           } });
         await application.openGraphical();
       }
+      host.loading?.stage("Starting game...");
       application.bots = await application.createBots(content, simulation);
       await application.openNetwork();
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
@@ -503,11 +507,13 @@ export class Application {
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
     try {
+      this.host.loading?.stage("Loading textures...");
       await assets.loadWorld();
+      this.host.loading?.stage("Loading characters...");
       const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography();
       const characters = this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
         { model: this.options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
-      renderer = NativeRenderer.open(this.options, owner);
+      renderer = NativeRenderer.open(this.host.loading?.deferWindowVisibility ? { ...this.options, hidden: true } : this.options, owner);
       const players: LocalPlayer[] = [];
       for (let index = 0; index < this.options.seats; index++) {
         const client = this.session.createClient(index);
@@ -517,6 +523,7 @@ export class Application {
         const player = this.simulation.admitPlayer(client.id);
         players.push({ seat, actor: player.actor });
       }
+      this.host.loading?.stage("Loading sounds...");
       input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig);
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));

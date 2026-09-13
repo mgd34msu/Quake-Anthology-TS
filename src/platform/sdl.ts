@@ -21,6 +21,8 @@ function loadSdl() {
     SDL_GetError: { args: [], returns: "cstring" },
     SDL_GetClipboardText: { args: [], returns: "ptr" },
     SDL_free: { args: ["ptr"], returns: "void" },
+    SDL_ShowWindow: { args: ["ptr"], returns: "void" },
+    SDL_HideWindow: { args: ["ptr"], returns: "void" },
     SDL_CreateWindow: { args: ["buffer", "i32", "i32", "i32", "i32", "u32"], returns: "ptr" },
     SDL_DestroyWindow: { args: ["ptr"], returns: "void" },
     SDL_GetWindowID: { args: ["ptr"], returns: "u32" },
@@ -555,6 +557,11 @@ export class SdlWindow {
   private opened(): Resources {
     if (this.resources === null) throw new Error("SDL window is closed");
     return this.resources;
+  }
+
+  setVisible(visible: boolean): void {
+    const window = this.opened().window;
+    if (visible) sdl().SDL_ShowWindow(window); else sdl().SDL_HideWindow(window);
   }
 
   get flags(): number { return sdl().SDL_GetWindowFlags(this.opened().window); }
