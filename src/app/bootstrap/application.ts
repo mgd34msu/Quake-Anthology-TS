@@ -7,7 +7,7 @@ import { applicationAudioCommands } from "./audio/commands.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
-import { ApplicationQ2Console } from "./q2-console.ts";
+import { ApplicationQ2Console, q2OperatorPlayerName } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
 import { botAdmissionError, ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
 import type { ApplicationBotClient } from "./simulation/bots.ts";
@@ -355,7 +355,8 @@ export class Application {
       if (player === null || this.localSeats.has(player.client)) return false;
       if (target.toLowerCase() === "all") return true;
       if (target.toLowerCase() === "allbots") return this.bots !== null && this.bots.actor(player.client) !== null;
-      const name = source?.pool.clientAt(player.client.slot).pers.netname ?? this.simulation.q2Source()?.players.states.get(actor)?.name ?? "";
+      const q2Player = this.simulation.q2Source()?.players.states.get(actor);
+      const name = source?.pool.clientAt(player.client.slot).pers.netname ?? (q2Player === undefined ? "" : q2OperatorPlayerName(q2Player));
       return String(player.client.slot) === target || name.replace(/\^[0-9]/g, "").toLowerCase() === target.toLowerCase();
     });
     if (selected.length === 0) throw new Error(`Player ${target} is not on the server`);

@@ -1,0 +1,52 @@
+import { expect, test } from "bun:test";
+import { Application } from "../../src/app/bootstrap/application.ts";
+import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
+
+for (const product of ["q2-classic-baseq2", "q2-rerelease-baseq2"]) test(`dedicated ${product} stdin identifies and removes only the selected session participant`, async () => {
+  const parsed = parseApplicationCommand(["--game", product, "--map", "base1", "--movement", "q2", "--character", "q2", "--mode", "coop", "--dedicated"]);
+  if (parsed.kind !== "run") throw new Error("Expected dedicated launch");
+  const prints: string[] = [];
+  const application = await Application.open(parsed.options, { print: text => { prints.push(text); } });
+  try {
+    const source = application.simulation.q2Source();
+    if (source === null) throw new Error("Missing Q2 source");
+    const first = application.session.createClient(0), second = application.session.createClient(1);
+    const firstActor = application.simulation.admitPlayer(first.id).actor, secondActor = application.simulation.admitPlayer(second.id).actor;
+    const firstEntity = source.game.entity(firstActor), secondEntity = source.game.entity(secondActor);
+    if (firstEntity === null || secondEntity === null) throw new Error("Missing source player");
+    source.players.userinfoChanged(firstEntity, source.game, "\\name\\Operator A\\skin\\male/grunt\\rate\\12345");
+    source.players.userinfoChanged(secondEntity, source.game, "\\name\\Peer B\\skin\\female/athena\\rate\\23456");
+    const state = source.players.states.get(firstActor);
+    if (state === undefined) throw new Error("Missing source player state");
+    state.score = 7;
+    process.stdin.emit("data", "sta");
+    const firstFrame = await application.step(100);
+    expect(prints.join("")).not.toContain("num score ping name");
+    process.stdin.emit("data", 'tus\ndumpuser "Operator A"\ntimelimit 1\n');
+    const nextFrame = await application.step(100);
+    expect(nextFrame.snapshot.frame.frame).toBeGreaterThan(firstFrame.snapshot.frame.frame);
+    const output = prints.join("");
+    expect(output).toContain("map              : base1");
+    expect(output).toContain("0 7 0 Operator A");
+    expect(output).toContain("1 0 0 Peer B");
+    expect(output).toContain("name                Operator A");
+    expect(output).toContain("rate                12345");
+    expect(application.simulation.q2ServerCvars()?.variableString("timelimit")).toBe("1");
+    process.stdin.emit("data", "kick 0\n");
+    await application.step(100);
+    expect(first.isClosed).toBe(true);
+    expect(second.isClosed).toBe(false);
+    expect(application.simulation.movementPlayer(firstActor)).toBeNull();
+    expect(application.simulation.movementPlayer(secondActor)).not.toBeNull();
+    prints.length = 0;
+    process.stdin.emit("data", "status\ndumpuser 0\n");
+    await application.step(100);
+    expect(prints.join("")).not.toContain("Operator A");
+    expect(prints.join("")).toContain("Peer B");
+    expect(prints.join("")).toContain("Player 0 is not on the server");
+    process.stdin.emit("data", 'kick "Peer B"\n');
+    await application.step(100);
+    expect(second.isClosed).toBe(true);
+    expect(application.simulation.movementPlayer(secondActor)).toBeNull();
+  } finally { await application.close(); }
+}, 30000);
