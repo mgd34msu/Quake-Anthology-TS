@@ -319,6 +319,11 @@ class TravelStep implements BotTravelContext {
     if (this.againstLadder()) state.moveFlags |= BotMoveFlag.AGAINSTLADDER;
     if ((state.moveFlags & (BotMoveFlag.ONGROUND | BotMoveFlag.SWIMMING | BotMoveFlag.AGAINSTLADDER)) !== 0) {
       state.area = this.host.navigation.fuzzyPointReachabilityArea(state.origin);
+      const riding = this.reachability(state.lastReachability);
+      if (riding?.graphEdge.source.kind === "nav3" && riding.graphEdge.sourceTravelType === 6 && this.onMover(state, riding)) {
+        state.area = this.graph.area(riding.graphEdge.from);
+        state.reachabilityTime = f(f(this.time()) + 5);
+      }
       if (state.area === 0) { result.failure = true; result.blocked = true; result.blockEntity = 0; result.type = BotMoveResultType.INSOLIDAREA; return; }
       if (state.area === goal.area) { copyResult(result, this.moveInGoalArea(goal)); return; }
       let number = state.lastReachability, prior = this.reachability(number);

@@ -203,7 +203,7 @@ export class NavigationRuntime {
       if (edges === null) return { kind: "unreachable", reason: "no route satisfies source flags, character capabilities, and current obstacles" };
       let cursor = query.start, seconds = 0, failed = false;
       const points: Vec3[] = [cursor];
-      const prediction = this.world.beginRoute(this.graph.profile);
+      let prediction = this.world.beginRoute(this.graph.profile);
       const admit = (request: TraversalRequest): TraversalAdmission => {
         const result = prediction.admit(request);
         if (result.admitted) {
@@ -214,10 +214,37 @@ export class NavigationRuntime {
         return result;
       };
       for (const edge of edges) {
+        const mover = edge.mode === "mover" && edge.source.kind === "nav3" && edge.sourceTravelType === 6 && edge.entity !== null
+          ? this.world.entity(edge.entity) : null;
+        if (mover?.elevator !== undefined && mover.enabled && !mover.locked) {
+          const elevator = mover.elevator;
+          if (elevator.top.z <= elevator.bottom.z || elevator.top.x !== elevator.bottom.x || elevator.top.y !== elevator.bottom.y) {
+            rejected.add(edge.id); failed = true; break;
+          }
+          const staging = edge.hint?.funnel ?? edge.start;
+          if (distance(cursor, edge.start) > Math.max(this.graph.profile.maximumStep, this.node(edge.from)?.radius ?? 0) && distance(cursor, staging) > 1
+            && !admit({ from: cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted) {
+            rejected.add(edge.id); failed = true; break;
+          }
+          points.push(edge.end); cursor = edge.end; seconds += edge.travelSeconds;
+          prediction = this.world.beginRoute(this.graph.profile);
+          continue;
+        }
         if (distance(cursor, edge.start) > 1 && !admit({ from: cursor, to: edge.start, mode: edge.mode === "crouch" ? "crouch" : "walk", hint: null, entity: null }).admitted) {
           rejected.add(edge.id); failed = true; break;
         }
-        const result = admit({ from: cursor, to: edge.end, mode: edge.mode, hint: edge.hint, entity: edge.entity });
+        let landing = edge.end;
+        const boarding = edge.mode === "walk" && edge.source.kind === "nav3"
+          ? this.outgoing(edge.to).find(next => next.mode === "mover" && next.sourceTravelType === 6 && next.entity !== null) : undefined;
+        const platform = boarding?.entity === undefined || boarding.entity === null ? null : this.world.entity(boarding.entity);
+        if (platform?.elevator !== undefined && platform.enabled && !platform.locked) {
+          const floor = this.world.scene.trace({ start: edge.end, end: { ...edge.end, z: edge.end.z - 96 },
+            shape: this.graph.profile.shape, target: { kind: "world" }, policy: this.graph.profile.policy,
+            numeric: this.graph.profile.movement.numeric, passActor: this.world.passActor });
+          if (!floor.startSolid && !floor.allSolid && floor.hit.kind === "actor" && floor.hit.actor.equals(platform.actor)
+            && floor.contact.kind === "plane" && floor.contact.plane.normal.z >= this.graph.profile.minimumFloorNormal) landing = floor.end;
+        }
+        const result = admit({ from: cursor, to: landing, mode: edge.mode, hint: edge.hint, entity: edge.entity });
         if (result.admitted) this.#admissionSeconds.set(edge.id, result.seconds);
         if (!result.admitted) { rejected.add(edge.id); failed = true; break; }
       }

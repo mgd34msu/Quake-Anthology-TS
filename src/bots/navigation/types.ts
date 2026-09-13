@@ -63,6 +63,8 @@ export interface NavigationRoutePrediction {
 export interface NavigationEntityState {
   readonly actor: ActorId; readonly enabled: boolean; readonly locked: boolean; readonly bounds: Bounds;
   readonly velocity: Vec3; readonly destination: Vec3 | null;
+  readonly elevator?: { readonly origin: Vec3; readonly bottom: Vec3; readonly top: Vec3;
+    readonly phase: "bottom" | "up" | "top" | "down" };
 }
 /** Reads shared world state. Prediction must use the selected movement provider without committing actors. */
 export interface NavigationWorld {
@@ -77,6 +79,7 @@ export interface NavigationWorld {
 }
 export interface NavigationRoute {
   readonly map: NavigationMapIdentity; readonly nodes: readonly number[]; readonly edges: readonly NavigationEdge[];
+  /** Movement probes supply walking points; authored elevator endpoints are executed against the live mover. */
   readonly points: readonly Vec3[]; readonly travelSeconds: number; readonly generation: number;
 }
 export type NavigationRouteResult = { readonly kind: "route"; readonly route: NavigationRoute }

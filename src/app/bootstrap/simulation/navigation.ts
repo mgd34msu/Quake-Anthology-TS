@@ -19,8 +19,8 @@ function profileFor(player: LocomotionPlayer): NavigationProfile {
   return { movement, shape: { kind: "box", bounds: player.standingBounds },
     ...(crouches ? { crouchedShape: { kind: "box", bounds: playerCrouchedBounds(player) } } satisfies Pick<NavigationProfile, "crouchedShape"> : {}),
     policy: playerTracePolicy(player),
-    capabilities: new Set(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder"]
-      : ["walk", "jump", "drop", "swim", "water-jump", "ladder"]),
+    capabilities: new Set(crouches ? ["walk", "crouch", "jump", "drop", "swim", "water-jump", "ladder", "mover"]
+      : ["walk", "jump", "drop", "swim", "water-jump", "ladder", "mover"]),
     maximumStep: 18, minimumFloorNormal: 0.7, maximumDrop: 128, team: null, monster: false };
 }
 
@@ -65,8 +65,11 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
                 && (master.targetname !== "" || master.maxHealth > 0 || (master.spawnflags & 4) !== 0 || needsKey) };
           }
           const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
-          if (q2 !== null && entity !== undefined && entity !== null)
-            return { ...common, enabled: entity.solid === "brush", ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)) };
+          if (q2 !== null && entity !== undefined && entity !== null) {
+            const platform = q2.baseEntities.platformState(entity);
+            return { ...common, enabled: entity.solid === "brush", ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)),
+              ...(platform === null ? {} : { elevator: { ...platform, origin: body.state.origin } }) };
+          }
           const q3 = simulation.q3Source()?.records.nativeByActor(body.actor);
           if (q3 !== undefined && q3 !== null) {
             const master = q3.teammaster ?? q3;

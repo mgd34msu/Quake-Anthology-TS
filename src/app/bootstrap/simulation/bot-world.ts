@@ -81,8 +81,9 @@ export function createSharedBotWorld(options: Options) {
   };
   const modelIndex = (name: string): number => {
     if (name === "") return 0;
+    if (name.startsWith("*")) return Number(name.slice(1));
     const existing = models.get(name); if (existing !== undefined) return existing;
-    const index = models.size + 1; models.set(name, index); return index;
+    const index = simulation.options.world.models.length + models.size; models.set(name, index); return index;
   };
   const playerInfo = (client: number): string => {
     const actor = actorForId(client), player = clientInfo(actor);

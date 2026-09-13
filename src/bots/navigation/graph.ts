@@ -96,13 +96,17 @@ export function navigationFromAsset(map: NavigationMapIdentity, asset: AasAsset 
     const entityLinks = new Map(asset.entities.map(entity => [entity.link, entity]));
     for (const [number, node] of asset.nodes.entries()) for (let index = node.firstLink; index < node.firstLink + node.linkCount; index++) {
       const link = at(asset.links, index), entity = entityLinks.get(index), rawHint = link.traversal === null ? null : at(asset.traversals, link.traversal);
-      const hint = rawHint === null ? null : { ...rawHint, start: lift(rawHint.start), end: lift(rawHint.end) };
+      const hint = rawHint === null ? null : { ...rawHint, funnel: lift(rawHint.funnel), start: lift(rawHint.start), end: lift(rawHint.end) };
       const start = hint?.start ?? at(nodes, number).origin, end = hint?.end ?? at(nodes, link.target).origin;
       const mode = kexTravelMode(link.type);
       edges.push({ id: index, from: number, to: link.target, mode, start, end, sourceTravelType: link.type, sourceFlags: link.flags,
         travelSeconds: mode === "teleport" ? 0.01 : Math.max(0.01, distance(start, end) * asset.heuristic / 320), hint,
         entity: entity === undefined ? mode === "teleport" || mode === "jump-pad" || mode === "mover"
-          ? { model: null, bounds: at(nodes, number).bounds, raw: [] } : null : { model: entity.model, bounds: entity.bounds, raw: entity.tail },
+          ? { model: null, bounds: at(nodes, number).bounds, raw: [] } : null : {
+            model: asset.kind === "nav3" && entity.model !== null
+              ? entity.model <= 1 || entity.model === 255 ? null : entity.model - (entity.model > 255 ? 2 : 1)
+              : entity.model,
+            bounds: entity.bounds, raw: entity.tail },
         source: { kind: asset.kind, node: number, link: index } });
     }
   }
