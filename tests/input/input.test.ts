@@ -4,7 +4,8 @@ import type { CommandContext } from "../../src/contracts/common.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { SeatInput, registerInputCommands } from "../../src/input/seat.ts";
 import { InputButton } from "../../src/input/buttons.ts";
-import { applyStickCurve } from "../../src/input/gamepad.ts";
+import { applyStickCurve, GamepadInput, defaultGamepadTuning } from "../../src/input/gamepad.ts";
+import { InputRouter } from "../../src/input/router.ts";
 import { SourceMidiDecoder } from "../../src/input/source-midi.ts";
 import { parseBnvib, SeatHaptics } from "../../src/input/haptics.ts";
 import { openArchive } from "../../src/content/archive/index.ts";
@@ -18,6 +19,98 @@ import { Q3GameSettings } from "../../src/content/q3/base/settings.ts";
 import { ClientConfiguration } from "../../src/content/q3/presentation/config.ts";
 import { ClientGameState, ClientGameStaticState } from "../../src/content/q3/presentation/state.ts";
 import { SeatConsole } from "../../src/console/session.ts";
+
+test("gyro calibration rejects motion and discontinuous timestamps without learning gameplay", () => {
+  const input = new GamepadInput({ ...defaultGamepadTuning, gyro: { ...defaultGamepadTuning.gyro, enabled: true } });
+  const still = { x: 0.01, y: -0.02, z: 0.005 };
+  input.beginGyroCalibration();
+  for (let index = 0; index < 100; index++) input.gyro(still, 0);
+  expect(input.gyroCalibration).toEqual({ kind: "calibrating", samples: 1, progress: 0 });
+  input.gyro(still, 500);
+  expect(input.gyroCalibration).toEqual({ kind: "calibrating", samples: 1, progress: 0 });
+  input.gyro(still, 400);
+  expect(input.gyroCalibration).toEqual({ kind: "calibrating", samples: 1, progress: 0 });
+  input.gyro({ x: 1, y: 0, z: 0 }, 410);
+  expect(input.gyroCalibration).toEqual({ kind: "calibrating", samples: 0, progress: 0 });
+  for (let index = 0; index < 200; index++) input.gyro({ x: index % 2 === 0 ? -0.03 : 0.03, y: 0, z: 0 }, 1000 + index * 20);
+  expect(input.gyroCalibration.kind).toBe("calibrating");
+  expect(input.sample(100).lookDegrees).toEqual({ x: 0, y: 0 });
+  for (let index = 0; index <= 100; index++) input.gyro(still, 6000 + index * 20);
+  expect(input.gyroCalibration.kind).toBe("ready");
+  input.clear();
+  expect(input.sample(100).lookDegrees).toEqual({ x: 0, y: 0 });
+  input.gyro(still, 8020);
+  expect(input.sample(100).lookDegrees.x).toBeCloseTo(0, 10);
+  expect(input.sample(100).lookDegrees.y).toBeCloseTo(0, 10);
+  for (let index = 0; index < 200; index++) input.gyro({ x: 0.11, y: 0.18, z: 0.305 }, 8040 + index * 20);
+  expect(input.sample(100).lookDegrees.x).toBeCloseTo(-0.2 * 180 / Math.PI * 0.1);
+  expect(input.sample(100).lookDegrees.y).toBeCloseTo(-0.1 * 180 / Math.PI * 0.1);
+  input.tuning = { ...input.tuning, invertPitch: true, gyro: { ...input.tuning.gyro, yawAxis: "z" } };
+  expect(input.sample(100).lookDegrees.x).toBeCloseTo(-0.3 * 180 / Math.PI * 0.1);
+  expect(input.sample(100).lookDegrees.y).toBeCloseTo(0.1 * 180 / Math.PI * 0.1);
+  input.beginGyroCalibration(); input.gyro(still, 13000); input.clear();
+  expect(input.gyroCalibration.kind).toBe("ready");
+  input.resetGyroCalibration();
+  expect(input.gyroCalibration.kind).toBe("idle");
+});
+
+test("gyro router calibrates focused menus per device and feeds every command dialect", () => {
+  const owner = createIdentityOwner("gyro-router"), seat = owner.seat(0), otherSeat = owner.seat(1);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const frames: readonly UserCommandFrame[] = [
+    { kind: "q1-netquake", acknowledgedServerTimeSeconds: 1 },
+    { kind: "q2-classic", deltaAngles: { x: 0, y: 0, z: 0 }, lightLevel: 128, attackAllowed: true },
+    { kind: "q2-rerelease", deltaAngles: { x: 0, y: 0, z: 0 }, serverFrame: 10, attackAllowed: true },
+    { kind: "q3", serverTimeMilliseconds: 110, weapon: 2, sensitivity: 1 },
+  ];
+  for (const frame of frames) {
+    const commands = new CommandBuffer({ dialect: frame.kind, context });
+    const input = new SeatInput({ seat, dialect: frame.kind, context, commands, uiEvent: () => false });
+    const other = new SeatInput({ seat: otherSeat, dialect: frame.kind,
+      context: { session: owner.session, origin: { kind: "local-seat", seat: otherSeat, client: owner.client(1, 0) } }, commands, uiEvent: () => false });
+    const sensorOperations: { readonly instance: number; readonly enabled: boolean }[] = [];
+    const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }, { input: other, controller: { kind: "automatic" } }],
+      keyboardSeat: seat, now: () => 10000, ticks: () => 10000, subframe: false, unhandled: () => {}, controllers: {
+        setAssignments: () => {}, assignments: [7, 8], pollEvents: () => [], snapshot: () => null,
+        setSensorEnabled: (instance, _sensor, enabled) => { sensorOperations.push({ instance, enabled }); return { kind: "accepted" }; },
+      } });
+    try {
+      router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 7 });
+      router.handleController({ kind: "assignment", timestamp: 0, slot: 1, previous: null, instance: 8 });
+      input.setFocus({ kind: "menu", menu: "menu:settings:gyro", control: null }, 0);
+      expect(router.beginGyroCalibration(seat).kind).toBe("accepted");
+      expect(input.gamepad.tuning.gyro.enabled).toBe(false);
+      const sample = (instance: number, time: number, y = -0.02): void => router.handleController({ kind: "sensor", timestamp: 10,
+        instance, slot: instance === 7 ? 0 : 1, sensor: "gyro", x: 0.01, y, z: 0.005, timestampUs: BigInt(time * 1000) });
+      for (let index = 0; index <= 100; index++) sample(8, 1000 + index * 20);
+      expect(router.gyroCalibration(seat)).toEqual({ kind: "calibrating", samples: 0, progress: 0 });
+      for (let index = 0; index <= 100; index++) sample(7, 1000 + index * 20);
+      expect(router.gyroCalibration(seat).kind).toBe("ready");
+      expect(router.gyroCalibration(otherSeat).kind).toBe("idle");
+      expect(sensorOperations).toEqual([{ instance: 7, enabled: true }, { instance: 7, enabled: false }]);
+      expect(input.sample(3100, 100).gamepadLookDegrees).toEqual({ x: 0, y: 0 });
+      router.setGyroEnabled(seat, true); input.setFocus({ kind: "game" }, 3100);
+      sample(7, 3120);
+      const builder = new InputCommandBuilder(frame.kind);
+      builder.build(input.sample(3200, 100), frame);
+      expect(builder.viewAngles.x).toBeCloseTo(0, 5); expect(builder.viewAngles.y).toBeCloseTo(0, 5);
+      sample(7, 3220, 0.18);
+      builder.build(input.sample(3300, 100), frame);
+      expect(builder.viewAngles.y).toBeCloseTo(0.2 * 180 / Math.PI * 0.1, 2);
+      router.setGyroEnabled(seat, false);
+      expect(router.beginGyroCalibration(seat).kind).toBe("accepted");
+      router.handlePlatform({ kind: "window", timestamp: 0, event: 13, data1: 0, data2: 0 });
+      expect(input.sample(3400, 100).gamepadLookDegrees).toEqual({ x: 0, y: 0 });
+      expect(router.gyroCalibration(seat).kind).toBe("ready");
+      expect(sensorOperations.at(-1)).toEqual({ instance: 7, enabled: false });
+      expect(input.gamepad.tuning.gyro.enabled).toBe(false);
+      router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 7, instance: 9 });
+      expect(router.gyroCalibration(seat).kind).toBe("idle");
+      router.handleController({ kind: "disconnected", timestamp: 0, slot: 0, instance: 9 });
+      expect(router.beginGyroCalibration(seat).kind).toBe("disconnected");
+    } finally { router.close(); }
+  }
+});
 
 describe("seat input", () => {
   test("human console reaches real Q3 server settings and only the invoking cgame seat across wait and travel", async () => {

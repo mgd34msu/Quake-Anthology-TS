@@ -168,12 +168,14 @@ export class SeatInput {
     }
     return consumed || this.currentFocus.kind === "game";
   }
-  gyro(sample: Vec3): void { if (this.windowFocused && this.currentFocus.kind === "game") this.gamepad.gyro(sample); }
+  gyro(sample: Vec3, timeMilliseconds: number): void {
+    if (this.windowFocused) this.gamepad.gyro(sample, timeMilliseconds, this.currentFocus.kind === "game");
+  }
   releaseDevice(device: number, time: number): void {
     for (const [key, held] of this.held) if ((held.input.kind === "controller-axis" || held.input.kind === "controller-button") && held.input.device === device) {
       this.runBinding(held, false, time); this.held.delete(key);
     }
-    this.gamepad.clear();
+    this.gamepad.clear(); this.gamepad.resetGyroCalibration();
   }
   release(time: number): void {
     for (const held of this.held.values()) this.runBinding(held, false, time);

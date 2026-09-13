@@ -3,6 +3,7 @@ import type { SeatInputEvent } from "../contracts/ui.ts";
 import type { ControllerEvent, ControllerOperationResult, ControllerSelection, SdlControllers } from "../platform/controller.ts";
 import type { SdlEvent, SdlInputLease, SdlWindow } from "../platform/sdl.ts";
 import { controllerAxisName, normalizedControllerAxis } from "./gamepad.ts";
+import type { GyroCalibrationState } from "./gamepad.ts";
 import { sdlEventTime, sdlGameKey } from "./sdl-keys.ts";
 import { SeatInput } from "./seat.ts";
 
@@ -10,7 +11,7 @@ export interface InputSeatRoute { readonly input: SeatInput; readonly controller
 export interface InputRouterOptions {
   readonly seats: readonly InputSeatRoute[];
   readonly keyboardSeat: SeatId | null;
-  readonly controllers: SdlControllers | null;
+  readonly controllers: Pick<SdlControllers, "setAssignments" | "setSensorEnabled" | "pollEvents" | "snapshot" | "assignments"> | null;
   readonly now: () => number;
   readonly ticks: () => number;
   readonly subframe: boolean;
@@ -24,6 +25,7 @@ export class InputRouter {
   private keyboard: SeatInput | null = null;
   private readonly keyboardKeys = new Map<number, number>();
   private readonly deviceSeats = new Map<number, SeatInput>();
+  private readonly calibrationSensors = new Set<number>();
   private lease: SdlInputLease | null = null;
   private window: SdlWindow | null = null;
   private closed = false;
@@ -43,8 +45,40 @@ export class InputRouter {
     if (seat === null) throw new Error("Gyro route refers to an unregistered seat");
     if (instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
     const result = this.options.controllers.setSensorEnabled(instance, "gyro", enabled);
-    if (result.kind === "accepted") seat.gamepad.tuning = { ...seat.gamepad.tuning, gyro: { ...seat.gamepad.tuning.gyro, enabled } };
+    if (result.kind === "accepted") {
+      seat.gamepad.cancelGyroCalibration(); this.calibrationSensors.delete(instance);
+      seat.gamepad.tuning = { ...seat.gamepad.tuning, gyro: { ...seat.gamepad.tuning.gyro, enabled } };
+    }
     return result;
+  }
+  private gyroSeat(id: SeatId): SeatInput {
+    const seat = this.seat(id);
+    if (seat === null) throw new Error("Gyro route refers to an unregistered seat");
+    return seat;
+  }
+  gyroCalibration(id: SeatId): GyroCalibrationState { return this.gyroSeat(id).gamepad.gyroCalibration; }
+  beginGyroCalibration(id: SeatId): ControllerOperationResult {
+    const seat = this.gyroSeat(id), instance = this.controllerFor(id);
+    if (instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
+    if (!seat.focused) return { kind: "failed", reason: "Focus the game window before calibrating" };
+    const result = this.options.controllers.setSensorEnabled(instance, "gyro", true);
+    if (result.kind === "accepted") {
+      if (!seat.gamepad.tuning.gyro.enabled) this.calibrationSensors.add(instance);
+      seat.gamepad.beginGyroCalibration();
+    }
+    return result;
+  }
+  cancelGyroCalibration(id: SeatId): void { this.gyroSeat(id).gamepad.cancelGyroCalibration(); this.finishGyroCalibration(); }
+  resetGyroCalibration(id: SeatId): void { this.gyroSeat(id).gamepad.resetGyroCalibration(); this.finishGyroCalibration(); }
+  private finishGyroCalibration(): void {
+    for (const instance of this.calibrationSensors) {
+      const seat = this.deviceSeats.get(instance);
+      if (seat?.gamepad.gyroCalibration.kind === "calibrating") continue;
+      this.calibrationSensors.delete(instance);
+      if (seat === undefined || seat.gamepad.tuning.gyro.enabled) continue;
+      const result = this.options.controllers?.setSensorEnabled(instance, "gyro", false);
+      if (result !== undefined) this.options.controllerOperation?.(seat.seat, result);
+    }
   }
   setKeyboardSeat(id: SeatId | null): void {
     this.keyboard?.release(this.options.now()); this.keyboardKeys.clear();
@@ -56,9 +90,11 @@ export class InputRouter {
   }
   detachWindow(): void {
     for (const route of this.routes) route.input.release(this.options.now());
+    this.finishGyroCalibration();
     this.keyboardKeys.clear(); this.lease?.close(); this.lease = null; this.window = null;
   }
   updateCapture(): void {
+    this.finishGyroCalibration();
     const playing = this.keyboard !== null && this.keyboard.focused && this.keyboard.focus.kind === "game";
     this.lease?.setRelativeMouse(playing);
   }
@@ -102,10 +138,12 @@ export class InputRouter {
     if (event.kind === "assignment") {
       if (event.previous !== null) {
         this.deviceSeats.get(event.previous)?.releaseDevice(event.previous, timeMilliseconds);
+        this.finishGyroCalibration();
         this.deviceSeats.delete(event.previous);
       }
       const seat = this.routes[event.slot]?.input;
       if (event.instance !== null && seat !== undefined) {
+        seat.gamepad.resetGyroCalibration();
         seat.remapControllerBindings(event.instance); this.deviceSeats.set(event.instance, seat);
         if (seat.gamepad.tuning.gyro.enabled) {
           const result = this.setGyroEnabled(seat.seat, true); this.options.controllerOperation?.(seat.seat, result);
@@ -118,14 +156,20 @@ export class InputRouter {
     if (seat === undefined) { this.options.unhandled(event); return; }
     const common = { seat: seat.seat, timeMilliseconds, device: event.instance };
     switch (event.kind) {
-      case "disconnected": seat.releaseDevice(event.instance, timeMilliseconds); this.deviceSeats.delete(event.instance); break;
+      case "disconnected":
+        seat.releaseDevice(event.instance, timeMilliseconds); this.calibrationSensors.delete(event.instance); this.deviceSeats.delete(event.instance); break;
       case "button": seat.input({ ...common, kind: "controller-button", button: event.button, down: event.down }); break;
       case "axis": {
         const axis = controllerAxisName(event.axis);
         if (axis !== null) seat.input({ ...common, kind: "controller-axis", axis, value: normalizedControllerAxis(axis, event.value) });
         break;
       }
-      case "sensor": if (event.sensor === "gyro") seat.gyro({ x: event.x, y: event.y, z: event.z }); else this.options.unhandled(event); break;
+      case "sensor":
+        if (event.sensor === "gyro") {
+          seat.gyro({ x: event.x, y: event.y, z: event.z }, event.timestampUs === 0n ? event.timestamp : Number(event.timestampUs) / 1000);
+          this.finishGyroCalibration();
+        } else this.options.unhandled(event);
+        break;
       default: this.options.unhandled(event);
     }
   }
@@ -142,7 +186,8 @@ export class InputRouter {
     this.updateCapture();
   }
   restart(): void {
-    for (const route of this.routes) route.input.release(this.options.now());
+    for (const route of this.routes) { route.input.release(this.options.now()); route.input.gamepad.resetGyroCalibration(); }
+    this.finishGyroCalibration();
     this.deviceSeats.clear(); this.keyboardKeys.clear();
     this.options.controllers?.setAssignments(this.routes.map(route => route.controller));
     const assignments = this.options.controllers?.assignments ?? [];
@@ -152,5 +197,10 @@ export class InputRouter {
     }
     this.updateCapture();
   }
-  close(): void { if (this.closed) return; this.detachWindow(); this.deviceSeats.clear(); this.closed = true; }
+  close(): void {
+    if (this.closed) return;
+    this.detachWindow();
+    for (const route of this.routes) route.input.gamepad.resetGyroCalibration();
+    this.deviceSeats.clear(); this.closed = true;
+  }
 }
