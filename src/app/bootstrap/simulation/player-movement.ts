@@ -22,14 +22,15 @@ function relocated(state: MovementState, origin: Vec3, velocity: Vec3): Movement
     velocityEighths: [Math.trunc(velocity.x * 8), Math.trunc(velocity.y * 8), Math.trunc(velocity.z * 8)] };
   return { ...state, origin, velocity };
 }
-export type LocomotionPlayer = Pick<MovementPlayer, "profile" | "standingBounds" | "sourceMovement" | "character" | "worldGravity">;
+export type LocomotionPlayer = Pick<MovementPlayer, "profile" | "standingBounds" | "sourceMovement" | "character" | "worldGravity" | "q2MovementConfig">;
 export function capturePlayerLocomotion(player: LocomotionPlayer): LocomotionPlayer {
   return { character: player.character, profile: player.profile, standingBounds: player.standingBounds,
-    worldGravity: player.worldGravity, sourceMovement: player.sourceMovement === null ? null : { ...player.sourceMovement } };
+    worldGravity: player.worldGravity, q2MovementConfig: player.q2MovementConfig, sourceMovement: player.sourceMovement === null ? null : { ...player.sourceMovement } };
 }
 export function playerLocomotionMatches(player: LocomotionPlayer, previous: LocomotionPlayer): boolean {
   return player.profile === previous.profile && player.character === previous.character && player.standingBounds === previous.standingBounds
-    && player.worldGravity === previous.worldGravity && player.sourceMovement?.traceMask === previous.sourceMovement?.traceMask
+    && player.worldGravity === previous.worldGravity && player.q2MovementConfig?.airAccelerate === previous.q2MovementConfig?.airAccelerate
+    && player.q2MovementConfig?.n64Physics === previous.q2MovementConfig?.n64Physics && player.sourceMovement?.traceMask === previous.sourceMovement?.traceMask
     && player.sourceMovement?.fixedMsec === previous.sourceMovement?.fixedMsec && player.sourceMovement?.noFootsteps === previous.sourceMovement?.noFootsteps;
 }
 export function playerTracePolicy(player: LocomotionPlayer): TracePolicy {
@@ -51,16 +52,19 @@ export function playerPostures(player: Pick<MovementPlayer, "character" | "stand
 }
 export function locomotionTemplate(recipe: ExecutableRecipe): LocomotionPlayer {
   const character = providerFamily(recipe.character.definition.provider);
-  return { character, profile: movementProfile(recipe), sourceMovement: null, worldGravity: 800, standingBounds: playerStandingBounds(character) };
+  return { character, profile: movementProfile(recipe), sourceMovement: null, q2MovementConfig: null, worldGravity: 800, standingBounds: playerStandingBounds(character) };
 }
 export function playerCrouchedBounds(player: LocomotionPlayer): Bounds {
   return playerPostures({ ...player, viewHeight: 0 }).crouched.bounds;
 }
-export function selectedMovementProfile(player: Pick<MovementPlayer, "profile" | "worldGravity" | "sourceMovement">,
+export function selectedMovementProfile(player: Pick<MovementPlayer, "profile" | "worldGravity" | "sourceMovement" | "q2MovementConfig">,
   profile: MovementProfile = player.profile): MovementProfile {
   if (profile.kind === "q1-netquake" || profile.kind === "q1-quakeworld") return { ...profile, parameters: { ...profile.parameters, gravity: player.worldGravity } };
   if (profile.kind === "q3" && player.sourceMovement !== null) return { ...profile,
     fixedMilliseconds: player.sourceMovement.fixedMsec, noFootsteps: player.sourceMovement.noFootsteps };
+  const q2 = player.q2MovementConfig;
+  if (q2 !== null && profile.kind === "q2-classic") return { ...profile, airAccelerate: q2.airAccelerate };
+  if (q2 !== null && profile.kind === "q2-rerelease") return { ...profile, ...q2 };
   return profile;
 }
 export function playerMovementEnvironment(player: Pick<MovementPlayer, "sourceEnvironment" | "gravityMultiplier" | "state">,

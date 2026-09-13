@@ -57,7 +57,13 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     configs.set(4, world?.spawn.values.get('skyrotate') ?? '0');
     configs.set(layout.mapChecksum, String(checksum));
     configs.set(layout.maxClients, String(source.game.options.maxClients));
-    configs.set(layout.airAccelerate, '0');
+    const updateMovementConfigs = (): void => {
+        const movement = simulation.q2MovementConfig();
+        if (movement === null) throw new Error('Q2 host lost source movement configuration');
+        configs.set(layout.airAccelerate, String(movement.airAccelerate));
+        if (layout.n64Physics !== null) configs.set(layout.n64Physics, movement.n64Physics ? '1' : '0');
+    };
+    updateMovementConfigs();
     model(options.content.recipe.map.geometry.requestedPath);
     for (const entity of source.game.entities.values()) {
         for (const path of [entity.model, entity.model2, entity.model3, entity.model4])
@@ -278,6 +284,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         carriedPlayer: client => { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client)); if (actor === undefined)
             throw new Error('Application has not admitted carried Q2 network client'); const player = { client, actor, sourceEntity: sourceNumber(actor) }; clients.set(client.slot, player); return player; },
         gameState: player => {
+            updateMovementConfigs();
             const entities = entityStates();
             for (const state of source.players.states.values())
                 configs.set(layout.playerSkins + state.slot, `${state.name}\\${state.skin}`);
@@ -287,6 +294,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         frame: (player, output): Q2WireFrame => { const body = simulation.bodies.read(player.actor); if (body === null)
             throw new Error('Network player body disappeared'); const state = playerState(player), origin = { x: body.origin.x + (state.viewoffset[0] ?? 0), y: body.origin.y + (state.viewoffset[1] ?? 0), z: body.origin.z + (state.viewoffset[2] ?? 0) }; return { serverFrame: output.snapshot.frame.frame, deltaFrame: -1, suppressedCount: 0, areaBits: simulation.scene.areaBits(simulation.scene.leafArea(simulation.scene.pointLeaf(origin))), player: state, entities: visibleEntities(player, entityStates(), origin) }; },
         events: (player, _output, events) => {
+            updateMovementConfigs();
             const messages: Q2ApplicationServerEvent[] = [];
             const targets = (actor: ActorId | null): boolean => actor === null || actor.equals(player.actor);
             for (const item of events) {

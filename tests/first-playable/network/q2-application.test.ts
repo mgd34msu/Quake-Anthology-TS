@@ -281,3 +281,88 @@ test('lower-level Q2 host preserves a synthetic unsupported RR model-beam endpoi
         expect(received.renderfx).toBe(128); expect(received.frame).toBe(30); expect(received.modelindex).toBe(wire.modelindex);
     } finally { simulation.close(); session.close(); await content.close(); }
 }, 30000);
+
+test('Q2 source movement settings follow Q64 travel and valid wire layouts', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { selectedMovementProfile } = await import('../../../src/app/bootstrap/simulation/player-movement.ts');
+    const { q2ApplicationLayout } = await import('../../../src/app/bootstrap/network/q2-layout.ts');
+    const { encodeQ2ServerEvent } = await import('../../../src/network/q2/index.ts');
+    const { discoverInstalledContent } = await import('../../../src/content/catalog/index.ts');
+    const { StartupSelectionModel } = await import('../../../src/app/bootstrap/startup-selection.ts');
+    const userRoot = await mkdtemp(join(tmpdir(), 'q2-movement-config-'));
+    try {
+        const parsed = parseApplicationCommand(['--game', 'q2-rerelease-baseq2', '--map', 'q64/bio',
+            '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop', '--user-content-root', userRoot]);
+        if (parsed.kind !== 'run') throw new Error('No Q64 source launch');
+        const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, userContentRoot: userRoot, discoverMods: false });
+        const selection = new StartupSelectionModel(catalog, parsed.options);
+        await selection.prepareMaps();
+        selection.select('movement', 'q2-rerelease-baseq2');
+        const selected = await selection.resolve();
+        const app = await Application.open(selected.options, { print: () => undefined }, selected.recipe);
+        try {
+            const client = app.session.createClient(0);
+            app.simulation.admitPlayer(client.id);
+            for (const map of ['q64/bio', 'base1', 'q64/bio']) {
+                if (app.simulation.q2Source()?.game.options.mapName !== map) await app.changeLevel(map);
+                const actor = app.simulation.players()[0];
+                if (actor === undefined) throw new Error('No carried source player');
+                const player = app.simulation.movementPlayer(actor), cvars = app.simulation.q2ServerCvars();
+                if (player === null || cvars === null) throw new Error('No source movement owner');
+                cvars.set('sv_airaccelerate', '2.9');
+                const profile = selectedMovementProfile(player);
+                expect(profile.kind).toBe('q2-rerelease');
+                if (profile.kind !== 'q2-rerelease') throw new Error('Wrong selected movement');
+                expect(profile.airAccelerate).toBe(2);
+                expect(profile.n64Physics).toBe(map.startsWith('q64/'));
+                for (const protocol of [{ kind: 'q2-classic', version: 34 }, { kind: 'q2-private-classic', version: 4038 },
+                    { kind: 'q2-rerelease', version: 1038 }, { kind: 'q2-kex', version: 2023 }] satisfies readonly import('../../../src/contracts/protocol.ts').Q2ProtocolIdentity[]) {
+                    const host = await createQ2ApplicationServerHost({ session: app.session, simulation: app.simulation, content: app.content, protocol, print: () => undefined });
+                    const peer = host.carriedPlayer(client.id), layout = q2ApplicationLayout(protocol), state = host.gameState(peer);
+                    expect(state.configStrings.get(layout.airAccelerate)).toBe('2');
+                    expect(state.configStrings.get(12103)).toBe(layout.n64Physics === null ? undefined : map.startsWith('q64/') ? '1' : '0');
+                    const wire = new Q2WireCodec(protocol), reader = new Q2ServerMessageReader(protocol, host.messageOptions);
+                    for (const index of [layout.airAccelerate, layout.n64Physics]) {
+                        if (index === null) continue;
+                        const value = state.configStrings.get(index);
+                        if (value === undefined) throw new Error('Missing movement configstring');
+                        expect(reader.read(encodeQ2ServerEvent(wire, { kind: 'config-string', index, value }))[0]?.event).toEqual({ kind: 'config-string', index, value });
+                    }
+                    cvars.set('sv_airaccelerate', '-3.8');
+                    const output = await app.step(25);
+                    const update = host.events(peer, output, []).find(event => event.kind === 'config-string' && event.index === layout.airAccelerate);
+                    if (update?.kind !== 'config-string') throw new Error('Missing live air acceleration update');
+                    expect(reader.read(encodeQ2ServerEvent(wire, update))[0]?.event).toEqual({ kind: 'config-string', index: layout.airAccelerate, value: '-3' });
+                    cvars.set('sv_airaccelerate', '2.9');
+                }
+                for (let frame = 0; frame < 20; frame++) await app.step(25);
+                const crouch = player.move({ actor, source: { kind: 'remote-client', client: client.id }, sequence: 1,
+                    command: { kind: 'q2-rerelease', milliseconds: 25, angles: player.viewAngles, forwardMove: 0, sideMove: 0, buttons: 16, serverFrame: 1 } },
+                    { frame: 1, time: { kind: 'milliseconds', value: app.simulation.timeSeconds * 1000 }, elapsed: { kind: 'milliseconds', value: 25 }, phase: 'client-command' });
+                if (crouch.status !== 'active') throw new Error('Source crouch removed player');
+                expect(crouch.bounds.max.z).toBe(map.startsWith('q64/') ? 32 : 4);
+                if (map === 'base1' && player.state.kind === 'q2-rerelease') {
+                    const airborne = { ...player.state, origin: { ...player.state.origin, z: player.state.origin.z + 48 },
+                        velocity: { x: 0, y: 150, z: 0 }, flags: 0, timeMilliseconds: 0 };
+                    const velocities: import("../../../src/contracts/math.ts").Vec3[] = [];
+                    for (const air of ['0', '2.9']) {
+                        cvars.set('sv_airaccelerate', air); player.commit(airborne, true, false);
+                        const moved = player.move({ actor, source: { kind: 'remote-client', client: client.id }, sequence: 2,
+                            command: { kind: 'q2-rerelease', milliseconds: 25, angles: { x: 0, y: 0, z: 0 }, forwardMove: 300, sideMove: 0, buttons: 0, serverFrame: 2 } },
+                            { frame: 2, time: { kind: 'milliseconds', value: app.simulation.timeSeconds * 1000 }, elapsed: { kind: 'milliseconds', value: 25 }, phase: 'client-command' });
+                        if (moved.status !== 'active' || moved.state.kind !== 'q2-rerelease') throw new Error('Lost RR air movement');
+                        velocities.push(moved.state.velocity);
+                    }
+                    expect(velocities[0]).not.toEqual(velocities[1]);
+                }
+            }
+            const deathmatch = createSimulation({ identity: createIdentityOwner('Q64 deathmatch movement'), recipe: app.content.recipe,
+                world: app.content.world, mounts: app.content.mounts, skill: 1, mode: 'deathmatch', seed: 1, maxClients: 1,
+                q2Cvars: [{ name: 'sv_airaccelerate', value: '4.9' }], playerIdentity: client => ({ seat: client.slot, socialId: '' }) });
+            try { expect(deathmatch.q2MovementConfig()).toEqual({ airAccelerate: 4, n64Physics: false }); }
+            finally { deathmatch.close(); }
+        } finally { await app.close(); }
+    } finally { await rm(userRoot, { recursive: true, force: true }); }
+}, 30000);

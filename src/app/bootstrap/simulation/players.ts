@@ -32,6 +32,7 @@ export interface NetQuakeClientBinding {
 }
 
 export interface PlayerMovementHost {
+  readonly q2MovementConfig?: () => { readonly airAccelerate: number; readonly n64Physics: boolean } | null;
   readonly netQuake?: NetQuakeClientBinding;
   readonly quakeWorld?: {
     read(state: QwMovementState): QwMovementState;
@@ -96,6 +97,7 @@ export function movementVelocity(state: MovementState): Vec3 {
 }
 
 export class MovementPlayer {
+  get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null { return this.host.q2MovementConfig?.() ?? null; }
   readonly character: GameFamily;
   readonly standingBounds: Bounds;
   readonly profile: MovementProfile;

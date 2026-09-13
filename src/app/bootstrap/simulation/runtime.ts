@@ -1385,6 +1385,7 @@ export class SharedSimulation implements Simulation {
       context: { session: this.session, origin: { kind: "server-console" } }, print: text => this.events.message({ kind: "print", level: 2, text }) });
     this.q2ServerRegistry = serverCvars;
     registerQ2ServerCvars(serverCvars, recipe.match.provider);
+    serverCvars.register("sv_airaccelerate", "0", 0);
     for (const variable of this.options.q2Cvars ?? []) serverCvars.set(variable.name, variable.value, true);
     this.initializeServerSettings(serverCvars);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
@@ -1658,6 +1659,7 @@ export class SharedSimulation implements Simulation {
         water: (level: number, type: number) => source.game.quakeWorldWater(actor.id, level, type),
         profile: (profile: import("../../../contracts/movement.ts").QwMovementProfile) => source.game.quakeWorldProfile(actor.id, profile),
       } }), actors: this.actors, bodies: this.bodies, combat: this.combat, scene: this.scene, rereleaseMovement: this.physics.rereleaseMovement,
+      q2MovementConfig: () => this.q2MovementConfig(),
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
       sourcePunch: actor => this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? null,
       worldActor: () => this.worldActor(), touchTriggers: owned => this.source.kind === "q3" ? undefined : this.physics.touchTriggers(owned), isBrush: id => this.physics.isBrush(id), jump: (owned, action) => this.jump(owned, action),
@@ -2724,6 +2726,13 @@ export class SharedSimulation implements Simulation {
     applyServerProfile(this.options.serverProfile, serverDefinitionsForRecipe(this.recipe).map(definition => ({ definition, owner })));
   }
   q2ServerCvars(): CvarRegistry | null { return this.q2ServerRegistry; }
+  q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null {
+    if (this.source.kind !== "q2" || this.q2ServerRegistry === null) return null;
+    const options = this.source.game.options, rerelease = options.edition === "rerelease";
+    return { airAccelerate: rerelease ? this.q2ServerRegistry.find("sv_airaccelerate")?.integerValue ?? 0
+      : options.mode === "deathmatch" ? this.q2ServerRegistry.variableValue("sv_airaccelerate") : 0,
+      n64Physics: rerelease && options.mode !== "deathmatch" && options.mapName.startsWith("q64/") };
+  }
   serverSettings(): readonly BoundServerSetting[] {
     const cvars = this.q2ServerRegistry ?? (this.source.kind === "q3" ? this.source.game.host.cvars : null);
     if (cvars === null) return [];
