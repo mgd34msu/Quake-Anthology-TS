@@ -1,4 +1,5 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
+import { QcFinaleAcknowledgement } from "../../../compat/qc/presentation-host.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { DamageDecision, ItemId } from "../../../contracts/gameplay.ts";
 import { Q1Foundation } from "../../q1/foundation/runtime.ts";
@@ -23,6 +24,7 @@ import type { Q1ClientAdmission, Q1CompositionServices, Q1SourceInput, Q1SourceS
 
 /** Registers one official source program on the session's existing world and actors. */
 export class Q1SourceComposition {
+  private readonly finaleAcknowledgement = new QcFinaleAcknowledgement();
   readonly base: Q1Base;
   readonly clients: Q1SourceClients;
   readonly packs: Q1MissionPackRuntime | null;
@@ -42,7 +44,9 @@ export class Q1SourceComposition {
     if (selection.program === "rogue") game.setBaseTeamHealth(false);
     this.base = registerQ1Base(game, { campaign: { readFlags: () => selection.campaign.readFlags(), writeFlags: flags => selection.campaign.writeFlags(flags),
       setSkill: skill => { selection.campaign.setSkill(skill); return services.setCvar("skill", String(skill)); } }, registered: selection.registered, officialCampaign: selection.officialCampaign,
-      sameLevel: () => services.cvar("samelevel") !== 0, playerExited: actor => this.notice(actor, "exit"), finishCampaign: () => services.finishCampaign() });
+      sameLevel: () => services.cvar("samelevel") !== 0, playerExited: actor => this.notice(actor, "exit"), finishCampaign: () => services.finishCampaign(),
+      finaleFinished: () => this.finaleAcknowledgement.poll(game.time, new Map([...this.clients.records.values()]
+        .map((client): readonly [ActorId, boolean] => [client.actor.id, game.player(client.actor.id)?.attackHeld ?? false]))) });
     const addonServices = { emit: (event: import("../../q1/addons/context.ts").Q1AddonEvent) => services.emit({ kind: "addon", event }),
       isMonster: (actor: ActorId) => this.isMonster(actor), cvar: (name: string) => services.cvar(name), setCvar: (name: string, value: string) => services.setCvar(name, value) };
     if (selection.program === "hipnotic" || selection.program === "rogue") {
@@ -225,13 +229,18 @@ export class Q1SourceComposition {
     return dropBackpack(this.game, body.origin, { weapon: WEAPONS.find(weapon => this.game.weaponItem(weapon) === this.services.selectedWeapon(actor.id)) ?? this.game.player(actor.id)?.weapon ?? null, shells: this.game.host.inventory.count(actor.id, "q1:ammo/shells"),
       nails: this.game.host.inventory.count(actor.id, "q1:ammo/nails"), rockets: this.game.host.inventory.count(actor.id, "q1:ammo/rockets"), cells: this.game.host.inventory.count(actor.id, "q1:ammo/cells") });
   }
-  requestIntermissionExit(pressed: boolean): Q1IntermissionResult {
+  requestIntermissionExit(pressed: boolean, input?: { readonly actor: ActorId; readonly attack: boolean }): Q1IntermissionResult {
+    if (input !== undefined) {
+      const player = this.game.player(this.clients.require(input.actor).actor.id);
+      if (player !== null) player.attackHeld = input.attack;
+    }
     const result = this.base.levelRules.requestExit(this.game.time, pressed, this.services.cvar("samelevel") !== 0); this.presentIntermission(result); return result;
   }
   private presentIntermission(result: Q1IntermissionResult): undefined {
+    if (result.kind === "finale") { this.base.resetFinale(); this.finaleAcknowledgement.reset(); }
     return result.kind === "finale" || result.kind === "sell-screen" ? this.services.emit({ kind: "level-presentation", event: result }) : undefined;
   }
-  dismissFinale(): undefined { return this.base.dismissFinale(); }
+  dismissFinale(): undefined { this.finaleAcknowledgement.dismiss(this.game.time); return this.base.dismissFinale(); }
   characterPose(actor: ActorId): Q1CharacterSourcePose {
     if (this.ctf !== null) return this.ctf.characterPose(actor);
     const player = this.game.player(actor);

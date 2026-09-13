@@ -31,6 +31,7 @@ export interface QcQuakeWorldMessageServices {
   route(entries: readonly QcRoutedMessage[], destination: QcMessageDestination): undefined;
 }
 export interface QcPresentationServices {
+  readonly finaleFinished?: () => boolean;
   readonly qw?: QcQuakeWorldMessageServices;
   readonly content: ContentId;
   /** The session's source precache table owns ordering, deduplication, limits and resource loading. */
@@ -46,6 +47,33 @@ export interface QcPresentationServices {
   };
 }
 
+/** QEX finale polling ignores held attack on entry and latches a subsequent press. */
+export class QcFinaleAcknowledgement {
+  private readonly held = new Map<ActorId, boolean>();
+  private lastPoll: number | null = null;
+  private acknowledged = false;
+
+  reset(): undefined { this.lastPoll = null; this.acknowledged = false; this.held.clear(); return undefined; }
+
+  poll(seconds: number, buttons: ReadonlyMap<ActorId, boolean>): boolean {
+    if (this.lastPoll === null || seconds < this.lastPoll || seconds - this.lastPoll > 1) {
+      this.acknowledged = false;
+      this.held.clear();
+      for (const [actor, down] of buttons) this.held.set(actor, down);
+    }
+    this.lastPoll = seconds;
+    for (const actor of this.held.keys()) if (!buttons.has(actor)) this.held.delete(actor);
+    for (const [actor, down] of buttons) {
+      const previous = this.held.get(actor);
+      if (down && previous !== true) this.acknowledged = true;
+      this.held.set(actor, down);
+    }
+    return this.acknowledged;
+  }
+
+  dismiss(seconds: number): undefined { this.lastPoll = seconds; this.acknowledged = true; return undefined; }
+}
+
 /** Adds source events to the same sink as built-in gameplay, without another media registry. */
 export function createQcPresentationBindings(world: QcWorldHost, services: QcPresentationServices): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
   const bindings = new Map<QcHostBuiltinName, QcBuiltin>();
@@ -59,6 +87,8 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
       return builtin(vm);
     });
   };
+  const finaleFinished = services.finaleFinished;
+  if (finaleFinished !== undefined) install("ex_finaleFinished", vm => { vm.returnFloat(Number(finaleFinished())); });
   const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
   if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
   install("bprint", vm => {

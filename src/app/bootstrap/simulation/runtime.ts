@@ -2399,7 +2399,7 @@ export class SharedSimulation implements Simulation {
             player.receiveNetQuake(this.prepareArsenalCommand(player, command, false));
             this.grapple?.setJump(player.actor.id, (command.command.buttons & 2) !== 0);
             if (this.source.kind === "q1" && this.source.game.intermission !== null)
-              this.source.composition.requestIntermissionExit(player.buttons !== 0);
+              this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
           }
           for (const player of this.playerStates.values()) if (player.profile.kind === "q1-netquake" && player.cutscene === null && !player.intermission) {
             const gravityMultiplier = player.gravityMultiplier;
@@ -2445,7 +2445,7 @@ export class SharedSimulation implements Simulation {
         }
         if (this.source.kind === "q1" && this.source.game.intermission !== null) {
           player.previousButtons = player.buttons; player.buttons = command.command.buttons; player.lastSequence = command.sequence;
-          this.source.composition.requestIntermissionExit(player.buttons !== 0);
+          this.source.composition.requestIntermissionExit(player.buttons !== 0, { actor: player.actor.id, attack: (player.buttons & 1) !== 0 });
           continue;
         }
         const movementCommand = command.command;

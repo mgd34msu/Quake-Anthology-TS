@@ -144,6 +144,7 @@ export class Q1Base implements MonsterServices {
   }
   finale(monster: BaseMonster): undefined {
     if (this.finaleStarted) return undefined; this.finaleStarted = true; const { game } = this;
+    this.resetFinale();
     monster.countKill(); game.cancel(monster.entity);
     const position = [...game.entities.values()].find(entity => entity.classname === "info_intermission");
     const train = [...game.entities.values()].find(entity => entity.classname === "misc_teleporttrain");
@@ -176,6 +177,10 @@ export class Q1Base implements MonsterServices {
     const timer = game.create("finale_wait"); return game.schedule(timer, 1, game.named.action(timer, "base:finale_wait"));
   }
   dismissFinale(): undefined { this.finaleDismissed = true; return undefined; }
-  get hasFinishedFinale(): boolean { return this.options.finaleFinished?.() ?? this.finaleDismissed; }
+  resetFinale(): undefined { this.finaleDismissed = false; return undefined; }
+  get hasFinishedFinale(): boolean {
+    if (!this.finaleDismissed && this.options.finaleFinished?.()) this.finaleDismissed = true;
+    return this.finaleDismissed;
+  }
 }
 export function registerQ1Base(game: Q1EntityServices, options: Q1BaseOptions = {}): Q1Base { return new Q1Base(game, options); }

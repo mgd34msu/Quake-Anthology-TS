@@ -94,6 +94,38 @@ function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved) {
   return { source, game, actors, callbacks, combat, inventory, events, sourceEvents, cvars, admit, advance, capture };
 }
 
+test("authored Shub finale acknowledges an attack edge once and retains completion through restore", async () => {
+  const level = await map("id1", "end"), world = sourceWorld(level, "id1"), player = world.admit("Ranger", 0);
+  try {
+    world.source.input(player.id, { attack: true, jump: false, use: false, impulse: 0 });
+    const shub = [...world.source.base.monsters.values()].find(monster => monster.spec.species === "oldone");
+    if (shub === undefined) throw new Error("Missing authored Shub");
+    world.game.damage(shub.entity.actor.id, player.id, player.id, 50000);
+    world.advance(20);
+    expect(world.source.base.hasFinishedFinale).toBe(false);
+    expect(world.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(0);
+    const heldRestore = sourceWorld(level, "id1", world.capture());
+    try {
+      heldRestore.advance(20.2);
+      expect(heldRestore.source.base.hasFinishedFinale).toBe(false);
+      expect(heldRestore.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(0);
+    } finally { heldRestore.actors.close(); }
+    world.source.requestIntermissionExit(false, { actor: player.id, attack: false });
+    world.advance(20.2);
+    world.source.requestIntermissionExit(true, { actor: player.id, attack: true });
+    world.advance(20.4);
+    expect(world.source.base.hasFinishedFinale).toBe(true);
+    expect(world.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(1);
+    const restored = sourceWorld(level, "id1", world.capture());
+    try {
+      expect(restored.source.base.hasFinishedFinale).toBe(true);
+      restored.advance(26);
+      expect(restored.sourceEvents.filter(event => event.kind === "finale" && event.stage === 6)).toHaveLength(1);
+      expect(restored.sourceEvents.filter(event => event.kind === "finale" && event.stage === 5)).toHaveLength(0);
+    } finally { restored.actors.close(); }
+  } finally { world.actors.close(); }
+});
+
 test("actual CTF composition joins client teams, capture score, death ordering and fresh saved admission", async () => {
   const level = await map("ctf", "ctf1"), world = sourceWorld(level, "ctf"), red = world.admit("Ranger", 4), blue = world.admit("Sarge", 13); world.advance(10);
   const ctf = world.source.ctf; if (ctf === null) throw new Error("Missing selected CTF source");
