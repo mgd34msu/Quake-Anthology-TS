@@ -14,7 +14,8 @@ import type { FogAdjustment } from "./fog.ts";
 import { MaterialDeformState } from "./geometry.ts";
 import type { MaterialGeometry, MaterialVertex } from "./geometry.ts";
 import { evaluateTexCoords, SourceTexCoordGenerator, stageState } from "./material.ts";
-import type { FinishedIteratorStage } from "./material-iterator.ts";
+import { sourceMaterialIterator, type FinishedIteratorStage } from "./material-iterator.ts";
+import type { BatchLighting } from "../contracts/render.ts";
 import { sourceStateChanges } from "./source-state.ts";
 
 export interface MaterialDrawContext extends Omit<StageColorContext, "time" | "previousColor"> {
@@ -28,6 +29,7 @@ export interface MaterialDrawContext extends Omit<StageColorContext, "time" | "p
   readonly dynamicLights?: { readonly lights: readonly DynamicLight[]; readonly mask: number; readonly image: RendererImage };
   /** Scene-owned masks and resources, evaluated on the deformed vertices. */
   readonly dynamicLightBatches?: (geometry: MaterialGeometry) => readonly DrawBatch[];
+  readonly lightmapLighting?: (geometry: MaterialGeometry) => Extract<BatchLighting, { readonly kind: "q2-world" }>;
   readonly depthRange: RenderState["depthRange"];
   readonly polygonOffset: RenderState["polygonOffset"];
   readonly fog: { readonly coordinates: (position: Vec3) => Vec2; readonly texture: TextureBinding; readonly color: Vec4 } | null;
@@ -98,7 +100,11 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
   const geometry = deformGeometry(state, definition.deforms, context.deformView, time, context.noise, context.projectionShadow);
   const batches: DrawBatch[] = [];
   const previousColors: Vec4[] = geometry.vertices.map(() => ({ x: 0, y: 0, z: 0, w: 0 }));
-  for (const pass of compiled.finished.iterator.passes) {
+  const lightmapLighting = context.lightmapLighting !== undefined && compiled.finished.hasLightmapStage ? context.lightmapLighting(geometry) : null;
+  const iterator = lightmapLighting === null ? compiled.finished.iterator : sourceMaterialIterator({ stages: compiled.finished.sourceStages,
+    sky: definition.sky !== null, polygonOffset: definition.polygonOffset, deformCount: definition.deforms.length },
+    { ignoreFastPath: true, multitexture: false, textureEnvAdd: false, driver: "generic" });
+  for (const pass of iterator.passes) {
     const first = pass.bundles[0], second = pass.bundles[1];
     if (!first.active) continue;
     const renderState = retainedState(pass.stateBits, { ...stageState(pass.stage, definition.cull), depthRange: context.depthRange,
@@ -113,7 +119,8 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       return { position: context.project(vertex.position), color, texCoord: coordinates(first, vertex, time, context) };
     });
     if (second === undefined) {
-      batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
+      batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" } : { kind: "vertex" },
+        primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
     } else {
       if (!second.active) throw new Error("Collapsed stage lost its second registered texture");
       const secondTexture = textureBinding(second, time);
@@ -124,7 +131,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       });
       batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "pair", state: renderState, texture, indices: geometry.indices,
         vertices: paired, secondTexture: { binding: secondTexture,
-          environment: compiled.finished.iterator.multitextureEnv === "add" ? "add" : "modulate" } });
+          environment: iterator.multitextureEnv === "add" ? "add" : "modulate" } });
     }
   }
   if (context.dynamicLightBatches !== undefined && receivesProjectedDlights(compiled)) {

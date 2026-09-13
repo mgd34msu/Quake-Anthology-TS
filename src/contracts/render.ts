@@ -181,7 +181,7 @@ export interface Q2ModelShadowLight {
 /** World-space arrays use the same vertex indices as the batch and survive clipping. */
 export type BatchLighting = { readonly kind: "vertex" }
   | { readonly kind: "q2-world"; readonly worldPositions: readonly Vec3[]; readonly normals: readonly Vec3[];
-      readonly pass: "lightmap" | "texture"; readonly lights: readonly Q2FragmentLight[]; readonly atlas: Q2ShadowAtlas | null }
+      readonly pass: "lightmap" | "texture" | "material-lightmap"; readonly lights: readonly Q2FragmentLight[]; readonly atlas: Q2ShadowAtlas | null }
   | { readonly kind: "q2-model-shadow"; readonly worldPositions: readonly Vec3[];
       readonly lights: readonly Q2ModelShadowLight[]; readonly shadeScale: number; readonly atlas: Q2ShadowAtlas };
 interface BatchData {

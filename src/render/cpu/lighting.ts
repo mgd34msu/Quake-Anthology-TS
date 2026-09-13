@@ -84,9 +84,9 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
   if (parameters.kind === "vertex") return { r: vertex.x * texel.r, g: vertex.y * texel.g,
     b: vertex.z * texel.b, a: vertex.w * texel.a };
   if (parameters.kind === "q2-world") {
-    let r = parameters.pass === "lightmap" ? texel.r : texel.r * vertex.x;
-    let g = parameters.pass === "lightmap" ? texel.g : texel.g * vertex.y;
-    let b = parameters.pass === "lightmap" ? texel.b : texel.b * vertex.z;
+    let r = parameters.pass !== "texture" ? texel.r : texel.r * vertex.x;
+    let g = parameters.pass !== "texture" ? texel.g : texel.g * vertex.y;
+    let b = parameters.pass !== "texture" ? texel.b : texel.b * vertex.z;
     for (const light of parameters.lights) {
       const contribution = calcDynamicLightContribution(light, position, normal);
       let visibility = 1;
@@ -96,6 +96,7 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
       }
       r += contribution.x * visibility; g += contribution.y * visibility; b += contribution.z * visibility;
     }
+    if (parameters.pass === "material-lightmap") { r *= vertex.x; g *= vertex.y; b *= vertex.z; }
     return { r, g, b, a: parameters.pass === "lightmap" ? 1 : texel.a * vertex.w };
   }
   if (lighting.depth === null) throw new Error("CPU model shadows require their depth atlas");

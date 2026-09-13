@@ -128,6 +128,53 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     for (let pixel = 0; pixel < backend.pixels.length; pixel += 4) if ((backend.pixels[pixel] ?? 0) + (backend.pixels[pixel + 1] ?? 0) + (backend.pixels[pixel + 2] ?? 0) > 0) colored++;
     if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/w17-scene/${fixture.family}${fixture.archive.includes("rerelease") ? "-rerelease" : ""}.png`, encodePng(160, 120, backend.pixels));
     expect(colored).toBeGreaterThan(1000);
+    if (fixture.family !== "q3" && !fixture.archive.includes("rerelease")) {
+      const candidate = scene.surfaces.find(surface => surface.kind === "legacy" && surface.lightmap !== null);
+      if (candidate === undefined || candidate.kind !== "legacy" || candidate.lightmap === null) throw new Error("Missing authored override candidate");
+      const name = `textures/${candidate.material.name}`;
+      expect(shaders.hasAuthored(name)).toBe(false);
+      expect(scene.surfaces.every(surface => surface.shader === null)).toBe(true);
+      shaders.addScript(`${name}
+{
+ {
+  map ${name}
+ }
+ {
+  map $lightmap
+  blendFunc filter
+ }
+}`, "<explicit fixture override>");
+      expect(shaders.hasAuthored(name)).toBe(true);
+      const overridden = await WorldScene.load(map, shaders, { q2SkyName: world?.get("sky") ?? "unit1_" });
+      try {
+        const surface = overridden.surfaces[candidate.index];
+        if (surface === undefined || surface.kind !== "legacy" || surface.shader === null || surface.lightmap === null) throw new Error("Explicit override was not joined");
+        expect(surface.geometry).toEqual(candidate.geometry);
+        expect(surface.material.name).toBe(candidate.material.name);
+        expect(surface.material.kind).toBe(candidate.material.kind);
+        expect(surface.lightmap.face).toEqual(candidate.lightmap.face);
+        expect(surface.shader.finished.hasLightmapStage).toBe(true);
+        expect(overridden.surfaces.some(other => other.shader === null)).toBe(true);
+        const directed = { ...input, camera: { ...camera, origin: { x: surface.bounds.min.x, y: surface.bounds.min.y, z: surface.bounds.max.z + 32 } } };
+        const preparedOverride = overridden.prepareModel(0, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }) }, directed);
+        expect(preparedOverride.some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
+        expect(images.drainOperations().some(operation => operation.kind === "update-image" && operation.image === surface.lightmap?.image)).toBe(true);
+        await overridden.remapShader(name, name);
+        const nativeTexture = surface.material.kind === "q1" ? surface.material.texture : surface.material.frames[0];
+        if (nativeTexture === undefined) throw new Error("Missing native source texture");
+        const sampled = textures.register("fixture-native-sampling", { kind: "rgba8", levels: [
+          { width: 2, height: 2, pixels: new Uint8Array(16).fill(255) }, { width: 1, height: 1, pixels: new Uint8Array(4).fill(255) }],
+          borderColor: { x: 0, y: 0, z: 0, w: 1 } }, undefined, nativeTexture.source);
+        expect(await textures.sampleSurface(sampled, { mipmap: true, wrap: "repeat" })).toBe(sampled);
+        const clamped = await textures.sampleSurface(sampled, { mipmap: false, wrap: "clamp" });
+        expect(await textures.sampleSurface(sampled, { mipmap: false, wrap: "clamp" })).toBe(clamped);
+        expect(clamped.content.levels).toHaveLength(1);
+        expect(clamped.image.source).toBe(nativeTexture.source);
+        expect(clamped.content.levels[0].pixels).toBe(sampled.content.levels[0].pixels);
+        expect(images.drainOperations().some(operation => operation.kind === "create-image" && operation.image === clamped.image
+          && operation.sampling.wrap === "clamp" && operation.sampling.filter === "linear")).toBe(true);
+      } finally { overridden.close(); }
+    }
     target.close(); scene.close(); images.close();
   } finally { archive.close(); }
 }, 60000);
@@ -149,4 +196,165 @@ test("uniform brush transforms preserve inverse points, vectors and transformed 
     expect(portal?.mirror).toBe(true);
   }
   expect(() => localPoint(camera.origin, { origin: camera.origin, axis: camera.axis, scale: 0 })).toThrow("nonzero");
+});
+
+for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[])
+  test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(`${root}/q3a/missionpack/pak0.pk3`))(`authored movie override on unchanged ${family} surfaces uses shared ${rendererKind} materials`, async () => {
+    const { mkdtemp, mkdir, copyFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { ApplicationAssets } = await import("../../../src/app/bootstrap/assets.ts");
+    const { loadApplicationContent } = await import("../../../src/app/bootstrap/content.ts");
+    const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
+    const { NativeRenderer } = await import("../../../src/app/bootstrap/renderer.ts");
+    const { MaterialCinematic } = await import("../../../src/media/material.ts");
+    const { vectorToAngles } = await import("../../../src/core/math.ts");
+    const temporary = await mkdtemp(join(tmpdir(), "authored-material-"));
+    try {
+      const directory = join(temporary, family, family === "q1" ? "id1" : "baseq2");
+      await mkdir(join(directory, "scripts"), { recursive: true }); await mkdir(join(directory, "video"));
+      await copyFile(`${root}/${family === "q1" ? "q1/id1/PAK0.PAK" : "q2/baseq2/pak0.pak"}`, join(directory, "pak0.pak"));
+      const id1 = join(temporary, "q1", "id1"); await mkdir(id1, { recursive: true });
+      if (family !== "q1") await copyFile(`${root}/q1/id1/PAK0.PAK`, join(id1, "pak0.pak"));
+      await copyFile(`${root}/q1/id1/PAK1.PAK`, join(id1, "pak1.pak"));
+      if (family === "q2") for (const pak of ["pak1.pak", "pak2.pak"]) await copyFile(`${root}/q2/baseq2/${pak}`, join(directory, pak));
+      const movieArchive = await openArchive(`${root}/q3a/missionpack/pak0.pk3`);
+      try {
+        const member = movieArchive.findEntries("video/mpteam1.roq", "ascii-insensitive")[0];
+        if (member === undefined) throw new Error("Missing genuine movie fixture");
+        await Bun.write(join(directory, "video", "mpteam1.roq"), await movieArchive.readEntry(member));
+      } finally { movieArchive.close(); }
+      const parsed = parseApplicationCommand(["--content-root", temporary, "--game", family === "q1" ? "q1-classic-id1" : "q2-classic-baseq2",
+        "--map", family === "q1" ? "start" : "base1", "--movement", family, "--character", family, "--dedicated"]);
+      if (parsed.kind !== "run") throw new Error("Missing native content fixture");
+      const content = await loadApplicationContent(parsed.options);
+      let now = 0;
+      const firstIdentity = createIdentityOwner("authored-control"), firstOwner = { identity: Symbol("authored-control"), session: firstIdentity.session, generation: 0 };
+      const controlAssets = new ApplicationAssets(content, firstOwner, { sample: () => now });
+      try {
+        const control = await controlAssets.loadWorld();
+        const worldModel = content.world.models[0];
+        if (worldModel === undefined || !("faces" in worldModel)) throw new Error("Missing native world range");
+        const candidate = control.surfaces.filter(surface => surface.index >= worldModel.faces.first && surface.index < worldModel.faces.first + worldModel.faces.count && surface.kind === "legacy" && surface.lightmap !== null && surface.plane !== null && Math.abs(surface.plane.normal.z) < 0.5)
+          .sort((a, b) => ((b.bounds.max.x - b.bounds.min.x) + (b.bounds.max.y - b.bounds.min.y)) * (b.bounds.max.z - b.bounds.min.z)
+            - ((a.bounds.max.x - a.bounds.min.x) + (a.bounds.max.y - a.bounds.min.y)) * (a.bounds.max.z - a.bounds.min.z))[0];
+        if (candidate === undefined || candidate.kind !== "legacy" || candidate.plane === null) throw new Error("Missing native wall");
+        const name = `textures/${candidate.material.name}`, normal = candidate.plane.normal;
+        const center = candidate.geometry.vertices.reduce((sum, vertex) => ({ x: sum.x + vertex.position.x / candidate.geometry.vertices.length,
+          y: sum.y + vertex.position.y / candidate.geometry.vertices.length, z: sum.z + vertex.position.z / candidate.geometry.vertices.length }), { x: 0, y: 0, z: 0 });
+        const camera: SceneCamera = { origin: { x: center.x + normal.x * 96, y: center.y + normal.y * 96, z: center.z + normal.z * 96 },
+          axis: anglesToAxis(vectorToAngles({ x: -normal.x, y: -normal.y, z: -normal.z })), viewport: { x: 0, y: 0, width: 640, height: 400 },
+          projection: perspectiveProjection(80, 55.41, 4096), clip: { kind: "none" } };
+        const lightingFrames = async (scene: WorldScene, images: SceneImageRegistry, renderer: import("../../../src/app/bootstrap/renderer.ts").NativeRenderer, label: string): Promise<number[]> => {
+          const values: number[] = [], frames = new SceneFrameBuilder(images);
+          let unlitPixel: Uint8Array | null = null;
+          for (const enabled of [false, true]) {
+            const input: WorldViewInput = { camera, target: { kind: "preview", id: label }, time: { kind: "milliseconds", value: 0 } };
+            const light: SceneLight = { origin: camera.origin, radius: 400, color: { x: 1, y: 0.5, z: 0.25 }, additive: false,
+              profile: { kind: "q2", scale: 0.1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+            const shadows = scene.prepareShadows(enabled ? [light] : [], input);
+            if (enabled) expect(shadows.lighting.atlas).not.toBeNull();
+            frames.begin();
+            const prepared = scene.prepareView({ ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations });
+            if (label === "unlit") {
+              const movieBatches = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+                .filter(batch => batch.texture.kind === "dynamic-image");
+              expect(movieBatches.length).toBeGreaterThan(0);
+              expect(movieBatches.every(batch => batch.lighting.kind === "vertex")).toBe(true);
+            }
+            frames.world(prepared);
+            const capture = renderer.captureNextFrame(); renderer.execute(frames.finish(true)); const pixels = await capture;
+            let total = 0; for (let offset = 0; offset < pixels.length; offset += 4) total += (pixels[offset] ?? 0) + (pixels[offset + 1] ?? 0) + (pixels[offset + 2] ?? 0);
+            values.push(total);
+            if (label === "unlit") {
+              const pixel = pixels.slice((200 * 640 + 320) * 4, (200 * 640 + 320) * 4 + 4);
+              if (unlitPixel === null) unlitPixel = pixel; else expect(Array.from(pixel)).toEqual(Array.from(unlitPixel));
+            }
+            if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-lighting/${rendererKind}-${label}-${enabled ? "lit" : "dark"}.png`, encodePng(640, 400, pixels));
+          }
+          return values;
+        };
+        let nativeLighting: number[] = [];
+        const drawControl = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, firstOwner);
+        try {
+          const frames = new SceneFrameBuilder(controlAssets.images); frames.begin();
+          frames.world(control.prepareView({ camera, target: { kind: "preview", id: "stock-control" }, time: { kind: "milliseconds", value: 0 } }));
+          const capture = drawControl.captureNextFrame(); drawControl.execute(frames.finish(true));
+          const pixels = await capture;
+          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}-stock.png`, encodePng(640, 400, pixels));
+          if (family === "q2") nativeLighting = await lightingFrames(control, controlAssets.images, drawControl, "native");
+        } finally { drawControl.close(); }
+        const minS = Math.min(...candidate.geometry.vertices.map(vertex => vertex.texCoord.x)), maxS = Math.max(...candidate.geometry.vertices.map(vertex => vertex.texCoord.x));
+        const minT = Math.min(...candidate.geometry.vertices.map(vertex => vertex.texCoord.y)), maxT = Math.max(...candidate.geometry.vertices.map(vertex => vertex.texCoord.y));
+        const scaleS = 1 / (maxS - minS), scaleT = 1 / (maxT - minT);
+        await Bun.write(join(directory, "scripts", "fixture.shader"), `${name}\n{\n cull none\n {\n  videoMap mpteam1.roq\n  rgbGen identity\n  tcMod transform ${scaleS} 0 0 ${scaleT} ${-minS * scaleS} ${-minT * scaleT}\n }\n}\n`);
+        const identity = createIdentityOwner("authored-video"), owner = { identity: Symbol("authored-video"), session: identity.session, generation: 0 };
+        const assets = new ApplicationAssets(content, owner, { sample: () => now });
+        const renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+        try {
+          const scene = await assets.loadWorld(), surface = scene.surfaces[candidate.index];
+          if (surface === undefined || surface.shader === null) throw new Error("Missing authored shader surface");
+          expect(scene.map).toBe(content.world);
+          expect(surface.geometry).toEqual(candidate.geometry);
+          const frames = new SceneFrameBuilder(assets.images), hashes: string[] = [], decodedFrames: number[] = [];
+          for (const time of [0, 34, 68, 102, 136]) {
+            now = time; frames.begin();
+            const prepared = scene.prepareView({ camera, target: { kind: "preview", id: "explicit-authored-video" }, time: { kind: "milliseconds", value: time } });
+            const binding = prepared.view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+              .map(batch => batch.texture).find(texture => texture.kind === "dynamic-image");
+            if (binding?.kind !== "dynamic-image" || !(binding.source instanceof MaterialCinematic)) throw new Error("Missing shared authored movie");
+            const provenance = binding.source.image.source;
+            if (provenance.kind !== "resource") throw new Error("Movie lost its actual resource");
+            expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
+            expect(provenance.resource.requestedPath).toBe("video/mpteam1.roq");
+            frames.world(prepared);
+            const capture = renderer.captureNextFrame(); renderer.execute(frames.finish(true)); const pixels = await capture;
+            if (time === 68 || time === 136) {
+              hashes.push(new Bun.CryptoHasher("sha256").update(pixels).digest("hex"));
+              const decoded = binding.source.playback.currentFrame;
+              if (decoded === null) throw new Error("Missing executed movie frame");
+              decodedFrames.push(decoded.index);
+              if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}-${time}.png`, encodePng(640, 400, pixels));
+            }
+          }
+          expect(hashes[0]).not.toBe(hashes[1]);
+          expect(decodedFrames[0]).not.toBe(decodedFrames[1]);
+          if (family === "q2") await lightingFrames(scene, assets.images, renderer, "unlit");
+          if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}.json`, JSON.stringify({
+            fixture: "Explicit loose shader/movie overlay; unchanged copied retail map archive", source: content.recipe.presentation.assets,
+            shader: name, movie: "video/mpteam1.roq", originalMovieArchive: "q3a/missionpack/pak0.pk3", surface: candidate.index, camera, center, normal, uvTransform: [scaleS, 0, 0, scaleT, -minS * scaleS, -minT * scaleT], times: [68, 136], decodedFrames }, null, 2));
+        } finally { assets.close(); renderer.close(); }
+        if (family === "q2") for (const variant of [{ label: "authored", color: 1 }, { label: "colored", color: 0.5 }]) {
+          await Bun.write(join(directory, "scripts", "fixture.shader"), `${name}\n{\n {\n map ${name}\n }\n {\n map $lightmap\n blendFunc filter\n rgbGen const ( ${variant.color} ${variant.color} ${variant.color} )\n alphaGen const 0.5\n }\n}\n`);
+          const identity = createIdentityOwner("authored-lighting"), owner = { identity: Symbol("authored-lighting"), session: identity.session, generation: 0 };
+          const assets = new ApplicationAssets(content, owner), renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+          try {
+            const scene = await assets.loadWorld();
+            const authored = await lightingFrames(scene, assets.images, renderer, variant.label);
+            const [nativeDark, nativeLit] = nativeLighting, [authoredDark, authoredLit] = authored;
+            if (nativeDark === undefined || nativeLit === undefined || authoredDark === undefined || authoredLit === undefined) throw new Error("Missing lighting comparisons");
+            expect(nativeLit - nativeDark).toBeGreaterThan(10000);
+            expect(authoredLit - authoredDark).toBeGreaterThan((nativeLit - nativeDark) * variant.color * 0.8);
+            expect(authoredLit - authoredDark).toBeLessThan((nativeLit - nativeDark) * variant.color * 1.2);
+          } finally { assets.close(); renderer.close(); }
+        }
+      } finally { controlAssets.close(); await content.close(); }
+    } finally { await rm(temporary, { recursive: true, force: true }); }
+  }, 60000);
+
+test("authored lightmap color scales static and dynamic RGB while preserving sampled alpha", async () => {
+  const { shadeQ2Fragment } = await import("../../../src/render/cpu/lighting.ts");
+  const parameters: Extract<import("../../../src/contracts/render.ts").BatchLighting, { readonly kind: "q2-world" }> = {
+    kind: "q2-world", pass: "lightmap", worldPositions: [], normals: [], atlas: null,
+    lights: [{ origin: { x: 0, y: 0, z: 32 }, radius: 128, color: { x: 1, y: 0.5, z: 0.25 }, scale: 1, cone: null, shadow: { kind: "none" } }],
+  };
+  const position = { x: 0, y: 0, z: 0 }, normal = { x: 0, y: 0, z: 1 }, color = { x: 0.25, y: 0.5, z: 0.75, w: 0.5 };
+  const texel = { r: 0.1, g: 0.2, b: 0.3, a: 0.4 };
+  const native = shadeQ2Fragment({ parameters, depth: null }, position, normal, color, texel);
+  const authored = shadeQ2Fragment({ parameters: { ...parameters, pass: "material-lightmap" }, depth: null }, position, normal, color, texel);
+  expect(native.r).toBeGreaterThan(texel.r);
+  expect(authored.r).toBeCloseTo(native.r * color.x, 6);
+  expect(authored.g).toBeCloseTo(native.g * color.y, 6);
+  expect(authored.b).toBeCloseTo(native.b * color.z, 6);
+  expect(authored.a).toBeCloseTo(texel.a * color.w, 6);
 });

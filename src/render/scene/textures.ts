@@ -75,6 +75,24 @@ export class SceneTextureLoader {
       texture.name.startsWith("sky") || texture.name.startsWith("*") ? null : { first: this.fullbrightFirst, last: 255 }));
   }
 
+  async sampleSurface(texture: SceneTexture, options: { readonly mipmap: boolean; readonly wrap: TextureSampling["wrap"] }): Promise<SceneTexture> {
+    if (options.mipmap && options.wrap === "repeat") return texture;
+    const key = `\0surface:${texture.image.ordinal}\0${options.mipmap}\0${options.wrap}`;
+    const existing = this.loaded.get(key);
+    if (existing !== undefined) {
+      const sampled = await existing;
+      if (sampled === null) throw new Error("Surface sampling cache lost its texture");
+      return sampled;
+    }
+    const original = texture.content;
+    const content: RenderImage = options.mipmap ? original : original.kind === "depth32f"
+      ? { ...original, levels: [original.levels[0]] } : { ...original, levels: [original.levels[0]] };
+    const sampled = this.register(texture.name, content, { wrap: options.wrap, filter: options.mipmap ? "linear-mipmap-nearest" : "linear" },
+      texture.image.source, texture);
+    this.loaded.set(key, Promise.resolve(sampled));
+    return sampled;
+  }
+
   load(name: string, options: { readonly mipmap?: boolean; readonly wrap?: TextureSampling["wrap"]; readonly family?: "q1" | "q2" | "q3" } = {}): Promise<SceneTexture | null> {
     const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}`;
     const existing = this.loaded.get(key);

@@ -100,8 +100,8 @@ export class ApplicationAssets {
         const asset = await mounts.open(path);
         return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
       } }, palette);
-      const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path));
-      if (family === "q3") for (const path of await shaderPaths(this.content, mounts)) {
+      const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
+      for (const path of await shaderPaths(this.content, mounts)) {
         const asset = await mounts.open(path);
         if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
       }

@@ -100,6 +100,7 @@ void main() {
   if (u_lighting_mode == 1) color = vec4(texel.rgb + dynamicLights(), 1.0);
   else if (u_lighting_mode == 2) color.rgb += dynamicLights();
   else if (u_lighting_mode == 3) color = modelShadow(texel);
+  else if (u_lighting_mode == 4) color = vec4((texel.rgb + dynamicLights()) * vertexColor.rgb, texel.a * vertexColor.a);
   if (secondaryMode != 0) {
     vec4 second = texture2D(secondaryTexture, coordinates1);
     if (secondaryMode == 1) color *= second;
@@ -206,7 +207,7 @@ void main() { gl_FragColor = vec4(1.0); }
     gl.glUseProgram(this.program);
     gl.glUniform1i(this.uniform("secondaryMode"), environment === null ? 0 : secondaryModes[environment]);
     gl.glUniform1i(this.uniform("alphaMode"), alphaModes[alphaTest]);
-    gl.glUniform1i(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : 2);
+    gl.glUniform1i(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
     if (lighting.kind === "vertex") { gl.glUniform1i(this.uniform("u_light_count"), 0); return; }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
     gl.glUniform1i(this.uniform("u_light_count"), lighting.lights.length);
