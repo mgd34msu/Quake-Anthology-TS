@@ -323,11 +323,11 @@ export class ClientSpawnRuntime {
       entity.r.maxs = { ...PLAYER_MAXS };
     }
     ps.clientNum = entity.slot;
+    ps.ammo.set(Weapon.WP_GAUNTLET, -1);
+    ps.ammo.set(Weapon.WP_GRAPPLING_HOOK, -1);
     if (this.host.selectedPlayer === undefined) {
       ps.stats.set(schema.weapons, (1 << Weapon.WP_MACHINEGUN) | (1 << Weapon.WP_GAUNTLET));
       ps.ammo.set(Weapon.WP_MACHINEGUN, frame.gameType === GameType.GT_TEAM ? 50 : 100);
-      ps.ammo.set(Weapon.WP_GAUNTLET, -1);
-      ps.ammo.set(Weapon.WP_GRAPPLING_HOOK, -1);
       entity.health = ps.health = (pers.maxHealth + 25) | 0;
     } else this.host.selectedPlayer(entity, spawn);
     setOrigin(entity, spawn.origin);

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
+import { Weapon } from "../../../src/movement/q3/constants.ts";
 
 test("retail q3dm1 runs independent cgame snapshots, weapon events and HUDs in two native seats", async () => {
   const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3",
@@ -15,10 +16,18 @@ test("retail q3dm1 runs independent cgame snapshots, weapon events and HUDs in t
     const a = first.seat.presentation, b = second.seat.presentation;
     if (!(a instanceof WorldSeatPresentation) || !(b instanceof WorldSeatPresentation) || a.q3Client === null || b.q3Client === null) throw new Error("Native seats lack cgame");
     const left = a.q3Client, right = b.q3Client;
+    const sourcePlayer = application.simulation.q3Source()?.records.byActor(first.actor)?.client?.ps;
+    expect(sourcePlayer?.ammo.get(Weapon.WP_GAUNTLET)).toBe(-1);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_GRAPPLING_HOOK)).toBe(-1);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_MACHINEGUN)).toBe(100);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_SHOTGUN)).toBe(0);
+    expect(application.simulation.inventory.entries(first.actor).every(entry => entry.count >= 0)).toBe(true);
     expect(left.cgame.state).not.toBe(right.cgame.state);
     expect(left.cvars).not.toBe(right.cvars);
     await application.step(50);
     expect(left.cgame.state.snap?.playerState.clientNum).toBe(left.source.clientNumber);
+    expect(left.cgame.state.snap?.playerState.ammo.get(Weapon.WP_GAUNTLET)).toBe(-1);
+    expect(left.cgame.state.snap?.playerState.ammo.get(Weapon.WP_GRAPPLING_HOOK)).toBe(-1);
     expect(right.cgame.state.snap?.playerState.clientNum).toBe(right.source.clientNumber);
     expect(left.source.clientNumber).not.toBe(right.source.clientNumber);
     expect(left.camera().viewport.x).toBe(0);
@@ -82,7 +91,15 @@ test("Team Arena give weapons registers newly owned media before synchronous pre
     if (local === undefined || source === null || !(local.seat.presentation instanceof WorldSeatPresentation) || local.seat.presentation.q3Client === null)
       throw new Error("Missing native Team Arena source and presentation");
     const client = local.seat.presentation.q3Client, registry = client.cgame.media.weaponRegistry;
+    const sourcePlayer = source.records.byActor(local.actor)?.client?.ps;
+    expect(sourcePlayer?.ammo.get(Weapon.WP_GAUNTLET)).toBe(-1);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_GRAPPLING_HOOK)).toBe(-1);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_MACHINEGUN)).toBe(100);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_SHOTGUN)).toBe(0);
+    expect(application.simulation.inventory.entries(local.actor).every(entry => entry.count >= 0)).toBe(true);
     await application.step(50);
+    expect(client.cgame.state.snap?.playerState.ammo.get(Weapon.WP_GAUNTLET)).toBe(-1);
+    expect(client.cgame.state.snap?.playerState.ammo.get(Weapon.WP_GRAPPLING_HOOK)).toBe(-1);
     expect(() => registry.requireWeapon(3)).toThrow("must finish registration");
     source.host.cvars.set("sv_cheats", "1", true);
     application.queueCommand("give", ["weapons"], local.seat.id);
