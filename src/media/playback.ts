@@ -44,6 +44,7 @@ export class CinematicPlayback {
   private readonly clock: PlaybackClock;
   private readonly movie: Movie;
   private state: CinematicStatus = "playing";
+  private decoderStatus: CinematicStatus | "looped" = "playing";
   private picture: CinematicFrame | null = null;
   private dirty = false;
   private frameRevision = 0;
@@ -94,6 +95,7 @@ export class CinematicPlayback {
   }
 
   get status(): CinematicStatus { return this.state; }
+  get sourceStatus(): CinematicStatus | "looped" { return this.state === "playing" ? this.decoderStatus : this.state; }
   get revision(): number { return this.frameRevision; }
   get playbackTimeMilliseconds(): number { return this.clock.sample(); }
   get currentFrame(): CinematicFrame | null { return this.picture === null ? null : { ...this.picture, rgba: this.picture.rgba.slice() }; }
@@ -103,6 +105,7 @@ export class CinematicPlayback {
     this.dirty = false;
     if (this.state === "playing" && this.movie.kind !== "image") {
       const tick = this.movie.playback.run(this.clock);
+      this.decoderStatus = tick.status;
       if (tick.update.kind === "frame") { this.picture = tick.update.frame; this.frameRevision++; changed = true; }
       if (tick.status === "held") this.state = "held";
       else if (tick.status === "ended") { this.state = "ended"; this.finish("finished"); }
