@@ -9,6 +9,7 @@ import { Q3ClientConnection } from '../../../network/q3/client.ts';
 import type { Q3ClientBindings, Q3ConnectionIdentity } from '../../../network/q3/client.ts';
 import { q3ChannelDelivery } from '../../../network/q3/transport.ts';
 import type { WireUserCommand } from '../../../network/q3/message.ts';
+import { MessageReader } from '../../../network/q3/message.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 export interface Q3ApplicationClientHost extends Pick<Q3ClientBindings, 'systemInfo' | 'gamestate' | 'snapshot' | 'clearActive' | 'mapRestart' | 'print' | 'downloadSize' | 'download'> {
@@ -87,7 +88,11 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         try { await this.connection.receiveDatagram(result.bytes, now); this.lastReceived = now; }
         catch (error) { this.state = 'rejected'; this.options.host.disconnected(error instanceof Error ? error.message : String(error)); throw error; }
       } else if (result.kind === 'connectionless') {
-        if (result.packet.command === 'print') this.options.host.print(result.packet.arguments.join(' '));
+        if (result.packet.command === 'print') {
+          const text = new Uint8Array(result.packet.payload.length + 1);
+          text.set(result.packet.payload);
+          this.options.host.print(new MessageReader(text, 'oob').readString());
+        }
         else if (result.packet.command === 'disconnect' && this.connection !== null && sameAddress(packet.from, this.peer) && now - this.lastReceived >= 3000) { this.state = 'closed'; this.options.host.disconnected('Server disconnected'); return []; }
       }
     }
