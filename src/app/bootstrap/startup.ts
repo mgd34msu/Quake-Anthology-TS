@@ -88,7 +88,7 @@ export class StartupApplication {
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
     let renderer: NativeRenderer | null = null, controllers: SdlControllers | null = null, router: InputRouter | null = null, menu: StartupMenu | null = null;
     try {
-      font = await loadMenuFont({ mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images });
+      font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images });
       typography = await loadMenuTypography(this.model.catalog, images, font.font.classic);
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");

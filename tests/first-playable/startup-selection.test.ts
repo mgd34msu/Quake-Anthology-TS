@@ -71,7 +71,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   await model.prepareMaps();
   const identity = createIdentityOwner("startup-roster-mouse"), seat = identity.seat(0), images = new SceneImageRegistry({ identity: Symbol("roster-ui"), session: identity.session, generation: 0 });
   const mounts = await catalog.mountsFor(catalog.require("q1-classic-id1").id), mounted = await openMountPlan({ id: createMountPlanId("roster", "menu"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
-  const font = await loadMenuFont({ mounts: mounted, family: "q1", rerelease: false, images });
+  const font = await loadMenuFont({ catalog, mounts: mounted, family: "q1", rerelease: false, images });
   const fontSource = font.font.classic.picture.image.source;
   if (fontSource.kind !== "resource") throw new Error("Missing actual font resource");
   const art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);

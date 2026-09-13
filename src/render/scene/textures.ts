@@ -10,7 +10,7 @@ export interface SceneAsset {
 }
 export interface SceneAssetReader {
   read(path: string): Promise<SceneAsset | null>;
-  /** Content's original mount, excluding user replacement directories. */
+  /** Alternate original source beneath a user replacement; null when the loaded asset is already original. */
   readOriginal?(path: string): Promise<SceneAsset | null>;
 }
 export interface SceneTexture {

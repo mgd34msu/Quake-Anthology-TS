@@ -100,7 +100,7 @@ export class MountedContent {
 
   get referencedArchives(): readonly ArchiveMount[] { return [...this.#referenced.values()]; }
 
-  #assertOpen(): void { if (this.#closed) throw new Error("Content mount plan is closed"); }
+  assertOpen(): void { if (this.#closed) throw new Error("Content mount plan is closed"); }
 
   #allowed(source: MountedSource, path: string): boolean {
     const pure = this.options.pure;
@@ -132,13 +132,14 @@ export class MountedContent {
     return { reference, bytes: read.bytes };
   }
 
-  async open(path: string): Promise<OpenedResource | null> {
-    this.#assertOpen();
+  async open(path: string, acceptMount: (mount: ContentMount) => boolean = () => true): Promise<OpenedResource | null> {
+    this.assertOpen();
     const requestedPath = normalizeResourcePath(path);
     for (const link of this.options.links ?? []) {
       if (!requestedPath.startsWith(link.sourcePrefix)) continue;
       const source = this.#sources.get(link.mount);
       if (source === undefined) throw new Error(`Unknown link mount: ${link.mount}`);
+      if (!acceptMount(source.mount)) return null;
       const targetPath = normalizeResourcePath(link.targetPrefix + requestedPath.slice(link.sourcePrefix.length));
       const read = await this.#readSource(source, targetPath);
       return read === null ? null : this.#opened(requestedPath, read, { kind: "link", plan: this.plan.id, sourcePrefix: link.sourcePrefix, targetPath });
@@ -148,6 +149,7 @@ export class MountedContent {
     for (const [rank, id] of order.entries()) {
       const source = this.#sources.get(id);
       if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
+      if (!acceptMount(source.mount)) continue;
       const read = await this.#readSource(source, requestedPath);
       if (read !== null) {
         const resolution: ResourceResolution = prefix === undefined
@@ -163,7 +165,7 @@ export class MountedContent {
 
   /** Q3 FS_ListFilteredFiles without a filter, in selected mount and archive-directory order. */
   async listFiles(path: string, extension: string): Promise<readonly string[]> {
-    this.#assertOpen();
+    this.assertOpen();
     if (path.length >= 256 || [...path, ...extension].some(character => character.charCodeAt(0) > 255 || character === "\0")) {
       throw new RangeError("Q3 file listing exceeds source path representation");
     }
@@ -195,7 +197,7 @@ export class MountedContent {
           if (isMissingFile(error)) return [];
           throw error;
         });
-        this.#assertOpen();
+        this.assertOpen();
         for (const entry of entries) {
           if (entry.isSymbolicLink()) continue;
           if ((extension === "/") !== entry.isDirectory() || extension !== "/" && !suffix(entry.name)) continue;
@@ -203,12 +205,12 @@ export class MountedContent {
         }
       }
     }
-    this.#assertOpen();
+    this.assertOpen();
     return names;
   }
 
   async read(resource: string | ResolvedResourceReference): Promise<Uint8Array> {
-    this.#assertOpen();
+    this.assertOpen();
     if (typeof resource === "string") {
       const opened = await this.open(resource);
       if (opened === null) throw new Error(`Resource not found: ${resource}`);

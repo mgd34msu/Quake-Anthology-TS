@@ -19,6 +19,7 @@ import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { loadApplicationModel } from "./model-loader.ts";
+import { mountedImageReader } from "./image-reader.ts";
 
 export interface ProviderSceneAssets {
   readonly family: GameFamily;
@@ -98,10 +99,7 @@ export class ApplicationAssets {
       const family = this.content.catalog.product(content).expectation.family;
       const mounts = await this.content.forContent(content), palette = await paletteFor(mounts, family);
       if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      const textures = new SceneTextureLoader(this.images, { read: async path => {
-        const asset = await mounts.open(path);
-        return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
-      } }, palette);
+      const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, mounts), palette);
       this.activeTextures.add(textures);
       const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
       for (const path of await shaderPaths(this.content, mounts)) {
@@ -161,7 +159,7 @@ export class ApplicationAssets {
     this.font = (async (): Promise<TextFontSelection> => {
       const provider = await this.provider(this.content.recipe.presentation.assets);
       const product = this.content.catalog.product(this.content.recipe.presentation.assets);
-      this.fonts = await loadMenuFont({ mounts: provider.mounts, family: provider.family,
+      this.fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
         rerelease: product.expectation.edition === "rerelease", images: this.images });
       return this.fonts.font;
     })();

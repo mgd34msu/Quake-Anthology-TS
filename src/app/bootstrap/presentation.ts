@@ -131,7 +131,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.worldText = this.simulation.worldText();
     for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
       const provider = await this.assets.provider(text.content);
-      this.worldFonts.set(text.content, await loadMenuFont({ mounts: provider.mounts, family: provider.family,
+      this.worldFonts.set(text.content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
         rerelease: this.assets.content.catalog.product(text.content).expectation.edition === "rerelease", images: this.assets.images }));
     }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;

@@ -12,8 +12,10 @@ import type { SceneImageRegistry } from "../../render/scene/index.ts";
 import { classicCharset } from "../../text/atlas.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { createMountedTextFonts } from "../../text/mounted.ts";
+import { mountedImageReader } from "./image-reader.ts";
 
 export interface MenuFontOptions {
+  readonly catalog: InstalledCatalog;
   readonly mounts: MountedContent;
   readonly family: GameFamily;
   readonly rerelease: boolean;
@@ -33,10 +35,7 @@ export async function loadMenuFont(options: MenuFontOptions): Promise<{ readonly
     const paletteAsset = family === "q2" ? await mounts.open("pics/colormap.pcx") : null;
     const colors = paletteAsset === null ? null : decodePcx(paletteAsset.bytes, "pics/colormap.pcx").palette;
     const palette = paletteAsset === null || colors === null ? null : { colors, source: paletteAsset.reference };
-    const textures = new SceneTextureLoader(images, { read: async path => {
-      const asset = await mounts.open(path);
-      return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
-    } }, palette);
+    const textures = new SceneTextureLoader(images, mountedImageReader(options.catalog, mounts), palette);
     const texture = await textures.load(family === "q2" ? "pics/conchars.pcx" : "gfx/2d/bigchars", { family, mipmap: false, wrap: "clamp" });
     if (texture === null) throw new Error("Quake III console charset is missing");
     image = images.register("conchars", texture.content, { wrap: "clamp", filter: "nearest" }, texture.image.source);
@@ -70,10 +69,7 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
     const mounts = await catalog.mountsFor(q3.id);
     const mounted = await openMountPlan({ id: "mount-plan:menu:typography", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     try {
-      const textures = new SceneTextureLoader(images, { read: async path => {
-        const asset = await mounted.open(path);
-        return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } };
-      } });
+      const textures = new SceneTextureLoader(images, mountedImageReader(catalog, mounted));
       const texture = await textures.load("menu/art/font1_prop.tga", { family: "q3", mipmap: false, wrap: "clamp" });
       if (texture === null) throw new Error("Quake III proportional menu font is missing");
       const glyphs = new Map<number, AtlasGlyph>();
