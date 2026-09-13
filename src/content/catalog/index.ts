@@ -5,6 +5,7 @@ import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, MountPlanId
 import { openArchive } from "../archive/index.ts";
 import { digestFile, openMountPlan } from "../mounts/index.ts";
 import { findContentPath, normalizeResourcePath } from "../mounts/paths.ts";
+import { userProductDirectory } from "../user-data.ts";
 import { expectedProducts } from "./products.ts";
 import type { ProductExpectation } from "./products.ts";
 
@@ -37,12 +38,14 @@ export interface CatalogProduct {
   readonly availability: ProductAvailability;
   readonly archives: readonly CatalogArchive[];
   readonly looseRoot: string | null;
+  readonly userContent: { readonly root: string; readonly archives: readonly CatalogArchive[] } | null;
   readonly maps: readonly ContentMap[];
   readonly diagnostics: readonly string[];
 }
 
 export interface DiscoverContentOptions {
   readonly corpusRoot: string;
+  readonly userContentRoot?: string;
   readonly products?: readonly ProductExpectation[];
   readonly generation?: number;
   readonly discoverMods?: boolean;
@@ -86,6 +89,13 @@ export function orderGameArchives(product: ProductExpectation, archives: readonl
     ? sorted.filter(archive => archive.format === "pak" && !/^pak[0-9]\.pak$/i.test(basename(archive.path)))
     : sorted.filter(archive => archive.format === "pk3" || archive.format === "kpf");
   return [...numbered, ...extra].reverse();
+}
+
+function productDirectories(product: CatalogProduct): readonly { readonly root: string | null; readonly archives: readonly CatalogArchive[] }[] {
+  const user = product.userContent;
+  if (user === null) return [{ root: product.looseRoot, archives: product.archives }];
+  const userArchives = new Set(user.archives);
+  return [user, { root: product.looseRoot, archives: product.archives.filter(archive => !userArchives.has(archive)) }];
 }
 
 async function discoverMods(root: string, products: readonly ProductExpectation[]): Promise<readonly ProductExpectation[]> {
@@ -132,7 +142,7 @@ export class InstalledCatalog {
   readonly #byId = new Map<string, CatalogProduct>();
   readonly #digests = new Map<string, Promise<ContentDigest>>();
 
-  constructor(readonly corpusRoot: string, readonly products: readonly CatalogProduct[], readonly rootArchives: readonly CatalogArchive[], readonly generation: number) {
+  constructor(readonly corpusRoot: string, readonly products: readonly CatalogProduct[], readonly rootArchives: readonly CatalogArchive[], readonly generation: number, readonly userContentRoot: string | null = null) {
     for (const product of products) {
       if (this.#byId.has(product.id) || this.#byId.has(product.expectation.id)) throw new RangeError(`Duplicate catalog identity: ${product.id}`);
       this.#byId.set(product.id, product);
@@ -161,11 +171,13 @@ export class InstalledCatalog {
       if (visited.has(product.id)) throw new Error(`Cyclic base content dependency: ${product.id}`);
       visited.add(product.id);
       const add = (map: ContentMap): void => { if (!winners.has(map.path.toLowerCase())) winners.set(map.path.toLowerCase(), map); };
-      for (const archive of orderGameArchives(product.expectation, product.archives)) {
-        const maps = product.maps.filter(map => map.source === archive.path);
-        for (const map of archive.format === "pak" ? maps : [...maps].reverse()) add(map);
+      for (const directory of productDirectories(product)) {
+        for (const archive of orderGameArchives(product.expectation, directory.archives)) {
+          const maps = product.maps.filter(map => map.source === archive.path);
+          for (const map of archive.format === "pak" ? maps : [...maps].reverse()) add(map);
+        }
+        for (const map of product.maps) if (map.memberIndex === null && directory.root !== null && resolve(directory.root, map.path) === map.source) add(map);
       }
-      for (const map of product.maps) if (map.memberIndex === null) add(map);
       if (product.expectation.baseProduct !== null) visit(this.product(product.expectation.baseProduct));
     };
     visit(this.product(id));
@@ -195,11 +207,13 @@ export class InstalledCatalog {
       const product = this.require(content);
       if (visited.has(product.id)) throw new Error(`Cyclic base content dependency: ${content}`);
       visited.add(product.id);
-      for (const archive of orderGameArchives(product.expectation, product.archives)) await addArchive(product, archive);
-      if (product.looseRoot !== null && !paths.has(product.looseRoot)) {
-        paths.add(product.looseRoot);
-        const name = Buffer.from(relative(this.corpusRoot, product.looseRoot)).toString("hex");
-        mounts.push({ kind: "loose", identity: createMountIdentity(createMountId(product.expectation.id, `loose-${name}`), product.id, this.generation), rootPath: product.looseRoot });
+      for (const directory of productDirectories(product)) {
+        for (const archive of orderGameArchives(product.expectation, directory.archives)) await addArchive(product, archive);
+        if (directory.root !== null && !paths.has(directory.root)) {
+          paths.add(directory.root);
+          const name = Buffer.from(relative(this.corpusRoot, directory.root)).toString("hex");
+          mounts.push({ kind: "loose", identity: createMountIdentity(createMountId(product.expectation.id, `loose-${name}`), product.id, this.generation), rootPath: directory.root });
+        }
       }
       if (product.expectation.baseProduct !== null) await visit(this.product(product.expectation.baseProduct).id);
       if (product.expectation.edition === "rerelease" && product.expectation.baseProduct === null) {
@@ -253,10 +267,14 @@ export class InstalledCatalog {
 
 export async function discoverInstalledContent(options: DiscoverContentOptions): Promise<InstalledCatalog> {
   const corpusRoot = resolve(options.corpusRoot);
+  const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
   const expected = options.products ?? expectedProducts;
-  const expectations = [...expected, ...options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected)];
+  const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected);
+  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods]);
+  const userModIds = new Set(userMods.map(product => product.id));
+  const expectations = [...expected, ...corpusMods, ...userMods];
   const archives = new Map<string, Promise<CatalogArchive>>();
   const inspect = (path: string, format: ArchiveFormat): Promise<CatalogArchive> => {
     const existing = archives.get(path);
@@ -294,18 +312,36 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
         }
       }
     }
+    const userRoot = userContentRoot === null || userContentRoot === corpusRoot ? null
+      : await findContentPath(userContentRoot, expectation.contentDirectory) ?? userProductDirectory(userContentRoot, expectation.contentDirectory);
+    const userArchives: CatalogArchive[] = [];
+    const userDiagnostics: string[] = [];
+    if (userRoot !== null) {
+      const entries = await readdir(userRoot, { withFileTypes: true }).catch((error: unknown) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+        throw error;
+      });
+      for (const entry of entries) {
+        const format = archiveFormat(entry.name);
+        if (!entry.isFile() || format === null) continue;
+        try { userArchives.push(await inspect(resolve(userRoot, entry.name), format)); }
+        catch (error: unknown) { userDiagnostics.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+    }
     const maps = found.flatMap(archive => archive.entries.filter(entry => /^maps\/.*\.bsp$/i.test(entry.path)).map(entry => ({ path: entry.path, source: archive.path, memberIndex: entry.ordinal })));
-    const allMaps: ContentMap[] = [...maps, ...looseRoot === null ? [] : await looseMaps(looseRoot)];
-    const requirements: string[] = [...diagnostics];
+    const corpusMaps: ContentMap[] = [...maps, ...looseRoot === null ? [] : await looseMaps(looseRoot)];
+    const userMaps = userArchives.flatMap(archive => archive.entries.filter(entry => /^maps\/.*\.bsp$/i.test(entry.path)).map(entry => ({ path: entry.path, source: archive.path, memberIndex: entry.ordinal })));
+    const allMaps: ContentMap[] = [...userMaps, ...userRoot === null ? [] : await looseMaps(userRoot), ...corpusMaps];
+    const requirements: string[] = [...diagnostics, ...userModIds.has(expectation.id) ? userDiagnostics : []];
     for (const archive of expectation.requiredContentArchives) {
-      const path = await findContentPath(corpusRoot, archive);
+      const path = await findContentPath(corpusRoot, archive) ?? (userModIds.has(expectation.id) && userContentRoot !== null ? await findContentPath(userContentRoot, archive) : null);
       if (path === null || !(await stat(path)).isFile()) requirements.push(archive);
     }
-    if (looseRoot === null) requirements.push(expectation.contentDirectory);
-    if (expectation.mapWitness !== null && !allMaps.some(map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase())) requirements.push(expectation.mapWitness);
+    if (looseRoot === null && !userModIds.has(expectation.id)) requirements.push(expectation.contentDirectory);
+    if (expectation.mapWitness !== null && !(userModIds.has(expectation.id) ? allMaps : corpusMaps).some(map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase())) requirements.push(expectation.mapWitness);
     const availability: ProductAvailability = expectation.unresolvedReason !== null ? { kind: "unresolved", reason: expectation.unresolvedReason }
       : requirements.length > 0 ? { kind: "missing", requirements } : { kind: "installed" };
-    products.push({ id, expectation, availability, archives: found, looseRoot, maps: allMaps, diagnostics });
+    products.push({ id, expectation, availability, archives: [...userArchives, ...found], looseRoot, userContent: userRoot === null ? null : { root: userRoot, archives: userArchives }, maps: allMaps, diagnostics: [...diagnostics, ...userDiagnostics] });
   }
   // An unreadable base remains a requirement even when its filenames are present.
   const byProduct = new Map(products.map(product => [product.expectation.id, product]));
@@ -315,5 +351,5 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     if (base === undefined || base.availability.kind !== "installed") return { ...product, availability: { kind: "missing", requirements: [`base product ${product.expectation.baseProduct}`] } };
     return product;
   });
-  return new InstalledCatalog(corpusRoot, checked, [...rootArchives.values()], generation);
+  return new InstalledCatalog(corpusRoot, checked, [...rootArchives.values()], generation, userContentRoot);
 }

@@ -1,3 +1,4 @@
+import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
 import { resolveLaunchResource } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
@@ -137,7 +138,7 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
 }
 
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy): Promise<LoadedApplicationContent> {
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, discoverMods: false });
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), ...(pure === undefined ? {} : { mounts: { pure } }) });

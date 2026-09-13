@@ -6,6 +6,7 @@ export interface ApplicationOptions {
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
+  readonly userContentRoot?: string;
   readonly product: string;
   readonly map: string;
   readonly movement: GameFamily;
@@ -39,6 +40,7 @@ Usage: bun run src/main.ts [options]
   --menu                     Open the startup menu (default without launch selections)
   --preset q2-q1-q3|q1-q2     Select an initial mixed-game profile
   --content-root PATH        Game data root (default ~/Projects/qfiles)
+  --user-content-root PATH   Writable user content root (default ~/.local/share/quake-typescript/content)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
   --map NAME                 Map name or maps/path.bsp
   --movement q1|q2|q3        Player movement provider
@@ -100,7 +102,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === "--menu") { menu = true; continue; }
-    if (flag !== undefined && !["--content-root", "--renderer", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
+    if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
@@ -113,6 +115,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         else if (value === "q1-q2") options = { ...options, product: "q1-rerelease-id1", map: "maps/e1m1.bsp", movement: "q2", character: "q2", characterModel: "male" };
         else throw new Error(`Unknown launch preset: ${value}`);
         break;
+      case "--user-content-root": options = { ...options, userContentRoot: resolve(value) }; break;
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
       case "--game": options = { ...options, product: value }; break;
       case "--map": options = { ...options, map: mapResourcePath(value) }; break;

@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createMountIdentity } from "../../../src/contracts/content.ts";
 import type { ArchiveMount, ContentMount, ResolvedMountPlan } from "../../../src/contracts/content.ts";
+import { userProductDirectory } from "../../../src/content/user-data.ts";
+import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
 import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
 import { canDownloadResource, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 
@@ -64,4 +66,138 @@ test.skipIf(!existsSync(corpusRoot))("rerelease rules read rerelease assets whil
   expect(icon?.reference.resolution.kind).toBe("default-order");
   expect(map?.bytes.length).toBeGreaterThan(1000);
   expect(icon?.bytes.slice(0, 4)).toEqual(new Uint8Array([137, 80, 78, 71]));
+});
+
+function zip(entries: readonly (readonly [string, string])[]): Uint8Array {
+  const locals: Uint8Array[] = [], directory: Uint8Array[] = [];
+  let offset = 0;
+  for (const [path, text] of entries) {
+    const name = new TextEncoder().encode(path), data = new TextEncoder().encode(text), crc = Bun.hash.crc32(data);
+    const local = new Uint8Array(30 + name.length + data.length), a = new DataView(local.buffer);
+    a.setUint32(0, 0x04034b50, true); a.setUint16(4, 20, true); a.setUint32(14, crc, true);
+    a.setUint32(18, data.length, true); a.setUint32(22, data.length, true); a.setUint16(26, name.length, true);
+    local.set(name, 30); local.set(data, 30 + name.length); locals.push(local);
+    const central = new Uint8Array(46 + name.length), b = new DataView(central.buffer);
+    b.setUint32(0, 0x02014b50, true); b.setUint16(4, 20, true); b.setUint16(6, 20, true); b.setUint32(16, crc, true);
+    b.setUint32(20, data.length, true); b.setUint32(24, data.length, true); b.setUint16(28, name.length, true); b.setUint32(42, offset, true);
+    central.set(name, 46); directory.push(central); offset += local.length;
+  }
+  const directoryLength = directory.reduce((sum, bytes) => sum + bytes.length, 0), result = new Uint8Array(offset + directoryLength + 22);
+  let position = 0;
+  for (const bytes of [...locals, ...directory]) { result.set(bytes, position); position += bytes.length; }
+  const end = new DataView(result.buffer, position);
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+  end.setUint32(12, directoryLength, true); end.setUint32(16, offset, true);
+  return result;
+}
+
+
+const overlayProduct: ProductExpectation = { id: "q3-overlay", family: "q3", edition: "classic", campaign: "baseq3", title: "Overlay fixture",
+  contentDirectory: "q3a/baseq3", baseProduct: null, requiredContentArchives: ["q3a/baseq3/pak0.pk3"], requiredPrograms: [], mapWitness: null, unresolvedReason: null };
+
+test("user archives and loose content override corpus by directory while retaining pure restrictions and provenance", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "content-overlay-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const corpus = userProductDirectory(corpusRoot, overlayProduct.contentDirectory), user = userProductDirectory(userContentRoot, overlayProduct.contentDirectory);
+  try {
+    await mkdir(corpus, { recursive: true }); await mkdir(resolve(user, "maps"), { recursive: true });
+    const corpusBytes = zip([["maps/stock.bsp", "stock"], ["shared.txt", "corpus"], ["loose-wins.txt", "corpus"]]);
+    await writeFile(resolve(corpus, "pak0.pk3"), corpusBytes);
+    await writeFile(resolve(user, "aaa-download.pk3"), zip([["maps/download.bsp", "download"], ["shared.txt", "user archive"]]));
+    await writeFile(resolve(user, "shared.txt"), "user loose"); await writeFile(resolve(user, "loose-wins.txt"), "user loose wins");
+    await writeFile(resolve(user, "autoexec.cfg"), "set user_overlay 1"); await writeFile(resolve(user, "maps/loose.bsp"), "loose map");
+    const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct], discoverMods: false });
+    const product = catalog.require(overlayProduct.id), mounts = await catalog.mountsFor(product.id);
+    expect(product.archives).toHaveLength(2); expect(product.userContent?.root).toBe(user);
+    expect(mounts.map(mount => mount.kind === "archive" ? mount.archivePath : mount.rootPath)).toEqual([resolve(user, "aaa-download.pk3"), user, resolve(corpus, "pak0.pk3"), corpus]);
+    const plan: ResolvedMountPlan = { id: "mount-plan:overlay:1", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
+    using opened = await openMountPlan(plan);
+    expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe("user archive");
+    const loose = await opened.open("loose-wins.txt"); expect(new TextDecoder().decode(loose?.bytes)).toBe("user loose wins");
+    expect(loose?.reference.provenance.kind).toBe("loose");
+    expect(loose?.reference.provenance.mount.identity.content).toBe(product.id);
+    if (loose?.reference.provenance.kind !== "loose") throw new Error("Expected loose provenance");
+    expect(loose.reference.provenance.mount.rootPath).toBe(user);
+    expect(catalog.mapsFor(product.id).map(map => map.path).sort()).toEqual(["maps/download.bsp", "maps/loose.bsp", "maps/stock.bsp"]);
+    using pure = await openMountPlan(plan, { pure: { archives: [await digestFile(resolve(corpus, "pak0.pk3"))] } });
+    expect(await pure.open("maps/download.bsp")).toBeNull(); expect(await pure.open("maps/loose.bsp")).toBeNull();
+    expect(new TextDecoder().decode(await pure.read("autoexec.cfg"))).toBe("set user_overlay 1");
+    expect(new TextDecoder().decode(await pure.read("shared.txt"))).toBe("corpus");
+    expect(Array.from(await Bun.file(resolve(corpus, "pak0.pk3")).bytes())).toEqual(Array.from(corpusBytes));
+    const witness = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [{ ...overlayProduct, mapWitness: "maps/download.bsp" }], discoverMods: false });
+    expect(witness.product(overlayProduct.id).availability.kind).toBe("missing");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("absent user directories stay mounted for new guest cfg files and downloaded archives appear on rediscovery", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "content-overlay-late-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const corpus = userProductDirectory(corpusRoot, overlayProduct.contentDirectory), user = userProductDirectory(userContentRoot, overlayProduct.contentDirectory);
+  try {
+    await mkdir(corpus, { recursive: true }); await writeFile(resolve(corpus, "pak0.pk3"), zip([["maps/stock.bsp", "stock"]]));
+    const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct], discoverMods: false });
+    expect(existsSync(user)).toBe(false);
+    const product = catalog.require(overlayProduct.id), mounts = await catalog.mountsFor(product.id);
+    using opened = await openMountPlan({ id: "mount-plan:overlay:late", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    expect(await opened.open("guest.cfg")).toBeNull();
+    await mkdir(user, { recursive: true }); await writeFile(resolve(user, "guest.cfg"), "guest wrote this");
+    const cfg = await opened.open("guest.cfg"); expect(new TextDecoder().decode(cfg?.bytes)).toBe("guest wrote this");
+    expect(cfg?.reference.provenance.kind).toBe("loose");
+    await writeFile(resolve(user, "custom.pk3"), zip([["maps/downloaded.bsp", "non-stock map"]]));
+    const refreshed = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct], discoverMods: false, generation: 1 });
+    expect(refreshed.mapsFor(product.id).some(map => map.path === "maps/downloaded.bsp")).toBe(true);
+    const refreshedMounts = await refreshed.mountsFor(product.id);
+    using remounted = await openMountPlan({ id: "mount-plan:overlay:refreshed", mounts: refreshedMounts, defaultOrder: refreshedMounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const map = await remounted.open("maps/downloaded.bsp"); expect(new TextDecoder().decode(map?.bytes)).toBe("non-stock map");
+    expect(map?.reference.provenance.mount.identity.generation).toBe(1);
+    await rm(resolve(corpus, "pak0.pk3"));
+    await writeFile(resolve(user, "pak0.pk3"), zip([["maps/stock.bsp", "user cannot supply retail requirement"]]));
+    const missing = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct], discoverMods: false });
+    expect(missing.product(overlayProduct.id).availability.kind).toBe("missing");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("Q1 and Q2 user roots retain native per-directory PAK priority without crossing content scopes", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "content-overlay-families-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const products: readonly ProductExpectation[] = ["q1", "q2"].map((family): ProductExpectation => ({ ...overlayProduct,
+    id: `${family}-overlay`, family: family === "q1" ? "q1" : "q2", campaign: "base", contentDirectory: `${family}/base`, requiredContentArchives: [`${family}/base/pak0.pak`] }));
+  try {
+    for (const product of products) {
+      const corpus = userProductDirectory(corpusRoot, product.contentDirectory), user = userProductDirectory(userContentRoot, product.contentDirectory);
+      await mkdir(corpus, { recursive: true }); await mkdir(user, { recursive: true });
+      await writeFile(resolve(corpus, "pak0.pak"), pak("shared.txt", "corpus"));
+      await writeFile(resolve(user, "pak0.pak"), pak("shared.txt", "user pak0"));
+      await writeFile(resolve(user, "pak1.pak"), pak("shared.txt", `${product.family} user pak1`));
+      await writeFile(resolve(user, "shared.txt"), "user loose");
+    }
+    const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false });
+    for (const product of products) {
+      const selected = catalog.require(product.id), mounts = await catalog.mountsFor(selected.id);
+      expect(mounts.every(mount => mount.identity.content === selected.id)).toBe(true);
+      using opened = await openMountPlan({ id: "mount-plan:overlay:families", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+      expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe(`${product.family} user pak1`);
+    }
+    expect(() => userProductDirectory(userContentRoot, "../corpus")).toThrow("Invalid relative");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("user-only mods inherit installed base dependencies and downloaded archive diagnostics do not hide retail", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "content-overlay-mod-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  try {
+    const corpus = userProductDirectory(corpusRoot, overlayProduct.contentDirectory);
+    const user = userProductDirectory(userContentRoot, overlayProduct.contentDirectory), mod = userProductDirectory(userContentRoot, "q3a/custom");
+    await mkdir(corpus, { recursive: true }); await mkdir(user, { recursive: true }); await mkdir(mod, { recursive: true });
+    await writeFile(resolve(corpus, "pak0.pk3"), zip([["maps/stock.bsp", "stock"]]));
+    await writeFile(resolve(user, "bad.pk3"), "not a zip"); await writeFile(resolve(mod, "custom.pk3"), zip([["maps/custom.bsp", "custom"]]));
+    const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct] });
+    expect(catalog.require(overlayProduct.id).diagnostics).toHaveLength(1);
+    const custom = catalog.require("q3-classic-custom");
+    expect(catalog.mapsFor(custom.id).map(map => map.path).sort()).toEqual(["maps/custom.bsp", "maps/stock.bsp"]);
+    await rm(resolve(corpus, "pak0.pk3"));
+    const missing = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [overlayProduct] });
+    expect(missing.product(custom.id).availability.kind).toBe("missing");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

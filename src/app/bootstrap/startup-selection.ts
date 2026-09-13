@@ -1,3 +1,4 @@
+import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -355,7 +356,7 @@ export class StartupSelectionModel {
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
-  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, discoverMods: false }), options);
+  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false }), options);
   await model.prepareMaps();
   return model;
 }
