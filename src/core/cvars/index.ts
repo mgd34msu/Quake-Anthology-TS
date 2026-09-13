@@ -13,7 +13,12 @@ export enum CvarFlag {
   Init = 16, Latch = 32, ReadOnly = 64, UserCreated = 128, Temporary = 256,
   Cheat = 512, NoRestart = 1024,
 }
-export enum Q2CvarFlag { None = 0, Archive = 1, UserInfo = 2, ServerInfo = 4, NoSet = 8, Latch = 16 }
+export enum Q2CvarFlag {
+  None = 0, Archive = 1, UserInfo = 2, ServerInfo = 4, NoSet = 8, Latch = 16,
+  Cheat = 32, Private = 64, ReadOnly = 128, Modified = 256, Custom = 512, Weak = 1024,
+  Game = 2048, NoArchive = 4096, Files = 8192, Refresh = 16384, Sound = 32768,
+}
+const q2NoArchive = Q2CvarFlag.NoSet | Q2CvarFlag.Cheat | Q2CvarFlag.Private | Q2CvarFlag.ReadOnly | Q2CvarFlag.NoArchive;
 
 export interface CvarRead {
   readonly name: string;
@@ -124,6 +129,7 @@ export class CvarRegistry {
   private serverInfo = "";
   private effects: CvarEffect[] = [];
   private userinfoDirty = false;
+  private readonly consoleVariables = new Set<string>();
 
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
@@ -155,7 +161,14 @@ export class CvarRegistry {
     if (isQ2(this.dialect) && (flags & 6) !== 0 && !validInfo(name)) { this.print("invalid info cvar name\n"); return undefined; }
     const key = this.key(name), existing = this.variables.get(key);
     if (existing !== undefined) {
-      if (isQ1(this.dialect)) { this.print(`Can't register variable ${name}, allready defined\n`); return snapshot(existing); }
+      if (isQ1(this.dialect)) {
+        if (this.consoleVariables.delete(key)) {
+          existing.resetValue = defaultValue;
+          existing.flags |= flags;
+          if (this.dialect === "q1-quakeworld") this.propagate(existing, existing.value, true);
+        } else this.print(`Can't register variable ${name}, allready defined\n`);
+        return snapshot(existing);
+      }
       if (this.dialect === "q3") {
         if ((existing.flags & CvarFlag.UserCreated) !== 0 && (flags & CvarFlag.UserCreated) === 0 && defaultValue.length > 0) {
           existing.flags &= ~CvarFlag.UserCreated;
@@ -164,7 +177,17 @@ export class CvarRegistry {
         }
         if (existing.resetValue.length === 0) existing.resetValue = defaultValue;
       }
+      if (isQ2(this.dialect) && (existing.flags & Q2CvarFlag.Custom) !== 0 && (flags & Q2CvarFlag.Custom) === 0) {
+        existing.resetValue = defaultValue;
+        existing.flags &= ~Q2CvarFlag.Custom;
+        if ((flags & (Q2CvarFlag.ReadOnly | Q2CvarFlag.NoSet)) !== 0
+          || (flags & Q2CvarFlag.Cheat) !== 0 && !this.allowCheats()
+          || (flags & (Q2CvarFlag.UserInfo | Q2CvarFlag.ServerInfo)) !== 0 && !validInfo(existing.value)) {
+          this.set(existing.name, defaultValue, true);
+        }
+      }
       existing.flags |= flags;
+      if (isQ2(this.dialect) && (flags & q2NoArchive) !== 0) existing.flags &= ~Q2CvarFlag.Archive;
       if (this.dialect === "q3" && existing.latchedValue !== undefined) {
         const value = existing.latchedValue;
         existing.latchedValue = undefined;
@@ -200,6 +223,8 @@ export class CvarRegistry {
     if (isQ2(this.dialect)) {
       if ((state.flags & 6) !== 0 && !validInfo(value)) { this.print("invalid info cvar value\n"); return snapshot(state); }
       if (!force) {
+        if ((state.flags & Q2CvarFlag.ReadOnly) !== 0) { this.print(`${name} is read only.\n`); return snapshot(state); }
+        if ((state.flags & Q2CvarFlag.Cheat) !== 0 && !this.allowCheats()) { this.print(`${name} is cheat protected.\n`); return snapshot(state); }
         if ((state.flags & Q2CvarFlag.NoSet) !== 0) { this.print(`${name} is write protected.\n`); return snapshot(state); }
         if ((state.flags & Q2CvarFlag.Latch) !== 0) {
           if (value === (state.latchedValue ?? state.value)) return snapshot(state);
@@ -236,6 +261,60 @@ export class CvarRegistry {
       if (isQ2(this.dialect) && (state.flags & CvarFlag.UserInfo) !== 0) this.userinfoDirty = true;
     }
     return snapshot(state);
+  }
+
+  private allowCheats(): boolean {
+    const cheats = this.find("sv_cheats");
+    return this.options.cheatsAllowed?.() ?? (cheats === undefined ? this.cheatsEnabled : cheats.integerValue !== 0);
+  }
+
+  setConsole(name: string, value: string): CvarSnapshot | undefined {
+    const state = this.variables.get(this.key(name));
+    if (isQ2(this.dialect) && state !== undefined && state.value === value) {
+      state.latchedValue = undefined;
+      return snapshot(state);
+    }
+    return this.set(name, value);
+  }
+
+  setCommandFlags(name: string, value: string, kind: "archive" | "userinfo" | "serverinfo"): void {
+    const q2 = isQ2(this.dialect);
+    const flag = kind === "archive" ? q2 ? Q2CvarFlag.Archive : CvarFlag.Archive
+      : kind === "userinfo" ? q2 ? Q2CvarFlag.UserInfo : CvarFlag.UserInfo
+      : q2 ? Q2CvarFlag.ServerInfo : CvarFlag.ServerInfo;
+    let state = this.variables.get(this.key(name));
+    const previousFlags = state?.flags ?? 0;
+    if (kind !== "archive" && (!validInfo(name) || !validInfo(value) || q2 && (name.length >= 64 || value.length >= 64))) {
+      this.print("invalid info cvar name or value\n"); return;
+    }
+    if (state === undefined) {
+      const created = this.register(name, value, flag | (q2 ? Q2CvarFlag.Custom : 0));
+      if (created === undefined) return;
+      state = this.variables.get(this.key(created.name));
+      if (state === undefined) return;
+      if (isQ1(this.dialect)) this.consoleVariables.add(this.key(created.name));
+    } else {
+      this.setConsole(name, value);
+      if (kind !== "archive" && (!validInfo(state.value) || q2 && state.value.length >= 64)) {
+        this.print("invalid retained info cvar value\n"); return;
+      }
+      if (kind !== "archive" && q2) state.flags &= ~(Q2CvarFlag.UserInfo | Q2CvarFlag.ServerInfo);
+      if (kind !== "archive" || !q2 || (state.flags & q2NoArchive) === 0) state.flags |= flag;
+    }
+    if (q2 && (state.flags & q2NoArchive) !== 0) state.flags &= ~Q2CvarFlag.Archive;
+    if (kind !== "archive") {
+      if (q2) { if (((previousFlags | state.flags) & Q2CvarFlag.UserInfo) !== 0) this.userinfoDirty = true; }
+      else this.propagate(state, state.value, true);
+    }
+  }
+
+  resetConsole(name: string, all = false): void {
+    const state = this.find(name);
+    if (state === undefined) return;
+    if (all && (name === "game" || name === "fs_game")) return;
+    if (all && (isQ2(this.dialect) ? (state.flags & (Q2CvarFlag.NoSet | Q2CvarFlag.ReadOnly)) !== 0
+      : this.dialect === "q3" && (state.flags & (CvarFlag.ReadOnly | CvarFlag.Init | CvarFlag.NoRestart)) !== 0)) return;
+    this.setConsole(name, state.resetValue);
   }
 
   fullSet(name: string, value: string, flags: number): CvarSnapshot | undefined {
@@ -334,6 +413,7 @@ export class CvarRegistry {
   infoString(flags: number, maximumLength = this.dialect === "q3" ? 1024 : 512): string {
     let info = "";
     for (let state = this.first; state !== undefined; state = state.next) if ((state.flags & flags) !== 0) {
+      if (isQ2(this.dialect) && (state.flags & Q2CvarFlag.Private) !== 0) continue;
       info = setInfoValue(info, state.name, state.value, { dialect: this.dialect, maximumLength,
         target: (flags & CvarFlag.UserInfo) !== 0 ? "client-userinfo" : "server-info", serverHighCharacters: this.highCharacters, print: text => this.print(text) });
     }
@@ -343,8 +423,9 @@ export class CvarRegistry {
   archiveCommands(): readonly string[] {
     const commands: string[] = [];
     for (let state = this.first; state !== undefined; state = state.next) {
+      if (isQ2(this.dialect) && (state.flags & q2NoArchive) !== 0) continue;
       if ((state.flags & CvarFlag.Archive) === 0 || this.dialect === "q3" && asciiFold(state.name) === "cl_cdkey") continue;
-      const prefix = this.dialect === "q3" ? "seta " : isQ2(this.dialect) ? "set " : "";
+      const prefix = this.dialect === "q3" || this.consoleVariables.has(this.key(state.name)) || isQ2(this.dialect) && (state.flags & Q2CvarFlag.Custom) !== 0 ? "seta " : isQ2(this.dialect) ? "set " : "";
       commands.push(`${prefix}${state.name} "${this.dialect === "q3" ? state.latchedValue ?? state.value : state.value}"`);
     }
     return Object.freeze(commands);
