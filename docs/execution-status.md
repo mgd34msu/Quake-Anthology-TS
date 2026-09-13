@@ -1,5 +1,13 @@
 # Execution status
 
+## Accepted native QW hosting and shared SOCKS clients
+
+Source cutoff: `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. Transport `7b2d38b` and QC messages `d4b9f8c` precede shared native QC `60bbc638` (root 9 tests/718 assertions, including actual source execution and NQ retention) and dedicated QW host `88f84c10` (root 3/132 across source/host/transport). An independent donor protocol-28 client exercised firing (shells 25 to 23), authoritative movement (x 528 to 434) and travel from `e1m1` to `dm2` with servercount 2; evidence is in `/tmp/qw-host-donor-peer.log`. The accepted host uses base protocol 28 and the pinned CRC-54730 QW program, without spectators. Local graphical QW hosting, arbitrary mods, other commands/admin, master/rcon and full parity remain open. Later native-QW command work is outside this cutoff.
+
+Accepted Q3 print `3d6589c5` restores native message-body reading (root 1/9). Shared SOCKS `7964fc31` connects the existing transport before native RemoteApplication sends, using archived/latched settings from the existing client configuration owner. Root passed the exact five cases/55 assertions: authenticated Q2 CPU signon, travel on the same association, reopen/settings, plus NQ/QW/Q3 native handshakes and decoded replies. Cancellation and proxy-loss checks use controlled loopback endpoints; configured proxy loss cannot silently send directly. Evidence is in `/tmp/root-socks4-final.log`. These tests do not establish GL, physical-network or all-family full-play qualification. Browser/listen-server proxy configuration remains separate.
+
+Four existing reasons are narrowed; no verdict changes. Counts remain 288 Done/189 Not done across 477 unique IDs, with the other 473 records carried forward. The installed binary remains `3a073e87ec7a4126f396e15833b8afb9df569403`; no executable rebuild is claimed.
+
 ## Accepted audio devices and world-text culling
 
 At source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`, accepted audio `0065d73b` passed root 31 tests/263 assertions: actual dummy SDL queued PCM/clock/music retention, CPU/GL menu/restart, and native NQ remote named-device travel from `e1m1` to `e1m2` in the same window. Device names/default selection and device/effects/music settings persist per product through ConfigStore. Output remains 44100 Hz, stereo, 16-bit. Physical audio quality/performance and injected remote failure races are not qualified.

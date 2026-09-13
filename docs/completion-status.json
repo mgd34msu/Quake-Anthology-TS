@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "39ea4c0cab9910c6b78d5f8d18d3bc36494dd519",
-  "carriedVerdictsFrom": "36f395ee80c4bede619a4b0eaaf1591873edba74",
+  "sourceCutoff": "7964fc31bfa186e538994eea3ed71cb6b8d035f6",
+  "carriedVerdictsFrom": "39ea4c0cab9910c6b78d5f8d18d3bc36494dd519",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -127,7 +127,7 @@
       "title": "Keep NetQuake and QuakeWorld gamecode host contracts distinct",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "QC application admission is limited to the verified classic id1 program with incomplete client/weapon/save integration; complete QW gamecode host ABI is not joined.",
+      "reason": "Accepted 60bbc638 joins the pinned native QW program through the shared QuakeCSource owner, preserving distinct NQ/QW layouts, callbacks and shared damage authority; NQ retention checks passed. Admission remains restricted to verified programs. The requirement’s external-mod workflow, broader product ABI coverage and QW spectator callbacks remain unqualified.",
       "paths": [
         "src/app/bootstrap/content.ts",
         "src/app/bootstrap/simulation/quakec-source.ts",
@@ -1363,7 +1363,7 @@
       "title": "Local players with QuakeWorld gameplay and native networking",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Accepted 66e6136 admits a single-seat native QW remote session with prediction and shared presentation. QW application hosting, split-screen transport extensions and independent multi-seat prediction remain open.",
+      "reason": "Accepted 66e6136 supplies a single-seat native QW remote session; 88f84c10 adds dedicated base-protocol-28 hosting. Local graphical QW hosting, split-screen transport extensions and independent multi-seat prediction remain open.",
       "paths": [
         "src/app/bootstrap/application.ts",
         "src/app/bootstrap/remote-application.ts",
@@ -1874,7 +1874,7 @@
       "title": "QuakeWorld protocol and prediction",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Accepted 66e6136 joins native protocol 28 remote admission, shared Q1 presentation and SelectedMovementPrediction history. Root verified signon/render and authoritative movement against an independent TypeScript donor loopback server. Other-player two-pass/fractional prediction, complete effects and QW application hosting remain open; base aliases only, spectator and extension profiles are rejected.",
+      "reason": "Accepted 66e6136 joins native protocol-28 remote admission and shared presentation/prediction; 88f84c10 adds dedicated native QW hosting. An independent donor client exercised authoritative movement, firing and travel. Protocol 29, negotiated extensions, spectator support, other-player two-pass/fractional prediction and full effects remain open.",
       "paths": [
         "src/network/q1/quakeworld.ts",
         "src/app/bootstrap/application.ts",
@@ -1886,7 +1886,7 @@
       "title": "Listen and dedicated server lifecycle",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Native NQ listen/dedicated hosting is connected, but the requirement covers both host profiles and QW application hosting is absent.",
+      "reason": "Native NQ listen/dedicated hosting and accepted 88f84c10 dedicated base-QW protocol-28 hosting are connected, including donor-client movement, firing and travel. Local graphical QW hosting/joins and the complete interactive dedicated-console/operator workflow remain open; command work after this cutoff is excluded.",
       "paths": [
         "src/app/bootstrap/application.ts",
         "src/app/bootstrap/network/q1.ts"

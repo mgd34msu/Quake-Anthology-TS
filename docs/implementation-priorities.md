@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite audio/world-text review at source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite native-QW/SOCKS review at source cutoff `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -46,7 +46,7 @@ Complete NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 in both
 
 **Done when:** Actual native peers exercise all required NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 profiles in both directions, including signon, prediction, authorization, travel and disconnect. Missing required profiles remain open; explicit rejection is diagnostic only. Separate retail/private dialect limitations must not substitute for the required stock protocols.
 
-Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Hosting, spectator/extensions, split-screen, demos, full prediction/effects and application host download policy remain open; no requirement closes.
+Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Dedicated base-protocol-28 hosting is now accepted in `88f84c10`; local graphical hosting, spectator/extensions, split-screen, demos, full prediction/effects and complete host download policy remain open. No requirement closes.
 
 Accepted `066ab042` adds QW custom skins and editable saved remote identity; `0c0499c3` supplies shared indexed color/crop semantics. Local source-color forwarding is accepted in `a8f9e2f`, but local setup/color-console and cross-source appearance ownership remain open. Download scope remains base qw/id1, with mod gamedir and host denial-policy work outstanding.
 
@@ -57,6 +57,8 @@ Accepted `5a0e1848` adds bounded classic-id1 NQ 15/666/999 application profiles;
 Complete NetQuake and QuakeWorld QC hosts, QVM game/cgame/UI roles and TypeScript hosts for native DLL/SO behavior, including application admission, save and travel.
 
 **Done when:** The required QC, QVM and native-mod behavior runs through normal application admission, execution, travel, save and teardown across every required host. A pinned-program whitelist is insufficient. Required programs or host combinations that remain unsupported keep this priority open; explicit failure only explains the limitation.
+
+Accepted `60bbc638` shares the pinned native QW program and damage authority with the existing QuakeCSource owner, retaining NQ behavior (root 9/718). This does not complete external-mod or spectator ABI coverage.
 
 ### 7. Swappable gameplay rosters and equipment
 
@@ -198,7 +200,9 @@ These dispositions do not change the historical ledger or invent new requirement
 | Audio devices | Accepted `0065d73b`: named/default device selection and per-product audio settings persistence, with root dummy SDL and CPU/GL menu/restart/remote checks 31/263. Selectable output formats and physical audio qualification remain open. |
 | World text | Bounded shared rendering accepted in `3f6be42`: actual two-seat billboard images and separate fixed-angle/depth tests. Accepted `39ea4c0c` adds native default distance-culling (root CPU/GL and two-seat checks 6/60). Live `gl_debug_distfrac` control and guest debug imports remain open under priority 3. |
 | Q1 VCR | Open source-inventory lead. Priority 22. |
-| SOCKS5 | Open source-inventory lead. Priority 24. |
+| SOCKS5 | Accepted `7964fc31` joins archived/latched client settings to the existing RemoteApplication transport for NQ/QW/Q2/Q3. Root 5/55 covers Q2 CPU signon/travel/reopen and all-family handshake/reply paths. Browser/listen-server configuration and broader network qualification remain separate. |
+| Native QW host | Accepted `60bbc638` shared QC and `88f84c10` dedicated protocol-28 host; independent donor-client movement, firing and travel verified. Graphical local hosting, spectators, arbitrary mods and complete operator commands remain open. |
+| Q3 connectionless print | Accepted `3d6589c5` restores native newline-body reading; root 1/9. |
 | Q3 event/config journals | Open source-inventory lead. Priority 22. |
 | MOTD | Open source-inventory lead. Priority 24. |
 | Shared resolver | Accepted `8e4230f`: one image-resolution path retains source skin semantics; root actual CPU/GL resolver tests passed 8/151 with no skips. Runtime controls/refresh are accepted in `0022dc2`; visible controls are accepted in `58e715e`. Startup-selector font policy is accepted in `d5ed58b` (2 tests/12 assertions). |
@@ -211,7 +215,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **189 open requirements** use source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. Two audio/settings reasons are narrowed; all verdicts and the other 475 records carry unchanged from `36f395ee80c4bede619a4b0eaaf1591873edba74`, without a new audit.
+The following **189 open requirements** use source cutoff `7964fc31bfa186e538994eea3ed71cb6b8d035f6`. Four native-QW execution/networking reasons are narrowed; all verdicts and the other 473 records carry unchanged from `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`, without a new audit.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
