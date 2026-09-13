@@ -46,31 +46,42 @@ export function makeLevelshot(image: ImageLevel, gamma: Uint8Array | null = null
 }
 export interface CaptureResult { readonly path: string; readonly width: number; readonly height: number; readonly byteLength: number; }
 export class FrameCapture {
+  private writes: Promise<void> = Promise.resolve();
+  private write<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.writes.then(operation);
+    this.writes = result.then(() => undefined, () => undefined);
+    return result;
+  }
   constructor(readonly root: string, private readonly readback: FrameReadback) {}
   async screenshot(options: { readonly format?: ScreenshotFormat; readonly name?: string; readonly quality?: number } = {}): Promise<CaptureResult> {
     const format = options.format ?? "png", image = await this.readback.readRgba(), bytes = encodeScreenshot(image, format, options.quality);
-    let path: string;
-    if (options.name !== undefined) {
-      path = settingsPath(this.root, `screenshots/${options.name}.${format}`); await writeAtomic(path, bytes);
-    } else {
-      path = "";
-      for (let index = 0; index < 10000; index++) {
-        const candidate = settingsPath(this.root, `screenshots/shot${String(index).padStart(4, "0")}.${format}`);
-        await mkdir(dirname(candidate), { recursive: true });
-        let file: FileHandle;
-        try { file = await open(candidate, "wx"); }
-        catch (error) { if (error instanceof Error && "code" in error && error.code === "EEXIST") continue; throw error; }
-        try { await file.writeFile(bytes); } finally { await file.close(); }
-        path = candidate; break;
+    return this.write(async () => {
+      let path: string;
+      if (options.name !== undefined) {
+        path = settingsPath(this.root, `screenshots/${options.name}.${format}`); await writeAtomic(path, bytes);
+      } else {
+        path = "";
+        for (let index = 0; index < 10000; index++) {
+          const candidate = settingsPath(this.root, `screenshots/shot${String(index).padStart(4, "0")}.${format}`);
+          await mkdir(dirname(candidate), { recursive: true });
+          let file: FileHandle;
+          try { file = await open(candidate, "wx"); }
+          catch (error) { if (error instanceof Error && "code" in error && error.code === "EEXIST") continue; throw error; }
+          try { await file.writeFile(bytes); } finally { await file.close(); }
+          path = candidate; break;
+        }
+        if (path === "") throw new Error("No free screenshot filename between shot0000 and shot9999");
       }
-      if (path === "") throw new Error("No free screenshot filename between shot0000 and shot9999");
-    }
-    return { path, width: image.width, height: image.height, byteLength: bytes.length };
+      return { path, width: image.width, height: image.height, byteLength: bytes.length };
+    });
   }
   async levelshot(mapName: string, gamma: Uint8Array | null = null): Promise<CaptureResult> {
     const map = mapName.replace(/^maps\//, "").replace(/\.bsp$/, "");
     const image = makeLevelshot(await this.readback.readRgba(), gamma), bytes = encodeTga(image);
-    const path = settingsPath(this.root, `levelshots/${map}.tga`); await writeAtomic(path, bytes);
-    return { path, width: image.width, height: image.height, byteLength: bytes.length };
+    const path = settingsPath(this.root, `levelshots/${map}.tga`);
+    return this.write(async () => {
+      await writeAtomic(path, bytes);
+      return { path, width: image.width, height: image.height, byteLength: bytes.length };
+    });
   }
 }

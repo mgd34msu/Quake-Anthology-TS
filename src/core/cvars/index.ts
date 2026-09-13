@@ -420,9 +420,10 @@ export class CvarRegistry {
     return info;
   }
   propagatedInfo(target: CvarInfoTarget): string { return target === "client-userinfo" ? this.clientInfo : this.serverInfo; }
-  archiveCommands(): readonly string[] {
+  archiveCommands(include: (name: string) => boolean = () => true): readonly string[] {
     const commands: string[] = [];
     for (let state = this.first; state !== undefined; state = state.next) {
+      if (!include(state.name)) continue;
       if (isQ2(this.dialect) && (state.flags & q2NoArchive) !== 0) continue;
       if ((state.flags & CvarFlag.Archive) === 0 || this.dialect === "q3" && asciiFold(state.name) === "cl_cdkey") continue;
       const prefix = this.dialect === "q3" || this.consoleVariables.has(this.key(state.name)) || isQ2(this.dialect) && (state.flags & Q2CvarFlag.Custom) !== 0 ? "seta " : isQ2(this.dialect) ? "set " : "";

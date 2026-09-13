@@ -3,18 +3,18 @@ import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts
 import type { SeatConsole } from "./session.ts";
 import type { ConfigStore } from "../settings/config.ts";
 import type { FrameCapture } from "../capture/index.ts";
-import type { CvarRegistry } from "../core/cvars/index.ts";
+import { isQ2 } from "../core/commands/text.ts";
 
 export interface ConsoleCommandServices {
   readonly commands: CommandBuffer;
-  readonly cvars: CvarRegistry;
-  readonly config: ConfigStore;
+  readonly config: (seat: SeatId) => ConfigStore;
+  readonly configuration: (invocation: CommandInvocation) => string;
   readonly console: (seat: SeatId) => SeatConsole | null;
   readonly capture: (seat: SeatId) => FrameCapture | null;
   readonly mapName: () => string;
   readonly print: (text: string) => void;
   /** Host drains work after renderer completion and before retiring resource owners. */
-  readonly queue: (operation: () => Promise<void>) => void;
+  readonly queue: (operation: () => Promise<void>, frameReadback?: boolean) => void;
 }
 export function registerConsoleCommands(services: ConsoleCommandServices): () => void {
   const names: string[] = [];
@@ -24,7 +24,7 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     return origin.kind === "local-seat" ? origin.seat : null;
   };
   const add = (name: string, handler: (invocation: CommandInvocation) => undefined): void => {
-    if (services.commands.register(name, handler)) names.push(name);
+    if (!services.commands.exists(name) && services.commands.register(name, handler)) names.push(name);
   };
   add("toggleconsole", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.toggle(); });
   add("clear", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.buffer.clear(); });
@@ -32,26 +32,33 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
   add("messagemode2", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.message(true); });
   add("condump", invocation => {
     const id = seat(invocation), name = invocation.argv[1], console = id === null ? null : services.console(id);
-    if (name === undefined || console === null) { services.print("condump <filename>\n"); return; }
-    const contents = console.buffer.dump(); services.queue(() => services.config.dump(name, contents));
+    if (name === undefined || console === null || id === null || invocation.argv.length !== 2) { services.print("condump <filename>\n"); return; }
+    const path = isQ2(invocation.dialect) && !name.endsWith(".txt") ? `${name}.txt` : name;
+    const contents = console.buffer.dump(), store = services.config(id);
+    services.queue(async () => { await store.dump(path, contents); services.print(`Dumped console text to ${path}\n`); });
   });
   add("writeconfig", invocation => {
-    const name = invocation.argv[1] ?? "config.cfg";
-    services.queue(() => services.config.saveCvars(name, services.cvars));
+    const id = seat(invocation);
+    if (id === null || services.console(id) === null) { services.print("writeconfig requires an active local seat\n"); return; }
+    const name = invocation.argv[1] ?? "config.cfg", path = name.endsWith(".cfg") ? name : `${name}.cfg`;
+    const contents = services.configuration(invocation), store = services.config(id);
+    services.queue(async () => { await store.dump(path, contents); services.print(`Wrote ${path}\n`); });
   });
   for (const [name, format] of [["screenshot", "tga"], ["screenshotJPEG", "jpg"], ["screenshotPNG", "png"]] satisfies readonly (readonly [string, "tga" | "jpg" | "png"])[]) {
     add(name, invocation => {
       const id = seat(invocation), capture = id === null ? null : services.capture(id), argument = invocation.argv[1];
       if (capture === null) { services.print("Screenshot requires an active seat renderer\n"); return; }
+      const map = services.mapName();
       services.queue(async () => {
-        const result = await capture.screenshot(argument === undefined || argument === "silent" ? { format } : { format, name: argument });
+        const result = argument === "levelshot" ? await capture.levelshot(map)
+          : await capture.screenshot(argument === undefined || argument === "silent" ? { format } : { format, name: argument });
         if (argument !== "silent") services.print(`Wrote ${result.path}\n`);
-      });
+      }, true);
     });
   }
   add("levelshot", invocation => {
     const id = seat(invocation), capture = id === null ? null : services.capture(id), map = services.mapName();
-    if (capture !== null) services.queue(async () => { const result = await capture.levelshot(map); services.print(`Wrote ${result.path}\n`); });
+    if (capture !== null) services.queue(async () => { const result = await capture.levelshot(map); services.print(`Wrote ${result.path}\n`); }, true);
   });
   return () => { for (const name of names) services.commands.unregister(name); };
 }

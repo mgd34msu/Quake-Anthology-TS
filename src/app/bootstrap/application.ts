@@ -1,3 +1,4 @@
+import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
@@ -95,6 +96,7 @@ export interface ApplicationHost {
 /** A single authoritative simulation owns every local and remote player's game state. */
 export class Application {
   private graphical: GraphicalApplication | null = null;
+  private capture: ApplicationCapture | null = null;
   private frontendOverrides: FrontendPreferenceOverrides = {};
   private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBots | null = null;
@@ -511,6 +513,7 @@ export class Application {
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
+      this.capture = new ApplicationCapture(input, renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text));
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
       this.session.close(); audio?.close(); effects?.close(); input?.close(); renderer?.close(); art?.close(); assets.close();
@@ -548,6 +551,7 @@ export class Application {
   }
 
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+    await this.capture?.beforeWorldChange();
     this.graphical?.input.stopHaptics();
     const settings = save === undefined ? null : savedSimulationSettings(save);
     let options = { ...this.options, map: mapResourcePath(map) };
@@ -643,10 +647,12 @@ export class Application {
           commands: previous.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
         let input = previous.input;
         if (movementDialect(previous.input.options) !== movementDialect(options) || previous.input.commands.dialect !== this.sourceDialect()) {
+          await this.capture?.close(); this.capture = null;
           previous.input.close();
           input = new ApplicationInput(previous.renderer.window, players, options, simulation,
             this.inputActions(), () => performance.now());
           nextInput = input;
+          this.capture = new ApplicationCapture(input, previous.renderer, applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));
         } else input.rebindPlayers(players, simulation);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
@@ -951,10 +957,12 @@ export class Application {
         });
         await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
+      await this.capture?.drain();
       await this.commands();
       await this.sourceActions();
       return output;
-    } finally { this.stepping = false; }
+    } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
+    finally { this.stepping = false; }
   }
 
   async run(): Promise<void> {
@@ -985,6 +993,8 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
+    try { await this.capture?.close(); } catch (error) { errors.push(error); }
+    this.capture = null;
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

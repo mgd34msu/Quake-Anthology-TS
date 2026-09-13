@@ -128,6 +128,12 @@ export class CommandBuffer {
     return Object.freeze(result);
   }
 
+  archiveCommands(source?: CommandContext): readonly string[] {
+    const context = this.inputContext(source);
+    return Object.freeze(this.visibleCvars(context).flatMap(registry =>
+      registry.archiveCommands(name => this.cvarOwner(name, context) === registry)));
+  }
+
   register(nameInput: string, handler: CommandHandler | null): boolean {
     const name = sourceCommandText(nameInput);
     if (this.exists(name)) {

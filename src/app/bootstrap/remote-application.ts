@@ -1,3 +1,4 @@
+import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
@@ -72,6 +73,7 @@ export class RemoteApplication {
   private readonly network: Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
   private frontend: RemoteWorldFrontend | null = null;
   private controls: ApplicationInput | null = null;
+  private capture: ApplicationCapture | null = null;
   private presentation: WorldSeatPresentation | null = null;
   private commands: RemoteCommand[] = [];
   private elapsed = 0;
@@ -300,6 +302,7 @@ export class RemoteApplication {
   }
 
   private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent, refreshContent = false): Promise<LoadedApplicationContent> {
+    await this.capture?.beforeWorldChange();
     const generation = ++this.worldLoadGeneration;
     const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
     assertCurrent();
@@ -380,6 +383,7 @@ export class RemoteApplication {
             if (client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
             this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
           } }, () => performance.now(), this.clientCommands ?? undefined);
+      this.capture = new ApplicationCapture(this.controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
     } else {
       const local = this.controls.locals[0];
       if (local === undefined) throw new Error("Remote input lost its local seat");
@@ -482,6 +486,7 @@ export class RemoteApplication {
         await this.dispatchCommands();
         this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
           commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
+        await this.capture?.drain();
         return null;
       }
       this.remote.samplePresentation(now);
@@ -514,11 +519,13 @@ export class RemoteApplication {
       await presentation.prepare(output.snapshot, models, characters);
       presentation.local.player.seat.present(output.snapshot, this.renderer.backend);
       this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
+      await this.capture?.drain();
       const camera = presentation.camera();
       await frontend.audio.frame(output.snapshot, [{ seat: presentation.local.player.seat.id, actor: presentation.local.player.actor,
         origin: camera.origin, axis: camera.axis, gain: 1, underwater: this.underwater(camera, presentation.local.player.actor, frontend.scene) }], this.sourceEvents);
       return output;
-    } finally { this.stepping = false; }
+    } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
+    finally { this.stepping = false; }
   }
 
   requestQuit(): undefined { this.stopping = true; return undefined; }
@@ -541,6 +548,8 @@ export class RemoteApplication {
   }
   private async closeOwned(): Promise<void> {
     const errors: unknown[] = [];
+    try { await this.capture?.close(); } catch (error) { errors.push(error); }
+    this.capture = null;
     if (!this.stepping) {
       try { await this.presentation?.q3Client?.shutdown(); } catch (error) { errors.push(error); }
     }

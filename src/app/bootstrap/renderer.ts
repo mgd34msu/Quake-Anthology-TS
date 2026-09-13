@@ -148,9 +148,22 @@ export class NativeRenderer {
     return this.current.pixels.slice();
   }
 
-  captureNextFrame(): Promise<Uint8Array> {
+  captureNextFrame(signal?: AbortSignal): Promise<Uint8Array> {
     if (this.closed) return Promise.reject(new Error("Native renderer is closed"));
-    return new Promise((resolve, reject) => { this.captures.push({ resolve, reject }); });
+    const abortReason = (): Error => { const reason: unknown = signal?.reason; return reason instanceof Error ? reason : new Error("Frame capture aborted"); };
+    if (signal?.aborted) return Promise.reject(abortReason());
+    return new Promise((resolve, reject) => {
+      const clear = (): void => { signal?.removeEventListener("abort", abort); };
+      const capture = { resolve: (pixels: Uint8Array): void => { clear(); resolve(pixels); },
+        reject: (reason: Error): void => { clear(); reject(reason); } };
+      const abort = (): void => {
+        const index = this.captures.indexOf(capture);
+        if (index >= 0) this.captures.splice(index, 1);
+        capture.reject(abortReason());
+      };
+      this.captures.push(capture);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
   }
 
   close(): undefined {
