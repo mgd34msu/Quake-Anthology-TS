@@ -24,8 +24,8 @@ import { Q3ClientConnection } from '../../../src/network/q3/client.ts';
 import { q3ChannelDelivery } from '../../../src/network/q3/transport.ts';
 import type { Snapshot } from '../../../src/network/q3/server-message.ts';
 
-function fixturePk3(path = 'wire-probe.cfg'): Uint8Array<ArrayBuffer> {
-  const name = new TextEncoder().encode(path), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(400));
+function fixturePk3(path = 'wire-probe.cfg', repeats = 400): Uint8Array<ArrayBuffer> {
+  const name = new TextEncoder().encode(path), data = new TextEncoder().encode('set wire_probe 1\n'.repeat(repeats));
   const localLength = 30 + name.length + data.length, centralLength = 46 + name.length;
   const bytes = new Uint8Array(localLength + centralLength + 22), view = new DataView(bytes.buffer), crc = Bun.hash.crc32(data);
   view.setUint32(0, 0x04034b50, true); view.setUint16(4, 20, true); view.setUint32(14, crc, true);
@@ -385,3 +385,57 @@ test('native Q3 downloads a referenced user package before guest init and pure a
     expect(await Bun.file(join(users, 'q3a/baseq3/settings/client.cfg')).text()).toContain('seta cl_allowDownload "1"');
   } finally { await client?.close(); await server.close(); init.mockRestore(); pure.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 }, 60000);
+
+test('native Q3 retries an interrupted second referenced package before guest initialization', async () => {
+  const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+  const root = mkdtempSync(join(tmpdir(), 'q3-multiple-download-')), corpus = join(root, 'server'), base = join(corpus, 'q3a/baseq3');
+  const original = join(homedir(), 'Projects/qfiles'), users = join(root, 'user-content'), destination = join(users, 'q3a/baseq3');
+  mkdirSync(base, { recursive: true });
+  for (const name of readdirSync(join(original, 'q3a/baseq3'))) if (name.endsWith('.pk3')) copyFileSync(join(original, 'q3a/baseq3', name), join(base, name), constants.COPYFILE_FICLONE);
+  const packages = [
+    { name: 'zzz-first.pk3', resource: 'first-probe.dat', bytes: fixturePk3('first-probe.dat', 4000) },
+    { name: 'zzz-second.pk3', resource: 'second-probe.dat', bytes: fixturePk3('second-probe.dat', 4001) },
+  ];
+  for (const pack of packages) writeFileSync(join(base, pack.name), pack.bytes);
+  const common = ['--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const selected = parseApplicationCommand([...common, '--content-root', corpus, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+  if (selected.kind !== 'run') throw new Error('Missing server options');
+  const messages: string[] = [], host = { print: (text: string): undefined => { messages.push(text); return undefined; } };
+  const server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-user') }, host);
+  let client: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
+  const init = spyOn(QvmCgame.prototype, 'init'), pure = spyOn(Q3ServerConnection.prototype, 'verifyPure');
+  try {
+    for (const pack of packages) { const opened = await server.content.mounts.open(pack.resource); if (opened === null) throw new Error('Missing server reference'); }
+    server.simulation.q3Source()?.host.cvars.set('sv_allowDownload', '1', true);
+    const address = server.networkAddress; if (address === null) throw new Error('Missing listener');
+    const options = parseApplicationCommand([...common, '--content-root', original, '--connect-q3', `127.0.0.1:${address.port}`, '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
+    if (options.kind !== 'run') throw new Error('Missing client options');
+    mkdirSync(join(destination, 'settings'), { recursive: true });
+    writeFileSync(join(destination, 'settings/client.cfg'), 'seta cl_allowDownload "1"\n');
+    client = await RemoteApplication.open({ ...options.options, userContentRoot: users }, host);
+    let published: string | undefined;
+    for (let tick = 0; tick < 500; tick++) {
+      await client.step(50); await Bun.sleep(2); await server.step(50); await Bun.sleep(2);
+      const installed = packages.filter(pack => existsSync(join(destination, pack.name)));
+      if (installed.length === 1 && readdirSync(destination).some(name => name.startsWith('.download-'))) { published = installed[0]?.name; break; }
+    }
+    if (published === undefined) throw new Error(`No partial second package: ${readdirSync(destination)} ${messages.join('')}`);
+    expect(init.mock.calls.length).toBe(0); expect(client.localPlayers).toHaveLength(0);
+    const first = packages.find(pack => pack.name === published); if (first === undefined) throw new Error('Unknown first package');
+    expect(await Bun.file(join(destination, first.name)).bytes()).toEqual(first.bytes);
+    await client.close(); client = null;
+    expect(readdirSync(destination).filter(name => name !== 'settings')).toEqual([first.name]);
+    for (let tick = 0; tick < 5; tick++) { await server.step(50); await Bun.sleep(2); }
+    client = await RemoteApplication.open({ ...options.options, userContentRoot: users }, host);
+    for (let tick = 0; tick < 1200 && client.networkPhase !== 'active'; tick++) {
+      await client.step(50); await Bun.sleep(2); await server.step(50); await Bun.sleep(2);
+      if (packages.some(pack => !existsSync(join(destination, pack.name)))) expect(init.mock.calls.length).toBe(0);
+    }
+    if (client.networkPhase !== 'active') throw new Error(`Retry admission failed: ${messages.join('')}`);
+    for (const pack of packages) expect(await Bun.file(join(destination, pack.name)).bytes()).toEqual(pack.bytes);
+    expect(init.mock.calls.length).toBe(1);
+    expect(pure.mock.results.some(result => result.type === 'return' && result.value.kind === 'authentic')).toBe(true);
+    expect(client.session.world).toBeNull();
+    expect(readdirSync(destination).filter(name => name.startsWith('.download-'))).toEqual([]);
+  } finally { await client?.close(); await server.close(); init.mockRestore(); pure.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+}, 90000);
