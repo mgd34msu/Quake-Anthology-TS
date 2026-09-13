@@ -1,3 +1,4 @@
+import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { createClientDownloadPermission } from "./network/client-download-policy.ts";
 import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
@@ -267,7 +268,7 @@ export class RemoteApplication {
       const font = await assets.loadConsoleFont(), source = font.classic.picture.image.source;
       if (source.kind !== "resource") throw new Error("Remote console font has no mounted resource identity");
       art = await loadNativeUiArt(source.resource.id, assets.images, readMenuArt);
-      audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text));
+      audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => { this.print(text); return undefined; }, await loadAudioSettings(this.inputConfig));
       const scene: SceneQueries = {
         trace: query => this.remote.scene.trace(query), pointContents: query => this.remote.scene.pointContents(query),
         boxLeaves: (bounds, limit) => this.remote.scene.boxLeaves(bounds, limit),
@@ -386,7 +387,7 @@ export class RemoteApplication {
   private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent, refreshContent = false): Promise<LoadedApplicationContent> {
     await this.capture?.beforeWorldChange();
     const generation = ++this.worldLoadGeneration;
-    const assertCurrent = (): void => { if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
+    const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
     assertCurrent();
     this.controls?.stopHaptics();
     const path = world.map;
@@ -396,14 +397,28 @@ export class RemoteApplication {
     const replaceContent = differentMap || preparedContent !== undefined || refreshContent;
     if (replaceContent || this.presentation !== null || this.remote.player !== null) {
       const options = { ...this.options, map }, content = preparedContent ?? (differentMap || refreshContent ? await loadApplicationContent(options) : this.content);
+      const previous = this.frontend, previousOutput = previous?.audio.selectedOutput ?? null;
       let frontend: RemoteWorldFrontend;
+      let outputDetached = false;
       try {
         assertCurrent();
+        if (previous !== null) {
+          await saveAudioSettings(this.inputConfig, previous.audio);
+          assertCurrent();
+          previous.audio.detachOutput(); outputDetached = true;
+        }
         frontend = await this.loadFrontend(content);
         try { assertCurrent(); } catch (error) { this.releaseFrontend(frontend); throw error; }
       }
-      catch (error) { if (replaceContent) await content.close(); throw error; }
-      const previous = this.frontend, oldContent = this.content;
+      catch (error) {
+        if (replaceContent) await content.close();
+        if (outputDetached && previous !== null && this.frontend === previous && !this.closing && !this.closed && generation === this.worldLoadGeneration) {
+          try { previous.audio.selectOutput(previousOutput); }
+          catch (restoreError) { throw new AggregateError([error, restoreError], "Remote audio preparation and output restoration failed"); }
+        }
+        throw error;
+      }
+      const oldContent = this.content;
       this.session.closeWorld(); this.presentation = null;
       if (previous !== null) {
         frontend.audio.effectsVolume = previous.audio.effectsVolume;
@@ -651,6 +666,7 @@ export class RemoteApplication {
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
     try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }
+    try { if (frontend !== null) await saveAudioSettings(this.inputConfig, frontend.audio); } catch (error) { errors.push(error); }
     for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

@@ -144,8 +144,22 @@ export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryIn
     toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
     toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
 }
-export function bindAudioSettings(service: SettingsValueService<AudioSettings>): readonly SettingBinding[] {
-  return [{ id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
+export interface AudioOutputSettings {
+  selected(): string | null;
+  devices(): readonly string[];
+  select(name: string | null): void;
+  report(message: string): void;
+}
+export function bindAudioSettings(service: SettingsValueService<AudioSettings>, output?: AudioOutputSettings): readonly SettingBinding[] {
+  const device: SettingBinding[] = output === undefined ? [] : [{ id: "ui:audio:device", label: "Output device", category: "audio", kind: "choice", enabled: () => true,
+    read: () => output.selected() === null ? "default" : `device:${output.selected()}`,
+    choices: () => { const names = new Set(output.devices()); const current = output.selected(); if (current !== null) names.add(current);
+      return [{ id: "default", label: "System default" }, ...[...names].map(name => ({ id: `device:${name}`, label: name }))]; },
+    write: value => { try {
+      if (value !== "default" && !value.startsWith("device:")) throw new Error("Unknown audio output choice");
+      output.select(value === "default" ? null : value.slice(7));
+    } catch (error) { output.report(`Audio output selection failed: ${error instanceof Error ? error.message : String(error)}`); } } }];
+  return [...device, { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().effectsVolume, write: value => service.write({ effectsVolume: value }) },
   { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().musicVolume, write: value => service.write({ musicVolume: value }) }];

@@ -1,3 +1,4 @@
+import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
@@ -505,7 +506,7 @@ export class Application {
       }
       input = await ApplicationInput.open(renderer.window, players, this.options, this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig);
-      audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text));
+      audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));
       audio.bindHaptics(input);
       await audio.prepareEnvironment(this.simulation.scene);
       applyFrontendPreferences(this.frontendOverrides, input, audio);
@@ -650,6 +651,7 @@ export class Application {
         const seatInputPreferences = new Map(previous.input.locals.map(local => [local.player.seat.id, readFrontendInput(local)]));
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
         const cgameSettings = new Map([...previous.q3].map(([seat, source]) => [seat, source.client.cvars.snapshots()]));
+        await saveAudioSettings(this.inputConfig, previous.audio);
         if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
         previousBots?.close(initialSourceMilliseconds !== 0);
         this.bots = nextBots;
@@ -673,7 +675,8 @@ export class Application {
         } else input.rebindPlayers(players, simulation);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
-        const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text));
+        const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text),
+          await loadAudioSettings(this.inputConfig));
         audio.bindHaptics(input);
         nextAudio = audio;
         await audio.prepareEnvironment(nextSimulation.scene);
@@ -1022,6 +1025,7 @@ export class Application {
     this.capture = null;
     try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
+    try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }

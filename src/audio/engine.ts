@@ -2,7 +2,7 @@ import { sourceSoundChannel } from "./types.ts";
 import type { SharedSoundChannel } from "./types.ts";
 import type { ActorId, SeatId } from "../contracts/identity.ts";
 import type { Vec3 } from "../contracts/math.ts";
-import { SdlAudioDevice } from "../platform/audio.ts";
+import { SdlAudioDevice, SdlAudioUnavailableError } from "../platform/audio.ts";
 import type { SdlAudioOptions } from "../platform/audio.ts";
 import { AudioMixer } from "./mixer.ts";
 import type { VoiceOrigin } from "./mixer.ts";
@@ -56,6 +56,8 @@ export class UnifiedAudio {
     private readonly streams = new Map<string, StreamBus>();
     private readonly music = new Map<string, MusicBus>();
     private device: SdlAudioDevice | null = null;
+    private detachedOutput: { readonly playing: boolean; readonly bufferFrames: number; readonly deviceName: string | null } | null = null;
+    private queuedPcm = new Int16Array(0);
     private closed = false;
     private paused = false;
     private effectsGain = 0.7;
@@ -69,6 +71,12 @@ export class UnifiedAudio {
     }
     get sampleClock(): number { return this.frame; }
     get queuedFrames(): number { return this.device?.queuedFrames ?? 0; }
+    get selectedOutput(): string | null { return this.device === null ? this.detachedOutput?.deviceName ?? null : this.device.deviceName; }
+    get pendingOutput(): Int16Array<ArrayBuffer> {
+        const samples = this.device === null ? this.queuedPcm.length : this.device.queuedFrames * 2;
+        return this.queuedPcm.slice(this.queuedPcm.length - samples);
+    }
+    outputDeviceNames(): readonly string[] { this.check(); return SdlAudioDevice.outputDeviceNames(); }
     get outputState(): "detached" | "paused" | "playing" | "closed" { return this.closed ? "closed" : this.device?.state ?? "detached"; }
     get outputConfiguration(): { readonly sampleRate: number; readonly channels: 1 | 2; readonly sampleBits: 8 | 16;
         readonly deviceName: string | null; readonly bufferFrames: number; readonly maximumQueuedFrames: number } | null {
@@ -326,6 +334,65 @@ export class UnifiedAudio {
         if (this.device !== null)
             throw new Error("Audio output already open");
         this.device = SdlAudioDevice.open({ ...options, sampleRate: this.sampleRate, channels: 2, sampleBits: 16 });
+        this.detachedOutput = null;
+    }
+    detachOutput(): void {
+        this.check();
+        const device = this.device;
+        if (device === null) return;
+        this.detachedOutput = { playing: device.state === "playing", bufferFrames: device.bufferFrames, deviceName: device.deviceName };
+        device.pause(); this.queuedPcm = this.pendingOutput;
+        device.close(); this.device = null;
+        this.previousPumpFrame = null; this.pumpIntervals.length = 0;
+    }
+    selectOutput(deviceName: string | null): void {
+        this.check();
+        const previous = this.device;
+        if (previous === null) {
+            const detached = this.detachedOutput;
+            const device = SdlAudioDevice.open({ deviceName, sampleRate: this.sampleRate, channels: 2, sampleBits: 16,
+                ...(detached === null ? {} : { bufferFrames: detached.bufferFrames }) });
+            try { device.queue(this.queuedPcm); }
+            catch (error) { device.close(); throw error; }
+            this.device = device;
+            if (detached?.playing === true && !this.paused) device.resume();
+            this.detachedOutput = null;
+            this.previousPumpFrame = null; this.pumpIntervals.length = 0;
+            return;
+        }
+        if (previous.deviceName === deviceName) return;
+        const playing = previous.state === "playing";
+        previous.pause();
+        this.queuedPcm = this.pendingOutput;
+        const open = (name: string | null): SdlAudioDevice => {
+            const device = SdlAudioDevice.open({ deviceName: name, sampleRate: this.sampleRate, channels: 2, sampleBits: 16, bufferFrames: previous.bufferFrames });
+            try { device.queue(this.queuedPcm); return device; }
+            catch (error) { device.close(); throw error; }
+        };
+        let replacement: SdlAudioDevice;
+        try { replacement = open(deviceName); }
+        catch (error) {
+            if (!(error instanceof SdlAudioUnavailableError)) { if (playing) previous.resume(); throw error; }
+            // Single-output drivers require releasing the old device before retrying.
+            previous.close(); this.device = null;
+            try { replacement = open(deviceName); }
+            catch (selectionError) {
+                try {
+                    const restored = open(previous.deviceName);
+                    this.device = restored;
+                    if (playing) restored.resume();
+                } catch (restoreError) {
+                    this.device?.close(); this.device = null;
+                    this.detachedOutput = { playing, bufferFrames: previous.bufferFrames, deviceName: previous.deviceName };
+                    throw new AggregateError([selectionError, restoreError], "Audio output selection and recovery failed");
+                } finally { this.previousPumpFrame = null; this.pumpIntervals.length = 0; }
+                throw selectionError;
+            }
+        }
+        previous.close();
+        this.device = replacement;
+        this.previousPumpFrame = null; this.pumpIntervals.length = 0;
+        if (playing) replacement.resume();
     }
     /** Cover recent frame times plus SDL's block consumption and scheduling jitter. */
     pump(aheadFrames?: number, measuredWorkMilliseconds = 0): number {
@@ -347,9 +414,14 @@ export class UnifiedAudio {
         if (!Number.isSafeInteger(target) || target < 0 || target > device.maxQueuedFrames)
             throw new RangeError("Invalid audio lookahead");
         this.previousPumpFrame = playbackFrame;
+        this.queuedPcm = this.queuedPcm.subarray(this.queuedPcm.length - device.queuedFrames * 2);
         const frames = Math.max(0, target - device.queuedFrames);
-        if (frames > 0)
-            device.queue(this.mix(frames));
+        if (frames > 0) {
+            const samples = this.mix(frames), queued = new Int16Array(this.queuedPcm.length + samples.length);
+            queued.set(this.queuedPcm); queued.set(samples, this.queuedPcm.length);
+            device.queue(samples);
+            this.queuedPcm = queued.slice(queued.length - device.queuedFrames * 2);
+        }
         device.resume();
         return frames;
     }
@@ -369,6 +441,7 @@ export class UnifiedAudio {
             bus.player.close();
         this.music.clear();
         this.device?.clear();
+        this.queuedPcm = new Int16Array(0);
     }
     close(): void { if (this.closed)
         return; try {
@@ -378,6 +451,7 @@ export class UnifiedAudio {
         this.closed = true;
         this.device?.close();
         this.device = null;
+        this.detachedOutput = null;
     } }
     [Symbol.dispose](): void { this.close(); }
 }

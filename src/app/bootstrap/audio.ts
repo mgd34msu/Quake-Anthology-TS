@@ -49,6 +49,11 @@ interface StaticAudio {
   readonly seats: SeatId[];
 }
 export type ApplicationEffectSound = SourceEffectSound;
+export interface ApplicationAudioOptions {
+  readonly deviceName?: string | null;
+  readonly effectsVolume?: number;
+  readonly musicVolume?: number;
+}
 
 /** The output device mixes independent local listeners without advancing the game. */
 export class ApplicationAudio {
@@ -74,13 +79,26 @@ export class ApplicationAudio {
   private haptics: ApplicationInput | null = null;
 
   constructor(private readonly content: LoadedApplicationContent, now: () => number, seed: number,
-    private readonly characterModel: string, private readonly print: (text: string) => undefined) {
+    private readonly characterModel: string, private readonly print: (text: string) => undefined, options: ApplicationAudioOptions = {}) {
     this.random = new GameRandom(seed);
     this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
     this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
     this.music = new ApplicationMusic(this.engine, print);
-    this.engine.openDevice();
+    this.effectsVolume = options.effectsVolume ?? this.volume;
+    this.musicVolume = options.musicVolume ?? this.music.volume;
+    const outputDevice = options.deviceName ?? null;
+    try { this.engine.openDevice({ deviceName: outputDevice }); }
+    catch (error) {
+      if (outputDevice === null) { this.engine.close(); throw error; }
+      this.print(`Audio output ${outputDevice} unavailable: ${error instanceof Error ? error.message : String(error)}. Using system default.\n`);
+      try { this.engine.openDevice(); } catch (fallbackError) { this.engine.close(); throw fallbackError; }
+    }
   }
+
+  get selectedOutput(): string | null { return this.engine.selectedOutput; }
+  outputDeviceNames(): readonly string[] { return this.engine.outputDeviceNames(); }
+  selectOutput(deviceName: string | null): void { this.engine.selectOutput(deviceName); }
+  detachOutput(): void { this.engine.detachOutput(); }
 
   bindHaptics(input: ApplicationInput): void {
     this.haptics = input;

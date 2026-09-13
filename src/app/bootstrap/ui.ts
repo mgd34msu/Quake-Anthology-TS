@@ -114,7 +114,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
       write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
-        if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } });
+        if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } },
+      { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
+        report: text => local.console.print(`${text}\n`) });
     const resolution = bindWindowResolution(input.window, [{ width: 640, height: 480 }, { width: 960, height: 600 }, { width: 1280, height: 720 }, { width: 1920, height: 1080 }]);
     const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
