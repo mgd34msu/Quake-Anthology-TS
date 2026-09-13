@@ -22,41 +22,49 @@ export class QvmUi implements Q3UiExports {
   readonly module: QvmModule;
   private retired = false;
 
-  constructor(readonly seat: SeatId, options: QvmModuleOptions, private readonly assertCurrentOperation: () => undefined) {
-    if (options.artifact.role !== "ui") throw new Error("QvmUi requires a ui artifact");
+  constructor(readonly seat: SeatId, options: QvmModuleOptions | QvmModule, private readonly assertCurrentOperation: () => undefined) {
+    if (!(options instanceof QvmModule) && options.artifact.role !== "ui") throw new Error("QvmUi requires a ui artifact");
     this.assertCurrentOperation();
-    this.module = new QvmModule(options);
+    this.module = options instanceof QvmModule ? options : new QvmModule(options);
     const api = this.module.profile.api;
     if (api.kind !== "q3-ui") throw new Error("QvmUi execution profile has the wrong role");
     this.api = api;
+  }
+
+  static async create(seat: SeatId, options: QvmModuleOptions, assertCurrentOperation: () => undefined): Promise<QvmUi> {
+    if (options.artifact.role !== "ui") throw new Error("QvmUi requires a ui artifact");
+    assertCurrentOperation();
+    const module = await QvmModule.create(options, assertCurrentOperation);
+    try { return new QvmUi(seat, module, assertCurrentOperation); }
+    catch (error) { module.retire(); throw error; }
   }
 
   private current(): void {
     this.assertCurrentOperation();
     if (this.retired) throw new Error("UI module has been retired");
   }
-  private call(words: readonly number[]): number {
+  private async call(words: readonly number[]): Promise<number> {
     this.current();
-    const result = this.module.call(words);
+    const result = await this.module.callAsync(words, 0, () => this.current());
     this.current();
     return result;
   }
-  init(connecting: boolean): undefined {
-    this.call([QvmUiExport.UI_INIT, Number(connecting)]);
+  async init(connecting: boolean): Promise<undefined> {
+    await this.call([QvmUiExport.UI_INIT, Number(connecting)]);
   }
-  shutdown(): undefined { this.call([QvmUiExport.UI_SHUTDOWN]); }
+  async shutdown(): Promise<undefined> { await this.call([QvmUiExport.UI_SHUTDOWN]); }
   retire(): void { this.retired = true; this.module.retire(); }
-  keyEvent(key: number, down: boolean): undefined { this.call([QvmUiExport.UI_KEY_EVENT, key, Number(down)]); }
-  mouseEvent(dx: number, dy: number): undefined { this.call([QvmUiExport.UI_MOUSE_EVENT, dx, dy]); }
-  refresh(time: number): undefined { this.call([QvmUiExport.UI_REFRESH, time]); }
-  isFullscreen(): boolean { return this.call([QvmUiExport.UI_IS_FULLSCREEN]) !== 0; }
-  setActiveMenu(menu: Q3MenuCommand): undefined { this.call([QvmUiExport.UI_SET_ACTIVE_MENU, menuNumber(menu)]); }
-  consoleCommand(time: number, arguments_: readonly string[]): boolean {
+  async keyEvent(key: number, down: boolean): Promise<undefined> { await this.call([QvmUiExport.UI_KEY_EVENT, key, Number(down)]); }
+  async mouseEvent(dx: number, dy: number): Promise<undefined> { await this.call([QvmUiExport.UI_MOUSE_EVENT, dx, dy]); }
+  async refresh(time: number): Promise<undefined> { await this.call([QvmUiExport.UI_REFRESH, time]); }
+  async isFullscreen(): Promise<boolean> { return await this.call([QvmUiExport.UI_IS_FULLSCREEN]) !== 0; }
+  async setActiveMenu(menu: Q3MenuCommand): Promise<undefined> { await this.call([QvmUiExport.UI_SET_ACTIVE_MENU, menuNumber(menu)]); }
+  async consoleCommand(time: number, arguments_: readonly string[]): Promise<boolean> {
     this.current();
-    const result = this.module.command([QvmUiExport.UI_CONSOLE_COMMAND, time], arguments_) !== 0;
+    const result = await this.module.commandAsync([QvmUiExport.UI_CONSOLE_COMMAND, time], arguments_, () => this.current()) !== 0;
     this.current();
     return result;
   }
-  drawConnectScreen(overlay: boolean): undefined { this.call([QvmUiExport.UI_DRAW_CONNECT_SCREEN, Number(overlay)]); }
-  hasUniqueCdKey(): boolean { return this.call([QvmUiExport.UI_HASUNIQUECDKEY]) !== 0; }
+  async drawConnectScreen(overlay: boolean): Promise<undefined> { await this.call([QvmUiExport.UI_DRAW_CONNECT_SCREEN, Number(overlay)]); }
+  async hasUniqueCdKey(): Promise<boolean> { return await this.call([QvmUiExport.UI_HASUNIQUECDKEY]) !== 0; }
 }

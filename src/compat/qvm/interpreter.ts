@@ -23,9 +23,11 @@ export interface QvmSyscall {
   readonly memory: Uint8Array;
   /** Recursive entry is valid only while this callback owns the suspended frame. */
   invoke(args: QvmArguments, instructionIndex?: number): number;
+  invokeAsync(args: QvmArguments, instructionIndex?: number, validate?: () => void): Promise<number>;
 }
 
-export type QvmSystemCall = (call: QvmSyscall) => number;
+export type QvmSystemCallResult = number | Promise<number>;
+export type QvmSystemCall = (call: QvmSyscall) => QvmSystemCallResult;
 
 class Operands {
   private readonly cells: (number | undefined)[] = new Array<number | undefined>(256);
@@ -83,7 +85,16 @@ class Operands {
   }
 }
 
-interface Invocation { readonly operands: Operands }
+interface Invocation {
+  readonly operands: Operands;
+  readonly asynchronous: boolean;
+  readonly validate: () => void;
+}
+interface SyscallScope {
+  open: boolean;
+  pending: Promise<void> | null;
+  failure: { readonly error: unknown } | null;
+}
 
 function signedWord(value: number): number {
   if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
@@ -208,8 +219,40 @@ export class QvmInterpreter {
     if (this.rootActive) throw new Error("QVM is already active; recursive calls belong to the current syscall");
     this.live();
     this.rootActive = true;
-    try { return this.execute(args, instructionIndex); }
+    try { return this.executeSync(args, instructionIndex); }
     finally { this.rootActive = false; }
+  }
+
+  async invokeAsync(args: QvmArguments, instructionIndex = 0, validate: () => void = () => {}): Promise<number> {
+    if (this.rootActive) throw new Error("QVM is already active; recursive calls belong to the current syscall");
+    this.live();
+    this.rootActive = true;
+    try { return await this.executeAsync(args, instructionIndex, validate); }
+    finally { this.rootActive = false; }
+  }
+
+  private executeSync(args: QvmArguments, instructionIndex: number): number {
+    const execution = this.execute(args, instructionIndex, false, () => {});
+    const result = execution.next();
+    if (result.done) return result.value;
+    // The trap boundary rejects promises before a synchronous invocation can yield.
+    execution.return(0);
+    throw new Error("Synchronous QVM call cannot suspend");
+  }
+
+  private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void): Promise<number> {
+    validate();
+    const execution = this.execute(args, instructionIndex, true, validate);
+    let next = execution.next();
+    while (!next.done) {
+      try {
+        const value = await next.value;
+        this.live();
+        validate();
+        next = execution.next(value);
+      } catch (error) { next = execution.throw(error); }
+    }
+    return next.value;
   }
 
   private range(address: number, length: number): void {
@@ -249,22 +292,62 @@ export class QvmInterpreter {
     return word;
   }
 
-  private trap(frame: Invocation, sp: number): number {
-    let open = true;
+  private trap(frame: Invocation, sp: number): QvmSystemCallResult {
+    const scope: SyscallScope = { open: true, pending: null, failure: null };
+    const complete = (value: number): QvmSystemCallResult => {
+      scope.open = false;
+      const checked = (): number => {
+        if (scope.failure !== null) throw scope.failure.error;
+        this.live();
+        frame.validate();
+        return signedWord(value);
+      };
+      return scope.pending === null ? checked() : scope.pending.then(checked);
+    };
+    const failed = (error: unknown): never | Promise<number> => {
+      scope.open = false;
+      if (scope.pending !== null) return scope.pending.then(() => { throw error; });
+      throw error;
+    };
+    const available = (): void => {
+      if (!scope.open || scope.pending !== null || this.active !== frame) throw new Error("QVM recursive call requires the active syscall with no pending child");
+      this.live();
+      frame.validate();
+    };
     const invoke = (args: QvmArguments, instructionIndex = 0): number => {
-      if (!open || this.active !== frame) throw new Error("QVM recursive call requires the active syscall");
-      return this.execute(args, instructionIndex);
+      available();
+      return this.executeSync(args, instructionIndex);
+    };
+    const invokeAsync = (args: QvmArguments, instructionIndex = 0, validate: () => void = () => {}): Promise<number> => {
+      try {
+        available();
+        if (!frame.asynchronous) throw new Error("Synchronous QVM syscall cannot start an asynchronous child");
+        const child = this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); });
+        scope.pending = child.then(
+          () => { scope.pending = null; },
+          (error: unknown) => { scope.pending = null; scope.failure = { error }; },
+        );
+        return child;
+      } catch (error) { return Promise.reject(error); }
     };
     try {
       this.range(sp + 4, 4);
-      return signedWord(this.systemCall({
+      const result = this.systemCall({
         words: new DataView(this.memory.buffer, this.memory.byteOffset + sp + 4, this.memory.byteLength - sp - 4),
-        memory: this.memory, invoke,
-      }));
-    } finally { open = false; }
+        memory: this.memory, invoke, invokeAsync,
+      });
+      if (typeof result === "number") return complete(result);
+      if (!frame.asynchronous) {
+        scope.open = false;
+        void result.catch(() => {});
+        throw new Error("Synchronous QVM call received an asynchronous syscall");
+      }
+      return result.then(complete, failed);
+    } catch (error) { return failed(error); }
   }
 
-  private execute(args: QvmArguments, instructionIndex: number): number {
+  private *execute(args: QvmArguments, instructionIndex: number, asynchronous: boolean,
+    validate: () => void): Generator<Promise<number>, number, number> {
     for (const word of args) signedWord(word);
     this.registration?.printCall(args[0]);
     const profile = this.registration?.executionProfile() ?? { kind: "release" };
@@ -276,7 +359,7 @@ export class QvmInterpreter {
     const entryStack = this.programStack;
     let sp = this.stack(entryStack - 48);
     const previous = this.active;
-    const frame: Invocation = { operands: new Operands(debug) };
+    const frame: Invocation = { operands: new Operands(debug), asynchronous, validate };
     const operands = frame.operands;
     this.active = frame;
     try {
@@ -355,7 +438,7 @@ export class QvmInterpreter {
               const savedFrame = debug ? this.readWord(sp + 4) : null;
               this.writeWord(sp + 4, -1 - target);
               const result = this.trap(frame, sp);
-              const value = result;
+              const value = typeof result === "number" ? result : yield result;
               if (savedFrame !== null) this.writeWord(sp + 4, savedFrame);
               operands.push(value);
               pc = this.readWord(sp);

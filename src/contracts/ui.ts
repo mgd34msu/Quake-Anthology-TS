@@ -185,30 +185,30 @@ export type Q3CgameEventHandling = "none" | "team-menu" | "scoreboard" | "edit-h
 export interface Q3CgameExports {
   readonly api: Extract<Q3ApiIdentity, { readonly kind: "q3-cgame" }>;
   readonly seat: SeatId;
-  readonly init: (serverMessageNumber: number, serverCommandSequence: number, clientNumber: number) => undefined;
-  readonly shutdown: () => undefined;
-  readonly consoleCommand: (arguments_: readonly string[]) => boolean;
-  readonly drawActiveFrame: (serverTimeMilliseconds: number, stereoView: StereoView, demoPlayback: boolean) => undefined;
-  readonly crosshairPlayer: () => number | null;
-  readonly lastAttacker: () => number | null;
-  readonly keyEvent: (key: number, down: boolean) => undefined;
-  readonly mouseEvent: (dx: number, dy: number) => undefined;
-  readonly eventHandling: (mode: Q3CgameEventHandling) => undefined;
+  readonly init: (serverMessageNumber: number, serverCommandSequence: number, clientNumber: number) => undefined | Promise<undefined>;
+  readonly shutdown: () => undefined | Promise<undefined>;
+  readonly consoleCommand: (arguments_: readonly string[]) => boolean | Promise<boolean>;
+  readonly drawActiveFrame: (serverTimeMilliseconds: number, stereoView: StereoView, demoPlayback: boolean) => undefined | Promise<undefined>;
+  readonly crosshairPlayer: () => number | null | Promise<number | null>;
+  readonly lastAttacker: () => number | null | Promise<number | null>;
+  readonly keyEvent: (key: number, down: boolean) => undefined | Promise<undefined>;
+  readonly mouseEvent: (dx: number, dy: number) => undefined | Promise<undefined>;
+  readonly eventHandling: (mode: Q3CgameEventHandling) => undefined | Promise<undefined>;
 }
 export type Q3MenuCommand = "none" | "main" | "ingame" | "need-cd" | "bad-cd-key" | "team" | "postgame";
 export interface Q3UiExports {
   readonly api: Extract<Q3ApiIdentity, { readonly kind: "q3-ui" }>;
   readonly seat: SeatId;
-  readonly init: (connecting: boolean) => undefined;
-  readonly shutdown: () => undefined;
-  readonly keyEvent: (key: number, down: boolean) => undefined;
-  readonly mouseEvent: (dx: number, dy: number) => undefined;
-  readonly refresh: (realTimeMilliseconds: number) => undefined;
-  readonly isFullscreen: () => boolean;
-  readonly setActiveMenu: (menu: Q3MenuCommand) => undefined;
-  readonly consoleCommand: (realTimeMilliseconds: number, arguments_: readonly string[]) => boolean;
-  readonly drawConnectScreen: (overlay: boolean) => undefined;
-  readonly hasUniqueCdKey: () => boolean;
+  readonly init: (connecting: boolean) => undefined | Promise<undefined>;
+  readonly shutdown: () => undefined | Promise<undefined>;
+  readonly keyEvent: (key: number, down: boolean) => undefined | Promise<undefined>;
+  readonly mouseEvent: (dx: number, dy: number) => undefined | Promise<undefined>;
+  readonly refresh: (realTimeMilliseconds: number) => undefined | Promise<undefined>;
+  readonly isFullscreen: () => boolean | Promise<boolean>;
+  readonly setActiveMenu: (menu: Q3MenuCommand) => undefined | Promise<undefined>;
+  readonly consoleCommand: (realTimeMilliseconds: number, arguments_: readonly string[]) => boolean | Promise<boolean>;
+  readonly drawConnectScreen: (overlay: boolean) => undefined | Promise<undefined>;
+  readonly hasUniqueCdKey: () => boolean | Promise<boolean>;
 }
 
 export type ArsenalAmmoWarning = "none" | "low" | "empty";

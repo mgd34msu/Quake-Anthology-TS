@@ -35,14 +35,14 @@ export class QvmCgame implements Q3CgameExports {
     if (state.generation !== phase.generation) throw new Error("Cgame module belongs to a stale engine gamestate");
   }
 
-  private call(command: QvmCgameExport, values: readonly number[] = []): number {
+  private async call(command: QvmCgameExport, values: readonly number[] = []): Promise<number> {
     this.current(command);
-    const result = this.module.call([command, ...values]);
+    const result = await this.module.callAsync([command, ...values], 0, () => this.current(command));
     this.current(command);
     return result;
   }
 
-  init(serverMessageNumber: number, serverCommandSequence: number, clientNumber: number): undefined {
+  async init(serverMessageNumber: number, serverCommandSequence: number, clientNumber: number): Promise<undefined> {
     this.lifetime.assertCurrentOperation();
     if (this.phase.kind === "retired" || this.phase.kind === "initializing") throw new Error("Cgame cannot initialize in its current lifecycle");
     const state = this.lifetime.current();
@@ -51,27 +51,29 @@ export class QvmCgame implements Q3CgameExports {
     if (state.serverMessageNumber !== serverMessageNumber) throw new Error("CG_Init message differs from the active engine message");
     this.phase = { kind: "initializing", generation: state.generation };
     this.lifetime.beginLoading();
-    this.call(QvmCgameExport.CG_INIT, [serverMessageNumber, serverCommandSequence, clientNumber]);
-    if (this.lifetime.current().serverMessageNumber !== serverMessageNumber) throw new Error("Engine server message parsing must serialize behind CG_Init");
-    this.lifetime.prime(state.generation);
-    this.phase = { kind: "initialized", generation: state.generation };
+    try {
+      await this.call(QvmCgameExport.CG_INIT, [serverMessageNumber, serverCommandSequence, clientNumber]);
+      if (this.lifetime.current().serverMessageNumber !== serverMessageNumber) throw new Error("Engine server message parsing must serialize behind CG_Init");
+      this.lifetime.prime(state.generation);
+      this.phase = { kind: "initialized", generation: state.generation };
+    } catch (error) { this.retire(); throw error; }
   }
-  shutdown(): undefined { this.call(QvmCgameExport.CG_SHUTDOWN); }
+  async shutdown(): Promise<undefined> { await this.call(QvmCgameExport.CG_SHUTDOWN); }
   retire(): void { this.phase = { kind: "retired" }; this.module.retire(); }
-  consoleCommand(arguments_: readonly string[]): boolean {
+  async consoleCommand(arguments_: readonly string[]): Promise<boolean> {
     this.current(QvmCgameExport.CG_CONSOLE_COMMAND);
-    const result = this.module.command([QvmCgameExport.CG_CONSOLE_COMMAND], arguments_) !== 0;
+    const result = await this.module.commandAsync([QvmCgameExport.CG_CONSOLE_COMMAND], arguments_, () => this.current(QvmCgameExport.CG_CONSOLE_COMMAND)) !== 0;
     this.current(QvmCgameExport.CG_CONSOLE_COMMAND);
     return result;
   }
-  drawActiveFrame(time: number, stereo: StereoView, demoPlayback: boolean): undefined {
-    this.call(QvmCgameExport.CG_DRAW_ACTIVE_FRAME, [time, stereo === "center" ? 0 : stereo === "left" ? 1 : 2, Number(demoPlayback)]);
+  async drawActiveFrame(time: number, stereo: StereoView, demoPlayback: boolean): Promise<undefined> {
+    await this.call(QvmCgameExport.CG_DRAW_ACTIVE_FRAME, [time, stereo === "center" ? 0 : stereo === "left" ? 1 : 2, Number(demoPlayback)]);
   }
-  crosshairPlayer(): number | null { const value = this.call(QvmCgameExport.CG_CROSSHAIR_PLAYER); return value < 0 ? null : value; }
-  lastAttacker(): number | null { const value = this.call(QvmCgameExport.CG_LAST_ATTACKER); return value < 0 ? null : value; }
-  keyEvent(key: number, down: boolean): undefined { this.call(QvmCgameExport.CG_KEY_EVENT, [key, Number(down)]); }
-  mouseEvent(dx: number, dy: number): undefined { this.call(QvmCgameExport.CG_MOUSE_EVENT, [dx, dy]); }
-  eventHandling(mode: Q3CgameEventHandling): undefined {
-    this.call(QvmCgameExport.CG_EVENT_HANDLING, [mode === "none" ? 0 : mode === "team-menu" ? 1 : mode === "scoreboard" ? 2 : 3]);
+  async crosshairPlayer(): Promise<number | null> { const value = await this.call(QvmCgameExport.CG_CROSSHAIR_PLAYER); return value < 0 ? null : value; }
+  async lastAttacker(): Promise<number | null> { const value = await this.call(QvmCgameExport.CG_LAST_ATTACKER); return value < 0 ? null : value; }
+  async keyEvent(key: number, down: boolean): Promise<undefined> { await this.call(QvmCgameExport.CG_KEY_EVENT, [key, Number(down)]); }
+  async mouseEvent(dx: number, dy: number): Promise<undefined> { await this.call(QvmCgameExport.CG_MOUSE_EVENT, [dx, dy]); }
+  async eventHandling(mode: Q3CgameEventHandling): Promise<undefined> {
+    await this.call(QvmCgameExport.CG_EVENT_HANDLING, [mode === "none" ? 0 : mode === "team-menu" ? 1 : mode === "scoreboard" ? 2 : 3]);
   }
 }

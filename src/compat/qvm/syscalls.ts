@@ -1,6 +1,6 @@
 import { decodeQvmGameImport, decodeQvmCgameImport, decodeQvmUiImport } from "./abi.ts";
 import type { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
-import type { QvmSyscall, QvmSystemCall } from "./interpreter.ts";
+import type { QvmSyscall, QvmSystemCall, QvmSystemCallResult } from "./interpreter.ts";
 import { QvmMemory } from "./memory.ts";
 import { qvmMathSyscall } from "./math-syscalls.ts";
 import { qvmMemorySyscall } from "./memory-syscalls.ts";
@@ -14,7 +14,8 @@ export type QvmHostCall = QvmSyscall & { readonly guest: QvmMemory; readonly com
   | { readonly kind: "engine"; readonly role: "ui"; readonly code: QvmUiImport }
   | { readonly kind: "extension"; readonly role: QvmRole; readonly code: number }
 );
-export type QvmHost = (call: QvmHostCall) => number;
+export type QvmHostResult = QvmSystemCallResult;
+export type QvmHost = (call: QvmHostCall) => QvmHostResult;
 
 export class QvmUnboundSyscallError extends Error {
   constructor(readonly role: QvmRole, readonly code: number) {

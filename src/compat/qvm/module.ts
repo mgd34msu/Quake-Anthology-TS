@@ -50,9 +50,12 @@ function sameModule(left: ModuleIdentity, right: ModuleIdentity): boolean {
   return left.id === right.id && left.digest === right.digest && left.artifactPath === right.artifactPath && left.revision === right.revision;
 }
 
+const deferredUiInitialization = Symbol("deferred UI API validation");
+
 /** One source VM instance. Reentry is scoped to the suspended host call. */
 export class QvmModule implements GuestExecutor {
-  readonly profile: Extract<ExecutionProfile, { readonly kind: "qvm" }>;
+  private executionProfile: Extract<ExecutionProfile, { readonly kind: "qvm" }>;
+  get profile(): Extract<ExecutionProfile, { readonly kind: "qvm" }> { return this.executionProfile; }
   readonly interpreter: QvmInterpreter;
   readonly memory: QvmMemory;
   readonly guestMemory: QvmGuestMemory;
@@ -60,9 +63,9 @@ export class QvmModule implements GuestExecutor {
   private currentCommandArguments: readonly string[] | null = null;
   private retired = false;
 
-  constructor(private readonly options: QvmModuleOptions) {
+  constructor(private readonly options: QvmModuleOptions, initialization?: typeof deferredUiInitialization) {
     const artifact = options.artifact;
-    this.profile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role), magic: 0x12721444, numeric: qvmNumericProfile };
+    this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role), magic: 0x12721444, numeric: qvmNumericProfile };
     const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments);
     this.interpreter = new QvmInterpreter(artifact.image, call => {
       const previous = this.currentSyscall;
@@ -72,11 +75,24 @@ export class QvmModule implements GuestExecutor {
     }, options.allocation, options.registration);
     this.memory = new QvmMemory(this.interpreter.memory);
     this.guestMemory = new QvmGuestMemory(artifact.module, this.memory);
-    if (artifact.role === "ui") {
-      const version = this.call([QvmUiExport.UI_GETAPIVERSION]);
-      if (version !== 4 && version !== 6) throw new CommonError("drop", `User Interface is version ${version}, expected 6`);
-      this.profile = { ...this.profile, api: { kind: "q3-ui", version } };
+    if (artifact.role === "ui" && initialization !== deferredUiInitialization) {
+      try { this.validateUiVersion(this.call([QvmUiExport.UI_GETAPIVERSION])); }
+      catch (error) { this.retire(); throw error; }
     }
+  }
+
+  static async create(options: QvmModuleOptions, validate: () => void = () => {}): Promise<QvmModule> {
+    const module = new QvmModule(options, deferredUiInitialization);
+    try {
+      if (options.artifact.role === "ui") module.validateUiVersion(await module.callAsync([QvmUiExport.UI_GETAPIVERSION], 0, validate));
+      else validate();
+      return module;
+    } catch (error) { module.retire(); throw error; }
+  }
+
+  private validateUiVersion(version: number): void {
+    if (version !== 4 && version !== 6) throw new CommonError("drop", `User Interface is version ${version}, expected 6`);
+    this.executionProfile = { ...this.executionProfile, api: { kind: "q3-ui", version } };
   }
 
   private live(): void {
@@ -88,6 +104,27 @@ export class QvmModule implements GuestExecutor {
     this.options.registration?.called();
     const arguments_ = qvmArguments(words);
     return this.currentSyscall === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentSyscall.invoke(arguments_, instructionIndex);
+  }
+
+  async callAsync(words: readonly number[], instructionIndex = 0, validate: () => void = () => {}): Promise<number> {
+    this.live();
+    this.options.registration?.called();
+    const arguments_ = qvmArguments(words);
+    const current = (): void => { this.live(); validate(); };
+    current();
+    const result = this.currentSyscall === null
+      ? await this.interpreter.invokeAsync(arguments_, instructionIndex, current)
+      : await this.currentSyscall.invokeAsync(arguments_, instructionIndex, current);
+    current();
+    return result;
+  }
+
+  async commandAsync(words: readonly number[], arguments_: readonly string[], validate: () => void = () => {}): Promise<number> {
+    if (this.interpreter.isActive && this.currentSyscall === null) throw new Error("QVM is already active; command arguments belong to the current invocation");
+    const previous = this.currentCommandArguments;
+    this.currentCommandArguments = arguments_;
+    try { return await this.callAsync(words, 0, validate); }
+    finally { this.currentCommandArguments = previous; }
   }
 
   command(words: readonly number[], arguments_: readonly string[]): number {
