@@ -46,6 +46,7 @@ function productChoice(product: CatalogProduct): StartupSelectionChoice {
 export class StartupSelectionModel {
   private readonly values: Record<StartupSelectionField, string>;
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
+  private readonly authoredDefaultMaps = new Map<string, string>();
   private readonly looseModels = new Map<string, readonly string[]>();
   private readonly monsterClasses = new Map<string, ReadonlyMap<string, number>>();
   private readonly rosters = new Map<string, { default: string; readonly byClassname: Map<string, string> }>();
@@ -106,7 +107,17 @@ export class StartupSelectionModel {
           }
           if (accepted !== false) choices.push(choice(map.path));
         }
-        this.playableMaps.set(product.expectation.id, choices.sort((a, b) => a.id.localeCompare(b.id)));
+        const authored = await this.catalog.authoredStartsFor(product.id);
+        const starts: StartupSelectionChoice[] = [];
+        for (const start of authored?.starts ?? []) {
+          if (starts.some(choice => choice.id.toLowerCase() === start.path.toLowerCase())) continue;
+          const installed = choices.find(choice => choice.id.toLowerCase() === start.path.toLowerCase());
+          starts.push(choice(installed?.id ?? start.path, start.title || start.path, installed === undefined ? `Missing authored start map: ${start.path}` : null));
+        }
+        const first = starts[0];
+        if (first !== undefined) this.authoredDefaultMaps.set(product.expectation.id, first.id);
+        const authoredPaths = new Set(starts.map(start => start.id.toLowerCase()));
+        this.playableMaps.set(product.expectation.id, [...starts, ...choices.filter(map => !authoredPaths.has(map.id.toLowerCase())).sort((a, b) => a.id.localeCompare(b.id))]);
       }
     } finally {
       for (const archive of archives.values()) archive.close();
@@ -116,7 +127,7 @@ export class StartupSelectionModel {
   private maps(): readonly StartupSelectionChoice[] { return this.playableMaps.get(this.geometry().expectation.id) ?? []; }
   private defaultMap(): string {
     const product = this.geometry(), maps = this.maps();
-    const preferred = product.expectation.mapWitness ?? (product.expectation.family === "q1" ? "maps/start.bsp" : product.expectation.family === "q2" ? "maps/base1.bsp" : "maps/q3dm0.bsp");
+    const preferred = this.authoredDefaultMaps.get(product.expectation.id) ?? product.expectation.mapWitness ?? (product.expectation.family === "q1" ? "maps/start.bsp" : product.expectation.family === "q2" ? "maps/base1.bsp" : "maps/q3dm0.bsp");
     return maps.find(map => map.id === preferred)?.id ?? "";
   }
   private product(field: "product" | "movement" | "character"): CatalogProduct { return this.catalog.product(this.values[field]); }

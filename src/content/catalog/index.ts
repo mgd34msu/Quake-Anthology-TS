@@ -8,6 +8,8 @@ import { findContentPath, normalizeResourcePath } from "../mounts/paths.ts";
 import { userProductDirectory } from "../user-data.ts";
 import { expectedProducts } from "./products.ts";
 import type { ProductExpectation } from "./products.ts";
+import { parseAuthoredStarts } from "./start-maps.ts";
+import type { AuthoredStartCatalog } from "./start-maps.ts";
 
 export { expectedProducts } from "./products.ts";
 export type { ProductExpectation } from "./products.ts";
@@ -278,6 +280,17 @@ export class InstalledCatalog {
     const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
     using opened = await openMountPlan(plan);
     return opened.read(path);
+  }
+
+  async authoredStartsFor(id: ContentId | string): Promise<AuthoredStartCatalog | null> {
+    const product = this.require(id);
+    if (product.expectation.family !== "q2" || product.expectation.edition !== "rerelease") return null;
+    const mounts = await this.mountsFor(product.id);
+    const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
+    using opened = await openMountPlan(plan);
+    const resource = await opened.open("mapdb.json");
+    if (resource === null) return null;
+    return { resource: resource.reference, ...parseAuthoredStarts(resource.bytes, product.expectation.campaign) };
   }
 }
 
