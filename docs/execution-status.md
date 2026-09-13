@@ -1,5 +1,13 @@
 # Execution status
 
+## Accepted audio devices and world-text culling
+
+At source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`, accepted audio `0065d73b` passed root 31 tests/263 assertions: actual dummy SDL queued PCM/clock/music retention, CPU/GL menu/restart, and native NQ remote named-device travel from `e1m1` to `e1m2` in the same window. Device names/default selection and device/effects/music settings persist per product through ConfigStore. Output remains 44100 Hz, stereo, 16-bit. Physical audio quality/performance and injected remote failure races are not qualified.
+
+Accepted world text `39ea4c0c` passed root 6 tests/60 assertions through CPU/GL units and actual two-seat Q2 rerelease `base1`; root inspected images from both changes. Shared culling uses the native strict condition `cellSize < dot(origin-camera.origin, camera.axis[0]) * distanceCullFactor`, with producer default `0.004`, signed forward distance and rejection before glyph lookup. Native `size * 8` remains. Live `gl_debug_distfrac` control and guest debug imports remain unjoined. Both frozen source units passed scoped strict/policy checks.
+
+The two reviewed ledger requirements remain open: configurable output formats/complete source audio workflow and the full display/video restart workflow are not established by these receipts. Counts remain 288 Done/189 Not done across 477 IDs; the other 475 records were not re-audited. The installed binary remains `3a073e87ec7a4126f396e15833b8afb9df569403`, without a rebuild.
+
 ## Accepted NQ profiles and device persistence
 
 Accepted `5a0e1848` supplies classic-id1 host protocol selection and shared-client negotiation of NQ 15/666/999, limits, alpha/scale, movement/travel and version flags. Root passed 9 tests/209 assertions and strict/policy checks; independent donor servers exercised signon and authoritative movement over all three protocols through the hidden shared client with no local world. Root inspected three images and donor-codec entity updates of 9/15/21 bytes matched inside actual UDP payloads. Rerelease, expansion/mod admission, private extensions, full bidirectional qualification, static visual-field production, nondefault lerpfinish and a menu protocol selector remain open.

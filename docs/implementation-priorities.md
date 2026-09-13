@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite NQ/controller review at source cutoff `36f395ee80c4bede619a4b0eaaf1591873edba74`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite audio/world-text review at source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -195,7 +195,8 @@ These dispositions do not change the historical ledger or invent new requirement
 | GIF images | Accepted in `e05343b`: actual installed image cases 17 tests / 139 assertions, plus media/world lifecycle 25 / 417. CPU/GL image agreement is bounded to the inspected samples. Keep this work; remaining renderer union is priority 3. |
 | Extended cvar commands | Accepted in `7b7110e`, including Q1 custom-variable promotion. Keep these commands; broader configuration persistence remains priority 15. |
 | HTTP ranges | Accepted in `8637652`: actual RemoteApplication downloaded and mounted the 1,991,612-byte PAK using one HEAD and four concurrent range GETs, with identical SHA and native WAL fallback. Focused cvar/range/HTTP checks passed 60 / 557. Resume, redirects and wider wire/UI work remain priority 14. |
-| World text | Bounded shared rendering accepted in `3f6be42`: actual two-seat billboard images and separate fixed-angle/depth tests. Guest debug imports and donor distance-culling remain open under priority 3. |
+| Audio devices | Accepted `0065d73b`: named/default device selection and per-product audio settings persistence, with root dummy SDL and CPU/GL menu/restart/remote checks 31/263. Selectable output formats and physical audio qualification remain open. |
+| World text | Bounded shared rendering accepted in `3f6be42`: actual two-seat billboard images and separate fixed-angle/depth tests. Accepted `39ea4c0c` adds native default distance-culling (root CPU/GL and two-seat checks 6/60). Live `gl_debug_distfrac` control and guest debug imports remain open under priority 3. |
 | Q1 VCR | Open source-inventory lead. Priority 22. |
 | SOCKS5 | Open source-inventory lead. Priority 24. |
 | Q3 event/config journals | Open source-inventory lead. Priority 22. |
@@ -210,7 +211,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **189 open requirements** use source cutoff `36f395ee80c4bede619a4b0eaaf1591873edba74`. Only device persistence closes; six related reasons are narrowed. The other 470 records carry unchanged from `a8f9e2f91d85330f0edce04aa829c27e37751135`, without a new audit.
+The following **189 open requirements** use source cutoff `39ea4c0cab9910c6b78d5f8d18d3bc36494dd519`. Two audio/settings reasons are narrowed; all verdicts and the other 475 records carry unchanged from `36f395ee80c4bede619a4b0eaaf1591873edba74`, without a new audit.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 

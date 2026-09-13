@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "36f395ee80c4bede619a4b0eaaf1591873edba74",
-  "carriedVerdictsFrom": "a8f9e2f91d85330f0edce04aa829c27e37751135",
+  "sourceCutoff": "39ea4c0cab9910c6b78d5f8d18d3bc36494dd519",
+  "carriedVerdictsFrom": "36f395ee80c4bede619a4b0eaaf1591873edba74",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -4532,7 +4532,7 @@
       "title": "Apply video, audio, and input settings",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Live menu controls affect rendering/audio/input, but their full persisted restart settings are not connected to application configuration storage.",
+      "reason": "Accepted 0065d73b joins named/default audio-device selection and per-product device/effects/music persistence through ConfigStore; 36f395ee joins input assignment, tuning and binding persistence. Actual CPU/GL menu/restart and remote travel checks passed. The complete display/video settings and restart workflow remains unqualified.",
       "paths": [
         "src/app/bootstrap/startup.ts",
         "src/app/bootstrap/frontend-preferences.ts",
@@ -5615,7 +5615,7 @@
       "title": "Raw PCM, output formats and sound diagnostics",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "PCM streaming and output conversion are implemented; complete soundinfo/soundlist/play diagnostics and source output/device configuration are not joined to application commands.",
+      "reason": "PCM ingestion/conversion and application soundinfo/soundlist/play diagnostics are connected. Accepted 0065d73b joins named/default device selection, persisted gains and device restart while retaining queued PCM timing and music. Output remains fixed at 44100 Hz, stereo, 16-bit; selectable output bits/channels/rate and the full source restart/cache workflow remain unqualified. Dummy SDL checks do not qualify physical buffering or audibility.",
       "paths": [
         "src/audio/engine.ts",
         "src/app/bootstrap/audio.ts",
