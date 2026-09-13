@@ -1,0 +1,69 @@
+import { expect, test } from "bun:test";
+import type { MonsterSelectionTarget, ProviderReference } from "../../../src/contracts/content.ts";
+import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../../src/content/catalog/monsters.ts";
+import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
+import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
+import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+
+const q1: ProviderReference = { provider: "q1:monsters/rerelease/id1", content: "q1:rerelease:id1:test" };
+const q2: ProviderReference = { provider: "q2:monsters/rerelease/baseq2", content: "q2:rerelease:baseq2:test" };
+function target(family: "q1" | "q2", source: ProviderReference, classname: string): MonsterSelectionTarget | undefined {
+  const roster = defaultMonsterRoster(family, source);
+  return roster.byClassname[classname];
+}
+
+test("campaign slot catalogs cover all registered species, expansions and bosses without Q3 players", () => {
+  for (const source of monsterSources) {
+    const slots = campaignMonsterSlots(source.family);
+    expect(new Set(slots.map(slot => slot.classname)).size).toBe(slots.length);
+    for (const classname of Object.keys(source.creatures)) expect(slots.some(slot => slot.classname === classname)).toBe(true);
+    for (const classname of Object.keys(source.creatures)) {
+      const reference = { provider: source.provider, content: source.family === "q1" ? q1.content : q2.content };
+      expect(target(source.family, reference, classname)).toEqual({ source: reference, classname });
+    }
+  }
+  expect(campaignMonsterSlots("q1").some(slot => slot.classname === "monster_armagon")).toBe(true);
+  expect(campaignMonsterSlots("q1").some(slot => slot.classname === "monster_eel")).toBe(true);
+  expect(campaignMonsterSlots("q2").some(slot => slot.classname === "monster_widow2")).toBe(true);
+  expect(campaignMonsterSlots("q2").some(slot => slot.classname === "monster_soldier_ripper")).toBe(true);
+  expect(campaignMonsterSlots("q3")).toEqual([]);
+});
+
+test("role defaults preserve flight, water, boss scripts and explicit overrides", () => {
+  for (const [authored, replacement] of [["monster_soldier", "monster_army"], ["monster_soldier_light", "monster_army"], ["monster_infantry", "monster_enforcer"],
+    ["monster_berserk", "monster_demon1"], ["monster_gunner", "monster_ogre"], ["monster_flyer", "monster_wizard"], ["monster_flipper", "monster_fish"],
+    ["monster_tank", "monster_shambler"]] satisfies readonly (readonly [string, string])[])
+    expect(target("q2", q1, authored)).toEqual({ source: q1, classname: replacement });
+  expect(target("q1", q2, "monster_fish")).toEqual({ source: q2, classname: "monster_flipper" });
+  expect(target("q1", q2, "monster_eel")).toEqual({ source: q2, classname: "monster_flipper" });
+  expect(target("q1", q2, "monster_wrath")).toEqual({ source: q2, classname: "monster_flyer" });
+  for (const classname of ["monster_medic", "monster_gekk", "monster_stalker", "monster_widow2", "monster_boss3_stand"])
+    expect(target("q2", q1, classname)).toEqual({ kind: "map-defined" });
+  for (const classname of ["monster_boss", "monster_oldone", "monster_armagon", "monster_dragon", "monster_zombie", "monster_morph"])
+    expect(target("q1", q2, classname)).toEqual({ kind: "map-defined" });
+  const override = { source: q1, classname: "monster_ogre" };
+  const roster = defaultMonsterRoster("q2", q1, { monster_soldier: override, monster_flipper: { kind: "map-defined" }, monster_custom: override });
+  if (roster.kind !== "replace") throw new Error("Missing selected roster");
+  expect(roster.byClassname["monster_soldier"]).toEqual(override);
+  expect(roster.byClassname["monster_flipper"]).toEqual({ kind: "map-defined" });
+  expect(roster.byClassname["monster_custom"]).toEqual(override);
+  expect(roster.default).toEqual({ kind: "map-defined" });
+  expect(defaultMonsterRoster("q2", q1)).toEqual(defaultMonsterRoster("q2", q1));
+});
+
+test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  for (const [game, map, family, source] of [["q2-rerelease-baseq2", "base1", "q2", q1], ["q1-rerelease-id1", "e1m1", "q1", q2]] satisfies readonly (readonly [string, string, "q1" | "q2", ProviderReference])[]) {
+    const parsed = parseApplicationCommand(["--game", game, "--map", map]);
+    if (parsed.kind !== "run") throw new Error("Expected launch command");
+    const preset = applicationPreset(catalog, parsed.options), selected = { ...source, content: catalog.require(source === q1 ? "q1-rerelease-id1" : "q2-rerelease-baseq2").id }, enemies = defaultMonsterRoster(family, selected);
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    expect(recipe.enemies).toEqual(enemies);
+    expect(recipe.map.geometryContent).toBe(preset.map.geometry.content);
+    expect(recipe.weapons).toEqual(preset.weapons);
+    if (recipe.enemies.kind !== "replace") throw new Error("Expected automatic roster");
+    const replacements = new Set(Object.values(recipe.enemies.byClassname).flatMap(value => "classname" in value ? [value.classname] : []));
+    expect(replacements.size).toBeGreaterThan(5);
+    expect(recipe.timing.some(clock => clock.provider === source.provider)).toBe(true);
+  }
+}, 60000);

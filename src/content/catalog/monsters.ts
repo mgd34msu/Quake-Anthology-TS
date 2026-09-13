@@ -3,6 +3,8 @@ import { monsterSource, monsterSources, monsterTiming } from "../monsters/defini
 import type { InstalledCatalog } from "./index.ts";
 
 export { monsterSources } from "../monsters/definitions.ts";
+export { campaignMonsterSlots, defaultMonsterRoster } from "../monsters/roster.ts";
+export type { MonsterRole, MonsterRosterSlot } from "../monsters/roster.ts";
 
 export function selectedMonsterDefinitions(enemies: EnemySelection): readonly MonsterDefinitionReference[] {
   return enemies.kind === "map-defined" ? [] : [enemies.default, ...Object.values(enemies.byClassname)].flatMap(target => "kind" in target ? [] : [target]);
