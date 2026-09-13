@@ -65,7 +65,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
-    private readonly worldTextCullFactor: (() => number) | null = null) {
+    private readonly worldTextCullFactor: (() => number) | null = null,
+    private readonly fieldOfView: () => number = () => 90) {
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets);
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -104,7 +105,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   camera(): SceneCamera {
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
     if (this.q3Client !== null) return cameraWithKick(this.q3Client.camera(), player.kickAngles ?? { x: 0, y: 0, z: 0 });
-    const fovX = 90, fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
+    const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
     return this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;

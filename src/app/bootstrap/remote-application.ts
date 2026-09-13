@@ -1,4 +1,5 @@
 import { ClientSocksSettings } from "./network/socks-settings.ts";
+import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { createClientDownloadPermission } from "./network/client-download-policy.ts";
 import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
@@ -82,6 +83,10 @@ interface RemoteCommand { readonly name: string; readonly args: readonly string[
 /** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
   readonly clientCommands: ApplicationInputCommandOwner | null;
+  readonly viewSettings = new ApplicationViewSettings(value => {
+    this.presentation?.q3Client?.cvars.set("cg_fov", String(value));
+    if (this.network instanceof Q2ClientNetwork && this.remote instanceof Q2RemotePresentation) this.network.userinfo(this.remote.userinfo());
+  });
   private readonly socksSettings: ClientSocksSettings;
   private readonly clientConfig: ConfigStore | null;
   private readonly inputConfig: ConfigStore;
@@ -205,7 +210,7 @@ export class RemoteApplication {
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
       const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
-        userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}`,
+        userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}\\fov\\${this.viewSettings.fieldOfView}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshDownloadCatalog(assertCurrent) });
       this.remote = remote;
@@ -237,6 +242,7 @@ export class RemoteApplication {
       await imageSettings.refreshDisplay(renderer);
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
+      await application.viewSettings.load(application.inputConfig);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
       if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
       await application.socksSettings.connect(transport);
@@ -503,7 +509,7 @@ export class RemoteApplication {
     const typography = await frontend.assets.loadMenuTypography();
     assertCurrent();
     const ui = new ApplicationSeatUi(local, frontend.art, input, this.remote, frontend.font, frontend.audio,
-      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), typography);
+      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding());
     if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
     const remote = this.remote;
     let q3: ApplicationQ3Client | null = null;
@@ -524,8 +530,11 @@ export class RemoteApplication {
         connection.reliable.add(this.q3Content.referencedPureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1) ?? "", "sv_serverid"))));
       }
     } catch (error) { q3?.close(); ui.close(); throw error; }
-    if (q3 !== null) input.registerClientCommands([...q3.commandNames]);
-    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"));
+    if (q3 !== null) {
+      input.registerClientCommands([...q3.commandNames]);
+      if (this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
+    }
+    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView);
     local.player.seat.attachPresentation(presentation, () => presentation.close());
     this.presentation = presentation;
     this.q3InitialViewPending = connection !== undefined;
@@ -672,6 +681,7 @@ export class RemoteApplication {
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
     try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }
+    try { if (frontend !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (frontend !== null) await saveAudioSettings(this.inputConfig, frontend.audio); } catch (error) { errors.push(error); }
     for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.transport.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {

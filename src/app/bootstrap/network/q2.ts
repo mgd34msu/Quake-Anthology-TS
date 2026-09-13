@@ -436,6 +436,9 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     get acknowledgedFrame(): number { return this.lastFrame; }
     command(text: string): void { const channel = this.channel; if (channel === null)
         throw new Error('Q2 client is not connected'); channel.queueReliable(encodeQ2ClientControl({ kind: 'command', text })); }
+    userinfo(text: string): void {
+        this.channel?.queueReliable(encodeQ2ClientControl({ kind: 'userinfo', text }));
+    }
     private cancelLoading(): void {
         this.pendingGameState = null;
         this.options.host.downloads?.close();

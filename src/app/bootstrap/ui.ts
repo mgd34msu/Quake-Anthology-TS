@@ -86,7 +86,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding) {
     const seat = local.player.seat.id;
     this.font = font; this.typography = typography;
     this.now = input.now;
@@ -127,7 +127,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
     const gyro = this.gyroSettings = registerGyroSettingsMenu(this.controller, input.controllerSettings.ui(local.input.seat));
-    this.settings = registerSettingsMenus(this.controller, [...display, ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
+    this.settings = registerSettingsMenus(this.controller, [...display, ...(viewSetting === undefined ? [] : [viewSetting]), ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
       write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });

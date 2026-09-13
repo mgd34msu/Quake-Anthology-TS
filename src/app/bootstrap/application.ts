@@ -1,5 +1,6 @@
 import { StartupSaves } from "./startup-saves.ts";
 import type { SavedGameMenuService } from "../../ui/saves/menu.ts";
+import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
@@ -107,6 +108,12 @@ export interface ApplicationHost {
 
 /** A single authoritative simulation owns every local and remote player's game state. */
 export class Application {
+  readonly viewSettings = new ApplicationViewSettings(value => {
+    for (const presentation of this.graphical?.presentations ?? []) {
+      this.simulation.setPlayerFieldOfView(presentation.local.player.actor, value);
+      presentation.q3Client?.cvars.set("cg_fov", String(value));
+    }
+  });
   private graphical: GraphicalApplication | null = null;
   private capture: ApplicationCapture | null = null;
   private frontendOverrides: FrontendPreferenceOverrides = {};
@@ -195,6 +202,7 @@ export class Application {
       await application.bindSourceCommands();
       if (options.dedicated) application.openDedicatedConsole();
       else {
+        await application.viewSettings.load(application.inputConfig);
         const frontend = application;
         application.imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
           dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
@@ -568,10 +576,14 @@ export class Application {
       for (const local of input.locals) {
         const sourceClient = await this.createQ3SeatClient(local, assets, audioOwner, inputOwner, native, this.simulation);
         if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
+        if (this.viewSettings.override !== null) {
+          this.simulation.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView);
+          sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
+        }
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu());
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding());
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
@@ -746,11 +758,15 @@ export class Application {
         for (const [index, local] of input.locals.entries()) {
           const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id));
           if (sourceClient !== null) q3Clients.set(local.player.seat.id, sourceClient);
+          if (this.viewSettings.override !== null) {
+            current.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView, save === undefined ? "change" : "restore");
+            sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
+          }
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu());
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding());
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004);
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView);
           local.player.seat.attachPresentation(presentation, () => presentation.close());
           presentations.push(presentation);
         }
@@ -1099,6 +1115,7 @@ export class Application {
     this.capture = null;
     try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
+    try { if (graphical !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {

@@ -106,7 +106,7 @@ import { WEAPONS as Q1_WEAPONS, isQ1BaseWeapon, q1WeaponBit } from "../../../con
 import type { Q1PlayerState } from "../../../content/q1/foundation/types.ts";
 import { Q1CampaignState, Q1CharacterActor } from "../../../content/q1/base/index.ts";
 import type { Q1TravelState } from "../../../content/q1/base/index.ts";
-import { Q2CharacterActor } from "../../../content/q2/base/player/index.ts";
+import { q2Userinfo, Q2CharacterActor } from "../../../content/q2/base/player/index.ts";
 import type { Q2PlayerHooks } from "../../../content/q2/base/player/index.ts";
 import { createQ2ProductRuntime, captureQ2Product, restoreQ2Product } from "../../../content/composition/q2/index.ts";
 import type { Q2ProductRuntime, Q2CompositionCommon } from "../../../content/composition/q2/index.ts";
@@ -2770,14 +2770,41 @@ export class SharedSimulation implements Simulation {
     return { health: combat.health, armor: combat.armor, activeWeapon: arsenal.activeWeapon, ammo, inventory, items, weaponStatus, arsenalWarning };
   }
 
+  setPlayerFieldOfView(actor: ActorId, fieldOfView: number, mode: "change" | "restore" = "change"): void {
+    const player = this.requirePlayer(actor);
+    const updateView = (previous: number, current: number): void => {
+      if (player.intermission || this.source.kind === "q2" && this.source.players.intermission.kind === "intermission") return;
+      const view = this.q2Views.get(actor);
+      if (view?.fov === previous) this.q2Views.set(actor, { ...view, fov: current });
+    };
+    if (this.source.kind !== "q2") {
+      const character = this.q2Characters.get(player.actor);
+      if (character !== undefined) { updateView(character.state.fov, fieldOfView); character.state.fov = fieldOfView; }
+      return;
+    }
+    const source = this.source, entity = source.game.entity(actor), state = source.players.states.get(actor);
+    if (entity === null || state === undefined) return;
+    const info = new Map(q2Userinfo(state.userinfo)), previous = state.fov;
+    // Saved userinfo holds the ordinary request; source cameras can change only the effective FOV.
+    const requested = Number.parseInt(info.get("fov") ?? "0", 10) || 0;
+    const fixed = source.game.options.edition !== "rerelease" && source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & 32768) !== 0;
+    const ordinary = fixed ? 90 : source.game.options.edition === "rerelease" ? Math.max(1, Math.min(160, requested))
+      : requested < 1 ? 90 : Math.min(160, requested);
+    const preserve = !fixed && (player.cutscene !== null || state.chaseTarget !== null || (entity.flags & 0x4000) !== 0
+      || mode === "restore" && previous !== ordinary);
+    info.set("fov", String(fieldOfView));
+    source.players.userinfoChanged(entity, source.game, [...info].map(([key, value]) => `\\${key}\\${value}`).join(""));
+    if (preserve) state.fov = previous;
+    updateView(previous, state.fov);
+  }
   playerView(actor: ActorId): PlayerView {
     const player = this.requirePlayer(actor), view = player.view(), source = this.q2Views.get(actor);
-    if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z };
+    if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z, fieldOfView: this.source.kind === "q2" ? source?.fov ?? 90 : 90 };
     const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
     // Classic viewoffset includes eye height; rerelease sends it separately in pmove.viewheight.
-    return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch }
+    return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch, ...(source === undefined ? {} : { fieldOfView: source.fov }) }
       : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch,
-        viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
+        fieldOfView: source.fov, viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
   }
   get sourceEntityText(): string { return this.options.world.entities; }
 

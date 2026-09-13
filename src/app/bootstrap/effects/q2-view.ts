@@ -1,6 +1,7 @@
 /* Rogue p_view.c and g_sphere.c presentation state. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { Vec3, Vec4 } from "../../../contracts/math.ts";
+import { perspectiveProjection } from "../../../render/scene/view.ts";
+import type { Mat4, Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { SceneCamera } from "../../../contracts/render.ts";
 import type { Q2MissionPackPlayerEffect } from "../../../content/q2/missionpacks/types.ts";
 import { anglesToAxis } from "../../../core/math.ts";
@@ -31,8 +32,13 @@ export class Q2EffectViews {
     const fraction = alpha > 0 ? nukeAlpha / alpha : 0;
     const blend = alpha > 0 ? { x: 1, y: fraction, z: fraction, w: alpha } : null;
     const sphere = state.sphere;
-    const selected = sphere === null || sphere.sphere === null ? camera : { ...camera,
-      origin: pose(sphere.sphere)?.origin ?? sphere.origin, axis: anglesToAxis(sphere.angles) };
+    let selected = camera;
+    if (sphere !== null && sphere.sphere !== null) {
+      const vertical = Math.atan(camera.viewport.height / camera.viewport.width * Math.tan(140 * Math.PI / 360)) * 360 / Math.PI;
+      const lens = perspectiveProjection(140, vertical, 16384), projection = [...camera.projection] satisfies Mat4;
+      projection[0] = lens[0]; projection[5] = lens[5];
+      selected = { ...camera, projection, origin: pose(sphere.sphere)?.origin ?? sphere.origin, axis: anglesToAxis(sphere.angles) };
+    }
     return { camera: selected, infrared, blend };
   }
   retain(actors: ReadonlySet<ActorId>): void {

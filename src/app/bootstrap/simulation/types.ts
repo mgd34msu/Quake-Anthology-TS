@@ -77,7 +77,7 @@ export interface SimulationTravel {
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; }
+export interface PlayerView { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; }
 export interface PlayerUiItem {
   readonly id: ItemId;
   readonly label: string;

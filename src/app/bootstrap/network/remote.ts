@@ -187,13 +187,14 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
 
     playerView(actor: ActorId): PlayerView {
         const { frame } = this.requirePlayer(actor), origin = this.playerOrigin(frame), previous = this.previousFrame;
+        const fieldOfView = previous === null ? frame.player.fov : previous.player.fov + (frame.player.fov - previous.player.fov) * this.fraction;
         const predicted = this.predicted;
         if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return { origin: movementOrigin(predicted.player.state), angles: predicted.player.viewAngles,
-            viewHeight: predicted.player.viewHeight };
+            viewHeight: predicted.player.viewHeight, fieldOfView };
         if (previous === null)
-            return { origin, angles: vector(frame.player.viewangles), viewHeight: readElement(frame.player.viewoffset, 2) };
+            return { origin, fieldOfView, angles: vector(frame.player.viewangles), viewHeight: readElement(frame.player.viewoffset, 2) };
         const before = this.playerOrigin(previous), teleport = Math.max(Math.abs(origin.x - before.x), Math.abs(origin.y - before.y), Math.abs(origin.z - before.z)) > 256;
-        return { origin: teleport ? origin : interpolate(before, origin, this.fraction), angles: interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction), viewHeight: readElement(previous.player.viewoffset, 2) + (readElement(frame.player.viewoffset, 2) - readElement(previous.player.viewoffset, 2)) * this.fraction };
+        return { fieldOfView, origin: teleport ? origin : interpolate(before, origin, this.fraction), angles: interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction), viewHeight: readElement(previous.player.viewoffset, 2) + (readElement(frame.player.viewoffset, 2) - readElement(previous.player.viewoffset, 2)) * this.fraction };
     }
     playerUi(actor: ActorId): PlayerUi {
         const { frame } = this.requirePlayer(actor), weaponModel = this.configs.get(this.layout.models + frame.player.gunindex), weapon = Q2_BASE_WEAPONS.find(item => item.viewModel === weaponModel);
