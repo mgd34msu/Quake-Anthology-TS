@@ -117,6 +117,21 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
     ]);
     return {
         maxClients: 32, paused: false, supportsSourceWire: () => ({ kind: 'supported' }),
+        clientInfo: player => requireClient(player).info,
+        commandPhase: (player, action, emit) => simulation.queueQuakeWorldAction(player.client, () => {
+            if (!clients.get(player.slot)?.player.actor.equals(player.actor)) return;
+            const flush = (): void => {
+                game.messages.flush();
+                const pending = queued.splice(0);
+                for (const batch of game.drainMessages()) for (const entry of batch.entries)
+                    if (entry.message.kind !== 'packet-entities' && entry.message.kind !== 'invalid-delta') pending.push({ message: entry.message, destination: batch.destination });
+                for (const entry of pending) {
+                    if (entry.destination.kind === 'signon' || !entry.destination.reliable) { queued.push(entry); continue; }
+                    for (const client of clients.values()) if ((client.begun || entry.destination.kind === 'client') && receives(client.player, entry.destination)) emit(client.player, entry.message);
+                }
+            };
+            flush(); action(); flush();
+        }),
         admit: request => {
             if (clients.size >= simulation.options.maxClients) return { kind: 'rejected', reason: 'Server is full' };
             let index = 0; while (clients.has(index) && index < 32) index++;
@@ -176,9 +191,12 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         commandGroup: (player, commands, sequence) => { const client = requireClient(player); simulation.queueQuakeWorldCommands(player.client, commands, sequence);
             client.command = commands.at(-1) ?? idle; client.commandTime = game.timeSeconds; },
         command: (player, name, args) => {
-            if (name === 'setinfo' && args.length === 2) {
+            if (name === 'kill') {
+                if (!game.clientKill(player.actor)) queued.push({ message: { kind: 'print', level: 2, text: "Can't suicide -- allready dead!\n" }, destination: { kind: 'client', actor: player.actor, reliable: true } });
+            } else if (name === 'setinfo' && args.length === 2) {
                 const key = args[0], value = args[1]; if (key === undefined || value === undefined || key.startsWith('*') || /[\\"\n\r]/.test(key + value)) return;
-                const client = requireClient(player); if (value === '') client.info.delete(key); else client.info.set(key, value); game.setClientInfo(player.client, client.info);
+                const client = requireClient(player); if (value === '') client.info.delete(key); else client.info.set(key, value);
+                game.setClientInfo(player.client, client.info);
                 queued.push({ message: { kind: 'set-info', slot: player.slot, key, value }, destination: { kind: 'broadcast', reliable: true } });
             } else options.print(`Unhandled QW client command: ${name}`);
         },

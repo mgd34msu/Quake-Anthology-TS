@@ -20,6 +20,8 @@ import { SizeBuf } from '../../../src/network/q1/message.ts';
 import { QuakeWorldConnectClient } from '../../../src/network/q1/handshake.ts';
 import { QuakeWorldChannel } from '../../../src/network/q1/channels.ts';
 import { writeClientStringCommand } from '../../../src/network/q1/session.ts';
+import { decodeQuakeWorldClient, writeQuakeWorldMove } from '../../../src/network/q1/commands.ts';
+import { SZ_Write } from '../../../src/network/q1/message.ts';
 
 test('native QW transport signs on, recovers command groups, sends deltas, downloads and travels over owned UDP', async () => {
     const root = await mkdtemp(join(tmpdir(), 'qw-host-transport-'));
@@ -32,12 +34,15 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         const baseline = qwEntity(wireEntity);
         let serverCount = 1, begun = 0, spawned = 0, drop = false, admittedCount = 0, paused = false, overflow = false;
         const pendingReliable: QwServerMessage[] = [];
+        const userInfo = new Map<string, string>();
         const spawnStarts: number[] = [];
         const delayed: { resolve: ((source: DownloadSource | null) => void) | null; closed: number } = { resolve: null, closed: 0 };
         let failedReadCloses = 0;
         const groups: { sequence: number; commands: readonly QwUserCommand[] }[] = [], disconnected: string[] = [], prints: string[] = [];
         const records: QuakeWorldMessage[] = [], deliveries: (readonly QuakeWorldMessage[])[] = [], serverCounts: number[] = [], downloaded: number[] = [];
         const host: QwApplicationServerHost = {
+            clientInfo: () => userInfo,
+            commandPhase: (_player, action) => action(),
             maxClients: 32, get paused() { return paused; }, supportsSourceWire: () => ({ kind: 'supported' }),
             admit: () => { const slot = admittedCount++; return { kind: 'accepted', player: { client: identity.client(slot, 0), actor: identity.actor(slot + 1, 0), slot } }; },
             carriedPlayer: client => ({ client, slot: client.slot, actor: identity.actor(client.slot + 1, serverCount - 1) }),
@@ -64,7 +69,9 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
             // Native sv_ents.c sets MOREBITS before SOLID; skin change supplies the required low-bit byte.
             frame: () => ({ entities: [{ ...baseline, frame: 4, skin: 1, origin: { x: serverCount * 16, y: 8, z: 24 } }],
                 messages: overflow ? [{ kind: 'print', level: 2, text: 'x'.repeat(1600) }] : [], reliable: pendingReliable.splice(0) }),
-            commandGroup: (_player, commands, sequence) => { groups.push({ commands, sequence }); }, command: () => undefined,
+            commandGroup: (_player, commands, sequence) => { groups.push({ commands, sequence }); }, command: (_player, name, args) => {
+                const key = args[0], value = args[1]; if (name === 'setinfo' && key !== undefined && value !== undefined) userInfo.set(key, value);
+            },
             observe: () => undefined, print: text => { prints.push(text); }
         };
         const serverSocket = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
@@ -72,7 +79,22 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         const clientSocket = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
         const transport: DatagramTransport<IpAddress> = {
             address: clientSocket.address, get closed() { return clientSocket.closed; },
-            send: (to, bytes) => { if (drop) { drop = false; return true; } return clientSocket.send(to, bytes); },
+            send: (to, bytes) => {
+                if (drop) { drop = false; return true; }
+                if (bytes.length > 10 && bytes[10] === 3) {
+                    const sequence = new DataView(bytes.buffer, bytes.byteOffset).getUint32(0, true) & 0x7fffffff;
+                    const commands = decodeQuakeWorldClient(bytes.subarray(10), { kind: 'q1-quakeworld', version: 28 }, sequence);
+                    const body = new SizeBuf(1450);
+                    for (const command of commands) {
+                        if (command.kind === 'move') writeQuakeWorldMove(body, { kind: 'q1-quakeworld', version: 28 }, { ...command.bundle, lossPercent: 37 }, sequence);
+                        else if (command.kind === 'delta') SZ_Write(body, new Uint8Array([5, command.sequence]));
+                        else if (command.kind === 'string-command') writeClientStringCommand(body, command.text);
+                    }
+                    const packet = new Uint8Array(10 + body.cursize); packet.set(bytes.subarray(0, 10)); packet.set(body.bytes(), 10);
+                    return clientSocket.send(to, packet);
+                }
+                return clientSocket.send(to, bytes);
+            },
             poll: () => clientSocket.poll(), subscribeReadable: listener => clientSocket.subscribeReadable(listener), close: () => clientSocket.close()
         };
         const native = new QwClientNetwork({ transport, remote: server.address, qport: 27001, userinfo: () => '\\name\\Transport peer\\rate\\10000', host: {
@@ -135,6 +157,9 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         for (let i = 0; i < 20 && records.filter(record => record.kind === 'download' && record.result.kind === 'missing').length === failedBefore; i++) await exchange();
         expect(records.filter(record => record.kind === 'download' && record.result.kind === 'missing').length).toBe(failedBefore + 1);
         expect(server.clients).toHaveLength(1);
+        native.submit([move(0)], now); await exchange(); native.command('pings'); native.submit([move(0)], now); await exchange();
+        expect(records.some(record => record.kind === 'packet-loss' && record.slot === 0 && record.value === 37)).toBe(true);
+        expect(records.some(record => record.kind === 'ping' && record.slot === 0 && record.value > 0 && record.value !== 9999)).toBe(true);
         // A second connected slot makes failed travel validate every peer before mutation.
         secondSocket = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
         const second = new QuakeWorldConnectClient(27002, '\\name\\Second');

@@ -22,6 +22,8 @@ export interface QwApplicationServerHost {
     supportsSourceWire(): WireAdmission;
     admit(request: QuakeWorldConnectRequest): { readonly kind: 'accepted'; readonly player: QwApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
     carriedPlayer(client: ClientId): QwApplicationPlayer;
+    clientInfo(player: QwApplicationPlayer): ReadonlyMap<string, string>;
+    commandPhase(player: QwApplicationPlayer, action: () => void, emit: (recipient: QwApplicationPlayer, message: QwServerMessage) => void): void;
     disconnect(player: QwApplicationPlayer, reason: string): void;
     signon(player: QwApplicationPlayer): QuakeWorldSignonHost;
     prepareDownload?(player: QwApplicationPlayer, path: string): Promise<DownloadSource | null>;

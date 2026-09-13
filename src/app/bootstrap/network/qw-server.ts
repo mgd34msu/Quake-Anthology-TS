@@ -5,6 +5,8 @@ import type { QwUserCommand } from '../../../contracts/protocol.ts';
 import type { DownloadSource } from '../../../network/services/downloads.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
+import { parseQ1Token } from '../../../core/common-parse.ts';
+import { SourceChatFlood } from '../../../network/services/admin.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
 import { QuakeWorldChannel } from '../../../network/q1/channels.ts';
 import { decodeQuakeWorldClient, QuakeWorldCommandReplay } from '../../../network/q1/commands.ts';
@@ -20,6 +22,7 @@ import type { QwApplicationPlayer, QwApplicationServerHost, QwServerMessage, QwS
 
 const protocol = { kind: 'q1-quakeworld', version: 28 } satisfies Extract<ApplicationNetwork['wire'], { kind: 'source' }>['protocol'];
 interface Frame { readonly sequence: number; readonly states: readonly QwEntityStateT[]; }
+interface PingFrame { readonly sequence: number; readonly sent: number; ping: number; }
 interface Peer {
     remote: IpAddress;
     player: QwApplicationPlayer;
@@ -35,6 +38,10 @@ interface Peer {
     delta: number | null;
     choked: number;
     lastReceived: number;
+    messageLevel: number;
+    lossPercent: number;
+    readonly pingFrames: Map<number, PingFrame>;
+    readonly chatFlood: SourceChatFlood;
 }
 export class QwServerNetwork implements ApplicationNetwork {
     readonly role = 'server';
@@ -64,7 +71,9 @@ export class QwServerNetwork implements ApplicationNetwork {
                     const rate = quakeWorldInfo(request.userinfo).get('rate');
                     const peer: Peer = { remote: request.from, player: admitted.player, channel: new QuakeWorldChannel('server', request.qport, 1450, rate ? this.rate(rate) : 2500),
                         signon: binding.signon, baselines: binding.baselines, replay: new QuakeWorldCommandReplay(), reliable: [], frames: new Map<number, Frame>(),
-                        reliableLength: 0, active: false, reply: false, delta: null, choked: 0, lastReceived: now };
+                        reliableLength: 0, active: false, reply: false, delta: null, choked: 0, lastReceived: now,
+                        messageLevel: nativeAtoi(quakeWorldInfo(request.userinfo).get('msg') ?? '0'), lossPercent: 0,
+                        pingFrames: new Map<number, PingFrame>(), chatFlood: new SourceChatFlood(4, 4, 10) };
                     this.peers.push(peer);
                 } catch (error) { this.host.disconnect(admitted.player, 'Signon failed'); throw error; }
                 return { kind: 'accepted' };
@@ -75,6 +84,46 @@ export class QwServerNetwork implements ApplicationNetwork {
     get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
     get clients(): readonly QwApplicationPlayer[] { return this.peers.map(peer => peer.player); }
     private rate(value: string): number { return Math.max(500, Math.min(10000, nativeAtoi(value))); }
+    private clientPrint(peer: Peer, level: number, text: string): void {
+        this.deliver(peer, { kind: 'print', level, text });
+    }
+    private deliver(peer: Peer, message: QwServerMessage): void {
+        if (!this.peers.includes(peer) || (message.kind === 'print' && message.level < peer.messageLevel)) return;
+        try { this.enqueue(peer, this.bytes([message])); }
+        catch (error) { this.disconnectClient(peer.player.client, error instanceof Error ? error.message : String(error)); }
+    }
+    private clientCommand(peer: Peer, name: string, args: readonly string[], text: string, now: number): boolean {
+        if (name === 'msg') {
+            if (args.length === 1) peer.messageLevel = nativeAtoi(args[0] ?? '');
+            this.clientPrint(peer, 2, `${args.length === 1 ? 'Msg level set to' : 'Current msg level is'} ${peer.messageLevel}\n`);
+            return true;
+        }
+        if (name === 'pings') {
+            for (const other of [...this.peers]) if (other.active) {
+                const samples = [...other.pingFrames.values()].filter(frame => frame.ping > 0);
+                const ping = samples.length === 0 ? 9999 : Math.trunc(samples.reduce((sum, frame) => sum + frame.ping, 0) / samples.length);
+                this.deliver(peer, { kind: 'ping', slot: other.player.slot, value: ping });
+                this.deliver(peer, { kind: 'packet-loss', slot: other.player.slot, value: other.lossPercent });
+            }
+            return true;
+        }
+        if (name === 'kill' && !peer.active) { this.clientPrint(peer, 2, "Can't suicide -- allready dead!\n"); return true; }
+        if (name !== 'say' && name !== 'say_team') return false;
+        if (args.length === 0) return true;
+        const flood = peer.chatFlood.check(now / 1000, this.host.paused);
+        if (flood.kind !== 'allowed') {
+            this.clientPrint(peer, 3, flood.kind === 'locked' ? `You can't talk for ${flood.seconds} more seconds\n` : `FloodProt: You can't talk for ${flood.seconds} seconds.\n`);
+            return true;
+        }
+        const info = this.host.clientInfo(peer.player), team = name === 'say_team', senderTeam = (info.get('team') ?? '').slice(0, 31);
+        const parsed = { data: text, index: 0 }; parseQ1Token(parsed, 'quakeworld');
+        let words = text.slice(parsed.index).trimStart();
+        if (words.startsWith('"')) words = words.slice(1, -1);
+        const sender = (info.get('name') ?? '').slice(0, 31), message = `${team ? `(${sender})` : sender}: ${words}\n`;
+        this.host.print(message);
+        for (const recipient of [...this.peers]) if (recipient.active && (!team || (this.host.clientInfo(recipient.player).get('team') ?? '') === senderTeam)) this.clientPrint(recipient, 3, message);
+        return true;
+    }
     private validate(host: QwApplicationServerHost): void {
         const support = host.supportsSourceWire();
         if (support.kind === 'unsupported') throw new Error(support.reasons.join('; '));
@@ -149,23 +198,22 @@ export class QwServerNetwork implements ApplicationNetwork {
                 if (owner === undefined) continue;
                 const canReply = new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0, true) % 0x80000000 >= owner.channel.outgoingSequence;
                 const delivery = owner.channel.receive(packet.payload, now); if (delivery === null) continue;
+                const acknowledged = owner.pingFrames.get(delivery.acknowledged & 63);
+                if (acknowledged?.sequence === delivery.acknowledged) acknowledged.ping = now - acknowledged.sent;
+                const nextSequence = owner.channel.outgoingSequence;
+                owner.pingFrames.set(nextSequence & 63, { sequence: nextSequence, sent: now, ping: -1 });
                 owner.remote = packet.from; owner.lastReceived = now; owner.reply = canReply; owner.delta = null;
                 for (const message of decodeQuakeWorldClient(delivery.payload, protocol, delivery.sequence)) {
                     if (!this.peers.includes(owner)) break;
                     if (message.kind === 'delta') owner.delta = message.sequence;
                     else if (message.kind === 'move' && owner.active) {
+                        owner.lossPercent = message.bundle.lossPercent;
                         const commands: QwUserCommand[] = [];
                         owner.replay.run(message.bundle, delivery.dropped, this.host.paused, command => commands.push(command));
                         if (commands.length !== 0) this.host.commandGroup(owner.player, commands, delivery.sequence);
                     } else if (message.kind === 'string-command') {
                         const [name, ...args] = quakeWorldCommandArguments(message.text);
                         if (name === 'drop' || name === 'disconnect') { this.disconnectClient(owner.player.client, 'Client disconnected'); continue; }
-                        if (name === 'rate') {
-                            if (args.length === 1) owner.channel.bytesPerSecond = this.rate(args[0] ?? '');
-                            this.enqueue(owner, this.bytes([{ kind: 'print', level: 2, text: `${args.length === 1 ? 'Net rate set to' : 'Current rate is'} ${owner.channel.bytesPerSecond}\n` }]));
-                            continue;
-                        }
-                        if (name === 'setinfo' && args.length === 2 && args[0] === 'rate' && args[1] !== '') owner.channel.bytesPerSecond = this.rate(args[1] ?? '');
                         let prepared: DownloadSource | null | undefined;
                         if (name === 'download' && this.host.prepareDownload !== undefined) {
                             const acceptedHost = this.host, acceptedSignon = owner.signon, acceptedPlayer = owner.player;
@@ -177,7 +225,34 @@ export class QwServerNetwork implements ApplicationNetwork {
                         }
                         const result = owner.signon.command(message.text, prepared);
                         if (result.kind === 'handled') for (const bytes of result.messages) this.enqueue(owner, bytes);
-                        else if (name !== undefined) this.host.command(owner.player, name, args);
+                        else if (name !== undefined) {
+                            const peer = owner, acceptedHost = this.host, acceptedPlayer = owner.player;
+                            const current = (): boolean => !this.ended && this.host === acceptedHost && this.peers.includes(peer) && peer.player === acceptedPlayer;
+                            const failed = (error: unknown): void => {
+                                const reason = error instanceof Error ? error.message : String(error); acceptedHost.print(reason);
+                                if (current()) this.disconnectClient(acceptedPlayer.client, reason);
+                            };
+                            acceptedHost.commandPhase(acceptedPlayer, () => {
+                                if (!current()) return;
+                                try {
+                                    if (name === 'rate') {
+                                        if (args.length === 1) peer.channel.bytesPerSecond = this.rate(args[0] ?? '');
+                                        this.clientPrint(peer, 2, `${args.length === 1 ? 'Net rate set to' : 'Current rate is'} ${peer.channel.bytesPerSecond}\n`); return;
+                                    }
+                                    if (this.clientCommand(peer, name, args, message.text, now)) return;
+                                    acceptedHost.command(acceptedPlayer, name, args);
+                                    if (name === 'setinfo') {
+                                        const info = acceptedHost.clientInfo(acceptedPlayer), level = info.get('msg'), rate = info.get('rate');
+                                        if (level !== undefined && level !== '') peer.messageLevel = nativeAtoi(level);
+                                        if (rate !== undefined && rate !== '') peer.channel.bytesPerSecond = this.rate(rate);
+                                    }
+                                } catch (error) { failed(error); }
+                            }, (recipient, record) => {
+                                if (this.ended || this.host !== acceptedHost) return;
+                                const target = this.peers.find(candidate => candidate.player.client.equals(recipient.client) && candidate.player.actor.equals(recipient.actor));
+                                if (target !== undefined) this.deliver(target, record);
+                            });
+                        }
                     }
                 }
             } catch (error) {
@@ -201,7 +276,7 @@ export class QwServerNetwork implements ApplicationNetwork {
         if (frame !== null) {
             try {
                 if (peer.choked !== 0) { writeQuakeWorldMessage(buffer, protocol, { kind: 'choke-count', count: peer.choked }); peer.choked = 0; }
-                for (const message of frame.messages) writeQuakeWorldMessage(buffer, protocol, message);
+                for (const message of frame.messages) if (message.kind !== 'print' || message.level >= peer.messageLevel) writeQuakeWorldMessage(buffer, protocol, message);
                 const states = frame.entities.map(state => qwWireEntity(state, (state.quakeWorldFlags & U_SOLID) !== 0));
                 const previous = peer.delta === null ? null : [...peer.frames.values()].find(value => (value.sequence & 255) === peer.delta && sequence - value.sequence < 64) ?? null;
                 writeQuakeWorldEntities(buffer, protocol, states, peer.baselines, previous);
@@ -222,7 +297,7 @@ export class QwServerNetwork implements ApplicationNetwork {
         for (const peer of [...this.peers]) if (peer.active) {
             try {
                 const frame = this.host.frame(peer.player, output);
-                for (const message of frame.reliable) this.enqueue(peer, this.bytes([message]));
+                for (const message of frame.reliable) if (message.kind !== 'print' || message.level >= peer.messageLevel) this.enqueue(peer, this.bytes([message]));
                 this.send(peer, frame, now);
             } catch (error) { this.disconnectClient(peer.player.client, error instanceof Error ? error.message : String(error)); }
         }

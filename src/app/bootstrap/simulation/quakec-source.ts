@@ -321,6 +321,13 @@ export class QuakeCSource {
     this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
     return actor;
   }
+  clientKill(actor: ActorId): boolean {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor) || this.entities.at(slot).float(this.field("health")) <= 0) return false;
+    this.invoke(this.prepared.program.functionNamed("ClientKill").index, slot, 0, this.currentTime);
+    return true;
+  }
+  hasClient(client: ClientId): boolean { return this.clientIdentities.get(client.slot + 1)?.equals(client) === true; }
   disconnectClient(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id);
     if (slot === null || !this.isReservedClient(actor.id)) throw new Error("QC disconnect requires a reserved client");

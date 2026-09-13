@@ -57,6 +57,27 @@ export class FloodLimiter {
   expire(now: number): void { for (const [key, entry] of this.entries) if (now - entry.time > this.burst * this.intervalMilliseconds) this.entries.delete(key); }
 }
 
+/** Per-client source chat history; QW sv_user.c uses a ten-entry ring and realtime seconds. */
+export class SourceChatFlood {
+  private readonly times = new Float64Array(10);
+  private head = 0;
+  private lockedUntil = 0;
+  constructor(readonly messages: number, readonly seconds: number, readonly lockSeconds: number) {
+    if (!Number.isInteger(messages) || messages < 0 || messages > 10 || seconds < 0 || lockSeconds < 0) throw new RangeError("Invalid source chat flood policy");
+  }
+  check(now: number, paused = false): { readonly kind: "allowed" } | { readonly kind: "locked" | "flood"; readonly seconds: number } {
+    if (this.messages === 0) return { kind: "allowed" };
+    if (!paused && now < this.lockedUntil) return { kind: "locked", seconds: Math.trunc(this.lockedUntil - now) };
+    const previous = this.times[(this.head - this.messages + 11) % 10] ?? 0;
+    if (!paused && previous !== 0 && now - previous < this.seconds) {
+      this.lockedUntil = now + this.lockSeconds;
+      return { kind: "flood", seconds: Math.trunc(this.lockSeconds) };
+    }
+    this.head = (this.head + 1) % 10; this.times[this.head] = now;
+    return { kind: "allowed" };
+  }
+}
+
 export interface RconHost {
   password(): string;
   execute(command: string, output: (text: string) => void): Promise<void>;

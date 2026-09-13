@@ -236,7 +236,7 @@ export class SharedSimulation implements Simulation {
   private q1Restart = false;
   private readonly lastAttack = new Map<OwnedActor, AttackProvenance>();
   private readonly areaPortals = new Map<number, boolean>();
-  private readonly quakeWorldCommands: { readonly client: ClientId; readonly commands: readonly QwUserCommand[]; readonly sequence: number }[] = [];
+  private readonly quakeWorldCommands: ({ readonly kind: "move"; readonly client: ClientId; readonly commands: readonly QwUserCommand[]; readonly sequence: number } | { readonly kind: "action"; readonly client: ClientId; readonly action: () => void })[] = [];
   private quakeWorldTouched: Set<number> | null = null;
 
   constructor(readonly options: SimulationOptions) {
@@ -2247,7 +2247,13 @@ export class SharedSimulation implements Simulation {
     if (player === undefined) throw new Error("QuakeWorld command client has not begun");
     for (const command of commands) if (!Number.isInteger(command.milliseconds) || command.milliseconds < 0 || command.milliseconds > 255)
       throw new Error("Invalid QuakeWorld command duration");
-    this.quakeWorldCommands.push({ client, commands: structuredClone(commands), sequence });
+    this.quakeWorldCommands.push({ kind: "move", client, commands: structuredClone(commands), sequence });
+  }
+  queueQuakeWorldAction(client: ClientId, action: () => void): void {
+    this.assertOpen();
+    if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld" || !this.options.identity.owns(client)
+      || !this.source.game.hasClient(client)) throw new Error("QuakeWorld action requires a connected client");
+    this.quakeWorldCommands.push({ kind: "action", client, action });
   }
   private runQuakeWorldNewMissile(): void {
     if (this.source.kind !== "quakec" || this.source.game.kind !== "quakeworld") return;
@@ -2264,6 +2270,14 @@ export class SharedSimulation implements Simulation {
     const source = this.source.game;
     for (const group of this.quakeWorldCommands.splice(0)) {
       const player = [...this.playerStates.values()].find(player => player.client.equals(group.client));
+      if (group.kind === "action") {
+        if (!source.hasClient(group.client)) continue;
+        group.action();
+        if (player === undefined || !source.isActiveClient(player.actor.id)) continue;
+        player.arsenal = source.clientArsenal(player.actor.id); player.animation = source.clientAnimation(player.actor.id);
+        player.state = player.readState(); this.syncQuakeCClientView(player);
+        continue;
+      }
       if (player === undefined || group.sequence <= player.lastSequence) continue;
       this.quakeWorldTouched = new Set<number>();
       try {
