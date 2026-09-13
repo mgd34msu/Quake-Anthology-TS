@@ -75,6 +75,7 @@ export interface QwMovementProfile extends MovementProfileFields {
   readonly parameters: Q1MovementParameters;
 }
 export interface Q2MovementProfile extends MovementProfileFields {
+  readonly strafejumpHack?: boolean;
   readonly kind: "q2-classic";
   readonly airAccelerate: number;
   readonly snapInitial: boolean;

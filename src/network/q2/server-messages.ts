@@ -262,6 +262,7 @@ export class Q2ServerMessageReader {
                     if (protocol !== this.wire.protocol.version)
                         throw new Error(`Q2 serverdata protocol ${protocol} differs from negotiated ${this.wire.protocol.version}`);
                     const data = this.wire.codec.readServerData();
+                    this.wire.acceptServerRevision(data.r1q2Version);
                     this.reset();
                     event = { kind: 'server-data', data };
                     break;

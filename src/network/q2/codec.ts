@@ -22,14 +22,23 @@ export function q2CodecSupport(protocol: Q2ProtocolIdentity): Q2CodecSupport {
         return { kind: 'unbound', reason: 'Q2PRO revision 1016 is reserved by the native protocol' };
     return { kind: 'supported', encode: true, decode: true };
 }
+export function negotiatedR1Q2Protocol(offered: Extract<Q2ProtocolIdentity, { kind: 'q2-r1q2' }>, reported: number | undefined): Extract<Q2ProtocolIdentity, { kind: 'q2-r1q2' }> {
+    if (reported !== 1903 && reported !== 1904 && reported !== 1905) throw new Error(`Unsupported R1Q2 server revision ${reported}`);
+    // R1Q2 can report its highest revision while sending the revision requested at connect.
+    const revision = reported < offered.revision ? reported : offered.revision;
+    return { kind: 'q2-r1q2', version: 35, revision };
+}
 export class Q2WireCodec {
     readonly message = createMessage(0);
-    readonly codec: ProtocolCodec;
+    private selectedCodec: ProtocolCodec;
+    private selectedProtocol: Q2ProtocolIdentity;
     readonly rerelease: ReturnType<typeof createRereleaseContext>;
     readonly kex: ReturnType<typeof createKexContext>;
     private readonly r1: ReturnType<typeof createR1Context>;
     private readonly q2pro: ReturnType<typeof createQ2ProContext>;
-    constructor(readonly protocol: Q2ProtocolIdentity) {
+    constructor(private readonly offeredProtocol: Q2ProtocolIdentity) {
+        const protocol = offeredProtocol;
+        this.selectedProtocol = protocol;
         const support = q2CodecSupport(protocol);
         if (support.kind === 'unbound')
             throw new Error(support.reason);
@@ -39,26 +48,34 @@ export class Q2WireCodec {
         this.q2pro = createQ2ProContext(this.message);
         switch (protocol.kind) {
             case 'q2-classic':
-                this.codec = createVanillaContext(this.message).VANILLA_CODEC;
+                this.selectedCodec = createVanillaContext(this.message).VANILLA_CODEC;
                 break;
             case 'q2-r1q2':
-                this.codec = this.r1.createR1Q2Codec(protocol.revision);
+                this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
                 break;
             case 'q2-q2pro':
-                this.codec = this.q2pro.createQ2ProCodec(protocol.revision);
+                this.selectedCodec = this.q2pro.createQ2ProCodec(protocol.revision);
                 break;
             case 'q2-rerelease':
-                this.codec = this.rerelease.Q2REPRO_CODEC;
+                this.selectedCodec = this.rerelease.Q2REPRO_CODEC;
                 break;
             case 'q2-private-classic':
-                this.codec = this.rerelease.Q2REPRO_CLASSIC_CODEC;
+                this.selectedCodec = this.rerelease.Q2REPRO_CLASSIC_CODEC;
                 break;
             case 'q2-kex':
             case 'q2-kex-demo':
                 this.kex.setKexProtocol(protocol.version);
-                this.codec = this.kex.KEX_DEMO_CODEC;
+                this.selectedCodec = this.kex.KEX_DEMO_CODEC;
                 break;
         }
+    }
+    get protocol(): Q2ProtocolIdentity { return this.selectedProtocol; }
+    get codec(): ProtocolCodec { return this.selectedCodec; }
+    acceptServerRevision(reported: number | undefined): void {
+        if (this.offeredProtocol.kind !== 'q2-r1q2') return;
+        const protocol = negotiatedR1Q2Protocol(this.offeredProtocol, reported);
+        this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
+        this.selectedProtocol = protocol;
     }
     get q2proRevision(): number { return this.q2pro.features.revision; }
     get q2proExtended(): boolean { return this.protocol.kind === 'q2-q2pro' && q2proExtensions(this.q2pro.features); }

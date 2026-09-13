@@ -76,7 +76,7 @@ test('normal remote application joins the donor R1Q2 server over localhost UDP',
         const moved = remote.playerView(player.actor).origin;
         expect(Math.hypot(moved.x - origin.x, moved.y - origin.y)).toBeGreaterThan(1);
         expect(serverMoved).toBe(true);
-        await expect(remote.gameState({ data: { serverState: 2, servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'invalid', r1q2Version: 1904, r1q2StrafejumpHack: true }, configStrings: new Map<number, string>(), baselines: new Map<number, EntityStateT>() })).rejects.toThrow('strafejump prediction');
+        await expect(remote.gameState({ data: { serverState: 2, servercount: 1, attractloop: false, gamedir: 'baseq2', clientnum: 0, levelname: 'invalid', r1q2Version: 1906, r1q2StrafejumpHack: true }, configStrings: new Map<number, string>(), baselines: new Map<number, EntityStateT>() })).rejects.toThrow('Unsupported R1Q2 server revision');
     } finally {
         try { await app?.close(); } finally {
             donor.kill('SIGTERM');

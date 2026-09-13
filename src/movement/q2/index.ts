@@ -111,7 +111,7 @@ export function moveQ2Classic(input: Q2MovementInput, services: MovementServices
     mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body,
     trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, MASK_CLASSIC_PLAYERSOLID), pointcontents: scene.pointcontents,
   };
-  pmoveClassic(pm, services.numeric, input.profile.airAccelerate);
+  pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false);
   const state: Q2MovementState = { kind: "q2-classic", type: pm.s.pm_type, originEighths: [...pm.s.origin], velocityEighths: [...pm.s.velocity],
     flags: pm.s.pm_flags, timeEightMilliseconds: pm.s.pm_time, gravity: pm.s.gravity, deltaAngleShorts: [...pm.s.delta_angles] };
   const contacts = movementContacts(pm.touchtraces.slice(0, pm.numtouch));

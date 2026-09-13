@@ -2,7 +2,8 @@ import type { ClientDownloadPermission } from './client-download-policy.ts';
 import type { WorldText } from "../../../text/world.ts";
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
-import type { Vec3 } from '../../../contracts/math.ts';
+import { negotiatedR1Q2Protocol } from '../../../network/q2/codec.ts';
+import type { Bounds, Vec3 } from '../../../contracts/math.ts';
 import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
 import type { ActorCommand, BodySnapshot, SimulationOutput } from '../../../contracts/session.ts';
 import type { SceneLightStyle, SceneQueries } from '../../../contracts/scene.ts';
@@ -36,6 +37,12 @@ export interface Q2RemotePresentationOptions {
     loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
     refreshDownloads?(assertCurrent: () => void): Promise<LoadedApplicationContent>;
 }
+export function q2RemoteEntityBounds(solid: number, longSolid: boolean): Bounds {
+    const size = longSolid ? solid & 255 : (solid & 31) * 8;
+    const down = longSolid ? solid >>> 8 & 255 : (solid >>> 5 & 31) * 8;
+    const up = longSolid ? (solid >>> 16 & 65535) - 32768 : (solid >>> 10 & 63) * 8 - 32;
+    return { min: { x: -size, y: -size, z: -down }, max: { x: size, y: size, z: up } };
+}
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(values: Float32Array): Vec3 { return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) }; }
 function interpolate(from: Vec3, to: Vec3, fraction: number): Vec3 { return { x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction, z: from.z + (to.z - from.z) * fraction }; }
@@ -47,7 +54,9 @@ function interpolateAngles(from: Vec3, to: Vec3, fraction: number): Vec3 {
 export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePresentationAccess {
     readonly downloads: Q2DownloadReceiver;
     readonly client: SessionClient;
-    readonly protocol: Q2ProtocolIdentity;
+    private selectedProtocol: Q2ProtocolIdentity;
+    private strafejumpHack = false;
+    get protocol(): Q2ProtocolIdentity { return this.selectedProtocol; }
     readonly messageOptions;
     readonly userinfo: () => string;
     private readonly layout;
@@ -81,9 +90,9 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         },
     };
     constructor(readonly options: Q2RemotePresentationOptions) {
-        if (options.protocol.kind !== 'q2-classic' && !(options.protocol.kind === 'q2-r1q2' && options.protocol.revision === 1904))
-            throw new Error('Remote application presentation binds Q2 protocol 34 or R1Q2 revision 1904');
-        this.protocol = options.protocol;
+        if (options.protocol.kind !== 'q2-classic' && options.protocol.kind !== 'q2-r1q2')
+            throw new Error('Remote application presentation binds Q2 protocol 34 or R1Q2');
+        this.selectedProtocol = options.protocol;
         this.layout = q2ApplicationLayout(options.protocol);
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
         this.userinfo = options.userinfo;
@@ -123,8 +132,9 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         return actor;
     }
     async gameState(state: Q2ApplicationGameState): Promise<void> {
-        if (this.protocol.kind === 'q2-r1q2' && (state.data.r1q2Version !== this.protocol.revision || state.data.r1q2StrafejumpHack))
-            throw new Error('Remote R1Q2 requires negotiated revision 1904 with stock movement; strafejump prediction is unbound');
+        const offered = this.options.protocol;
+        if (offered.kind === 'q2-r1q2') this.selectedProtocol = negotiatedR1Q2Protocol(offered, state.data.r1q2Version);
+        this.strafejumpHack = offered.kind === 'q2-r1q2' && state.data.r1q2StrafejumpHack === true;
         const revision = this.downloads.revision;
         const content = this.options.loadContent === undefined ? this.content : await this.options.loadContent(state);
         if (revision !== this.downloads.revision) return;
@@ -255,8 +265,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.receivedAt = nowMilliseconds;
         const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
         const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
-            const size = entity.solid & 31, down = entity.solid >> 5 & 31, up = (entity.solid >> 10 & 63) * 8 - 32;
-            return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds: { min: { x: -size * 8, y: -size * 8, z: -down * 8 }, max: { x: size * 8, y: size * 8, z: up } }, ground: null } };
+            const bounds = q2RemoteEntityBounds(entity.solid, this.protocol.kind === 'q2-r1q2' && this.protocol.revision >= 1905);
+            return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds, ground: null } };
         });
         bodies.push({ actor: player.actor, body: { origin: view.origin, angles: view.angles, velocity, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: view.viewHeight + 10 } }, ground: null } });
         const time = frame.serverFrame * this.frameMilliseconds, recipe = this.content.recipe;
@@ -295,6 +305,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const profile = movementProfile(recipe);
         if (profile.kind !== 'q2-classic' || native.kind !== 'q2-classic') return;
         const airAccelerate = (): number => Number(this.configs.get(this.layout.airAccelerate) ?? '0');
+        const strafejumpHack = (): boolean => this.strafejumpHack;
         const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
         const snapshot: MovementPredictionSnapshot = { sequence: this.packetAcknowledged, commandTimeMilliseconds: frame.serverFrame * this.frameMilliseconds,
             state: native.movement, viewAngles: native.viewAngles, viewHeight: native.viewOffset.z, viewOffset: native.viewOffset, bounds,
@@ -306,7 +317,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             contact: null, q3Arsenal: null };
         if (this.predictionOwner === null) this.predictionOwner = new SelectedMovementPrediction({
             actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider), seat: this.options.identity.seat(this.client.id.slot),
-            recipe, get profile() { return { ...profile, airAccelerate: airAccelerate() }; },
+            recipe, get profile() { return { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() }; },
             standingBounds: bounds, standingViewHeight: 22, scene: this.collision,
             isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && (this.current?.entities.some(entity => this.actor(entity.number).equals(hit.actor) && entity.solid === 31) ?? false),
         }, snapshot);
