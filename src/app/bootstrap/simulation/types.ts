@@ -33,6 +33,7 @@ import type { SaveImage } from "../../../contracts/session.ts";
 
 export interface SimulationOptions {
   readonly dedicated?: boolean;
+  readonly promptSupported?: (client: ClientId) => boolean;
   readonly preparedQuakeC?: PreparedQuakeCSource;
   readonly identity: IdentityOwner;
   readonly recipe: ExecutableRecipe;

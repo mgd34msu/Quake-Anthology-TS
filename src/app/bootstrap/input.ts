@@ -55,6 +55,7 @@ export interface ApplicationInputCommands {
 export interface ApplicationInputUi {
   input(event: SeatInputEvent, focus: SeatInputFocus): boolean;
   closeMenus(): void;
+  clearPrompt?(): void;
   sample(input: SeatInputSample): SeatInputSample;
   wheel(mode: "weapons" | "powerups", down: boolean): void;
 }
@@ -282,6 +283,7 @@ export class ApplicationInput {
     for (const local of this.locals) {
       const player = players.find(player => player.seat.id.equals(local.player.seat.id));
       if (player === undefined) throw new Error("World travel has no player for a local seat");
+      this.seatUi.get(local.player.seat.id)?.clearPrompt?.();
       local.haptics.invalidateAssets();
       local.input.release(this.now());
       local.player.actor = player.actor;

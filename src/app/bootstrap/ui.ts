@@ -27,6 +27,7 @@ import type { SimulationPresentationAccess, SimulationPresentationEvent } from "
 import type { MenuTypography } from "./menu-font.ts";
 import { menuPanel, menuSkin, menuTitleFont } from "../../ui/common/menu-theme.ts";
 import { layoutText } from "../../text/layout.ts";
+import { SeatGamePrompt, gamePromptMenu } from "./game-prompt.ts";
 import { Q2MatchUi } from "./q2-match-ui.ts";
 
 export class ApplicationSeatUi implements ApplicationInputUi {
@@ -37,6 +38,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   readonly text: UiTextRenderer;
   private readonly menuText: UiTextRenderer;
   private readonly match: Q2MatchUi;
+  private readonly prompt: SeatGamePrompt;
   private readonly settings: SettingsMenus;
   private readonly gyroSettings: SettingsMenus;
   private readonly serverSettings: SettingsMenus | null;
@@ -48,7 +50,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private weaponAssets: ApplicationWeaponHudAssets | null = null;
   private weaponIcons: { readonly weapon: ResourceId | null; readonly ammo: ResourceId | null } = { weapon: null, ammo: null };
 
-  async prepareWeaponHud(assets: ApplicationAssets): Promise<void> {
+  async prepare(assets: ApplicationAssets): Promise<void> {
+    await this.prompt.prepare(assets, () => this.local.input.focus);
     this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
     this.weaponIcons = await this.weaponAssets.prepare(this.simulation.playerUi(this.local.player.actor).weaponStatus);
   }
@@ -66,12 +69,13 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.menuText = new UiTextRenderer(seat);
     this.menuText.bind(art.skin.font, typography.body);
     this.menuText.bind(menuTitleFont, typography.title);
-    this.controller = new NativeUiController({ seat, skin: () => menuSkin(art.skin.font),
+    this.controller = new NativeUiController({ seat, skin: () => this.controller.activeMenu === gamePromptMenu ? { ...menuSkin(art.skin.font), titleFont: art.skin.font, titleScale: 2.6 } : menuSkin(art.skin.font),
       measureText: (text, scale) => layoutText({ text, font: typography.body, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width, now: input.now,
       bindings: () => local.input.bindings, appearance: () => this.preferences.values,
       focus: (focus, time) => { local.input.setFocus(focus, time); local.haptics.setActive(local.input.focused && focus.kind === "game"); input.router.updateCapture(); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
+    this.prompt = new SeatGamePrompt(seat, () => local.player.actor, this.controller, value => local.input.setImpulse(value));
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
       items: mode => simulation.playerUi(local.player.actor).items.filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
@@ -106,6 +110,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   input(event: SeatInputEvent, focus: SeatInputFocus): boolean {
     if (focus.kind === "console" || focus.kind === "chat") return false;
+    if (this.prompt.input(event)) return true;
+    if (this.controller.activeMenu === gamePromptMenu && (event.kind === "key" && event.code === KeyCode.Escape && event.down && !event.repeat
+      || event.kind === "controller-button" && (event.button === 1 || event.button === 6) && event.down
+      || event.kind === "mouse-button" && event.button === 3 && event.down)) { this.controller.openMenu("menu:application:game"); return true; }
     if (this.controller.activeMenu !== null) return this.controller.input(event);
     const menu = event.kind === "key" && event.code === KeyCode.Escape && event.down && !event.repeat
       || event.kind === "controller-button" && event.button === 6 && event.down;
@@ -123,7 +131,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   wheel(mode: "weapons" | "powerups", down: boolean): void { if (down) this.weaponWheel.open(mode); else this.weaponWheel.close(true); }
   closeMenus(): void { this.weaponWheel.close(false); this.controller.closeAll(); }
 
+  clearPrompt(): void { this.prompt.clear(); }
+
   receive(events: readonly SimulationPresentationEvent[]): void {
+    this.prompt.receive(events);
     for (const source of events) {
       if (source.kind === "q2-player" && source.event.kind === "userinfo") this.match.name(source.event.actor, source.event.name);
       if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) this.match.receive(source.event);
@@ -175,5 +186,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

@@ -118,6 +118,7 @@ export class Q1CharacterActor {
     this.viewOffset = vector(reader.field("viewOffset")); this.lastFallSpeed = reader.field("lastFallSpeed").number();
     this.airFinished = reader.field("airFinished").number(); this.drownDamage = reader.field("drownDamage").number(); this.hazardAt = reader.field("hazardAt").number(); this.inWater = reader.field("inWater").boolean(); return undefined;
   }
+  get lifecycle(): Pick<Q1CharacterPresentation, "life" | "viewOffset"> { return { life: this.life, viewOffset: this.viewOffset }; }
   get presentation(): Q1CharacterPresentation {
     const pose = this.life === "alive" ? this.options.sourcePose?.() : undefined;
     const model = this.life === "alive" ? this.input.invisible ? "progs/eyes.mdl" : pose?.definition?.model ?? "progs/player.mdl" : this.model;
