@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d",
-  "carriedVerdictsFrom": "a68b43edd5f2167d34ade98d55922e9dd0eff934",
+  "sourceCutoff": "9e55c75cd997bcb14d252e414140304018abb239",
+  "carriedVerdictsFrom": "c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -20,14 +20,14 @@
     },
     {
       "family": "q2",
-      "done": 113,
-      "notDone": 80,
+      "done": 114,
+      "notDone": 79,
       "total": 193,
-      "percentage": 58.5,
+      "percentage": 59.1,
       "methods": {
         "integrated": 62,
         "sharedReplacement": 31,
-        "extendedCommon": 20
+        "extendedCommon": 21
       }
     },
     {
@@ -44,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 286,
-    "notDone": 191,
+    "done": 287,
+    "notDone": 190,
     "total": 477,
-    "percentage": 60
+    "percentage": 60.2
   },
   "rows": [
     {
@@ -4608,14 +4608,17 @@
     {
       "id": "q2.assets.md5-replacements",
       "title": "Select correctly scaled skeletal model replacements",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Accepted a68b43e implements default Q2 application replacement selection with authored scale and corrected source culling. User-selectable replacement tiers remain unfinished: application gl_md5_load/gl_md5_use configuration and distance-based selection are not joined. G36 requires those controls; the loader itself is no longer missing.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 9e55c75 retains native MDL/MD2 with optional MD5 pairs and joins persisted load/use controls and per-seat distance selection to common CPU/GL presentation. Source precedence, authored scale, original bounds/frame fallback, skins and joint attachments are retained. Root passed 17 tests/369 assertions with no skips, strict/scoped policy checks, and inspected two-seat distance and Q1 menu/gun images. Model-specific remote execution was not rerun; full visual parity and a world-scale conversion are not claimed.",
       "paths": [
         "src/app/bootstrap/model-loader.ts",
         "src/formats/q3-model/replacements.ts",
         "src/render/scene/models/prepare.ts",
-        "docs/comparison-q2.md"
+        "docs/comparison-q2.md",
+        "src/render/scene/models/replacements.ts",
+        "src/app/bootstrap/image-settings.ts",
+        "tests/first-playable/application/model-settings.test.ts"
       ]
     },
     {

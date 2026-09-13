@@ -1,18 +1,18 @@
 # Implementation completion status
 
-Source cutoff: `c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d`. This finite review revisits only the five `q2.download.*` records and `q3.content.client-download-restart`. All six requirements are Done through the common engine with the bounded receipts below. All other 471 verdicts and reasons carry unchanged from `a68b43edd5f2167d34ade98d55922e9dd0eff934`; historical protocol/browser reasons are not newly endorsed or re-audited. Uncommitted changes are excluded. Counts describe requirement verdicts, not engine completion or equally sized work. Accepted source receipts do not update the installed binary (source `3a073e87`).
+Source cutoff: `9e55c75cd997bcb14d252e414140304018abb239`. This finite review revisits only `q2.assets.md5-replacements`, now Done/extended-common. All other 476 verdicts, reasons and paths carry unchanged from `c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d`; no full-ledger audit was performed. Uncommitted changes are excluded. Counts describe requirement verdicts, not engine completion. Accepted source receipts do not update the installed binary (source `3a073e87`).
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
 | Q1 | 122 | 58 | 180 | 67.8% |
-| Q2 | 113 | 80 | 193 | 58.5% |
+| Q2 | 114 | 79 | 193 | 59.1% |
 | Q3 | 51 | 53 | 104 | 49% |
-| Overall inventory | 286 | 191 | 477 | 60% |
+| Overall inventory | 287 | 190 | 477 | 60.2% |
 
 | Game | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: |
 | Q1 | 102 | 15 | 5 |
-| Q2 | 62 | 31 | 20 |
+| Q2 | 62 | 31 | 21 |
 | Q3 | 39 | 7 | 5 |
 
 ## Q1 requirements
@@ -721,13 +721,13 @@ Source cutoff: `c5787140eb4cc04ac6ad37f4e7dd1e70e090a61d`. This finite review re
 | --- | --- | --- | --- | --- |
 | `q2.diagnostics.runtime-camera` — Execute authored target cameras | done | integrated | Registered Q64 target_camera callbacks move source intermission cameras through authored targets, preserve the dummy/player state and restore normal play through player hooks. | [src/content/q2/rerelease/q64/index.ts](../src/content/q2/rerelease/q64/index.ts), [src/content/q2/rerelease/players.ts](../src/content/q2/rerelease/players.ts), [src/content/composition/q2/index.ts](../src/content/composition/q2/index.ts), [src/app/bootstrap/presentation.ts](../src/app/bootstrap/presentation.ts) |
 
-### assets — 3 done / 4 total
+### assets — 4 done / 4 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
 | `q2.assets.bspx-lightmaps` — Load decoupled BSPX lightmaps | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
 | `q2.assets.lightgrid` — Light entities from BSPX light grids | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
-| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | not-done | missing-work | Accepted a68b43e implements default Q2 application replacement selection with authored scale and corrected source culling. User-selectable replacement tiers remain unfinished: application gl_md5_load/gl_md5_use configuration and distance-based selection are not joined. G36 requires those controls; the loader itself is no longer missing. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/replacements.ts](../src/formats/q3-model/replacements.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [docs/comparison-q2.md](../docs/comparison-q2.md) |
+| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | done | extended-common | Accepted 9e55c75 retains native MDL/MD2 with optional MD5 pairs and joins persisted load/use controls and per-seat distance selection to common CPU/GL presentation. Source precedence, authored scale, original bounds/frame fallback, skins and joint attachments are retained. Root passed 17 tests/369 assertions with no skips, strict/scoped policy checks, and inspected two-seat distance and Q1 menu/gun images. Model-specific remote execution was not rerun; full visual parity and a world-scale conversion are not claimed. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/replacements.ts](../src/formats/q3-model/replacements.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [docs/comparison-q2.md](../docs/comparison-q2.md), [src/render/scene/models/replacements.ts](../src/render/scene/models/replacements.ts), [src/app/bootstrap/image-settings.ts](../src/app/bootstrap/image-settings.ts), [tests/first-playable/application/model-settings.test.ts](../tests/first-playable/application/model-settings.test.ts) |
 | `q2.assets.md5-animation` — Animate skeletal models with authored scale | done | integrated | Accepted a68b43e joins Q2 MD5 animation to the actual application loader and shared model preparation, retaining source frame mapping and authored joint scales. Corrected source front culling passed six tests/148 assertions plus actual normal CPU/GL application runs with reviewed textured blaster/hand and soldier images. This closes animation integration, not all replacement configuration or full visual fidelity. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/replacements.ts](../src/formats/q3-model/replacements.ts), [src/contracts/scene.ts](../src/contracts/scene.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [tests/formats/q3-model/md5.test.ts](../tests/formats/q3-model/md5.test.ts), [tests/first-playable/q2-md5.test.ts](../tests/first-playable/q2-md5.test.ts) |
 
 ### visual — 2 done / 2 total
