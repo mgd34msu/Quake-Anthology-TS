@@ -1,18 +1,18 @@
 # Implementation completion status
 
-Source cutoff: `27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4`. All other verdicts carry from a5fca35 without a new inventory-wide audit. This update reviews only three gyro requirements against accepted 221547a and 27c17a9, with one status transition; physical-controller qualification remains unclaimed. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
+Source cutoff: `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf`. All other verdicts carry from 27c17a9 without a new inventory-wide audit. This finite update reviews only q2.capture.screenshots and q3.recording.screenshots-levelshots against accepted fc0c15e: Q2 capture becomes Done/shared-replacement; Q3 remains Not done for recording-clock/FPS-timescale/restart integration. Multi-seat and resized-window screenshots were not separately exercised in the current capture fixture. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
 | Q1 | 122 | 58 | 180 | 67.8% |
-| Q2 | 108 | 85 | 193 | 56% |
+| Q2 | 109 | 84 | 193 | 56.5% |
 | Q3 | 50 | 54 | 104 | 48.1% |
-| Overall inventory | 280 | 197 | 477 | 58.7% |
+| Overall inventory | 281 | 196 | 477 | 58.9% |
 
 | Game | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: |
 | Q1 | 102 | 15 | 5 |
-| Q2 | 61 | 32 | 15 |
+| Q2 | 61 | 33 | 15 |
 | Q3 | 39 | 7 | 4 |
 
 ## Q1 requirements
@@ -709,11 +709,11 @@ Source cutoff: `27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4`. All other verdicts ca
 | `q2.config.audio-video-input-menus` — Apply video, audio, and input settings | not-done | missing-work | Live menu controls affect rendering/audio/input, but their full persisted restart settings are not connected to application configuration storage. | [src/app/bootstrap/startup.ts](../src/app/bootstrap/startup.ts), [src/app/bootstrap/frontend-preferences.ts](../src/app/bootstrap/frontend-preferences.ts), [src/ui/settings/index.ts](../src/ui/settings/index.ts), [src/settings/config.ts](../src/settings/config.ts) |
 | `q2.config.renderer-restart` — Restart or switch renderer within a live session | not-done | missing-work | Startup can recreate display and in-game resizing is supported, but live-session CPU/GL renderer switching with complete world/input/HUD rebuild is not provided. | [src/app/bootstrap/startup.ts](../src/app/bootstrap/startup.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts) |
 
-### capture — 0 done / 1 total
+### capture — 1 done / 1 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
-| `q2.capture.screenshots` — Capture the active CPU and GL scene | not-done | missing-work | Application.captureNextFrame provides CPU/GL readback, but the shared FrameCapture file encoder/naming and screenshot command registration have no production application caller. The complete built-in saved-image workflow remains unjoined. | [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts), [src/capture/index.ts](../src/capture/index.ts), [src/console/commands.ts](../src/console/commands.ts) |
+| `q2.capture.screenshots` — Capture the active CPU and GL scene | done | shared-replacement | Accepted fc0c15e joins screenshot commands to complete active-frame readback and contained file ownership through the shared capture service. Actual normal local and remote CPU/GL captures, current dimensions, valid filenames and continued rendering passed; the complete-frame and resize ownership paths were reviewed. Multi-seat and resized-window screenshots were not separately exercised in the current five capture tests; this is a verification limit, not an identified missing implementation. | [src/capture/index.ts](../src/capture/index.ts), [src/app/bootstrap/capture.ts](../src/app/bootstrap/capture.ts), [src/app/bootstrap/renderer.ts](../src/app/bootstrap/renderer.ts), [src/console/commands.ts](../src/console/commands.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts), [src/app/bootstrap/remote-application.ts](../src/app/bootstrap/remote-application.ts), [tests/capture/application.test.ts](../tests/capture/application.test.ts) |
 
 ### diagnostics — 1 done / 1 total
 
@@ -920,7 +920,7 @@ Source cutoff: `27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4`. All other verdicts ca
 | --- | --- | --- | --- | --- |
 | `q3.recording.demo-record-playback` — Demo recording and legacy playback | not-done | missing-work | Q3 demo codecs exist, but record/playback, snapshot consumption and demo UI/application lifecycle are not joined. | [src/network/q3/demo.ts](../src/network/q3/demo.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts) |
 | `q3.recording.timedemo` — Timedemo clocks and performance reporting | not-done | missing-work | There is no joined application timedemo command, playback clock and performance-result workflow. | [src/network/q3/demo.ts](../src/network/q3/demo.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts) |
-| `q3.recording.screenshots-levelshots` — Screenshots, levelshots and capture timing | not-done | missing-work | FrameCapture implements the formats/naming/levelshot operations, but no production caller constructs it or registers registerConsoleCommands, so the complete user capture workflow is unjoined. | [src/capture/index.ts](../src/capture/index.ts), [src/console/commands.ts](../src/console/commands.ts), [src/app/bootstrap/application.ts](../src/app/bootstrap/application.ts) |
+| `q3.recording.screenshots-levelshots` — Screenshots, levelshots and capture timing | not-done | missing-work | Accepted fc0c15e implements automatic/named/silent screenshot commands, TGA/PNG/JPEG output, source-style 128x128 levelshot downsampling and complete-frame readback through the shared application capture path. Recording capture-clock integration with FPS/timescale and restart/timing behavior remains unfinished; screenshot and levelshot helper absence is no longer the gap. | [src/capture/index.ts](../src/capture/index.ts), [src/console/commands.ts](../src/console/commands.ts), [src/app/bootstrap/capture.ts](../src/app/bootstrap/capture.ts), [src/app/bootstrap/renderer.ts](../src/app/bootstrap/renderer.ts), [tests/capture/application.test.ts](../tests/capture/application.test.ts) |
 
 ### configuration — 0 done / 2 total
 

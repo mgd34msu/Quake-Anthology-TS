@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4",
-  "carriedVerdictsFrom": "a5fca3567968151261506707acfc392a5b95679e",
+  "sourceCutoff": "a5c4da305b9597e9a06b773bf63c25f2e7d60aaf",
+  "carriedVerdictsFrom": "27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -20,13 +20,13 @@
     },
     {
       "family": "q2",
-      "done": 108,
-      "notDone": 85,
+      "done": 109,
+      "notDone": 84,
       "total": 193,
-      "percentage": 56,
+      "percentage": 56.5,
       "methods": {
         "integrated": 61,
-        "sharedReplacement": 32,
+        "sharedReplacement": 33,
         "extendedCommon": 15
       }
     },
@@ -44,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 280,
-    "notDone": 197,
+    "done": 281,
+    "notDone": 196,
     "total": 477,
-    "percentage": 58.7
+    "percentage": 58.9
   },
   "rows": [
     {
@@ -4527,13 +4527,17 @@
     {
       "id": "q2.capture.screenshots",
       "title": "Capture the active CPU and GL scene",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Application.captureNextFrame provides CPU/GL readback, but the shared FrameCapture file encoder/naming and screenshot command registration have no production application caller. The complete built-in saved-image workflow remains unjoined.",
+      "status": "done",
+      "basis": "shared-replacement",
+      "reason": "Accepted fc0c15e joins screenshot commands to complete active-frame readback and contained file ownership through the shared capture service. Actual normal local and remote CPU/GL captures, current dimensions, valid filenames and continued rendering passed; the complete-frame and resize ownership paths were reviewed. Multi-seat and resized-window screenshots were not separately exercised in the current five capture tests; this is a verification limit, not an identified missing implementation.",
       "paths": [
-        "src/app/bootstrap/application.ts",
         "src/capture/index.ts",
-        "src/console/commands.ts"
+        "src/app/bootstrap/capture.ts",
+        "src/app/bootstrap/renderer.ts",
+        "src/console/commands.ts",
+        "src/app/bootstrap/application.ts",
+        "src/app/bootstrap/remote-application.ts",
+        "tests/capture/application.test.ts"
       ]
     },
     {
@@ -5690,11 +5694,13 @@
       "title": "Screenshots, levelshots and capture timing",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "FrameCapture implements the formats/naming/levelshot operations, but no production caller constructs it or registers registerConsoleCommands, so the complete user capture workflow is unjoined.",
+      "reason": "Accepted fc0c15e implements automatic/named/silent screenshot commands, TGA/PNG/JPEG output, source-style 128x128 levelshot downsampling and complete-frame readback through the shared application capture path. Recording capture-clock integration with FPS/timescale and restart/timing behavior remains unfinished; screenshot and levelshot helper absence is no longer the gap.",
       "paths": [
         "src/capture/index.ts",
         "src/console/commands.ts",
-        "src/app/bootstrap/application.ts"
+        "src/app/bootstrap/capture.ts",
+        "src/app/bootstrap/renderer.ts",
+        "tests/capture/application.test.ts"
       ]
     },
     {

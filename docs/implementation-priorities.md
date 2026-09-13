@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog after accepted source commit `d07700be0dc85312f4279bb6ec694961443b303c`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the historical requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog at accepted source cutoff `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -173,29 +173,30 @@ These dispositions do not change the historical ledger or invent new requirement
 | GIF images | Accepted in `e05343b`: actual installed image cases 17 tests / 139 assertions, plus media/world lifecycle 25 / 417. CPU/GL image agreement is bounded to the inspected samples. Keep this work; remaining renderer union is priority 3. |
 | Extended cvar commands | Accepted in `7b7110e`, including Q1 custom-variable promotion. Keep these commands; broader configuration persistence remains priority 15. |
 | HTTP ranges | Accepted in `8637652`: actual RemoteApplication downloaded and mounted the 1,991,612-byte PAK using one HEAD and four concurrent range GETs, with identical SHA and native WAL fallback. Focused cvar/range/HTTP checks passed 60 / 557. Resume, redirects and wider wire/UI work remain priority 14. |
-| World text | In progress in shared text/presentation ownership; not accepted by this document. Priority 3. |
+| World text | Bounded shared rendering accepted in `3f6be42`: actual two-seat billboard images and separate fixed-angle/depth tests. Guest debug imports and donor distance-culling remain open under priority 3. |
 | Q1 VCR | Open source-inventory lead. Priority 22. |
 | SOCKS5 | Open source-inventory lead. Priority 24. |
 | Q3 event/config journals | Open source-inventory lead. Priority 22. |
 | MOTD | Open source-inventory lead. Priority 24. |
+| Shared screenshot capture | Accepted in `fc0c15e`: actual local/remote CPU and GL captures and reviewed complete-frame, dimension and file-ownership paths close `q2.capture.screenshots` as Done/shared-replacement. Multi-seat and resized-window screenshots were not separately exercised in the current five tests. Q3 recording-clock/FPS-timescale/restart integration remains open. |
 | Local game prompts | Accepted in `d07700b`: actual application proof passed 25 assertions, with source review and CPU image inspection. Local UI pagination/lifecycle and the Q1 player lifecycle recursion correction are included. Private native remote prompt transport remains unsupported. Priority 17 retains that boundary. |
 
 The seven newly identified source leads are GIF, extended cvar commands, world text, Q1 VCR, SOCKS5, Q3 journals and MOTD. HTTP ranges and local prompts are additional accepted receipts, not additional invented ledger entries. The installed executable remains source `3a073e8`; these newer source commits have not been rebuilt into it.
 
-## Historical requirement appendix
+## Carried-forward open requirement appendix
 
-The following **197 historical not-done requirements** come from cutoff `27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4`, with the ledger's unaffected verdicts carried from `a5fca3567968151261506707acfc392a5b95679e`. Every ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities.
+The following **196 open requirements** use source cutoff `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf`. Only the two capture requirements were reviewed in this update: `q2.capture.screenshots` moved to Done/shared-replacement and is removed from this appendix; `q3.recording.screenshots-levelshots` remains Not done for recording-clock/FPS-timescale/restart integration. All other verdicts carry from `27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4`; the remaining 196 rows were not newly audited.
 
-This is **not a current failure count**. Later accepted native clients, VM execution, downloads, GIFs, commands, prompts and other work can supersede parts of the old reasons. Consult the linked ledger for the historical reasons and paths, and the reconciliation/execution receipts for later acceptance. Inclusion here does not instruct an engineer to rebuild completed work. No fresh 477-row audit was performed.
+Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
-### Priority 1: One authoritative simulation and composition — 4 historical requirements
+### Priority 1: One authoritative simulation and composition — 4 carried-forward open requirements
 
 - `q1.content.launch-selection` — Select gameplay separately from content and engine behavior
 - `q1.physics.rerelease-gibs-corpses` — Rerelease gib and corpse collision semantics
 - `q2.game.provider-selection` — Select base, expansion, CTF, LMCTF, and KEX game providers
 - `q2.rerelease.q64-movement` — Match Q2 64 server movement and prediction
 
-### Priority 2: Shared content, assets and provenance — 6 historical requirements
+### Priority 2: Shared content, assets and provenance — 6 carried-forward open requirements
 
 - `q1.content.quake64` — Identify and launch the required Quake 64 content
 - `q2.content.discovered-addons` — Discover installed add-on directories
@@ -204,7 +205,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.formats.ibsp44-compatibility` — Observed IBSP44 map compatibility
 - `q3.content.demo-product-profiles` — Independent prerelease demo product restrictions
 
-### Priority 3: Shared CPU and GL rendering — 7 historical requirements
+### Priority 3: Shared CPU and GL rendering — 7 carried-forward open requirements
 
 - `q1.render.fog-sky-liquids` — Fog, skyboxes and liquid presentation
 - `q1.render.model-effects-particles` — Model effects, particles, shadows and transparency
@@ -214,7 +215,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.presentation.materials-cpu-gl` — Materials and complete CPU/GL rendering
 - `q3.presentation.visual-options-restart` — Visual settings, display lifecycle and source hardware profiles
 
-### Priority 4: Common audio — 5 historical requirements
+### Priority 4: Common audio — 5 carried-forward open requirements
 
 - `q2.audio.raw-pcm` — Mix cinematic and streamed PCM
 - `q2.music.pause-resume-gain` — Control music pause, resume, and continuous gain
@@ -222,7 +223,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.audio.background-music` — Background intro/loop music and continuous gain
 - `q3.audio.raw-pcm-output-diagnostics` — Raw PCM, output formats and sound diagnostics
 
-### Priority 5: Native client and server wire compatibility — 8 historical requirements
+### Priority 5: Native client and server wire compatibility — 8 carried-forward open requirements
 
 - `q1.network.nq-wire` — NetQuake protocols 15, 666 and 999
 - `q1.network.qw-prediction` — QuakeWorld protocol and prediction
@@ -233,13 +234,13 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.services.authorization-endpoints` — CD-key authorization and configurable service endpoints
 - `q3.content.pure-policy` — Pure package checksums and filesystem selection
 
-### Priority 6: Actual mod execution — 3 historical requirements
+### Priority 6: Actual mod execution — 3 carried-forward open requirements
 
 - `q1.execution.nq-qw-host-abi` — Keep NetQuake and QuakeWorld gamecode host contracts distinct
 - `q1.execution.builtin-typescript-gameplay` — Run first-party Q1 gameplay in strict TypeScript
 - `q3.execution.qvm-roles` — QVM game, cgame and UI execution
 
-### Priority 7: Swappable gameplay rosters and equipment — 11 historical requirements
+### Priority 7: Swappable gameplay rosters and equipment — 11 carried-forward open requirements
 
 - `q1.hipnotic.monster-scourge` — Hipnotic scourge encounter
 - `q1.hipnotic.monster-gremlin` — Hipnotic gremlin encounter
@@ -253,14 +254,14 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.rogue.double-damage` — Activate double damage
 - `q2.rerelease.guardian` — Complete the guardian encounter
 
-### Priority 8: Authored maps and campaigns — 4 historical requirements
+### Priority 8: Authored maps and campaigns — 4 carried-forward open requirements
 
 - `q1.execution.entity-properties` — Preserve foreign entity classes, fields and target graphs
 - `q2.content.native-starts` — Launch authored campaign starting maps
 - `q2.campaign.unit-backtracking` — Restore revisited levels within a unit
 - `q2.campaign.hub-endings` — Complete hubs, objectives, secrets, and endings
 
-### Priority 9: Complete saves and recovery — 8 historical requirements
+### Priority 9: Complete saves and recovery — 8 carried-forward open requirements
 
 - `q1.ui.save-load-menus` — Save, load and autosave selection UI
 - `q1.saves.classic-v5` — Classic version 5 save import and export
@@ -271,7 +272,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.save.autosave-transition` — Distinguish autosaves from transition snapshots
 - `q3.persistence.complete-world-save` — Complete unified world saves under Q3 gameplay
 
-### Priority 10: Match rules and objectives — 12 historical requirements
+### Priority 10: Match rules and objectives — 12 carried-forward open requirements
 
 - `q1.horde.launch-waves` — Horde launch, wave spawning and survivor progression
 - `q1.ctf.capture-loop` — Rerelease CTF capture, return, drop and scoring
@@ -286,7 +287,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.modes.single-player-arena` — Single-player arena match flow
 - `q3.modes.foreign-objective-adaptation` — Objective and spawn adaptation on foreign maps
 
-### Priority 11: One shared bot and navigation system — 9 historical requirements
+### Priority 11: One shared bot and navigation system — 9 carried-forward open requirements
 
 - `q1.bots.population` — Manual bots, autofill and eligibility
 - `q1.bots.knowledge-skill` — Bot personalities, weapon/item knowledge and skill
@@ -298,7 +299,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.bots.aas-reachability-clustering` — AAS reachability, clustering, writing and optimization
 - `q3.bots.foreign-map-construction` — Navigation construction for foreign maps and moving geometry
 
-### Priority 12: Independent local and remote seats — 6 historical requirements
+### Priority 12: Independent local and remote seats — 6 carried-forward open requirements
 
 - `q1.seats.connections-lifecycle` — Two to four independent local player connections
 - `q1.seats.presentation-ownership` — Resolve shared effects, audio, menus and recordings for seats
@@ -307,7 +308,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.seats.remote-network` — Use multiple local players on a remote server
 - `q3.input.multiple-local-players` — Multiple local seats and remote participation
 
-### Priority 13: Input and controller behavior — 5 historical requirements
+### Priority 13: Input and controller behavior — 5 carried-forward open requirements
 
 - `q1.input.controller-tuning` — Controller deadzones, curves and per-seat settings UI
 - `q2.input.controller-assignment` — Persist controller-to-player assignments
@@ -315,7 +316,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.input.binds-keyboard-mouse` — Bind keyboard and mouse gameplay controls
 - `q3.input.joystick-profiles-hotplug` — Joystick profiles, thresholds and device lifecycle
 
-### Priority 14: Common downloads — 7 historical requirements
+### Priority 14: Common downloads — 7 carried-forward open requirements
 
 - `q1.network.downloads` — QuakeWorld content download queues and policy
 - `q2.download.path-policy` — Validate and contain content downloads
@@ -325,7 +326,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.download.udp-fallback` — Fall back from HTTP to UDP transfer
 - `q3.content.client-download-restart` — Client package download, contained writes and restart
 
-### Priority 15: Console, cvars and profile persistence — 5 historical requirements
+### Priority 15: Console, cvars and profile persistence — 5 carried-forward open requirements
 
 - `q1.config.commands-console` — Console scripts, aliases, history and completion
 - `q1.config.persistence-migration` — Archived configuration and writable profile migration
@@ -333,7 +334,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.configuration.console-scripts` — Console, history, completion and command scripts
 - `q3.configuration.persistence-startup` — Archived cvars, bindings and startup configuration
 
-### Priority 16: Unified setup and main menus — 10 historical requirements
+### Priority 16: Unified setup and main menus — 10 carried-forward open requirements
 
 - `q1.multiplayer.setup` — Configure and launch multiplayer matches
 - `q1.ui.options-and-reset` — Complete options, binding and reset workflows
@@ -346,7 +347,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.ui.team-arena-scripts-feeders-visibility` — Team Arena scripts, feeders and owner draws
 - `q3.ui.team-arena-skirmish` — Team Arena skirmish launch and next match
 
-### Priority 17: HUD and gameplay interaction — 18 historical requirements
+### Priority 17: HUD and gameplay interaction — 18 carried-forward open requirements
 
 - `q1.multiplayer.identity` — Player names, colors and setup
 - `q1.ui.weapon-quickswitch` — Weapon-wheel data and quickswitch impulses
@@ -367,7 +368,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q2.hud.centerprints-notifications` — Queue localized centerprints and notifications
 - `q2.admin.player-identity` — Configure player names, skins, handedness, and view settings
 
-### Priority 18: Server browser and administration — 19 historical requirements
+### Priority 18: Server browser and administration — 19 carried-forward open requirements
 
 - `q1.multiplayer.chat` — Public, team and private messages
 - `q1.multiplayer.pause-kick-status` — Pause, kick, ping and player status
@@ -389,7 +390,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.discovery.ping-status-cache-filters` — Ping/status queues, filtering and persistent cache
 - `q3.admin.pause-flood-inactivity` — Pause eligibility, command flood control and inactivity
 
-### Priority 19: Cinematics and media — 7 historical requirements
+### Priority 19: Cinematics and media — 7 carried-forward open requirements
 
 - `q2.media.cin-video` — Decode and present classic CIN frames
 - `q2.media.cin-soundtrack` — Synchronize the CIN soundtrack
@@ -399,7 +400,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.media.cinematic-clock-transitions` — Cinematic timing, looping, hold and skip
 - `q3.media.world-and-menu-video` — World material and menu cinematics
 
-### Priority 20: Localization and accessibility — 10 historical requirements
+### Priority 20: Localization and accessibility — 10 carried-forward open requirements
 
 - `q1.text.localization-overlays` — Localization, fallback and mod overlay precedence
 - `q1.accessibility.contrast-color` — Contrast and color-accessibility settings
@@ -412,7 +413,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.presentation.accessibility-scales` — Readable UI, independent scales and accessibility
 - `q3.media.subtitles-captions` — Timed subtitles and captions for supplied media
 
-### Priority 21: Progression and local service lifecycle — 11 historical requirements
+### Priority 21: Progression and local service lifecycle — 11 carried-forward open requirements
 
 - `q1.events.achievements` — Achievement persistence and player UI
 - `q1.events.level-completed-lobby` — Level-completed events and return-to-lobby lifecycle
@@ -426,7 +427,7 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.progression.podium-postgame` — Podium, postgame and next-match navigation
 - `q3.progression.team-arena-records` — Team Arena skirmish scores and best times
 
-### Priority 22: Recording and replay — 10 historical requirements
+### Priority 22: Recording and replay — 10 carried-forward open requirements
 
 - `q1.demos.nq-record-playback` — NetQuake demo recording, playback and timedemo
 - `q1.demos.qw-record-spectate` — QuakeWorld demos, rerecord and spectator cameras
@@ -439,17 +440,16 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.recording.demo-record-playback` — Demo recording and legacy playback
 - `q3.recording.timedemo` — Timedemo clocks and performance reporting
 
-### Priority 23: Runtime capture and authoring tools — 7 historical requirements
+### Priority 23: Runtime capture and authoring tools — 6 carried-forward open requirements
 
 - `q1.tools.chase-camera-diagnostics` — Runtime chase camera and diagnostic commands
-- `q2.capture.screenshots` — Capture the active CPU and GL scene
 - `q3.recording.screenshots-levelshots` — Screenshots, levelshots and capture timing
 - `q3.diagnostics.runtime-tools` — Runtime diagnostic and developer commands
 - `q3.diagnostics.omnitimer` — OmniTimer initialization, stamps and reporting
 - `q3.cameras.spline-runtime` — Spline camera evaluation and timed camera events
 - `q3.source-applications.role-accounting` — Separate authoring and distribution application roles
 
-### Priority 24: External and historical services — 5 historical requirements
+### Priority 24: External and historical services — 5 carried-forward open requirements
 
 - `q1.services.addon-discovery` — Local and online add-on browsing
 - `q3.network.ipx-transport` — Historical IPX transport obligation
@@ -457,11 +457,11 @@ This is **not a current failure count**. Later accepted native clients, VM execu
 - `q3.input.midi-controller` — MIDI note input and device configuration
 - `q3.audio.a3d-geometry-contract` — Legacy A3D geometry behavior account
 
-### Priority 25: Sustained play, fidelity and performance — 0 historical requirements
+### Priority 25: Sustained play, fidelity and performance — 0 carried-forward open requirements
 
-No historical not-done row is assigned primarily here; the scope comes from the common-engine plan and source-inventory leads.
+No open ledger row is assigned primarily here; the scope comes from the common-engine plan and source-inventory leads.
 
 
-### Priority 26: Later hardening and release work — 0 historical requirements
+### Priority 26: Later hardening and release work — 0 carried-forward open requirements
 
-No historical not-done row is assigned primarily here; the scope comes from the common-engine plan and source-inventory leads.
+No open ledger row is assigned primarily here; the scope comes from the common-engine plan and source-inventory leads.
