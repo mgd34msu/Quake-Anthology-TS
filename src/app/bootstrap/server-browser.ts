@@ -13,6 +13,13 @@ import type { DirectServerAddress } from "./server-browser-addresses.ts";
 
 export type BrowserProtocol = "q1" | "q2" | "q3";
 export interface BrowserConnection { readonly protocol: BrowserProtocol; readonly remote: string; }
+export type BrowserSortOrder = "ping-low" | "ping-high" | "name-az" | "name-za" | "map-az" | "map-za" | "players-most" | "players-fewest";
+export const browserSortOrders: readonly { readonly id: BrowserSortOrder; readonly label: string }[] = [
+  { id: "ping-low", label: "Ping: lowest first" }, { id: "ping-high", label: "Ping: highest first" },
+  { id: "name-az", label: "Name: A to Z" }, { id: "name-za", label: "Name: Z to A" },
+  { id: "map-az", label: "Map: A to Z" }, { id: "map-za", label: "Map: Z to A" },
+  { id: "players-most", label: "Players: most first" }, { id: "players-fewest", label: "Players: fewest first" },
+];
 const protocols: readonly BrowserProtocol[] = ["q1", "q2", "q3"];
 const ports = { q1: 26000, q2: 27910, q3: 27960 };
 export function browserAddress(address: NetworkAddress): string {
@@ -29,6 +36,9 @@ export class StartupServerBrowser {
   set address(value: string) { this.addresses.set(this.protocol, value); }
   filter = "";
   favoritesOnly = false;
+  sortOrder: BrowserSortOrder = "ping-low";
+  hideEmpty = false;
+  hideFull = false;
   selected: string | null = null;
   status = "";
   private constructor(private readonly transport: UdpTransport, private readonly config: ConfigStore) {
@@ -61,11 +71,34 @@ export class StartupServerBrowser {
     if (protocol !== "q1" && protocol !== "q2" && protocol !== "q3") throw new Error("Unsupported server protocol");
     this.protocol = protocol; this.selected = null;
   }
+  chooseSort(order: string): void {
+    const selected = browserSortOrders.find(choice => choice.id === order);
+    if (selected === undefined) throw new Error("Unsupported server sort order");
+    this.sortOrder = selected.id;
+  }
+  get emptyMessage(): string {
+    return this.browser().list().length === 0 ? "No servers yet. Enter an address or find LAN." : "No servers match these filters.";
+  }
   rows(): readonly BrowserEntry[] {
-    const search = this.filter.toLowerCase();
+    const search = this.filter.trim().toLowerCase();
     return this.browser().list().filter(entry => (!this.favoritesOnly || entry.sources.includes("favorite"))
+      && (entry.status === null || entry.status.maxPlayers <= 0 || (!this.hideEmpty || entry.status.players > 0) && (!this.hideFull || entry.status.players < entry.status.maxPlayers))
       && `${entry.status?.name ?? ""} ${entry.status?.map ?? ""} ${browserAddress(entry.address)}`.toLowerCase().includes(search))
-      .sort((a, b) => (a.pingMilliseconds ?? Infinity) - (b.pingMilliseconds ?? Infinity) || browserAddress(a.address).localeCompare(browserAddress(b.address)));
+      .sort((a, b) => {
+        // Q2's source keeps unanswered rows last in either direction and treats 0/0 as unknown capacity.
+        if ((a.status === null) !== (b.status === null)) return a.status === null ? 1 : -1;
+        let compared = 0;
+        switch (this.sortOrder) {
+          case "ping-low": case "ping-high": {
+            if ((a.pingMilliseconds === null) !== (b.pingMilliseconds === null)) return a.pingMilliseconds === null ? 1 : -1;
+            compared = ((a.pingMilliseconds ?? 0) - (b.pingMilliseconds ?? 0)) * (this.sortOrder === "ping-low" ? 1 : -1); break;
+          }
+          case "name-az": case "name-za": compared = (a.status?.name ?? "").localeCompare(b.status?.name ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "name-az" ? 1 : -1); break;
+          case "map-az": case "map-za": compared = (a.status?.map ?? "").localeCompare(b.status?.map ?? "", undefined, { sensitivity: "base" }) * (this.sortOrder === "map-az" ? 1 : -1); break;
+          case "players-most": case "players-fewest": compared = ((a.status?.players ?? 0) - (b.status?.players ?? 0)) * (this.sortOrder === "players-fewest" ? 1 : -1); break;
+        }
+        return compared || browserAddress(a.address).localeCompare(browserAddress(b.address));
+      });
   }
   select(key: string): void {
     const entry = this.rows().find(entry => addressKey(entry.address) === key);

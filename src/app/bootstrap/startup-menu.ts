@@ -1,7 +1,7 @@
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
-import { browserAddress } from "./server-browser.ts";
+import { browserAddress, browserSortOrders } from "./server-browser.ts";
 import type { StartupServerBrowser, BrowserConnection } from "./server-browser.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { RenderCommand } from "../../contracts/render.ts";
@@ -39,6 +39,7 @@ export interface StartupMenuOptions {
 }
 const main: UiMenuId = "menu:startup:main";
 const browserMenu: UiMenuId = "menu:startup:servers";
+const browserOptionsMenu: UiMenuId = "menu:startup:server-filters";
 const session: UiMenuId = "menu:startup:session";
 const optionsMenu: UiMenuId = "menu:startup:options";
 const displayMenu: UiMenuId = "menu:startup:display";
@@ -86,6 +87,7 @@ export class StartupMenu {
       this.button("quit", "Quit", 4, options.quit),
     ]);
     this.register(browserMenu, () => this.browserControls());
+    this.register(browserOptionsMenu, () => this.browserOptionsControls());
     this.register(session, () => [...(this.multiplayer && options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu), true)] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("play", "Play", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
@@ -174,8 +176,8 @@ export class StartupMenu {
     const run = (work: () => Promise<void>): void => { work().catch((error: unknown) => { browser.status = error instanceof Error ? error.message : String(error); }); };
     const button = (id: string, label: string, x: number, y: number, width: number, action: () => void): UiControl =>
       ({ ...this.button(id, label, 0, action), rect: { x, y, width, height: 30 } });
-    const text = (id: string, label: string, value: string, y: number, change: (value: string) => void, submit: () => void): UiControl => ({
-      id: `ui:startup:${id}`, kind: "text-entry", label, text: value, maximumLength: 255, rect: { x: 64, y, width: 512, height: 30 },
+    const text = (id: string, label: string, value: string, y: number, change: (value: string) => void, submit: () => void, width = 512): UiControl => ({
+      id: `ui:startup:${id}`, kind: "text-entry", label, text: value, maximumLength: 255, rect: { x: 64, y, width, height: 30 },
       enabled: !this.busy, visible: true, change: (_seat, value) => { change(value); return undefined; }, submit: () => { submit(); return undefined; } });
     const entries = browser.rows(), pages = Math.max(1, Math.ceil(entries.length / 3)); this.page = Math.min(this.page, pages - 1);
     return [
@@ -186,7 +188,8 @@ export class StartupMenu {
       button("server-query", "Query", 64, 180, 160, () => run(() => browser.query())),
       button("server-lan", "Find LAN", 240, 180, 160, () => browser.scan()),
       button("server-favorite", "Favorite", 416, 180, 160, () => run(() => browser.favorite())),
-      text("server-filter", "Filter", browser.filter, 216, value => { browser.filter = value; this.page = 0; }, () => undefined),
+      text("server-filter", "Filter", browser.filter, 216, value => { browser.filter = value; this.page = 0; }, () => undefined, 320),
+      button("server-sort-filter", browser.hideEmpty || browser.hideFull ? "Filters on" : "Sort/filter", 400, 216, 176, () => this.controller.openMenu(browserOptionsMenu)),
       ...entries.slice(this.page * 3, this.page * 3 + 3).map((entry, index) => button(`server:${addressKey(entry.address)}`,
         this.fit(`${entry.sources.includes("favorite") ? "* " : ""}${entry.status?.name || browserAddress(entry.address)}  ${entry.status === null ? "?" : `${entry.status.players}/${entry.status.maxPlayers}`}  ${entry.pingMilliseconds === null ? "" : `${Math.round(entry.pingMilliseconds)}ms`}`, 490, 2.6),
         64, 252 + index * 34, 512, () => browser.select(addressKey(entry.address)))),
@@ -194,6 +197,19 @@ export class StartupMenu {
       button("server-favorites", browser.favoritesOnly ? "Favorites only" : "All servers", 320, 358, 256, () => { browser.favoritesOnly = !browser.favoritesOnly; this.page = 0; }),
       button("server-connect", "Connect", 64, 396, 240, () => run(async () => this.options.connect?.(await browser.connection()))),
       button("server-back", "Back", 320, 396, 256, () => this.controller.closeMenu()),
+    ];
+  }
+  private browserOptionsControls(): readonly UiControl[] {
+    const browser = this.options.browser;
+    if (browser === undefined) return [this.back()];
+    return [
+      { id: "ui:startup:server-sort", kind: "choice", label: "Sort", rect: { x: 64, y: 118, width: 512, height: 30 }, enabled: true, visible: true,
+        choices: browserSortOrders, selected: browser.sortOrder, select: (_seat, value) => { browser.chooseSort(value); this.page = 0; return undefined; } },
+      { id: "ui:startup:server-hide-empty", kind: "toggle", label: "Hide empty", rect: { x: 64, y: 152, width: 512, height: 30 }, enabled: true, visible: true,
+        checked: browser.hideEmpty, change: (_seat, value) => { browser.hideEmpty = value; this.page = 0; return undefined; } },
+      { id: "ui:startup:server-hide-full", kind: "toggle", label: "Hide full", rect: { x: 64, y: 186, width: 512, height: 30 }, enabled: true, visible: true,
+        checked: browser.hideFull, change: (_seat, value) => { browser.hideFull = value; this.page = 0; return undefined; } },
+      this.button("server-filters-back", "Back", 4, () => this.controller.closeMenu(), true),
     ];
   }
   private register(id: UiMenuId, controls: () => readonly UiControl[]): void {
@@ -264,7 +280,7 @@ export class StartupMenu {
     const backdrop = menuBackdrop(context), panel = menuPanel(context, active === main);
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
-      : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
+      : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Counts: this map. Choices apply across this campaign.", 64, 82, 1.5);
@@ -281,6 +297,7 @@ export class StartupMenu {
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {
       const browser = this.options.browser, selected = browser.rows().find(entry => addressKey(entry.address) === browser.selected);
+      if (browser.rows().length === 0) text(browser.emptyMessage, 64, 430, 1.5);
       text(this.fit(selected?.status === null || selected === undefined ? browser.status : `${selected.status.map} — ${browser.status}`, 512, 1.8), 64, 450, 1.8);
     }
     if (active === loadMenu) {
