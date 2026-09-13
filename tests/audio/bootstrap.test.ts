@@ -2,6 +2,7 @@ import type { Q3SeatAudioFrame } from "../../src/app/bootstrap/audio/q3.ts";
 import { ApplicationInput } from "../../src/app/bootstrap/input.ts";
 import { InputRouter } from "../../src/input/router.ts";
 import { SdlControllers } from "../../src/platform/controller.ts";
+import { SdlAudioDevice } from "../../src/platform/audio.ts";
 import type { ControllerOperationResult } from "../../src/platform/controller.ts";
 import { FrontendPreferences, applyFrontendPreferences } from "../../src/app/bootstrap/frontend-preferences.ts";
 import { join } from "node:path";
@@ -22,6 +23,55 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { AudioListener } from "../../src/audio/types.ts";
 import { EntityEvent } from "../../src/movement/q3/constants.ts";
 import { q2MuzzleSounds, q2MonsterMuzzleSounds } from "../../src/app/bootstrap/audio/q2-events.ts";
+
+test("audio diagnostics and play use the actual common console and queued PCM for every family", async () => {
+  const fixtures = [
+    { game: "q1-classic-id1", map: "start", family: "q1", sound: "weapons/rocket1i", listed: "sound/weapons/rocket1i.wav" },
+    { game: "q2-classic-baseq2", map: "base1", family: "q2", sound: "weapons/railgf1a", listed: "sound/weapons/railgf1a.wav" },
+    { game: "q3-baseq3", map: "q3dm1", family: "q3", sound: "sound/weapons/machinegun/machgf1b.wav", listed: "sound/weapons/machinegun/machgf1b.wav" },
+  ];
+  const bind = ApplicationAudio.prototype.bindHaptics, queue = SdlAudioDevice.prototype.queue;
+  const joined: { readonly audio: ApplicationAudio; readonly input: ApplicationInput }[] = [];
+  let observe = false, nonzeroQueued = 0;
+  ApplicationAudio.prototype.bindHaptics = function(this: ApplicationAudio, input): void { bind.call(this, input); joined.push({ audio: this, input }); };
+  SdlAudioDevice.prototype.queue = function(this: SdlAudioDevice, samples): void {
+    queue.call(this, samples);
+    if (observe && samples.some(value => value !== 0)) nonzeroQueued++;
+  };
+  try {
+    for (const fixture of fixtures) {
+      const parsed = parseApplicationCommand(["--game", fixture.game, "--map", fixture.map, "--movement", fixture.family, "--character", fixture.family,
+        "--renderer", "cpu", "--hidden", "--width", "160", "--height", "120"]);
+      if (parsed.kind !== "run") throw new Error("Expected audio console launch");
+      const messages: string[] = [];
+      const application = await Application.open(parsed.options, { print: text => { messages.push(text); return undefined; } });
+      try {
+        const owners = joined.at(-1);
+        if (owners === undefined) throw new Error("Application did not bind its shared audio/input owner");
+        await application.step(50);
+        nonzeroQueued = 0; observe = true;
+        owners.input.commands.append(`stopsound; play ${fixture.sound}; soundlist; soundinfo\n`);
+        await application.step(50);
+        observe = false;
+        expect(nonzeroQueued).toBeGreaterThan(0);
+        expect(messages.some(text => text.includes(fixture.listed) && text.includes("16-bit"))).toBe(true);
+        expect(messages.some(text => text.includes("44100 Hz, 2 channels, 16-bit PCM"))).toBe(true);
+        expect(messages.some(text => text.includes("queued frames"))).toBe(true);
+        expect(owners.audio.engine.outputConfiguration?.sampleRate).toBe(owners.audio.engine.sampleRate);
+        owners.input.commands.append("play missing/audio-diagnostic-file; s_info\n");
+        await application.step(50);
+        expect(messages.some(text => text.includes("Sound unavailable:") && text.includes("missing/audio-diagnostic-file.wav"))).toBe(true);
+        await owners.audio.command({ name: "s_stop", args: [], seat: null });
+        expect(owners.audio.engine.queuedFrames).toBe(0);
+        expect(owners.audio.engine.mix(256).every(value => value === 0)).toBe(true);
+        expect(await owners.audio.command({ name: "not-an-audio-command", args: [], seat: null })).toBe(false);
+        const loading = owners.audio.command({ name: "play", args: [fixture.sound], seat: null });
+        owners.audio.close();
+        await expect(loading).rejects.toThrow("closed during sound loading");
+      } finally { observe = false; await application.close(); }
+    }
+  } finally { ApplicationAudio.prototype.bindHaptics = bind; SdlAudioDevice.prototype.queue = queue; }
+}, 60000);
 
 // Run with SDL_AUDIODRIVER=dummy; this exercises the normal shared mixer/device path.
 test("bootstrap plays source player events, filters a wet listener, replaces music and closes world audio", async () => {
@@ -92,6 +142,7 @@ test("bootstrap plays source player events, filters a wet listener, replaces mus
       expect(audioWet.engine.mix(22050).some(sample => sample !== 0)).toBe(true);
       await audioWet.playMusic(source.content, "2");
       expect(audioWet.engine.mix(22050).some(sample => sample !== 0)).toBe(true);
+      await audioWet.command({ name: "stopsound", args: [], seat: null });
       await audioWet.playMusic(source.content, "0");
       expect(audioWet.engine.mix(128).every(sample => sample === 0)).toBe(true);
       expect(q2MuzzleSounds(5, true, () => 2).map(sound => [sound.volume, sound.delaySeconds])).toEqual([[0.2, 0], [0.2, 0.033], [0.2, 0.066]]);

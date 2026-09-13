@@ -23,6 +23,7 @@ import type { SessionSeat } from "../../world/session/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
+import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
 
 export interface LocalPlayer {
@@ -142,7 +143,7 @@ export class ApplicationInput {
       const local = origin.kind === "local-seat" ? locals.find(local => local.player.seat.id.equals(origin.seat)) : locals[0];
       local?.console.toggle(); return undefined;
     });
-    for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team"]) this.commands.register(name, invocation => {
+    for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) this.commands.register(name, invocation => {
       let origin = invocation.source.origin;
       while (origin.kind === "script") origin = origin.caller;
       return actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);

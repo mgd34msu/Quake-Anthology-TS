@@ -23,6 +23,16 @@ import { ApplicationMusic } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds, q2MonsterMuzzleSounds } from "./audio/q2-events.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
+import { applicationAudioCommands } from "./audio/commands.ts";
+import type { SoundRegistration } from "../../content/q3/presentation/audio.ts";
+
+export interface ApplicationAudioCommand {
+  readonly name: string;
+  readonly args: readonly string[];
+  readonly seat: SeatId | null;
+  readonly registrations?: readonly Pick<SoundRegistration, "path" | "sound">[];
+  readonly print?: (text: string) => void;
+}
 
 interface ActorAudio {
   readonly actor: ActorId;
@@ -115,6 +125,62 @@ export class ApplicationAudio {
   uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
   receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
   receiveCgameFrame(frame: Q3SeatAudioFrame): void { this.cgameFrames.push(frame); }
+
+  async command(request: ApplicationAudioCommand): Promise<boolean> {
+    if (!applicationAudioCommands.includes(request.name)) return false;
+    if (this.closed) throw new Error("Sound system is closed");
+    const print = request.print ?? this.print;
+    if (request.name === "soundinfo" || request.name === "s_info") {
+      const output = this.engine.outputConfiguration;
+      print(`Sound output: ${this.engine.outputState}\n`);
+      if (output !== null) {
+        print(`SDL device: ${output.deviceName ?? "system default"}\n`);
+        print(`${output.sampleRate} Hz, ${output.channels} channels, ${output.sampleBits}-bit PCM; buffer ${output.bufferFrames} frames\n`);
+        print(`${this.engine.queuedFrames} queued frames, maximum ${output.maximumQueuedFrames}; mixed clock ${this.engine.sampleClock}\n`);
+      }
+      print(`Effects volume ${this.effectsVolume}; music volume ${this.musicVolume}; listeners ${this.listeners.length}\n`);
+      return true;
+    }
+    if (request.name === "soundlist" || request.name === "s_list") {
+      const registrations = [...this.sounds.entries()];
+      const results = await Promise.allSettled(registrations.map(([, pending]) => pending));
+      if (this.closed) throw new Error("Sound system closed during sound listing");
+      const assets = new Set<SoundAsset>();
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled" && result.value !== null) assets.add(result.value);
+        else print(`unavailable: ${registrations[index]?.[0] ?? "unknown sound"}\n`);
+      }
+      for (const entry of request.registrations ?? []) {
+        if (entry.sound !== null) assets.add(entry.sound);
+        else print(`unavailable: ${entry.path}\n`);
+      }
+      let bytes = 0;
+      for (const sound of [...assets].sort((a, b) => a.name.localeCompare(b.name))) {
+        const pcm = sound.pcm; bytes += pcm.samples.byteLength;
+        print(`${pcm.loopStart === null ? " " : "L"} ${pcm.sampleRate} Hz ${pcm.channels}ch 16-bit ${pcm.frameCount} frames ${pcm.samples.byteLength} bytes : ${sound.name} [${sound.resource}]\n`);
+      }
+      print(`Decoded PCM storage: ${bytes} bytes in ${assets.size} registered resources\n`);
+      return true;
+    }
+    if (request.name === "stopsound" || request.name === "s_stop") {
+      this.music.stop(); this.engine.stopAll();
+      this.statics.length = 0; this.loops.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
+      return true;
+    }
+    if (request.args.length === 0) throw new Error("Usage: play <sound> [sound ...]");
+    const listener = this.listeners.find(value => request.seat === null || value.seat.equals(request.seat));
+    if (listener === undefined) throw new Error("Sound playback requires a local listener");
+    const content = this.content.recipe.presentation.audio.content, family = this.content.catalog.product(content).expectation.family;
+    for (const argument of request.args) {
+      const path = argument.includes(".") ? argument : `${argument}.wav`;
+      const sound = await this.sound(content, path, family, listener.actor);
+      if (this.closed) throw new Error("Sound system closed during sound loading");
+      if (sound === null) throw new Error(`Sound unavailable: ${content}/${path}`);
+      this.engine.play({ sound, family, actor: null, origin: { kind: "local" }, audience: { kind: "seat", seat: listener.seat },
+        channel: family === "q3" ? 6 : 0, volume: 1, attenuation: 0 });
+    }
+    return true;
+  }
 
   private bank(content: ContentId): Promise<SoundBank> {
     const existing = this.banks.get(content);

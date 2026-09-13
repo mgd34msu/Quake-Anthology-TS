@@ -70,6 +70,12 @@ export class UnifiedAudio {
     get sampleClock(): number { return this.frame; }
     get queuedFrames(): number { return this.device?.queuedFrames ?? 0; }
     get outputState(): "detached" | "paused" | "playing" | "closed" { return this.closed ? "closed" : this.device?.state ?? "detached"; }
+    get outputConfiguration(): { readonly sampleRate: number; readonly channels: 1 | 2; readonly sampleBits: 8 | 16;
+        readonly deviceName: string | null; readonly bufferFrames: number; readonly maximumQueuedFrames: number } | null {
+        const device = this.device;
+        return device === null ? null : { sampleRate: device.sampleRate, channels: device.channels, sampleBits: device.sampleBits,
+            deviceName: device.deviceName, bufferFrames: device.bufferFrames, maximumQueuedFrames: device.maxQueuedFrames };
+    }
     private check(): void { if (this.closed)
         throw new Error("Audio engine closed"); }
     private entity(actor: ActorId): number {

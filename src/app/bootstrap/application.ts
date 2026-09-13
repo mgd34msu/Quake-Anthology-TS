@@ -1,4 +1,5 @@
 import { ConfigStore } from "../../settings/config.ts";
+import { applicationAudioCommands } from "./audio/commands.ts";
 import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
@@ -791,6 +792,17 @@ export class Application {
     this.requestedCommands = [];
     for (const command of pending) {
       try {
+        if (applicationAudioCommands.includes(command.name)) {
+          const graphical = this.graphical;
+          if (graphical === null) throw new Error("Sound system is not started");
+          await graphical.audio.command({ name: command.name, args: command.arguments_, seat: command.seat,
+            registrations: [...graphical.q3.values()].flatMap(value => value.client.media.bank.registrations()),
+            print: text => {
+              this.host.print(text);
+              for (const local of graphical.input.locals) if (command.seat === null || local.player.seat.id.equals(command.seat)) local.console.print(text);
+            } });
+          continue;
+        }
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
         if (command.name === "use") {
           const actor = this.commandActor(command.seat), requested = command.arguments_.join("").toLowerCase().replaceAll(" ", "");
