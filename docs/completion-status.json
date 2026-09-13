@@ -1,5 +1,6 @@
 {
-  "sourceCutoff": "a5fca3567968151261506707acfc392a5b95679e",
+  "sourceCutoff": "27c17a9e6bee1e6a50cec1479ef70d2a9d5c66e4",
+  "carriedVerdictsFrom": "a5fca3567968151261506707acfc392a5b95679e",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -7,14 +8,14 @@
   "families": [
     {
       "family": "q1",
-      "done": 121,
-      "notDone": 59,
+      "done": 122,
+      "notDone": 58,
       "total": 180,
-      "percentage": 67.2,
+      "percentage": 67.8,
       "methods": {
         "integrated": 102,
         "sharedReplacement": 15,
-        "extendedCommon": 4
+        "extendedCommon": 5
       }
     },
     {
@@ -43,10 +44,10 @@
     }
   ],
   "overall": {
-    "done": 279,
-    "notDone": 198,
+    "done": 280,
+    "notDone": 197,
     "total": 477,
-    "percentage": 58.5
+    "percentage": 58.7
   },
   "rows": [
     {
@@ -1489,13 +1490,16 @@
     {
       "id": "q1.input.gyro",
       "title": "Gyro aiming and device settings",
-      "status": "not-done",
-      "basis": "missing-work",
-      "reason": "Gyro samples are routed into seat aiming, but stationary calibration/bias handling and complete enable/calibrate UI are not implemented.",
+      "status": "done",
+      "basis": "extended-common",
+      "reason": "Accepted 221547a and 27c17a9 join stationary gyro bias calibration, per-seat aiming/device ownership, enable/calibrate controls and yaw/pitch sensitivity through common input and settings. Gyro tuning and axis mapping persist; no axis-selection UI or physical-controller qualification is claimed.",
       "paths": [
         "src/input/gamepad.ts",
+        "src/input/seat.ts",
         "src/input/router.ts",
-        "src/ui/settings/index.ts"
+        "src/ui/settings/gyro.ts",
+        "src/app/bootstrap/controller-settings.ts",
+        "src/settings/config.ts"
       ]
     },
     {
@@ -3732,11 +3736,15 @@
       "title": "Complete required gyro and device controls",
       "status": "done",
       "basis": "shared-replacement",
-      "reason": "The common input router sends device events only to the assigned seat, applies controller tuning/gyro state and balanced source actions, and releases device state on loss.",
+      "reason": "The common input router assigns device events to their seat, applies gyro tuning and stationary bias calibration, preserves balanced source actions, and releases connection-local state on device loss. Shared enable/calibrate and yaw/pitch sensitivity controls persist gyro tuning; physical-controller qualification is not claimed.",
       "paths": [
         "src/input/router.ts",
         "src/input/gamepad.ts",
-        "src/app/bootstrap/input.ts"
+        "src/input/seat.ts",
+        "src/app/bootstrap/input.ts",
+        "src/ui/settings/gyro.ts",
+        "src/app/bootstrap/controller-settings.ts",
+        "src/settings/config.ts"
       ]
     },
     {
@@ -5525,7 +5533,7 @@
       "title": "Per-seat gyro and tactile feedback",
       "status": "done",
       "basis": "extended-common",
-      "reason": "Accepted a8ace02 and 3e57748 join source sound-triggered BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Disk persistence and physical-controller qualification are not claimed. Existing gyro/router and gamepad configuration remain joined through the common input path.",
+      "reason": "Accepted a8ace02 and 3e57748 join source BNVIB envelopes, affected-seat routing, lifecycle cancellation, shared enable/strength settings and runtime gain changes. Accepted 221547a and 27c17a9 add shared gyro calibration, device ownership and persisted gyro tuning. Haptic-settings persistence and physical-controller qualification remain unclaimed.",
       "paths": [
         "src/input/haptics.ts",
         "src/app/bootstrap/input.ts",
@@ -5533,7 +5541,10 @@
         "src/input/router.ts",
         "src/input/gamepad.ts",
         "src/app/bootstrap/audio/q3.ts",
-        "src/app/bootstrap/q3-client.ts"
+        "src/app/bootstrap/q3-client.ts",
+        "src/ui/settings/gyro.ts",
+        "src/app/bootstrap/controller-settings.ts",
+        "src/settings/config.ts"
       ]
     },
     {
