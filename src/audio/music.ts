@@ -1,21 +1,20 @@
 // Intro/loop and CD track selection adapted from Q3 snd_dma.c and Q1/Q2 cd_ogg.ts.
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { PcmSound } from "./wav.ts";
+import { RawAudioStream } from "./streams.ts";
 import type { PcmStream } from "./streams.ts";
-import type { SoundFamily } from "./types.ts";
+import type { SoundFamily, StreamPcm } from "./types.ts";
 export class MusicPlayer {
     private stream: PcmStream | null = null;
     private loop: PcmStream | null = null;
-    private chunk: PcmSound | null = null;
-    private chunkBegin = 0;
-    private position = 0;
-    private outputFrames = 0;
+    private pcm: RawAudioStream;
     private targetVolume = 0.25;
     private smoothedVolume = Math.fround(0.5);
     paused = false;
-    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3") { }
+    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3") {
+        this.pcm = new RawAudioStream(outputRate);
+    }
     get playing(): boolean { return this.stream !== null; }
-    get sourcePosition(): number { return this.position; }
+    get sourcePosition(): number { return this.pcm.sourcePosition; }
     get volume(): number { return this.family === "q3" ? this.smoothedVolume : this.targetVolume; }
     setVolume(value: number): void { if (!Number.isFinite(value) || value < 0)
         throw new RangeError("Invalid music volume"); this.targetVolume = value; }
@@ -28,17 +27,13 @@ export class MusicPlayer {
         this.stop();
         this.stream = intro;
         this.loop = loop;
-        this.chunk = null;
-        this.chunkBegin = 0;
-        this.position = 0;
-        this.outputFrames = 0;
+        this.pcm = new RawAudioStream(this.outputRate);
         this.paused = false;
     }
     stop(): void {
         const stream = this.stream, loop = this.loop;
         this.stream = null;
         this.loop = null;
-        this.chunk = null;
         try {
             stream?.close();
         }
@@ -47,53 +42,34 @@ export class MusicPlayer {
                 loop?.close();
         }
     }
-    private nextChunk(): boolean {
+    private nextChunk(): StreamPcm | null {
         const stream = this.stream;
         if (stream === null)
-            return false;
-        this.chunkBegin = stream.positionFrames;
-        this.chunk = stream.read(16384);
-        if (this.chunk !== null)
-            return true;
+            return null;
+        const sourceSample = stream.positionFrames;
+        const chunk = stream.read(16384);
+        if (chunk !== null)
+            return { ...chunk, sourceSample, resetStream: false };
         if (this.loop === null) {
             this.stream = null;
             stream.close();
-            return false;
+            return null;
         }
         if (this.loop !== stream)
             stream.close();
         this.stream = this.loop;
         this.stream.seek(0);
-        this.position = 0;
-        this.outputFrames = 0;
-        this.chunkBegin = 0;
-        this.chunk = this.stream.read(16384);
-        if (this.chunk === null) {
+        const loopChunk = this.stream.read(16384);
+        if (loopChunk === null) {
             this.stop();
-            return false;
+            return null;
         }
-        return true;
+        return { ...loopChunk, sourceSample: 0, resetStream: true };
     }
     mix(frames: number): Float64Array {
-        const output = new Float64Array(frames * 2);
-        if (this.paused || this.volume <= 0)
-            return output;
-        for (let frame = 0; frame < frames; frame++) {
-            if (this.stream === null)
-                break;
-            while (this.chunk === null || this.position >= this.chunkBegin + this.chunk.frameCount)
-                if (!this.nextChunk())
-                    return output;
-            const chunk = this.chunk, index = (this.position - this.chunkBegin) * chunk.channels;
-            const left = chunk.samples[index], right = chunk.channels === 1 ? left : chunk.samples[index + 1];
-            if (left === undefined || right === undefined)
-                throw new Error("Music source position outside decoded chunk");
-            output[frame * 2] = left * this.volume;
-            output[frame * 2 + 1] = right * this.volume;
-            this.outputFrames++;
-            this.position = Math.floor(this.outputFrames * chunk.sampleRate / this.outputRate);
-        }
-        return output;
+        if (this.paused || this.volume <= 0 || this.stream === null)
+            return new Float64Array(frames * 2);
+        return this.pcm.mix(frames, this.volume, () => this.nextChunk());
     }
     close(): void { this.stop(); }
 }

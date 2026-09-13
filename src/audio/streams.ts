@@ -112,7 +112,7 @@ export class RawAudioStream {
     paused = false;
     constructor(readonly outputRate: number) { }
     get queuedSourceFrames(): number { return Math.max(0, this.end - this.sourcePosition); }
-    private get sourcePosition(): number { return this.origin + Math.floor(this.outputFrames * this.inputRate / this.outputRate); }
+    get sourcePosition(): number { return this.origin + Math.floor(this.outputFrames * this.inputRate / this.outputRate); }
     queue(chunk: StreamPcm): void {
         if (!Number.isSafeInteger(chunk.sampleRate) || chunk.sampleRate < 1 || !Number.isSafeInteger(chunk.sourceSample) || chunk.sourceSample < 0 || chunk.samples.length % chunk.channels !== 0)
             throw new RangeError("Invalid streamed PCM");
@@ -134,17 +134,26 @@ export class RawAudioStream {
             this.segments.push({ begin: chunk.sourceSample, end, samples });
         this.end = end;
     }
-    mix(frames: number, gain = 1): Float64Array {
+    /** Music refills on demand; only a reset chunk starts a new resampling phase. */
+    mix(frames: number, gain = 1, refill?: () => StreamPcm | null): Float64Array {
         const output = new Float64Array(frames * 2);
-        if (this.paused || this.inputRate === 0)
+        if (this.paused)
             return output;
         for (let frame = 0; frame < frames; frame++) {
+            let segment = this.segments[0];
+            while (segment === undefined || this.sourcePosition >= segment.end) {
+                if (segment !== undefined)
+                    this.segments.shift();
+                segment = this.segments[0];
+                if (segment === undefined) {
+                    const chunk = refill?.();
+                    if (chunk === undefined || chunk === null)
+                        return output;
+                    this.queue(chunk);
+                    segment = this.segments[0];
+                }
+            }
             const position = this.sourcePosition;
-            while (this.segments[0] !== undefined && position >= this.segments[0].end)
-                this.segments.shift();
-            const segment = this.segments[0];
-            if (segment === undefined)
-                break;
             const index = (position - segment.begin) * this.channels;
             const left = segment.samples[index], right = this.channels === 1 ? left : segment.samples[index + 1];
             if (left === undefined || right === undefined)
