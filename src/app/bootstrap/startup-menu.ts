@@ -1,3 +1,5 @@
+import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
+import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { browserAddress } from "./server-browser.ts";
 import type { StartupServerBrowser, BrowserConnection } from "./server-browser.ts";
@@ -56,6 +58,7 @@ const groups: readonly { readonly title: string; readonly fields: readonly Start
 export class StartupMenu {
   readonly controller: NativeUiController;
   private readonly text: UiTextRenderer;
+  private gyroMenu: UiMenuId | null = null;
   private readonly disposers: (() => void)[] = [];
   private status = "";
   private busy = false;
@@ -99,9 +102,18 @@ export class StartupMenu {
       this.button("apply-display", "Apply display settings", 5, options.applyDisplay, true), this.back(),
     ]);
     for (const [id, category] of [[soundMenu, "audio"], [controlsMenu, "input"]] satisfies readonly (readonly [UiMenuId, string])[])
-      this.register(id, () => [...(category === "audio" ? this.rows(["environment", "doppler"]).map((row, index) => this.row(row, index)) : []),
-        ...(options.settings ?? []).filter(binding => binding.category === category)
-          .map((binding, index) => settingControl(binding, { x: 64, y: 118 + (index + (category === "audio" ? 2 : 0)) * 38, width: 512, height: 34 }, options.seat)), this.back()]);
+      this.register(id, () => {
+        const bindings = (options.settings ?? []).filter(binding => binding.category === category);
+        const offset = category === "audio" ? 2 : 0;
+        const rect = (index: number) => ({ x: 64, y: 118 + (index + offset) * 38, width: 512, height: 34 });
+        const controls = [...(category === "audio" ? this.rows(["environment", "doppler"]).map((row, index) => this.row(row, index)) : []),
+          ...bindings.map((binding, index) => settingControl(binding, rect(index), options.seat))];
+        if (category === "input" && this.gyroMenu !== null) controls.push({
+          ...this.button("gyro", "Gyro controls", 0, () => { if (this.gyroMenu !== null) this.controller.openMenu(this.gyroMenu); }),
+          rect: rect(bindings.length),
+        });
+        return [...controls, this.back()];
+      });
     this.register(selectMenu, () => {
       const row = this.selectionRow();
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
@@ -252,7 +264,7 @@ export class StartupMenu {
     const backdrop = menuBackdrop(context), panel = menuPanel(context, active === main);
     const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
-      : active === browserMenu ? "Find servers" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
+      : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     text(title, 64, 44, active === main ? 6 : 4, true, true);
 
     if (active === rosterMenu) text("Counts: this map. Choices apply across this campaign.", 64, 82, 1.5);
@@ -292,6 +304,9 @@ export class StartupMenu {
       picture: resource => this.options.art.picture(resource), emit, material });
     renderUiCommands(context, overlayCommands.map(command => transformUi(command, transform)), { text: this.text, white: this.options.art.white,
       picture: resource => this.options.art.picture(resource), emit, material });
+  }
+  bindGyro(settings: GyroSettingsUi): void {
+    const menu = registerGyroSettingsMenu(this.controller, settings, ""); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);
   }
   close(): void { this.controller.closeAll(); for (const dispose of this.disposers) dispose(); this.text.clear(); }
 }

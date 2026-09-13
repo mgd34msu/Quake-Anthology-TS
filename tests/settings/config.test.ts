@@ -66,3 +66,19 @@ test("common vibration strength uses the existing frontend preference binding", 
   if (restored === undefined || restored.kind !== "slider") throw new Error("Missing restored strength slider");
   expect(restored.read()).toBe(0.35);
 });
+
+test("gyro tuning profiles persist by seat and serial without calibration bias", async () => {
+  const { parseGyroProfile } = await import("../../src/settings/config.ts");
+  const root = await mkdtemp(join(tmpdir(), "quake-gyro-"));
+  try {
+    const store = new ConfigStore(root);
+    const profile = { version: 1, identity: { kind: "device", guid: "a".repeat(32), serial: "pad-A" }, tuning: { ...defaultGamepadTuning.gyro, enabled: true, yawSensitivity: 2.5 } } satisfies import("../../src/settings/config.ts").GyroProfile;
+    await store.saveGyro("controllers/seat-1/pad-A.json", profile);
+    expect(await store.loadGyro("controllers/seat-1/pad-A.json")).toEqual(profile);
+    expect(await store.loadGyro("controllers/seat-2/pad-A.json")).toBeNull();
+    expect(await store.loadGyro("controllers/seat-1/pad-B.json")).toBeNull();
+    expect(JSON.stringify(await store.loadGyro("controllers/seat-1/pad-A.json"))).not.toContain("bias");
+    expect(() => parseGyroProfile({ ...profile, identity: { ...profile.identity, serial: "" } })).toThrow("identity");
+    expect(() => parseGyroProfile({ ...profile, tuning: { ...profile.tuning, yawSensitivity: Infinity } })).toThrow("finite");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

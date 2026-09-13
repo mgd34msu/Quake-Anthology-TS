@@ -1,3 +1,4 @@
+import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import { registerServerSettingsMenu } from "../../ui/settings/server.ts";
 import type { HostServerSettingsUi } from "../../ui/settings/server.ts";
 import type { CommonHudData } from "../../ui/hud/index.ts";
@@ -37,6 +38,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly menuText: UiTextRenderer;
   private readonly match: Q2MatchUi;
   private readonly settings: SettingsMenus;
+  private readonly gyroSettings: SettingsMenus;
   private readonly serverSettings: SettingsMenus | null;
   private readonly bindings: ReturnType<typeof registerBindingMenus>;
   private readonly disposeInput: () => void;
@@ -89,7 +91,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
-    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
+    const gyro = this.gyroSettings = registerGyroSettingsMenu(this.controller, input.controllerSettings.ui(local.input.seat));
+    this.settings = registerSettingsMenus(this.controller, [resolution, bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
       write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()]);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
@@ -172,5 +175,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

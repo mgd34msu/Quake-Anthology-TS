@@ -110,6 +110,16 @@ export async function writeAtomic(path: string, contents: string | Uint8Array): 
 }
 export class ConfigStore {
   constructor(readonly root: string) {}
+  async loadGyro(name: string): Promise<GyroProfile | null> {
+    const text = await this.loadText(name);
+    if (text === null) return null;
+    if (text.length > 8192) throw new Error("Gyro settings file is too large");
+    const value: unknown = JSON.parse(text); return parseGyroProfile(value);
+  }
+  async saveGyro(name: string, profile: GyroProfile): Promise<void> {
+    const validated = parseGyroProfile(profile);
+    await this.dump(name, `${JSON.stringify(validated)}\n`);
+  }
   async saveSeat(name: string, settings: SeatSettings): Promise<void> {
     await writeAtomic(settingsPath(this.root, name), `${JSON.stringify(settings, null, 2)}\n`);
   }
@@ -130,4 +140,22 @@ export class ConfigStore {
     return await file.exists() ? file.text() : null;
   }
   async dump(name: string, contents: string): Promise<void> { await writeAtomic(settingsPath(this.root, name), contents); }
+}
+
+export type GyroProfileIdentity = { readonly kind: "seat" } | { readonly kind: "device"; readonly guid: string; readonly serial: string };
+export interface GyroProfile { readonly version: 1; readonly identity: GyroProfileIdentity; readonly tuning: GamepadTuning["gyro"]; }
+export function parseGyroProfile(value: unknown): GyroProfile {
+  const input = record(value), identity = record(input["identity"]), tuning = record(input["tuning"]);
+  if (input["version"] !== 1) throw new Error("Unsupported gyro settings version");
+  let key: GyroProfileIdentity;
+  if (identity["kind"] === "seat") key = { kind: "seat" };
+  else if (identity["kind"] === "device") {
+    const guid = string(identity["guid"]), serial = string(identity["serial"]);
+    if (!/^[0-9a-f]{32}$/.test(guid) || serial.length === 0 || serial.length > 256 || serial.includes("\0")) throw new Error("Invalid gyro device identity");
+    key = { kind: "device", guid, serial };
+  } else throw new Error("Unknown gyro profile identity");
+  const yawAxis = tuning["yawAxis"];
+  if (yawAxis !== "y" && yawAxis !== "z") throw new Error("Unknown gyro yaw axis");
+  const result: GamepadTuning["gyro"] = { enabled: boolean(tuning["enabled"]), yawAxis, yawSensitivity: number(tuning["yawSensitivity"]), pitchSensitivity: number(tuning["pitchSensitivity"]) };
+  return { version: 1, identity: key, tuning: result };
 }

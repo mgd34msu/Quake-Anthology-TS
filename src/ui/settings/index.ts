@@ -190,3 +190,4 @@ export class SeatUiPreferences {
       boolean("highContrast", "High contrast"), boolean("reducedFlashes", "Reduce HUD flashes"), boolean("captions", "Captions"), boolean("crosshair", "Crosshair")];
   }
 }
+export * from "./gyro.ts";

@@ -1,3 +1,4 @@
+import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import type { BrowserConnection } from "./server-browser.ts";
 import { ConfigStore } from "../../settings/config.ts";
@@ -41,6 +42,7 @@ interface StartupGraphics {
   readonly menu: StartupMenu;
   readonly router: InputRouter;
   readonly controllers: SdlControllers;
+  readonly controllerSettings: ControllerSettings;
   draw(): void;
   close(): void;
 }
@@ -111,10 +113,12 @@ export class StartupApplication {
         now: () => performance.now(), ticks: () => native.window.ticks, subframe: false,
         unhandled: event => { if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit(); } });
       router.attachWindow(native.window);
+      const controllerSettings = new ControllerSettings(router, [seat], () => controllers?.devices ?? [], new ConfigStore(join(this.saves.directory, "..", "settings")), this.host.print);
+      controllerSettings.update(); activeMenu.bindGyro(controllerSettings.ui(seat));
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
       const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
       const presentation: PresentationSelection = { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider };
-      this.graphics = { display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads,
+      this.graphics = { display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
         draw: () => {
           const viewport = { x: 0, y: 0, ...native.window.drawableSize };
           builder.begin("back", true);
@@ -122,7 +126,7 @@ export class StartupApplication {
             command => builder.command(command), () => { throw new Error("Startup charset unexpectedly requested a material draw"); });
           native.execute(builder.finish());
         },
-        close: () => { activeRouter.close(); pads.close(); activeMenu.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
+        close: () => { controllerSettings.close(); activeRouter.close(); pads.close(); activeMenu.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
       return this.graphics;
     } catch (error) {
       router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
@@ -189,6 +193,7 @@ export class StartupApplication {
     if (graphics === null) throw new Error("Startup frame has no renderer");
     for (const event of graphics.renderer.window.pollEvents()) graphics.router.handlePlatform(event);
     for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
+    graphics.controllerSettings.update();
     graphics.router.updateCapture();
     if (this.refreshSaves) {
       this.refreshSaves = false; graphics.menu.setStatus("Reading saved games...", true); graphics.draw();

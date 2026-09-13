@@ -1,3 +1,4 @@
+import { ControllerSettings } from "./controller-settings.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ContentId, ResourceRequest } from "../../contracts/content.ts";
 import type { AudioAudience } from "../../audio/types.ts";
@@ -69,6 +70,7 @@ export class ApplicationInput {
   readonly locals: readonly LocalInput[];
   readonly controllers: SdlControllers;
   readonly router: InputRouter;
+  readonly controllerSettings: ControllerSettings;
   private sequence = 0;
   private hapticLoad: (request: ResourceRequest) => Promise<Uint8Array | null> = async () => null;
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
@@ -110,7 +112,7 @@ export class ApplicationInput {
           if (event.kind === "key" && event.down && !event.repeat && event.code === 96) {
             ui?.closeMenus(); console?.toggle(); return true;
           }
-          return (ui?.input(event, focus) ?? false) || (console?.input(event, focus) ?? false) || (actions.clientInput?.(event) ?? false);
+          return (console?.input(event, focus) ?? false) || (actions.clientInput?.(event) ?? false) || (ui?.input(event, focus) ?? false);
         } });
       console = new SeatConsole({ seat: player.seat.id, dialect: sourceDialect, context: seatContext, commands: this.commands, cvars: consoleCvars,
         now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now());
@@ -157,7 +159,8 @@ export class ApplicationInput {
         }
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
       } });
-    try { this.router.attachWindow(window); this.router.restart(); }
+    this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, undefined, actions.print);
+    try { this.router.attachWindow(window); this.router.restart(); this.controllerSettings.update(); }
     catch (error) { this.controllers.close(); throw error; }
   }
 
@@ -168,6 +171,7 @@ export class ApplicationInput {
       this.router.handlePlatform(event);
     }
     for (const event of this.controllers.pollEvents()) this.router.handleController(event);
+    this.controllerSettings.update();
     this.commands.execute();
     this.router.updateCapture();
     for (const local of this.locals) {
@@ -282,6 +286,7 @@ export class ApplicationInput {
   }
 
   close(): undefined {
+    this.controllerSettings.close();
     for (const local of this.locals) local.haptics.close();
     this.router.close();
     this.controllers.close();

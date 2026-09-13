@@ -228,3 +228,51 @@ test("common weapon HUD distinguishes finite zero, source one-shell fallback, un
   if (warning?.kind !== "text") throw new Error("Missing aggregate warning");
   expect(warning.origin.x + measureText(warning.text, warning.scale)).toBeLessThanOrEqual(156);
 });
+
+test("gyro menu calibrates the assigned controller and restores only its seat tuning", async () => {
+  const { registerGyroSettingsMenu } = await import("../../../src/ui/settings/gyro.ts");
+  const { ControllerSettings } = await import("../../../src/app/bootstrap/controller-settings.ts");
+  const { ConfigStore } = await import("../../../src/settings/config.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const directory = await mkdtemp("/tmp/gyro-menu-");
+  const owner = createIdentityOwner("gyro-menu"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q3", context });
+  const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
+  const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat,
+    now: () => 1000, ticks: () => 1000, subframe: false, unhandled: () => undefined,
+    controllers: { setAssignments: () => undefined, assignments: [7], pollEvents: () => [], snapshot: () => null,
+      setSensorEnabled: () => ({ kind: "accepted" }) } });
+  const device: import("../../../src/platform/controller.ts").ControllerDevice = { instance: 7, name: "Test gyro controller", guid: "a".repeat(32), serial: "pad-A", ordinal: 0, virtual: true,
+    capabilities: { axes: [], buttons: [], rumble: false, triggerRumble: false, led: false, touchpads: 0, sensors: [{ kind: "gyro", enabled: false, rateHz: 50 }] } };
+  let devices: readonly import("../../../src/platform/controller.ts").ControllerDevice[] = [device];
+  const store = new ConfigStore(directory), settings = new ControllerSettings(router, [seat], () => devices, store);
+  const ui = new NativeUiController({ seat, now: () => 1000, skin: () => defaultUiSkin(fontId), bindings: () => [],
+    focus: focus => input.setFocus(focus, 1000), sound: () => undefined, executeScript: () => undefined });
+  const menu = registerGyroSettingsMenu(ui, settings.ui(seat));
+  const click = (row: number): void => {
+    ui.input({ seat, timeMilliseconds: 1000, kind: "mouse-motion", position: { x: 200, y: 106 + row * 28 }, delta: { x: 0, y: 0 } });
+    ui.input({ seat, timeMilliseconds: 1000, kind: "mouse-button", button: 1, down: true });
+    ui.input({ seat, timeMilliseconds: 1000, kind: "mouse-button", button: 1, down: false });
+  };
+  const loaded = async (): Promise<void> => { for (let attempt = 0; attempt < 100 && settings.busy(seat); attempt++) await Bun.sleep(1); expect(settings.busy(seat)).toBe(false); };
+  try {
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 7 }); settings.update(); await loaded();
+    ui.openMenu(menu.root); click(1); await loaded(); expect(input.gamepad.tuning.gyro.enabled).toBe(true);
+    click(2); expect(router.gyroCalibration(seat).kind).toBe("calibrating");
+    for (let index = 0; index <= 100; index++) router.handleController({ kind: "sensor", timestamp: 0, instance: 7, slot: 0, sensor: "gyro", timestampUs: BigInt((1000 + index * 20) * 1000), x: 0.01, y: -0.02, z: 0.03 });
+    expect(router.gyroCalibration(seat).kind).toBe("ready");
+    click(5); expect(router.gyroCalibration(seat).kind).toBe("idle");
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 7, instance: null }); settings.update();
+    devices = [{ ...device, instance: 8, serial: "pad-B" }];
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 8 }); settings.update(); await loaded();
+    expect(router.gyroCalibration(seat).kind).toBe("idle");
+    expect(input.gamepad.tuning.gyro.enabled).toBe(false);
+    router.setGyroEnabled(seat, false);
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: 8, instance: null }); settings.update();
+    devices = [{ ...device, instance: 9 }];
+    router.handleController({ kind: "assignment", timestamp: 0, slot: 0, previous: null, instance: 9 }); settings.update(); await loaded();
+    expect(input.gamepad.tuning.gyro.enabled).toBe(true);
+    expect(router.gyroCalibration(seat).kind).toBe("idle");
+  } finally { ui.closeAll(); menu.dispose(); settings.close(); router.close(); await rm(directory, { recursive: true, force: true }); }
+});
