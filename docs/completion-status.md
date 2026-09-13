@@ -1,18 +1,18 @@
 # Implementation completion status
 
-Source cutoff: `185c06edc6ad8d02702cfaeed00a21df9235edf5`. This finite review reopens only q2.assets.md5-replacements and q2.assets.md5-animation: shared parsing exists, but Q2 application replacement selection is not joined. All other 475 verdicts carry unchanged from the a5c4da3 capture-review cutoff, without a new inventory-wide audit. Existing Q1 MD5 selection and separately tested BSPX behavior remain intact. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
+Source cutoff: `a68b43edd5f2167d34ade98d55922e9dd0eff934`. This finite review updates only q2.assets.md5-animation and q2.assets.md5-replacements against accepted a68b43e. Animation is Done/integrated; replacement selection remains Not done for user-selectable tiers, application configuration and distance selection. All other 475 verdicts carry unchanged from cutoff 185c06e, without a new inventory-wide audit. Existing Q1 MD5 selection and separately tested BSPX behavior remain intact. Uncommitted changes are excluded. These are requirement verdict counts, not equally sized implementation tasks or an overall engine completion percentage. Done means the stated requirement is integrated, replaced by a shared implementation, or extended through the common engine. A shared implementation may satisfy rows in multiple source lists, so these counts measure fulfilled requirements, not independent code modules or effort.
 
 | Game | Done | Not done | Total | Requirement share done |
 | --- | ---: | ---: | ---: | ---: |
 | Q1 | 122 | 58 | 180 | 67.8% |
-| Q2 | 107 | 86 | 193 | 55.4% |
+| Q2 | 108 | 85 | 193 | 56% |
 | Q3 | 50 | 54 | 104 | 48.1% |
-| Overall inventory | 279 | 198 | 477 | 58.5% |
+| Overall inventory | 280 | 197 | 477 | 58.7% |
 
 | Game | Integrated | Shared replacement | Extended common |
 | --- | ---: | ---: | ---: |
 | Q1 | 102 | 15 | 5 |
-| Q2 | 61 | 31 | 15 |
+| Q2 | 62 | 31 | 15 |
 | Q3 | 39 | 7 | 4 |
 
 ## Q1 requirements
@@ -721,14 +721,14 @@ Source cutoff: `185c06edc6ad8d02702cfaeed00a21df9235edf5`. This finite review re
 | --- | --- | --- | --- | --- |
 | `q2.diagnostics.runtime-camera` — Execute authored target cameras | done | integrated | Registered Q64 target_camera callbacks move source intermission cameras through authored targets, preserve the dummy/player state and restore normal play through player hooks. | [src/content/q2/rerelease/q64/index.ts](../src/content/q2/rerelease/q64/index.ts), [src/content/q2/rerelease/players.ts](../src/content/q2/rerelease/players.ts), [src/content/composition/q2/index.ts](../src/content/composition/q2/index.ts), [src/app/bootstrap/presentation.ts](../src/app/bootstrap/presentation.ts) |
 
-### assets — 2 done / 4 total
+### assets — 3 done / 4 total
 
 | Requirement | Verdict | Method | Reason and remaining work | Source paths |
 | --- | --- | --- | --- | --- |
 | `q2.assets.bspx-lightmaps` — Load decoupled BSPX lightmaps | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
 | `q2.assets.lightgrid` — Light entities from BSPX light grids | done | shared-replacement | Application asset loading and the shared world/model renderers consume the parsed format metadata, preserving model/lightmap scale and animation semantics for both CPU and GL. | [src/app/bootstrap/assets.ts](../src/app/bootstrap/assets.ts), [src/render/scene/world.ts](../src/render/scene/world.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts), [src/render/scene/models/light-sampler.ts](../src/render/scene/models/light-sampler.ts) |
-| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | not-done | missing-work | At accepted 185c06e, loadApplicationModel selects enhanced replacements only for Q1 MDL assets. Q2 MD5 helpers exist, but Q2 application replacement discovery, selection and authored-scale attachment are not joined. Preserve the working Q1 replacement path; common parsing alone does not complete the Q2 requirement. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/md5.ts](../src/formats/q3-model/md5.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts) |
-| `q2.assets.md5-animation` — Animate skeletal models with authored scale | not-done | missing-work | At accepted 185c06e, Q2 skeletal helpers do not reach application model selection, so required Q2 MD5 animation/frame mapping and authored-scale behavior are not exercised through the normal application model path. Join Q2 replacement selection and its animation/scale semantics; the existing Q1 MD5 join and separately tested BSPX lighting remain intact. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/md5.ts](../src/formats/q3-model/md5.ts), [src/render/scene/models/renderer.ts](../src/render/scene/models/renderer.ts) |
+| `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements | not-done | missing-work | Accepted a68b43e implements default Q2 application replacement selection with authored scale and corrected source culling. User-selectable replacement tiers remain unfinished: application gl_md5_load/gl_md5_use configuration and distance-based selection are not joined. G36 requires those controls; the loader itself is no longer missing. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/replacements.ts](../src/formats/q3-model/replacements.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [docs/comparison-q2.md](../docs/comparison-q2.md) |
+| `q2.assets.md5-animation` — Animate skeletal models with authored scale | done | integrated | Accepted a68b43e joins Q2 MD5 animation to the actual application loader and shared model preparation, retaining source frame mapping and authored joint scales. Corrected source front culling passed six tests/148 assertions plus actual normal CPU/GL application runs with reviewed textured blaster/hand and soldier images. This closes animation integration, not all replacement configuration or full visual fidelity. | [src/app/bootstrap/model-loader.ts](../src/app/bootstrap/model-loader.ts), [src/formats/q3-model/replacements.ts](../src/formats/q3-model/replacements.ts), [src/contracts/scene.ts](../src/contracts/scene.ts), [src/render/scene/models/prepare.ts](../src/render/scene/models/prepare.ts), [tests/formats/q3-model/md5.test.ts](../tests/formats/q3-model/md5.test.ts), [tests/first-playable/q2-md5.test.ts](../tests/first-playable/q2-md5.test.ts) |
 
 ### visual — 2 done / 2 total
 

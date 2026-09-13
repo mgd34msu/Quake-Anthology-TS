@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite MD5 review at source cutoff `185c06edc6ad8d02702cfaeed00a21df9235edf5`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite MD5 review at source cutoff `a68b43edd5f2167d34ade98d55922e9dd0eff934`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -22,7 +22,7 @@ Complete format and mod discovery, expansion dependencies, authored map database
 
 **Done when:** Each supported product and mod resolves its required assets, start maps and dependencies through the common catalog with explicit missing-data errors. Accepted PKZ support and downloaded-package remounting remain in place.
 
-Image-format subrequirements: preserve the production decoder union PCX, WAL, TGA, PNG, JPG/JPEG, BMP and GIF; GIF is already accepted. Q2 JPEG/BMP replacement fallback is accepted in `185c06e`. Consolidate inconsistent caller-specific override priority and wire the absent `r_override_textures`, `r_texture_overrides` and `r_texture_formats` controls through common image selection. PCX/BMP original logical-dimension recovery is accepted in `185c06e`; `aeb059d` connects the production original-image reader. Preserve these joins while completing the remaining controls. Model replacements also need the Q2 MD5 application selection join: `src/app/bootstrap/model-loader.ts` currently selects replacements only for Q1. Preserve the existing Q1 MD5 join; Q2 MD5 helpers alone do not complete application selection.
+Image-format subrequirements: preserve the production decoder union PCX, WAL, TGA, PNG, JPG/JPEG, BMP and GIF; GIF is already accepted. Q2 JPEG/BMP replacement fallback is accepted in `185c06e`. Shared resolver `8e4230f` consolidates caller-specific resolution while preserving source skin semantics. Wire the still-missing application `r_override_textures`, `r_texture_overrides` and `r_texture_formats` controls through common image selection. PCX/BMP original logical-dimension recovery is accepted in `185c06e`; `aeb059d` connects the production original-image reader. Preserve these joins while completing the remaining controls. Q2 default application MD5 selection and animation are accepted in `a68b43e`, alongside the existing Q1 join. User-selectable Q2 replacement tiers, `gl_md5_load`/`gl_md5_use` configuration and distance selection remain unfinished.
 
 ### 3. Shared CPU and GL rendering
 
@@ -30,7 +30,7 @@ Complete the rendering feature union: effects, fog, shadows, transparency, view 
 
 **Done when:** The same scene commands express the required features on CPU and GL, with source-grounded visual comparisons for the affected scenes. Accepted GIF playback is retained; bounded matching images do not imply universal renderer parity.
 
-Image-replacement rendering must consume the common priority and format choices from priority 2. Preserve original logical dimensions independently of replacement pixel dimensions, including PCX/BMP, so replacement textures keep the intended world/UI scale on CPU and GL. The bounded image fixes in `185c06e` and production original reader in `aeb059d` are accepted; these receipts do not implement the remaining override controls or a common override-priority policy.
+Image-replacement rendering must consume the common priority and format choices from priority 2. Preserve original logical dimensions independently of replacement pixel dimensions, including PCX/BMP, so replacement textures keep the intended world/UI scale on CPU and GL. The bounded image fixes in `185c06e` and production original reader in `aeb059d` are accepted; `8e4230f` adds the common resolver. Runtime override controls and refresh lifecycle remain in progress and are not accepted by these receipts.
 
 ### 4. Common audio
 
@@ -174,7 +174,7 @@ Do regression hardening, menu asset packaging and release work only when request
 
 ## Current followups — 2026-09-12
 
-The image-replacement and actor-scaling details above are current planning followups, separate from the historical seven source-inventory leads and the carried requirement verdicts. Image decoder support and accepted GIF playback are existing work. The bounded image-resolution fixes are accepted in `185c06e`; the production original reader is accepted in `aeb059d`. Root checked the combined Hipnotic/reader source with 37 tests/1755 assertions and strict/policy checks. Actor-size measurements are read-only and were independently rerun: Q1 MDL height 51.8381, Q2 male MD2 49.8092, Q1 rerelease MD5 52.0984 and Q2 male MD5 50.0221. Assembled Q3 heights are Sarge 57.8448, Xaero 59.6382 and Anarki 62.2117. All standing hulls are 56 high; Q3 width/view height are 30/26, versus Q1/Q2 32/22. Visual reference calibration is separate from physics units. Root inspected `/tmp/q12-scale-native.png` and `/tmp/q12-scale-fixed-ratio.png`: Q2 `base1`, equal depth and floor placement, Q2 soldier/male beside Q1 shambler/Ranger, comparing native factor 1 with a common Q1 factor of 0.960860619. This comparison did not establish automatic enlargement. Root also reran `/tmp/map-scale-measure.ts` (`/tmp/root-map-scale-measure.log`): all three BSP vertex paths retain unscaled coordinates; reviewed defaults use step 18 and gravity 800. Room clearances 96/320/276 come from different rooms and are not a unit calibration. Equal actor hulls do not prove equivalent world scale. No scale factor has been selected and no engine scaling change is claimed. Neither followup changes the 477-row ledger, its counts or the historical seven-lead count.
+The image-replacement and actor-scaling details above are current planning followups, separate from the historical seven source-inventory leads and the carried requirement verdicts. Image decoder support and accepted GIF playback are existing work. The bounded image-resolution fixes are accepted in `185c06e`; the production original reader is accepted in `aeb059d`. Root checked the combined Hipnotic/reader source with 37 tests/1755 assertions and strict/policy checks. Actor-size measurements are read-only and were independently rerun: Q1 MDL height 51.8381, Q2 male MD2 49.8092, Q1 rerelease MD5 52.0984 and Q2 male MD5 50.0221. Assembled Q3 heights are Sarge 57.8448, Xaero 59.6382 and Anarki 62.2117. All standing hulls are 56 high; Q3 width/view height are 30/26, versus Q1/Q2 32/22. Visual reference calibration is separate from physics units. Root inspected `/tmp/q12-scale-native.png` and `/tmp/q12-scale-fixed-ratio.png`: Q2 `base1`, equal depth and floor placement, Q2 soldier/male beside Q1 shambler/Ranger, comparing native factor 1 with a common Q1 factor of 0.960860619. This comparison did not establish automatic enlargement. Root also reran `/tmp/map-scale-measure.ts` (`/tmp/root-map-scale-measure.log`): all three BSP vertex paths retain unscaled coordinates; reviewed defaults use step 18 and gravity 800. Room clearances 96/320/276 come from different rooms and are not a unit calibration. Equal actor hulls do not prove equivalent world scale. Root also inspected Q1 `start` and Q3 `q3dm1` lineups at scale 1, with assembled Sarge, Q2 male, shambler and Ranger aligned by feet at equal depth. No world conversion was established. No scale factor has been selected and no engine scaling change is claimed. Neither followup changes the 477-row ledger, its counts or the historical seven-lead count.
 
 ## Recent accepted work and new leads
 
@@ -190,6 +190,9 @@ These dispositions do not change the historical ledger or invent new requirement
 | SOCKS5 | Open source-inventory lead. Priority 24. |
 | Q3 event/config journals | Open source-inventory lead. Priority 22. |
 | MOTD | Open source-inventory lead. Priority 24. |
+| Shared resolver | Accepted `8e4230f`: one image-resolution path retains source skin semantics; root actual CPU/GL resolver tests passed 8/151 with no skips. Runtime controls/refresh remain in progress. |
+| HTTP filelist validation | Accepted `30d872a`: image and asset entry validation, root 4/79. Game-local `@` scope and client permission remain in progress. |
+| Q2 camera and MD5 | Camera `0c05d78` passed native 2/154, cross-Q1 1/6 and normal CPU/GL application checks. MD5 `a68b43e` passed 6/148 plus exact normal CPU/GL runs; root inspected corrected textured blaster/hand and soldier placement. Animation is complete; replacement controls/distance and full fidelity remain open. |
 | Shared screenshot capture | Accepted in `fc0c15e`: actual local/remote CPU and GL captures and reviewed complete-frame, dimension and file-ownership paths close `q2.capture.screenshots` as Done/shared-replacement. Multi-seat and resized-window screenshots were not separately exercised in the current five tests. Q3 recording-clock/FPS-timescale/restart integration remains open. |
 | Local game prompts | Accepted in `d07700b`: actual application proof passed 25 assertions, with source review and CPU image inspection. Local UI pagination/lifecycle and the Q1 player lifecycle recursion correction are included. Private native remote prompt transport remains unsupported. Priority 17 retains that boundary. |
 
@@ -197,7 +200,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **198 open requirements** include the finite MD5 correction at source cutoff `185c06edc6ad8d02702cfaeed00a21df9235edf5`. Only `q2.assets.md5-replacements` and `q2.assets.md5-animation` were reopened: Q2 application replacement selection is absent despite common helper support. All other 475 verdicts carry unchanged from the `a5c4da305b9597e9a06b773bf63c25f2e7d60aaf` capture-review cutoff. The remaining rows were not newly audited. The completed Q2 screenshot row remains out of this appendix.
+The following **197 open requirements** use source cutoff `a68b43edd5f2167d34ade98d55922e9dd0eff934`. This finite review changes only the two MD5 records: `q2.assets.md5-animation` is now Done/integrated and leaves the appendix; `q2.assets.md5-replacements` remains Not done for user-selectable tiers, application configuration and distance selection. All other 475 verdicts carry unchanged from cutoff `185c06edc6ad8d02702cfaeed00a21df9235edf5`. The remaining rows were not newly audited. The completed Q2 screenshot row stays out of this appendix.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
@@ -219,7 +222,7 @@ Every open ID appears exactly once under its primary planning priority, with its
 
 - `q2.assets.md5-replacements` — Select correctly scaled skeletal model replacements
 
-### Priority 3: Shared CPU and GL rendering — 8 carried-forward open requirements
+### Priority 3: Shared CPU and GL rendering — 7 carried-forward open requirements
 
 - `q1.render.fog-sky-liquids` — Fog, skyboxes and liquid presentation
 - `q1.render.model-effects-particles` — Model effects, particles, shadows and transparency
@@ -228,8 +231,6 @@ Every open ID appears exactly once under its primary planning priority, with its
 - `q3.presentation.fonts-and-glyphs` — Bitmap, proportional and Team Arena glyph fonts
 - `q3.presentation.materials-cpu-gl` — Materials and complete CPU/GL rendering
 - `q3.presentation.visual-options-restart` — Visual settings, display lifecycle and source hardware profiles
-
-- `q2.assets.md5-animation` — Animate skeletal models with authored scale
 
 ### Priority 4: Common audio — 5 carried-forward open requirements
 
