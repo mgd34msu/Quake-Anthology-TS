@@ -10,6 +10,9 @@ import { Draw2D, TextCommandSink } from "../../src/text/draw2d.ts";
 import { layoutText, drawTextLayout } from "../../src/text/layout.ts";
 import { LocalizationCatalog, Loc_LanguageFromLocale } from "../../src/text/localization.ts";
 import { parseFontData, proportionalStringWidth } from "../../src/text/q3-font.ts";
+import { loadMenuTypography } from "../../src/app/bootstrap/menu-font.ts";
+import { discoverInstalledContent } from "../../src/content/catalog/index.ts";
+import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 
 const corpus = new URL("../../../qfiles/", import.meta.url).pathname;
 async function member(archive: ArchiveHandle, path: string): Promise<Uint8Array> {
@@ -18,6 +21,43 @@ async function member(archive: ArchiveHandle, path: string): Promise<Uint8Array>
   return archive.readEntry(entry);
 }
 const encode = (text: string) => new TextEncoder().encode(text);
+
+test.skipIf(!existsSync(`${corpus}q1/rerelease/QuakeEX.kpf`))("mounted menu typography preserves Unicode punctuation in actual labels", async () => {
+  const identity = createIdentityOwner("menu-punctuation");
+  const images = new SceneImageRegistry({ identity: Symbol("menu-punctuation"), session: identity.session, generation: 0 });
+  const image = images.register("classic", { kind: "rgba8", levels: [{ width: 128, height: 128, pixels: new Uint8Array(128 * 128 * 4) }], borderColor: { x: 0, y: 0, z: 0, w: 0 } }, { wrap: "clamp", filter: "nearest" });
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const typography = await loadMenuTypography(catalog, images, classicCharset(image));
+  try {
+    const operations = images.drainOperations();
+    for (const font of [typography.body, typography.title]) {
+      if (font.kind !== "atlas") throw new Error("Expected mounted proportional font");
+      const atlas = font.font;
+      for (const glyph of atlas.glyphs.values()) {
+        expect(glyph.x + glyph.width).toBeLessThanOrEqual(atlas.picture.image.width);
+        expect(glyph.y + glyph.height).toBeLessThanOrEqual(atlas.picture.image.height);
+      }
+      const upload = operations.find(operation => operation.kind === "create-image" && operation.image === atlas.picture.image);
+      if (upload?.kind !== "create-image" || upload.content.kind !== "rgba8") throw new Error("Missing font atlas upload");
+      const dash = atlas.glyphs.get(0x2014), fallback = atlas.glyphs.get(63), level = upload.content.levels[0];
+      if (dash === undefined || fallback === undefined) throw new Error("Missing punctuation glyphs");
+      expect(dash).not.toEqual(fallback);
+      let ink = 0;
+      for (let y = 0; y < dash.height; y++) for (let x = 0; x < dash.width; x++)
+        if ((level.pixels[((dash.y + y) * level.width + dash.x + x) * 4 + 3] ?? 0) > 0) ink++;
+      expect(ink).toBeGreaterThan(0);
+      const text = "Loki's Minions CTF — offhand – ‘quoted’ … café";
+      const layout = layoutText({ text, font, scale: 1, color: { x: 1, y: 1, z: 1, w: 1 } });
+      const glyphs = layout.lines.flatMap(line => line.glyphs);
+      for (const character of ["—", "–", "‘", "’", "…", "é"]) {
+        const glyph = glyphs.find(glyph => glyph.sourceOffset === text.indexOf(character));
+        expect(glyph?.glyph.codepoint).toBe(character.codePointAt(0));
+        expect(glyph?.glyph.visible).toBe(true);
+        expect(glyph?.glyph.glyph.width).toBeGreaterThan(0);
+      }
+    }
+  } finally { typography.close(); images.release(image); }
+});
 
 test.skipIf(!existsSync(`${corpus}q1/rerelease/id1/pak0.pak`))("real rerelease localization loads Unicode and overlays with independent seats", async () => {
   const owner = createIdentityOwner("text-localization"), q1 = new LocalizationCatalog(owner.seat(0));

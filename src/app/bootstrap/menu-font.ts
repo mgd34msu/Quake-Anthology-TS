@@ -90,7 +90,8 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
   const mounted = await openMountPlan({ id: "mount-plan:menu:typography", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
   const fonts = createMountedTextFonts(mounted, images);
   try {
-    const codepoints = Array.from({ length: 224 }, (_, index) => index + 32);
+    const codepoints = [...Array.from({ length: 224 }, (_, index) => index + 32),
+      ...Array.from({ length: 112 }, (_, index) => index + 0x2000)];
     const body = await fonts.loadTrueType("fonts/Montserrat-Regular.ttf", 48, codepoints);
     const title = await fonts.loadTrueType("fonts/NotoSans-Bold.ttf", 72, codepoints);
     if (body === null || title === null) throw new Error("Installed proportional menu fonts are missing");
