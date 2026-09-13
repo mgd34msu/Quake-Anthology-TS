@@ -15,6 +15,8 @@ export interface ApplicationConsoleRoutingOptions {
   sourceDialect(): CommandDialect;
   server(): ApplicationConsoleServer | null;
   seat(id: SeatId): CvarRegistry | null;
+  /** A null id selects the primary input seat for local startup commands. */
+  readonly input?: (id: SeatId | null) => CvarRegistry | null;
   /** Existing input tuning variables retain their movement provider's cvar policy. */
   readonly movement?: () => CvarRegistry | null;
   readonly shared?: () => CvarRegistry | null;
@@ -28,6 +30,7 @@ function caller(origin: CommandOrigin): Exclude<CommandOrigin, { readonly kind: 
 interface CvarOwners {
   readonly server: ApplicationConsoleServer | null;
   readonly seat: CvarRegistry | null;
+  readonly input: CvarRegistry | null;
   readonly movement: CvarRegistry | null;
   readonly origin: ReturnType<typeof caller>;
 }
@@ -48,29 +51,36 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     const server = this.options.server(), origin = caller(source.origin);
     if (origin.kind === "remote-client") throw new Error("Remote client cvars require an explicit client owner");
     const seat = origin.kind === "local-seat" ? this.options.seat(origin.seat) : null;
+    const input = origin.kind === "server-console" ? null : this.options.input?.(origin.kind === "local-seat" ? origin.seat : null) ?? null;
     const movement = this.options.movement?.() ?? null;
     if (movement !== null && movement.context.session !== source.session) throw new Error("Movement cvars belong to another session");
-    for (const registry of [server?.cvars, seat]) {
+    for (const registry of [server?.cvars, seat, input]) {
       if (registry === undefined || registry === null) continue;
       if (registry.context.session !== source.session || registry.dialect !== dialect) throw new Error("Console cvar registry has another session or source dialect");
     }
+    if (input !== null && caller(input.context.origin).kind !== "local-seat") throw new Error("Mouse settings require a local seat owner");
     if (origin.kind === "local-seat") {
       if (origin.seat.session !== source.session || origin.client.session !== source.session) throw new Error("Console seat belongs to another session");
-      if (seat !== null) {
-        const seatOrigin = caller(seat.context.origin);
+      for (const registry of [seat, input]) {
+        if (registry === null) continue;
+        const seatOrigin = caller(registry.context.origin);
         if (seatOrigin.kind !== "local-seat" || !seatOrigin.seat.equals(origin.seat) || !seatOrigin.client.equals(origin.client)) {
           throw new Error("Console cvar registry belongs to another seat");
         }
       }
     }
-    return { server, seat, movement, origin };
+    return { server, seat, input, movement, origin };
   }
 
   owner(nameInput: string, source: CommandContext): CvarRegistry {
-    const name = sourceCommandText(nameInput), { server, seat, movement, origin } = this.owners(source);
+    const name = sourceCommandText(nameInput), { server, seat, input, movement, origin } = this.owners(source);
     const shared = this.options.shared?.();
     if (shared?.find(name) !== undefined) return shared;
     const serverHas = server !== null && server.cvars.find(name) !== undefined;
+    if (input !== null && input.find(name) !== undefined) {
+      if (serverHas && server?.cvars !== input) throw new Error(`Console cvar ${name} has conflicting server and input declarations`);
+      return input;
+    }
     const seatHas = seat !== null && seat.find(name) !== undefined;
     const movementHas = movement !== null && movement.find(name) !== undefined;
     if (server !== null && serverHas && ((seatHas && server.cvars !== seat) || (movementHas && server.cvars !== movement))) {
@@ -90,8 +100,9 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
   }
 
   visible(source: CommandContext): readonly CvarRegistry[] {
-    const { server, seat, movement } = this.owners(source), registries = new Set<CvarRegistry>();
+    const { server, seat, input, movement } = this.owners(source), registries = new Set<CvarRegistry>();
     const shared = this.options.shared?.(); if (shared !== undefined && shared !== null) registries.add(shared);
+    if (input !== null) registries.add(input);
     if (server !== null) registries.add(server.cvars);
     if (seat !== null) registries.add(seat);
     if (movement !== null) registries.add(movement);

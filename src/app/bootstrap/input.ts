@@ -17,6 +17,8 @@ import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
 import { InputCommandBuilder } from "../../input/user-command.ts";
+import { MouseInput } from "../../input/mouse.ts";
+import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { UserCommandFrame } from "../../input/user-command.ts";
 import { SdlControllers } from "../../platform/controller.ts";
 import { readSdlClipboard } from "../../platform/sdl.ts";
@@ -83,6 +85,7 @@ export function movementDialect(options: Pick<ApplicationOptions, "movement"> & 
 export interface ApplicationInputCommandOwner {
   readonly cvars: CvarRegistry;
   readonly commands: CommandBuffer;
+  readonly inputSettings?: MouseSettings;
 }
 
 export class ApplicationInput {
@@ -101,11 +104,17 @@ export class ApplicationInput {
   private sequence = 0;
   private hapticLoad: (request: ResourceRequest) => Promise<Uint8Array | null> = async () => null;
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
+  private readonly mouseSettings = new Map<SeatId, MouseSettings>();
   private readonly q3Selections = new Map<SeatId, Q3CommandSelection>();
   private readonly arsenalSelections = new Map<SeatId, Pick<ArsenalIntent, "provider" | "weapon">>();
   private readonly offhandButtons = new Map<SeatId, { readonly grapple: InputButton; readonly grenade: InputButton }>();
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
+
+  inputCvars(id: SeatId | null): CvarRegistry | null {
+    for (const [seat, settings] of this.mouseSettings) if (id === null || seat.equals(id)) return settings.cvars;
+    return null;
+  }
 
   static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions, dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
@@ -132,9 +141,9 @@ export class ApplicationInput {
     this.cvars = owner?.cvars ?? new CvarRegistry({ dialect, context, print });
     const sourceDialect = actions.console?.dialect() ?? dialect;
     const consoleCvars = sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print });
-    this.consoleRouting = actions.console === undefined && actions.sharedCvars === undefined ? null : new ApplicationConsoleRouting({ fallback: consoleCvars,
+    this.consoleRouting = owner === undefined ? new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
-      seat: id => actions.console?.seat(id) ?? null, movement: () => this.cvars, shared: () => actions.sharedCvars ?? null });
+      seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => actions.sharedCvars ?? null }) : null;
     this.commands = owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
       ...(this.consoleRouting === null ? {} : { cvarRouting: this.consoleRouting }), print, forwardToServer: invocation => {
       const name = invocation.argv[0]; if (name === undefined) return undefined;
@@ -158,7 +167,14 @@ export class ApplicationInput {
         now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now());
           locals.find(local => local.player.seat.id.equals(player.seat.id))?.haptics.setActive(input.focused && focus.kind === "game"); },
         chat: (text, team, target) => actions.execute(team ? "say_team" : "say", target === null ? [text] : [text, String(target)], player.seat.id) });
-      const builder = new InputCommandBuilder(dialect);
+      const mouseSettings = owner?.inputSettings ?? new MouseSettings(new CvarRegistry({ dialect: sourceDialect, context: seatContext, print }));
+      const mouseOrigin = mouseSettings.cvars.context.origin;
+      if (mouseSettings.cvars.dialect !== sourceDialect || mouseSettings.cvars.context.session !== context.session
+        || mouseOrigin.kind !== "local-seat" || !mouseOrigin.seat.equals(player.seat.id) || !mouseOrigin.client.equals(player.seat.client.id)) {
+        throw new Error("Mouse settings belong to another seat or source dialect");
+      }
+      this.mouseSettings.set(player.seat.id, mouseSettings);
+      const builder = new InputCommandBuilder(dialect, new MouseInput(mouseSettings));
       builder.setViewAngles(simulation.playerView(player.actor).angles);
       for (const binding of defaultBindings(0, dialect)) input.bind(binding);
       input.bind({ input: { kind: "key", code: 113 }, target: { kind: "command", text: "+weaponwheel" } });
@@ -170,7 +186,7 @@ export class ApplicationInput {
       const profile = saved[index]; if (profile === undefined || profile === null) continue;
       local.input.unbindAll(); for (const binding of profile.bindings) local.input.bind(binding);
       local.input.gamepad.tuning = structuredClone(profile.gamepad);
-      local.builder.mouse.tuning = { ...profile.mouse };
+      if (owner?.inputSettings === undefined) local.builder.mouse.tuning = { ...profile.mouse };
       local.console.history.replace(profile.history); local.haptics.setEnabled(profile.rumble); local.haptics.setStrength(profile.rumbleStrength ?? 1);
     }
     this.locals = locals;

@@ -42,6 +42,7 @@ import type { LoadedApplicationContent } from "./content.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
+import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { ApplicationInputCommandOwner, LocalPlayer } from "./input.ts";
 import { readMenuArt } from "./menu-art.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
@@ -148,7 +149,10 @@ export class RemoteApplication {
         cvars.register("password", "", CvarFlag.UserInfo);
       }
       const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => dialect, server: () => null,
-        seat: () => null, shared: () => this.imageSettings.cvars });
+        seat: () => null, input: id => {
+          const settings = this.clientCommands?.inputSettings, origin = settings?.cvars.context.origin;
+          return origin?.kind === "local-seat" && (id === null || origin.seat.equals(id)) ? settings?.cvars ?? null : null;
+        }, shared: () => this.imageSettings.cvars });
       const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: text => this.print(text), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
@@ -216,6 +220,12 @@ export class RemoteApplication {
       this.remote = remote;
       this.network = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     }
+    if (this.clientCommands !== null) {
+      const context: import("../../contracts/common.ts").CommandContext = { session: session.session,
+        origin: { kind: "local-seat", seat: identity.seat(0), client: this.remote.client.id } };
+      const inputSettings = new MouseSettings(new CvarRegistry({ dialect: this.clientCommands.cvars.dialect, context, print: text => this.print(text) }));
+      this.clientCommands = { ...this.clientCommands, inputSettings };
+    }
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost): Promise<RemoteApplication> {
@@ -243,6 +253,8 @@ export class RemoteApplication {
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
       await application.viewSettings.load(application.inputConfig);
+      const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
+      if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
       if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
       await application.socksSettings.connect(transport);

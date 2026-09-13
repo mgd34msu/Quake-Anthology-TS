@@ -15,13 +15,15 @@ export function applyFrontendPreferences(values: FrontendPreferenceOverrides, in
   for (const local of input.locals) applyFrontendInput(values, local);
 }
 export function readFrontendInput(local: LocalInput): PrimaryInputSettings & ControllerVibrationSettings {
-  return { controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength, sensitivity: local.builder.mouse.tuning.sensitivity, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
+  return { controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength, sensitivity: local.builder.mouse.tuning.sensitivity, pitch: local.builder.mouse.tuning.pitch, yaw: local.builder.mouse.tuning.yaw, invertMouse: local.builder.mouse.tuning.invertPitch, alwaysRun: local.builder.tuning.alwaysRun };
 }
 export function applyFrontendInput(values: Partial<PrimaryInputSettings & ControllerVibrationSettings>, local: LocalInput): void {
   if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength);
   if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration);
   local.builder.mouse.tuning = { ...local.builder.mouse.tuning,
     ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
+    ...(values.pitch === undefined ? {} : { pitch: values.pitch }),
+    ...(values.yaw === undefined ? {} : { yaw: values.yaw }),
     ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
   if (values.alwaysRun !== undefined) local.builder.tuning = { ...local.builder.tuning, alwaysRun: values.alwaysRun };
 }
@@ -38,6 +40,8 @@ export function changedFrontendPreferences(before: FrontendPreferenceValues, aft
     ...(after.effectsVolume === before.effectsVolume ? {} : { effectsVolume: after.effectsVolume }),
     ...(after.musicVolume === before.musicVolume ? {} : { musicVolume: after.musicVolume }),
     ...(after.sensitivity === before.sensitivity ? {} : { sensitivity: after.sensitivity }),
+    ...(Object.is(after.pitch, before.pitch) ? {} : { pitch: after.pitch }),
+    ...(Object.is(after.yaw, before.yaw) ? {} : { yaw: after.yaw }),
     ...(after.invertMouse === before.invertMouse ? {} : { invertMouse: after.invertMouse }),
     ...(after.alwaysRun === before.alwaysRun ? {} : { alwaysRun: after.alwaysRun }) };
 }
@@ -51,6 +55,7 @@ export class FrontendPreferences {
       write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? defaultMouseTuning.sensitivity,
+      pitch: this.values.pitch ?? defaultMouseTuning.pitch, yaw: this.values.yaw ?? defaultMouseTuning.yaw,
       invertMouse: this.values.invertMouse ?? defaultMouseTuning.invertPitch,
       alwaysRun: this.values.alwaysRun ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
       write: values => { this.values = { ...this.values, ...values }; } })];

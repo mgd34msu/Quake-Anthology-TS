@@ -5,6 +5,7 @@ import type { Rect } from "../../contracts/render.ts";
 import type { UiChoice, UiControl, UiControlId, UiMenuId } from "../../contracts/ui.ts";
 import { CvarFlag, Q2CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
+import { defaultMouseTuning } from "../../input/mouse.ts";
 import type { SeatInput } from "../../input/seat.ts";
 import type { InputCommandBuilder } from "../../input/user-command.ts";
 import type { RestartControls, RestartKind } from "../../settings/restart.ts";
@@ -129,7 +130,7 @@ function numeric(id: string, label: string, minimum: number, maximum: number, st
 function toggle(id: string, label: string, read: () => boolean, write: (value: boolean) => void): SettingBinding {
   return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
 }
-export interface PrimaryInputSettings { readonly sensitivity: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
+export interface PrimaryInputSettings { readonly sensitivity: number; readonly pitch: number; readonly yaw: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
 export interface ControllerVibrationSettings { readonly controllerVibration: boolean; readonly controllerVibrationStrength: number; }
 export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
   return [toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
@@ -139,8 +140,19 @@ export function bindControllerVibration(service: SettingsValueService<Controller
 }
 export interface AudioSettings { readonly effectsVolume: number; readonly musicVolume: number; }
 export interface SettingsValueService<T> { read(): T; write(values: Partial<T>): void; }
+function mouseAxis(service: SettingsValueService<PrimaryInputSettings>, axis: "pitch" | "yaw", name: string): SettingBinding {
+  const read = (): number => Math.abs(service.read()[axis]) / defaultMouseTuning[axis] * 100;
+  return { id: `ui:input:mouse-${axis}`, get label() { return `${name}: ${Number(read().toFixed(2))}%`; }, category: "input",
+    kind: "slider", enabled: () => true, minimum: 0, maximum: 200, step: 1, read,
+    write: value => {
+      const current = service.read()[axis];
+      const direction = current < 0 || Object.is(current, -0) ? -1 : 1;
+      service.write({ [axis]: direction * defaultMouseTuning[axis] * Math.min(200, Math.max(0, value)) / 100 });
+    } };
+}
 export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryInputSettings>): readonly SettingBinding[] {
   return [numeric("sensitivity", "Mouse sensitivity", 0.1, 20, 0.1, () => service.read().sensitivity, value => service.write({ sensitivity: value })),
+    mouseAxis(service, "yaw", "Horizontal sensitivity"), mouseAxis(service, "pitch", "Vertical sensitivity"),
     toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
     toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
 }
@@ -170,9 +182,10 @@ export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder
   const mouse = builder.mouse, pad = input.gamepad;
   return [
     ...(vibration === undefined ? [] : bindControllerVibration(vibration)),
-    ...bindPrimaryInputSettings({ read: () => ({ sensitivity: mouse.tuning.sensitivity, invertMouse: mouse.tuning.invertPitch, alwaysRun: builder.tuning.alwaysRun }),
+    ...bindPrimaryInputSettings({ read: () => ({ sensitivity: mouse.tuning.sensitivity, pitch: mouse.tuning.pitch, yaw: mouse.tuning.yaw, invertMouse: mouse.tuning.invertPitch, alwaysRun: builder.tuning.alwaysRun }),
       write: values => {
         mouse.tuning = { ...mouse.tuning, ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
+          ...(values.pitch === undefined ? {} : { pitch: values.pitch }), ...(values.yaw === undefined ? {} : { yaw: values.yaw }),
           ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
         if (values.alwaysRun !== undefined) builder.tuning = { ...builder.tuning, alwaysRun: values.alwaysRun };
       } }),
