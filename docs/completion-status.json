@@ -1,6 +1,6 @@
 {
-  "sourceCutoff": "66e6136be8e0ee266672b4e98c401997ecc17c5b",
-  "carriedVerdictsFrom": "9e55c75cd997bcb14d252e414140304018abb239",
+  "sourceCutoff": "a8f9e2f91d85330f0edce04aa829c27e37751135",
+  "carriedVerdictsFrom": "66e6136be8e0ee266672b4e98c401997ecc17c5b",
   "exclusions": [
     "Uncommitted source changes"
   ],
@@ -1268,7 +1268,7 @@
       "title": "Player names, colors and setup",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Accepted 66e6136 provides native QW application admission. Complete editable QW userinfo and custom-skin display/policy remain open; current skin work is unaccepted.",
+      "reason": "Accepted 066ab042 joins saved pre-connect QW name/skin/colors/rate and live color updates with custom-skin display; 0c0499c3 retains indexed MDL colors and proper PCX source cropping. Accepted a8f9e2f forwards local Q1 source colors through two-seat update/save/load. Editable local Q1 setup/color console and cross-source appearance ownership remain unjoined, so the required setup/console and independent-seat identity workflow is incomplete.",
       "paths": [
         "src/content/composition/q1/clients.ts",
         "src/app/bootstrap/remote-application.ts"
@@ -1920,7 +1920,7 @@
       "title": "QuakeWorld content download queues and policy",
       "status": "not-done",
       "basis": "missing-work",
-      "reason": "Accepted 66e6136 joins the QW sound/model transfer queue, contained resource admission and checksum2 spawn/begin workflow to the remote application. Full download policy and custom-skin display/admission remain open; current skin work is unaccepted.",
+      "reason": "Accepted 66e6136 joins QW sound/model transfer queues and contained admission; 066ab042 adds application skin transfer/display, including an independently verified exact 913-byte skin. Scope remains base qw/id1. Arbitrary mod gamedir admission and application server-host per-category denial policy remain unjoined; complete allowed/denied map/model/sound/skin workflows are not established.",
       "paths": [
         "src/network/q1/quakeworld.ts",
         "src/app/bootstrap/remote-application.ts"

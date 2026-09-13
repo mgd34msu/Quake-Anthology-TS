@@ -1,6 +1,6 @@
 # Implementation priorities
 
-This is the ordered common-engine backlog with the finite QuakeWorld reason update at source cutoff `66e6136be8e0ee266672b4e98c401997ecc17c5b`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
+This is the ordered common-engine backlog with the finite skin/identity reason update at source cutoff `a8f9e2f91d85330f0edce04aa829c27e37751135`. It combines the [source inventory reconciliation](source-inventory-reconciliation.md) with the carried-forward requirement list in [completion-status.json](completion-status.json). It is a planning map, not a new code audit or completion-percentage report.
 
 Priority is engineering order, not a requirement to wait for every earlier group. Work on 1–2 as foundations; 3–6 can proceed in parallel with fixed contracts; 7–12 cover shared integration; 13–21 cover consumer completion; 22–24 cover remaining tools and services. Sustained play and requested release work follow the content joins. Bounded source review and actual behavior checks remain part of every change.
 
@@ -46,7 +46,9 @@ Complete NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 in both
 
 **Done when:** Actual native peers exercise all required NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 profiles in both directions, including signon, prediction, authorization, travel and disconnect. Missing required profiles remain open; explicit rejection is diagnostic only. Separate retail/private dialect limitations must not substitute for the required stock protocols.
 
-Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Hosting, spectator/extensions, split-screen, demos, full prediction/effects and custom-skin policy remain open; no requirement closes.
+Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Hosting, spectator/extensions, split-screen, demos, full prediction/effects and application host download policy remain open; no requirement closes.
+
+Accepted `066ab042` adds QW custom skins and editable saved remote identity; `0c0499c3` supplies shared indexed color/crop semantics. Local source-color forwarding is accepted in `a8f9e2f`, but local setup/color-console and cross-source appearance ownership remain open. Download scope remains base qw/id1, with mod gamedir and host denial-policy work outstanding.
 
 ### 6. Actual mod execution
 
@@ -206,7 +208,7 @@ The seven newly identified source leads are GIF, extended cvar commands, world t
 
 ## Carried-forward open requirement appendix
 
-The following **190 open requirements** use source cutoff `66e6136be8e0ee266672b4e98c401997ecc17c5b`. Five QuakeWorld reasons are narrowed by accepted remote admission; no verdict changes. All other 472 records carry unchanged from `9e55c75`, without a new audit. Every previously completed row remains absent.
+The following **190 open requirements** use source cutoff `a8f9e2f91d85330f0edce04aa829c27e37751135`. Only identity and download reasons are narrowed by accepted skin work; no verdict changes. All other 475 records carry unchanged from `66e6136`, without a new audit. Every previously completed row remains absent.
 
 Every open ID appears exactly once under its primary planning priority, with its original title. Cross-cutting work can depend on other priorities. Later accepted work can supersede parts of carried reasons, so consult the completion ledger and acceptance receipts before implementing a gap. No fresh 477-row audit was performed.
 
