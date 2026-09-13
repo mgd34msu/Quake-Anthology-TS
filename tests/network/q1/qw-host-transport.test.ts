@@ -12,6 +12,7 @@ import { UdpTransport } from '../../../src/network/common/transport.ts';
 import type { DatagramTransport } from '../../../src/network/common/transport.ts';
 import type { IpAddress } from '../../../src/network/common/endpoint.ts';
 import { DownloadFile } from '../../../src/network/services/downloads.ts';
+import type { DownloadSource } from '../../../src/network/services/downloads.ts';
 import { qwEntity, writeQuakeWorldMessage } from '../../../src/network/q1/quakeworld.ts';
 import type { QuakeWorldMessage } from '../../../src/network/q1/quakeworld.ts';
 import { QwEntityStateT, U_SOLID } from '../../../src/network/q1/qw-constants.ts';
@@ -32,6 +33,8 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         let serverCount = 1, begun = 0, spawned = 0, drop = false, admittedCount = 0, paused = false, overflow = false;
         const pendingReliable: QwServerMessage[] = [];
         const spawnStarts: number[] = [];
+        const delayed: { resolve: ((source: DownloadSource | null) => void) | null; closed: number } = { resolve: null, closed: 0 };
+        let failedReadCloses = 0;
         const groups: { sequence: number; commands: readonly QwUserCommand[] }[] = [], disconnected: string[] = [], prints: string[] = [];
         const records: QuakeWorldMessage[] = [], deliveries: (readonly QuakeWorldMessage[])[] = [], serverCounts: number[] = [], downloaded: number[] = [];
         const host: QwApplicationServerHost = {
@@ -39,6 +42,13 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
             admit: () => { const slot = admittedCount++; return { kind: 'accepted', player: { client: identity.client(slot, 0), actor: identity.actor(slot + 1, 0), slot } }; },
             carriedPlayer: client => ({ client, slot: client.slot, actor: identity.actor(client.slot + 1, serverCount - 1) }),
             disconnect: (_player, reason) => { disconnected.push(reason); }, baselines: () => [baseline],
+            prepareDownload: async (_player, path) => {
+                if (path === 'skins/read-failure.pcx') return { byteLength: 1, read: () => { throw new Error('Fixture download read failed'); }, close: () => { failedReadCloses++; } };
+                if (path === 'skins/delayed.pcx') return new Promise<DownloadSource | null>(resolve => { delayed.resolve = resolve; });
+                if (path === 'skins/failure.pcx') throw new Error('Fixture download preparation failed');
+                if (path !== 'skins/test.pcx') return null;
+                return DownloadFile.open(root, path);
+            },
             signon: admitted => ({
                 serverData: () => ({ kind: 'server-data', protocol: { kind: 'q1-quakeworld', version: 28 }, serverCount,
                     gameDirectory: 'qw', playerSlot: admitted.slot, spectator: false, level: 'Transport source fixture',
@@ -120,6 +130,11 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         native.command('download ../outside.pcx');
         for (let i = 0; i < 20 && !records.some(record => record.kind === 'download' && record.result.kind === 'missing'); i++) await exchange();
         expect(records.some(record => record.kind === 'download' && record.result.kind === 'missing')).toBe(true);
+        const failedBefore = records.filter(record => record.kind === 'download' && record.result.kind === 'missing').length;
+        native.command('download skins/failure.pcx');
+        for (let i = 0; i < 20 && records.filter(record => record.kind === 'download' && record.result.kind === 'missing').length === failedBefore; i++) await exchange();
+        expect(records.filter(record => record.kind === 'download' && record.result.kind === 'missing').length).toBe(failedBefore + 1);
+        expect(server.clients).toHaveLength(1);
         // A second connected slot makes failed travel validate every peer before mutation.
         secondSocket = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
         const second = new QuakeWorldConnectClient(27002, '\\name\\Second');
@@ -141,11 +156,19 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         } };
         expect(() => server?.changeWorld(invalid)).toThrow('admitted native QW player'); expect(server.clients).toEqual(oldPlayers);
         server.disconnectClient(identity.client(1, 0), 'Fixture second peer complete');
+        native.command('download skins/delayed.pcx'); native.submit([move(0)], now); await Bun.sleep(1);
+        const pendingPoll = server.poll(now += 100); await Bun.sleep(1);
+        if (delayed.resolve === null) throw new Error('Delayed mounted open did not start');
         serverCount++; server.changeWorld(host);
+        delayed.resolve({ byteLength: 1, read: () => new Uint8Array([42]), close: () => { delayed.closed++; } });
+        await pendingPoll; expect(delayed.closed).toBe(1);
         for (let i = 0; i < 100 && begun < 2; i++) await exchange();
         expect(serverCounts).toEqual([1, 2]); expect([spawned, begun]).toEqual([4, 2]);
         expect(server.clients[0]?.client.equals(clientId)).toBe(true); expect(server.clients[0]?.actor.equals(actor)).toBe(false);
-        native.close(); await Bun.sleep(1); await server.poll(now + 100); expect(server.clients).toHaveLength(0);
-        expect(prints.filter(text => !text.includes('changing') && !text.includes('datagram overflow'))).toEqual([]); expect(disconnected).toContain('Client disconnected');
+        native.command('download skins/read-failure.pcx');
+        for (let i = 0; i < 20 && failedReadCloses === 0; i++) await exchange();
+        expect(failedReadCloses).toBe(1); expect(server.clients).toHaveLength(0);
+        native.close(); await Bun.sleep(1); await server.poll(now + 100); expect(failedReadCloses).toBe(1);
+        expect(prints.filter(text => !text.includes('changing') && !text.includes('datagram overflow') && !text.includes('preparation failed') && !text.includes('read failed'))).toEqual([]);
     } finally { client?.close(); secondSocket?.close(); server?.close(); await rm(root, { recursive: true, force: true }); }
 }, 10000);

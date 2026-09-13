@@ -186,7 +186,8 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     options = { ...options, network: { kind: remoteKind, remote } };
   }
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
-  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && options.product.startsWith("q3-") ? "deathmatch" : "coop" };
+  if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
+  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");
   return { kind: menu || !explicitLaunch ? "menu" : "run", options };

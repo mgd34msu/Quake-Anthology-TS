@@ -13,7 +13,6 @@ import type { Q1ExtendedEntityState, QwUserCommand, QwPlayerState } from '../../
 import type { QuakeWorldMessage, QwMoveVariables } from '../../../network/q1/quakeworld.ts';
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
 import { quakeWorldInfo } from '../../../network/q1/handshake.ts';
-import { blockChecksum } from '../../../core/md4.ts';
 import { Q1RemotePresentation } from './remote-q1.ts';
 import type { Q1RemotePresentationOptions, Q1RemoteWorld } from './remote-q1.ts';
 import type { QwApplicationClientHost, QwApplicationDownloads, QwServerData } from './qw-types.ts';
@@ -22,19 +21,6 @@ export interface QwRemotePresentationOptions extends Q1RemotePresentationOptions
     readonly skinOptions: QwSkinOptions;
     prepareServerData(data: QwServerData): Promise<void>;
     mapChecksum(world: Q1RemoteWorld, gameDirectory: string): Promise<number>;
-}
-export function quakeWorldMapChecksum2(bytes: Uint8Array): number {
-    if (bytes.length < 124) throw new Error('Short Quake BSP header');
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (view.getInt32(0, true) !== 29) throw new Error('QW requires BSP version 29');
-    let checksum = 0;
-    for (let lump = 0; lump < 15; lump++) {
-        const start = view.getInt32(4 + lump * 8, true), length = view.getInt32(8 + lump * 8, true);
-        if (start < 0 || length < 0 || start + length > bytes.length) throw new Error('Invalid Quake BSP lump');
-        if (lump === 0 || lump === 4 || lump === 5 || lump === 10) continue;
-        checksum ^= blockChecksum(bytes.subarray(start, start + length));
-    }
-    return checksum | 0;
 }
 const zero = { x: 0, y: 0, z: 0 };
 function playerEntity(state: QwPlayerState): Q1ExtendedEntityState {

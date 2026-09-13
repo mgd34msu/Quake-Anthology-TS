@@ -57,9 +57,17 @@ export interface SimulationOptions {
   readonly restoredClients?: readonly ClientId[];
 }
 
+export interface QuakeWorldSourceTravel {
+  readonly kind: "quakeworld";
+  readonly serverFlags: number;
+  readonly cvars: readonly { readonly name: string; readonly value: string }[];
+  readonly clients: readonly { readonly client: ClientId; readonly parameters: readonly number[]; readonly userInfo: ReadonlyMap<string, string> }[];
+}
+
 export interface SimulationTravel {
   readonly spawnPoint: string;
   readonly source: { readonly kind: "q1"; readonly flags: number; readonly skill: 0 | 1 | 2 | 3 }
+    | QuakeWorldSourceTravel
     | { readonly kind: "q2"; readonly serverFlags: number; readonly lmctf?: LmctfTravel; readonly rerelease?: Q2RereleaseCampaignState; readonly landmark: { readonly clientSlot: number; readonly name: string;
       readonly relativeOrigin: Vec3; readonly relativeVelocity: Vec3; readonly relativeViewAngles: Vec3 } | null };
   readonly players: readonly { readonly client: ClientId; readonly weaponSlot?: WeaponReference; readonly handGrenades?: HandGrenadeTravel; readonly selectedArsenal?: { readonly kind: "q1"; readonly state: Q1SelectedArsenalTravel }

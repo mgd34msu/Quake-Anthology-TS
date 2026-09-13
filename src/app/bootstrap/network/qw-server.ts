@@ -2,6 +2,7 @@
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { QwUserCommand } from '../../../contracts/protocol.ts';
+import type { DownloadSource } from '../../../network/services/downloads.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
@@ -165,7 +166,16 @@ export class QwServerNetwork implements ApplicationNetwork {
                             continue;
                         }
                         if (name === 'setinfo' && args.length === 2 && args[0] === 'rate' && args[1] !== '') owner.channel.bytesPerSecond = this.rate(args[1] ?? '');
-                        const result = owner.signon.command(message.text);
+                        let prepared: DownloadSource | null | undefined;
+                        if (name === 'download' && this.host.prepareDownload !== undefined) {
+                            const acceptedHost = this.host, acceptedSignon = owner.signon, acceptedPlayer = owner.player;
+                            try { prepared = await acceptedHost.prepareDownload?.(acceptedPlayer, args[0] ?? ''); }
+                            catch (error) { prepared = null; this.host.print(error instanceof Error ? error.message : String(error)); }
+                            if (this.ended || !this.peers.includes(owner) || this.host !== acceptedHost || owner.signon !== acceptedSignon || owner.player !== acceptedPlayer) {
+                                prepared?.close(); continue;
+                            }
+                        }
+                        const result = owner.signon.command(message.text, prepared);
                         if (result.kind === 'handled') for (const bytes of result.messages) this.enqueue(owner, bytes);
                         else if (name !== undefined) this.host.command(owner.player, name, args);
                     }

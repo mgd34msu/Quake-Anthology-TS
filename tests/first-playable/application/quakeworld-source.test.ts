@@ -86,6 +86,42 @@ test('native QW artifact reserves, spawns and begins clients then groups recover
     }
     expect(source.sourceSlot(rocket.id)).toBeNull(); expect(targetWords.float(field('health'))).toBeLessThan(250);
     expect(damage.some(outcome => outcome.kind === 'committed' && outcome.decision.request.attack.weapon === 'q1:weapon/rocketlauncher')).toBe(true);
+    const downloading = identity.client(6, 0), disconnected = identity.client(7, 0);
+    source.setClientInfo(downloading, new Map([['name', 'Still downloading']])); source.reservedClient(downloading);
+    source.setClientInfo(disconnected, new Map([['name', 'Departed']])); source.disconnectClient(source.reservedClient(disconnected));
+    words.setFloat(field('health'), 80); words.setFloat(field('ammo_rockets'), 9);
+    source.machine.globals.setFloat(source.machine.globalOffset('serverflags'), 5);
+    source.cvars.set('teamplay', '2'); source.cvars.set('sv_gravity', '600');
+    const travel = simulation.captureTravel();
+    if (travel.source.kind !== 'quakeworld') throw new Error('Missing native travel carry');
+    expect(travel.source.cvars.find(variable => variable.name === 'sv_gravity')?.value).toBe('600');
+    expect(travel.source.clients).toHaveLength(3); expect(travel.players).toHaveLength(0);
+    const carried = travel.source.clients.find(record => record.client.equals(client));
+    expect(carried?.parameters).toHaveLength(16); expect(carried?.parameters[1]).toBe(80); expect(carried?.parameters[5]).toBe(9);
+    const nextContent = await loadApplicationContent({ ...launch.options, map: 'maps/e1m2.bsp' });
+    try {
+      if (nextContent.preparedQuakeC === null) throw new Error('Missing next native artifact');
+      const next = createSimulation({ identity, recipe: nextContent.recipe, world: nextContent.world, mounts: nextContent.mounts,
+        preparedQuakeC: nextContent.preparedQuakeC, dedicated: true, skill: 1, mode: 'deathmatch', seed: 1, maxClients: 8, travel });
+      try {
+        const nextSource = next.quakecSource(); if (nextSource === null) throw new Error('Missing next native source');
+        expect(next.players()).toHaveLength(0); expect(nextSource.machine.globals.float(nextSource.machine.globalOffset('serverflags'))).toBe(5);
+        expect(nextSource.cvars.variableValue('teamplay')).toBe(2); expect(nextSource.cvars.variableValue('sv_gravity')).toBe(800);
+        expect(nextSource.clientInfo(client).get('name')).toBe('After');
+        expect(nextSource.clientInfo(downloading).get('name')).toBe('Still downloading');
+        const nextTravel = next.captureTravel();
+        if (nextTravel.source.kind !== 'quakeworld') throw new Error('Missing unbegun native travel carry');
+        expect(nextTravel.source.clients.map(record => record.parameters)).toEqual(travel.source.clients.map(record => record.parameters));
+        nextSource.prepareClientSpawn(client); const newPlayer = next.admitPlayer(client);
+        expect(nextSource.isActiveClient(newPlayer.actor)).toBe(true); expect(nextSource.entities.at(4).float(field('health'))).toBe(80);
+        expect(nextSource.entities.at(4).float(field('ammo_rockets'))).toBe(9);
+        expect(nextSource.isActiveClient(nextSource.reservedClient(downloading).id)).toBe(false);
+        nextSource.disconnectClient(nextSource.reservedClient(downloading));
+        const afterDisconnect = next.captureTravel();
+        if (afterDisconnect.source.kind !== 'quakeworld') throw new Error('Missing final native carry');
+        expect(afterDisconnect.source.clients).toHaveLength(2);
+      } finally { next.close(); }
+    } finally { await nextContent.close(); }
   } finally { simulation.close(); }
   } finally { await content.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }

@@ -59,6 +59,9 @@ import { createSimulation, savedSimulationSettings } from "./simulation/index.ts
 import { createQ2ApplicationServerHost } from "./simulation/network.ts";
 import { Q2ServerNetwork } from "./network/q2.ts";
 import { Q1ServerNetwork } from "./network/q1.ts";
+import { QwServerNetwork } from "./network/qw-server.ts";
+import type { QwApplicationServerHost } from "./network/qw-server-types.ts";
+import { createQwApplicationServerHost } from "./simulation/network-qw.ts";
 import { Q3ServerNetwork } from "./network/q3.ts";
 import type { Q1ApplicationServerHost } from "./network/q1-types.ts";
 import type { Q3ApplicationServerHost } from "./network/q3-types.ts";
@@ -71,10 +74,12 @@ import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { SimulationTravel } from "./simulation/types.ts";
 
 type NativeServerHost = { readonly kind: "q1"; readonly host: Q1ApplicationServerHost }
+  | { readonly kind: "qw"; readonly host: QwApplicationServerHost }
   | { readonly kind: "q2"; readonly host: Q2ApplicationServerHost }
   | { readonly kind: "q3"; readonly host: Q3ApplicationServerHost };
 type NativeServer = { readonly address: IpAddress } & (
   { readonly kind: "q1"; readonly server: Q1ServerNetwork<IpAddress> }
+  | { readonly kind: "qw"; readonly server: QwServerNetwork }
   | { readonly kind: "q2"; readonly server: Q2ServerNetwork<IpAddress> }
   | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
 
@@ -126,6 +131,7 @@ export class Application {
   private q2Console: ApplicationQ2Console | null = null;
   private pendingRestart: number | null = null;
   private pendingSave: SaveImage | null = null;
+  private nativeWorldCount = 1;
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
@@ -152,7 +158,7 @@ export class Application {
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
       const simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
-        maxClients: options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
+        maxClients: options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
         promptSupported: client => !options.dedicated && localSeats.has(client),
         playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
       session.attachWorld(simulation);
@@ -220,7 +226,9 @@ export class Application {
   get presentationEvents(): readonly SimulationPresentationEvent[] { return this.sourceEvents; }
   get unhandledPresentationEffects(): readonly UnhandledApplicationEffect[] { return this.unhandledEffects; }
   get networkAddress(): IpAddress | null { return this.network?.address ?? null; }
-  get networkClients(): readonly ApplicationNetworkPlayer[] { return this.network?.server.clients ?? []; }
+  get networkClients(): readonly ApplicationNetworkPlayer[] {
+    return this.network?.kind === "qw" ? this.network.server.clients.map(player => ({ ...player, sourceEntity: player.slot + 1 })) : this.network?.server.clients ?? [];
+  }
   get localPlayers(): readonly LocalPlayer[] { return this.graphical?.input.locals.map(local => local.player) ?? []; }
 
   input(event: SeatInputEvent): boolean {
@@ -247,7 +255,7 @@ export class Application {
 
   private sourceDialect(): CommandDialect {
     const source = this.content.catalog.product(this.content.recipe.engineBehavior.content).expectation;
-    return source.family === "q1" ? "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
+    return source.family === "q1" ? source.edition === "quakeworld" ? "q1-quakeworld" : "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
   }
 
   private inputActions(): ApplicationInputCommands {
@@ -299,7 +307,7 @@ export class Application {
     }
     const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
     if (q1 !== null) {
-      const commands = new CommandBuffer({ dialect: "q1-netquake", cvars: q1.cvars,
+      const commands = new CommandBuffer({ dialect: q1.cvars.dialect, cvars: q1.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
       commands.register("quit", () => this.requestQuit());
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
@@ -435,13 +443,15 @@ export class Application {
     if (this.simulation.q1Source() === null && this.simulation.quakecSource() === null) this.sourceCommands?.execute();
   }
 
-  private async networkHost(simulation = this.simulation, content = this.content): Promise<NativeServerHost> {
+  private async networkHost(simulation = this.simulation, content = this.content, serverCount = this.nativeWorldCount): Promise<NativeServerHost> {
     const source = content.catalog.product(content.recipe.map.entities.content).expectation;
     if (this.options.q1Protocol !== undefined && source.family !== "q1") throw new Error("--q1-protocol requires a Quake I source game");
     if (this.options.network.kind === "q2-server" && source.family !== "q2") throw new Error("--listen-q2 requires a Quake II source game; use --listen for the selected native protocol");
     const common = { session: this.session, simulation, content, print: (text: string): void => { this.host.print(text); } };
     switch (source.family) {
-      case "q1": return { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
+      case "q1": return source.edition === "quakeworld"
+        ? { kind: "qw", host: await createQwApplicationServerHost({ ...common, serverCount }) }
+        : { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
       case "q2": return { kind: "q2", host: await createQ2ApplicationServerHost({ ...common,
         protocol: source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 } }) };
       case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost(common) };
@@ -459,6 +469,7 @@ export class Application {
     if (network === null) throw new Error("Native world replacement requires an open server");
     switch (next.kind) {
       case "q1": if (network.kind !== "q1") throw new Error("Native Q1 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
+      case "qw": if (network.kind !== "qw") throw new Error("Native QW host cannot replace another wire family"); network.server.changeWorld(next.host); this.nativeWorldCount++; return;
       case "q2": if (network.kind !== "q2") throw new Error("Native Q2 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
       case "q3": if (network.kind !== "q3") throw new Error("Native Q3 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
     }
@@ -475,6 +486,7 @@ export class Application {
     try {
       switch (selected.kind) {
         case "q1": this.network = { kind: "q1", address: transport.address, server: new Q1ServerNetwork({ transport, host: selected.host }) }; break;
+        case "qw": this.network = { kind: "qw", address: transport.address, server: new QwServerNetwork({ transport, host: selected.host, random: () => Math.trunc(Math.random() * 0x7fffffff) }) }; break;
         case "q2": this.network = { kind: "q2", address: transport.address, server: new Q2ServerNetwork({ transport, host: selected.host, random }) }; break;
         case "q3": this.network = { kind: "q3", address: transport.address, server: new Q3ServerNetwork({ transport, host: selected.host, random }) }; break;
       }
@@ -568,6 +580,7 @@ export class Application {
   }
 
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+    if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     await this.capture?.beforeWorldChange();
     this.graphical?.input.stopHaptics();
     const settings = save === undefined ? null : savedSimulationSettings(save);
@@ -616,14 +629,14 @@ export class Application {
       if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
         nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
       }
-      const admissions = new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
+      const admissions = nextSimulation.quakecSource()?.kind === "quakeworld" ? new Map<number, ActorId>() : new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
         const actor = nextSimulation.players().find(actor => nextSimulation.movementPlayer(actor)?.client.equals(client));
         if (actor === undefined) throw new Error(`Restore did not bind client ${client.slot}`);
         return [client.slot, actor];
       }));
       nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0);
-      const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content);
+      const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content, this.nativeWorldCount + 1);
       if (nextNetworkHost !== null) this.validateNetworkHost(nextNetworkHost);
       if (previous === null) {
         if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);

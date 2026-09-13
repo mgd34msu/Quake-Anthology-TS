@@ -4,6 +4,7 @@ import type { SimulationOutput } from '../../../contracts/session.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
 import type { WireAdmission } from '../../../network/common/session.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
+import type { DownloadSource } from '../../../network/services/downloads.ts';
 import type { QuakeWorldConnectRequest } from '../../../network/q1/handshake.ts';
 import type { QuakeWorldEntity, QuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
 import type { QuakeWorldSignonHost } from '../../../network/q1/session.ts';
@@ -23,6 +24,7 @@ export interface QwApplicationServerHost {
     carriedPlayer(client: ClientId): QwApplicationPlayer;
     disconnect(player: QwApplicationPlayer, reason: string): void;
     signon(player: QwApplicationPlayer): QuakeWorldSignonHost;
+    prepareDownload?(player: QwApplicationPlayer, path: string): Promise<DownloadSource | null>;
     baselines(player: QwApplicationPlayer): readonly QuakeWorldEntity[];
     frame(player: QwApplicationPlayer, output: SimulationOutput): {
         readonly entities: readonly QuakeWorldEntity[];

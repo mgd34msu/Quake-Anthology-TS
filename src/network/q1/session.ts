@@ -77,26 +77,28 @@ export class QuakeWorldSignonServer {
         writeQuakeWorldServerData(sb, data);
         return [sb.bytes()];
     }
-    command(text: string): {
+    command(text: string, preparedDownload?: DownloadSource | null): {
         readonly kind: 'handled';
         readonly messages: readonly Uint8Array[];
     } | {
         readonly kind: 'game-command';
         readonly text: string;
     } {
-        const args = quakeWorldCommandArguments(text), op = args[0], data = this.host.serverData();
+        const args = quakeWorldCommandArguments(text), op = args[0];
         if (op === 'new')
             return { kind: 'handled', messages: this.phase === 'spawned' ? [] : this.fresh() };
         if (op === 'download') {
-            this.download?.close();
-            this.download = null;
+            const previous = this.download;
+            this.download = preparedDownload ?? null;
+            try { previous?.close(); }
+            catch (error) { this.close(); throw error; }
             const path = args[1] ?? '';
             try {
                 downloadPath(path);
-                this.download = this.host.openDownload(path);
+                this.download = preparedDownload === undefined ? this.host.openDownload(path) : preparedDownload;
             }
             catch {
-                this.download = null;
+                this.close();
             }
             this.downloadOffset = 0;
             return { kind: 'handled', messages: [this.nextDownload()] };
@@ -105,6 +107,7 @@ export class QuakeWorldSignonServer {
             return { kind: 'handled', messages: this.download === null ? [] : [this.nextDownload()] };
         if (op !== 'soundlist' && op !== 'modellist' && op !== 'prespawn' && op !== 'spawn' && op !== 'begin')
             return { kind: 'game-command', text };
+        const data = this.host.serverData();
         if (this.phase === 'spawned')
             return { kind: 'handled', messages: [] };
         if (Number.parseInt(args[1] ?? '', 10) !== data.serverCount)
@@ -157,18 +160,19 @@ export class QuakeWorldSignonServer {
         const s = new SizeBuf(1450), source = this.download;
         if (source === null)
             writeQuakeWorldDownload(s, { kind: 'missing' });
-        else {
+        else try {
             const bytes = source.read(this.downloadOffset, 768);
             this.downloadOffset += bytes.length;
             writeQuakeWorldDownload(s, { kind: 'data', bytes, percent: Math.trunc(this.downloadOffset * 100 / (source.byteLength || 1)) });
             if (this.downloadOffset === source.byteLength) {
-                source.close();
                 this.download = null;
+                source.close();
             }
         }
+        catch (error) { this.close(); throw error; }
         return s.bytes();
     }
-    close(): void { this.download?.close(); this.download = null; }
+    close(): void { const source = this.download; this.download = null; source?.close(); }
 }
 export class QuakeWorldPrecacheClient {
     serverCount = 0;

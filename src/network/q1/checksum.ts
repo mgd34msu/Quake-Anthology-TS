@@ -1,3 +1,4 @@
+import { blockChecksum } from '../../core/md4.ts';
 // QuakeWorld common.c sequence checksum table and CRC-CCITT. GPL-2.0-or-later.
 const chktblExplicit: readonly number[] = [
     0x78, 0xd2, 0x94, 0xe3, 0x41, 0xec, 0xd6, 0xd5, 0xcb, 0xfc, 0xdb, 0x8a, 0x4b, 0xcc, 0x85, 0x01,
@@ -52,4 +53,18 @@ export function quakeWorldChecksum(bytes: Uint8Array, sequence: number): number 
             crc = ((crc << 1) ^ ((crc & 32768) ? 0x1021 : 0)) & 65535;
     }
     return crc & 255;
+}
+
+export function quakeWorldMapChecksum2(bytes: Uint8Array): number {
+    if (bytes.length < 124) throw new Error('Short Quake BSP header');
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (view.getInt32(0, true) !== 29) throw new Error('QW requires BSP version 29');
+    let checksum = 0;
+    for (let lump = 0; lump < 15; lump++) {
+        const start = view.getInt32(4 + lump * 8, true), length = view.getInt32(8 + lump * 8, true);
+        if (start < 0 || length < 0 || start + length > bytes.length) throw new Error('Invalid Quake BSP lump');
+        if (lump === 0 || lump === 4 || lump === 5 || lump === 10) continue;
+        checksum ^= blockChecksum(bytes.subarray(start, start + length));
+    }
+    return checksum | 0;
 }

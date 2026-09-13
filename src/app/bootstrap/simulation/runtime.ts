@@ -251,7 +251,7 @@ export class SharedSimulation implements Simulation {
         throw new Error("QuakeC simulation requires the prepared dedicated native classic id1 artifact and map-defined actors");
       if (quakec.api.kind === "q1-quakeworld" && (options.mode !== "deathmatch" || options.maxClients > 32 || providerTiming(options.recipe, options.recipe.movement.provider).clock.kind !== "q1-quakeworld"))
         throw new Error("Native QuakeWorld requires deathmatch, at most 32 clients and QuakeWorld movement");
-      if (options.restore !== undefined || options.travel !== undefined || (options.restoredClients?.length ?? 0) !== 0
+      if (options.restore !== undefined || options.travel !== undefined && (quakec.api.kind !== "q1-quakeworld" || options.travel.source.kind !== "quakeworld") || (options.restoredClients?.length ?? 0) !== 0
         || options.initialSourceMilliseconds !== undefined && options.initialSourceMilliseconds !== 1000)
         throw new Error("QuakeC application clients, travel and saved games are not yet supported");
     } else if (options.preparedQuakeC !== undefined) throw new Error("Prepared QuakeC artifact does not match the selected execution");
@@ -472,7 +472,13 @@ export class SharedSimulation implements Simulation {
     options.monsterNavigation?.install(this, this.q1Movement);
     if (saved !== undefined) this.restore(saved);
     else if (this.source.kind === "q1" && options.world.kind === "q1-bsp") this.source.composition.spawnMap(options.world);
-    else if (this.source.kind === "quakec") this.source.game.spawnMap();
+    else if (this.source.kind === "quakec") {
+      if (options.travel?.source.kind === "quakeworld") {
+        if (options.travel.source.clients.some(record => !options.identity.owns(record.client))) throw new Error("QW travel client belongs to another session");
+        this.source.game.restoreTravel(options.travel.source);
+      }
+      this.source.game.spawnMap();
+    }
     else if (this.source.kind === "q3") { if (providerFamily(this.recipe.combat.provider) === "q3") this.combat.register(this.source.game.bridge.policy()); this.source.game.load(); }
     else if (this.source.kind === "q2") {
       if (options.travel?.source.kind === "q2") this.source.game.counters.serverFlags = options.travel.source.serverFlags;
@@ -1823,7 +1829,7 @@ export class SharedSimulation implements Simulation {
     for (const player of this.playerStates.values()) if (player.client.slot === client.slot) throw new Error("Client already has a player");
     const source = this.source;
     if (source.kind === "quakec") {
-      if (travel !== undefined || this.options.dedicated !== true || providerFamily(this.recipe.character.definition.provider) !== "q1"
+      if (travel !== undefined && (source.game.kind !== "quakeworld" || travel.source.kind !== "quakeworld") || this.options.dedicated !== true || providerFamily(this.recipe.character.definition.provider) !== "q1"
         || providerTiming(this.recipe, this.recipe.movement.provider).clock.kind !== (source.game.kind === "quakeworld" ? "q1-quakeworld" : "q1-netquake"))
         throw new Error("QuakeC internal clients require dedicated native NetQuake movement and Q1 character; graphical clients and travel are unsupported");
       const actor = source.game.admitClient(client), body = this.bodies.read(actor.id);
@@ -2902,6 +2908,7 @@ export class SharedSimulation implements Simulation {
   captureTravel(spawnPoint = ""): SimulationTravel {
     this.assertOpen();
     const source = this.source;
+    if (source.kind === "quakec" && source.game.kind === "quakeworld") return { spawnPoint, source: source.game.captureTravel(), players: [] };
     if (source.kind === "loading" || source.kind === "quakec") throw new Error("Source campaign travel is not available");
     if (source.kind === "q3") throw new Error("Q3 map rotation uses match session state instead of campaign travel carry");
     for (const player of this.playerStates.values()) this.grapple?.release(player.actor.id);
