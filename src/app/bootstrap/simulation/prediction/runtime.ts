@@ -42,7 +42,7 @@ export class SelectedMovementPrediction {
     }
     return undefined;
   }
-  replay(): MovementPredictionResult {
+  replay(observe?: (snapshot: MovementPredictionSnapshot) => void): MovementPredictionResult {
     let player = copyPredictionSnapshot(this.snapshot);
     const effects: OrderedMovementEffect[] = [];
     if ((player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease") && (player.state.flags & 64) !== 0) {
@@ -66,6 +66,7 @@ export class SelectedMovementPrediction {
         fixedMilliseconds: profile.kind === "q3" ? profile.fixedMilliseconds : null,
         noFootsteps: profile.kind === "q3" && profile.noFootsteps, gauntletHit: false, traceMask: null, firstCommand: first });
       player = output.player; effects.push(...output.result.effects); first = false;
+      if (observe !== undefined) observe(copyPredictionSnapshot(player));
     }
     return { status: first ? "unchanged" : "predicted", player, effects };
   }

@@ -235,6 +235,8 @@ class QuakeWorldMove {
     this.setState(c.lifecycle(this.state, "beforePhysics", { ...this.input, command,
       frame: { ...this.input.frame, elapsed: { kind: "milliseconds", value: command.milliseconds } } }));
     if (c.removed) return;
+    // CL_PredictUsercmd seeds pmove.angles before PlayerMove computes its axes.
+    if (this.input.execution === "prediction") this.state.angles = c.math.vec(command.angles.x, command.angles.y, command.angles.z);
     const axes = c.math.angles(this.state.angles);
     this.forward = axes.forward; this.right = axes.right;
     if (this.state.spectator !== 0) { this.spectatorMove(); return; }

@@ -45,6 +45,13 @@ import { Q3ClientNetwork } from "./network/q3-client.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
 import { q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
+import { createMountPlanId } from "../../contracts/content.ts";
+import { openMountPlan } from "../../content/mounts/index.ts";
+import type { MountedContent } from "../../content/mounts/index.ts";
+import type { QwServerData } from "./network/qw-types.ts";
+import { QwClientNetwork } from "./network/qw-client.ts";
+import { QwRemotePresentation, quakeWorldMapChecksum2 } from "./network/remote-qw.ts";
+import { QwDownloadReceiver } from "./network/qw-downloads.ts";
 import { Q1ClientNetwork } from "./network/q1-client.ts";
 import { Q1RemotePresentation } from "./network/remote-q1.ts";
 import type { Q1RemoteWorld } from "./network/remote-q1.ts";
@@ -74,8 +81,8 @@ export class RemoteApplication {
   readonly clientCommands: ApplicationInputCommandOwner | null;
   private readonly clientConfig: ConfigStore | null;
   private readonly downloadPermission: ClientDownloadPermission | null;
-  readonly remote: Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
-  private readonly network: Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
+  readonly remote: QwRemotePresentation | Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
+  private readonly network: QwClientNetwork | Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
   private frontend: RemoteWorldFrontend | null = null;
   private controls: ApplicationInput | null = null;
   private capture: ApplicationCapture | null = null;
@@ -90,6 +97,8 @@ export class RemoteApplication {
   private worldLoadGeneration = 0;
   private stepping = false;
   private q3Content: Q3ClientContent | null = null;
+  private qwDownloads: QwDownloadReceiver | null = null;
+  private qwMounts: MountedContent | null = null;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
   private downloadCatalogSeed: LoadedApplicationContent | null = null;
   private q3InitialViewPending = false;
@@ -129,7 +138,20 @@ export class RemoteApplication {
       const product = loadedContent.catalog.require(launchOptions.product);
       this.clientConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
-    if (launchOptions.network.kind === "q1-client") {
+    if (launchOptions.network.kind === "qw-client") {
+      const remote = new QwRemotePresentation({ identity, session, content: loadedContent,
+        downloads: {
+          request: (path, category) => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.request(path, category); },
+          receive: result => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.receive(result); },
+          close: () => { this.qwDownloads?.close(); this.qwDownloads = null; },
+        },
+        prepareServerData: data => this.prepareQwDownloads(data),
+        print: text => this.print(text), sendCommand: text => this.network.command(text),
+        loadContent: async world => { const content = await this.loadServerWorld(world, undefined, true); this.qwMounts?.close(); this.qwMounts = null; return content; },
+        mapChecksum: async world => quakeWorldMapChecksum2(await this.content.mounts.read(world.map)) });
+      this.remote = remote;
+      this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: "\\name\\Player\\rate\\2500\\topcolor\\0\\bottomcolor\\0" });
+    } else if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: world => this.loadServerWorld(world) });
@@ -167,24 +189,24 @@ export class RemoteApplication {
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost): Promise<RemoteApplication> {
-    const q1 = options.network.kind === "q1-client", q3 = options.network.kind === "q3-client";
+    const qw = options.network.kind === "qw-client", q1 = options.network.kind === "q1-client" || qw, q3 = options.network.kind === "q3-client";
     if (!q1 && !q3 && options.network.kind !== "q2-client") throw new Error("RemoteApplication requires a native connect address");
     const family = q1 ? "q1" : q3 ? "q3" : "q2";
     if (options.dedicated || options.seats !== 1 || options.movement !== family || options.character !== family)
       throw new Error(`Native ${family} remote play requires one graphical seat with matching movement and character providers`);
     if (!q1 && !q3 && !["male", "female", "cyborg"].includes(options.characterModel))
       throw new Error("Remote Q2 character selection requires an installed male, female or cyborg player appearance");
-    if (options.network.kind !== "q1-client" && options.network.kind !== "q2-client" && options.network.kind !== "q3-client") throw new Error("Missing remote address");
-    const address = await resolveAddress(options.network.remote, q1 ? 26000 : q3 ? 27960 : 27910, q3 ? 4 : 0);
+    if (options.network.kind !== "qw-client" && options.network.kind !== "q1-client" && options.network.kind !== "q2-client" && options.network.kind !== "q3-client") throw new Error("Missing remote address");
+    const address = await resolveAddress(options.network.remote, qw ? 27500 : q1 ? 26000 : q3 ? 27960 : 27910, q3 ? 4 : 0);
     const content = await loadApplicationContent(options);
     const identity = createIdentityOwner(`quake:remote:${addressKey(address)}`), session = new EngineSession(identity, { kind: "local" });
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     try {
       const product = content.catalog.product(options.product);
-      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" || q3 && options.product !== "q3-baseq3")
+      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === "q1-quakeworld") || q3 && options.product !== "q3-baseq3")
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34 or baseq3 protocol 68 content");
       imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
-        dialect: q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
+        dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
         print: text => { if (application === null) host.print(text); else application.print(text); } });
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
@@ -192,7 +214,7 @@ export class RemoteApplication {
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
       if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
       application.frontend = await application.loadFrontend(content);
-      host.print(`Connecting to ${q1 ? "Quake" : q3 ? "Quake III" : "Quake II"} server ${addressKey(address)}.\n`);
+      host.print(`Connecting to ${qw ? "QuakeWorld" : q1 ? "Quake" : q3 ? "Quake III" : "Quake II"} server ${addressKey(address)}.\n`);
       return application;
     } catch (error) {
       if (application !== null) await application.close();
@@ -277,6 +299,24 @@ export class RemoteApplication {
     catch (error) { if (this.downloadCatalogSeed === fresh) { this.downloadCatalogSeed = null; await fresh.close(); } throw error; }
     return fresh;
   }
+  private async prepareQwDownloads(data: QwServerData): Promise<void> {
+    const productId = data.gameDirectory === "qw" || data.gameDirectory === "id1" ? "q1-quakeworld" : null;
+    if (productId === null) throw new Error("QW server selected an unsupported game directory");
+    const product = this.content.catalog.require(productId);
+    const gameRoot = product.userContent?.root ?? userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
+    const skinRoot = userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), "q1/qw");
+    await mkdir(gameRoot, { recursive: true }); await mkdir(skinRoot, { recursive: true });
+    const mounts = await this.content.catalog.mountsFor(product.id);
+    const prepared = await openMountPlan({ id: createMountPlanId("qw-server", String(data.serverCount)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    if (this.closed) { prepared.close(); throw new Error("QW directory selection was cancelled"); }
+    this.qwMounts?.close(); this.qwMounts = prepared;
+    this.qwDownloads?.close();
+    this.qwDownloads = new QwDownloadReceiver({ gameRoot, skinRoot,
+      exists: async (path, category) => existsSync(join(category === "skin" ? skinRoot : gameRoot, path)) || await (this.qwMounts ?? this.content.mounts).resolve(path) !== null,
+      sendCommand: text => this.network.command(text), print: text => this.print(text), noskins: () => 1, demoRecording: () => false, demoPlayback: () => false });
+    this.launchOptions = { ...this.options, product: productId };
+  }
+
   private async prepareQ3Downloads(connection: Q3ClientConnection): Promise<boolean> {
     const generation = connection.generation;
     const assertCurrent = (): void => {
@@ -370,7 +410,10 @@ export class RemoteApplication {
       const path = sound.startsWith("#") ? sound.slice(1) : this.remote instanceof Q3RemotePresentation ? sound : `sound/${sound}`;
       const resource = await provider.mounts.resolve(path);
       assertCurrent();
-      if (resource === null) throw new Error(`Server sound is absent from mounted content: ${path}`);
+      if (resource === null) {
+        if (this.remote instanceof QwRemotePresentation) { this.print(`QW sound is unavailable: ${path}\n`); continue; }
+        throw new Error(`Server sound is absent from mounted content: ${path}`);
+      }
       this.remote.registerResource(this.content.recipe.map.entities.content, path, resource);
     }
     for (const image of world.images ?? []) {
@@ -481,7 +524,7 @@ export class RemoteApplication {
     const timing = this.content.recipe.timing.find(timing => timing.provider === this.content.recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Remote world has no numeric profile for camera contents");
     const contents = scene.pointContents({ point: camera.origin, target: { kind: "world" }, passActor: actor, numeric: timing.numeric,
-      policy: this.options.network.kind === "q1-client" ? { kind: "q1", move: "normal", hull: null } : this.options.network.kind === "q3-client" ? { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } : { kind: "q2", contentsMask: -1, leafContents: "merged" } });
+      policy: this.options.network.kind === "qw-client" || this.options.network.kind === "q1-client" ? { kind: "q1", move: "normal", hull: null } : this.options.network.kind === "q3-client" ? { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } : { kind: "q2", contentsMask: -1, leafContents: "merged" } });
     return contents.kind === "q1" ? contents.contents <= -3 && contents.contents >= -5 : contents.kind === "q3" ? (contents.contents & 56) !== 0 : contents.kind === "q2" && (contents.merged & 56) !== 0;
   }
 
@@ -579,7 +622,7 @@ export class RemoteApplication {
     }
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
-    for (const close of [() => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
+    for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }

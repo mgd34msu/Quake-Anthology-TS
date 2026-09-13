@@ -129,7 +129,7 @@ export class Application {
     private readonly localSeats: Map<ClientId, SessionSeat>) {}
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
-    if ((options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
+    if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const content = await loadApplicationContent(options, recipe);
     try {
       if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);

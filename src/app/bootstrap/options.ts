@@ -26,7 +26,7 @@ export interface ApplicationOptions {
   readonly frameLimit: number | null;
   readonly hidden: boolean;
   readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server"; readonly host: string; readonly port: number }
-    | { readonly kind: "q1-client" | "q2-client" | "q3-client"; readonly remote: string };
+    | { readonly kind: "q1-client" | "qw-client" | "q2-client" | "q3-client"; readonly remote: string };
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
@@ -60,6 +60,7 @@ Usage: bun run src/main.ts [options]
   --listen-q2 PORT           Host the native Quake II source protocol
   --bind ADDRESS             Server IP (default 0.0.0.0)
   --connect-q1 ADDRESS       Join a native Quake server (id1, protocol 15)
+  --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
   --connect-q2 ADDRESS       Join a native Quake II server
   --seed N                   Gameplay random seed
@@ -97,7 +98,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   };
   let list = false, menu = false, explicitLaunch = false;
   let listenKind: "native-server" | "q2-server" = "q2-server";
-  let remoteKind: "q1-client" | "q2-client" | "q3-client" = "q2-client";
+  let remoteKind: "q1-client" | "qw-client" | "q2-client" | "q3-client" = "q2-client";
   let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -146,9 +147,9 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (listen !== null && listenKind !== kind) throw new Error("Choose either --listen or --listen-q2");
         listenKind = kind; listen = integer(value, flag, 0, 65535); break;
       }
-      case "--connect-q1": case "--connect-q2": case "--connect-q3":
+      case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3":
         if (remote !== null) throw new Error("Choose one native remote connection");
-        remoteKind = flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
+        remoteKind = flag === "--connect-qw" ? "qw-client" : flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
       case "--bind": bind = value; break;
       case "--skill": {
         const skill = integer(value, flag, 0, 3);

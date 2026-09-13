@@ -63,8 +63,8 @@ export interface ApplicationInputUi {
 
 export interface Q3CommandSelection { readonly weapon: number; readonly sensitivity: number; }
 
-export function movementDialect(options: Pick<ApplicationOptions, "movement">): CommandDialect {
-  return options.movement === "q1" ? "q1-netquake" : options.movement === "q2" ? "q2-classic" : "q3";
+export function movementDialect(options: Pick<ApplicationOptions, "movement"> & Partial<Pick<ApplicationOptions, "network">>): CommandDialect {
+  return options.network?.kind === "qw-client" ? "q1-quakeworld" : options.movement === "q1" ? "q1-netquake" : options.movement === "q2" ? "q2-classic" : "q3";
 }
 
 export interface ApplicationInputCommandOwner {
