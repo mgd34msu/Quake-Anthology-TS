@@ -40,7 +40,14 @@ type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
 type Material = { readonly kind: "q3"; readonly name: string; readonly compiled: CompiledMaterial; readonly timeOffset: number }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
-const normalIndices = new Map(ALIAS_NORMALS.map((normal, index) => [`${normal.x},${normal.y},${normal.z}`, index]));
+const normalIndices = new Map<number, Map<number, Map<number, number>>>();
+for (const [index, normal] of ALIAS_NORMALS.entries()) {
+  let ys = normalIndices.get(normal.x);
+  if (ys === undefined) { ys = new Map<number, Map<number, number>>(); normalIndices.set(normal.x, ys); }
+  let zs = ys.get(normal.y);
+  if (zs === undefined) { zs = new Map<number, number>(); ys.set(normal.y, zs); }
+  zs.set(normal.z, index);
+}
 
 function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
 function materialKey(entity: SceneEntity, image: ModelImageSelection, options: ModelSourceOptions): string {
@@ -225,7 +232,7 @@ export class SceneModelRenderer {
       }
       if (entity.flags.kind === "q2" && q2ShellColor(entity.flags.bits) !== null) return light;
       const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
-      const index = normalIndices.get(`${normal.x},${normal.y},${normal.z}`);
+      const index = normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z);
       let shade = index === undefined ? null : r_avertexnormal_dots[row * 256 + index] ?? null;
       if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
         const oldShade = r_avertexnormal_dots[row * 256 + previousNormalIndex] ?? shade;
