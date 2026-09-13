@@ -2938,9 +2938,10 @@ export class SharedSimulation implements Simulation {
       } else {
         const entity = entry.entity, model = this.sourceModels.get(entity.actor.id);
         if (entity.classname === "worldspawn") continue;
+        const frame = model?.frame ?? entity.frame, oldFrame = model?.oldFrame ?? entity.oldFrame;
         result.push({ actor: entity.actor.id, content: entry.content, family: "q2", path: entity.model,
           ...(entity.flare === null ? {} : { flare: entity.flare }),
-          frame: model?.frame ?? entity.frame, oldFrame: model?.oldFrame ?? entity.frame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
+          frame, oldFrame: oldFrame === -1 ? frame : oldFrame, skin: model?.skin ?? entity.skin, effects: model?.effects ?? entity.effects,
           renderFlags: model?.renderFlags ?? entity.renderFlags, alpha: model?.alpha ?? entity.alpha, origin: body.origin, angles: body.angles,
           previousOrigin: entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? entity.pos2 : body.origin,
           ...(entry.services.options.edition === "rerelease" && (entity.renderFlags & 128) !== 0 ? { modelBeam: { segmentLength: entity.frame } } : {}),
