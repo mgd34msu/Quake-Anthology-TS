@@ -33,6 +33,7 @@ import { FrontendPreferences } from "./frontend-preferences.ts";
 import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
+import { ApplicationImageSettings } from "./image-settings.ts";
 
 type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
@@ -88,14 +89,16 @@ export class StartupApplication {
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
     let renderer: NativeRenderer | null = null, controllers: SdlControllers | null = null, router: InputRouter | null = null, menu: StartupMenu | null = null;
     try {
-      font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images });
-      typography = await loadMenuTypography(this.model.catalog, images, font.font.classic);
+      const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client } };
+      const imageSettings = await ApplicationImageSettings.open({ context, dialect: "q3", print: this.host.print,
+        ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }) });
+      font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images, imagePolicy: imageSettings.policy });
+      typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy);
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);
       renderer = NativeRenderer.open(options, owner);
       controllers = SdlControllers.open();
-      const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client } };
       const commands = new CommandBuffer({ dialect: "q3", context });
       menu = new StartupMenu({ seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
