@@ -9,6 +9,7 @@ import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.t
 import { SceneImageRegistry } from "../../../src/render/scene/resources.ts";
 import type { RendererImage } from "../../../src/contracts/render.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
+import { KeyCode } from "../../../src/input/key-codes.ts";
 
 function pink(bytes: Uint8Array): number {
   let count = 0;
@@ -27,9 +28,9 @@ function red(bytes: Uint8Array): number {
   return count;
 }
 
-for (const backend of ["cpu", "gl"]) test(`local ${backend} image console refresh retains the world and retires replaced images`, async () => {
+for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl"]) test(`local ${backend} image ${interaction} refresh retains the world and retires replaced images`, async () => {
   const users = await mkdtemp(join(tmpdir(), "quake-local-images-"));
-  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--renderer", backend, "--hidden", "--width", "320", "--height", "240"]);
+  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q2", "--character", "q2", "--renderer", backend, "--hidden", "--width", interaction === "menu" ? "640" : "320", "--height", interaction === "menu" ? "480" : "240"]);
   if (parsed.kind !== "run") throw new Error("Missing application options");
   const content = await loadApplicationContent(parsed.options);
   try {
@@ -72,6 +73,50 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} image console refres
     const capture = async (): Promise<Uint8Array> => { const pending = application.captureNextFrame(); await application.step(25); return pending; };
     for (let index = 0; index < 12; index++) await application.step(25);
     const baselinePixels = await capture(), baseline = pink(baselinePixels), elapsed = application.timeMilliseconds;
+    if (interaction === "menu") {
+      const clickRow = async (row: number, x = 300): Promise<void> => {
+        const size = application.window?.drawableSize;
+        if (size === undefined) throw new Error("Missing mouse viewport");
+        const scale = Math.min(size.width / 640, size.height / 480);
+        application.input({ seat: local.seat.id, kind: "mouse-motion", position: { x: (size.width - 640 * scale) / 2 + x * scale,
+          y: (size.height - 480 * scale) / 2 + (106 + row * 28) * scale }, delta: { x: 0, y: 0 }, timeMilliseconds: performance.now() });
+        for (const down of [true, false]) application.input({ seat: local.seat.id, kind: "mouse-button", button: 1, down, timeMilliseconds: performance.now() });
+        await application.step(25);
+      };
+      const video = async (): Promise<void> => {
+        key(27); await application.step(25);
+        expect(presentation.ui.controller.activeMenu).toBe("menu:application:game");
+        await clickRow(3); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:root");
+        await clickRow(0); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:0");
+      };
+      const resume = async (): Promise<void> => { await clickRow(11); await clickRow(11); await clickRow(1); };
+      await video();
+      expect(application.window?.drawableSize).toEqual({ width: 640, height: 480 });
+      await clickRow(2, 540);
+      key(KeyCode.End);
+      for (let index = 0; index < 6; index++) key(KeyCode.Backspace);
+      application.input({ seat: local.seat.id, kind: "text", text: "png", timeMilliseconds: performance.now() });
+      await application.step(25);
+      expect(assets.imagePolicy?.formats).toEqual(["png"]);
+      await clickRow(1);
+      expect(assets.imagePolicy?.overrideLevel).toBe(1);
+      const menu = await capture();
+      await Bun.write(`/tmp/image-video-menu-${backend}.png`, encodePng(640, 480, menu));
+      expect(await Bun.file(join(users, "settings/images.cfg")).text()).toContain('"png"');
+      await resume(); expect(presentation.ui.controller.activeMenu).toBeNull();
+      expect(pink(await capture())).toBeGreaterThan(baseline + 100);
+      await video(); await clickRow(5);
+      expect(assets.imagePolicy?.overrideUsages.includes("wall")).toBe(false);
+      const mask = await capture();
+      await Bun.write(`/tmp/image-video-menu-${backend}-mask.png`, encodePng(640, 480, mask));
+      await resume(); const masked = await capture();
+      await Bun.write(`/tmp/image-video-world-${backend}-mask.png`, encodePng(640, 480, masked));
+      expect(pink(masked)).toBeLessThanOrEqual(baseline + 20);
+      expect(red(masked)).toBeGreaterThan(red(baselinePixels) + 20);
+      expect(assets.world).toBe(world); expect(application.simulation).toBe(simulation);
+      expect(local.seat.presentation).toBe(presentation); expect(application.window).toBe(window);
+      return;
+    }
     const inventory = simulation.playerUi(local.actor).items, weapon = simulation.playerUi(local.actor).weaponStatus;
     const gun = simulation.presentations().find(value => value.viewWeapon);
     if (gun === undefined) throw new Error("Missing active source weapon");

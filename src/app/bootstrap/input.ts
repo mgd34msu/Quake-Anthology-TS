@@ -73,6 +73,7 @@ export interface ApplicationInputCommandOwner {
 }
 
 export class ApplicationInput {
+  get sharedCvars(): CvarRegistry | null { return this.actions.sharedCvars ?? null; }
   readonly commands: CommandBuffer;
   readonly cvars: CvarRegistry;
   readonly locals: readonly LocalInput[];
