@@ -1,3 +1,4 @@
+import type { ItemId } from "../../contracts/gameplay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
 /** Q2 quantities feed Q1 capacities. Slugs become nails; energy weapons use lightning. */
@@ -24,4 +25,12 @@ export const Q2_Q1_SUPPLY_PROFILE: PickupSupplyProfile = {
     { source: "q2:weapon_railgun", destinations: ["q1:weapon/supernailgun"] },
     { source: "q2:weapon_bfg", destinations: ["q1:weapon/lightning"] },
   ],
+};
+
+const hipnoticWeapons = new Map<ItemId, readonly ItemId[]>([["q2:weapon_hyperblaster", ["q1:weapon/hipnotic:laser"]], ["q2:weapon_grenadelauncher", ["q1:weapon/hipnotic:proximity"]], ["q2:weapon_bfg", ["q1:weapon/hipnotic:mjolnir"]]]);
+
+export const Q2_HIPNOTIC_SUPPLY_PROFILE: PickupSupplyProfile = {
+  ...Q2_Q1_SUPPLY_PROFILE, id: "composition:q2-hipnotic-supply",
+  weapons: Q2_Q1_SUPPLY_PROFILE.weapons.map(entry => ({ ...entry, destinations: [...entry.destinations,
+    ...(hipnoticWeapons.get(entry.source) ?? [])] })),
 };

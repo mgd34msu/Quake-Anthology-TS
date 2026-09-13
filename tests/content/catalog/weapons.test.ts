@@ -144,3 +144,34 @@ test.skipIf(!existsSync(resolve(corpusRoot, "q1/rerelease/id1/pak0.pak")))("Q1 c
     for (const request of selectedWeaponResources(preset.map.entities, [role], catalog)) expect(recipe.resources.some(resource => resource.requestedPath === request.path && resource.provenance.mount.identity.content === weapon.content)).toBe(true);
   }
 }, 60000);
+
+test.skipIf(!existsSync(corpusRoot))("Hipnotic classic and rerelease arsenals resolve through menu selection on all map families", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  for (const game of ["q1-classic-id1", "q1-classic-hipnotic", "q2-classic-baseq2", "q3-baseq3"]) {
+    const command = parseApplicationCommand(["--game", game, "--map", game.startsWith("q1") ? "start" : game.startsWith("q2") ? "base1" : "q3dm1"]);
+    if (command.kind !== "run") throw new Error("Expected launch command");
+    const startup = new StartupSelectionModel(catalog, command.options);
+    await startup.prepareMaps();
+    for (const edition of ["classic", "rerelease"]) {
+      const id = `q1-${edition}-hipnotic`;
+      expect(startup.rows().find(row => row.id === "weapons")?.choices.find(choice => choice.id === id)?.unavailable).toBeNull();
+      for (const field of ["movement", "character"]) expect(startup.rows().find(row => row.id === field)?.choices.some(choice => choice.id === id)).toBe(false);
+      startup.select("weapons", id);
+      const { recipe } = await startup.resolve();
+      const preset = applicationPreset(catalog, command.options);
+      const weapon = { provider: "q1:official", content: catalog.require(id).id } satisfies typeof preset.map.entities;
+      const role = canonicalWeaponSource(preset.map.entities, weapon, catalog);
+      expect(recipe.weapons).toEqual([role]);
+      expect(recipe.map.entities).toEqual(preset.map.entities);
+      if (id === game) { expect(role).toEqual(preset.map.entities); continue; }
+      expect(role.provider).toBe(`q1:weapons/${edition}/hipnotic`);
+      expect(recipe.timing.find(entry => entry.provider === role.provider)).toEqual(nativeProviderTiming(role, "q1", edition === "rerelease"));
+      const requests = selectedWeaponResources(preset.map.entities, [weapon], catalog);
+      expect(requests.filter(request => request.path.startsWith("progs/v_"))).toHaveLength(11);
+      for (const path of ["progs/lasrspik.mdl", "progs/proxbomb.mdl", "sound/hipweap/mjolhit.wav", ...(edition === "rerelease" ? ["gfx/weapons/ui_h_weapon_laser_1.lmp", "gfx/weapons/ui_h_weapon_mjolnir_2.lmp", "gfx/weapons/ui_h_weapon_gren_1.lmp"] : ["gfx.wad"])]) {
+        expect(requests.some(request => request.path === path)).toBe(true);
+        expect(recipe.resources.find(resource => resource.requestedPath === path)?.provenance.mount.identity.content).toBe(weapon.content);
+      }
+    }
+  }
+}, 60000);

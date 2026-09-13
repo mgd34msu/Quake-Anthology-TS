@@ -2,7 +2,7 @@ import { q2BaseWeaponDisplayName } from "../../../../content/q2/foundation/items
 import { itemList } from "../../../../content/q3/base/shared/items.ts";
 import { ItemType } from "../../../../content/q3/base/shared/definitions.ts";
 import { isQ1BaseWeapon } from "../../../../content/q1/foundation/types.ts";
-import type { Q1BaseWeapon } from "../../../../content/q1/foundation/types.ts";
+import type { Q1BaseWeapon, Q1Weapon } from "../../../../content/q1/foundation/types.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../../contracts/ui.ts";
@@ -20,9 +20,17 @@ function displayName(value: string): string {
   return value.replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, character => character.toUpperCase());
 }
 
+export function q1WeaponDisplayName(weapon: Q1Weapon): string {
+  if (isQ1BaseWeapon(weapon)) return q1DisplayNames[weapon];
+  if (weapon === "hipnotic:laser") return "Laser Cannon";
+  if (weapon === "hipnotic:mjolnir") return "Mjolnir";
+  if (weapon === "hipnotic:proximity") return "Proximity Gun";
+  return displayName(weapon);
+}
+
 export function q1WeaponStatus(game: Q1EntityServices, player: Q1PlayerState, source: ProviderReference): WeaponHudStatus {
   const item = game.weaponItem(player.weapon), ammo = game.weaponAmmo(player.weapon);
-  return { source, item, label: isQ1BaseWeapon(player.weapon) ? q1DisplayNames[player.weapon] : displayName(player.weapon), ammo: ammo === null ? { kind: "unmetered" } : {
+  return { source, item, label: q1WeaponDisplayName(player.weapon), ammo: ammo === null ? { kind: "unmetered" } : {
     kind: "finite", item: ammo, count: game.host.inventory.count(player.actor.id, ammo),
     hasAmmoToStart: game.weaponAvailable(player, player.weapon, "fire"), low: false,
   } };

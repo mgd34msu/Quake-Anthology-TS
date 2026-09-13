@@ -812,6 +812,12 @@ export class Application {
           continue;
         }
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
+        if (sourceClient !== undefined && (command.name === "use" || command.name === "weapnext" || command.name === "weapprev")) {
+          const actor = this.commandActor(command.seat);
+          if (this.simulation.movementPlayer(actor)?.arsenal.state.kind !== "q3") {
+            this.simulation.playerCommand(actor, command.name, command.arguments_); continue;
+          }
+        }
         if (command.name === "use") {
           const actor = this.commandActor(command.seat), requested = command.arguments_.join("").toLowerCase().replaceAll(" ", "");
           const item = this.simulation.playerUi(actor).items.find(item => item.kind === "weapon" && item.owned

@@ -30,6 +30,22 @@ function animate(game: Q1EntityServices, player: Q1PlayerState, seconds: number)
   if (frame !== player.weaponFrame) { player.weaponFrame = frame; game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon, viewModel: game.weaponModel(player.weapon), frame, punch: 0 }); }
   if (step >= 6) player.weaponAnimationAt = -1; return undefined;
 }
+function registerWeaponDefinitions(game: Q1EntityServices, pack: Q1MissionPack): void {
+  for (const weapon of missionWeapons) if (weapon.id.startsWith(`${pack}:`)) game.registerWeapon({
+    id: weapon.id, ammo: weapon.ammo, model: weapon.model, rank: weapon.rank,
+    bestAvailable: (runtime, player) => weapon.id !== "rogue:lava-supernailgun" || runtime.host.inventory.count(player.actor.id, "rogue:ammo/lava-nails") >= 2,
+    fire: (runtime, player) => fire(runtime, player, weapon.id), animate,
+  });
+  const order: readonly Q1Weapon[] = pack === "hipnotic" ? ["lightning", "hipnotic:laser", "supernailgun", "supershotgun", "nailgun", "shotgun", "hipnotic:mjolnir", "axe"] :
+    ["lightning", "rogue:lava-supernailgun", "supernailgun", "rogue:lava-nailgun", "nailgun", "supershotgun", "shotgun", "axe"];
+  game.registerWeaponOrder(`q1:${pack}`, order);
+}
+
+export function registerHipnoticWeapons(game: Q1EntityServices): void {
+  registerHipnoticWeaponCallbacks(game);
+  registerWeaponDefinitions(game, "hipnotic");
+}
+
 export class MissionPackArsenal {
   readonly players: MissionPackPlayers;
   private charmer: ActorId | null = null;
@@ -42,15 +58,11 @@ export class MissionPackArsenal {
   constructor(readonly game: Q1EntityServices, readonly pack: Q1MissionPack) {
     this.players = new MissionPackPlayers(game, pack);
     registerMissionPackPickupRules(game, pack, this.players);
-    if (pack === "hipnotic") registerHipnoticWeaponCallbacks(game); else { registerRogueWeaponCallbacks(game); registerRogueTossCallbacks(game, this.players); new RogueGrapple(game); }
-    for (const weapon of missionWeapons) if (weapon.id.startsWith(`${pack}:`)) game.registerWeapon({
-      id: weapon.id, ammo: weapon.ammo, model: weapon.model, rank: weapon.rank,
-      bestAvailable: (runtime, player) => weapon.id !== "rogue:lava-supernailgun" || runtime.host.inventory.count(player.actor.id, "rogue:ammo/lava-nails") >= 2,
-      fire: (runtime, player) => fire(runtime, player, weapon.id), animate,
-    });
-    const order: readonly Q1Weapon[] = pack === "hipnotic" ? ["lightning", "hipnotic:laser", "supernailgun", "supershotgun", "nailgun", "shotgun", "hipnotic:mjolnir", "axe"] :
-      ["lightning", "rogue:lava-supernailgun", "supernailgun", "rogue:lava-nailgun", "nailgun", "supershotgun", "shotgun", "axe"];
-    game.registerWeaponOrder(`q1:${pack}`, order);
+    if (pack === "hipnotic") registerHipnoticWeapons(game);
+    else {
+      registerRogueWeaponCallbacks(game); registerRogueTossCallbacks(game, this.players); new RogueGrapple(game);
+      registerWeaponDefinitions(game, pack);
+    }
     registerMissionPackItems(game, {
       pack, powerup: (player, powerup, seconds) => this.players.powerup(player, powerup, seconds), sphere: (item, player) => this.players.sphere(item, player), enableCombos: player => this.players.enableCombos(player),
       horn: (item, player) => {

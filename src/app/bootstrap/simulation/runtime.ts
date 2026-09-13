@@ -57,8 +57,11 @@ import { createQ1ActorHost, createQ2ActorHost } from "./source-hosts.ts";
 import type { ActorHostRuntime } from "./source-hosts.ts";
 import { actorMotion, actorCollision, actorFlags, writeActorFlags, executeActor } from "./actor-execution.ts";
 import type { ActorExecution } from "./actor-execution.ts";
-import { Q2_Q1_SUPPLY_PROFILE } from "../../../content/composition/q2-q1-supply.ts";
-import { Q3_Q1_SUPPLY_PROFILE } from "../../../content/composition/q3-q1-supply.ts";
+import { Q2_Q1_SUPPLY_PROFILE, Q2_HIPNOTIC_SUPPLY_PROFILE } from "../../../content/composition/q2-q1-supply.ts";
+import { Q3_Q1_SUPPLY_PROFILE, Q3_HIPNOTIC_SUPPLY_PROFILE } from "../../../content/composition/q3-q1-supply.ts";
+import { Q1_HIPNOTIC_SUPPLY_PROFILE } from "../../../content/composition/q1-hipnotic-supply.ts";
+import { registerHipnoticWeapons } from "../../../content/q1/missionpacks/arsenal.ts";
+import { missionWeaponImpulse } from "../../../content/q1/missionpacks/selection.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
 import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
@@ -99,6 +102,7 @@ import { FrameScheduler } from "../../../world/scheduler.ts";
 import { SourceClock } from "../../../world/session/index.ts";
 import { Q1Foundation } from "../../../content/q1/foundation/runtime.ts";
 import { WEAPONS as Q1_WEAPONS, isQ1BaseWeapon, q1WeaponBit } from "../../../content/q1/foundation/types.ts";
+import type { Q1PlayerState } from "../../../content/q1/foundation/types.ts";
 import { Q1CampaignState, Q1CharacterActor } from "../../../content/q1/base/index.ts";
 import type { Q1TravelState } from "../../../content/q1/base/index.ts";
 import { Q2CharacterActor } from "../../../content/q2/base/player/index.ts";
@@ -675,6 +679,7 @@ export class SharedSimulation implements Simulation {
       ammo: Q1_Q3_SUPPLY_PROFILE.ammo.map(entry => ({ source: entry.source, destinations: [entry.source] })),
       weapons: Q1_Q3_SUPPLY_PROFILE.weapons.map(entry => ({ source: entry.source, destinations: [entry.source] })) };
     const profile = selected?.family === "q3" ? Q1_Q3_SUPPLY_PROFILE : selected?.family === "q2" ? Q1_Q2_SUPPLY_PROFILE
+      : selected?.family === "q1" && selected.game.registeredWeapons.has("hipnotic:laser") ? Q1_HIPNOTIC_SUPPLY_PROFILE
       : selected?.family === "q1" || this.source.kind === "q1" ? identity : Q1_Q2_SUPPLY_PROFILE;
     return new SharedPickupAdmission({ inventory: this.inventory, profile,
       ammoGranted: (actor, grants, autoSwitch) => {
@@ -840,8 +845,7 @@ export class SharedSimulation implements Simulation {
     const product = this.weaponProvider.content.split(":")[2];
     if (this.source.kind === "q3" && this.source.game.options.product === "missionpack") throw new Error("Selected Q1 supply on Team Arena is not implemented");
     if (this.source.kind === "q2" && this.source.product.configuration.program !== "baseq2") throw new Error("Selected Q1 supply currently supports base Q2 items");
-    if (product !== "id1") throw new Error("Selected Q1 arsenal currently supports only base id1");
-    if (this.source.kind === "q1" && this.recipe.map.entities.content.split(":")[2] !== "id1") throw new Error("Selected Q1 supply on Q1 maps currently supports base id1");
+    if (product !== "id1" && product !== "hipnotic") throw new Error("Selected Q1 arsenal requires id1 or Hipnotic weapon registration");
     const timing = providerTiming(this.recipe, this.weaponProvider.provider);
     const random = new SourceRandom(this.options.seed, "classic");
     const host = this.q1ActorHost(this.weaponProvider, { numeric: timing.numeric, random,
@@ -869,18 +873,22 @@ export class SharedSimulation implements Simulation {
       provider: this.weaponProvider.provider, edition: this.weaponProvider.content.includes(":rerelease:") ? "rerelease" : "classic",
       skill: this.options.skill, deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", campaign: this.recipe.map.entities.provider,
       combatProvider: this.recipe.combat.provider, movementProvider: this.recipe.movement.provider, inventoryProvider: this.recipe.inventory.provider, gravity: this.physics.gravity });
+    if (product === "hipnotic") registerHipnoticWeapons(game);
     this.selectedWeaponSource = { kind: "q1", game, random };
-    const profile: PickupSupplyProfile = this.source.kind === "q1" ? { id: "composition:q1-q1-supply", weaponOwnership: "all-destinations",
+    const profile: PickupSupplyProfile = product === "hipnotic"
+      ? this.source.kind === "q1" ? Q1_HIPNOTIC_SUPPLY_PROFILE : this.source.kind === "q2" ? Q2_HIPNOTIC_SUPPLY_PROFILE : Q3_HIPNOTIC_SUPPLY_PROFILE
+      : this.source.kind === "q1" ? { id: "composition:q1-q1-supply", weaponOwnership: "all-destinations",
       ammo: Q1_Q3_SUPPLY_PROFILE.ammo.map(entry => ({ source: entry.source, destinations: [entry.source] })),
       weapons: Q1_Q3_SUPPLY_PROFILE.weapons.map(entry => ({ source: entry.source, destinations: [entry.source] })) } : this.source.kind === "q2" ? Q2_Q1_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE;
     const selected = new Q1SelectedArsenal({ game,
+      ...(product === "hipnotic" ? { impulse: (player: Q1PlayerState, value: number) => missionWeaponImpulse(game, player, "hipnotic", value) } : {}),
       ...(this.source.kind === "q1" ? { nativePlayer: (actor: ActorId) => {
         const player = this.source.kind === "q1" ? this.source.game.player(actor) : null;
         if (player === null) throw new Error("Selected Q1 arsenal has no native map player");
         return player;
       } } : {}),
       fired: (actor, weapon) => {
-        this.weaponCharacterAnimation(actor, "attack", weapon === "axe", this.weaponProvider.content, false);
+        this.weaponCharacterAnimation(actor, "attack", weapon === "axe" || weapon === "hipnotic:mjolnir", this.weaponProvider.content, false);
         if (this.source.kind === "q1") this.source.composition.fired(actor, game.weaponItem(weapon));
         const player = this.requirePlayer(actor), body = this.bodies.read(actor);
         if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor, this.source.game, body.origin, "weapon");
@@ -1843,7 +1851,7 @@ export class SharedSimulation implements Simulation {
     else if (source.kind === "q2" && carried?.kind === "q2" && entity !== null) source.players.restoreCarry(entity, source.game, carried.carry);
     player.state = player.readState();
     if (this.selectedArsenal !== null) {
-      if (source.kind === "q1" && this.selectedArsenal.family === "q1") player.arsenal = this.selectedArsenal.admit(actor, 100);
+      if (source.kind === "q1" && this.selectedArsenal.family === "q1" && (this.selectedArsenal.game.registeredWeapons.size === 0 || carriedPlayer?.selectedArsenal === undefined)) player.arsenal = this.selectedArsenal.admit(actor, 100);
       else if (carriedPlayer?.selectedArsenal !== undefined) {
         const carry = carriedPlayer.selectedArsenal;
         if (this.selectedArsenal.family === "q1" && carry.kind === "q1") player.arsenal = this.selectedArsenal.admitTravel(actor, 100, carry.state);
@@ -2006,7 +2014,12 @@ export class SharedSimulation implements Simulation {
     const player = this.playerStates.get(input.actor);
     if (player === undefined) throw new Error("Weapon input has no admitted player");
     if (this.selectedArsenal !== null) {
-      if (this.source.kind === "q1" && this.selectedArsenal.family === "q1") this.source.composition.impulse(player.actor.id);
+      if (this.selectedArsenal.family === "q1") {
+        const client = this.source.kind === "q1" ? this.source.composition.clients.require(player.actor.id) : null;
+        const impulse = client?.impulse ?? ("impulse" in input.command ? input.command.impulse : 0);
+        if (this.selectedArsenal.impulse(player.actor.id, impulse)) { if (client !== null) client.impulse = 0; }
+        else if (this.source.kind === "q1") this.source.composition.impulse(player.actor.id);
+      }
       if (this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf && this.source.product.match.source.match.paused)
         return { arsenal: this.selectedArsenal.read(player.actor.id), animation: input.animation, effects: [] };
       const arsenal = this.selectedArsenal.read(player.actor.id);
@@ -2763,7 +2776,7 @@ export class SharedSimulation implements Simulation {
     const player = this.requirePlayer(actor);
     if (this.weaponSlots.has(actor) && (name === "weapnext" || name === "weapprev" || name === "use")) {
       const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned), requested = args.join("").toLowerCase().replaceAll(" ", "");
-      const selected = name === "use" ? owned.find(item => item.id === requested || item.label.toLowerCase().replaceAll(" ", "") === requested)
+      const selected = name === "use" ? owned.find(item => item.id === requested || item.id === `q1:weapon/${requested}` || item.label.toLowerCase().replaceAll(" ", "") === requested)
         : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
       if (selected !== undefined) { const equipment = this.grapple?.weapon(); this.requestWeapon(actor, { provider: equipment?.item === selected.id ? equipment.provider : this.weaponProvider.provider, item: selected.id }); return undefined; }
       if (name !== "use") return undefined;
@@ -2771,7 +2784,7 @@ export class SharedSimulation implements Simulation {
     if (this.selectedArsenal !== null && (name === "weapnext" || name === "weapprev" || name === "use")) {
       const ui = this.selectedArsenal.ui(actor, this.weaponProvider), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
       const requested = args.join("").toLowerCase().replaceAll(" ", "");
-      const weapon = name === "use" ? owned.find(item => item.id === requested || item.label.replaceAll(" ", "") === requested)
+      const weapon = name === "use" ? owned.find(item => item.id === requested || item.id === `q1:weapon/${requested}` || item.label.toLowerCase().replaceAll(" ", "") === requested)
         : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
       if (weapon !== undefined) { this.selectedArsenal.select(actor, weapon.id); return undefined; }
       if (name !== "use") return undefined;

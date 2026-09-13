@@ -9,6 +9,9 @@ import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { Q1Foundation } from "../../../src/content/q1/foundation/index.ts";
+import { Q1EntityServices } from "../../../src/content/q1/foundation/entity-services.ts";
+import { registerHipnoticWeapons } from "../../../src/content/q1/missionpacks/arsenal.ts";
+import { missionWeapons } from "../../../src/content/q1/missionpacks/types.ts";
 import type { Q1Event, Q1FoundationHost } from "../../../src/content/q1/foundation/index.ts";
 import { PLAYER_BOUNDS, ZERO, vadd, weaponItem } from "../../../src/content/q1/foundation/types.ts";
 import { registerQ1Base } from "../../../src/content/q1/base/index.ts";
@@ -76,6 +79,45 @@ test.skipIf(!existsSync(archivePath))("Hipnotic paired lasers, native pickups an
   expect(combat.read(player.actor.id)?.health).toBe(80); expect(combat.read(target.actor.id)?.health).toBe(80);
   game.givePowerup(target, "hipnotic:wetsuit"); game.damage(target.actor.id, player.actor.id, player.actor.id, 100, "lightning", "radius", "discharge");
   expect(combat.read(target.actor.id)?.health).toBe(80); actors.close();
+});
+
+for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "rerelease")[]) test.skipIf(!existsSync(archivePath))(`Hipnotic ${edition} weapon registration fires on existing actors without campaign player extensions`, async () => {
+  const native = await session("hipnotic", edition);
+  try {
+    const game = new Q1EntityServices(native.game.host, { ...native.game.options, provider: `q1:weapons/${edition}/hipnotic` });
+    const actorsBefore = native.actors.observations().length;
+    registerHipnoticWeapons(game);
+    expect([...game.registeredWeapons.keys()]).toEqual([...native.game.registeredWeapons.keys()]);
+    expect(game.weaponOrder).toEqual(native.game.weaponOrder);
+    expect(game.playerExtensions.size).toBe(0);
+    expect(game.pickupRules).toBeNull();
+    expect(game.stateExtensions.size).toBe(0);
+    const player = game.attachPlayer(native.player.actor, { initializeInventory: false });
+    expect(native.actors.observations().length).toBe(actorsBefore);
+    expect(game.entities.size).toBe(0);
+    expect(game.world).toBeNull();
+    native.inventory.configure(player.actor, { item: "q1:ammo/cells", count: 100, capacity: 100 });
+    native.inventory.configure(player.actor, { item: "q1:ammo/rockets", count: 100, capacity: 100 });
+    let seconds = 1;
+    for (const weapon of missionWeapons) if (weapon.id.startsWith("hipnotic:")) {
+      const item = game.weaponItem(weapon.id);
+      native.inventory.configure(player.actor, { item, count: 1, capacity: 1 });
+      expect(game.selectWeapon(player.actor, weapon.id)).toBe(true);
+      expect(game.weaponInput(player.actor, true, ZERO, seconds)).toBe(true);
+      expect(player.weapon).toBe(weapon.id);
+      expect(game.weaponModel(player.weapon)).toBe(weapon.model);
+      seconds += 2;
+    }
+    expect([...game.entities.values()].filter(entity => entity.classname === "hiplaser")).toHaveLength(2);
+    expect([...game.entities.values()].some(entity => entity.classname === "proximity_grenade")).toBe(true);
+    expect(native.inventory.count(player.actor.id, "q1:ammo/cells")).toBe(99);
+    expect(native.inventory.count(player.actor.id, "q1:ammo/rockets")).toBe(99);
+    const health = game.health(player.actor.id);
+    player.waterLevel = 3; player.airFinished = -100;
+    game.weaponFrame(player.actor, seconds);
+    expect(game.health(player.actor.id)).toBe(health);
+    expect(game.playerExtensions.size).toBe(0);
+  } finally { native.actors.close(); }
 });
 
 test.skipIf(!existsSync(archivePath))("Rogue powered ammunition, lava armor and five-way grenades preserve source behavior", async () => {

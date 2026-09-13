@@ -26,6 +26,13 @@ const q1Pictures: readonly { readonly item: ItemId; readonly classic: string | n
   { item: "q1:weapon/lightning", classic: "lightng", wheel: "light", ammo: "sb_cells" },
 ];
 
+// Hipnotic sbar.ts lumps and retail rerelease hipnotic/wwheel.txt slots 7–9.
+const hipnoticPictures: typeof q1Pictures = [
+  { item: "q1:weapon/hipnotic:laser", classic: "laser", wheel: "ui_h_weapon_laser", ammo: "sb_cells" },
+  { item: "q1:weapon/hipnotic:mjolnir", classic: "mjolnir", wheel: "ui_h_weapon_mjolnir", ammo: "sb_cells" },
+  { item: "q1:weapon/hipnotic:proximity", classic: "prox", wheel: "ui_h_weapon_gren", ammo: "sb_rocket" },
+];
+
 function image(source: ProviderReference, path: string): WeaponHudIcon {
   return { kind: "image", resource: { content: source.content, path } };
 }
@@ -34,11 +41,11 @@ function wad(source: ProviderReference, lump: string): WeaponHudIcon {
 }
 
 export function weaponHudIcons(source: ProviderReference, product: ProductExpectation, item: ItemId): WeaponHudIcons | null {
-  if (product.family === "q1" && product.campaign === "id1" && (product.edition === "classic" || product.edition === "rerelease")) {
-    const pictures = q1Pictures.find(entry => entry.item === item);
+  if (product.family === "q1" && (product.campaign === "id1" || product.campaign === "hipnotic") && (product.edition === "classic" || product.edition === "rerelease")) {
+    const pictures = [...q1Pictures, ...(product.campaign === "hipnotic" ? hipnoticPictures : [])].find(entry => entry.item === item);
     if (pictures === undefined) return null;
-    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/ww_${pictures.wheel}_1.lmp`) : pictures.classic === null ? null : wad(source, `inv_${pictures.classic}`),
-      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/ww_${pictures.wheel}_2.lmp`) : pictures.classic === null ? null : wad(source, `inv2_${pictures.classic}`),
+    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_h_") ? pictures.wheel : `ww_${pictures.wheel}`}_1.lmp`) : pictures.classic === null ? null : wad(source, `inv_${pictures.classic}`),
+      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_h_") ? pictures.wheel : `ww_${pictures.wheel}`}_2.lmp`) : pictures.classic === null ? null : wad(source, `inv2_${pictures.classic}`),
       ammo: pictures.ammo === null ? null : wad(source, pictures.ammo) };
   }
   if (product.family === "q2" && product.campaign === "baseq2" && (product.edition === "classic" || product.edition === "rerelease")) {
@@ -70,7 +77,7 @@ const teamArenaImages: Readonly<Record<string, string>> = {
 };
 
 export function weaponHudResources(source: ProviderReference, product: ProductExpectation): readonly ResourceRequest[] {
-  const items = product.family === "q1" ? q1Pictures.map(entry => entry.item) : product.family === "q2" ? Q2_BASE_WEAPONS.map(entry => entry.item) : Q3_WEAPON_ITEMS.map(entry => entry.item);
+  const items = product.family === "q1" ? [...q1Pictures, ...(product.campaign === "hipnotic" ? hipnoticPictures : [])].map(entry => entry.item) : product.family === "q2" ? Q2_BASE_WEAPONS.map(entry => entry.item) : Q3_WEAPON_ITEMS.map(entry => entry.item);
   const paths = new Set<string>();
   for (const item of items) {
     const icons = weaponHudIcons(source, product, item);

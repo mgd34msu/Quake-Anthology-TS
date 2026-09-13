@@ -4,6 +4,7 @@ import type { HostServerSettingsUi } from "../../ui/settings/server.ts";
 import type { CommonHudData } from "../../ui/hud/index.ts";
 import { ApplicationWeaponHudAssets } from "./weapon-hud.ts";
 import type { ApplicationAssets } from "./assets.ts";
+import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ResourceId } from "../../contracts/content.ts";
 import type { Rect, RenderCommand, SceneCamera } from "../../contracts/render.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl, UiDrawContext } from "../../contracts/ui.ts";
@@ -47,13 +48,22 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly disposeMenu: () => void;
   private readonly now: () => number;
   private readonly measureHudText: (text: string, scale: number) => number;
+  private readonly wheelIcons = new Map<ItemId, ResourceId>();
   private weaponAssets: ApplicationWeaponHudAssets | null = null;
   private weaponIcons: { readonly weapon: ResourceId | null; readonly ammo: ResourceId | null } = { weapon: null, ammo: null };
 
   async prepare(assets: ApplicationAssets): Promise<void> {
     await this.prompt.prepare(assets, () => this.local.input.focus);
     this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
-    this.weaponIcons = await this.weaponAssets.prepare(this.simulation.playerUi(this.local.player.actor).weaponStatus);
+    const ui = this.simulation.playerUi(this.local.player.actor), assetsOwner = this.weaponAssets;
+    this.weaponIcons = await assetsOwner.prepare(ui.weaponStatus);
+    if (ui.weaponStatus !== null) {
+      const status = ui.weaponStatus;
+      await Promise.all(ui.items.filter(item => item.kind === "weapon").map(async item => {
+        const icons = await assetsOwner.prepare({ ...status, item: item.id });
+        if (icons.weapon !== null) this.wheelIcons.set(item.id, icons.weapon);
+      }));
+    }
   }
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
@@ -79,7 +89,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
       items: mode => simulation.playerUi(local.player.actor).items.filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
-        .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: null, selectedIcon: null })),
+        .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: this.wheelIcons.get(item.id) ?? null, selectedIcon: this.wheelIcons.get(item.id) ?? null })),
       activeItem: () => simulation.playerUi(local.player.actor).activeWeapon,
       select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
     const keys: readonly (readonly [string, string])[] = [["Move forward", "+forward"], ["Move back", "+back"], ["Strafe left", "+moveleft"],
