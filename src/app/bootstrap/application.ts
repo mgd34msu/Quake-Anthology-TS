@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import type { LlmCommandRequester } from "../../console/llm.ts";
 import type { LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { StartupSaves } from "./startup-saves.ts";
@@ -1099,6 +1100,7 @@ export class Application {
       if (elapsed < 4) { await Bun.sleep(4 - elapsed); continue; }
       previous = now;
       await this.step(elapsed);
+      await setImmediate();
     }
   }
 

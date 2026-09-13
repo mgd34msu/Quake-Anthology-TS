@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import type { CommandContext } from "../../contracts/common.ts";
 import { ClientSocksSettings } from "./network/socks-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
@@ -689,6 +690,7 @@ export class RemoteApplication {
       const now = performance.now(), elapsed = now - previous;
       if (elapsed < 4) { await Bun.sleep(4 - elapsed); continue; }
       previous = now; await this.step(elapsed);
+      await setImmediate();
     }
   }
   readPixels(): Uint8Array { return this.renderer.readPixels(); }
