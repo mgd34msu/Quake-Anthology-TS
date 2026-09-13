@@ -15,6 +15,7 @@ export { sourceFilter } from "./filter.ts";
 
 export interface CommandInvocation {
   readonly source: CommandContext;
+  readonly direct: boolean;
   readonly dialect: CommandDialect;
   readonly argv: readonly string[];
   readonly args: readonly string[];
@@ -39,7 +40,7 @@ export interface CommandBufferOptions {
   readonly context: CommandContext;
   readonly cvars?: CvarRegistry;
   readonly cvarRouting?: CommandCvarRouting;
-  readonly print?: (text: string) => void;
+  readonly print?: (text: string, source?: CommandContext) => void;
   readonly readScript?: (name: string, source: CommandContext) => string | undefined;
   readonly commandLine?: readonly string[];
   readonly clientGame?: CommandFallback;
@@ -53,8 +54,8 @@ export interface CommandBufferOptions {
 
 interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
 interface AliasEntry { readonly name: string; value: string; }
-interface TextChunk { readonly text: string; readonly source: CommandContext; }
-interface ExecutionFrame { readonly source: CommandContext; readonly parent: ExecutionFrame | undefined; active: boolean; }
+interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; }
+interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly parent: ExecutionFrame | undefined; active: boolean; }
 
 function copyOrigin(origin: CommandOrigin, context: CommandContext): CommandOrigin {
   switch (origin.kind) {
@@ -85,6 +86,7 @@ export class CommandBuffer {
   private aliasCount = 0;
   private frame: ExecutionFrame | undefined;
   private tokens: readonly string[] = [];
+  private batchBudget: { remaining: number; readonly signal: AbortSignal | undefined } | undefined;
   private readonly maximumBuffer: number;
   private readonly maximumCommand: number;
 
@@ -102,7 +104,10 @@ export class CommandBuffer {
   get pendingText(): string { return this.chunks.map(chunk => chunk.text).join(""); }
   get deferredText(): string { return this.deferred.map(chunk => chunk.text).join(""); }
   get tokenizedArguments(): readonly string[] { return this.tokens; }
-  private print(text: string): void { this.options.print?.(text); }
+  get maximumCommandLength(): number { return this.maximumCommand; }
+  get maximumBufferLength(): number { return this.maximumBuffer; }
+  get executionContext(): CommandContext | undefined { return this.frame?.source; }
+  private print(text: string): void { this.options.print?.(text, this.frame?.source); }
 
   private cvarOwner(name: string, source: CommandContext): CvarRegistry | undefined {
     const owner = this.options.cvarRouting?.owner(name, source) ?? this.options.cvars;
@@ -209,12 +214,12 @@ export class CommandBuffer {
     if (source.session !== this.context.session) throw new RangeError("Command input belongs to another session");
     return Object.freeze({ session: source.session, origin: copyOrigin(source.origin, source) });
   }
-  private appendFor(input: string, source: CommandContext): void {
+  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script"): void {
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) this.chunks.push({ text, source });
+    if (text.length > 0) this.chunks.push({ text, source, direct });
   }
-  private insertFor(input: string, source: CommandContext): void {
+  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script"): void {
     const text = sourceCommandText(input) + (this.dialect === "q1-quakeworld" || this.dialect === "q3" ? "\n" : "");
     if (this.dialect === "q3") {
       if (this.pendingText.length + text.length > this.maximumBuffer) { this.print("Cbuf_InsertText overflowed\n"); return; }
@@ -222,7 +227,7 @@ export class CommandBuffer {
       if (text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
       if (this.pendingText.length + text.length > this.maximumBuffer) throw new RangeError("Cbuf_InsertText overflows source sizebuf");
     }
-    if (text.length > 0) this.chunks.unshift({ text, source });
+    if (text.length > 0) this.chunks.unshift({ text, source, direct });
   }
   copyToDefer(): void {
     if (!isQ2(this.dialect)) throw new Error("Deferred command buffers belong to Quake II");
@@ -257,26 +262,53 @@ export class CommandBuffer {
       }
       const line = buffer.slice(0, offset), consumed = offset === buffer.length ? offset : offset + 1;
       this.consume(consumed);
-      executed += this.dispatch(line, first.source);
+      executed += this.dispatch(line, first.source, first.direct);
       if (this.dialect !== "q3" && this.waitFrames !== 0) { this.waitFrames = 0; break; }
     }
     return executed;
   }
 
-  executeNow(text: string | null): number {
+  executeNow(text: string | null, source?: CommandContext): number {
     const value = text === null ? "" : sourceCommandText(text);
-    return value.length === 0 ? this.execute() : this.dispatch(value, this.frame?.source ?? this.context);
+    return value.length === 0 ? this.execute() : this.dispatch(value, this.inputContext(source), this.frame === undefined);
   }
+  /** Execute a bounded batch without draining another seat's pending input. */
+  executeBatch(text: string, source: CommandContext, signal?: AbortSignal): number {
+    const context = this.inputContext(source), value = sourceCommandText(text);
+    if (value !== text || value.length >= this.maximumBuffer) throw new RangeError("Command batch exceeds the engine buffer limit.");
+    let quoted = false, length = 0;
+    for (const character of value) {
+      if (character === '"') quoted = !quoted;
+      if ((!quoted && character === ";") || character === "\n" || this.dialect === "q3" && character === "\r") length = 0;
+      else if (++length >= this.maximumCommand) throw new RangeError("Command batch line exceeds the engine line limit.");
+    }
+    if (this.batchBudget !== undefined) throw new Error("Nested command batches are not supported.");
+    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, aliasCount: this.aliasCount, tokens: this.tokens };
+    this.chunks = []; this.deferred = []; this.waitFrames = 0; this.aliasCount = 0;
+    this.batchBudget = { remaining: 128, signal };
+    try {
+      this.appendFor(value, context, false);
+      const count = this.execute();
+      if (this.chunks.length > 0 || this.deferred.length > 0) throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
+      return count;
+    } finally {
+      this.chunks = saved.chunks; this.deferred = saved.deferred; this.waitFrames = saved.waitFrames;
+      this.aliasCount = saved.aliasCount; this.tokens = saved.tokens; this.batchBudget = undefined;
+    }
+  }
+
   private consume(count: number): void {
     while (count > 0) {
       const chunk = this.chunks.shift();
       if (chunk === undefined) return;
-      if (chunk.text.length > count) { this.chunks.unshift({ text: chunk.text.slice(count), source: chunk.source }); return; }
+      if (chunk.text.length > count) { this.chunks.unshift({ text: chunk.text.slice(count), source: chunk.source, direct: chunk.direct }); return; }
       count -= chunk.text.length;
     }
   }
 
-  private dispatch(raw: string, source: CommandContext): number {
+  private dispatch(raw: string, source: CommandContext, direct = false): number {
+    if (this.batchBudget?.signal?.aborted) throw new Error("Command batch cancelled; remaining batch discarded.");
+    if (this.batchBudget !== undefined && --this.batchBudget.remaining < 0) throw new Error("Command batch exceeded 128 dispatched commands; remaining batch discarded.");
     const expanded = isQ2(this.dialect) ? expandCommandMacros(raw, name => {
       const owner = this.cvarOwner(name, source), variable = owner?.find(name);
       return owner !== undefined && isQ2(owner.dialect) && variable !== undefined && (variable.flags & Q2CvarFlag.Private) !== 0 ? "" : variable?.value ?? "";
@@ -285,10 +317,10 @@ export class CommandBuffer {
     const tokens = tokenizeCommand(expanded, this.dialect), name = tokens.argv[0];
     this.tokens = tokens.argv;
     if (name === undefined) return 0;
-    const frame: ExecutionFrame = { source, parent: this.frame, active: true };
+    const frame: ExecutionFrame = { source, direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"), parent: this.frame, active: true };
     this.frame = frame;
     const requireActive = (): void => { if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active"); };
-    const command: CommandInvocation = Object.freeze({ source, dialect: this.dialect, argv: tokens.argv,
+    const command: CommandInvocation = Object.freeze({ source, direct: frame.direct, dialect: this.dialect, argv: tokens.argv,
       args: Object.freeze(tokens.argv.slice(1)), argsText: tokens.argsText, raw,
       append: (text: string): void => { requireActive(); this.appendFor(text, source); },
       insert: (text: string): void => { requireActive(); this.insertFor(text, source); },

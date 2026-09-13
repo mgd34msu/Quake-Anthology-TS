@@ -28,7 +28,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
-import { registerLlmCommands } from "../../console/llm.ts";
+import { registerLlmCommands, type LlmCommandRequester } from "../../console/llm.ts";
 import { registerQ2ClientCommands } from "./q2-client-commands.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
@@ -49,6 +49,7 @@ export interface LocalInput {
 }
 
 export interface ApplicationInputCommands {
+  readonly llm?: LlmCommandRequester;
   bindingCapabilities?(): BindingCapabilities;
   readonly sharedCvars?: CvarRegistry;
   quit(): undefined;
@@ -111,6 +112,24 @@ export class ApplicationInput {
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
 
+  print(text: string, source?: CommandContext): void {
+    const context = source ?? this.commands?.executionContext;
+    if (context === undefined) {
+      this.actions.print(text);
+      for (const local of this.locals ?? []) local.console.print(text);
+      return;
+    }
+    let origin = context.origin;
+    while (origin.kind === "script") origin = origin.caller;
+    if (origin.kind === "local-seat") {
+      const seat = origin.seat;
+      this.locals.find(local => local.player.seat.id.equals(seat))?.console.print(text);
+    } else {
+      this.actions.print(text);
+      if (origin.kind === "local-console") this.locals[0]?.console.print(text);
+    }
+  }
+
   inputCvars(id: SeatId | null): CvarRegistry | null {
     for (const [seat, settings] of this.mouseSettings) if (id === null || seat.equals(id)) return settings.cvars;
     return null;
@@ -133,10 +152,7 @@ export class ApplicationInput {
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
     const context: CommandContext = { session: first.actor.session, origin: { kind: "local-console" } };
-    const print = (text: string): void => {
-      actions.print(text);
-      for (const local of this.locals ?? []) local.console.print(text);
-    };
+    const print = (text: string, source?: CommandContext): void => this.print(text, source);
     if (owner !== undefined && (owner.cvars.dialect !== dialect || actions.console !== undefined)) throw new Error("Input command owner does not match its console dialect");
     this.cvars = owner?.cvars ?? new CvarRegistry({ dialect, context, print });
     const sourceDialect = actions.console?.dialect() ?? dialect;
@@ -191,7 +207,7 @@ export class ApplicationInput {
     }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
-    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print),
+    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
       registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat))];
     this.commands.register("quit", () => actions.quit());
     for (const name of ["+weaponwheel", "-weaponwheel", "+powerupwheel", "-powerupwheel"]) this.commands.register(name, invocation => {

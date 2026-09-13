@@ -1,3 +1,4 @@
+import type { LlmCommandRequester } from "../../console/llm.ts";
 import type { LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { StartupSaves } from "./startup-saves.ts";
 import type { SavedGameMenuService } from "../../ui/saves/menu.ts";
@@ -22,7 +23,7 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutableRecipe } from "../../contracts/content.ts";
-import type { CommandDialect } from "../../contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { TransitionDecision } from "../../contracts/gameplay.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
@@ -102,7 +103,7 @@ interface GraphicalApplication {
 }
 
 export interface ApplicationHost {
-  readonly llm?: LlmSettingsUi;
+  readonly llm?: LlmSettingsUi & LlmCommandRequester;
   readonly saveDirectory?: string;
   readonly loading?: { readonly deferWindowVisibility: boolean; stage(message: string): void };
   print(text: string): undefined;
@@ -293,7 +294,7 @@ export class Application {
   }
 
   private inputActions(): ApplicationInputCommands {
-    return { quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
+    return { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
       bindingCapabilities: () => ({ chat: this.simulation.q2Source() !== null || this.simulation.q3Source() !== null,
         scoreCommand: this.simulation.q2Source() !== null ? "score" : this.simulation.q3Source() !== null ? "+scores" : null,
         offhandGrapple: this.simulation.recipe.equipment.grapple.kind === "enabled" && this.simulation.recipe.equipment.grapple.binding === "offhand",
@@ -613,7 +614,7 @@ export class Application {
       viewport: () => { const size = renderer.window.drawableSize; return seatViewport(local.player.seat.id.index, this.options.seats, size.width, size.height); },
       now: () => performance.now(), commands: {
         reliable: text => { const [name, ...args] = tokenizeCommand(text, "q3").argv; if (name !== undefined) this.queueCommand(name, args, local.player.seat.id); },
-        console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }),
+        console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }),
         print: text => { this.host.print(text); local.console.print(text); },
       } });
     input.registerClientCommands([...client.commandNames]);
@@ -889,6 +890,16 @@ export class Application {
     const pending = this.requestedCommands;
     this.requestedCommands = [];
     for (const command of pending) {
+      const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
+      const source: CommandContext | undefined = local === undefined ? undefined : { session: this.session.session,
+        origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } };
+      const print = (text: string): void => {
+        if (source !== undefined) this.graphical?.input.print(text, source);
+        else {
+          this.host.print(text);
+          if (command.seat === null) for (const local of this.graphical?.input.locals ?? []) local.console.print(text);
+        }
+      };
       try {
         if (["+grapple", "-grapple", "+grenade", "-grenade"].includes(command.name)) {
           if (command.seat === null) throw new Error("Offhand commands require an invoking local seat");
@@ -906,10 +917,7 @@ export class Application {
           if (graphical === null) throw new Error("Sound system is not started");
           await graphical.audio.command({ name: command.name, args: command.arguments_, seat: command.seat,
             registrations: [...graphical.q3.values()].flatMap(value => value.client.media.bank.registrations()),
-            print: text => {
-              this.host.print(text);
-              for (const local of graphical.input.locals) if (command.seat === null || local.player.seat.id.equals(command.seat)) local.console.print(text);
-            } });
+            print });
           continue;
         }
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
@@ -948,7 +956,7 @@ export class Application {
           const path = command.arguments_[0];
           if (path === undefined || path.length === 0) throw new Error("Usage: save <path>");
           await this.saveGame(path);
-          this.host.print(`Saved ${path}.\n`);
+          print(`Saved ${path}.\n`);
         } else if (command.name === "weapnext" || command.name === "weapprev" || command.name === "use") {
           this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         } else if (command.name === "say" || command.name === "say_team") {
@@ -972,8 +980,7 @@ export class Application {
         else throw new Error(`Unknown application command: ${command.name}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.host.print(`${message}\n`);
-        for (const local of this.graphical?.input.locals ?? []) local.console.print(`${message}\n`);
+        print(`${message}\n`);
       }
     }
   }

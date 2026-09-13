@@ -1,3 +1,4 @@
+import type { CommandContext } from "../../contracts/common.ts";
 import { ClientSocksSettings } from "./network/socks-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
@@ -153,7 +154,7 @@ export class RemoteApplication {
           const settings = this.clientCommands?.inputSettings, origin = settings?.cvars.context.origin;
           return origin?.kind === "local-seat" && (id === null || origin.seat.equals(id)) ? settings?.cvars ?? null : null;
         }, shared: () => this.imageSettings.cvars });
-      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: text => this.print(text), forwardToServer: invocation => {
+      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: (text, source) => this.print(text, source), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
@@ -256,7 +257,11 @@ export class RemoteApplication {
       const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
       if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
-      if (saved !== null && saved !== undefined) { application.clientCommands?.commands.append(saved); application.clientCommands?.commands.execute(); }
+      const commands = application.clientCommands?.commands;
+      if (saved !== null && saved !== undefined && commands !== undefined) {
+        commands.append(saved, { ...commands.context, origin: { kind: "script", name: "client.cfg", caller: commands.context.origin } });
+        commands.execute();
+      }
       await application.socksSettings.connect(transport);
       application.frontend = await application.loadFrontend(content);
       host.print(`Connecting to ${qw ? "QuakeWorld" : q1 ? "Quake" : q3 ? "Quake III" : "Quake II"} server ${addressKey(address)}.\n`);
@@ -279,9 +284,9 @@ export class RemoteApplication {
   get presentationEvents(): readonly SimulationPresentationEvent[] { return this.sourceEvents; }
   get unhandledPresentationEffects(): readonly UnhandledApplicationEffect[] { return this.unhandledEffects; }
 
-  private print(text: string): void {
-    this.host.print(text);
-    for (const local of this.controls?.locals ?? []) local.console.print(text);
+  private print(text: string, source?: CommandContext): void {
+    if (this.controls === null) this.host.print(text);
+    else this.controls.print(text, source ?? this.clientCommands?.commands.executionContext);
   }
 
   private async loadFrontend(content: LoadedApplicationContent): Promise<RemoteWorldFrontend> {
@@ -501,7 +506,7 @@ export class RemoteApplication {
     if (this.controls === null) {
       const seat = this.session.createSeat(0, this.remote.client);
       const controls = await ApplicationInput.open(this.window, [{ seat, actor: player.actor }], this.options, movementDialect(this.options), this.remote,
-        { quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
+        { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
           clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
           clientInput: event => {
             const client = this.presentation?.q3Client;
@@ -538,7 +543,7 @@ export class RemoteApplication {
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
           assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
           viewport: () => { const size = this.window.drawableSize; return { x: 0, y: 0, width: size.width, height: size.height }; }, now: () => performance.now(),
-          commands: { reliable: text => this.network.command(text), console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }), print: text => this.print(text) } });
+          commands: { reliable: text => this.network.command(text), console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }), print: text => this.print(text) } });
       }
       assertCurrent();
       if (connection !== undefined) {
@@ -572,6 +577,13 @@ export class RemoteApplication {
   private async dispatchCommands(): Promise<void> {
     const pending = this.commands; this.commands = [];
     for (const command of pending) {
+      const local = this.controls?.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
+      const source: CommandContext | undefined = local === undefined ? undefined : { session: this.session.session,
+        origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } };
+      const print = (text: string): void => {
+        if (source !== undefined || command.seat === null) this.print(text, source);
+        else this.host.print(text);
+      };
       try {
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); continue; }
         if (this.network instanceof QwClientNetwork && (command.name === "skins" || command.name === "allskins")) {
@@ -579,7 +591,7 @@ export class RemoteApplication {
           await this.network.refreshSkins(); continue;
         }
         if (this.frontend !== null && await this.frontend.audio.command({ name: command.name, args: command.args, seat: command.seat,
-          registrations: this.presentation?.q3Client?.media.bank.registrations() ?? [], print: text => this.print(text) })) continue;
+          registrations: this.presentation?.q3Client?.media.bank.registrations() ?? [], print })) continue;
         if (["map", "save", "load"].includes(command.name)) throw new Error(`${command.name} requires the authoritative server console`);
         const player = this.localPlayers.find(player => command.seat === null || player.seat.id.equals(command.seat));
         if (player === undefined || this.network.phase !== "active") throw new Error("Remote command requires a connected local player");
@@ -589,7 +601,7 @@ export class RemoteApplication {
           if (await q3.command([command.name, ...command.args])) continue;
         }
         this.remote.playerCommand(player.actor, command.name, command.args);
-      } catch (error) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); }
+      } catch (error) { print(`${error instanceof Error ? error.message : String(error)}\n`); }
     }
   }
 

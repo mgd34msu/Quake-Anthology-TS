@@ -78,7 +78,8 @@ export class ApplicationQvmClient {
     return qvmClientCommonSyscall(call, call.role === 'cgame'
       ? { ...common, role: 'cgame', commands: { append: session.appendConsoleCommand, register: session.registerCgameCommand,
         remove: o.removeCommand, reliable: session.addReliableCommand } }
-      : { ...common, role: 'ui', commands: { executeNow: text => { o.commands.executeNow(text); }, insert: text => o.commands.insert(text), append: session.appendConsoleCommand } })
+      : { ...common, role: 'ui', commands: { executeNow: text => { o.commands.executeNow(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }); },
+        insert: text => o.commands.insert(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }), append: session.appendConsoleCommand } })
       ?? qvmClientFileSyscall(call, this.files[call.role])
       ?? qvmClientScriptSyscall(call, this.scripts[call.role])
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)

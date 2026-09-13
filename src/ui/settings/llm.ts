@@ -46,7 +46,7 @@ export function registerLlmSettingsMenu(controller: NativeUiController, service:
       if (provider === "other-api") controls.push(field("base-url", "Base URL", 5, baseUrl ?? snapshot.providers["other-api"].baseUrl, value => { baseUrl = value; }),
         button("transport", "OpenAI-compatible Chat Completions", 6, () => undefined, false));
     }
-    const message = status || (snapshot.subscriptionAuth.status === "error" ? snapshot.subscriptionAuth.message : snapshot.errors[0]?.message ?? "LLM commands are not active yet");
+    const message = status || (snapshot.subscriptionAuth.status === "error" ? snapshot.subscriptionAuth.message : snapshot.errors[0]?.message ?? (selected.model.trim() === "" ? "Enter a model name, then save settings." : "Console: llm_ask or llm_exec"));
     const lines = message.match(/.{1,54}(?:\s|$)|.{1,54}/g) ?? [];
     controls.push(button("save", "Save settings", 7, () => {
       const draftKey = key, draftModel = model ?? selected.model, draftBase = baseUrl ?? snapshot.providers["other-api"].baseUrl;

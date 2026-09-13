@@ -113,12 +113,13 @@ export class SeatInput {
       this.commandButton(target.action, physicalInputKey(binding.input), down, now); return;
     }
     const key = commandKey(binding.input);
+    const source: CommandContext = { session: this.options.context.session, origin: { kind: "script", name: "key-binding", caller: this.options.context.origin } };
     let hadButton = false;
     for (const segment of target.text.split(";").map(text => text.trim()).filter(text => text.length > 0)) {
       if (segment.startsWith("+")) {
-        this.options.commands.append(`${down ? "+" : "-"}${segment.slice(1)} ${key} ${Math.trunc(now)}\n`, this.options.context);
+        this.options.commands.append(`${down ? "+" : "-"}${segment.slice(1)} ${key} ${Math.trunc(now)}\n`, source);
         hadButton = true;
-      } else if (down || hadButton) this.options.commands.append(`${segment}\n`, this.options.context);
+      } else if (down || hadButton) this.options.commands.append(`${segment}\n`, source);
     }
   }
   private digital(input: PhysicalInput, down: boolean, time: number, consumed = false): void {
