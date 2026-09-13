@@ -1,3 +1,4 @@
+import { Q1MessageLocalization } from "./q1-localization.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { WorldText } from "../../text/world.ts";
 import { prepareWorldText } from "../../render/scene/world-text.ts";
@@ -48,6 +49,9 @@ export function cameraWithKick(camera: SceneCamera, kick: Vec3): SceneCamera {
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
+  private readonly q1Messages: Q1MessageLocalization;
+  private readonly pendingMessages: string[] = [];
+  private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
   private readonly finale: SourceFinale;
@@ -61,6 +65,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null) {
+    this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets);
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
     this.text = new SeatTextPresentation(local.player.seat.id, font);
@@ -107,18 +112,19 @@ export class WorldSeatPresentation implements SeatPresentation {
   receive(events: readonly SimulationEvent[]): undefined {
     for (const event of events) if (event.payload.kind === "message") {
       const message = event.payload.event;
-      if ("text" in message && typeof message.text === "string") this.local.console.print(`${message.text}\n`);
+      if ("text" in message && typeof message.text === "string") this.pendingMessages.push(message.text);
     }
     return undefined;
   }
 
   sourceEvents(events: readonly SimulationPresentationEvent[]): void {
+    for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
     if (this.q3Client !== null) {
       for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
       return;
     }
     this.scene.receive(events);
-    this.ui.receive(events);
+    this.ui.receive(events.filter(source => source.kind !== "q1" || source.event.kind !== "message"));
     this.finale.receive(events);
     const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
     for (const source of events) {
@@ -127,9 +133,6 @@ export class WorldSeatPresentation implements SeatPresentation {
       } else if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "teleport-player" && owns(event.player)) this.local.builder.setViewAngles(event.angles);
-        if (event.kind === "message" && owns(event.player)) {
-          if (!event.center) this.local.console.print(`${event.text}\n`);
-        }
       } else if (source.kind === "q2") {
         const event = source.event;
         if (event.kind === "help") this.local.console.print(`${event.text}\n`);
@@ -146,6 +149,20 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+    const q1Messages = this.pendingQ1Messages.splice(0);
+    const mirrored = q1Messages.flatMap(source => source.event.kind === "message" ? [source.event.text] : []);
+    for (const message of this.pendingMessages.splice(0)) {
+      const paired = mirrored.indexOf(message);
+      if (paired < 0) this.local.console.print(`${message}\n`);
+      else mirrored.splice(paired, 1);
+    }
+    for (const source of q1Messages) {
+      const event = source.event;
+      if (event.kind !== "message") continue;
+      const text = await this.q1Messages.resolve(source.content, event.text, event.args ?? []);
+      if (!event.center) this.local.console.print(`${text}\n`);
+      this.ui.receive([{ ...source, event: { ...event, text } }]);
+    }
     await this.ui.prepare(this.assets);
     this.worldText = this.simulation.worldText();
     for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
