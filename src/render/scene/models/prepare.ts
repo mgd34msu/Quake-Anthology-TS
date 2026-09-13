@@ -161,12 +161,25 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
   }
   const { frame, previousFrame, backLerp } = pose;
-  if (flags.kind === "q2" && (bits & 128) !== 0) {
+  let bounds: Bounds | null = null;
+  if (native.model.kind === "q1-mdl") bounds = modelWorldBounds(native.transform, native.model.bounds);
+  else if (native.model.kind === "q2-md2" && (bits & 128) === 0) {
+    let local = emptyBounds();
+    for (const index of [frame, previousFrame]) {
+      const sourceFrame = at(native.model.frames, index, "MD2 bounds frame");
+      local = addPointToBounds(local, sourceFrame.translation);
+      local = addPointToBounds(local, add3(sourceFrame.translation, scale3(sourceFrame.scale, 255)));
+    }
+    bounds = modelWorldBounds(native.transform, local);
+  }
+  const weapon = flags.kind === "q2" && (options.viewModel === true || (bits & 4) !== 0);
+  const sourceCull = invisibleWeapon ? "out" : weapon ? "in" : bounds === null ? null : cullGeometry(bounds, context);
+  if (sourceCull !== "out" && flags.kind === "q2" && (bits & 128) !== 0) {
     const palette = context.paletteColor?.(entity, entity.skin & 255);
     if (palette === undefined) throw new Error("Q2 beam preparation requires its source palette");
     const geometry = q2BeamGeometry(entity.transform.origin, entity.previousOrigin, frame, { ...palette, w: entity.color.w * 255 });
     append("beam", { kind: "white" }, geometry.vertices, geometry.indices, true, true);
-  } else switch (model.kind) {
+  } else if (sourceCull !== "out") switch (model.kind) {
     case "q1-mdl": {
       const current = sampleTimedFrame(at(model.frames, frame, "MDL frame"), context.timeSeconds, options.syncBase ?? 0);
       const previous = sampleTimedFrame(at(model.frames, previousFrame, "MDL old frame"), context.timeSeconds, options.syncBase ?? 0);
@@ -247,20 +260,9 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     }
     case "brush-model": break;
   }
-  let bounds: Bounds | null = null;
-  for (const surface of surfaces) for (const vertex of surface.geometry.vertices) bounds = addPointToBounds(bounds ?? emptyBounds(), vertex.position);
-  if (native.model.kind === "q1-mdl") bounds = modelWorldBounds(native.transform, native.model.bounds);
-  else if (native.model.kind === "q2-md2" && (bits & 128) === 0) {
-    let local = emptyBounds();
-    for (const index of [frame, previousFrame]) {
-      const sourceFrame = at(native.model.frames, index, "MD2 bounds frame");
-      local = addPointToBounds(local, sourceFrame.translation);
-      local = addPointToBounds(local, add3(sourceFrame.translation, scale3(sourceFrame.scale, 255)));
-    }
-    bounds = modelWorldBounds(native.transform, local);
-  }
-  const weapon = flags.kind === "q2" && (options.viewModel === true || (bits & 4) !== 0);
-  const cull = invisibleWeapon ? "out" : weapon ? "in" : cullGeometry(bounds, context);
+  if (bounds === null) for (const surface of surfaces) for (const vertex of surface.geometry.vertices)
+    bounds = addPointToBounds(bounds ?? emptyBounds(), vertex.position);
+  const cull = sourceCull ?? cullGeometry(bounds, context);
   const attachments: PreparedModelEntity[] = [], missingAttachments: string[] = [];
   const repaired = entity.pose.kind === "frame" ? { ...entity, pose: { ...entity.pose, frame, previousFrame, backLerp } } : entity;
   for (const attachment of entity.attachments) {

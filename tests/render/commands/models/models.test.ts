@@ -305,3 +305,34 @@ test("weapon HUD framing preserves world camera, viewport and horizontal scale",
   expect(framed.projection[9]).toBeCloseTo(-46 / 480, 8);
   expect(source.projection[9]).toBe(0);
 });
+
+test("native alias bounds reject geometry before lighting while retaining replacement attachments and shadow casters", async () => {
+  const original = await asset(rereleaseGunArchive, "progs/v_shot2.mdl", "q1");
+  const mesh = await asset(rereleaseGunArchive, "progs/v_shot2.md5mesh", "q1");
+  const animation = await asset(rereleaseGunArchive, "progs/v_shot2.md5anim", "q1");
+  const alias = parseMdl(original.bytes);
+  const skeleton = createMd5Model(parseMd5Mesh(new TextDecoder().decode(mesh.bytes)), parseMd5Anim(new TextDecoder().decode(animation.bytes)));
+  const replacement = { ...skeleton, skinSelection: q1ReplacementSkinSelection(skeleton, alias) };
+  const joint = replacement.joints[0];
+  if (joint === undefined) throw new Error("Missing replacement attachment joint");
+  const child = entity(alias, original.resource, "q1");
+  const source: SceneEntity = { ...entity({ ...alias, replacement: { model: replacement, resource: mesh.resource } }, original.resource, "q1"),
+    attachments: [{ tag: joint.name, entity: { ...child, transform: { ...child.transform, origin: { x: 2000, y: 0, z: 0 } } } }] };
+  const frustum = [{ normal: { x: 1, y: 0, z: 0 }, distance: 1000 }];
+  let parentLights = 0, childLights = 0;
+  const context = { camera, timeSeconds: 0, frustum, finalVertexLight: (current: SceneEntity) => {
+    if (current.model.kind === "md5") parentLights++; else childLights++;
+    return { x: 1, y: 1, z: 1 };
+  } };
+  const culled = prepareSceneEntity(source, context);
+  expect(culled.cull).toBe("out"); expect(culled.surfaces).toHaveLength(0); expect(parentLights).toBe(0);
+  expect(culled.attachments[0]?.cull).not.toBe("out"); expect(childLights).toBeGreaterThan(0);
+  const shadow = prepareSceneEntity(source, { ...context, noCull: true, purpose: "shadow" });
+  expect(shadow.surfaces.length).toBeGreaterThan(0); expect(parentLights).toBeGreaterThan(0);
+  const native = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const q2 = entity(parseMd2(native.bytes), native.resource, "q2");
+  const hidden = prepareSceneEntity(q2, context);
+  expect(hidden.cull).toBe("out"); expect(hidden.surfaces).toHaveLength(0);
+  const weapon = prepareSceneEntity({ ...q2, flags: { kind: "q2", bits: 4 } }, context);
+  expect(weapon.cull).toBe("in"); expect(weapon.surfaces.length).toBeGreaterThan(0);
+});
