@@ -1,3 +1,7 @@
+import { MAX_DATAGRAM, MAX_MSGLEN } from "../../network/q1/wire-types.ts";
+import { QuakeWorldDecoder, writeQuakeWorldMessage } from "../../network/q1/quakeworld.ts";
+import type { QuakeWorldMessage } from "../../network/q1/quakeworld.ts";
+import type { Vec3 } from "../../contracts/math.ts";
 import { SizeBuf, MSG_WriteByte, MSG_WriteChar, MSG_WriteShort, MSG_WriteLong, MSG_WriteCoord, MSG_WriteAngle, MSG_WriteString } from "../../network/q1/message.ts";
 import { NetQuakeDecoder, writeNetQuakeMessage } from "../../network/q1/netquake.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -14,7 +18,20 @@ export interface QcPrecachedResource {
   readonly index: number;
   readonly resource: ResolvedResourceReference;
 }
+export type QcMessageDestination =
+  | { readonly kind: "broadcast"; readonly reliable: boolean }
+  | { readonly kind: "client"; readonly actor: ActorId; readonly reliable: true }
+  | { readonly kind: "signon" }
+  | { readonly kind: "multicast"; readonly origin: Vec3; readonly visibility: "all" | "pvs" | "phs"; readonly reliable: boolean };
+export interface QcRoutedMessage { readonly message: QuakeWorldMessage; readonly actor: ActorId | null; }
+export interface QcQuakeWorldMessageServices {
+  loading(): boolean;
+  client(actor: ActorId): boolean;
+  phs(): boolean;
+  route(entries: readonly QcRoutedMessage[], destination: QcMessageDestination): undefined;
+}
 export interface QcPresentationServices {
+  readonly qw?: QcQuakeWorldMessageServices;
   readonly content: ContentId;
   /** The session's source precache table owns ordering, deduplication, limits and resource loading. */
   precache(kind: "model" | "sound", name: string): QcPrecachedResource;
@@ -42,7 +59,15 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
       return builtin(vm);
     });
   };
-  install("bprint", vm => { services.print(vm.varString(0)); });
+  const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
+  if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
+  install("bprint", vm => {
+    if (qw === undefined) services.print(vm.varString(0));
+    else {
+      const text = vm.varString(1); services.print(text);
+      qw.route([{ message: { kind: "print", level: Math.trunc(vm.argFloat(0)), text }, actor: null }], { kind: "broadcast", reliable: true });
+    }
+  });
   install("localcmd", vm => { emit({ kind: "server-command", text: vm.argString(0) }); });
   install("makestatic", vm => {
     const words = vm.entities.fromReference(vm.argInt(0));
@@ -58,9 +83,15 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
     remove(vm);
   });
   const message = services.message;
-  if (message !== undefined) {
+  if (message !== undefined || qw !== undefined) {
     for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) install(name, vm => {
-      const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = vm.varString(1);
+      const actor = world.actor(vm.entities.slot(vm.argInt(0))), text = vm.varString(qw !== undefined && name === "sprint" ? 2 : 1);
+      if (qw !== undefined) {
+        if (!qw.client(actor.id)) { services.print(`tried to ${name} to a non-client\n`); return; }
+        return qw.route([{ message: name === "sprint" ? { kind: "print", level: Math.trunc(vm.argFloat(1)), text }
+          : name === "centerprint" ? { kind: "center-print", text } : { kind: "stufftext", text }, actor: actor.id }], { kind: "client", actor: actor.id, reliable: true });
+      }
+      if (message === undefined) return vm.fail("Missing client message service");
       message(name === "sprint" ? { kind: "print", level: 2, text }
         : name === "centerprint" ? { kind: "center-print", text } : { kind: "command-text", text }, actor.id);
     });
@@ -79,20 +110,31 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
     const channel = Math.trunc(vm.argFloat(1)), volume = Math.trunc(vm.numeric.multiply(vm.argFloat(3), 255)), attenuation = vm.argFloat(4);
     if (!Number.isFinite(volume) || volume < 0 || volume > 255) return vm.fail(`SV_StartSound: volume = ${volume}`);
     if (!Number.isFinite(attenuation) || attenuation < 0 || attenuation > 4) return vm.fail(`SV_StartSound: attenuation = ${attenuation}`);
+    if (!Number.isFinite(channel) || channel < 0 || channel > (qw === undefined ? 7 : 15)) return vm.fail(`SV_StartSound: channel = ${channel}`);
+    const channelId = channel & 7;
     let sourceChannel: Q1SoundChannel;
-    switch (channel) {
+    switch (channelId) {
       case 0: sourceChannel = "auto"; break;
       case 1: sourceChannel = "weapon"; break;
       case 2: sourceChannel = "voice"; break;
       case 3: sourceChannel = "item"; break;
       case 4: sourceChannel = "body"; break;
-      case 5: case 6: case 7: sourceChannel = channel; break;
+      case 5: case 6: case 7: sourceChannel = channelId; break;
       default: return vm.fail(`SV_StartSound: channel = ${channel}`);
     }
     const path = vm.argString(2), resource = services.lookup("sound", path);
     if (resource === null) { services.print(`SV_StartSound: ${path} not precacheed\n`); return; }
     register(resource);
     const actor = world.actor(vm.entities.slot(vm.argInt(0)));
+    if (qw !== undefined) {
+      const words = vm.entities.fromReference(vm.argInt(0)), origin = words.vector(vm.fieldOffset("origin"));
+      const mins = words.vector(vm.fieldOffset("mins")), maxs = words.vector(vm.fieldOffset("maxs"));
+      const position = words.float(vm.fieldOffset("solid")) === 4 ? { x: vm.numeric.add(origin.x, vm.numeric.multiply(vm.numeric.add(mins.x, maxs.x), 0.5)),
+        y: vm.numeric.add(origin.y, vm.numeric.multiply(vm.numeric.add(mins.y, maxs.y), 0.5)), z: vm.numeric.add(origin.z, vm.numeric.multiply(vm.numeric.add(mins.z, maxs.z), 0.5)) } : origin;
+      return qw.route([{ message: { kind: "sound", entity: vm.entities.slot(vm.argInt(0)), channel: channel & 7,
+        index: resource.index, origin: position, volume, attenuation }, actor: actor.id }],
+        { kind: "multicast", origin: position, visibility: (channel & 8) !== 0 || !qw.phs() ? "all" : "phs", reliable: (channel & 8) !== 0 });
+    }
     emit({ kind: "sound", actor: actor.id, path, channel: sourceChannel, volume: volume / 255, attenuation });
   });
   install("ambientsound", vm => {
@@ -116,36 +158,111 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
 
 export type QcBroadcastEvent = Extract<Q1Event, { readonly kind: "effect" | "beam" | "colored-explosion" }>;
 
-/** Raw QC datagram writes retain NetQuake encoding before joining shared effects. */
+/** QC writes retain their source codec and destination before joining shared presentation. */
 export class QcBroadcastMessages {
   readonly host: ReadonlyMap<QcHostBuiltinName, QcBuiltin>;
   private readonly buffer = new SizeBuf(1024);
   private readonly owners = new Map<number, ActorId | null>();
   private readonly decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 });
-  constructor(world: QcWorldHost, private readonly emit: (effect: QcBroadcastEvent) => undefined) {
-    const write = (operation: (vm: Parameters<QcBuiltin>[0]) => void): QcBuiltin => vm => {
+  private signonBuffers = 1;
+  private readonly qwDecoder = new QuakeWorldDecoder();
+  private readonly routedBuffers = new Map<string, { readonly buffer: SizeBuf; readonly owners: Map<number, ActorId | null>; readonly destination: QcMessageDestination | null }>();
+  constructor(world: QcWorldHost, private readonly emit: (effect: QcBroadcastEvent) => undefined, private readonly qw?: QcQuakeWorldMessageServices) {
+    const isQw = world.options.program.api.kind === "q1-quakeworld";
+    if (isQw && qw === undefined) throw new Error("QuakeWorld messages require routed message services");
+    if (!isQw && qw !== undefined) throw new Error("NetQuake messages cannot use QuakeWorld routes");
+    const target = (vm: Parameters<QcBuiltin>[0]) => {
+      const dest = Math.trunc(vm.argFloat(0));
+      let key: string, destination: QcMessageDestination | null;
+      switch (dest) {
+        case 0: key = "broadcast"; destination = { kind: "broadcast", reliable: false }; break;
+        case 1: {
+          const actor = world.actor(vm.entities.slot(vm.globals.int(vm.globalOffset("msg_entity"))));
+          if (qw?.client(actor.id) !== true) return vm.fail("WriteDest: not a client");
+          key = `client:${actor.id.slot}:${actor.id.generation}`; destination = { kind: "client", actor: actor.id, reliable: true }; break;
+        }
+        case 2: key = "all"; destination = { kind: "broadcast", reliable: true }; break;
+        case 3:
+          if (qw?.loading() !== true) return vm.fail("PF_Write_*: MSG_INIT can only be written in spawn functions");
+          key = "signon"; destination = { kind: "signon" }; break;
+        case 4: key = "multicast"; destination = null; break;
+        default: return vm.fail("WriteDest: bad destination");
+      }
+      // MSG_ONE aggregates one netchan message plus four source backbuffers; the host packs native reliable records.
+      let entry = this.routedBuffers.get(key);
+      if (entry === undefined) { entry = { buffer: new SizeBuf(dest === 1 ? MAX_MSGLEN * 5 : dest === 0 || dest === 3 ? MAX_DATAGRAM : MAX_MSGLEN, dest === 0), owners: new Map<number, ActorId | null>(), destination }; this.routedBuffers.set(key, entry); }
+      return entry;
+    };
+    const write = (operation: (vm: Parameters<QcBuiltin>[0], buffer: SizeBuf) => void): QcBuiltin => vm => {
       if (vm.program !== world.options.program || vm.entities !== world.options.entities) return vm.fail("QC message belongs to another source");
-      if (vm.argFloat(0) !== 0) return vm.fail("QC message destination is not the supported MSG_BROADCAST datagram");
-      const before = this.buffer.cursize;
-      operation(vm);
+      if (!isQw && vm.argFloat(0) !== 0) return vm.fail("QC message destination is not the supported MSG_BROADCAST datagram");
+      const entry = isQw ? target(vm) : { buffer: this.buffer, owners: this.owners };
+      const before = entry.buffer.cursize;
+      operation(vm, entry.buffer);
       // Capture identity when each possible entity word completes, independent of the writer used.
-      for (let end = Math.max(1, before); end < this.buffer.cursize; end++) {
-        const low = this.buffer.data[end - 1], high = this.buffer.data[end];
+      for (let end = Math.max(1, before); end < entry.buffer.cursize; end++) {
+        const low = entry.buffer.data[end - 1], high = entry.buffer.data[end];
         if (low === undefined || high === undefined) throw new Error("Missing written QC message byte");
-        this.owners.set(end - 1, world.options.slots.at(low + high * 256)?.id ?? null);
+        entry.owners.set(end - 1, world.options.slots.at(low + high * 256)?.id ?? null);
+        if (isQw) entry.owners.set(-end, world.options.slots.at(((low + high * 256) >>> 3) & 1023)?.id ?? null);
       }
     };
-    const number = (operation: (buffer: SizeBuf, value: number) => void): QcBuiltin => write(vm => operation(this.buffer, vm.argFloat(1)));
-    this.host = new Map<QcHostBuiltinName, QcBuiltin>([
+    const number = (operation: (buffer: SizeBuf, value: number) => void): QcBuiltin => write((vm, buffer) => operation(buffer, vm.argFloat(1)));
+    const host = new Map<QcHostBuiltinName, QcBuiltin>([
       ["WriteByte", number(MSG_WriteByte)], ["WriteChar", number(MSG_WriteChar)],
       ["WriteShort", number(MSG_WriteShort)], ["WriteLong", number(MSG_WriteLong)],
       ["WriteCoord", number(MSG_WriteCoord)], ["WriteAngle", number(MSG_WriteAngle)],
-      ["WriteString", write(vm => MSG_WriteString(this.buffer, vm.argString(1)))],
-      ["WriteEntity", write(vm => MSG_WriteShort(this.buffer, vm.entities.slot(vm.argInt(1))))],
+      ["WriteString", write((vm, buffer) => MSG_WriteString(buffer, vm.argString(1)))],
+      ["WriteEntity", write((vm, buffer) => MSG_WriteShort(buffer, vm.entities.slot(vm.argInt(1))))],
     ]);
+    if (isQw) host.set("multicast", vm => {
+      if (vm.program !== world.options.program || vm.entities !== world.options.entities) return vm.fail("QC multicast belongs to another source");
+      const mode = Math.trunc(vm.argFloat(1));
+      if (mode < 0 || mode > 5) return vm.fail("SV_Multicast: bad destination");
+      const entry = this.routedBuffers.get("multicast");
+      if (entry !== undefined) {
+        this.routeBuffer(entry, { kind: "multicast", origin: vm.argVector(0), visibility: mode % 3 === 0 ? "all" : mode % 3 === 1 ? "phs" : "pvs", reliable: mode >= 3 });
+        this.routedBuffers.delete("multicast");
+      }
+    });
+    this.host = host;
+  }
+  private routeBuffer(entry: { readonly buffer: SizeBuf; readonly owners: ReadonlyMap<number, ActorId | null> }, destination: QcMessageDestination): void {
+    if (this.qw === undefined) throw new Error("Missing QuakeWorld routing service");
+    const encoded = new SizeBuf(entry.buffer.maxsize);
+    const entries = this.qwDecoder.decode(entry.buffer.bytes(), 0).map((message): QcRoutedMessage => {
+      if (message.kind === "packet-entities" || message.kind === "invalid-delta") throw new Error("QC cannot write snapshot entity deltas");
+      const offset = encoded.cursize;
+      writeQuakeWorldMessage(encoded, this.qwDecoder.protocol, message);
+      const actor = message.kind === "temporary-entity" && message.effect.kind === "beam" ? entry.owners.get(offset + 2) ?? null
+        : message.kind === "sound" || message.kind === "stop-sound" ? entry.owners.get(-offset - 2) ?? null
+        : message.kind === "muzzle-flash" || message.kind === "set-view" ? entry.owners.get(offset + 1) ?? null : null;
+      if (message.kind === "temporary-entity" && message.effect.kind === "beam" && actor === null) throw new Error("QC beam had no owned actor when written");
+      return { message, actor };
+    });
+    this.qw.route(entries, destination);
+  }
+  /** Source SV_FlushSignon runs after each entity spawn, reserving 512 bytes for the next. */
+  flushSignon(): undefined {
+    const entry = this.routedBuffers.get("signon");
+    if (entry !== undefined && entry.buffer.cursize >= MAX_DATAGRAM - 512) {
+      if (this.signonBuffers === 7) throw new Error("QW MAX_SIGNON_BUFFERS exhausted");
+      this.signonBuffers++;
+      this.routeBuffer(entry, { kind: "signon" }); this.routedBuffers.delete("signon");
+    }
+    return undefined;
   }
   bytes(): Uint8Array { return this.buffer.bytes(); }
   flush(): undefined {
+    if (this.qw !== undefined) {
+      for (const [key, entry] of this.routedBuffers) {
+        if (entry.destination === null) continue;
+        // QW SV_SendClientMessages discards the entire overflowed broadcast datagram.
+        if (!entry.buffer.overflowed) this.routeBuffer(entry, entry.destination);
+        this.routedBuffers.delete(key);
+      }
+      return undefined;
+    }
     const encoded = new SizeBuf(1024);
     const effects = this.decoder.decode(this.buffer.bytes()).map((message): QcBroadcastEvent => {
       if (message.kind !== "temporary-entity") throw new Error(`Unsupported QC broadcast message ${message.kind}`);
