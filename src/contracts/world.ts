@@ -79,6 +79,7 @@ export interface TouchContact {
 }
 
 export interface PainReaction {
+  readonly attack: AttackProvenance | null;
   readonly self: OwnedActor;
   readonly attacker: ActorId | null;
   readonly kick: number;
@@ -86,7 +87,6 @@ export interface PainReaction {
 }
 
 export interface DeathReaction extends PainReaction {
-  readonly attack?: AttackProvenance;
   readonly inflictor: ActorId | null;
   readonly point: Vec3;
 }

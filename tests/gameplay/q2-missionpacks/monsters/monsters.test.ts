@@ -123,7 +123,7 @@ describe("original missionpack monster source behavior", () => {
     expect(childContext.state.spawnedBy).toBe("carrier"); expect(childContext.state.doNotCount).toBe(true);
     expect(scene.game.counters.totalMonsters).toBe(before); expect(carrier.state.monsterSlots).toBe(slots - 1);
     scene.combat.setHealth(child.actor, -5);
-    child.die?.(child, scene.game, { self: child.actor, attacker: scene.player.id, inflictor: scene.player.id, damage: 55, kick: 0, point: zero });
+    child.die?.(child, scene.game, { attack: null, self: child.actor, attacker: scene.player.id, inflictor: scene.player.id, damage: 55, kick: 0, point: zero });
     expect(carrier.state.monsterSlots).toBe(slots); expect(scene.game.counters.killedMonsters).toBe(0);
     expect(scene.actors.isLive(child.actor.id)).toBe(false);
     scene.actors.close();

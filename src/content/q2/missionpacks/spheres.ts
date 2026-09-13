@@ -1,4 +1,5 @@
 /* Rogue g_sphere.c. Sphere reactions share the owner's combat and movement authority. */
+import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { TouchContact } from "../../../contracts/world.ts";
@@ -34,14 +35,14 @@ export class Q2MissionPackSpheres {
     return null;
   }
 
-  ownerDamaged(actor: ActorId, attacker: ActorId | null, game: Q2GameServices): undefined {
+  ownerDamaged(actor: ActorId, attack: AttackProvenance, game: Q2GameServices): undefined {
     const sphere = this.ownedSphere(actor, game);
-    return sphere?.pain?.(sphere, game, { self: sphere.actor, attacker, damage: 0, kick: 0 });
+    return sphere?.pain?.(sphere, game, { attack, self: sphere.actor, attacker: attack.attacker, damage: 0, kick: 0 });
   }
 
-  ownerDied(actor: ActorId, game: Q2GameServices): undefined {
+  ownerDied(actor: ActorId, game: Q2GameServices, attack: AttackProvenance | null): undefined {
     const sphere = this.ownedSphere(actor, game);
-    return sphere?.die?.(sphere, game, { self: sphere.actor, attacker: actor, inflictor: actor, damage: 0, kick: 0, point: zero });
+    return sphere?.die?.(sphere, game, { attack, self: sphere.actor, attacker: actor, inflictor: actor, damage: 0, kick: 0, point: zero });
   }
 
   disconnect(actor: ActorId, game: Q2GameServices): undefined {

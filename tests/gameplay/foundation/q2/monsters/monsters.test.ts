@@ -139,7 +139,7 @@ describe("source soldier and infantry behavior", () => {
     scene.advance(0.1);
     scene.combat.setHealth(context.entity.actor, -10);
     scene.random.push(0.4);
-    context.entity.die?.(context.entity, scene.game, { self: context.entity.actor, attacker: scene.player.id, inflictor: scene.player.id, damage: 10, kick: 0, point: zero });
+    context.entity.die?.(context.entity, scene.game, { attack: null, self: context.entity.actor, attacker: scene.player.id, inflictor: scene.player.id, damage: 10, kick: 0, point: zero });
     expect(context.state.move.name).toBe("infantry_move_death2");
     context.entity.frame = classic_infantryFrames.death211 - 1;
     for (let tick = 2; tick <= 17; tick++) scene.advance(tick / 10);
@@ -155,7 +155,7 @@ describe("source soldier and infantry behavior", () => {
     scene.advance(0.1);
     const prior = context.state.move;
     scene.combat.setHealth(context.entity.actor, 40);
-    const hit = { self: context.entity.actor, attacker: scene.player.id, damage: 5, kick: 2 };
+    const hit = { attack: null, self: context.entity.actor, attacker: scene.player.id, damage: 5, kick: 2 };
     context.entity.pain?.(context.entity, scene.game, hit);
     context.entity.pain?.(context.entity, scene.game, hit);
     expect(context.state.move.name.startsWith("infantry_move_pain")).toBe(false);
@@ -186,9 +186,13 @@ describe("source soldier and infantry behavior", () => {
     scene.advance(0.125);
     scene.monsters.reportNoise(scene.player.id, { x: 100, y: 0, z: 24 });
     scene.combat.setHealth(soldier.entity.actor, 5);
-    soldier.entity.pain?.(soldier.entity, scene.game, { self: soldier.entity.actor, attacker: scene.player.id, damage: 7, kick: 3 });
+    const attack = scene.game.attack(scene.player.id, scene.player.id, 1, 0, "q2:blaster");
+    soldier.entity.pain?.(soldier.entity, scene.game, { attack, self: soldier.entity.actor, attacker: scene.player.id, damage: 7, kick: 3 });
     throwGib(soldier.entity, scene.game, "models/objects/gibs/sm_meat/tris.md2", 5);
     const source = structuredClone(scene.game.capture()), snapshot = structuredClone(scene.monsters.capture());
+    const pending = snapshot.actors.find(actor => actor.actor.slot === soldier.entity.actor.id.slot)?.pendingDamage;
+    expect(pending?.attack?.cause).toEqual(attack.cause);
+    expect(pending?.reaction).not.toHaveProperty("attack");
     const random = [...scene.random], counters = { ...scene.game.counters };
     const actors = SessionActorRegistry.restore(createIdentityOwner("q2-monsters-restored"), scene.actors.checkpoint(), scene.actors.sourceCheckpoint());
     const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -220,6 +224,9 @@ describe("source soldier and infantry behavior", () => {
     expect(scene.weapons.shots).toHaveLength(2);
     const before = scene.events.filter(event => event.kind === "sound" && event.path.startsWith("soldier/solpain")).length;
     restored.endFrame(game);
+    const restoredAttack = game.entity(actors.referenceSaved(soldier.entity.actor.id))?.lastAttack;
+    expect(restoredAttack?.attacker).toBe(player);
+    expect(restoredAttack?.cause).toEqual(attack.cause);
     expect(scene.events.filter(event => event.kind === "sound" && event.path.startsWith("soldier/solpain"))).toHaveLength(before + 1);
     expect(restored.capture().actors.find(actor => actor.actor.slot === soldier.entity.actor.id.slot)?.pendingDamage).toBeNull();
     actors.close(); scene.actors.close();

@@ -1,5 +1,5 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { DamageDecision } from "../../../contracts/gameplay.ts";
+import type { AttackProvenance, DamageDecision } from "../../../contracts/gameplay.ts";
 import type { Q2Entity, Q2SpawnModule, Q2LandmarkCarry } from "../../q2/foundation/host.ts";
 import { Q2Foundation } from "../../q2/foundation/runtime.ts";
 import { createQ2ItemModule } from "../../q2/foundation/items.ts";
@@ -165,7 +165,7 @@ export class Q2ProductRuntime {
       beforeDeathInventory: (entity, game, attack) => { this.match.dropInventory(entity, game); return configuration.playerHooks.beforeDeathInventory?.(entity, game, attack); },
       death: (entity, game, attack) => {
         this.match.death(entity, game);
-        this.armory?.spheres.ownerDied(entity.actor.id, game); this.armory?.items.reset(entity.actor.id);
+        this.armory?.spheres.ownerDied(entity.actor.id, game, attack); this.armory?.items.reset(entity.actor.id);
         return configuration.playerHooks.death?.(entity, game, attack);
       },
       disconnect: (entity, game) => {
@@ -271,7 +271,7 @@ export class Q2ProductRuntime {
     return this.players.recordDamage(entity, this.game, decision);
   }
 
-  beforeReaction(actor: ActorId, attacker: ActorId | null): undefined { return this.armory?.spheres.ownerDamaged(actor, attacker, this.game); }
+  beforeReaction(actor: ActorId, attack: AttackProvenance): undefined { return this.armory?.spheres.ownerDamaged(actor, attack, this.game); }
 
   movementImpact(actor: ActorId, impactDelta: number, onLadder: boolean): undefined {
     return this.rerelease?.players.movementImpact(actor, impactDelta, onLadder);

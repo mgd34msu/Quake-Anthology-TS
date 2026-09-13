@@ -114,7 +114,7 @@ export class Q2DeathBall implements Q2SpawnModule {
       else if (playerTeam === team) this.hooks.addScore(actor, score);
       else if (actor === ball.enemy) this.hooks.addScore(actor, -score);
     }
-    this.die(ball, game, { self: ball.actor, attacker: ball.enemy, inflictor: ball.enemy, damage: 0, kick: 0, point: zero });
+    this.resetBall(ball, game);
     return game.useTargets(entity, ball.actor.id);
   };
   private readonly ballTouch: Q2Touch = (entity, game, contact) => {
@@ -128,7 +128,8 @@ export class Q2DeathBall implements Q2SpawnModule {
   private goalEffect(entity: Q2Entity, game: Q2GameServices): undefined {
     return game.host.emit({ kind: "effect", effect: "q2:dball_goal", origin: game.body(entity).origin, direction: zero, count: 0, color: 0 });
   }
-  private readonly die: Q2Die = (entity, game) => {
+  private readonly die: Q2Die = (entity, game) => this.resetBall(entity, game);
+  private resetBall(entity: Q2Entity, game: Q2GameServices): undefined {
     this.goalEffect(entity, game); entity.angularVelocity = zero;
     game.move(entity, { angles: zero, velocity: zero }); game.motion(entity, entity.motion); game.solid(entity, "none");
     return game.schedule(entity, 2, this.respawn);

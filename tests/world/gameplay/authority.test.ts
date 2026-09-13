@@ -139,10 +139,11 @@ describe("shared actor and gameplay authority", () => {
     const target = actors.allocateAtSource("q2:guest", 13, "q2:soldier");
     const attacker = actors.allocate("q1:game", "q1:player");
     const steps: string[] = [];
+    const capturedAttacks = new Map<number, DamageRequest["attack"]>();
     let replacement: OwnedActor | null = null;
     const authority = new GameplayAuthority(actors, callbacks, {
       impulse: (_actor, impulse, movement) => { steps.push(`impulse:${impulse.x}:${movement}`); return undefined; },
-      beforeReaction: (_actor, result) => { steps.push(`health:${bytes.getInt32(0, true)}:${result.request.attack.sequence}`); return undefined; },
+      beforeReaction: (_actor, result) => { capturedAttacks.set(result.request.attack.sequence, result.request.attack); steps.push(`health:${bytes.getInt32(0, true)}:${result.request.attack.sequence}`); return undefined; },
       confirmed: outcome => { if (outcome.kind === "committed") steps.push(`score:${outcome.decision.request.attack.sequence}`); return undefined; },
     });
     authority.create(attacker, state());
@@ -153,21 +154,31 @@ describe("shared actor and gameplay authority", () => {
       writeHealth: health => { bytes.setInt32(0, health, true); return undefined; },
       writeArmor: value => { if (value.kind !== "q2") throw new Error("Wrong victim armor"); bytes.setInt32(4, value.points, true); return undefined; } });
     authority.register(createQ3CombatPolicy({ id: "q3:combat", context: () => q3Context, armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) }));
+    const firstAttack = attack(target.id, attacker.id), nestedAttack = attack(target.id, attacker.id, 2, 100);
     callbacks.bind(target, { think: null, touch: null, use: null,
-      pain: () => {
+      pain: reaction => {
+        const captured = capturedAttacks.get(1);
+        if (captured === undefined) throw new Error("Missing captured pain attack");
+        expect(reaction.attack).toEqual(firstAttack.attack);
+        expect(reaction.attack).toBe(captured);
         expect(callbacks.current?.kind).toBe("pain");
-        authority.apply(attack(target.id, attacker.id, 2, 100));
+        authority.apply(nestedAttack);
+        expect(reaction.attack).toBe(captured);
         expect(callbacks.current?.kind).toBe("pain");
         steps.push("pain-return"); return undefined;
       },
-      die: () => {
+      die: reaction => {
+        const captured = capturedAttacks.get(2);
+        if (captured === undefined) throw new Error("Missing captured death attack");
+        expect(reaction.attack).toEqual(nestedAttack.attack);
+        expect(reaction.attack).toBe(captured);
         expect(callbacks.current?.parent?.kind).toBe("pain");
         actors.release(target);
         replacement = actors.allocateAtSource("q2:guest", 13, "q2:replacement");
         return undefined;
       },
     });
-    const outcome = authority.apply(attack(target.id, attacker.id));
+    const outcome = authority.apply(firstAttack);
     expect(outcome.kind).toBe("committed");
     if (outcome.kind === "committed") expect(outcome.survived).toBe(false);
     expect(steps).toEqual(["impulse:200:q1:movement", "health:14:1", "impulse:500:q1:movement", "health:-80:2", "score:2", "pain-return", "score:1"]);

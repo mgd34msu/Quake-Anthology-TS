@@ -268,7 +268,7 @@ test.skipIf(!existsSync(path))("actual e1m1 source save resumes mover, delay, me
   if (template === undefined) throw new Error("Missing authored clone template");
   const templateMode = template.monster?.mode, total = runtime.totalMonsters;
   const clone = runtime.cloneEntity(template);
-  callbacks.pain({ self: clone.actor, attacker: player.id, damage: 1, kick: 0 });
+  callbacks.pain({ attack: null, self: clone.actor, attacker: player.id, damage: 1, kick: 0 });
   expect(clone.monster?.mode).toBe("pain");
   expect(template.monster?.mode).toBe(templateMode);
   expect(runtime.totalMonsters).toBe(total);

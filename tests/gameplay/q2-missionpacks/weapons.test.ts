@@ -140,8 +140,8 @@ describe("mission-pack source weapons", () => {
     expect(scene.weapons.registeredDefinitions().length).toBe(20);
     expect(items.lookup("Trap")?.usable).toBe(true); expect(items.lookup("Tesla")?.usable).toBe(true);
     const decoy = armory.doppleganger.fire(scene.self, scene.game, zero, forward), killer = scene.target(900);
-    decoy.pain?.(decoy, scene.game, { self: decoy.actor, attacker: killer.actor.id, damage: 10, kick: 0 });
-    decoy.die?.(decoy, scene.game, { self: decoy.actor, attacker: killer.actor.id, inflictor: killer.actor.id, damage: 30, kick: 0, point: zero });
+    decoy.pain?.(decoy, scene.game, { attack: null, self: decoy.actor, attacker: killer.actor.id, damage: 10, kick: 0 });
+    decoy.die?.(decoy, scene.game, { attack: null, self: decoy.actor, attacker: killer.actor.id, inflictor: killer.actor.id, damage: 30, kick: 0, point: zero });
     const sphere = [...scene.game.entities.values()].find(entity => entity.classname === "sphere");
     expect(sphere?.enemy).toBe(killer.actor.id); expect((sphere?.spawnflags ?? 0) & 2).toBe(2);
     expect((sphere?.spawnflags ?? 0) & 0x10000).toBe(0x10000);
@@ -164,7 +164,7 @@ describe("mission-pack source weapons", () => {
     expect(projectiles.markTeslaArea(scene.self, scene.game, tesla)).toBe(false);
     expect(projectiles.badArea(scene.self.actor.id, scene.game)).toBe(true);
     const area = tesla.teamChain;
-    tesla.die?.(tesla, scene.game, { self: tesla.actor, attacker: scene.self.actor.id, inflictor: scene.self.actor.id, damage: 30, kick: 0, point: zero });
+    tesla.die?.(tesla, scene.game, { attack: null, self: tesla.actor, attacker: scene.self.actor.id, inflictor: scene.self.actor.id, damage: 30, kick: 0, point: zero });
     expect(scene.game.entity(area)).toBeNull(); scene.actors.close();
   });
 

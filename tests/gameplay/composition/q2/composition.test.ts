@@ -108,7 +108,7 @@ test("Tag source scoring transfers the live token before player death drops inve
   active.items.touch(token, active.game, active.first.actor.id);
   expect(source.ownerActor()).toBe(active.first.actor.id);
   active.first.lastAttack = active.game.attack(active.second, active.second.actor.id, 1, 0, null);
-  active.players.recordDeath(active.first, active.game, { self: active.first.actor, attacker: active.second.actor.id, inflictor: active.second.actor.id, damage: 110, kick: 0, point: active.game.body(active.first).origin });
+  active.players.recordDeath(active.first, active.game, { attack: null, self: active.first.actor, attacker: active.second.actor.id, inflictor: active.second.actor.id, damage: 110, kick: 0, point: active.game.body(active.first).origin });
   expect(source.ownerActor()).toBe(active.second.actor.id);
   expect(active.players.states.get(active.second.actor.id)?.score).toBe(5);
   expect(active.composition.match.damage(active.first.actor.id, null, 100)).toBe(75);

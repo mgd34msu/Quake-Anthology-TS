@@ -38,7 +38,7 @@ export class Q2MissionPackDoppleganger {
     const enemy = entity.enemy === null ? null : game.host.bodies.read(entity.enemy);
     if (enemy !== null && entity.enemy !== entity.teamMaster) {
       const sphere = this.spheres.launch(entity, game, length(subtract(enemy.origin, game.body(entity).origin)) > 768 ? "hunter" : "vengeance", true);
-      sphere.pain?.(sphere, game, { self: sphere.actor, attacker: reaction.attacker, damage: 0, kick: 0 });
+      sphere.pain?.(sphere, game, { attack: reaction.attack, self: sphere.actor, attacker: reaction.attacker, damage: 0, kick: 0 });
     }
     return this.timeout(entity, game);
   };

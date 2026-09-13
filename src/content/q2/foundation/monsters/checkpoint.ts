@@ -13,7 +13,7 @@ export interface Q2MonsterStateCheckpoint extends Omit<MonsterState, "move" | "n
   readonly commander: SavedActorId | null;
 }
 export interface Q2MonsterDamageCheckpoint {
-  readonly reaction: Omit<DeathReaction, "self" | "attacker" | "inflictor"> & { readonly attacker: SavedActorId | null; readonly inflictor: SavedActorId | null };
+  readonly reaction: Omit<DeathReaction, "self" | "attacker" | "inflictor" | "attack"> & { readonly attacker: SavedActorId | null; readonly inflictor: SavedActorId | null };
   readonly attack: Q2AttackCheckpoint | null;
 }
 interface SavedSighting { readonly actor: SavedActorId; readonly time: number; }

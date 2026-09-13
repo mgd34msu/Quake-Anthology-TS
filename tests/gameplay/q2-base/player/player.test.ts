@@ -139,7 +139,7 @@ test("Q2 campaign death bookkeeping leaves a foreign character's body to its own
   shared.inventory.consume(entity.actor, "q2:key_data_cd", 1); players.consumedKey(entity, game);
   expect(state.coopRespawn?.inventory.find(entry => entry.item === "q2:key_data_cd")?.count).toBe(0);
   shared.combat.setHealth(entity.actor, -1);
-  players.recordDeath(entity, game, { self: entity.actor, attacker: null, inflictor: null, kick: 0, damage: 101, point: { x: 0, y: 0, z: 0 } });
+  players.recordDeath(entity, game, { attack: null, self: entity.actor, attacker: null, inflictor: null, kick: 0, damage: 101, point: { x: 0, y: 0, z: 0 } });
   expect(shared.bodies.read(entity.actor.id)).toEqual(before);
   expect(state.dead).toBe(true);
   players.putInServer(entity, game);

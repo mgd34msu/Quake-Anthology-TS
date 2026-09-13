@@ -156,7 +156,7 @@ export class Q2Monsters implements Q2SpawnModule {
   private readonly sourcePain: Q2Pain = (entity, game, reaction) => {
     const context = this.requireContext(entity), definition = this.actors.get(entity.actor.id);
     this.perception.reactToDamage(context, reaction.attacker);
-    if (game.options.edition === "rerelease") this.queuePain(context, reaction, { inflictor: entity.lastAttack?.inflictor ?? null, point: game.body(entity).origin });
+    if (game.options.edition === "rerelease") this.queuePain(context, reaction, { inflictor: reaction.attack?.inflictor ?? null, point: game.body(entity).origin });
     else definition?.pain?.(context, reaction);
     this.setSkin(context); game.show(entity); return undefined;
   };
@@ -264,10 +264,12 @@ export class Q2Monsters implements Q2SpawnModule {
         oldEnemy: reference(oldEnemy), moveTarget: reference(moveTarget), commander: reference(commander) };
       this.attachContext(entity, game, definition, state);
       const pending = saved.pendingDamage;
-      if (pending !== null) this.pendingDamage.set(owner.id, {
-        reaction: { ...pending.reaction, self: owner, attacker: reference(pending.reaction.attacker), inflictor: reference(pending.reaction.inflictor) },
-        attack: pending.attack === null ? null : restoreQ2Attack(pending.attack, actor => game.host.actors.referenceSaved(actor)),
-      });
+      if (pending !== null) {
+        const attack = pending.attack === null ? null : restoreQ2Attack(pending.attack, actor => game.host.actors.referenceSaved(actor));
+        this.pendingDamage.set(owner.id, {
+          reaction: { ...pending.reaction, attack, self: owner, attacker: reference(pending.reaction.attacker), inflictor: reference(pending.reaction.inflictor) }, attack,
+        });
+      }
     }
     this.perception.restore(game, checkpoint.perception);
     for (const context of this.contexts.values()) this.actors.get(context.entity.actor.id)?.restore?.(context);
@@ -493,7 +495,7 @@ export class Q2Monsters implements Q2SpawnModule {
       if (definition === undefined) throw new Error("Missing dead monster definition");
       const origin = game.body(entity).origin;
       game.host.combat.setHealth(entity.actor, 0);
-      definition.die(context, { self: entity.actor, attacker: entity.actor.id, inflictor: entity.actor.id, damage: 0, kick: 0, point: zero });
+      definition.die(context, { attack: null, self: entity.actor, attacker: entity.actor.id, inflictor: entity.actor.id, damage: 0, kick: 0, point: zero });
       if (!game.host.actors.isLive(entity.actor.id) || state.gibbed) return undefined;
       const move = state.move;
       for (let frameNumber = move.firstFrame; frameNumber < move.lastFrame; frameNumber++) {
@@ -656,7 +658,7 @@ export class Q2Monsters implements Q2SpawnModule {
   private queuePain(context: MonsterContext, reaction: PainReaction, hit: { readonly inflictor: ActorId | null; readonly point: Vec3 }): undefined {
     const previous = this.pendingDamage.get(context.entity.actor.id);
     this.pendingDamage.set(context.entity.actor.id, { reaction: { ...reaction, inflictor: hit.inflictor, point: hit.point,
-      damage: reaction.damage + (previous?.reaction.damage ?? 0), kick: reaction.kick + (previous?.reaction.kick ?? 0) }, attack: context.entity.lastAttack });
+      damage: reaction.damage + (previous?.reaction.damage ?? 0), kick: reaction.kick + (previous?.reaction.kick ?? 0) }, attack: reaction.attack });
     return undefined;
   }
 

@@ -348,9 +348,9 @@ export class SharedSimulation implements Simulation {
         if (this.source.kind === "q3") this.source.game.beforeReaction(actor, decision);
         if (decision.reaction === "death") { const player = this.playerStates.get(actor); if (player !== undefined) { this.grapple?.release(actor.id); this.stepHandGrenade(player, "dead"); } }
         if (this.source.kind === "q1") this.source.composition.beforeReaction(actor, decision);
-        if (this.source.kind === "q2") { const entity = this.source.game.entity(actor.id); if (entity !== null) { entity.lastAttack = decision.request.attack; if (this.playerStates.has(actor)) this.source.product.beforeReaction(actor.id, decision.request.attack.attacker); } }
+        if (this.source.kind === "q2") { const entity = this.source.game.entity(actor.id); if (entity !== null) { entity.lastAttack = decision.request.attack; if (this.playerStates.has(actor)) this.source.product.beforeReaction(actor.id, decision.request.attack); } }
         if (decision.reaction === "death" && this.source.kind === "q2" && this.playerStates.has(actor) && this.playerStates.get(actor)?.character !== "q2") {
-          const entity = this.source.game.entity(actor.id); if (entity !== null) this.source.players.recordDeath(entity, this.source.game, { self: actor, attacker: decision.request.attack.attacker,
+          const entity = this.source.game.entity(actor.id); if (entity !== null) this.source.players.recordDeath(entity, this.source.game, { attack: decision.request.attack, self: actor, attacker: decision.request.attack.attacker,
             inflictor: decision.request.attack.inflictor, damage: decision.appliedDamage, kick: decision.request.knockback, point: decision.request.point });
         }
         return undefined;
