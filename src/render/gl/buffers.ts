@@ -32,22 +32,37 @@ export function packGeometry(batch: DrawBatch): GeometryArrays {
     normals: new Float32Array(batch.lighting.kind === "q2-world" ? vertices.length * 3 : 0),
     indices: new Uint32Array(indices),
   };
-  for (const [index, vertex] of vertices.entries()) {
+  let four = 0, two = 0;
+  for (const vertex of vertices) {
     const { position, color, texCoord } = vertex;
-    arrays.positions.set([position.x, position.y, position.z, position.w], index * 4);
-    arrays.colors.set([color.x, color.y, color.z, color.w], index * 4);
-    arrays.coordinates.set([texCoord.x, texCoord.y], index * 2);
+    arrays.positions[four] = position.x; arrays.positions[four + 1] = position.y;
+    arrays.positions[four + 2] = position.z; arrays.positions[four + 3] = position.w;
+    arrays.colors[four] = color.x; arrays.colors[four + 1] = color.y;
+    arrays.colors[four + 2] = color.z; arrays.colors[four + 3] = color.w;
+    arrays.coordinates[two] = texCoord.x; arrays.coordinates[two + 1] = texCoord.y;
+    four += 4; two += 2;
   }
   if (batch.texturing === "pair") {
-    for (const [index, vertex] of batch.vertices.entries())
-      arrays.coordinates2.set([vertex.texCoord2.x, vertex.texCoord2.y], index * 2);
+    let offset = 0;
+    for (const vertex of batch.vertices) {
+      arrays.coordinates2[offset] = vertex.texCoord2.x; arrays.coordinates2[offset + 1] = vertex.texCoord2.y;
+      offset += 2;
+    }
   }
   if (batch.lighting.kind !== "vertex") {
     if (batch.lighting.worldPositions.length !== vertices.length) throw new RangeError("Q2 world positions must match the draw's vertex count");
-    for (const [index, position] of batch.lighting.worldPositions.entries()) arrays.worldPositions.set([position.x, position.y, position.z], index * 3);
+    let offset = 0;
+    for (const position of batch.lighting.worldPositions) {
+      arrays.worldPositions[offset] = position.x; arrays.worldPositions[offset + 1] = position.y; arrays.worldPositions[offset + 2] = position.z;
+      offset += 3;
+    }
     if (batch.lighting.kind === "q2-world") {
       if (batch.lighting.normals.length !== vertices.length) throw new RangeError("Q2 normals must match the draw's vertex count");
-      for (const [index, normal] of batch.lighting.normals.entries()) arrays.normals.set([normal.x, normal.y, normal.z], index * 3);
+      offset = 0;
+      for (const normal of batch.lighting.normals) {
+        arrays.normals[offset] = normal.x; arrays.normals[offset + 1] = normal.y; arrays.normals[offset + 2] = normal.z;
+        offset += 3;
+      }
     }
   }
   for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {

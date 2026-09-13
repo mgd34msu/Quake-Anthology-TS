@@ -6,6 +6,7 @@ import type { DrawBatch, Q2FogOperation, RendererImage, RendererResourceOwner, R
 import { perspectiveMat4 } from "../../../src/core/math.ts";
 import { SdlWindow } from "../../../src/platform/sdl.ts";
 import { GlRenderer } from "../../../src/render/gl/renderer.ts";
+import { packGeometry } from "../../../src/render/gl/buffers.ts";
 import { outputGammaTable } from "../../../src/render/output-gamma.ts";
 
 const white = { x: 1, y: 1, z: 1, w: 1 };
@@ -17,6 +18,34 @@ const vertices: readonly RenderVertex[] = [
   { position: { x: 1, y: 1, z: 0, w: 1 }, texCoord: { x: 0.5, y: 0.5 }, color: white },
   { position: { x: -1, y: 1, z: 0, w: 1 }, texCoord: { x: 0.5, y: 0.5 }, color: white },
 ];
+
+test("GL packing preserves float32 bytes, paired coordinates and world lighting arrays", () => {
+  const paired = vertices.map((vertex, index) => ({ ...vertex,
+    position: { ...vertex.position, z: index / 3, w: index === 0 ? -0 : 1 },
+    texCoord2: { x: index / 7, y: -index / 9 } }));
+  const worldPositions = paired.map(vertex => ({ x: vertex.position.x, y: vertex.position.y, z: vertex.position.z }));
+  const normals = paired.map(() => ({ x: 0, y: -0, z: 1 }));
+  const batch: DrawBatch = { texturing: "pair", primitive: "triangles", vertices: paired, indices: [0, 1, 2, 0, 2, 3],
+    texture: { kind: "retain-current-texture" }, secondTexture: { binding: { kind: "retain-current-texture" }, environment: "modulate" }, state,
+    lighting: { kind: "q2-world", worldPositions, normals, pass: "lightmap", lights: [], atlas: null } };
+  const arrays = packGeometry(batch);
+  const bytes = (values: Float32Array | Uint32Array): Uint8Array => new Uint8Array(values.buffer, values.byteOffset, values.byteLength);
+  expect(bytes(arrays.positions)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.position.x, vertex.position.y, vertex.position.z, vertex.position.w]))));
+  expect(bytes(arrays.colors)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.color.x, vertex.color.y, vertex.color.z, vertex.color.w]))));
+  expect(bytes(arrays.coordinates)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.texCoord.x, vertex.texCoord.y]))));
+  expect(bytes(arrays.coordinates2)).toEqual(bytes(new Float32Array(paired.flatMap(vertex => [vertex.texCoord2.x, vertex.texCoord2.y]))));
+  expect(bytes(arrays.worldPositions)).toEqual(bytes(new Float32Array(worldPositions.flatMap(position => [position.x, position.y, position.z]))));
+  expect(bytes(arrays.normals)).toEqual(bytes(new Float32Array(normals.flatMap(normal => [normal.x, normal.y, normal.z]))));
+  expect(bytes(arrays.indices)).toEqual(bytes(new Uint32Array(batch.indices)));
+  const single = packGeometry({ ...batch, texturing: "single", lighting: { kind: "vertex" } });
+  expect(single.coordinates2).toEqual(new Float32Array(paired.length * 2));
+  expect(single.worldPositions.length).toBe(0); expect(single.normals.length).toBe(0);
+  expect(() => packGeometry({ ...batch, indices: [0, 1, 4] })).toThrow("index is outside");
+  expect(() => packGeometry({ ...batch, indices: [0, 1] })).toThrow("index count");
+  expect(() => packGeometry({ ...batch, vertices: paired.map(vertex => ({ ...vertex, position: { ...vertex.position, x: 1e40 } })) })).toThrow("finite float32");
+  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions: [], normals, pass: "lightmap", lights: [], atlas: null } })).toThrow("world positions");
+  expect(() => packGeometry({ ...batch, lighting: { kind: "q2-world", worldPositions, normals: [], pass: "lightmap", lights: [], atlas: null } })).toThrow("normals");
+});
 
 function draw(renderer: GlRenderer, batch: DrawBatch): void {
   const prepared = renderer.prepareGeometry(batch);
