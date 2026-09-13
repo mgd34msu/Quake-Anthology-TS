@@ -1,3 +1,4 @@
+import { menuSoundPath } from "./audio/menu.ts";
 import type { ApplicationInput } from "./input.ts";
 import type { ContentId, GameFamily } from "../../contracts/content.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
@@ -406,8 +407,7 @@ export class ApplicationAudio {
     this.engine.beginLoopFrame();
     for (const event of this.uiSounds.splice(0)) {
       const content = this.content.recipe.presentation.audio.content, family = this.content.catalog.product(content).expectation.family;
-      const index = event.sound === "open" ? 1 : event.sound === "close" ? 3 : event.sound === "reject" && family === "q3" ? 4 : 2;
-      const sound = await this.sound(content, `misc/menu${index}.wav`, family);
+      const sound = await this.sound(content, menuSoundPath(family, event.sound), family);
       if (sound !== null) this.engine.play({ sound, family, actor: null, origin: { kind: "local" }, audience: { kind: "seat", seat: event.seat },
         channel: 0, volume: 1, attenuation: 0 });
     }

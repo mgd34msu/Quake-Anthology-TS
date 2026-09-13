@@ -1,3 +1,4 @@
+import type { UiSound } from "../../ui/common/controller.ts";
 import { registerLlmSettingsMenu, type LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
@@ -22,6 +23,7 @@ import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 
 export interface StartupMenuOptions {
+  readonly sound?: (sound: UiSound) => void;
   readonly llm?: LlmSettingsUi;
   readonly clipboard?: () => string | null;
   readonly seat: SeatId;
@@ -82,7 +84,7 @@ export class StartupMenu {
     const skin = menuSkin(options.art.skin.font);
     this.controller = new NativeUiController({ seat: options.seat, skin: () => skin, now: options.now, bindings: () => [],
       ...(options.clipboard === undefined ? {} : { clipboard: options.clipboard }),
-      focus: () => undefined, sound: () => undefined, measureText: (text, scale) => this.measure(text, scale), executeScript: () => { throw new Error("Startup menu has no legacy scripts"); } });
+      focus: () => undefined, sound: sound => options.sound?.(sound), measureText: (text, scale) => this.measure(text, scale), executeScript: () => { throw new Error("Startup menu has no legacy scripts"); } });
     this.register(main, () => [
       this.button("single", "Single Player", 0, () => this.configure(false)),
       this.button("multi", "Multiplayer", 1, () => this.configure(true)),

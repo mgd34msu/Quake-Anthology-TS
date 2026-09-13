@@ -1,3 +1,4 @@
+import { StartupAudio } from "./startup-audio.ts";
 import { readSdlClipboard } from "../../platform/sdl.ts";
 import { serviceLoading } from "./loading.ts";
 import { ControllerSettings } from "./controller-settings.ts";
@@ -42,6 +43,7 @@ import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
+  readonly audio: StartupAudio;
   readonly imageSettings: ApplicationImageSettings;
   readonly display: StartupDisplay;
   readonly renderer: NativeRenderer;
@@ -68,7 +70,8 @@ export class StartupApplication {
   private readonly saves: StartupSaves;
   readonly preferences: FrontendPreferences;
   private applyDisplay = false;
-  private mouseBaselineProduct: string | null = null;
+  private baselineProduct: string | null = null;
+  private preferenceStore: ConfigStore | null = null;
 
   private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost, saveDirectory: string) {
     this.preferences = new FrontendPreferences(() => movementDialect(model.options));
@@ -81,18 +84,20 @@ export class StartupApplication {
     catch (error) { await application.close(); throw error; }
   }
 
-  private async refreshMouseBaseline(force = false): Promise<void> {
+  private async refreshPreferenceBaseline(force = false): Promise<void> {
     const options = this.model.options;
-    if (!force && this.mouseBaselineProduct === options.product) return;
+    if (!force && this.baselineProduct === options.product) return;
+    if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
       ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
-    await this.preferences.loadMouseBaseline(settings);
-    this.mouseBaselineProduct = options.product;
+    await this.preferences.loadBaseline(settings);
+    this.preferenceStore = settings;
+    this.baselineProduct = options.product;
   }
 
   private async openGraphics(display: StartupDisplay = this.model.options): Promise<StartupGraphics> {
-    await this.refreshMouseBaseline(true);
+    await this.refreshPreferenceBaseline(true);
     const options = { ...this.model.options, ...display }, identity = createIdentityOwner("startup-menu"), seat = identity.seat(0), client = identity.client(0, 0);
     const owner = { identity: Symbol("startup renderer"), session: identity.session, generation: 0 };
     const images = new SceneImageRegistry(owner);
@@ -101,6 +106,8 @@ export class StartupApplication {
     if (product === undefined) throw new Error(`No installed game data found in ${options.corpusRoot}; a game charset is required for the startup menu`);
     const mounts = await this.model.catalog.mountsFor(product.id);
     const mounted = await openMountPlan({ id: createMountPlanId("startup", "font"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    let themeMounts: Awaited<ReturnType<typeof openMountPlan>> | null = null;
+    let audio: StartupAudio | null = null;
     let font: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
     let art: Awaited<ReturnType<typeof loadNativeUiArt>> | null = null;
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
@@ -118,7 +125,17 @@ export class StartupApplication {
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
       const commands = new CommandBuffer({ dialect: "q3", context });
-      menu = new StartupMenu({ ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
+      const themeProduct = installed.find(candidate => candidate.expectation.family === "q2" && candidate.expectation.edition === "rerelease" && candidate.expectation.campaign === "baseq2");
+      if (themeProduct !== undefined) {
+        const themePlan = await this.model.catalog.mountsFor(themeProduct.id);
+        themeMounts = await openMountPlan({ id: createMountPlanId("startup", "music"), mounts: themePlan, defaultOrder: themePlan.map(mount => mount.identity.id), prefixOrders: [] });
+      }
+      const activeThemeMounts = themeMounts;
+      audio = await StartupAudio.open({ theme: themeProduct === undefined || themeMounts === null ? null : { content: themeProduct.id, mounts: themeMounts }, mounts: mounted, family: product.expectation.family, content: product.id, seat, print: this.host.print,
+        preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues } });
+      audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
+      const activeAudio = audio;
+      menu = new StartupMenu({ sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
         clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         play: () => { this.pending = { kind: "play" }; }, load: id => {
@@ -140,18 +157,19 @@ export class StartupApplication {
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
       const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
       const presentation: PresentationSelection = { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider };
-      this.graphics = { imageSettings, display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
+      this.graphics = { audio: activeAudio, imageSettings, display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
         draw: () => {
+          const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.pump();
           const viewport = { x: 0, y: 0, ...native.window.drawableSize };
           builder.begin("back", true);
           activeMenu.draw({ binding: { seat, client, viewport, safeArea: viewport, hudScale: 1, presentation }, timeMilliseconds: performance.now() },
             command => builder.command(command), () => { throw new Error("Startup charset unexpectedly requested a material draw"); });
           native.execute(builder.finish());
         },
-        close: () => { controllerSettings.close(); activeRouter.close(); pads.close(); activeMenu.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
+        close: () => { activeAudio.close(); activeThemeMounts?.close(); controllerSettings.close(); activeRouter.close(); pads.close(); activeMenu.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
       return this.graphics;
     } catch (error) {
-      router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
+      audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       throw error;
     }
   }
@@ -164,6 +182,9 @@ export class StartupApplication {
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame(); }
 
   private async launch(action: StartupAction): Promise<void> {
+    if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
+    this.preferenceStore = null;
+    this.graphics?.audio.close();
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw();
     try {
@@ -233,7 +254,7 @@ export class StartupApplication {
     if (graphics === null) throw new Error("Startup frame has no renderer");
     for (const event of graphics.renderer.window.pollEvents()) graphics.router.handlePlatform(event);
     for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
-    await this.refreshMouseBaseline();
+    await this.refreshPreferenceBaseline();
     graphics.controllerSettings.update();
     graphics.router.updateCapture();
     if (this.refreshSaves) {
@@ -266,6 +287,8 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
+    try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
+    catch (error) { this.host.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     this.game?.requestQuit(); this.remote?.requestQuit(); await this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;
   }
 }

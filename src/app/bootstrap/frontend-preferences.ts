@@ -1,3 +1,5 @@
+import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
+import type { AudioPreferences } from "./audio-settings.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import { defaultMouseTuning } from "../../input/mouse.ts";
 import type { MouseTuning } from "../../input/mouse.ts";
@@ -64,18 +66,30 @@ export function changedFrontendPreferences(before: FrontendPreferenceValues, aft
 /** Only user-selected overrides cross into a game; saved values stay with their seat. */
 export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
+  audioBaseline: Partial<AudioPreferences> = {};
+  get audioValues(): AudioSettings { return { effectsVolume: this.values.effectsVolume ?? this.audioBaseline.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? this.audioBaseline.musicVolume ?? 0.25 }; }
   private mouseBaseline: MouseTuning = defaultMouseTuning;
   constructor(private readonly dialect: () => CommandDialect) {}
-  async loadMouseBaseline(settings: ConfigStore): Promise<void> {
+  async loadBaseline(settings: ConfigStore): Promise<void> {
+    this.audioBaseline = await loadAudioSettings(settings);
     const saved = await settings.loadSeat("input/seat-1.json"), identity = createIdentityOwner("frontend-mouse-baseline");
     const mouse = new MouseSettings(new CvarRegistry({ dialect: this.dialect(), context: { session: identity.session,
       origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } } }));
     if (saved !== null) mouse.write(saved.mouse);
     this.mouseBaseline = mouse.read();
   }
+  async saveAudioBaseline(settings: ConfigStore): Promise<void> {
+    if (this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
+    const volume = this.audioValues;
+    if (volume.effectsVolume === (this.audioBaseline.effectsVolume ?? 0.7) && volume.musicVolume === (this.audioBaseline.musicVolume ?? 0.25)) return;
+    const saved = await loadAudioSettings(settings);
+    const deviceName = saved.deviceName ?? null;
+    await saveAudioSettings(settings, { selectedOutput: deviceName, ...volume });
+    this.audioBaseline = { deviceName, ...volume };
+  }
   bindings(): readonly SettingBinding[] {
     return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true, controllerVibrationStrength: this.values.controllerVibrationStrength ?? 1 }),
-      write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => ({ effectsVolume: this.values.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? 0.25 }),
+      write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => this.audioValues,
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,
       pitch: this.values.pitch ?? this.mouseBaseline.pitch, yaw: this.values.yaw ?? this.mouseBaseline.yaw,
