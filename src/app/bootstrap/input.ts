@@ -247,11 +247,14 @@ export class ApplicationInput {
       else button.up(key, time);
       return active === button.active ? undefined : actions.execute(name, [], origin.seat);
     });
-    for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) this.commands.register(name, invocation => {
-      let origin = invocation.source.origin;
-      while (origin.kind === "script") origin = origin.caller;
-      return actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);
-    });
+    for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) {
+      if ((sourceDialect === "q2-classic" || sourceDialect === "q2-rerelease") && this.commands.exists(name)) continue;
+      this.commands.register(name, invocation => {
+        let origin = invocation.source.origin;
+        while (origin.kind === "script") origin = origin.caller;
+        return actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);
+      });
+    }
     this.controllers = SdlControllers.open();
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
       controller: saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { CommandContext } from "../../src/contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import type { SeatId } from "../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
@@ -34,4 +34,27 @@ test("Q2 gameplay catalogue is selected by source dialect", () => {
   expect(commands.exists("god")).toBe(false);
   registerQ2ClientCommands(commands, "q2-rerelease", () => undefined);
   expect(commands.commandDocumentation("noclip")?.usage).toBe("noclip");
+});
+
+test.each(["q2-classic", "q2-rerelease"] satisfies readonly CommandDialect[])("%s catalogue owns shared weapon and chat forwarding", dialect => {
+  const owner = createIdentityOwner("shared-command-ownership"), seat = owner.seat(1);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(1, 0) } };
+  const printed: string[] = [], forwarded: { name: string; args: readonly string[]; seat: SeatId | null }[] = [];
+  const commands = new CommandBuffer({ dialect, context, print: text => { printed.push(text); } });
+  registerQ2ClientCommands(commands, dialect, (name, args, source) => { forwarded.push({ name, args, seat: source }); });
+  const names = ["weapnext", "weapprev", "use", "say", "say_team"];
+  for (const name of names) {
+    expect(commands.registeredNames().filter(registered => registered === name)).toHaveLength(1);
+    expect(commands.commandDocumentation(name)).toEqual(q2ClientCommands.find(command => command.name === name)?.documentation);
+    expect(queryConsoleEntries(commands).find(entry => entry.name === name)?.summary).toBeTruthy();
+  }
+  const script: CommandContext = { session: owner.session, origin: { kind: "script", name: "bindings.cfg", caller: context.origin } };
+  commands.append('weapnext\nweapprev\nuse "Railgun"\nsay "hello world"\nsay_team "team message"\n', script);
+  commands.execute();
+  expect(forwarded).toEqual([
+    { name: "weapnext", args: [], seat }, { name: "weapprev", args: [], seat },
+    { name: "use", args: ["Railgun"], seat }, { name: "say", args: ["hello world"], seat },
+    { name: "say_team", args: ["team message"], seat },
+  ]);
+  expect(printed).toEqual([]);
 });
