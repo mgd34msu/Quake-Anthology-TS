@@ -2738,11 +2738,13 @@ export class SharedSimulation implements Simulation {
       const body = this.bodies.read(player.actor.id); if (body === null) continue;
       const model = this.recipe.character.appearance.provider.split("/").at(-1) ?? "male";
       const q1Player = this.source.kind === "q1" ? this.source.game.player(player.actor.id) : null;
+      const colors = player.character === "q1" && this.source.kind === "q1" ? this.source.composition.clients.get(player.actor.id) : null;
       const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       result.push({ actor: player.actor.id, content: this.recipe.character.appearance.content, family: player.character,
         path: this.q2Characters.get(player.actor)?.entity.model ?? (this.q1Characters.get(player.actor)?.presentation.model ?? (player.character === "q1" ? "progs/player.mdl" : `players/${model}/tris.md2`)), skinPath: player.character === "q2" ? `players/${model}/grunt.pcx` : null,
         frame: this.q2Characters.get(player.actor)?.entity.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: 0,
-        skin: 0, effects: 0, renderFlags: 0, origin: body.origin, angles: body.angles, ...visual, visible: true, viewWeapon: false });
+        skin: 0, effects: 0, renderFlags: 0, origin: body.origin, angles: body.angles, ...visual,
+        ...(colors === null ? {} : { playerColors: { top: colors.shirt, bottom: colors.pants } }), visible: true, viewWeapon: false });
     }
     for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
       frame: 0, oldFrame: 0, skin: 0, effects: 2, renderFlags: 0, origin: body.origin, angles: body.angles, scale: 1, visible: true, viewWeapon: false }); }
