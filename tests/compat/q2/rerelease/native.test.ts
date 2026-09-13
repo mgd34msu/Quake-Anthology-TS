@@ -1,3 +1,5 @@
+import { WorldTextStore } from "../../../../src/text/world.ts";
+import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rerelease/world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
@@ -21,7 +23,7 @@ import { cgameExportLayout, cgameImportLayout, clientLayout, cvarLayout, edictLa
 
 const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", import.meta.url);
 const available = await Bun.file(dll).exists();
-async function nativeFixture() {
+async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void) {
   const bytes = new Uint8Array(await Bun.file(dll).arrayBuffer());
   const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
   expect(hash).toBe("045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
@@ -80,6 +82,7 @@ async function nativeFixture() {
   const sounds: RereleaseSoundEvent[] = [];
   const unicasts: RereleaseUnicast[] = [], multicasts: RereleaseMulticast[] = [];
   const host = new RereleaseQ2GuestHost({ runner, getGameApi: entry("GetGameAPI"), getCgameApi: entry("GetCGameAPI"), services,
+    ...(worldText === undefined ? {} : { worldText }),
     sound: event => { sounds.push(event); },
     messages: { buffer, acceptsClient: slot => slot === 1, unicast: message => { unicasts.push(message); }, multicast: message => { multicasts.push(message); } },
     engine: world.engine, spatial: world.spatial, semantics: world.semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });
@@ -258,3 +261,36 @@ test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame 
     }
   }
 });
+
+
+test.skipIf(!available)("retail info_world_text RunFrame submits both guest imports into the shared world store", async () => {
+  const store = new WorldTextStore(), emitted: RereleaseWorldTextEvent[] = [];
+  let now = 0;
+  const { host, world } = await nativeFixture(event => { emitted.push(event); store.submit({ ...event.text, content: "q2:rerelease:baseq2:pak0" }, now, event.lifetime); });
+  try {
+    host.preInit(); host.init();
+    host.spawnEntities("base1", '{\n"classname" "worldspawn"\n}\n' +
+      '{\n"classname" "info_player_start" "origin" "' + world.origin + '"\n}\n' +
+      '{\n"classname" "info_world_text" "message" "BILLBOARD" "origin" "1 2 3" "angle" "-3" "radius" "0.5" "sounds" "1"\n}\n' +
+      '{\n"classname" "info_world_text" "message" "FIXED" "origin" "4 5 6" "angle" "90" "radius" "1" "sounds" "2"\n}\n');
+    expect(host.clientConnect(1, "\\name\\World Text\\skin\\male/grunt\\ip\\127.0.0.1", "text-social", false).accepted).toBe(true);
+    host.clientBegin(1);
+    for (let frame = 0; frame < 4 && emitted.length < 2; frame++) { now += 0.1; host.runFrame(true); }
+    const billboard = emitted.find(event => event.text.text === "BILLBOARD"), fixed = emitted.find(event => event.text.text === "FIXED");
+    if (billboard === undefined || fixed === undefined) throw new Error("Native world text did not execute");
+    expect(billboard.text.orientation).toEqual({ kind: "billboard" });
+    expect(fixed.text.orientation).toEqual({ kind: "fixed", angles: { x: 0, y: 270, z: 0 } });
+    expect(billboard.text.origin).toEqual({ x: 1, y: 2, z: 3 });
+    expect(fixed.text.origin).toEqual({ x: 4, y: 5, z: 6 });
+    expect(billboard.text.color).toEqual({ x: 1, y: 0, z: 0, w: 1 });
+    expect(fixed.text.color).toEqual({ x: 0, y: 0, z: 1, w: 1 });
+    expect([billboard.text.cellSize, fixed.text.cellSize]).toEqual([4, 8]);
+    expect(billboard.text.depthTest).toBe(true); expect(billboard.text.distanceCullFactor).toBe(0.004);
+    expect(billboard.lifetime).toBeGreaterThan(0);
+    expect(store.snapshot(now, 1)).toHaveLength(2);
+    expect(store.snapshot(now + billboard.lifetime + 0.001, 2)).toHaveLength(0);
+    now += 0.1; host.runFrame(true); expect(store.snapshot(now, 3).length).toBeGreaterThan(0);
+    store.clear(); expect(store.snapshot(now, 3)).toHaveLength(0);
+    host.shutdown();
+  } finally { store.clear(); }
+}, 60000);

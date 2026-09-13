@@ -1,3 +1,5 @@
+import { RereleaseWorldTextImports } from "./world-text.ts";
+import type { RereleaseWorldTextEvent } from "./world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -49,6 +51,7 @@ export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "in
   readonly spatial: RereleaseSpatialServices;
   readonly semantics: RereleaseSemanticBindings;
   readonly messages?: RereleaseMessageServices;
+  readonly worldText?: (event: RereleaseWorldTextEvent) => void;
   readonly sound?: (event: RereleaseSoundEvent) => void;
 }
 
@@ -57,6 +60,7 @@ export class RereleaseQ2GuestHost {
   readonly module: RereleaseGuestModule;
   readonly core: RereleaseCoreImports;
   readonly #messages: RereleaseMessageImports | null;
+  readonly #worldText: RereleaseWorldTextImports | null;
   readonly #sounds: RereleaseSoundImports | null;
   readonly #lifetimes = new Map<number, { readonly actor: OwnedActor; readonly generation: number; readonly address: bigint }>();
   readonly #surfaces = new Map<Q2SurfaceInfo, GuestAddress>();
@@ -68,6 +72,7 @@ export class RereleaseQ2GuestHost {
     this.module = new RereleaseGuestModule({ ...options,
       actorAtSlot: slot => options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null,
       invokeImport: call => this.#import(call) });
+    this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
     this.#sounds = options.sound === undefined ? null : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
     this.#messages = options.messages === undefined ? null : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
   }
@@ -153,6 +158,8 @@ export class RereleaseQ2GuestHost {
     finally { memory.unmap(address, bytes.length + 1); }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
+    const text = this.#worldText?.invoke(call);
+    if (text !== undefined) return text;
     const sound = this.#sounds?.invoke(call);
     if (sound !== undefined) return sound;
     const message = this.#messages?.invoke(call);
