@@ -488,6 +488,7 @@ export class RemoteApplication {
 
   private async bindSeat(connection?: Q3ClientConnection): Promise<void> {
     const generation = this.worldLoadGeneration;
+    let seatAttached = false;
     const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
     const player = connection !== undefined && this.remote instanceof Q3RemotePresentation ? this.remote.admittedPlayer : this.remote.player, frontend = this.frontend;
     if (connection === undefined && this.q3InitialViewPending && player !== null && this.remote.output !== null && this.controls !== null) {
@@ -528,7 +529,10 @@ export class RemoteApplication {
     try {
       if (remote instanceof Q3RemotePresentation) {
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
-        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
+        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent: () => {
+          if (!seatAttached) assertCurrent();
+          else if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Q3 cgame belongs to a retired remote world");
+        }, source: remote.cgameSource, connection,
           commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer,
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
@@ -549,6 +553,7 @@ export class RemoteApplication {
     const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView);
     local.player.seat.attachPresentation(presentation, () => presentation.close());
     this.presentation = presentation;
+    seatAttached = true;
     this.q3InitialViewPending = connection !== undefined;
     if (q3 === null) await frontend.audio.startWorldMusic();
   }

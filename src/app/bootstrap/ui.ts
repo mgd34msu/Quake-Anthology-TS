@@ -111,9 +111,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: this.wheelIcons.get(item.id) ?? null, selectedIcon: this.wheelIcons.get(item.id) ?? null })),
       activeItem: () => simulation.playerUi(local.player.actor).activeWeapon,
       select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
-    const bindingItems = simulation.playerUi(local.player.actor).items;
     this.bindings = registerBindingMenus(this.controller, local.input,
-      () => sharedBindingActions(local.builder.dialect, bindingItems, input.bindingCapabilities));
+      () => sharedBindingActions(local.builder.dialect, simulation.playerUi(local.player.actor).items, input.bindingCapabilities));
     const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
