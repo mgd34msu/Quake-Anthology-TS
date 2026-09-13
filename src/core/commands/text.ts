@@ -23,6 +23,17 @@ export function isQ2(dialect: CommandDialect): boolean {
   return dialect === "q2-classic" || dialect === "q2-rerelease";
 }
 
+export function commandSeparatorOffset(text: string, dialect: CommandDialect): number {
+  let quoted = false, offset = 0;
+  while (offset < text.length) {
+    const character = text.charAt(offset);
+    if (character === '"') quoted = !quoted;
+    if ((!quoted && character === ";") || character === "\n" || dialect === "q3" && character === "\r") break;
+    offset++;
+  }
+  return offset;
+}
+
 interface ParsedToken { readonly value: string; readonly end: number; }
 
 function whitespace(text: string, index: number): boolean {

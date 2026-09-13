@@ -7,7 +7,7 @@ import { CvarFlag, Q2CvarFlag } from "../cvars/index.ts";
 import type { CvarRead, CvarRegistry, CvarSnapshot } from "../cvars/index.ts";
 import { cvarValueText } from "../cvars/numbers.ts";
 import { nativeAtof, nativeAtoi } from "../numeric.ts";
-import { asciiFold, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand } from "./text.ts";
+import { asciiFold, commandSeparatorOffset, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand } from "./text.ts";
 import { sourceFilter } from "./filter.ts";
 import type { CommandDocumentation } from "./documentation.ts";
 export { asciiFold, sourceCommandText, tokenizeCommand, expandCommandMacros } from "./text.ts";
@@ -249,13 +249,7 @@ export class CommandBuffer {
       const first = this.chunks[0];
       if (first === undefined) break;
       const buffer = this.pendingText;
-      let quoted = false, offset = 0;
-      while (offset < buffer.length) {
-        const character = buffer.charAt(offset);
-        if (character === '"') quoted = !quoted;
-        if ((!quoted && character === ";") || character === "\n" || this.dialect === "q3" && character === "\r") break;
-        offset++;
-      }
+      let offset = commandSeparatorOffset(buffer, this.dialect);
       if (offset >= this.maximumCommand) {
         if (this.dialect !== "q3") throw new RangeError("Command line overflows source line buffer");
         offset = this.maximumCommand - 1;

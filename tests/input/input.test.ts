@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { CommandContext } from "../../src/contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { SeatInput, registerInputCommands } from "../../src/input/seat.ts";
 import { InputButton } from "../../src/input/buttons.ts";
@@ -19,6 +19,42 @@ import { Q3GameSettings } from "../../src/content/q3/base/settings.ts";
 import { ClientConfiguration } from "../../src/content/q3/presentation/config.ts";
 import { ClientGameState, ClientGameStaticState } from "../../src/content/q3/presentation/state.ts";
 import { SeatConsole } from "../../src/console/session.ts";
+
+test("binding scripts preserve quoted semicolons and held-button release commands", () => {
+  const owner = createIdentityOwner("quoted-binding"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const calls: { argv: readonly string[]; source: CommandContext }[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context });
+  commands.register("record", invocation => { calls.push({ argv: invocation.argv, source: invocation.source }); });
+  const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
+  const unregister = registerInputCommands(commands, () => input);
+  input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: 'record "before;a";+forward;record "after;b"' } });
+  input.input({ kind: "key", seat, timeMilliseconds: 10, code: 119, down: true, repeat: false }); commands.execute();
+  expect(calls.map(call => call.argv)).toEqual([["record", "before;a"], ["record", "after;b"]]);
+  expect(input.button("forward").active).toBe(true);
+  input.input({ kind: "key", seat, timeMilliseconds: 20, code: 119, down: false, repeat: false }); commands.execute();
+  expect(calls.map(call => call.argv)).toEqual([["record", "before;a"], ["record", "after;b"], ["record", "after;b"]]);
+  expect(input.button("forward").active).toBe(false);
+  for (const call of calls) expect(call.source).toEqual({ session: owner.session, origin: { kind: "script", name: "key-binding", caller: context.origin } });
+  unregister();
+});
+
+test("binding separators match direct command-buffer dialect parsing", () => {
+  const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];
+  for (const dialect of dialects) for (const script of ['record "a;b";record tail', 'record first\nrecord second', 'record first\rrecord second', 'record "before\nafter";record tail']) {
+    const owner = createIdentityOwner(`binding-separator-${dialect}`), seat = owner.seat(0);
+    const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+    const expected: (readonly string[])[] = [], actual: (readonly string[])[] = [];
+    const direct = new CommandBuffer({ dialect, context }), bound = new CommandBuffer({ dialect, context });
+    direct.register("record", invocation => { expected.push(invocation.argv); });
+    bound.register("record", invocation => { actual.push(invocation.argv); });
+    direct.append(`${script}\n`, context); direct.execute();
+    const input = new SeatInput({ seat, dialect, context, commands: bound, uiEvent: () => false });
+    input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: script } });
+    input.input({ kind: "key", seat, timeMilliseconds: 10, code: 119, down: true, repeat: false }); bound.execute();
+    expect(actual).toEqual(expected);
+  }
+});
 
 test("gyro calibration rejects motion and discontinuous timestamps without learning gameplay", () => {
   const input = new GamepadInput({ ...defaultGamepadTuning, gyro: { ...defaultGamepadTuning.gyro, enabled: true } });

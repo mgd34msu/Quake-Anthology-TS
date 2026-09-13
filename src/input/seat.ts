@@ -5,6 +5,7 @@ import type { SeatId } from "../contracts/identity.ts";
 import type { Vec2, Vec3 } from "../contracts/math.ts";
 import type { InputAction, InputBinding, InputBindingTarget, PhysicalInput, SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
 import type { CommandBuffer } from "../core/commands/index.ts";
+import { commandSeparatorOffset, sourceCommandText } from "../core/commands/text.ts";
 import { InputButton } from "./buttons.ts";
 import { GamepadInput } from "./gamepad.ts";
 import type { GamepadTuning } from "./gamepad.ts";
@@ -115,7 +116,12 @@ export class SeatInput {
     const key = commandKey(binding.input);
     const source: CommandContext = { session: this.options.context.session, origin: { kind: "script", name: "key-binding", caller: this.options.context.origin } };
     let hadButton = false;
-    for (const segment of target.text.split(";").map(text => text.trim()).filter(text => text.length > 0)) {
+    let remaining = sourceCommandText(target.text);
+    while (remaining.length > 0) {
+      const offset = commandSeparatorOffset(remaining, this.options.dialect);
+      const segment = remaining.slice(0, offset).trim();
+      remaining = remaining.slice(offset + 1);
+      if (segment.length === 0) continue;
       if (segment.startsWith("+")) {
         this.options.commands.append(`${down ? "+" : "-"}${segment.slice(1)} ${key} ${Math.trunc(now)}\n`, source);
         hadButton = true;
