@@ -173,8 +173,11 @@ export class SceneModelRenderer {
       return value;
     };
     const q2Lighting = this.provider.family === "q2" || this.provider.family === "q1" && this.world.map.kind === "q2-bsp";
-    const lightingInput = q2Lighting && input.lights === undefined && input.q2FragmentLighting !== undefined
-      ? { ...input, lights: input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 })) } : input;
+    const lightingInput = q2Lighting && input.q2FragmentLighting !== undefined
+      ? { ...input, lights: input.lights === undefined
+        ? input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))
+        : [...input.lights, ...input.q2FragmentLighting.lights.filter(light => light.shadow.kind !== "none")
+          .map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))] } : input;
     const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number, source: ModelSourceOptions): Vec3 => {
       if (this.provider.family === "q3") return unit;
       let previousNormalIndex: number | undefined;
