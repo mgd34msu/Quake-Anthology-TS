@@ -193,7 +193,7 @@ export class Q2ShadowScene {
     if (this.image === null) this.image = this.images.register("*q2-shadow-atlas", { kind: "depth32f",
       levels: [{ width: Q2_SHADOW_ATLAS_SIZE, height: Q2_SHADOW_ATLAS_SIZE, pixels: new Float32Array(Q2_SHADOW_ATLAS_SIZE ** 2).fill(1) }] }, { wrap: "clamp", filter: "nearest" });
     const slots = fit(candidates), passes: DepthAtlasPass[] = [], signatures = new Map<number, string>();
-    const worldKey = geometryDigest(world), casterKeys = new Map(casters.map(caster => [caster, geometryDigest(caster.meshes)]));
+    const worldKey = geometryDigest(world), casterKeys = new Map<ShadowCaster, string>();
     let cachedLights = 0, rebuiltLights = 0, entityCasters = 0;
     for (const [index, candidate] of candidates.entries()) {
       const slot = slots[index]; if (slot === null || slot === undefined) continue;
@@ -201,7 +201,11 @@ export class Q2ShadowScene {
       const atlasRect: Vec4 = { x: slot.x / Q2_SHADOW_ATLAS_SIZE, y: slot.y / Q2_SHADOW_ATLAS_SIZE, z: slot.width / Q2_SHADOW_ATLAS_SIZE, w: slot.height / Q2_SHADOW_ATLAS_SIZE };
       const shadow: Q2ShadowProjection = matrix === null ? { kind: "point", atlasRect } : { kind: "cone", atlasRect, matrix: shadowMatrixMultiply(depthBias, matrix) };
       lights[candidate.index] = { ...light, shadow };
-      const signature = JSON.stringify([light.origin, light.radius, light.cone, slot, worldKey, candidate.casters.map(caster => [caster.origin, caster.radius, casterKeys.get(caster)])]);
+      const signature = JSON.stringify([light.origin, light.radius, light.cone, slot, worldKey, candidate.casters.map(caster => {
+        let key = casterKeys.get(caster);
+        if (key === undefined) { key = geometryDigest(caster.meshes); casterKeys.set(caster, key); }
+        return [caster.origin, caster.radius, key];
+      })]);
       signatures.set(candidate.index, signature);
       if (this.cached.get(candidate.index) === signature) { cachedLights++; continue; }
       rebuiltLights++; entityCasters += candidate.casters.length;
