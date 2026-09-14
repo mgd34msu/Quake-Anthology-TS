@@ -4,6 +4,8 @@ import { findContentPath } from "../../content/mounts/paths.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
+import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifact.ts";
+import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
@@ -79,6 +81,10 @@ function execution(provider: ProviderReference, family: GameFamily, rerelease: b
 
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
+  const q3Guest = family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
+  if (q3Guest && (!options.dedicated || options.network.kind !== "native-server" || options.mode !== "deathmatch"
+    || options.movement !== "q3" || options.character !== "q3" || options.botSkill !== undefined))
+    throw new Error("Selected Q3 mods require a dedicated native server with native Q3 movement and character, deathmatch and bots disabled");
   const quakeworld = product.expectation.id === "q1-quakeworld" && options.network.kind !== "qw-client";
   const nativeProgram = options.quakeCProgram;
   if (nativeProgram !== undefined && (!(product.expectation.id === "q1-classic-id1" || product.expectation.id === "q1-classic-hipnotic")
@@ -88,8 +94,8 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
     throw new Error("Native QuakeWorld currently requires dedicated deathmatch with Q1 movement and character; NetQuake protocol overrides and mixed roles are unsupported");
   const provider: ProviderReference = { provider: `${family}:official`, content: product.id };
-  const movement: ProviderReference = { provider: `${options.movement}:movement`, content: quakeworld ? product.id : catalog.require(baseProduct(options.movement)).id };
-  const character: ProviderReference = { provider: `${options.character}:character`, content: quakeworld ? product.id : catalog.require(baseProduct(options.character)).id };
+  const movement: ProviderReference = { provider: `${options.movement}:movement`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.movement)).id };
+  const character: ProviderReference = { provider: `${options.character}:character`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean) => {
@@ -106,7 +112,8 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, provider, match), enemies: { kind: "map-defined" },
     presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider },
     engineBehavior: provider, combat: provider, inventory: provider, match, transition: provider,
-    execution: [quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
+    execution: [q3Guest ? { kind: "qvm", owner: provider, role: "server-game", artifact: { content: product.id, path: "vm/qagame.qvm" },
+      api: { kind: "q3-qagame", version: 8 } } : quakeworld ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: "qwprogs.dat" },
       api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : nativeProgram !== undefined
         ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: nativeProgram },
           api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } : execution(provider, family, rerelease)],
@@ -122,7 +129,7 @@ export class LoadedApplicationContent {
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
     readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null,
-    private readonly pure?: PureMountPolicy) {}
+    private readonly pure?: PureMountPolicy, readonly preparedQ3Game: PreparedQ3Game | null = null) {}
 
   openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
 
@@ -202,7 +209,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
       throw new Error("Remote content context requires its matching remote client product");
   }
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false,
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated && options.network.kind === "native-server",
     ...(remote === undefined ? {} : { remoteContent: remote }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
@@ -210,6 +217,13 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   };
   let recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
+    if (module.kind === "qvm" && module.role === "server-game") {
+      if (!options.dedicated || options.network.kind !== "native-server" || options.mode !== "deathmatch" || options.botSkill !== undefined
+        || catalog.product(recipe.map.geometryContent).expectation.family !== "q3")
+        throw new Error("Q3 bytecode requires dedicated native Q3 server operation with bots disabled");
+      assertQ3GuestRecipe(recipe, module);
+      continue;
+    }
     if (module.kind === "quakec") {
       const product = catalog.product(recipe.map.entities.content).expectation.id;
       const nativeQw = product === "q1-quakeworld" && module.api.kind === "q1-quakeworld" && options.mode === "deathmatch"
@@ -251,7 +265,10 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     } else world = decodeQ3World(bytes, map);
     const execution = recipe.execution.find(module => module.kind === "quakec");
     const prepared = execution?.kind === "quakec" ? await prepareQuakeCSource(execution, mounts, world.entities) : null;
-    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure);
+    const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
+    const q3Prepared = q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
+    if (q3Prepared !== null && world.kind !== "q3-bsp") throw new Error("Q3 bytecode requires native Q3 geometry");
+    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared);
   } catch (error) {
     mounts.close();
     throw error;

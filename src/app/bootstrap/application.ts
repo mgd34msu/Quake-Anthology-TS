@@ -1,3 +1,4 @@
+import { UserFileStore } from "../../platform/files/writable.ts";
 import { setImmediate } from "node:timers/promises";
 import type { LlmCommandRequester } from "../../console/llm.ts";
 import type { LlmSettingsUi } from "../../ui/settings/llm.ts";
@@ -22,7 +23,7 @@ import { loadMountedBotAssetFiles } from "../../bots/behavior/index.ts";
 import type { ActorId, ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ExecutableRecipe } from "../../contracts/content.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { TransitionDecision } from "../../contracts/gameplay.ts";
@@ -69,6 +70,7 @@ import { QwServerNetwork } from "./network/qw-server.ts";
 import type { QwApplicationServerHost } from "./network/qw-server-types.ts";
 import { createQwApplicationServerHost } from "./simulation/network-qw.ts";
 import { Q3ServerNetwork } from "./network/q3.ts";
+import { Q3GameCallbackError, q3GameCallback } from "./network/q3-types.ts";
 import type { Q1ApplicationServerHost } from "./network/q1-types.ts";
 import type { Q3ApplicationServerHost } from "./network/q3-types.ts";
 import { createQ1ApplicationServerHost } from "./simulation/network-q1.ts";
@@ -89,7 +91,7 @@ type NativeServer = { readonly address: IpAddress } & (
   | { readonly kind: "q2"; readonly server: Q2ServerNetwork<IpAddress> }
   | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
 
-interface ApplicationCommandRequest { readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; }
+interface ApplicationCommandRequest { readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; }
 interface Q3SeatClient { readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost>; }
 interface GraphicalApplication {
   readonly renderer: NativeRenderer;
@@ -192,7 +194,27 @@ export class Application {
     try {
       host.loading?.stage("Preparing world...");
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
-      const simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+      const guestContent = content.catalog.product(content.recipe.map.entities.content);
+      const guestCommands = () => {
+        const commands = application?.sourceCommands;
+        if (commands === null || commands === undefined) throw new Error("Q3 guest console is unavailable");
+        return commands;
+      };
+      const simulation = createSimulation({ dedicated: options.dedicated,
+        ...(content.preparedQ3Game === null ? {} : { q3Guest: {
+          prepared: content.preparedQ3Game,
+          writable: new UserFileStore(guestContent.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), guestContent.expectation.contentDirectory)),
+          gameDirectory: basename(guestContent.expectation.contentDirectory), print: text => host.print(text),
+          common: { milliseconds: () => Math.trunc(performance.now()), realTime: output => {
+            const now = new Date(), year = now.getFullYear();
+            output?.({ second: now.getSeconds(), minute: now.getMinutes(), hour: now.getHours(), day: now.getDate(),
+              month: now.getMonth(), year: year - 1900, weekday: now.getDay(),
+              yearDay: Math.trunc((Date.UTC(year, now.getMonth(), now.getDate()) - Date.UTC(year, 0, 1)) / 86400000),
+              isDst: now.getTimezoneOffset() < Math.max(new Date(year, 0, 1).getTimezoneOffset(), new Date(year, 6, 1).getTimezoneOffset()) ? 1 : 0 });
+            return Math.trunc(now.getTime() / 1000);
+          }, commands: { executeNow: text => { guestCommands().executeNow(text); },
+            append: text => guestCommands().append(text), insert: text => guestCommands().insert(text) } },
+        } }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
         maxClients: options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
         promptSupported: client => !options.dedicated && localSeats.has(client),
@@ -219,6 +241,13 @@ export class Application {
       host.loading?.stage("Starting game...");
       application.bots = await application.createBots(content, simulation);
       await application.openNetwork();
+      const guest = simulation.q3Guest();
+      if (guest !== null) {
+        if (application.network?.kind !== "q3") throw new Error("Q3 guest requires the native dedicated server network");
+        await guest.initialize(application.network.server.gameOutput());
+        const initialized = application;
+        await initialized.sourceCommands?.executeAsync(() => initialized.commands());
+      }
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
       return application;
     } catch (error) {
@@ -354,6 +383,26 @@ export class Application {
       commands.register("quit", () => this.requestQuit());
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
       q1.cvars.register("bot_minplayers", "0"); this.sourceCommands = commands; return;
+    }
+    const guest = this.simulation.q3Guest();
+    if (guest !== null) {
+      const commands = new CommandBuffer({ dialect: "q3", cvars: guest.state.cvars,
+        context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text),
+        serverGame: invocation => {
+          if (guest.game.module.interpreter.isActive) throw new Error("Nested Q3 guest console exports are unsupported");
+          const name = invocation.argv[0]; if (name === undefined) return false;
+          this.queueCommand(name, invocation.args, null); return true;
+        } });
+      commands.register("quit", () => this.requestQuit());
+      commands.unregister("exec");
+      commands.register("exec", invocation => {
+        if (guest.game.module.interpreter.isActive) throw new Error("Q3 guest immediate exec is unsupported; append the script command");
+        this.queueCommand("exec", invocation.args, null, { session: invocation.source.session, origin: invocation.source.origin });
+        return undefined;
+      });
+      for (const name of ["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist", "kick"])
+        commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      this.sourceCommands = commands; this.bindServerSettingCommand(commands); return;
     }
     const source = this.simulation.q3Source();
     if (source === null) { this.sourceCommands = null; return; }
@@ -638,12 +687,13 @@ export class Application {
 
   requestQuit(): undefined { this.stopping = true; return undefined; }
 
-  queueCommand(name: string, arguments_: readonly string[], seat: SeatId | null): undefined {
-    this.requestedCommands.push({ name, arguments_: [...arguments_], seat });
+  queueCommand(name: string, arguments_: readonly string[], seat: SeatId | null, source?: CommandContext): undefined {
+    this.requestedCommands.push({ name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) });
     return undefined;
   }
 
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+    if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes, restart and restore are unsupported");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     await this.capture?.beforeWorldChange();
     this.graphical?.input.stopHaptics();
@@ -827,6 +877,7 @@ export class Application {
   }
 
   async loadGame(path: string): Promise<void> {
+    if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest saved games are unsupported");
     if (this.closed || this.stepping) throw new Error("Save restoration requires an idle open application");
     await this.restoreSavedGame(path);
   }
@@ -907,16 +958,40 @@ export class Application {
     this.requestedCommands = [];
     for (const command of pending) {
       const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
-      const source: CommandContext | undefined = local === undefined ? undefined : { session: this.session.session,
-        origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } };
+      const source: CommandContext | undefined = command.source ?? (local === undefined ? undefined : { session: this.session.session,
+        origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } });
       const print = (text: string): void => {
-        if (source !== undefined) this.graphical?.input.print(text, source);
+        if (source !== undefined && this.graphical !== null) this.graphical.input.print(text, source);
         else {
           this.host.print(text);
           if (command.seat === null) for (const local of this.graphical?.input.locals ?? []) local.console.print(text);
         }
       };
       try {
+        const guest = this.simulation.q3Guest();
+        if (guest !== null) {
+          if (command.seat !== null) throw new Error("Q3 guest local seats are unsupported");
+          if (["map", "map_restart", "devmap", "spmap", "spdevmap", "save", "load", "addbot", "removebot", "botlist"].includes(command.name))
+            throw new Error(`Q3 guest command ${command.name} is unsupported`);
+          if (command.name === "exec") {
+            const argument = command.arguments_[0];
+            if (argument === undefined || command.arguments_.length !== 1) throw new Error("Usage: exec <filename>");
+            const path = /\.[^/]+$/.test(argument) ? argument : `${argument}.cfg`;
+            const script = await this.content.mounts.open(path);
+            if (script === null) print(`couldn't exec ${path}\n`);
+            else {
+              print(`execing ${path}\n`);
+              const caller: CommandContext = source ?? { session: this.session.session, origin: { kind: "server-console" } };
+              this.sourceCommands?.insert(new TextDecoder().decode(script.bytes), { session: caller.session,
+                origin: { kind: "script", name: path, caller: caller.origin } });
+            }
+          } else if (command.name === "kick") {
+            const target = command.arguments_[0]; if (target === undefined) throw new Error("Usage: kick <slot|all>");
+            for (const player of guest.players()) if (target === "all" || target === String(player.sourceEntity))
+              await this.network?.server.disconnectClient(player.client, "was kicked");
+          } else if (!await q3GameCallback(() => guest.consoleCommand([command.name, ...command.arguments_]))) print(`Unknown game command: ${command.name}\n`);
+          continue;
+        }
         if (["+grapple", "-grapple", "+grenade", "-grenade"].includes(command.name)) {
           if (command.seat === null) throw new Error("Offhand commands require an invoking local seat");
           const actor = this.commandActor(command.seat), held = command.name.startsWith("+");
@@ -995,6 +1070,7 @@ export class Application {
         }
         else throw new Error(`Unknown application command: ${command.name}`);
       } catch (error) {
+        if (error instanceof Q3GameCallbackError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         print(`${message}\n`);
       }
@@ -1022,7 +1098,8 @@ export class Application {
       if (q1 !== null && this.sourceCommands !== this.dedicatedCommands) this.sourceCommands?.execute();
       if (this.dedicatedCommands !== null) {
         this.dedicatedConsole?.drain(this.dedicatedCommands);
-        this.dedicatedCommands.execute();
+        if (this.simulation.q3Guest() !== null) await this.dedicatedCommands.executeAsync(() => this.commands());
+        else this.dedicatedCommands.execute();
       }
       const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
       if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
@@ -1107,7 +1184,7 @@ export class Application {
       const currentGraphics = this.graphical;
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       return output;
-    } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
+    } catch (error) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
     finally { this.stepping = false; this.stepCompletion = null; completion.resolve(); }
   }
 
@@ -1151,7 +1228,7 @@ export class Application {
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
-    for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
+    for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.simulation.shutdownQ3Guest(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { await close(); } catch (error) { errors.push(error); }
     }

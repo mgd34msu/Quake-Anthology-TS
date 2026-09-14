@@ -1,3 +1,6 @@
+import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
+import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
+import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
 import type { WorldText } from "../../../text/world.ts";
@@ -162,6 +165,7 @@ type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
+  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame }
   | ({ readonly kind: "q2"; readonly product: Q2ProductRuntime } & Pick<Q2ProductRuntime, "game" | "weapons" | "monsters" | "movers" | "items" | "players" | "baseEntities">);
 
 type SelectedWeaponSource = { readonly kind: "q1"; readonly game: Q1EntityServices; readonly random: SourceRandom }
@@ -239,6 +243,17 @@ export class SharedSimulation implements Simulation {
   private quakeWorldTouched: Set<number> | null = null;
 
   constructor(readonly options: SimulationOptions) {
+    const qvm = options.recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
+    if (qvm !== undefined) {
+      assertQ3GuestRecipe(options.recipe, qvm);
+      if (options.dedicated !== true || options.mode !== "deathmatch" || options.world.kind !== "q3-bsp"
+        || options.q3Guest === undefined || !isDeepStrictEqual(qvm, options.q3Guest.prepared.execution)
+        || options.travel !== undefined || options.restore !== undefined || options.q3Session !== undefined
+        || (options.restoredClients?.length ?? 0) !== 0 || options.initialSourceMilliseconds !== undefined)
+        throw new Error("Q3 bytecode requires a prepared dedicated native map with no local, save, restore or travel state");
+    } else if (options.q3Guest !== undefined || options.recipe.execution.some(module => module.kind === "qvm")) {
+      throw new Error("Prepared Q3 guest does not match the selected server execution");
+    }
     this.session = options.identity.session;
     this.q1Campaign = new Q1CampaignState(options.travel?.source.kind === "q1" ? options.travel.source.flags : 0, options.travel?.source.kind === "q1" ? options.travel.source.skill : options.skill);
     this.recipe = options.recipe;
@@ -395,7 +410,7 @@ export class SharedSimulation implements Simulation {
     this.source = this.createSource();
     this.handGrenades = this.createHandGrenades();
     this.grapple = this.createGrapple();
-    if (this.source.kind !== "quakec" && (this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== this.source.kind)) {
+    if (this.source.kind !== "quakec" && this.source.kind !== "q3-qvm" && (this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== this.source.kind)) {
       if (providerFamily(this.weaponProvider.provider) === "q1") {
         this.selectedArsenal = this.createSelectedQ1Arsenal();
       } else if (providerFamily(this.weaponProvider.provider) === "q2" && (this.source.kind === "q1" || this.source.kind === "q2" || this.source.kind === "q3")) {
@@ -470,8 +485,7 @@ export class SharedSimulation implements Simulation {
     }
     }
     try {
-    this.prepareSelectedMonsters();
-    options.monsterNavigation?.install(this, this.q1Movement);
+    if (this.source.kind !== "q3-qvm") { this.prepareSelectedMonsters(); options.monsterNavigation?.install(this, this.q1Movement); }
     if (saved !== undefined) this.restore(saved);
     else if (this.source.kind === "q1" && options.world.kind === "q1-bsp") this.source.composition.spawnMap(options.world);
     else if (this.source.kind === "quakec") {
@@ -1282,6 +1296,23 @@ export class SharedSimulation implements Simulation {
   private createSource(): SourceRuntime {
     const recipe = this.recipe, content = recipe.map.entities.content, campaign = recipe.campaign.kind === "campaign" ? recipe.campaign.mission.provider : recipe.map.entities.provider;
     const timing = providerTiming(recipe, recipe.map.entities.provider);
+    const guest = this.options.q3Guest;
+    if (guest !== undefined) {
+      if (this.options.world.kind !== "q3-bsp") throw new Error("Q3 guest requires native Q3 geometry");
+      const now = () => Math.trunc(this.timeSeconds * 1000);
+      const state = new Q3ServerState({ session: this.session, now, print: guest.print,
+        settings: { gameType: 0, singlePlayer: false, maxClients: this.options.maxClients,
+          mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+          ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) } });
+      state.cvars.set("fs_game", guest.gameDirectory, true);
+      this.initializeServerSettings(state.cvars);
+      return { kind: "q3-qvm", game: new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
+        records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
+          collision: (actor, collision) => this.physics.setCollision(actor, collision) },
+        mounts: this.options.mounts, writable: guest.writable, common: guest.common,
+        maxClients: this.options.maxClients, seed: this.options.seed, entityText: this.options.world.entities,
+        now, assertCurrent: () => { this.assertOpen(); } }) };
+    }
     if (this.options.preparedQuakeC !== undefined) {
       if (this.options.world.kind !== "q1-bsp") throw new Error("QuakeC requires a Q1 world");
       const game: QuakeCSource = new QuakeCSource(this.options.preparedQuakeC, { recipe, world: this.options.world, scene: this.scene,
@@ -1704,7 +1735,7 @@ export class SharedSimulation implements Simulation {
 
   private worldActor(): ActorId | null { return this.actors.atSource(this.recipe.map.entities.provider, this.options.world.kind === "q3-bsp" ? 1022 : 0)?.id ?? null; }
   private player(actor: ActorId | null): MovementPlayer | null { if (actor === null) return null; const owned = this.actors.resolveOwned(actor); return owned === null ? null : this.playerStates.get(owned) ?? null; }
-  players(): readonly ActorId[] { return [...this.playerStates.values()].sort((a, b) => a.client.slot - b.client.slot).map(player => player.actor.id); }
+  players(): readonly ActorId[] { if (this.source.kind === "q3-qvm") return this.source.game.players().map(player => player.actor); return [...this.playerStates.values()].sort((a, b) => a.client.slot - b.client.slot).map(player => player.actor.id); }
   private classname(actor: ActorId): string { const entry = this.actorExecutions.get(actor); return this.player(actor) !== null ? "player" : entry?.kind === "q3" ? "q3:projectile" : entry?.kind === "quakec" ? entry.source.classname(actor) : entry?.entity.classname ?? ""; }
 
   private powerup(actor: OwnedActor, powerup: Q1Powerup, expires: number): undefined {
@@ -1935,6 +1966,7 @@ export class SharedSimulation implements Simulation {
       return { actor: actor.id, viewHeight: player.viewHeight };
     }
     if (source.kind === "loading") throw new Error("Map spawn is incomplete");
+    if (source.kind === "q3-qvm") throw new Error("Q3 guest admission requires the awaited native network lifecycle");
     if (source.kind === "q3") return this.admitQ3Player(client, source.game);
     const actor = this.actors.allocateAtSource(this.recipe.map.entities.provider, client.slot + 1, this.recipe.character.definition.provider);
     const arsenal: ArsenalState = { provider: this.weaponProvider.provider, activeWeapon: null, ammo: [], state: source.kind === "q1"
@@ -2389,8 +2421,32 @@ export class SharedSimulation implements Simulation {
     }
   }
 
+  async stepAsync(input: InputBatch): Promise<SimulationOutput> {
+    if (this.source.kind !== "q3-qvm") return this.step(input);
+    this.assertOpen();
+    if (this.stepping) throw new Error("Simulation step is already running");
+    if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
+    if (input.commands.length !== 0) throw new Error("Q3 guest commands must enter through its native network lifecycle");
+    const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
+    if (profile.kind !== "q3") throw new Error("Q3 guest lost its native frame clock");
+    this.stepping = true;
+    try {
+      this.hostMilliseconds += input.elapsedMilliseconds;
+      this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
+      if (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000) {
+        this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
+        await this.source.game.runFrame(Math.trunc(this.timeSeconds * 1000));
+        this.assertOpen();
+        this.sourceFrame = this.clock.enter("frame-exit");
+        if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000;
+      }
+      return { snapshot: this.snapshot(), events: this.events.take() };
+    } finally { this.stepping = false; }
+  }
+
   step(input: InputBatch): SimulationOutput {
     this.assertOpen();
+    if (this.source.kind === "q3-qvm") throw new Error("Q3 guest requires the awaited simulation step");
     if (this.stepping) throw new Error("Simulation step is already running");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
     this.stepping = true;
@@ -2838,7 +2894,7 @@ export class SharedSimulation implements Simulation {
       n64Physics: rerelease && options.mode !== "deathmatch" && options.mapName.startsWith("q64/") };
   }
   serverSettings(): readonly BoundServerSetting[] {
-    const cvars = this.q2ServerRegistry ?? (this.source.kind === "q3" ? this.source.game.host.cvars : null);
+    const cvars = this.q2ServerRegistry ?? (this.source.kind === "q3" ? this.source.game.host.cvars : this.source.kind === "q3-qvm" ? this.source.game.state.cvars : null);
     if (cvars === null) return [];
     const owner = cvarServerSettingsOwner(cvars);
     if (this.source.kind === "q3") {
@@ -2854,6 +2910,8 @@ export class SharedSimulation implements Simulation {
   q2Source(): Extract<SourceRuntime, { readonly kind: "q2" }> | null { return this.source.kind === "q2" ? this.source : null; }
   quakecSource() { return this.source.kind === "quakec" ? this.source.game : null; }
   q1Source() { return this.source.kind === "q1" ? this.source : null; }
+  q3Guest(): Q3QvmServerGame | null { return this.source.kind === "q3-qvm" ? this.source.game : null; }
+  async shutdownQ3Guest(): Promise<void> { await this.q3Guest()?.shutdown(); }
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }
   movementPlayer(actor: ActorId): Readonly<MovementPlayer> | null { return this.player(actor); }
   weaponPresentationClock(): { readonly content: ContentId; readonly timeMilliseconds: number } | null {
@@ -3039,7 +3097,7 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind === "quakec") return { spawnPoint, source: source.game.captureTravel(), players: [] };
     if (source.kind === "loading") throw new Error("Source campaign travel is not available");
-    if (source.kind === "q3") throw new Error("Q3 map rotation uses match session state instead of campaign travel carry");
+    if (source.kind === "q3" || source.kind === "q3-qvm") throw new Error("Q3 map rotation uses match session state instead of campaign travel carry");
     for (const player of this.playerStates.values()) this.grapple?.release(player.actor.id);
     const landmark = this.levelChange?.landmark ?? null;
     const landmarkPlayer = landmark === null ? null : this.player(landmark.player);
@@ -3073,7 +3131,7 @@ export class SharedSimulation implements Simulation {
     this.assertOpen();
     if (this.stepping || this.transitions.length !== 0) throw new Error("Save requires a completed frame without pending world travel");
     const source = this.source;
-    if (source.kind === "loading" || source.kind === "q3" || source.kind === "quakec") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
+    if (source.kind === "loading" || source.kind === "q3" || source.kind === "q3-qvm" || source.kind === "quakec") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
@@ -3130,7 +3188,7 @@ export class SharedSimulation implements Simulation {
 
   private restore(save: SaveImage): undefined {
     const source = this.source;
-    if (source.kind === "q3" || source.kind === "loading" || source.kind === "quakec") throw new Error("The selected source world does not expose a complete saved-game restore");
+    if (source.kind === "q3" || source.kind === "q3-qvm" || source.kind === "loading" || source.kind === "quakec") throw new Error("The selected source world does not expose a complete saved-game restore");
     const reader = simulationSaveReader(save), reference = (value: SaveReader) => this.actors.referenceSaved(readSavedActor(value));
     const owner = (value: SaveReader): OwnedActor => { const actor = this.actors.resolveSaved(readSavedActor(value)); if (actor === null) return value.fail("Missing restored actor"); return actor; };
     const random = save.random.find(value => value.provider === this.recipe.map.entities.provider)?.state;
@@ -3275,7 +3333,10 @@ export class SharedSimulation implements Simulation {
     if (this.events.nextSequence !== save.nextEventSequence) throw new Error("Save event sequence disagrees with its source journal");
     return undefined;
   }
-  close(): undefined { if (this.closed) return undefined; this.closed = true; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
+  close(): undefined { if (this.closed) return undefined;
+    const guest = this.q3Guest();
+    if (guest !== null && !guest.isRetired) throw new Error("Q3 guest shutdown must be awaited before closing its shared world");
+    this.closed = true; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
   private assertOpen(): undefined { if (this.closed) throw new Error("Simulation is closed"); return undefined; }
 }
 

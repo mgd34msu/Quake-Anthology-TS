@@ -2,6 +2,23 @@ import { expect, test } from 'bun:test';
 import { QvmGameData } from '../../../src/compat/qvm/game-data.ts';
 import { QvmMemory } from '../../../src/compat/qvm/memory.ts';
 
+test('player ping borrows the located public int32 field and validates client slots', () => {
+  const memory = new QvmMemory(new Uint8Array(16384)), data = new QvmGameData(memory);
+  expect(() => data.playerPing(0)).toThrow();
+  data.setClientCount(2);
+  data.locate(64, 3, 700, 4096, 600);
+  memory.bytes.fill(0xa5, 4096, 5296);
+  memory.view(4096 + 600 + 452, 4).setInt32(0, -123456789, true);
+  expect(data.playerPing(1)).toBe(-123456789);
+  data.setPlayerPing(1, 87);
+  expect(data.playerPing(1)).toBe(87);
+  expect(memory.view(4096 + 600 + 448, 4).getUint32(0, true)).toBe(0xa5a5a5a5);
+  expect(memory.view(4096 + 600 + 456, 4).getUint32(0, true)).toBe(0xa5a5a5a5);
+  for (const slot of [-1, 0.5, 2, 64]) expect(() => data.playerPing(slot)).toThrow();
+  data.setClientCount(64);
+  expect(() => data.playerPing(21)).toThrow('allocation');
+});
+
 test('located guest spans reject invalid strides, indexes, pointers and wire capacity before borrowing', () => {
   const memory = new QvmMemory(new Uint8Array(16384)), data = new QvmGameData(memory);
   data.setClientCount(2);

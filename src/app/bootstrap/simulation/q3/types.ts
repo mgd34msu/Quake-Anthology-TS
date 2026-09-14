@@ -47,6 +47,7 @@ export type Q3SourceBots = ClientBotServices & (
 
 /** W73 supplies the existing owners; this provider contains source game records and phase functions. */
 export interface Q3SourceHost extends ClientMovementHost {
+  readonly serverState: import("./server-state.ts").Q3ServerState;
   readonly moverActors: Pick<MoverActorAccess, "observe" | "write" | "link" | "release">;
   primaryAttackAllowed?(actor: ActorId): boolean;
   previewPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupPreview;

@@ -152,6 +152,10 @@ export class QvmGameData {
     return readQvmPlayerState(this.view(this.clientOffset(number), QVM_PLAYER_STATE_BYTES));
   }
 
+  playerPing(number: number): number {
+    return this.view(this.clientOffset(number) + 452, 4).getInt32(0, true);
+  }
+
   setPlayerPing(number: number, ping: number): void {
     // The server writes this field directly, without reading or copying the rest of playerState_t.
     const offset = this.clientOffset(number);

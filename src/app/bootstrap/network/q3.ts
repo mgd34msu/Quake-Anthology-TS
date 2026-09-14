@@ -1,3 +1,4 @@
+import type { Q3GuestOutput } from '../simulation/q3/guest-runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
@@ -17,6 +18,7 @@ import { encodeConnectionlessText } from '../../../network/q3/connectionless.ts'
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q3ApplicationPlayer, Q3ApplicationServerHost } from './q3-types.ts';
+import { Q3GameCallbackError, q3GameCallback } from './q3-types.ts';
 interface Peer { readonly slot: number; readonly download: Q3ServerDownload; readonly baselines: Map<number, EntityStateFields>; remote: Q3Address; player: Q3ApplicationPlayer; readonly connection: Q3ServerConnection; lastReceived: number; readonly connectedAt: number; sequence: number; userinfo: string; }
 export interface Q3ServerNetworkOptions { readonly transport: DatagramTransport<NetworkAddress>; readonly host: Q3ApplicationServerHost; readonly random: () => number; readonly timeoutMilliseconds?: number; }
 export class Q3ServerNetwork implements ApplicationNetwork {
@@ -69,9 +71,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     const host = this.host, serverId = this.serverId;
     const previous = this.peers.get(request.slot); if (previous !== undefined) await this.disconnectClient(previous.player.client, 'reconnected');
     this.assertWorld(host, serverId);
-    const admitted = await host.admit(request);
+    const admitted = await q3GameCallback(() => host.admit(request));
     if (this.ended || this.host !== host || this.serverId !== serverId) {
-      if (admitted.kind === 'accepted') await host.disconnect(admitted.player, 'Server changed during admission');
+      if (admitted.kind === 'accepted') await q3GameCallback(() => host.disconnect(admitted.player, 'Server changed during admission'));
       return 'Server changed during admission';
     }
     if (admitted.kind === 'rejected') return admitted.reason;
@@ -91,10 +93,16 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         if (name === 'nextdl') { await download.acknowledge(nativeAtoi(argv[1] ?? ''), this.host.time()); return connection.phase !== 'zombie'; }
         if (name === 'stopdl') { download.close(); return true; }
         if (name === 'donedl') { if (connection.phase !== 'active') this.gamestate(peer); return true; }
-        if (name === 'userinfo') { peer.userinfo = argv[1] ?? ''; await host.userinfo(peer.player, peer.userinfo); this.assertPeer(peer, host, serverId); }
-        else if (clientOK) { await host.command(peer.player, name, argv.slice(1)); this.assertPeer(peer, host, serverId); }
-        return true;
-      }, enterWorld: command => this.input(peer, command),
+        if (name === 'userinfo') { peer.userinfo = argv[1] ?? ''; await q3GameCallback(() => host.userinfo(peer.player, peer.userinfo)); }
+        else if (clientOK) await q3GameCallback(() => host.command(peer.player, name, argv.slice(1)));
+        this.assertWorld(host, serverId);
+        return this.peers.get(peer.slot) === peer && peer.connection.phase !== 'zombie';
+      }, enterWorld: async command => {
+        const host = this.host, serverId = this.serverId;
+        const begin = host.begin;
+        if (begin === undefined) await this.input(peer, command);
+        else { await q3GameCallback(() => begin.call(host, peer.player, command)); this.assertWorld(host, serverId); }
+      },
       think: command => this.input(peer, command),
       resendGamestate: () => this.gamestate(peer), drop: async reason => { await this.disconnectClient(peer.player.client, reason); }, print: text => this.host.print(text),
     });
@@ -103,8 +111,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   }
   private async input(peer: Peer, command: import('../../../network/q3/message.ts').WireUserCommand): Promise<void> {
     const host = this.host, serverId = this.serverId;
-    const accepted = await host.input(peer.player, command, peer.sequence++);
-    this.assertPeer(peer, host, serverId); this.pending.push(accepted);
+    const accepted = await q3GameCallback(() => host.input(peer.player, command, peer.sequence++));
+    this.assertWorld(host, serverId);
+    if (this.peers.get(peer.slot) === peer && peer.connection.phase !== 'zombie' && accepted !== null) this.pending.push(accepted);
   }
   private async operation<T>(run: () => Promise<T>): Promise<T> {
     if (this.activeOperation !== null) throw new Error('Q3 network operation is already in progress');
@@ -115,7 +124,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private async pollPackets(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
     if (this.ended) return []; this.now = Math.trunc(nowMilliseconds);
     const host = this.host, serverId = this.serverId;
-    await host.prepare(this.checksumFeed, serverId); if (this.ended) return []; this.assertWorld(host, serverId);
+    await host.prepare(this.checksumFeed, serverId, (index, value) => this.broadcastConfigstring(index, value)); if (this.ended) return []; this.assertWorld(host, serverId);
     if (this.changedWorld) { this.changedWorld = false; for (const peer of this.peers.values()) this.gamestate(peer); }
     for (let event = this.options.transport.poll(); event !== null; event = this.options.transport.poll()) {
       if (this.ended) break;
@@ -128,7 +137,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
           const slot = routeQ3SequencedPacket(event.from, bytes, this.slots()), peer = slot === null ? undefined : this.peers.get(slot.slot);
           if (peer !== undefined) { peer.remote = event.from; const result = await peer.connection.receiveDatagram(bytes); if (this.peers.get(peer.slot) !== peer) continue; this.assertPeer(peer, host, serverId); if (result.kind === 'accepted') { peer.lastReceived = this.now; if (peer.connection.phase === 'connected') this.gamestate(peer); } }
         }
-      } catch (error) { if (this.ended) break; this.host.print(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { if (error instanceof Q3GameCallbackError) throw error; if (this.ended) break; this.host.print(error instanceof Error ? error.message : String(error)); }
     }
     if (this.ended) { this.pending = []; return []; }
     for (const peer of this.peers.values()) if (this.now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 30000)) await this.disconnectClient(peer.player.client, 'timed out');
@@ -148,11 +157,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         if (event.kind === 'drop-client' && event.client === peer.player.sourceEntity) await this.disconnectClient(peer.player.client, event.reason);
         else if (event.kind === 'server-command' && (event.client === -1 || event.client === peer.player.sourceEntity)) await this.queue(peer, event.text);
         else if (event.kind === 'configstring' && peer.connection.phase !== 'connected') {
-          const chunks = event.value.match(/[\s\S]{1,999}/g) ?? [''];
-          for (const [index, chunk] of chunks.entries()) {
-            if (this.ended || this.peers.get(peer.slot) !== peer) break;
-            await this.queue(peer, `${chunks.length === 1 ? 'cs' : index === 0 ? 'bcs0' : index === chunks.length - 1 ? 'bcs2' : 'bcs1'} ${event.index} "${chunk}"`);
-          }
+          await this.configstring(peer, event.index, event.value);
         }
       }
     }
@@ -166,6 +171,34 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     const rate = this.host.rate(peer.player);
     peer.connection.sendSnapshot(this.serverFlags, rate, this.delivery(peer), writer => peer.download.write(writer, this.host.time(), rate));
   }
+  gameOutput(): Q3GuestOutput {
+    return {
+      dropClient: async (slot, reason) => {
+        const peer = [...this.peers.values()].find(peer => peer.player.sourceEntity === slot);
+        if (peer !== undefined) await this.disconnectClient(peer.player.client, reason);
+      },
+      sendServerCommand: async (slot, text) => {
+        for (const peer of [...this.peers.values()]) {
+          if (this.ended || this.peers.get(peer.slot) !== peer) continue;
+          if (slot === -1 || peer.player.sourceEntity === slot) await this.queue(peer, text);
+        }
+      },
+      configstring: (index, value) => this.broadcastConfigstring(index, value),
+    };
+  }
+  private async broadcastConfigstring(index: number, value: string): Promise<void> {
+    for (const peer of [...this.peers.values()]) {
+      if (peer.connection.phase === 'connected') continue;
+      await this.configstring(peer, index, value);
+    }
+  }
+  private async configstring(peer: Peer, configIndex: number, value: string): Promise<void> {
+    const chunks = value.match(/[\s\S]{1,999}/g) ?? [''];
+    for (const [index, chunk] of chunks.entries()) {
+      if (this.ended || this.peers.get(peer.slot) !== peer) break;
+      await this.queue(peer, `${chunks.length === 1 ? 'cs' : index === 0 ? 'bcs0' : index === chunks.length - 1 ? 'bcs2' : 'bcs1'} ${configIndex} "${chunk}"`);
+    }
+  }
   private async queue(peer: Peer, text: string): Promise<void> { if (peer.connection.reliable.add(text).kind === 'overflow') await this.disconnectClient(peer.player.client, 'Server command overflow'); }
   async disconnectClient(client: ClientId, reason: string): Promise<boolean> {
     const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client)); if (peer === undefined) return false;
@@ -173,7 +206,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     this.peers.delete(peer.slot); this.admission.disconnect(peer.remote);
     this.pending = this.pending.filter(command => !command.actor.equals(peer.player.actor));
     try { peer.download.close(); this.queueDisconnect(peer, reason); }
-    finally { await host.disconnect(peer.player, reason); }
+    finally { await q3GameCallback(() => host.disconnect(peer.player, reason)); }
     return true;
   }
   private queueDisconnect(peer: Peer, reason: string): void {
@@ -188,7 +221,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private async replaceWorld(host: Q3ApplicationServerHost): Promise<void> {
     this.requireSupported(host); const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) }));
     this.host = host; this.serverId++; this.serverFlags ^= 4; this.pending = []; this.checksumFeed = (this.options.random() << 16) ^ this.options.random(); this.changedWorld = true;
-    for (const { peer, player } of carried) { peer.player = player; await this.host.userinfo(player, peer.userinfo); this.assertPeer(peer); peer.download.close(); peer.connection.deltaMessage = -1; peer.connection.phase = 'connected'; }
+    for (const { peer, player } of carried) { peer.player = player; await q3GameCallback(() => this.host.userinfo(player, peer.userinfo)); this.assertPeer(peer); peer.download.close(); peer.connection.deltaMessage = -1; peer.connection.phase = 'connected'; }
   }
   close(): Promise<void> {
     if (this.closing !== null) return this.closing;

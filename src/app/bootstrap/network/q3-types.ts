@@ -15,7 +15,7 @@ export type Q3ApplicationAdmission = { readonly kind: 'accepted'; readonly playe
 export interface Q3ApplicationServerHost {
   readonly product: Product;
   readonly maxClients: number;
-  prepare(checksumFeed: number, serverId: number): Promise<void>;
+  prepare(checksumFeed: number, serverId: number, configstring?: (index: number, value: string) => void | Promise<void>): Promise<void>;
   pure(serverId: number): Q3PureServer;
   downloadsEnabled(): boolean;
   openDownload(name: string): Q3DownloadReadFile | null;
@@ -28,9 +28,21 @@ export interface Q3ApplicationServerHost {
   disconnect(player: Q3ApplicationPlayer, reason: string): void | Promise<void>;
   gameState(player: Q3ApplicationPlayer, serverId: number): Gamestate;
   snapshot(player: Q3ApplicationPlayer): { readonly player: PlayerStateFields; readonly areaMask: Uint8Array; readonly entities: readonly EntityStateFields[] };
-  input(player: Q3ApplicationPlayer, command: WireUserCommand, sequence: number): ActorCommand | Promise<ActorCommand>;
+  begin?(player: Q3ApplicationPlayer, command: WireUserCommand): void | Promise<void>;
+  input(player: Q3ApplicationPlayer, command: WireUserCommand, sequence: number): ActorCommand | null | Promise<ActorCommand | null>;
   command(player: Q3ApplicationPlayer, name: string, args: readonly string[]): void | Promise<void>;
   userinfo(player: Q3ApplicationPlayer, value: string): void | Promise<void>;
   status(challenge: string, detailed: boolean): string;
   print(text: string): void;
+}
+
+export class Q3GameCallbackError extends Error {
+  constructor(cause: unknown) {
+    super(`Q3 game callback failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'Q3GameCallbackError';
+  }
+}
+export async function q3GameCallback<T>(callback: () => T | Promise<T>): Promise<T> {
+  try { return await callback(); }
+  catch (error) { throw error instanceof Q3GameCallbackError ? error : new Q3GameCallbackError(error); }
 }

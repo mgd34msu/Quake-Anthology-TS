@@ -1,3 +1,5 @@
+import type { PreparedQ3Game } from "./q3/guest-artifact.ts";
+import type { Q3GuestRuntimeOptions } from "./q3/guest-runtime.ts";
 import type { SceneFlare } from "../../../contracts/flare.ts";
 import type { WorldText } from "../../../text/world.ts";
 import type { IndexedModelSkin } from "../../../contracts/scene.ts";
@@ -38,6 +40,11 @@ export interface SimulationOptions {
   readonly dedicated?: boolean;
   readonly promptSupported?: (client: ClientId) => boolean;
   readonly preparedQuakeC?: PreparedQuakeCSource;
+  readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {
+    readonly prepared: PreparedQ3Game;
+    readonly gameDirectory: string;
+    print(text: string): void;
+  };
   readonly identity: IdentityOwner;
   readonly recipe: ExecutableRecipe;
   readonly world: ApplicationWorld;

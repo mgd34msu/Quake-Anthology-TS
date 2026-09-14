@@ -10,6 +10,7 @@ import { ClientMessageReader, encodeClientMessage } from "../../../src/network/q
 import { encodeConnect } from "../../../src/network/q3/connectionless.ts";
 import { Q3ServerConfigStrings } from "../../../src/network/q3/configstrings.ts";
 import { Q3ServerNetwork } from "../../../src/app/bootstrap/network/q3.ts";
+import { Q3GameCallbackError } from "../../../src/app/bootstrap/network/q3-types.ts";
 import type { Q3ApplicationServerHost } from "../../../src/app/bootstrap/network/q3-types.ts";
 import type { WireUserCommand } from "../../../src/network/q3/message.ts";
 import { Netchannel, xorClientMessage } from "../../../src/network/q3/netchan.ts";
@@ -292,4 +293,92 @@ test("Q3 admission awaits connect decision and suppresses replies after owner cl
     if (closeWhileWaiting) enabled = false;
     gate.resolve(null); await pending; expect(replies).toHaveLength(closeWhileWaiting ? 0 : 1);
   }
+});
+
+test("Q3 callback drops stop the packet without a false error and leave the server active", async () => {
+  for (const dropAt of ["begin", "input", "userinfo", "command"]) {
+    const hub = new LoopbackHub(), transport = hub.bind(`drop-server-${dropAt}`), client = hub.bind(`drop-client-${dropAt}`);
+    const owner = createIdentityOwner(`q3-drop-${dropAt}`), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
+    const calls: string[] = [], printed: string[] = [];
+    const host: Q3ApplicationServerHost = {
+      product: "baseq3", maxClients: 1, async prepare() {},
+      pure: () => ({ enabled: false, checksumFeed: 0, checksumFeedServerId: 1, cgameChecksum: undefined, uiChecksum: undefined, loadedPureChecksums: [] }),
+      downloadsEnabled: () => false, openDownload: () => null,
+      rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: false, lan: true }),
+      supportsSourceWire: () => ({ kind: "supported" }), time: () => 0, occupiedSlots: () => [],
+      admit: () => ({ kind: "accepted", player }), carriedPlayer: () => player,
+      disconnect() { calls.push("disconnect"); },
+      gameState: () => ({ kind: "gamestate", commandSequence: 0, entries: [], clientNumber: 0, checksumFeed: 0 }),
+      snapshot: () => ({ player: new PlayerStateRecord("baseq3", 0, 0, 0), areaMask: new Uint8Array(), entities: [] }),
+      async begin(_player, command) { calls.push(`begin:${command.serverTime}`); if (dropAt === "begin") await network.gameOutput().dropClient(0, "guest drop"); },
+      async input(_player, command) { calls.push(`input:${command.serverTime}`); if (dropAt === "input") await network.gameOutput().dropClient(0, "guest drop"); return null; },
+      async command(_player, name) { calls.push(`command:${name}`); if (dropAt === "command") await network.gameOutput().dropClient(0, "guest drop"); },
+      async userinfo() { calls.push("userinfo"); if (dropAt === "userinfo") await network.gameOutput().dropClient(0, "guest drop"); },
+      status() { calls.push("status"); return "infoResponse\n"; }, print(text) { printed.push(text); },
+    };
+    const network = new Q3ServerNetwork({ transport, host, random: () => 0 }), channel = new Netchannel("client", 77);
+    const send = (times: readonly number[], commands: readonly string[] = []): void => {
+      const bytes = encodeClientMessage({ header: { serverId: 1, messageAcknowledge: 0, reliableAcknowledge: 0 },
+        commands: commands.map((text, index) => ({ sequence: index + 1, text })),
+        movement: times.length === 0 ? null : { kind: "move-no-delta", commands: times.map(orderedWireCommand) } }, { checksumFeed: 0, serverCommand: () => "" });
+      for (const packet of channel.transmit(xorClientMessage(bytes, 0, () => ""))) client.send(transport.address, packet);
+    };
+    try {
+      client.send(transport.address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0")); await network.poll(0);
+      send([]); await network.poll(1);
+      if (dropAt === "command" || dropAt === "userinfo") {
+        send([10]); await network.poll(2);
+        send([20, 30], [dropAt === "userinfo" ? 'userinfo "\\name\\Changed"' : "drop", "later"]);
+      } else send([10, 20, 30]);
+      expect(await network.poll(3)).toEqual([]);
+      expect(network.clients).toHaveLength(0); expect(network.phase).toBe("active");
+      expect(calls).toEqual(dropAt === "begin" ? ["begin:10", "disconnect"] : dropAt === "input" ? ["begin:10", "input:20", "disconnect"]
+        : dropAt === "userinfo" ? ["begin:10", "userinfo", "disconnect"] : ["begin:10", "command:drop", "disconnect"]);
+      expect(printed.some(text => text.includes("callback belongs to a dropped client"))).toBe(false);
+      client.send(transport.address, Uint8Array.of(255, 255, 255, 255, ...new TextEncoder().encode("getinfo")));
+      await network.poll(4); expect(calls.at(-1)).toBe("status");
+    } finally { await network.close(); hub.close(); }
+  }
+});
+
+
+test("Q3 packet recovery handles malformed bytes but propagates an awaited game failure", async () => {
+  const hub = new LoopbackHub(), transport = hub.bind("failure-server"), client = hub.bind("failure-client");
+  const owner = createIdentityOwner("q3-failure"), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
+  const failure = new RangeError("guest memory access failed"), calls: string[] = [], printed: string[] = [];
+  const host: Q3ApplicationServerHost = {
+    product: "baseq3", maxClients: 1, async prepare() {},
+    pure: () => ({ enabled: false, checksumFeed: 0, checksumFeedServerId: 1, cgameChecksum: undefined, uiChecksum: undefined, loadedPureChecksums: [] }),
+    downloadsEnabled: () => false, openDownload: () => null,
+    rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: false, lan: true }),
+    supportsSourceWire: () => ({ kind: "supported" }), time: () => 0, occupiedSlots: () => [],
+    admit: () => ({ kind: "accepted", player }), carriedPlayer: () => player, disconnect() {},
+    gameState: () => ({ kind: "gamestate", commandSequence: 0, entries: [], clientNumber: 0, checksumFeed: 0 }),
+    snapshot: () => ({ player: new PlayerStateRecord("baseq3", 0, 0, 0), areaMask: new Uint8Array(), entities: [] }),
+    async begin() { calls.push("begin"); await Promise.resolve(); throw failure; },
+    input() { calls.push("input"); return null; }, command() {}, userinfo() {},
+    status() { calls.push("status"); return "infoResponse\n"; }, print(text) { printed.push(text); },
+  };
+  const network = new Q3ServerNetwork({ transport, host, random: () => 0 }), channel = new Netchannel("client", 77);
+  const send = (times: readonly number[]): void => {
+    const bytes = encodeClientMessage({ header: { serverId: 1, messageAcknowledge: 0, reliableAcknowledge: 0 }, commands: [],
+      movement: times.length === 0 ? null : { kind: "move-no-delta", commands: times.map(orderedWireCommand) } }, { checksumFeed: 0, serverCommand: () => "" });
+    for (const packet of channel.transmit(xorClientMessage(bytes, 0, () => ""))) client.send(transport.address, packet);
+  };
+  try {
+    client.send(transport.address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0")); await network.poll(0);
+    client.send(transport.address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0").slice(0, 13));
+    expect(await network.poll(1)).toEqual([]);
+    expect(printed.length).toBeGreaterThan(0);
+    send([]); await network.poll(2);
+    send([10, 20]);
+    client.send(transport.address, Uint8Array.of(255, 255, 255, 255, ...new TextEncoder().encode("getinfo")));
+    let caught: unknown;
+    try { await network.poll(3); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(Q3GameCallbackError);
+    if (!(caught instanceof Q3GameCallbackError)) throw new Error("Missing authoritative callback failure");
+    expect(caught.cause).toBe(failure);
+    expect(calls).toEqual(["begin"]);
+    expect(printed.some(text => text.includes(failure.message))).toBe(false);
+  } finally { await network.close(); hub.close(); }
 });
