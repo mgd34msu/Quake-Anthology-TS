@@ -1,4 +1,4 @@
-/* Synchronous command storage and dispatch adapted from quake-3-ts/core/commands.ts.
+/* Shared command storage and dispatch adapted from quake-3-ts/core/commands.ts.
  * Family rules follow Quake/QW cmd.c and Quake II qcommon/cmd.c.
  * Extended cvar commands follow q2repro src/common/cvar.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -84,6 +84,7 @@ export class CommandBuffer {
   private deferred: TextChunk[] = [];
   private waitFrames = 0;
   private aliasCount = 0;
+  private asyncDraining = false;
   private frame: ExecutionFrame | undefined;
   private tokens: readonly string[] = [];
   private batchBudget: { remaining: number; readonly signal: AbortSignal | undefined } | undefined;
@@ -242,8 +243,24 @@ export class CommandBuffer {
   }
 
   execute(): number {
-    if (isQ2(this.dialect)) this.aliasCount = 0;
+    if (this.asyncDraining) throw new Error("Command buffer is already draining asynchronously");
     let executed = 0;
+    for (const count of this.drain()) executed += count;
+    return executed;
+  }
+
+  async executeAsync(afterDispatch: () => Promise<void>): Promise<number> {
+    if (this.asyncDraining || this.frame !== undefined) throw new Error("Command buffer is already executing");
+    this.asyncDraining = true;
+    try {
+      let executed = 0;
+      for (const count of this.drain()) { executed += count; await afterDispatch(); }
+      return executed;
+    } finally { this.asyncDraining = false; }
+  }
+
+  private *drain(): Generator<number, void, void> {
+    if (isQ2(this.dialect)) this.aliasCount = 0;
     while (this.chunks.length > 0) {
       if (this.dialect === "q3" && this.waitFrames !== 0) { this.waitFrames = (this.waitFrames - 1) | 0; break; }
       const first = this.chunks[0];
@@ -256,10 +273,10 @@ export class CommandBuffer {
       }
       const line = buffer.slice(0, offset), consumed = offset === buffer.length ? offset : offset + 1;
       this.consume(consumed);
-      executed += this.dispatch(line, first.source, first.direct);
+      const count = this.dispatch(line, first.source, first.direct);
+      if (count !== 0) yield count;
       if (this.dialect !== "q3" && this.waitFrames !== 0) { this.waitFrames = 0; break; }
     }
-    return executed;
   }
 
   executeNow(text: string | null, source?: CommandContext): number {

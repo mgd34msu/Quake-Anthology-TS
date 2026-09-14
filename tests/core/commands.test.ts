@@ -226,3 +226,65 @@ test("Q2 private data stays out of macros, info and archives, and custom archive
   cvars.register("pending", "bad;old", Q2CvarFlag.Latch); cvars.setServerActive(true);
   commands.executeNow("setu pending valid"); expect((cvars.find("pending")?.flags ?? 0) & Q2CvarFlag.UserInfo).toBe(0);
 });
+
+test("awaitable command drain waits between guest fallback and later cvar dispatch", async () => {
+  const cvars = new CvarRegistry({ dialect: "q3", context: context() }); cvars.register("g_x", "1");
+  const gate = Promise.withResolvers<void>(), calls: string[] = []; let pending = false;
+  const commands = new CommandBuffer({ dialect: "q3", context: context(), cvars,
+    serverGame: command => { calls.push(`${command.argv.join(" ")}:${cvars.variableString("g_x")}`); pending = true; return true; } });
+  commands.append("guest first;set g_x 2;guest second\n");
+  const executing = commands.executeAsync(async () => { if (pending) { pending = false; await gate.promise; } });
+  expect(calls).toEqual(["guest first:1"]); expect(cvars.variableString("g_x")).toBe("1");
+  expect(() => commands.execute()).toThrow("already draining");
+  await expect(commands.executeAsync(async () => {})).rejects.toThrow("already executing");
+  gate.resolve(); expect(await executing).toBe(3);
+  expect(calls).toEqual(["guest first:1", "guest second:2"]); expect(commands.pendingText).toBe("");
+});
+
+test("awaited script insertion precedes the remaining buffer and keeps script provenance", async () => {
+  const script = Promise.withResolvers<string>(), calls: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context: context() });
+  let request: CommandContext | null = null;
+  commands.unregister("exec");
+  commands.register("exec", invocation => { request = invocation.source; return undefined; });
+  commands.register("note", invocation => {
+    calls.push(`${invocation.args[0]}:${invocation.source.origin.kind}:${invocation.direct}`);
+    if (invocation.args[0] === "script") invocation.executeNow("note nested");
+    return undefined;
+  });
+  commands.append("exec fixture;note tail\n");
+  const executing = commands.executeAsync(async () => {
+    const caller = request; request = null;
+    if (caller !== null) commands.insert(await script.promise, { session: caller.session, origin: { kind: "script", name: "fixture.cfg", caller: caller.origin } });
+  });
+  expect(calls).toEqual([]); expect(commands.pendingText).toBe("note tail\n");
+  script.resolve("note script"); expect(await executing).toBe(3);
+  expect(calls).toEqual(["script:script:false", "nested:script:false", "tail:local-seat:true"]);
+  expect(commands.executionContext).toBeUndefined(); expect(commands.tokenizedArguments).toEqual(["note", "tail"]);
+});
+
+test("awaitable drains preserve family wait and Q2 alias limits", async () => {
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const syncCalls: string[] = [], asyncCalls: string[] = [];
+    const sync = new CommandBuffer({ dialect, context: context() }), asynchronous = new CommandBuffer({ dialect, context: context() });
+    sync.register("note", invocation => { syncCalls.push(invocation.args.join(" ")); return undefined; });
+    asynchronous.register("note", invocation => { asyncCalls.push(invocation.args.join(" ")); return undefined; });
+    const text = "note first;wait 2;note last\n"; sync.append(text); asynchronous.append(text);
+    for (let frame = 0; frame < 3; frame++) {
+      expect(await asynchronous.executeAsync(async () => {})).toBe(sync.execute());
+      expect(asyncCalls).toEqual(syncCalls); expect(asynchronous.pendingText).toBe(sync.pendingText);
+    }
+  }
+  const output: string[] = [], commands = new CommandBuffer({ dialect: "q2-classic", context: context(), print: text => { output.push(text); } });
+  commands.defineAlias("cycle", "cycle\n"); commands.append("cycle\n");
+  expect(await commands.executeAsync(async () => {})).toBe(16); expect(output).toEqual(["ALIAS_LOOP_COUNT\n"]);
+});
+
+test("failed awaited action leaves later commands pending and releases drain ownership", async () => {
+  const calls: string[] = [], commands = new CommandBuffer({ dialect: "q3", context: context() });
+  commands.register("note", invocation => { calls.push(invocation.args[0] ?? ""); return undefined; });
+  commands.append("note first;note second\n");
+  await expect(commands.executeAsync(async () => { throw new Error("mounted read failed"); })).rejects.toThrow("mounted read failed");
+  expect(calls).toEqual(["first"]); expect(commands.pendingText).toBe("note second\n");
+  expect(commands.execute()).toBe(1); expect(calls).toEqual(["first", "second"]);
+});
