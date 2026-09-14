@@ -7,31 +7,36 @@ import { Q3_PROTOCOL } from "./adapters.ts";
 import { q3InfoValue } from "./admission.ts";
 import { decodeConnectionless, encodeConnectionlessText } from "./connectionless.ts";
 
-export function q3DiscoveryWire(keywords: readonly string[] = []): DiscoveryWire {
+export function q3DiscoveryWire(keywords: readonly string[] = [], protocol = 68): DiscoveryWire {
+  if (!Number.isSafeInteger(protocol) || protocol <= 0 || protocol > 0x7fffffff) throw new RangeError("Invalid Q3 master protocol");
   for (const keyword of keywords) if (/\s|\0/.test(keyword)) throw new RangeError("Q3 master keywords must be source words");
   return {
     query: (kind, challenge) => encodeConnectionlessText(`${kind === "info" ? "getinfo" : "getstatus"} ${challenge}`),
-    masterQuery: () => encodeConnectionlessText(`getservers 68${keywords.length === 0 ? "" : ` ${keywords.join(" ")}`}`),
+    masterQuery: () => encodeConnectionlessText(`getservers ${protocol}${keywords.length === 0 ? "" : ` ${keywords.join(" ")}`}`),
     heartbeat: () => encodeConnectionlessText("heartbeat QuakeArena-1\n"),
   };
 }
 export function decodeQ3MasterResponse(bytes: Uint8Array): readonly Ipv4Address[] {
+  return decodeQ3MasterPacket(bytes).addresses;
+}
+export function decodeQ3MasterPacket(bytes: Uint8Array): { readonly addresses: readonly Ipv4Address[]; readonly complete: boolean } {
   const prefix = new TextEncoder().encode("getserversResponse");
   if (bytes.length < prefix.length + 4 || ![0, 1, 2, 3].every(index => bytes[index] === 255)
     || !prefix.every((byte, index) => bytes[index + 4] === byte)) throw new RangeError("Not a Q3 master response");
   const result: Ipv4Address[] = [];
   let cursor = 4 + prefix.length;
   while (cursor < bytes.length && bytes[cursor] !== 92) cursor++;
-  while (cursor + 7 <= bytes.length && result.length < 256 && bytes[cursor] === 92) {
+  while (cursor < bytes.length && bytes[cursor] === 92) {
     cursor++;
-    if (bytes[cursor] === 69 && bytes[cursor + 1] === 79 && bytes[cursor + 2] === 84) break;
+    if (bytes[cursor] === 69 && bytes[cursor + 1] === 79 && bytes[cursor + 2] === 84) return { addresses: result, complete: true };
+    if (result.length >= 256) break;
     const a = bytes[cursor], b = bytes[cursor + 1], c = bytes[cursor + 2], d = bytes[cursor + 3], high = bytes[cursor + 4], low = bytes[cursor + 5];
     if (a === undefined || b === undefined || c === undefined || d === undefined || high === undefined || low === undefined) break;
     cursor += 6;
     if (bytes[cursor] !== 92) break;
     result.push({ kind: "ipv4", host: [a, b, c, d], port: (high << 8) | low });
   }
-  return result;
+  return { addresses: result, complete: false };
 }
 function payloadText(bytes: Uint8Array): string {
   let text = "";

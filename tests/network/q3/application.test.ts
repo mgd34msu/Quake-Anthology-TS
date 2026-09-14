@@ -4,6 +4,9 @@ import { Q3RendererResources } from "../../../src/content/q3/presentation/resour
 import { Draw2D } from "../../../src/text/draw2d.ts";
 import { QvmCgame } from "../../../src/compat/qvm/cgame.ts";
 import { QvmUi } from "../../../src/compat/qvm/ui.ts";
+import { Q3BrowserView } from "../../../src/network/q3/browser-view.ts";
+import { StartupServerBrowser } from "../../../src/app/bootstrap/server-browser.ts";
+import { ConfigStore } from "../../../src/settings/config.ts";
 import { Q3SceneRecorder } from "../../../src/content/q3/presentation/scene.ts";
 import { UnifiedAudio } from "../../../src/audio/index.ts";
 import { expect, test, spyOn } from 'bun:test';
@@ -205,15 +208,18 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
 
 test('production protocol68 shared remote frontend draws retail q3dm1 and travels without a simulation', async () => {
   const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+  const root = mkdtempSync(join(tmpdir(), 'q3-browser-wiring-'));
+  const browser = await StartupServerBrowser.open(new ConfigStore(join(root, 'browser-settings')));
   const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
   const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
   if (selected.kind !== 'run') throw new Error('Missing server options');
-  const prints: string[] = [], host = { print: (text: string): undefined => { prints.push(text); return undefined; } };
-  const server = await Application.open(selected.options, host);
+  const prints: string[] = [], host = { saveDirectory: join(root, 'saves'), serverBrowser: browser, print: (text: string): undefined => { prints.push(text); return undefined; } };
+  const server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-content') }, host);
   expect(server.simulation.q3Source()?.host.cvars.get('sv_pure')?.integerValue).toBe(1);
   const guestFrames = spyOn(QvmCgame.prototype, 'drawActiveFrame'), scenes = spyOn(Q3SceneRecorder.prototype, 'renderScene'), audio = spyOn(UnifiedAudio.prototype, 'play');
   const pure = spyOn(Q3ServerConnection.prototype, 'verifyPure'), shaders = spyOn(Q3RendererResources.prototype, 'registerShader'), pictures = spyOn(Draw2D.prototype, 'stretchPixels');
   const guestUiFrames = spyOn(QvmUi.prototype, 'refresh'), guestKeys = spyOn(QvmUi.prototype, 'keyEvent');
+  const browserCloses = spyOn(Q3BrowserView.prototype, 'close');
   let app: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
   const lifecycle: string[] = [], shutdownGate = Promise.withResolvers<void>();
   let pauseShutdown = false;
@@ -237,11 +243,28 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     const address = server.networkAddress; if (address === null) throw new Error('No listener');
     const parsed = parseApplicationCommand([...common, '--connect-q3', `localhost:${address.port}`, '--renderer', process.env["Q3_REMOTE_RENDERER"] ?? 'cpu', '--width', '640', '--height', '480', '--hidden']);
     if (parsed.kind !== 'run') throw new Error('Missing client options');
-    app = await RemoteApplication.open(parsed.options, host);
+    app = await RemoteApplication.open({ ...parsed.options, userContentRoot: join(root, 'client-content') }, host);
     const remote = app;
+    for (const name of ['serverstatus', 'ping', 'globalservers']) remote.clientCommands?.commands.executeNow(name);
     const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await server.step(50); await Bun.sleep(1); await remote.step(50); };
     for (let i = 0; i < 100 && remote.networkPhase !== 'active'; i++) await exchange();
     expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull();
+    expect(prints.some(text => text.includes('Not connected to a server.'))).toBe(true);
+    expect(prints.includes('usage: ping [server]\n')).toBe(true);
+    expect(prints.includes('usage: globalservers <master# 0-1> <protocol> [keywords]\n')).toBe(true);
+    expect(remote.serverBrowser).toBe(browser);
+    expect(remote.clientCommands?.cvars.variableValue('cl_maxPing')).toBe(800);
+    expect(remote.clientCommands?.cvars.variableValue('cl_serverStatusResendTime')).toBe(750);
+    for (const name of ['localservers', 'globalservers', 'ping', 'serverstatus'])
+      expect(remote.clientCommands?.commands.commandDocumentation(name)?.usage.startsWith(name)).toBe(true);
+    remote.clientCommands?.commands.executeNow(`ping localhost:${address.port}`);
+    remote.clientCommands?.commands.executeNow('serverstatus');
+    for (let tick = 0; tick < 30 && !prints.includes('Server settings:\n'); tick++) await exchange();
+    expect(prints.includes('Server settings:\n')).toBe(true);
+    expect(prints.some(text => text.includes('Players:\n'))).toBe(true);
+    const discovered = browser.q3Core.entry(address);
+    expect(discovered?.status?.map).toBe('q3dm1');
+    expect(typeof discovered?.pingMilliseconds).toBe('number');
     const player = remote.localPlayers[0], peer = server.networkClients[0];
     if (player === undefined || peer === undefined) throw new Error(`No player: ${prints.join('')}`);
     if (!(remote.remote instanceof Q3RemotePresentation)) throw new Error("Missing native Q3 presentation");
@@ -304,6 +327,12 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     expect(server.networkClients[0]?.client.equals(peer.client)).toBe(true);
     expect(remote.session.world).toBeNull();
     expect(lifecycle).toEqual(["ui-init:maps/q3dm1.bsp", "cg-shutdown:maps/q3dm1.bsp", "ui-shutdown:maps/q3dm1.bsp", "ui-init:maps/q3dm2.bsp"]);
+    expect(browserCloses.mock.calls.length).toBe(0);
+    for (let tick = 0; tick < 30 && remote.networkPhase !== 'active'; tick++) await exchange();
+    const previousStatuses = prints.filter(text => text === 'Server settings:\n').length;
+    remote.clientCommands?.commands.executeNow('serverstatus');
+    for (let tick = 0; tick < 30 && prints.filter(text => text === 'Server settings:\n').length === previousStatuses; tick++) await exchange();
+    expect(prints.filter(text => text === 'Server settings:\n').length).toBe(previousStatuses + 1);
     pauseShutdown = true;
     const closing = remote.close();
     expect(remote.close()).toBe(closing);
@@ -311,8 +340,10 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     expect(() => remote.input({ seat: player.seat.id, kind: "key", code: 119, down: true, repeat: false, timeMilliseconds: performance.now() })).toThrow("closed");
     shutdownGate.resolve();
     await closing;
+    expect(browserCloses.mock.calls.length).toBe(1);
+    expect(() => browser.assertOpen()).not.toThrow();
     expect(lifecycle.slice(-2)).toEqual(["cg-shutdown:maps/q3dm2.bsp", "ui-shutdown:maps/q3dm2.bsp"]);
-  } finally { shutdownGate.resolve(); await app?.close(); await server.close(); cgShutdown.mockRestore(); uiShutdown.mockRestore(); uiInit.mockRestore(); guestFrames.mockRestore(); scenes.mockRestore(); audio.mockRestore(); guestUiFrames.mockRestore(); guestKeys.mockRestore(); pure.mockRestore(); shaders.mockRestore(); pictures.mockRestore(); }
+  } finally { shutdownGate.resolve(); await app?.close(); await server.close(); await browser.close(); browserCloses.mockRestore(); cgShutdown.mockRestore(); uiShutdown.mockRestore(); uiInit.mockRestore(); guestFrames.mockRestore(); scenes.mockRestore(); audio.mockRestore(); guestUiFrames.mockRestore(); guestKeys.mockRestore(); pure.mockRestore(); shaders.mockRestore(); pictures.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 }, 60000);
 
 

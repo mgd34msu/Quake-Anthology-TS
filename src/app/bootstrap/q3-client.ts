@@ -24,6 +24,7 @@ import { freemem } from "node:os";
 import { anglesToAxis } from "../../core/math.ts";
 import type { SharedSceneQueries } from "../../world/collision/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
+import type { Q3BrowserView } from "../../network/q3/browser-view.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { createQ3ClientPresentation } from "../../content/q3/presentation/client.ts";
 import { cvarTable } from "../../content/q3/presentation/config.ts";
@@ -93,6 +94,7 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
     predictionCommand?(command: ActorCommand, sourceTimeMilliseconds: number): UserCommand; }
   | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
   | { readonly kind: "qvm"; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientConnection;
+      readonly browser: Q3BrowserView;
       readonly queries: SharedSceneQueries; readonly commandBuffer: CommandBuffer; readonly renderer: NativeRenderer;
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
@@ -194,7 +196,7 @@ export class ApplicationQ3Client {
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ seat, services, media, session, connection: o.connection, queries: o.queries,
-        commands: o.commandBuffer, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
+        commands: o.commandBuffer, browser: o.browser, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandBuffer.unregister(name); },
         scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });
       this.backend = { kind: "qvm", game };

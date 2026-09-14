@@ -11,6 +11,8 @@ import type { Q3ClientConnection } from '../../../network/q3/client.ts';
 import type { CommandBuffer } from '../../../core/commands/index.ts';
 import { QvmCgame } from '../../../compat/qvm/cgame.ts';
 import { QvmUi } from '../../../compat/qvm/ui.ts';
+import type { Q3BrowserView } from '../../../network/q3/browser-view.ts';
+import { qvmClientBrowserSyscall } from '../../../compat/qvm/client-browser-syscalls.ts';
 import { resolveQvmArtifact } from '../../../compat/qvm/artifacts.ts';
 import { qvmClientCommonSyscall } from '../../../compat/qvm/client-common-syscalls.ts';
 import { qvmClientCinematicSyscall } from '../../../compat/qvm/client-cinematic-syscalls.ts';
@@ -35,6 +37,7 @@ export interface ApplicationQvmClientOptions {
   readonly connection: Q3ClientConnection;
   readonly queries: SharedSceneQueries;
   readonly commands: CommandBuffer;
+  readonly browser: Q3BrowserView;
   readonly map: string;
   readonly now: () => number;
   readonly keyCatcher: () => number;
@@ -92,6 +95,7 @@ export class ApplicationQvmClient {
       }, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
       ?? qvmClientMarkSyscall(call, this.marks)
       ?? qvmClientCinematicSyscall(call, { cinematics: o.services.cinematics, draw: o.services.draw, developerPrint: session.print })
+      ?? qvmClientBrowserSyscall(call, o.browser)
       ?? o.scalar(call, this) ?? rejectQvmSyscall(call);
   }
   private async module(role: 'cgame' | 'ui'): Promise<QvmModuleOptions> {

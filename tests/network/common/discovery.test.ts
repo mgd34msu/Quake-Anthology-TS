@@ -28,6 +28,33 @@ function fixture() {
   return { browser, sent, challenge, response, request };
 }
 
+test("LAN discovery adds membership to existing favorites and cache restore retains live status", () => {
+  const f = fixture(); f.browser.add(address, "favorite");
+  f.browser.broadcast([ipv4Address([255, 255, 255, 255], 27960)], 10);
+  const reply = f.response(0);
+  expect(f.browser.receive(address, reply.status, reply.challenge, 20)).toBe(true);
+  expect(f.browser.entry(address)?.sources).toEqual(["favorite", "lan"]);
+  f.browser.restoreEntry({ address, sources: ["secondary-master"], status: { ...reply.status, name: "Stale cache" }, pingMilliseconds: 100, updatedAt: 0 });
+  expect(f.browser.entry(address)?.status?.name).toBe("Arena");
+  expect(f.browser.entry(address)?.sources).toEqual(["favorite", "lan", "secondary-master"]);
+  f.browser.removeSource(address, "secondary-master"); f.browser.removeFavorite(address);
+  expect(f.browser.entry(address)?.sources).toEqual(["lan"]);
+});
+
+test("owner-managed requests accept late replies until release while timed requests retain explicit deadlines", () => {
+  const f = fixture(), retained = f.browser.request(address, 0, "info", null), timed = f.browser.request(other, 0, "status", 100);
+  if (retained === null || timed === null) throw new Error("Missing request handles");
+  f.browser.expireQueries(3000, 3000);
+  expect(f.browser.requestResult(retained)?.kind).toBe("pending"); expect(f.browser.requestResult(timed)?.kind).toBe("expired");
+  const reply = f.response(0);
+  expect(f.browser.receive(address, reply.status, reply.challenge, 4000)).toBe(true);
+  expect(f.browser.requestResult(retained)).toMatchObject({ kind: "completed", pingMilliseconds: 4000 });
+  f.browser.releaseRequest(retained); expect(f.browser.requestResult(retained)).toBeNull();
+  const released = f.browser.request(address, 5000, "info", null); if (released === null) throw new Error("Missing released request");
+  const late = f.response(2); f.browser.releaseRequest(released);
+  expect(f.browser.receive(address, late.status, late.challenge, 9000)).toBe(false);
+});
+
 test("independent info/status handles complete in either order with decoded player results", () => {
   for (const statusFirst of [true, false]) {
     const f = fixture(), info = f.request(10), status = f.request(20, "status");

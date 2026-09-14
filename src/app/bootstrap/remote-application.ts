@@ -51,6 +51,7 @@ import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { ApplicationInputCommandOwner, LocalPlayer } from "./input.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
+import { Q3BrowserView } from "../../network/q3/browser-view.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
 import { q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
@@ -122,6 +123,7 @@ export class RemoteApplication {
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
   private q3InitialViewPending = false;
   private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
+  private q3Browser: Q3BrowserView | null = null;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
   private readonly reportedEffectGaps = new Set<string>();
@@ -149,6 +151,9 @@ export class RemoteApplication {
         cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("model", `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
         cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
+        cvars.register("cl_maxPing", "800", CvarFlag.Archive);
+        cvars.register("cl_serverStatusResendTime", "750", 0);
+        cvars.register("sv_master1", "master.quake3arena.com", 0);
       }
       if (family === "qw") {
         cvars.register("noskins", "0", CvarFlag.Archive); cvars.register("baseskin", "base", CvarFlag.Archive);
@@ -267,6 +272,7 @@ export class RemoteApplication {
         ? { kind: "owned", browser: await StartupServerBrowser.open(new ConfigStore(browserSettings)) }
         : { kind: "borrowed", browser: host.serverBrowser };
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity, browser);
+      application.initializeQ3Browser();
       await application.viewSettings.load(application.inputConfig);
       const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
       if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
@@ -304,6 +310,50 @@ export class RemoteApplication {
   private print(text: string, source?: CommandContext): void {
     if (this.controls === null) this.host.print(text);
     else this.controls.print(text, source ?? this.clientCommands?.commands.executionContext);
+  }
+
+  private initializeQ3Browser(): void {
+    if (this.options.network.kind !== "q3-client") return;
+    const input = this.clientCommands;
+    if (input === null) throw new Error("Q3 browser requires the client command owner");
+    this.q3Browser = new Q3BrowserView({ browser: this.serverBrowser, now: () => performance.now(),
+      maxPing: () => input.cvars.variableValue("cl_maxPing"), statusResendTime: () => input.cvars.variableValue("cl_serverStatusResendTime"),
+      print: text => this.print(text) });
+    for (const entry of [
+      { name: "localservers", summary: "Discover Quake III servers on the local network.", usage: "localservers", examples: ["localservers"] },
+      { name: "globalservers", summary: "Request Quake III servers from the configured master.", usage: "globalservers <master# 0-1> <protocol> [keywords]", examples: ["globalservers 0 68"] },
+      { name: "ping", summary: "Query a Quake III server's latency and information.", usage: "ping <server>", examples: ["ping localhost:27960"] },
+      { name: "serverstatus", summary: "Print a Quake III server's settings and players.", usage: "serverstatus [server]", examples: ["serverstatus", "serverstatus localhost:27960"] },
+    ]) input.commands.register(entry.name, invocation => this.queueCommand(entry.name, invocation.args, null), entry);
+  }
+
+  private async browserCommand(name: string, args: readonly string[], print: (text: string) => void): Promise<boolean> {
+    const browser = this.q3Browser;
+    if (browser === null) return false;
+    switch (name) {
+      case "localservers": print("Scanning for servers on the local network...\n"); browser.localServers(); return true;
+      case "globalservers": {
+        if (args.length < 2) { print("usage: globalservers <master# 0-1> <protocol> [keywords]\n"); return true; }
+        const cvars = this.clientCommands?.cvars;
+        if (cvars === undefined) throw new Error("Q3 browser requires client cvars");
+        const keywords = args.slice(2);
+        if (cvars.variableValue("fs_restrict") !== 0) keywords.push("demo");
+        print("Requesting servers from the master...\n");
+        await browser.globalServers(nativeAtoi(args[0] ?? "") === 1 ? 1 : 2, cvars.variableString("sv_master1"), nativeAtoi(args[1] ?? ""), keywords);
+        return true;
+      }
+      case "ping":
+        if (args.length !== 1) print("usage: ping [server]\n");
+        else await browser.ping(args[0] ?? "");
+        return true;
+      case "serverstatus": {
+        const server = args.length === 1 ? args[0] : this.network.phase === "active" && this.options.network.kind === "q3-client" ? this.options.network.remote : undefined;
+        if (server === undefined) print("Not connected to a server.\nUsage: serverstatus [server]\n");
+        else await browser.serverStatusCommand(server);
+        return true;
+      }
+      default: return false;
+    }
   }
 
   private async loadFrontend(content: LoadedApplicationContent): Promise<RemoteWorldFrontend> {
@@ -570,11 +620,12 @@ export class RemoteApplication {
     try {
       if (remote instanceof Q3RemotePresentation) {
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
+        if (this.q3Browser === null) throw new Error("Q3 guest seat requires its application browser");
         q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent: () => {
           if (!seatAttached) assertCurrent();
           else if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Q3 cgame belongs to a retired remote world");
         }, source: remote.cgameSource, connection,
-          commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer,
+          commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer, browser: this.q3Browser,
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
           assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
@@ -622,6 +673,7 @@ export class RemoteApplication {
       };
       try {
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); continue; }
+        if (await this.browserCommand(command.name, command.args, print)) continue;
         if (this.network instanceof QwClientNetwork && (command.name === "skins" || command.name === "allskins")) {
           if (command.name === "allskins") this.qwAllSkins = command.args[0] ?? '';
           await this.network.refreshSkins(); continue;
@@ -656,6 +708,7 @@ export class RemoteApplication {
     this.stepping = true;
     try {
       this.serverBrowser.poll();
+      this.q3Browser?.poll();
       this.sourceEvents = []; this.unhandledEffects = [];
       this.elapsed += elapsedMilliseconds;
       if (this.controls !== null) this.controls.pump();
@@ -740,11 +793,14 @@ export class RemoteApplication {
   }
   private async closeOwned(): Promise<void> {
     const errors: unknown[] = [];
+    const closingDuringStep = this.stepping;
+    if (closingDuringStep) { try { this.q3Browser?.close(); } catch (error) { errors.push(error); } }
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
-    if (!this.stepping) {
+    if (!closingDuringStep) {
       try { await this.presentation?.q3Client?.shutdown(); } catch (error) { errors.push(error); }
     }
+    if (!closingDuringStep) { try { this.q3Browser?.close(); } catch (error) { errors.push(error); } }
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
     const frontend = this.frontend; this.frontend = null;
     try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }

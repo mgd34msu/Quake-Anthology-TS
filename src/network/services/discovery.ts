@@ -13,7 +13,7 @@ export interface ServerStatus {
   readonly playerDetails: readonly { readonly name: string; readonly score: number; readonly ping: number }[];
   readonly wire: WireSelection;
 }
-export type DiscoverySource = "lan" | "master" | "favorite" | "direct";
+export type DiscoverySource = "lan" | "master" | "secondary-master" | "favorite" | "direct";
 export interface BrowserEntry {
   readonly address: NetworkAddress;
   readonly sources: readonly DiscoverySource[];
@@ -44,6 +44,7 @@ interface PendingBroadcast { readonly challenge: string; readonly sentAt: number
 interface PendingQuery extends DiscoveryRequestDetails, PendingBroadcast {
   readonly handle: DiscoveryRequestHandle;
   readonly retainResult: boolean;
+  readonly timeoutMilliseconds: number | null | undefined;
 }
 
 /** Codecs retain source text/opcodes. This table never guesses a game's protocol. */
@@ -62,10 +63,18 @@ export class ServerBrowser {
     this.entries.set(key, entry); return entry;
   }
   removeFavorite(address: NetworkAddress): void {
+    this.removeSource(address, "favorite");
+  }
+  removeSource(address: NetworkAddress, source: DiscoverySource): void {
     const key = addressKey(address), entry = this.entries.get(key);
     if (entry === undefined) return;
-    const sources = entry.sources.filter(source => source !== "favorite");
+    const sources = entry.sources.filter(value => value !== source);
     if (sources.length === 0) this.entries.delete(key); else this.entries.set(key, { ...entry, sources });
+  }
+  restoreEntry(entry: BrowserEntry): void {
+    const key = addressKey(entry.address), existing = this.entries.get(key);
+    this.entries.set(key, existing === undefined ? entry : { ...(existing.status === null ? entry : existing),
+      sources: [...new Set([...existing.sources, ...entry.sources])] });
   }
   entry(address: NetworkAddress): BrowserEntry | null { return this.entries.get(addressKey(address)) ?? null; }
   list(): readonly BrowserEntry[] { return [...this.entries.values()]; }
@@ -77,8 +86,9 @@ export class ServerBrowser {
     }
     return this.startRequest(address, now, kind, false) !== null;
   }
-  request(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info"): DiscoveryRequestHandle | null {
-    return this.startRequest(address, now, kind, true);
+  request(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info", timeoutMilliseconds?: number | null): DiscoveryRequestHandle | null {
+    if (timeoutMilliseconds !== undefined && timeoutMilliseconds !== null && (!Number.isFinite(timeoutMilliseconds) || timeoutMilliseconds < 0)) throw new RangeError("Invalid discovery request timeout");
+    return this.startRequest(address, now, kind, true, timeoutMilliseconds);
   }
   requestResult(handle: DiscoveryRequestHandle): DiscoveryRequestResult | null { return this.results.get(handle) ?? null; }
   cancelRequest(handle: DiscoveryRequestHandle): boolean {
@@ -91,9 +101,9 @@ export class ServerBrowser {
     this.queries.delete(handle);
     this.results.delete(handle);
   }
-  private startRequest(address: NetworkAddress, now: number, kind: DiscoveryRequestKind, retainResult: boolean): DiscoveryRequestHandle | null {
+  private startRequest(address: NetworkAddress, now: number, kind: DiscoveryRequestKind, retainResult: boolean, timeoutMilliseconds?: number | null): DiscoveryRequestHandle | null {
     const handle = Symbol("discovery request"), challenge = String(++this.querySequence);
-    const pending: PendingQuery = { handle, challenge, address, requestKind: kind, sentAt: now, retainResult };
+    const pending: PendingQuery = { handle, challenge, address, requestKind: kind, sentAt: now, retainResult, timeoutMilliseconds };
     this.queries.set(handle, pending);
     if (retainResult) this.results.set(handle, Object.freeze({ kind: "pending", address, requestKind: kind, sentAt: now }));
     try {
@@ -118,7 +128,7 @@ export class ServerBrowser {
     const pending = direct ?? broadcast;
     if (pending === undefined) return false;
     const pingMilliseconds = Math.max(0, now - pending.sentAt);
-    const old = this.entries.get(key) ?? this.add(address, direct === undefined ? "lan" : "direct", now);
+    const old = direct === undefined ? this.add(address, "lan", now) : this.entries.get(key) ?? this.add(address, "direct", now);
     this.entries.set(key, { ...old, status, pingMilliseconds, updatedAt: now });
     if (direct !== undefined) this.finishRequest(direct, { kind: "completed", address: direct.address,
       requestKind: direct.requestKind, sentAt: direct.sentAt, status, pingMilliseconds, completedAt: now });
@@ -138,7 +148,7 @@ export class ServerBrowser {
     const expired: NetworkAddress[] = [];
     for (const [key, query] of this.broadcasts) if (now - query.sentAt >= timeoutMilliseconds) this.broadcasts.delete(key);
     for (const query of this.queries.values()) {
-      if (now - query.sentAt < timeoutMilliseconds) continue;
+      if (query.timeoutMilliseconds === null || now - query.sentAt < (query.timeoutMilliseconds ?? timeoutMilliseconds)) continue;
       const entry = this.entries.get(addressKey(query.address));
       if (entry !== undefined && !expired.some(address => addressKey(address) === addressKey(entry.address))) expired.push(entry.address);
       this.finishRequest(query, { kind: "expired", address: query.address, requestKind: query.requestKind, sentAt: query.sentAt });
