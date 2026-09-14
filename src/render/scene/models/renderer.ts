@@ -174,6 +174,7 @@ export class SceneModelRenderer {
     const entityLights = new Map<SceneEntity, EntityLighting>();
     const optionCache = new Map<SceneEntity, ModelSourceOptions>();
     const vertexLights = new Map<SceneEntity, Map<Vec3, Vec3>>();
+    const shadeBases = new Map<SceneEntity, { readonly yaw: number; readonly row: number; direction: Vec3 | null }>();
     const options: SourceOptions = entity => {
       let value = optionCache.get(entity);
       if (value === undefined) { value = sourceOptions(entity); optionCache.set(entity, value); }
@@ -231,7 +232,12 @@ export class SceneModelRenderer {
         lightCache.set(entity, light);
       }
       if (entity.flags.kind === "q2" && q2ShellColor(entity.flags.bits) !== null) return light;
-      const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
+      let basis = shadeBases.get(entity);
+      if (basis === undefined) {
+        const yaw = Math.atan2(entity.transform.axis[0].y, entity.transform.axis[0].x), row = Math.trunc(yaw * 16 / (2 * Math.PI)) & 15;
+        basis = { yaw, row, direction: null }; shadeBases.set(entity, basis);
+      }
+      const { row } = basis;
       const index = normalIndices.get(normal.x)?.get(normal.y)?.get(normal.z);
       let shade = index === undefined ? null : r_avertexnormal_dots[row * 256 + index] ?? null;
       if (previousNormalIndex !== undefined && entity.pose.kind === "frame" && shade !== null) {
@@ -239,7 +245,8 @@ export class SceneModelRenderer {
         shade = shade * (1 - entity.pose.backLerp) + oldShade * entity.pose.backLerp;
       }
       if (shade === null) {
-        const direction = normalize3({ x: Math.cos(-yaw), y: Math.sin(-yaw), z: 1 }), d = dot3(normal, direction);
+        if (basis.direction === null) basis.direction = normalize3({ x: Math.cos(-basis.yaw), y: Math.sin(-basis.yaw), z: 1 });
+        const d = dot3(normal, basis.direction);
         shade = 1 + (d < 0 ? d * 0.3 : d);
       }
       const result = scale3(light, shade);

@@ -14,6 +14,7 @@ import { decodePcx, encodePng } from "../../src/formats/images/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene, perspectiveProjection } from "../../src/render/scene/index.ts";
 import { SceneModelRenderer, prepareSceneEntity } from "../../src/render/scene/models/index.ts";
 import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
+import { anglesToAxis } from "../../src/core/math.ts";
 
 async function fixture() {
   const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak");
@@ -168,6 +169,17 @@ test("retained Q2 aliases select by each eye, preserve native bounds and commit 
       await renderer.preload([attached]);
       const input = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: f.identity.seat(0) },
         clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
+      const turning = { ...near.entity, model: skeletal, flags: { kind: "q2", bits: 8 },
+        transform: { ...entity.transform, axis: anglesToAxis({ x: 0, y: 90, z: 0 }) } } satisfies SceneEntity;
+      const still = { ...turning, transform: { ...turning.transform, axis: entity.transform.axis } };
+      const before = renderer.prepare([turning], input), fixed = renderer.prepare([still], input);
+      expect(before.length).toBeGreaterThan(0); expect(fixed.length).toBeGreaterThan(0);
+      expect(renderer.prepare([turning, still], input)).toEqual([...before, ...fixed]);
+      turning.transform.axis = anglesToAxis({ x: 0, y: -90, z: 0 });
+      const after = renderer.prepare([turning], input);
+      expect(after).toEqual(renderer.prepare([{ ...turning, transform: { ...turning.transform } }], input));
+      expect(after.flatMap(batch => batch.vertices.map(vertex => vertex.color)))
+        .not.toEqual(before.flatMap(batch => batch.vertices.map(vertex => vertex.color)));
       expect(prepareSceneEntity(attached, { camera, timeSeconds: 0 }).attachments).toHaveLength(1);
       expect(renderer.prepareShadowCasters([attached], { ...input, camera: { ...camera, origin: { x: -4096, y: 0, z: 0 } } })).toHaveLength(2);
       const eager = renderer.prepareShadowCasters([attached], input);
