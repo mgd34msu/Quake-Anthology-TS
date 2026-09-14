@@ -24,6 +24,22 @@ function preset(content: ContentId): LaunchPreset {
 }
 
 describe("installed content catalog", () => {
+  test("catalog read retains mounted content until asynchronous reads finish", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "quake-catalog-read-"));
+    try {
+      await mkdir(resolve(root, "q3a/baseq3"), { recursive: true });
+      await writeFile(resolve(root, "q3a/baseq3/game.cfg"), "set g_gametype 4\n");
+      const base = expectedProducts.find(product => product.id === "q3-baseq3");
+      if (base === undefined) throw new Error("Missing base fixture expectation");
+      const catalog = await discoverInstalledContent({ corpusRoot: root, discoverMods: false,
+        products: [{ ...base, requiredContentArchives: [], requiredPrograms: [], mapWitness: null }] });
+      const product = catalog.require(base.id);
+      expect(new TextDecoder().decode(await catalog.read(product.id, "game.cfg"))).toBe("set g_gametype 4\n");
+      await expect(catalog.read(product.id, "missing.cfg")).rejects.toThrow();
+      expect(new TextDecoder().decode(await catalog.read(product.id, "game.cfg"))).toBe("set g_gametype 4\n");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   test.skipIf(!existsSync(corpusRoot))("application rejects resolved guest artifacts instead of substituting TypeScript execution", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
     const cases: readonly { readonly game: string; readonly map: string; readonly module: (owner: ProviderReference) => ExecutionSelection }[] = [

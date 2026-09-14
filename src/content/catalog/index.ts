@@ -322,7 +322,7 @@ export class InstalledCatalog {
     const mounts = await this.mountsFor(content);
     const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
     using opened = await openMountPlan(plan);
-    return opened.read(path);
+    return await opened.read(path);
   }
 
   async authoredStartsFor(id: ContentId | string): Promise<AuthoredStartCatalog | null> {
