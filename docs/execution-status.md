@@ -8,7 +8,7 @@ Verified installation on 2026-09-14 at `07:40:08.892Z` (02:40 CDT): `/home/buzzk
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
 ```
 
-This installation also includes Q3 model-material preload `003521b`, redundant packing-zero removal `b2aeb48`, reproducible monster-table generation `8e53aef`, and scalar model transforms `46d1468`. The transform pair retained bit-exact native color and shadow-atlas output; mean time changed from 59.589 to 59.049 ms while p95 worsened from 88.707 to 92.538 ms, so no reliable speed gain is established. Pending QW and Q2 cleanup work is neither accepted nor installed.
+This installation also includes Q3 model-material preload `003521b`, redundant packing-zero removal `b2aeb48`, reproducible monster-table generation `8e53aef`, and scalar model transforms `46d1468`. The transform pair retained bit-exact native color and shadow-atlas output; mean time changed from 59.589 to 59.049 ms while p95 worsened from 88.707 to 92.538 ms, so no reliable speed gain is established. The later QW and Q2 source updates recorded below are accepted but not installed.
 
 Recent accepted fixes are included:
 
@@ -66,6 +66,8 @@ Accepted source `9683d9dc9a153f00515c27f6e370521f61527a7a` caches immutable loca
 Accepted source `58a3448bbac8c35842d6be5a97881517ebcb8439` reuses model-lighting yaw rows and directions once per entity, retaining the numeric expressions and the required rerelease TypeScript donor behavior. Root passed the retained test with 34 assertions; retained family-lighting checks and actual CPU/GL model captures also passed. No timing gain is claimed. This unit is now included in the installed executable. The ceiling-object identification is resolved below.
 
 The frozen `9683d9d` ceiling probe identifies the tan detail as static world-model-0 faces 6047, 6270, and 6044 using `e1u1/broken2_3`. The globes match authored `target_explosion` positions with model scale 1; recorded models and events do not support Scrag or machinegun-fire causation. This establishes object provenance, not donor pixel parity for lighting or animation. Evidence: `.artifacts/resume-20260913/classic-ceiling-effects/report.md`.
+
+Accepted `820173d068c92dfb9e735a39d43d0df82029b6f4` retains server-selected ASCII QuakeWorld mod directories through the common catalog, with mod → qw → id1 lookup, case-preserved writes, shared skins, travel, cancellation, and reopen behavior. Root passed 11 native client/download and catalog tests with 187 assertions. This does not qualify retail peers, arbitrary mods, or full hosting. Accepted `751193f85d6a8abfffed6d818eab6531fade72ce` replaces a synthetic Q2 warmup pose with the shared renderer’s `preloadModel(asset)` call; three existing failure/retry tests passed with 12 assertions. Both changes remain outside the installed `46d1468` executable.
 
 ## Historical execution records
 

@@ -48,7 +48,7 @@ Complete NQ 15/666/999, QuakeWorld, Q2 classic/enhanced/rerelease and Q3 in both
 
 Accepted `66e6136` provides bounded native protocol 28 QW remote admission, transfer queues and shared rendering/prediction. Dedicated base-protocol-28 hosting is now accepted in `88f84c10`; local graphical hosting, spectator/extensions, split-screen, demos, full prediction/effects and complete host download policy remain open. No requirement closes.
 
-Accepted `066ab042` adds QW custom skins and editable saved remote identity; `0c0499c3` supplies shared indexed color/crop semantics. Local source-color forwarding is accepted in `a8f9e2f`, but local setup/color-console and cross-source appearance ownership remain open. Download scope remains base qw/id1, with mod gamedir and host denial-policy work outstanding.
+Accepted `066ab042` adds QW custom skins and editable saved remote identity; `0c0499c3` supplies shared indexed color/crop semantics. Local source-color forwarding is accepted in `a8f9e2f`, but local setup/color-console and cross-source appearance ownership remain open. Accepted `820173d` adds server-selected ASCII mod gamedir downloads through the common catalog, including travel and reopen. Arbitrary-mod qualification and complete host denial policy remain outstanding.
 
 Accepted `5a0e1848` adds bounded classic-id1 NQ 15/666/999 application profiles; remaining product and wire qualification stays open. Accepted `36f395ee` closes shared device persistence, including custom bindings and per-seat haptic enable/strength. Full controller preview and physical-device qualification remain separate.
 
