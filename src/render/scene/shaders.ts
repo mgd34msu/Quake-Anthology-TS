@@ -12,6 +12,7 @@ import type { MaterialPicture } from "../../text/draw2d.ts";
 /** Named shaders are registered separately for each lightmap, as R_FindShader does. */
 export class SceneShaderRegistry {
   private readonly programs = new Map<string, ShaderRegistrationProgram>();
+  private readonly cinematicPrograms = new Set<string>();
   private readonly compiled = new Map<string, Promise<CompiledMaterial>>();
   private readonly remaps = new Map<string, { readonly name: string; readonly timeOffset: number }>();
   private readonly pictureOrders = new Map<CompiledMaterial, number>();
@@ -28,11 +29,16 @@ export class SceneShaderRegistry {
   addScript(text: string, source = "<shader>"): void {
     for (const entry of inspectShaderScript(text, source).entries) {
       const name = this.key(entry.name);
-      if (!this.programs.has(name)) this.programs.set(name, entry.program);
+      if (!this.programs.has(name)) {
+        this.programs.set(name, entry.program);
+        const definition = entry.textResult.kind === "accepted" ? entry.textResult.definition : entry.textResult.partial;
+        if (definition.stages.some(stage => stage.map.kind === "video")) this.cinematicPrograms.add(name);
+      }
     }
   }
 
   hasAuthored(name: string): boolean { return this.programs.has(this.key(name)); }
+  hasCinematic(name: string): boolean { return this.cinematicPrograms.has(this.key(name)); }
 
   remap(original: string, replacement: string, timeOffset = 0): void {
     const key = this.key(original);
@@ -56,6 +62,9 @@ export class SceneShaderRegistry {
       const state: { current: CompiledMaterial; readonly value: CompiledMaterial } = { current, value: { get registered() { return state.current.registered; },
         get finished() { return state.current.finished; }, get material() { return state.current.material; } } };
       this.retained.set(key, state); return state.value;
+    }).catch((error: unknown) => {
+      if (this.compiled.get(key) === pending) this.compiled.delete(key);
+      throw error;
     });
     this.compiled.set(key, pending);
     return pending;
@@ -65,6 +74,7 @@ export class SceneShaderRegistry {
   replacement(textures: SceneTextureLoader): SceneShaderRegistry {
     const result = new SceneShaderRegistry(textures, this.profile, this.playCinematic, this.family);
     for (const [key, program] of this.programs) result.programs.set(key, program);
+    for (const key of this.cinematicPrograms) result.cinematicPrograms.add(key);
     for (const [key, remap] of this.remaps) result.remaps.set(key, remap);
     return result;
   }

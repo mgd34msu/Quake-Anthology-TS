@@ -12,6 +12,94 @@ import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { anglesToAxis, identityMat4 } from "../../src/core/math.ts";
 import { createSceneQueries } from "../../src/world/collision/index.ts";
+import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
+import { Q3ApplicationEffects } from "../../src/app/bootstrap/effects/q3.ts";
+
+test("cinematic metadata preserves normalized first definitions and replacements", async () => {
+  const identity = createIdentityOwner("effect-cinematic");
+  const images = new SceneImageRegistry({ identity: Symbol("effect-cinematic"), session: identity.session, generation: 0 });
+  const textures = new SceneTextureLoader(images, { read: async () => null });
+  let plays = 0;
+  const shaders = new SceneShaderRegistry(textures, undefined, async () => { plays++; return null; });
+  try {
+    shaders.addScript("Fx/Movie { { videoMap intro.roq } }\nfx/still { { map $whiteimage } }");
+    shaders.addScript("fx/movie { { map $whiteimage } }\nfx/still { { videoMap later.roq } }");
+    expect(shaders.hasCinematic("FX/MOVIE.tga")).toBe(true);
+    expect(shaders.hasCinematic("fx/still")).toBe(false);
+    expect(shaders.replacement(textures).hasCinematic("fx/movie")).toBe(true);
+    expect(plays).toBe(0);
+    await shaders.register("fx/movie");
+    expect(plays).toBe(1);
+  } finally { textures.close(); images.close(); }
+});
+
+test("failed effect shader registration retries its image provider", async () => {
+  const identity = createIdentityOwner("effect-shader-retry");
+  const images = new SceneImageRegistry({ identity: Symbol("effect-shader-retry"), session: identity.session, generation: 0 });
+  let fail = true;
+  const bytes = encodePng(1, 1, new Uint8Array([255, 255, 255, 255]));
+  const textures = new SceneTextureLoader(images, { read: async path => {
+    if (fail) { fail = false; throw Error("effect image unavailable"); }
+    return { bytes, source: { kind: "generated", name: path } };
+  } });
+  const shaders = new SceneShaderRegistry(textures);
+  try {
+    shaders.addScript("fx/retry { { map retry.png } }");
+    await expect(shaders.register("fx/retry")).rejects.toThrow("effect image unavailable");
+    const material = await shaders.register("fx/retry");
+    expect(await shaders.register("fx/retry")).toBe(material);
+  } finally { textures.close(); images.close(); }
+});
+
+test("Q3 loading media stays empty and retries a deferred cinematic at actual use", async () => {
+  const temporary = await mkdtemp("/tmp/quake-q3-effect-precache-");
+  try {
+    const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--dedicated", "--user-content-root", temporary]);
+    if (command.kind !== "run") throw Error("Expected game");
+    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q3-effect-precache");
+    const assets = new ApplicationAssets(content, { identity: Symbol("q3-effect-precache"), session: identity.session, generation: 0 });
+    try {
+      await assets.loadWorld();
+      const source = content.recipe.map.entities.content, provider = await assets.provider(source), queries = createSceneQueries(content.world);
+      const guard = spyOn(provider.shaders, "hasCinematic").mockImplementation(name => name === "waterBubble");
+      const register = spyOn(provider.shaders, "register");
+      try {
+        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, true)).rejects.toThrow("cinematic deferred");
+        expect(register).not.toHaveBeenCalled();
+      } finally { guard.mockRestore(); register.mockRestore(); }
+      const effects = await Q3ApplicationEffects.create(assets, queries, source, () => false, true);
+      try {
+        expect(effects.state.time).toBe(0);
+        expect(effects.drainSounds()).toHaveLength(0);
+        const warm = spyOn(effects, "loadWeapons");
+        try {
+          const origin = { x: 0, y: 0, z: 0 };
+          await effects.ballistic({ kind: "fire", actor: identity.actor(1, 0), weapon: 2, origin, end: origin,
+            normal: origin, target: null, surfaceFlags: 0, timeMilliseconds: 1000, volume: 1 });
+          expect(warm).not.toHaveBeenCalled();
+          expect(effects.state.time).toBe(1000);
+          expect(effects.drainSounds().length).toBeGreaterThan(0);
+        } finally { warm.mockRestore(); }
+      } finally { effects.close(); }
+      const shared = new ApplicationEffects(assets, queries, () => false);
+      const create = spyOn(Q3ApplicationEffects, "create");
+      const frame = spyOn(Q3ApplicationEffects.prototype, "frame");
+      const close = spyOn(Q3ApplicationEffects.prototype, "close");
+      try {
+        expect(await shared.preloadTransientResources()).toHaveLength(0);
+        expect(create).not.toHaveBeenCalled();
+        shared.frame({ origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+          projection: identityMat4(), viewport: { x: 0, y: 0, width: 64, height: 64 }, clip: { kind: "none" } });
+        expect(frame).not.toHaveBeenCalled();
+        expect(shared.drainSounds()).toHaveLength(0);
+        shared.close();
+        expect(close).not.toHaveBeenCalled();
+        shared.close();
+        expect(close).not.toHaveBeenCalled();
+      } finally { shared.close(); create.mockRestore(); frame.mockRestore(); close.mockRestore(); }
+    } finally { assets.close(); await content.close(); }
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+}, 60000);
 
 test("texture rejection retries while absent null remains cached", async () => {
   const identity = createIdentityOwner("texture-retry");

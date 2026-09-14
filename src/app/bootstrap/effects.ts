@@ -74,6 +74,7 @@ export class ApplicationEffects {
   private readonly images = new Map<"q1" | "q2", RendererImage>();
   private readonly q3 = new Map<ContentId, Q3ApplicationEffects>();
   private readonly q3Weapons = new Map<ContentId, Q3ApplicationEffects>();
+  private readonly preparedQ3Weapons = new Map<ContentId, Q3ApplicationEffects>();
   private readonly q3WeaponTimes = new Map<ContentId, number>();
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
   private pending: SimulationPresentationEvent[] = [];
@@ -126,6 +127,16 @@ export class ApplicationEffects {
       if ("source" in target) contents.add(target.source.content);
     }
     const failures: { content: ContentId; path: string; error: string }[] = [];
+    for (const content of new Set(recipe.weapons.map(weapon => weapon.content))) {
+      if (content === recipe.map.entities.content || this.assets.content.catalog.product(content).expectation.family !== "q3"
+        || this.preparedQ3Weapons.has(content) || this.q3Weapons.has(content)) continue;
+      try {
+        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, true);
+        this.preparedQ3Weapons.set(content, effects);
+      } catch (error: unknown) {
+        failures.push({ content, path: "Q3 effect media", error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     for (const content of contents) {
       if (this.assets.content.catalog.product(content).expectation.family !== "q2") continue;
       for (const path of Object.values(Q2_TRANSIENT_MODELS)) {
@@ -265,7 +276,11 @@ export class ApplicationEffects {
     if (source.kind === "q3-ballistics") {
       if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
       let effects = this.q3Weapons.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer); this.q3Weapons.set(source.content, effects); }
+      if (effects === undefined) {
+        effects = this.preparedQ3Weapons.get(source.content) ?? await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer);
+        this.preparedQ3Weapons.delete(source.content);
+        this.q3Weapons.set(source.content, effects);
+      }
       await effects.ballistic(source.event);
       return;
     }
@@ -567,7 +582,8 @@ export class ApplicationEffects {
     if (this.closed) return;
     this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];
     this.staticBrushes.length = 0; this.styles = [];
-    for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) effects.close();
+    for (const effects of [...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()]) effects.close();
+    this.preparedQ3Weapons.clear();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
     this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
