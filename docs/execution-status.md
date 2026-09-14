@@ -2,7 +2,7 @@
 
 ## Installed executable and recent fixes
 
-Verified installation on 2026-09-14 at `00:03:39.651Z` (September 13 locally): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`, tree `b7929755aebc50ac8480e27fc3b1b5df61f9690b`. The executable is 121,448,576 bytes with mode `0755` and SHA-256 `467e501f0023919f23c383c5865c387c79104caffd81f7afb33c10915dddfaad`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+Verified installation on 2026-09-14 at `00:46:20.349Z` (September 13 locally): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `dd6d06203f931924148122aeedb6e8655595b139`, tree `0e4722548fdc524119aa71b134574ade5f7f3170`. The executable is 121,452,672 bytes with mode `0755` and SHA-256 `df02dd42d7ad82f6f21a6f37f13ba116ea1d43f11a140fd58c67e3731688169d`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
 
 ```sh
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
@@ -16,19 +16,23 @@ Recent accepted fixes are included:
 - `f5df800` packs shadow positions directly into one Float64Array. All packed bytes and digests matched across 130 actual geometry groups. Paired digest time fell about 24%, and one bounded fixed-step profile fell about 6%. Sustained gameplay FPS remains unqualified.
 - `e3ef2f0` restores shared menu sound cues and the global Q2 rerelease `music/track77.ogg` theme when installed. Saved gains and the selected device are preserved.
 
+The installed build includes three further render optimizations:
+
+- `23702ce` reuses MD5 skinning across color and shadow passes within each view. Root passed 11 tests with 498 assertions, and actual geometry matched across 2,864 color and shadow calls. One bounded profile reduced mean fixed-step time from 95.658 to 91.730 ms, about 4.1%; p95 did not improve.
+- `c607ded` hashes only casters used by fitted shadow lights. Eight complete actual-scene comparisons, including cached replays, remained equivalent. The exercised scene avoids 65 caster digests covering 33,071 vertices and 1,769,944 SHA input bytes per preparation. No timing gain is claimed.
+- `dd6d062` reuses unchanged shader uniform values. Root passed four actual offscreen GL tests with 219 assertions, and final scene color and full shadow-atlas captures matched exactly. One bounded profile issued 95% fewer uniform uploads and reduced mean fixed-step time from 91.728 to 88.362 ms, about 3.7%.
+
+These measurements used separate bounded comparisons. Their percentages cannot be added into an overall performance gain, and they do not establish sustained gameplay FPS.
+
 The tested Q2 classic and rerelease `base1` recipes used QW movement, a Q1 rerelease player, Q3 weapons, and Q1 monsters matching the map edition. LMCTF offhand grapple and Q2 classic grenades were selected but not exercised.
 
-Root inspected both actual compiled GL runs through menus, 500 ms of forward input, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,202.673 ms and the classic interval 30,447.138 ms. Both exited with code 0 and only the expected map-loaded log line. Proof: `.artifacts/resume-20260913/final-e3ef2f0/runtime-proof.json`.
+Root inspected both actual compiled GL runs through menus, 500 ms of forward input, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,200.949 ms and the classic interval 30,434.408 ms. Both exited with code 0 and only the expected map-loaded log line. Proof: `.artifacts/resume-20260913/final-dd6d062/runtime-proof.json`.
 
-Separate native menu checks exercised real input events, decoded music and cue PCM, mute and unmute, saved gains, and device release before game initialization. Those checks and the compiled runs used dummy audio output; audibility through the user's speakers remains unverified. Classic captures remain dark; exact source visual fidelity is unqualified. Overall FPS is not resolved.
+The receipt confirms the audio source is unchanged from the accepted `e3ef2f0` unit. Separate native menu checks exercised real input events, decoded music and cue PCM, mute and unmute, saved gains, and device release before game initialization. Those checks and the compiled runs used dummy audio output; audibility through the user's speakers remains unverified. Classic captures remain dark; exact source visual fidelity is unqualified. Overall FPS is not resolved.
 
 This build also includes explicit dedicated offline id1 and Hipnotic QuakeC admission at `5f760f3`, native monster-damage accumulation across save and restore at `dcb4da6`, and supported Hipnotic QuakeC weapon inventory at `708417b`. These bounded paths do not establish general QuakeC or full native-mod compatibility.
 
 Earlier HTTP/timer yielding, OAuth response flushing, quoted binding semicolons, the provider model picker and reasoning effort, and the Q2 `oldFrame=-1` correction remain included. Prior loopback provider checks do not establish live ChatGPT account connectivity, which remains unverified. The engine remains incomplete; this update does not re-audit the 477 requirements or change their counts.
-
-Accepted source `23702ce16b67aa46714bc7c3c81508a7ad6c8883` reuses MD5 skinning across color and shadow passes within each view. Root passed 11 tests with 498 assertions, and an actual-geometry comparison matched 2,864 color and shadow calls. One bounded profile reduced mean fixed-step time from 95.658 to 91.730 ms, about 4.1%; p95 did not improve. This does not establish sustained gameplay FPS. The installed executable remains `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`; this source change has not been rebuilt or installed.
-
-Accepted source `c607ded5f607865555ee1dc685861a2a7ae4c73b` hashes only casters used by fitted shadow lights. Eight complete actual-scene comparisons, including cached replays, remained equivalent. The exercised scene avoids 65 caster digests covering 33,071 vertices and 1,769,944 SHA input bytes per preparation; no timing gain is claimed. The installed executable remains `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`, without a rebuild or installation of this change.
 
 ## Historical execution records
 
