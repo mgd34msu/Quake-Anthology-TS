@@ -2,6 +2,7 @@ import { CvarFlag } from "../../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
 
 export function initializeQ3ClientCvars(cvars: CvarRegistry, identity: { readonly name: string; readonly model: string }): void {
+  cvars.register("cl_timeNudge", "0", CvarFlag.Temporary);
   cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
   cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
   cvars.register("cl_packetdup", "1", CvarFlag.Archive);

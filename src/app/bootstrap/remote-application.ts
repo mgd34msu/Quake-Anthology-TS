@@ -199,6 +199,7 @@ export class RemoteApplication {
     } else if (launchOptions.network.kind === "q3-client") {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
       const remote = new Q3RemotePresentation({ identity, session, content: loadedContent,
+        timeNudge: () => this.clientCommands?.cvars.get("cl_timeNudge")?.integerValue ?? 0,
         userinfo: () => this.clientCommands?.cvars.infoString(CvarFlag.UserInfo) ?? "",
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: (world, connection) => this.loadQ3ServerWorld(world, connection), initialize: connection => this.bindSeat(connection),

@@ -36,6 +36,7 @@ export interface Q3RemotePresentationOptions {
   readonly session: EngineSession;
   readonly content: LoadedApplicationContent;
   readonly userinfo: () => string;
+  readonly timeNudge?: () => number;
   loadContent(world: Q3RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent>;
   readonly downloads?: {
     prepare(connection: Q3ClientConnection): Promise<boolean>;
@@ -180,7 +181,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     this.options.session.publish(this.published);
   }
   samplePresentation(now: number): SimulationOutput | null {
-    const time = this.clock.advance(Math.trunc(now), { paused: false, timeNudge: 0, timescale: 1, demo: false, freezeDemo: false, timedemo: false });
+    const time = this.clock.advance(Math.trunc(now), { paused: false, timeNudge: this.options.timeNudge?.() ?? 0, timescale: 1, demo: false, freezeDemo: false, timedemo: false });
     if (time === null) return null; this.publish(time); return this.published;
   }
   private predictionSnapshot(): MovementPredictionSnapshot {
