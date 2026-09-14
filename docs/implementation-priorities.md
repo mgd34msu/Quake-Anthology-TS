@@ -56,6 +56,8 @@ Accepted `5a0e1848` adds bounded classic-id1 NQ 15/666/999 application profiles;
 
 Complete NetQuake and QuakeWorld QC hosts, QVM game/cgame/UI roles and TypeScript hosts for native DLL/SO behavior, including application admission, save and travel.
 
+Accepted `729b1dd` binds cgame entity-token and PVS queries to the loaded Q3 world owner, with root five tests/3,196 assertions. Known-baseq3 admission remains gated; broader QVM/mod compatibility stays open.
+
 **Done when:** The required QC, QVM and native-mod behavior runs through normal application admission, execution, travel, save and teardown across every required host. A pinned-program whitelist is insufficient. Required programs or host combinations that remain unsupported keep this priority open; explicit failure only explains the limitation.
 
 Accepted `60bbc638` shares the pinned native QW program and damage authority with the existing QuakeCSource owner, retaining NQ behavior (root 9/718). This does not complete external-mod or spectator ABI coverage.

@@ -73,6 +73,8 @@ Accepted source `33026a68ebf6cec4b7fb40e41ee78d7d0d1706a5` submits shadow-atlas 
 
 Accepted source `18bedc4bb83621676cef289494c588c5d488c7f9` shares remote content selection and a mounted owner before world creation across QW, Q2, and Q3. Stock metadata, base lookup chains, case-preserved roots, independent active-world ownership, same-map refresh, and cancellation are retained. Root passed actual QW mod admission, Q2 UDP directory transitions, Q3 non-base package admission through real QVM and authentic pure checks, and catalog/base cases: five tests with 103 assertions. Q2 retains one HTTP queue and baseq2 player assets; Q3 uses selected/base physical prefixes and preworld packages. This does not expand arbitrary-mod QVM or wire ABI support; the Q3 proof used known baseq3 modules and game types 0–4. Configurations remain owned by the launch base. The unit is included in this installation.
 
+Accepted source `729b1dde51a0fcebdb5a269f91e042b24dda1fd7` binds cgame entity-token and PVS queries to the existing loaded Q3 world owner. Root passed five tests with 3,196 assertions after reviewing the donor token, leaf, and visibility behavior. The known-baseq3 admission gate is unchanged; this does not qualify broader QVM or mod compatibility. These bindings are not in the installed `18bedc4` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
