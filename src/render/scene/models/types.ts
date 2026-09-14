@@ -9,7 +9,7 @@ import type { skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
 import type { ShadowSphere } from "../shadows.ts";
 
 export type ModelSkinningFrame = WeakMap<Parameters<typeof skinMd5Mesh>[0],
-  WeakMap<Parameters<typeof skinMd5Mesh>[1], ReturnType<typeof skinMd5Mesh>>>;
+  WeakMap<Parameters<typeof skinMd5Mesh>[1], readonly (ReturnType<typeof skinMd5Mesh>[number] & { readonly texCoord: Vec2 })[]>>;
 
 export type ModelImageSelection = { readonly kind: "external"; readonly name: string }
   | { readonly kind: "indexed"; readonly name: string; readonly width: number; readonly height: number;

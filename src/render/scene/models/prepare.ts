@@ -245,15 +245,15 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         let poses = context.skinningFrame?.get(mesh);
         let skinned = poses?.get(joints);
         if (skinned === undefined) {
-          skinned = skinMd5Mesh(mesh, joints);
+          skinned = skinMd5Mesh(mesh, joints).map((vertex, index) => ({ ...vertex,
+            texCoord: at(mesh.vertices, index, "MD5 UV").texCoord }));
           if (context.skinningFrame !== undefined) {
             if (poses === undefined) { poses = new WeakMap(); context.skinningFrame.set(mesh, poses); }
             poses.set(joints, skinned);
           }
         }
-        const vertices = skinned.map(vertex => shell === null ? vertex : { ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) });
-        append(`mesh${index}`, at(images, index, "MD5 material"),
-          vertices.map((vertex, index) => ({ ...vertex, texCoord: at(mesh.vertices, index, "MD5 UV").texCoord })), mesh.indices, shell !== null);
+        const vertices = shell === null ? skinned : skinned.map(vertex => ({ ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) }));
+        append(`mesh${index}`, at(images, index, "MD5 material"), vertices, mesh.indices, shell !== null);
       }
       break;
     }

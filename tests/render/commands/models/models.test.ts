@@ -348,6 +348,7 @@ test("MD5 frame-local skinning reuses a pose without retaining animated monster 
   const context = { camera, timeSeconds: 0, skinningFrame };
   const prepared = prepareSceneEntity(source, context), first = skinningFrame.get(mesh)?.get(firstPose);
   expect(first).toBeDefined();
+  for (const [index, vertex] of (first ?? []).entries()) expect(mesh.vertices[index]?.texCoord).toBe(vertex.texCoord);
   expect(prepareSceneEntity(source, context)).toEqual(prepared);
   expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
   expect(prepared).toEqual(prepareSceneEntity(source, { camera, timeSeconds: 0 }));
@@ -365,4 +366,5 @@ test("MD5 frame-local skinning reuses a pose without retaining animated monster 
   const shell = { ...source, flags: { kind: "q2", bits: 1024 } } satisfies SceneEntity;
   expect(prepareSceneEntity(shell, context)).toEqual(prepareSceneEntity(shell, { camera, timeSeconds: 0 }));
   expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
+  expect(prepareSceneEntity(source, context)).toEqual(prepared);
 });
