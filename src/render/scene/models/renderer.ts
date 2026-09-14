@@ -18,7 +18,7 @@ import { cameraFrustum, createViewProjector } from "../view.ts";
 import type { WorldScene, WorldViewInput } from "../world.ts";
 import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts";
 import { shadowCaster, shadowMesh } from "../shadows.ts";
-import type { ShadowCaster, ShadowMesh } from "../shadows.ts";
+import type { ShadowCaster, ShadowMesh, ShadowSphere } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
 import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { prepareSceneEntity, preparedModelBatches } from "./prepare.ts";
@@ -259,7 +259,8 @@ export class SceneModelRenderer {
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
-  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly ShadowCaster[] {
+  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame,
+    retainBody?: (sphere: ShadowSphere) => boolean): readonly ShadowCaster[] {
     const result: ShadowCaster[] = [], time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const visit = (entity: SceneEntity, original: SceneEntity): void => {
       const source = options(original);
@@ -268,6 +269,13 @@ export class SceneModelRenderer {
         flags: entity.flags.kind === "q2" ? { kind: "q2", bits: entity.flags.bits & ~Q2_SHELL_MASK } : entity.flags,
         pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose };
       const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, purpose: "shadow",
+        ...(retainBody === undefined ? {} : { retainShadowBody: (selected: SceneEntity, sphere: ShadowSphere, images: readonly ModelImageSelection[], selectedOptions: ModelSourceOptions): boolean => {
+          if (images.some(image => {
+            const material = this.materials.get(materialKey(selected, image, selectedOptions));
+            return material === undefined || material.kind === "q3" && material.compiled.registered.definition.deforms.length !== 0;
+          })) return true;
+          return retainBody(sphere);
+        } }),
         ...(skinningFrame === undefined ? {} : { skinningFrame }),
         ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }), options: () => source });
       const meshes: ShadowMesh[] = [];

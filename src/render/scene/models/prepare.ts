@@ -15,6 +15,7 @@ import { q1SpriteGeometry, spriteQuad } from "./sprites.ts";
 import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldBounds, modelWorldDirection, modelWorldPoint } from "./transform.ts";
 import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replacements.ts";
 import { byteColor } from "./types.ts";
+import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
 import type { ModelBatchContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
@@ -227,6 +228,19 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const elapsedFrame = elapsed === null ? null : ((elapsed % model.frames.length) + model.frames.length) % model.frames.length;
       const joints = entity.pose.kind === "skeleton" ? entity.pose.joints : elapsedFrame === null
         ? sampleMd5Pose(model, frame, previousFrame, backLerp) : sampleMd5Pose(model, elapsedFrame);
+      const images = model.meshes.map((mesh, index): ModelImageSelection => {
+        let shaders: readonly string[];
+        if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
+        else if (selection.kind === "q1-mdl-replacement") {
+          const groups = at(selection.meshSkinGroups, index, "Q1 replacement mesh skin");
+          shaders = groups.map(group => `${sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0)}.lmp`);
+        } else shaders = [mesh.shader];
+        return shell === null ? selectedShader(`mesh${index}`, shaders, entity, options) : { kind: "white" };
+      });
+      if (context.retainShadowBody !== undefined && context.purpose === "shadow" && shell === null && options.modelBeam === undefined) {
+        const envelope = md5ShadowEnvelope(model.meshes, joints, entity.transform);
+        if (envelope !== null && !context.retainShadowBody(entity, envelope, images, options)) break;
+      }
       for (const [index, mesh] of model.meshes.entries()) {
         let poses = context.skinningFrame?.get(mesh);
         let skinned = poses?.get(joints);
@@ -238,13 +252,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
           }
         }
         const vertices = skinned.map(vertex => shell === null ? vertex : { ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) });
-        let shaders: readonly string[];
-        if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
-        else if (selection.kind === "q1-mdl-replacement") {
-          const groups = at(selection.meshSkinGroups, index, "Q1 replacement mesh skin");
-          shaders = groups.map(group => `${sampleTimedFrame(group, context.timeSeconds, options.syncBase ?? 0)}.lmp`);
-        } else shaders = [mesh.shader];
-        append(`mesh${index}`, shell === null ? selectedShader(`mesh${index}`, shaders, entity, options) : { kind: "white" },
+        append(`mesh${index}`, at(images, index, "MD5 material"),
           vertices.map((vertex, index) => ({ ...vertex, texCoord: at(mesh.vertices, index, "MD5 UV").texCoord })), mesh.indices, shell !== null);
       }
       break;

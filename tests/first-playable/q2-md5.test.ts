@@ -170,6 +170,41 @@ test("retained Q2 aliases select by each eye, preserve native bounds and commit 
         clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
       expect(prepareSceneEntity(attached, { camera, timeSeconds: 0 }).attachments).toHaveLength(1);
       expect(renderer.prepareShadowCasters([attached], { ...input, camera: { ...camera, origin: { x: -4096, y: 0, z: 0 } } })).toHaveLength(2);
+      const eager = renderer.prepareShadowCasters([attached], input);
+      let bodies = 0;
+      const childOnly = renderer.prepareShadowCasters([attached], input, undefined, undefined, () => ++bodies !== 1);
+      expect(bodies).toBe(2);
+      expect(childOnly).toEqual(eager.slice(1));
+      const indexed = { ...entity, model: { ...native, replacement: null } };
+      expect(renderer.prepareShadowCasters([indexed], input, undefined, undefined, () => false))
+        .toEqual(renderer.prepareShadowCasters([indexed], input));
+      const shell = { ...entity, flags: { kind: "q2", bits: 1024 } } satisfies SceneEntity;
+      expect(renderer.prepareShadowCasters([shell], input, undefined, undefined, () => true)).toEqual(eager.slice(0, 1));
+      f.provider.shaders.addScript(`shadow-bound-deform
+{
+ deformVertexes move 800 0 0 sin 1 0 0 0
+ {
+  map $whiteimage
+ }
+}
+shadow-bound-static
+{
+ {
+  map $whiteimage
+ }
+}`, "<shadow envelope material fixture>");
+      const scripted = new SceneModelRenderer({ ...f.provider, family: "q3" }, world);
+      const deformed = () => ({ customShader: "shadow-bound-deform" });
+      const staticSkin = () => ({ customShader: "shadow-bound-static" });
+      await scripted.preload([entity], deformed);
+      await scripted.preload([entity], staticSkin);
+      let boundCalls = 0;
+      expect(scripted.prepareShadowCasters([entity], input, deformed)).toHaveLength(1);
+      expect(scripted.prepareShadowCasters([entity], input, staticSkin)).toHaveLength(1);
+      expect(scripted.prepareShadowCasters([entity], input, deformed, undefined, () => { boundCalls++; return false; }))
+        .toEqual(scripted.prepareShadowCasters([entity], input, deformed));
+      expect(boundCalls).toBe(0);
+      expect(scripted.prepareShadowCasters([entity], input, staticSkin, undefined, () => false)).toEqual([]);
     } finally { world.close(); }
   } finally { f.archive.close(); }
 }, 30000);

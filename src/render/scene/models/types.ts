@@ -6,6 +6,7 @@ import type { IndexedModelSkin, ModelTransform, Q3MeshModel, SceneEntity } from 
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
 import type { skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
+import type { ShadowSphere } from "../shadows.ts";
 
 export type ModelSkinningFrame = WeakMap<Parameters<typeof skinMd5Mesh>[0],
   WeakMap<Parameters<typeof skinMd5Mesh>[1], ReturnType<typeof skinMd5Mesh>>>;
@@ -46,6 +47,8 @@ export interface ModelPreparationContext {
   readonly timeSeconds: number;
   readonly frustum?: readonly Plane[];
   readonly noCull?: boolean;
+  /** Unknown envelopes and material deformations retain full shadow preparation. */
+  retainShadowBody?(entity: SceneEntity, sphere: ShadowSphere, images: readonly ModelImageSelection[], options: ModelSourceOptions): boolean;
   options?(entity: SceneEntity): ModelSourceOptions;
   /** Normalized alias-light modulation; Q3 keeps local normals for its stages. */
   lightVertex?(entity: SceneEntity, normal: Vec3, position: Vec3): Vec3;

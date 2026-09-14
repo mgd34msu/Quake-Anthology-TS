@@ -13,9 +13,11 @@ const minimumResolution = 128, maximumLights = 8;
 const f = Math.fround;
 
 export interface ShadowMesh { readonly positions: readonly Vec3[]; readonly indices: readonly number[]; }
-export interface ShadowCaster {
+export interface ShadowSphere {
   readonly origin: Vec3;
   readonly radius: number;
+}
+export interface ShadowCaster extends ShadowSphere {
   readonly meshes: readonly ShadowMesh[];
 }
 export interface ShadowAtlasOptions { readonly enabled?: boolean; readonly resolutionCap?: number; }
@@ -119,19 +121,32 @@ export function shadowConeMatrix(light: Q2FragmentLight): Mat4 {
 }
 const depthBias: Mat4 = [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0.5, 0.5, 0.5, 1];
 
-function gather(light: Q2FragmentLight, casters: readonly ShadowCaster[]): readonly ShadowCaster[] {
+function lightContainsSphere(light: Pick<Q2FragmentLight, "origin" | "radius" | "cone">, conservative = false): (caster: ShadowSphere) => boolean {
   const cone = light.cone;
   const diagonal = cone === null ? Math.PI : Math.atan(Math.SQRT2 * Math.tan(Math.min(shadowConeFov(cone.cosHalfAngle) * Math.PI / 360, 87 * Math.PI / 180)));
   const limit = Math.cos(diagonal);
-  return casters.filter(caster => {
+  return caster => {
     const delta = difference(caster.origin, light.origin), distance = length(delta);
     if (distance > light.radius + caster.radius) return false;
     if (cone !== null && distance > caster.radius) {
       const angle = Math.acos(Math.min(1, Math.max(-1, dot(delta, cone.direction) / distance)));
-      if (Math.cos(Math.min(Math.PI, angle - Math.asin(Math.min(1, caster.radius / distance)))) < limit) return false;
+      const separation = angle - Math.asin(Math.min(1, caster.radius / distance));
+      // An envelope spanning the cone axis must remain; exact gather keeps its source predicate.
+      if (Math.cos(Math.min(Math.PI, conservative ? Math.max(0, separation) : separation)) < limit) return false;
     }
     return true;
-  });
+  };
+}
+
+function eligibleShadowLight(light: SceneLight): boolean {
+  return light.profile.kind === "q2" && !(light.radius <= 0) && (light.profile.shadow.kind === "cast" || light.profile.cone !== null);
+}
+
+/** The atlas selects the first eight Q2 lights before testing shadow eligibility. */
+export function shadowBodyFilter(source: readonly SceneLight[]): (sphere: ShadowSphere) => boolean {
+  const tests = source.filter(light => light.profile.kind === "q2").slice(0, maximumLights).filter(eligibleShadowLight)
+    .map(light => lightContainsSphere({ ...light, cone: light.profile.kind === "q2" ? light.profile.cone : null }, true));
+  return sphere => tests.some(test => test(sphere));
 }
 function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec3 | null): boolean {
   let inRadius = false, inFront = forward === null;
@@ -185,8 +200,8 @@ export class Q2ShadowScene {
     const q2Source = source.filter(light => light.profile.kind === "q2"), candidates: Candidate[] = [];
     if (options.enabled !== false) for (const [index, light] of lights.slice(0, maximumLights).entries()) {
       const original = q2Source[index];
-      if (original === undefined || original.profile.kind !== "q2" || light.radius <= 0 || original.profile.shadow.kind !== "cast" && light.cone === null) continue;
-      candidates.push({ index, light, face: shadowMapResolution(original.profile.shadow.kind === "cast" ? original.profile.shadow.resolution : 0, options.resolutionCap), casters: gather(light, casters) });
+      if (original === undefined || original.profile.kind !== "q2" || !eligibleShadowLight(original)) continue;
+      candidates.push({ index, light, face: shadowMapResolution(original.profile.shadow.kind === "cast" ? original.profile.shadow.resolution : 0, options.resolutionCap), casters: casters.filter(lightContainsSphere(light)) });
     }
     if (options.enabled === false) this.close();
     if (candidates.length === 0) return { lighting: { lights, atlas: null }, operations: [], stats: { lights: 0, cachedLights: 0, rebuiltLights: 0, facesRendered: 0, entityCasters: 0 } };
