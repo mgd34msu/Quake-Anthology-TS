@@ -7,6 +7,8 @@ import { perspectiveMat4 } from "../../../src/core/math.ts";
 import { SdlWindow } from "../../../src/platform/sdl.ts";
 import { GlRenderer } from "../../../src/render/gl/renderer.ts";
 import { packGeometry } from "../../../src/render/gl/buffers.ts";
+import { StageProgram } from "../../../src/render/gl/programs.ts";
+import type { loadGlPrograms } from "../../../src/platform/gl-programs.ts";
 import { outputGammaTable } from "../../../src/render/output-gamma.ts";
 
 const white = { x: 1, y: 1, z: 1, w: 1 };
@@ -162,6 +164,12 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   const skyBlue = renderer.readPixels()[2];
   if (skyBlue === undefined) throw new Error("Missing GL sky fog pixel");
   expect([127, 128]).toContain(skyBlue);
+  renderer.beginView({ viewport: fogPass.camera.viewport, clear, clipPlane: null });
+  renderer.withObjectOpacity(0.5, () => { draw(renderer, batch); return undefined; });
+  expect(renderer.readPixels().slice(0, 3).every(value => value === 127 || value === 128)).toBe(true);
+  draw(renderer, batch);
+  expect(renderer.readPixels().slice(0, 4)).toEqual(new Uint8Array([255, 255, 255, 255]));
+  expect(renderer.readDepthPixel(8, 8)).toBeCloseTo(0.5, 5);
   renderer.finish();
   expect(renderer.getError()).toBe(0);
   renderer.present();
@@ -237,3 +245,103 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL output gamma follows blen
   restarted.beginView({ viewport: { x: 0, y: 0, width: 12, height: 8 }, clear, clipPlane: null });
   restarted.finish(); expect(restarted.getError()).toBe(0);
 });
+
+test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserve native state across changes, rejected inputs and restart", () => {
+  using window = SdlWindow.open({ title: "Stage uniform cache", width: 16, height: 16, backend: "gl", hidden: true });
+  const owner: RendererResourceOwner = { identity: Symbol("uniforms"), session: createIdentityOwner("uniforms").session, generation: 0 };
+  const atlasImage: RendererImage = { owner, ordinal: 0, source: { kind: "generated", name: "atlas" }, width: 16, height: 16 };
+  const atlas = { image: atlasImage, texelSize: 1 / 16, nearPlane: 4 };
+  const matrix: [...Mat4] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  let light: import("../../../src/contracts/render.ts").Q2FragmentLight = { origin: { x: 0, y: 1, z: 2 }, radius: 64, color: { x: 1, y: 0.5, z: 0.25 }, scale: 1,
+    cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 }, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } };
+  const lighting = (): import("../../../src/contracts/render.ts").BatchLighting => ({ kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [light], atlas });
+  const reference = new StageProgram(window), cached = new StageProgram(window);
+  const referenceTrace = traceUniforms(reference["library"].symbols, reference["uniforms"]), trace = traceUniforms(cached["library"].symbols, cached["uniforms"]);
+  function freshReference(): void {
+    reference["integers"].clear(); reference["scalars"].clear(); reference["vectors3"].clear(); reference["vectors4"].clear(); reference["matrices"].clear();
+  }
+  function use(...args: Parameters<StageProgram["use"]>): void {
+    freshReference(); reference.use(...args); cached.use(...args);
+    expect(trace.state).toEqual(referenceTrace.state);
+  }
+  try {
+    use(null, "none", lighting());
+    const initial = trace.calls;
+    use(null, "none", lighting()); expect(trace.calls).toBe(initial);
+    cached.useDepth(); cached.restore(0); use(null, "none", lighting()); expect(trace.calls).toBe(initial);
+    const changed = (change: () => void): void => { const before = trace.calls; change(); use(null, "none", lighting()); expect(trace.calls).toBe(before + 1); };
+    changed(() => { light = { ...light, radius: 65 }; });
+    changed(() => { light = { ...light, scale: 0.75 }; });
+    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) {
+      changed(() => { light = { ...light, origin: { ...light.origin, [component]: light.origin[component] + 1 } }; });
+      changed(() => { light = { ...light, color: { ...light.color, [component]: light.color[component] + 0.1 } }; });
+      changed(() => { const cone = light.cone; if (cone === null) throw new Error("Missing cone"); light = { ...light, cone: { ...cone, direction: { ...cone.direction, [component]: cone.direction[component] + 0.1 } } }; });
+    }
+    changed(() => { const cone = light.cone; if (cone === null) throw new Error("Missing cone"); light = { ...light, cone: { ...cone, cosHalfAngle: 0.6 } }; });
+    for (const component of ["x", "y", "z", "w"] satisfies readonly ("x" | "y" | "z" | "w")[]) changed(() => {
+      const shadow = light.shadow; if (shadow.kind !== "cone") throw new Error("Missing shadow");
+      light = { ...light, shadow: { ...shadow, atlasRect: { ...shadow.atlasRect, [component]: shadow.atlasRect[component] + 0.01 } } };
+    });
+    for (let index = 0; index < matrix.length; index++) changed(() => { matrix[index] = (matrix[index] ?? 0) + 0.01; });
+    changed(() => { atlas.texelSize = 1 / 32; }); changed(() => { atlas.nearPlane = 2; });
+    changed(() => { light = { ...light, origin: { ...light.origin, x: 0 } }; });
+    changed(() => { light = { ...light, origin: { ...light.origin, x: -0 } }; });
+    for (const environment of ["modulate", "add", "replace", null] satisfies readonly Parameters<StageProgram["use"]>[0][]) {
+      for (const alpha of ["none", "gt0", "lt128", "ge128"] satisfies readonly RenderState["alphaTest"][]) use(environment, alpha, lighting(), true);
+    }
+    use(null, "none", lighting(), false);
+    use(null, "none", { kind: "vertex" });
+    const world = lighting(); if (world.kind !== "q2-world") throw new Error("Missing world lighting");
+    use(null, "none", { ...world, lights: [light, { ...light, radius: 80 }] });
+    use(null, "none", { ...world, lights: [] }); use(null, "none", { ...world, lights: [light, { ...light, radius: 90 }] });
+    for (const pass of ["texture", "material-lightmap", "lightmap"] satisfies readonly typeof world.pass[]) use(null, "none", { ...world, pass });
+    light = { ...light, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } }; use(null, "none", lighting());
+    light = { ...light, shadow: { kind: "none" } }; use(null, "none", lighting());
+    light = { ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }; use(null, "none", lighting());
+    const model = { kind: "q2-model-shadow", worldPositions: [], shadeScale: 1, lights: [{ origin: light.origin, radius: light.radius, fraction: { x: 1, y: 0.5, z: 0.25 }, shadow: light.shadow }], atlas } satisfies import("../../../src/contracts/render.ts").BatchLighting;
+    use(null, "none", model); use(null, "none", { ...model, shadeScale: 0.5 });
+    for (const component of ["x", "y", "z"] satisfies readonly ("x" | "y" | "z")[]) use(null, "none", { ...model, lights: model.lights.map(item => ({ ...item, fraction: { ...item.fraction, [component]: 0.75 } })) });
+    const invalid = [
+      { ...world, lights: Array.from({ length: 9 }, () => light) },
+      { ...world, atlas: { ...atlas, nearPlane: 0 } },
+      { ...world, lights: [{ ...light, radius: -1 }] },
+      { ...world, lights: [{ ...light, origin: { ...light.origin, x: NaN } }] },
+      { ...world, atlas: null, lights: [light] },
+    ] satisfies readonly import("../../../src/contracts/render.ts").BatchLighting[];
+    for (const malformed of invalid) {
+      for (let repeat = 0; repeat < 2; repeat++) {
+        freshReference(); expect(() => reference.use(null, "none", malformed)).toThrow(); expect(() => cached.use(null, "none", malformed)).toThrow();
+        expect(trace.state).toEqual(referenceTrace.state);
+      }
+      use(null, "none", lighting());
+    }
+    trace.rejectScalar(); referenceTrace.rejectScalar(); light = { ...light, radius: light.radius + 1 };
+    freshReference(); expect(() => reference.use(null, "none", lighting())).toThrow("native upload rejected"); expect(() => cached.use(null, "none", lighting())).toThrow("native upload rejected");
+    use(null, "none", lighting());
+    expect(trace.calls).toBeLessThan(referenceTrace.calls);
+  } finally { cached.close(); reference.close(); }
+  expect(() => cached.use(null, "none")).toThrow("closed");
+  const restarted = new StageProgram(window), restartTrace = traceUniforms(restarted["library"].symbols, restarted["uniforms"]);
+  try { restarted.use(null, "none", lighting()); expect(restartTrace.calls).toBeGreaterThan(5); }
+  finally { restarted.close(); }
+});
+
+function traceUniforms(gl: ReturnType<typeof loadGlPrograms>["symbols"], locations: ReadonlyMap<string, number>) {
+  const state = new Map<string, readonly number[]>(); let calls = 0, rejectScalar = false;
+  const record = (location: number, values: readonly number[]): void => {
+    for (const [name, id] of locations) if (id === location) { state.set(name, [...values]); calls++; return; }
+    throw new Error("Unknown uniform location");
+  };
+  const integer = gl.glUniform1i, scalar = gl.glUniform1f, vector3 = gl.glUniform3f, vector4 = gl.glUniform4f, matrix = gl.glUniformMatrix4fv;
+  gl.glUniform1i = Object.assign((location: number, value: number) => { const result = integer(location, value); record(location, [value]); return result; }, integer);
+  gl.glUniform1f = Object.assign((location: number, value: number) => {
+    if (rejectScalar) { rejectScalar = false; throw new Error("native upload rejected"); }
+    const result = scalar(location, value); record(location, [Math.fround(value)]); return result;
+  }, scalar);
+  gl.glUniform3f = Object.assign((location: number, x: number, y: number, z: number) => { const result = vector3(location, x, y, z); record(location, [Math.fround(x), Math.fround(y), Math.fround(z)]); return result; }, vector3);
+  gl.glUniform4f = Object.assign((location: number, x: number, y: number, z: number, w: number) => { const result = vector4(location, x, y, z, w); record(location, [Math.fround(x), Math.fround(y), Math.fround(z), Math.fround(w)]); return result; }, vector4);
+  gl.glUniformMatrix4fv = Object.assign((location: number, count: number, transpose: number, value: Float32Array) => {
+    const result = matrix(location, count, transpose, value); record(location, [...value]); return result;
+  }, matrix);
+  return { state, get calls() { return calls; }, rejectScalar() { rejectScalar = true; } };
+}

@@ -2,6 +2,7 @@
 // Q3 texture environments, implemented with the Q2 rerelease port's
 // compatibility GLSL submission convention. Shader text is embedded source.
 import { loadGlPrograms } from "../../platform/gl-programs.ts";
+import type { Mat4 } from "../../contracts/math.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
 import type { BatchLighting, RenderState, TextureBundle } from "../../contracts/render.ts";
 import { shadowFactorLines } from "./shadow-shader.ts";
@@ -166,6 +167,11 @@ export class StageProgram {
   private readonly program: number;
   private readonly depthProgram: number;
   private readonly uniforms = new Map<string, number>();
+  private readonly integers = new Map<number, number>();
+  private readonly scalars = new Map<number, number>();
+  private readonly vectors3 = new Map<number, readonly [number, number, number]>();
+  private readonly vectors4 = new Map<number, readonly [number, number, number, number]>();
+  private readonly matrices = new Map<number, Mat4>();
   private closed = false;
 
   constructor(context: SdlRenderContext) {
@@ -203,55 +209,88 @@ void main() { gl_FragColor = vec4(1.0); }
     return location;
   }
 
+  private integer(location: number, value: number): void {
+    if (Object.is(this.integers.get(location), value)) return;
+    this.library.symbols.glUniform1i(location, value); this.integers.set(location, value);
+  }
+
+  private scalar(location: number, value: number): void {
+    if (Object.is(this.scalars.get(location), value)) return;
+    this.library.symbols.glUniform1f(location, value); this.scalars.set(location, value);
+  }
+
+  private vector3(location: number, x: number, y: number, z: number): void {
+    const previous = this.vectors3.get(location);
+    if (previous !== undefined && Object.is(previous[0], x) && Object.is(previous[1], y) && Object.is(previous[2], z)) return;
+    this.library.symbols.glUniform3f(location, x, y, z); this.vectors3.set(location, [x, y, z]);
+  }
+
+  private vector4(location: number, x: number, y: number, z: number, w: number): void {
+    const previous = this.vectors4.get(location);
+    if (previous !== undefined && Object.is(previous[0], x) && Object.is(previous[1], y) && Object.is(previous[2], z) && Object.is(previous[3], w)) return;
+    this.library.symbols.glUniform4f(location, x, y, z, w); this.vectors4.set(location, [x, y, z, w]);
+  }
+
+  private matrix(location: number, value: Mat4): void {
+    const previous = this.matrices.get(location);
+    if (previous !== undefined) {
+      let equal = true;
+      for (let index = 0; index < value.length; index++) if (!Object.is(previous[index], value[index])) { equal = false; break; }
+      if (equal) return;
+    }
+    this.library.symbols.glUniformMatrix4fv(location, 1, 0, new Float32Array(value));
+    this.matrices.set(location, [...value]);
+  }
+
   use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }, luminanceAlpha = false): void {
     if (this.closed) throw new Error("OpenGL stage program is closed");
     const gl = this.library.symbols;
     gl.glUseProgram(this.program);
-    gl.glUniform1i(this.uniform("secondaryMode"), environment === null ? 0 : secondaryModes[environment]);
-    gl.glUniform1i(this.uniform("alphaMode"), alphaModes[alphaTest]);
-    gl.glUniform1i(this.uniform("u_luminance_alpha"), luminanceAlpha ? 1 : 0);
-    gl.glUniform1i(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
-    if (lighting.kind === "vertex") { gl.glUniform1i(this.uniform("u_light_count"), 0); return; }
+    this.integer(this.uniform("secondaryMode"), environment === null ? 0 : secondaryModes[environment]);
+    this.integer(this.uniform("alphaMode"), alphaModes[alphaTest]);
+    this.integer(this.uniform("u_luminance_alpha"), luminanceAlpha ? 1 : 0);
+    this.integer(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
+    if (lighting.kind === "vertex") { this.integer(this.uniform("u_light_count"), 0); return; }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
-    gl.glUniform1i(this.uniform("u_light_count"), lighting.lights.length);
+    this.integer(this.uniform("u_light_count"), lighting.lights.length);
     if (lighting.atlas !== null) {
       finiteUniforms([lighting.atlas.texelSize, lighting.atlas.nearPlane]);
       if (!Number.isFinite(lighting.atlas.texelSize) || lighting.atlas.texelSize <= 0 || !Number.isFinite(lighting.atlas.nearPlane) || lighting.atlas.nearPlane <= 0)
         throw new RangeError("Q2 shadow atlas texel size and near plane must be positive");
-      gl.glUniform1f(this.uniform("u_shadow_texel"), lighting.atlas.texelSize);
-      gl.glUniform1f(this.uniform("u_shadow_near"), lighting.atlas.nearPlane);
+      this.scalar(this.uniform("u_shadow_texel"), lighting.atlas.texelSize);
+      this.scalar(this.uniform("u_shadow_near"), lighting.atlas.nearPlane);
     }
     if (lighting.kind === "q2-model-shadow") {
       finiteUniforms([lighting.shadeScale]);
-      gl.glUniform1f(this.uniform("u_shade_scale"), lighting.shadeScale);
+      this.scalar(this.uniform("u_shade_scale"), lighting.shadeScale);
     }
     for (const [index, light] of lighting.lights.entries()) {
       finiteUniforms([light.origin.x, light.origin.y, light.origin.z, light.radius]);
       if (light.radius <= 0) throw new RangeError("Q2 fragment light radius must be positive");
-      gl.glUniform3f(this.uniform(`u_light_pos[${index}]`), light.origin.x, light.origin.y, light.origin.z);
-      gl.glUniform1f(this.uniform(`u_light_radius[${index}]`), light.radius);
+      this.vector3(this.uniform(`u_light_pos[${index}]`), light.origin.x, light.origin.y, light.origin.z);
+      this.scalar(this.uniform(`u_light_radius[${index}]`), light.radius);
       if ("color" in light) {
         finiteUniforms([light.color.x, light.color.y, light.color.z, light.scale]);
         if (light.cone !== null) finiteUniforms([light.cone.direction.x, light.cone.direction.y, light.cone.direction.z, light.cone.cosHalfAngle]);
-        gl.glUniform3f(this.uniform(`u_light_color[${index}]`), light.color.x, light.color.y, light.color.z);
-        gl.glUniform1f(this.uniform(`u_light_scale[${index}]`), light.scale);
-        gl.glUniform1f(this.uniform(`u_light_cone_cos[${index}]`), light.cone?.cosHalfAngle ?? 0);
+        this.vector3(this.uniform(`u_light_color[${index}]`), light.color.x, light.color.y, light.color.z);
+        this.scalar(this.uniform(`u_light_scale[${index}]`), light.scale);
+        this.scalar(this.uniform(`u_light_cone_cos[${index}]`), light.cone?.cosHalfAngle ?? 0);
         const direction = light.cone?.direction;
-        gl.glUniform3f(this.uniform(`u_light_cone_dir[${index}]`), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
+        this.vector3(this.uniform(`u_light_cone_dir[${index}]`), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
       } else {
         finiteUniforms([light.fraction.x, light.fraction.y, light.fraction.z]);
-        gl.glUniform3f(this.uniform(`u_light_frac[${index}]`), light.fraction.x, light.fraction.y, light.fraction.z);
+        this.vector3(this.uniform(`u_light_frac[${index}]`), light.fraction.x, light.fraction.y, light.fraction.z);
       }
       const shadow = light.shadow;
       if (shadow.kind !== "none" && lighting.atlas === null) throw new Error("Q2 shadow receiver is missing its atlas");
-      gl.glUniform1f(this.uniform(`u_light_shadow[${index}]`), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);
+      this.scalar(this.uniform(`u_light_shadow[${index}]`), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);
       if (shadow.kind !== "none") {
         const rect = shadow.atlasRect;
         finiteUniforms([rect.x, rect.y, rect.z, rect.w]);
-        gl.glUniform4f(this.uniform(`u_light_atlas[${index}]`), rect.x, rect.y, rect.z, rect.w);
+        this.vector4(this.uniform(`u_light_atlas[${index}]`), rect.x, rect.y, rect.z, rect.w);
         if (shadow.kind === "cone") {
           finiteUniforms(shadow.matrix);
-          gl.glUniformMatrix4fv(this.uniform(`u_light_matrix[${index}]`), 1, 0, new Float32Array(shadow.matrix));
+          this.matrix(this.uniform(`u_light_matrix[${index}]`), shadow.matrix);
         }
       }
     }
@@ -267,5 +306,6 @@ void main() { gl_FragColor = vec4(1.0); }
     this.library.symbols.glDeleteProgram(this.depthProgram);
     this.library.close();
     this.closed = true;
+    this.integers.clear(); this.scalars.clear(); this.vectors3.clear(); this.vectors4.clear(); this.matrices.clear();
   }
 }
