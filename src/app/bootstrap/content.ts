@@ -5,7 +5,7 @@ import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
-import { discoverInstalledContent, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import { discoverInstalledContent, quakeWorldContentProduct, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { InstalledCatalog, LaunchPreset } from "../../content/catalog/index.ts";
 import { openMountPlan } from "../../content/mounts/index.ts";
 import type { MountedContent, PureMountPolicy } from "../../content/mounts/index.ts";
@@ -155,7 +155,11 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
 }
 
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy): Promise<LoadedApplicationContent> {
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false });
+  if (options.quakeWorldContent !== undefined && (options.network.kind !== "qw-client"
+    || options.product !== quakeWorldContentProduct(options.quakeWorldContent)))
+    throw new Error("QuakeWorld content context requires its matching remote client product");
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false,
+    ...(options.quakeWorldContent === undefined ? {} : { quakeWorld: options.quakeWorldContent }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), ...(pure === undefined ? {} : { mounts: { pure } }) });

@@ -1,3 +1,5 @@
+import { findContentPath } from "../../content/mounts/paths.ts";
+import { discoverInstalledContent, quakeWorldContentContext, quakeWorldContentProduct } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
 import type { CommandContext } from "../../contracts/common.ts";
 import { ClientSocksSettings } from "./network/socks-settings.ts";
@@ -113,6 +115,7 @@ export class RemoteApplication {
   private qwAllSkins = '';
   private qwDownloads: QwDownloadReceiver | null = null;
   private qwMounts: MountedContent | null = null;
+  private qwContentGeneration = 0;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
   private downloadCatalogSeed: LoadedApplicationContent | null = null;
   private q3InitialViewPending = false;
@@ -179,7 +182,7 @@ export class RemoteApplication {
         downloads: {
           request: (path, category) => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.request(path, category); },
           receive: result => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.receive(result); },
-          close: () => { this.qwDownloads?.close(); this.qwDownloads = null; },
+          close: () => { this.qwContentGeneration++; this.qwDownloads?.close(); this.qwDownloads = null; },
         },
         prepareServerData: data => this.prepareQwDownloads(data),
         print: text => this.print(text), sendCommand: text => this.network.command(text),
@@ -245,7 +248,7 @@ export class RemoteApplication {
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     try {
       const product = content.catalog.product(options.product);
-      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === "q1-quakeworld") || q3 && options.product !== "q3-baseq3")
+      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === quakeWorldContentProduct(options.quakeWorldContent ?? { kind: "base" })) || q3 && options.product !== "q3-baseq3")
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34/35 or baseq3 protocol 68 content");
       imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
         dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
@@ -352,21 +355,44 @@ export class RemoteApplication {
     return fresh;
   }
   private async prepareQwDownloads(data: QwServerData): Promise<void> {
-    const productId = data.gameDirectory === "qw" || data.gameDirectory === "id1" ? "q1-quakeworld" : null;
-    if (productId === null) throw new Error("QW server selected an unsupported game directory");
-    const product = this.content.catalog.require(productId);
-    const gameRoot = product.userContent?.root ?? userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
-    const skinRoot = userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), "q1/qw");
+    const context = quakeWorldContentContext(data.gameDirectory);
+    const productId = quakeWorldContentProduct(context);
+    const generation = ++this.qwContentGeneration;
+    this.worldLoadGeneration++;
+    this.qwDownloads?.close(); this.qwDownloads = null;
+    const current = (): boolean => !this.closed && !this.closing && generation === this.qwContentGeneration;
+    const assertCurrent = (): void => {
+      if (!current()) throw new Error("QW directory selection was cancelled");
+    };
+    const options = { ...this.options, product: productId, quakeWorldContent: context };
+    const userRoot = options.userContentRoot ?? defaultUserContentRoot();
+    const q1Root = await findContentPath(userRoot, "q1") ?? userProductDirectory(userRoot, "q1");
+    const skinRoot = await findContentPath(q1Root, "qw") ?? join(q1Root, "qw");
+    const gameRoot = context.kind === "base" ? skinRoot : await findContentPath(q1Root, context.directory) ?? join(q1Root, context.directory);
+    assertCurrent();
     await mkdir(gameRoot, { recursive: true }); await mkdir(skinRoot, { recursive: true });
-    const mounts = await this.content.catalog.mountsFor(product.id);
+    assertCurrent();
+    const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: userRoot, discoverMods: false, quakeWorld: context });
+    assertCurrent();
+    const product = catalog.require(productId);
+    if (product.userContent !== null && product.userContent.root !== gameRoot)
+      throw new Error("QW download directory does not match its content owner");
+    const mounts = await catalog.mountsFor(product.id);
+    assertCurrent();
     const prepared = await openMountPlan({ id: createMountPlanId("qw-server", String(data.serverCount)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
-    if (this.closed) { prepared.close(); throw new Error("QW directory selection was cancelled"); }
+    try { assertCurrent(); } catch (error) { prepared.close(); throw error; }
+    const receiver = new QwDownloadReceiver({ gameRoot, skinRoot,
+      exists: async (path, category) => {
+        if (!current()) return false;
+        const owner = this.qwMounts ?? this.content.mounts;
+        try { return existsSync(join(category === "skin" ? skinRoot : gameRoot, path)) || await owner.resolve(path) !== null; }
+        catch (error) { if (!current()) return false; throw error; }
+      },
+      sendCommand: text => { assertCurrent(); this.network.command(text); }, print: text => this.print(text), noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
+      demoRecording: () => false, demoPlayback: () => false });
     this.qwMounts?.close(); this.qwMounts = prepared;
-    this.qwDownloads?.close();
-    this.qwDownloads = new QwDownloadReceiver({ gameRoot, skinRoot,
-      exists: async (path, category) => existsSync(join(category === "skin" ? skinRoot : gameRoot, path)) || await (this.qwMounts ?? this.content.mounts).resolve(path) !== null,
-      sendCommand: text => this.network.command(text), print: text => this.print(text), noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0, demoRecording: () => false, demoPlayback: () => false });
-    this.launchOptions = { ...this.options, product: productId };
+    this.qwDownloads = receiver;
+    this.launchOptions = options;
   }
 
   private async prepareQ3Downloads(connection: Q3ClientConnection): Promise<boolean> {

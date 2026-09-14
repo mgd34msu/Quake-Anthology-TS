@@ -45,12 +45,28 @@ export interface CatalogProduct {
   readonly diagnostics: readonly string[];
 }
 
+export type QuakeWorldContentContext =
+  | { readonly kind: "base" }
+  | { readonly kind: "mod"; readonly directory: string };
+
+export function quakeWorldContentContext(gameDirectory: string): QuakeWorldContentContext {
+  if (!/^[a-zA-Z0-9_+.-]+$/.test(gameDirectory) || gameDirectory === "." || gameDirectory.includes(".."))
+    throw new Error("QuakeWorld game directory must be a single safe directory name");
+  const directory = gameDirectory.toLowerCase();
+  return directory === "qw" || directory === "id1" ? { kind: "base" } : { kind: "mod", directory };
+}
+
+export function quakeWorldContentProduct(context: QuakeWorldContentContext): string {
+  return context.kind === "base" ? "q1-quakeworld" : `q1-quakeworld-mod-${context.directory}`;
+}
+
 export interface DiscoverContentOptions {
   readonly corpusRoot: string;
   readonly userContentRoot?: string;
   readonly products?: readonly ProductExpectation[];
   readonly generation?: number;
   readonly discoverMods?: boolean;
+  readonly quakeWorld?: QuakeWorldContentContext;
 }
 
 export interface MountPlanSelection {
@@ -299,10 +315,17 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
-  const expected = options.products ?? expectedProducts;
+  const selected = options.quakeWorld;
+  const context = selected === undefined ? undefined : quakeWorldContentContext(selected.kind === "base" ? "qw" : selected.directory);
+  const remoteProduct: ProductExpectation | null = context?.kind === "mod" ? {
+    id: quakeWorldContentProduct(context), family: "q1", edition: "quakeworld", campaign: `mod-${context.directory}`,
+    title: context.directory, contentDirectory: `q1/${context.directory}`, baseProduct: "q1-quakeworld",
+    requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null,
+  } : null;
+  const expected = [...options.products ?? expectedProducts, ...remoteProduct === null ? [] : [remoteProduct]];
   const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected);
   const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods]);
-  const userModIds = new Set(userMods.map(product => product.id));
+  const userModIds = new Set([...userMods.map(product => product.id), ...remoteProduct === null ? [] : [remoteProduct.id]]);
   const expectations = [...expected, ...corpusMods, ...userMods];
   const archives = new Map<string, Promise<CatalogArchive>>();
   const inspect = (path: string, format: ArchiveFormat): Promise<CatalogArchive> => {

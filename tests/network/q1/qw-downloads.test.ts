@@ -59,3 +59,21 @@ test('QW denial cancellation invalid paths and publication conflicts retain cont
     expect(readdirSync(join(f.gameRoot,'maps'))).toEqual(['a.bsp']);
   } finally {f.close();}
 });
+
+test('retiring a QW directory cancels a pending mounted lookup before sending download', async () => {
+  const f = fixture();
+  let finish: ((value: boolean) => void) | undefined;
+  const pending = new Promise<boolean>(resolve => { finish = resolve; });
+  const commands: string[] = [];
+  const receiver = new QwDownloadReceiver({ gameRoot: f.gameRoot, skinRoot: f.skinRoot, exists: () => pending,
+    sendCommand: text => { commands.push(text); }, print() {}, noskins: () => 0, demoRecording: () => false, demoPlayback: () => false });
+  try {
+    const request = receiver.request('maps/retired.bsp', 'model');
+    receiver.close();
+    if (finish === undefined) throw new Error('Missing lookup completion');
+    finish(false);
+    expect(await request).toBe('skipped');
+    expect(commands).toEqual([]);
+    expect(await Bun.file(join(f.gameRoot, 'maps/retired.bsp')).exists()).toBe(false);
+  } finally { receiver.close(); f.close(); }
+});

@@ -1,4 +1,5 @@
 /* QW cl_main.c, cl_parse.c and cl_input.c. GPL-2.0-or-later. */
+import { quakeWorldContentContext } from "../../../content/catalog/index.ts";
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { QwUserCommand } from '../../../contracts/protocol.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
@@ -101,7 +102,7 @@ export class QwClientNetwork implements ApplicationNetwork {
         for (const message of messages) {
             if (message.kind === 'server-data') {
                 if (message.protocol.kind !== 'q1-quakeworld' || message.playerSlot >= 32) throw new Error('Remote QW requires native protocol 28 and a valid player slot');
-                if (message.gameDirectory !== 'id1' && message.gameDirectory !== 'qw') throw new Error('This QW client supports base id1 and qw game directories');
+                quakeWorldContentContext(message.gameDirectory);
                 if (message.spectator) throw new Error('QW spectator presentation is not supported');
                 this.options.host.downloads?.close();
                 await this.options.host.serverData(message);

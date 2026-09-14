@@ -7,7 +7,7 @@ import { createContentDigest, createMountIdentity, createMountPlanId } from "../
 import type { ArchiveMount, ContentMount, ResolvedMountPlan, ResolvedResourceReference } from "../../../src/contracts/content.ts";
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
-import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
+import { discoverInstalledContent, quakeWorldContentContext, quakeWorldContentProduct } from "../../../src/content/catalog/index.ts";
 import { canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 
 function pak(path: string, text: string): Uint8Array {
@@ -418,5 +418,48 @@ test("borrowed provider scopes preserve subsets, records, policy and independent
     await writeFile(lowPath, pak("shared.txt", "changed"));
     await expect(mutationChild.read("shared.txt")).rejects.toThrow("source changed");
     mutationChild.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("explicit QW mod context uses common archives and user overlays above qw and id1", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "qw-context-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const products: readonly ProductExpectation[] = [
+    { id: "q1-classic-id1", family: "q1", edition: "classic", campaign: "id1", title: "id1", contentDirectory: "q1/id1", baseProduct: null, requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null },
+    { id: "q1-quakeworld", family: "q1", edition: "quakeworld", campaign: "id1", title: "qw", contentDirectory: "q1/qw", baseProduct: "q1-classic-id1", requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null },
+  ];
+  try {
+    for (const directory of ["id1", "qw", "alpha"]) await mkdir(resolve(corpusRoot, "q1", directory), { recursive: true });
+    for (const directory of ["alpha", "beta"]) await mkdir(resolve(userContentRoot, "q1", directory), { recursive: true });
+    await writeFile(resolve(corpusRoot, "q1/id1/base.txt"), "id1");
+    await writeFile(resolve(corpusRoot, "q1/id1/shared.txt"), "id1");
+    await writeFile(resolve(corpusRoot, "q1/qw/shared.txt"), "qw");
+    await writeFile(resolve(corpusRoot, "q1/alpha/pak0.pak"), pak("shared.txt", "alpha archive"));
+    await writeFile(resolve(userContentRoot, "q1/alpha/shared.txt"), "alpha user");
+    const cases = [["alpha", "alpha user"], ["beta", "qw"], ["id1", "qw"], ["qw", "qw"]];
+    for (const entry of cases) {
+      const directory = entry[0], expected = entry[1];
+      if (directory === undefined || expected === undefined) throw new Error("Missing QW case");
+      const context = quakeWorldContentContext(directory);
+      const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, quakeWorld: context });
+      const product = catalog.require(quakeWorldContentProduct(context));
+      const mounts = await catalog.mountsFor(product.id);
+      using opened = await openMountPlan({ id: createMountPlanId("test", directory), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+      expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe(expected);
+      expect(new TextDecoder().decode(await opened.read("base.txt"))).toBe("id1");
+      if (directory === "alpha") {
+        expect((await opened.open("shared.txt"))?.reference.provenance.mount.identity.content).toBe(product.id);
+        await rm(resolve(userContentRoot, "q1/alpha/shared.txt"));
+        expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe("alpha archive");
+      }
+    }
+    const absent = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false });
+    expect(() => absent.require("q1-quakeworld-mod-beta")).toThrow();
+    for (const directory of ["", "..", "../alpha", "a/b", "a\\b", "a:b", ".", "a..b", "a;quit"])
+      expect(() => quakeWorldContentContext(directory)).toThrow();
+    expect(quakeWorldContentContext("ID1")).toEqual({ kind: "base" });
+    for (const directory of ["_ctf", "-arena", ".hidden", "+foo"])
+      expect(quakeWorldContentContext(directory)).toEqual({ kind: "mod", directory });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

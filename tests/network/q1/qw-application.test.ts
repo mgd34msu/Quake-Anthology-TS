@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RemoteApplication } from '../../../src/app/bootstrap/remote-application.ts';
@@ -18,17 +18,19 @@ import { userProductDirectory } from '../../../src/content/user-data.ts';
 import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.ts';
 import type { QwUserCommand } from '../../../src/contracts/protocol.ts';
 const profile = { kind: 'q1-quakeworld', version: 28 } satisfies QwServerData['protocol'];
-for (const gameDirectory of ['qw', 'id1']) test(`hidden QW ${gameDirectory} application downloads a sound, binds shared scene and sends source movement`, async () => {
+for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDirectory} application downloads a sound, binds shared scene and sends source movement`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'qw-application-')), server = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     let app: RemoteApplication | null = null;
     const prints: string[] = [];
     try {
+        if (gameDirectory === 'mod-alpha') await mkdir(join(root, 'q1/Mod-Alpha'), { recursive: true });
         const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--connect-qw', addressKey(server.address), '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden', '--user-content-root', root]);
         if (launch.kind !== 'run') throw new Error('Expected QW run');
         app = await RemoteApplication.open(launch.options, { print: text => { prints.push(text); return undefined; } });
         const remote = app;
         const sound = await remote.content.mounts.read('sound/misc/menu1.wav');
         let channel: QuakeWorldChannel | null = null, downloadOffset = 0, begun = false;
+        let servedDirectory = gameDirectory, servedMap = 'e1m1', serverCount = 3;
         const commands: string[] = [], moves: QwUserCommand[] = [];
         const send = (records: readonly Exclude<QuakeWorldMessage, { kind: 'packet-entities' | 'invalid-delta' }>[], entities = false): void => {
             if (channel === null) throw new Error('No QW channel');
@@ -36,6 +38,8 @@ for (const gameDirectory of ['qw', 'id1']) test(`hidden QW ${gameDirectory} appl
             if (entities) { const door = new QwEntityStateT(); door.number = 40; door.modelindex = 3; writeQuakeWorldEntities(bytes, profile, [door], new Map<number, QwEntityStateT>(), null); }
             server.send(remote.networkAddress, channel.transmit(bytes.bytes(), performance.now()));
         };
+        const serverData = (): QwServerData => ({ kind: 'server-data', protocol: profile, serverCount, gameDirectory: servedDirectory, playerSlot: 3, spectator: false, level: servedMap,
+          moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } });
         const chunk = (): void => { const bytes = sound.subarray(downloadOffset, downloadOffset + 768); downloadOffset += bytes.length; send([{ kind: 'download', result: { kind: 'data', percent: Math.floor(downloadOffset * 100 / sound.length), bytes } }]); };
         const snapshot = (): void => send([
             { kind: 'stat', index: 0, value: 100 }, { kind: 'stat', index: 15, value: 4097 }, { kind: 'stat', index: 10, value: 1 },
@@ -56,27 +60,27 @@ for (const gameDirectory of ['qw', 'id1']) test(`hidden QW ${gameDirectory} appl
                     if (record.kind === 'move') { moves.push(record.bundle.current); continue; }
                     if (record.kind !== 'string-command') continue;
                     commands.push(record.text);
-                    if (record.text === 'new') send([{ kind: 'server-data', protocol: profile, serverCount: 3, gameDirectory, playerSlot: 3, spectator: false, level: 'e1m1', moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } }]);
-                    else if (record.text === 'soundlist 3 0') send([{ kind: 'sound-list', first: 0, names: ['misc/qw-join-test.wav', 'misc/qw-missing.wav'], next: 0 }]);
+                    if (record.text === 'new') send([serverData()]);
+                    else if (record.text === `soundlist ${serverCount} 0`) send([{ kind: 'sound-list', first: 0, names: ['misc/qw-join-test.wav', 'misc/qw-missing.wav'], next: 0 }]);
                     else if (record.text === 'download sound/misc/qw-join-test.wav' || record.text === 'nextdl') chunk();
                     else if (record.text === 'download sound/misc/qw-missing.wav') send([{ kind: 'download', result: { kind: 'missing' } }]);
-                    else if (record.text === 'modellist 3 0') send([{ kind: 'model-list', first: 0, names: ['maps/e1m1.bsp', 'progs/player.mdl', '*1'], next: 0 }]);
-                    else if (record.text.startsWith('prespawn 3 0 ')) { expect(Number(record.text.split(' ')[3])).not.toBe(0); send([{ kind: 'stufftext', text: 'cmd spawn 3 0\n' }]); }
-                    else if (record.text === 'spawn 3 0') send([{ kind: 'stufftext', text: 'skins\n' }]);
-                    else if (record.text === 'begin 3') { begun = true; snapshot(); }
+                    else if (record.text === `modellist ${serverCount} 0`) send([{ kind: 'model-list', first: 0, names: [`maps/${servedMap}.bsp`, 'progs/player.mdl', '*1'], next: 0 }]);
+                    else if (record.text.startsWith(`prespawn ${serverCount} 0 `)) { expect(Number(record.text.split(' ')[3])).not.toBe(0); send([{ kind: 'stufftext', text: `cmd spawn ${serverCount} 0\n` }]); }
+                    else if (record.text === `spawn ${serverCount} 0`) send([{ kind: 'stufftext', text: 'skins\n' }]);
+                    else if (record.text === `begin ${serverCount}`) { begun = true; snapshot(); }
                 }
                 if (begun && delivery.payload.length === 0) snapshot();
             }
             await Bun.sleep(1);
         };
         for (let i = 0; i < 200 && remote.localPlayers.length === 0; i++) await exchange();
-        expect(remote.options.product).toBe('q1-quakeworld');
+        expect(remote.options.product).toBe(gameDirectory === 'mod-alpha' ? 'q1-quakeworld-mod-mod-alpha' : 'q1-quakeworld');
         expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull(); expect(remote.remote).toBeInstanceOf(QwRemotePresentation);
         if (!(remote.remote instanceof QwRemotePresentation)) throw new Error('Expected QW presentation');
         const player = remote.localPlayers[0]; if (player === undefined) throw new Error(`QW seat missing: ${prints.join('')}`);
         expect(remote.remote.player?.sourceEntity).toBe(4); expect(remote.remote.playerUi(player.actor).health).toBe(100);
         expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
-        expect(new Uint8Array(await readFile(join(userProductDirectory(root, 'q1/qw'), 'sound/misc/qw-join-test.wav')))).toEqual(new Uint8Array(sound));
+        expect(new Uint8Array(await readFile(join(userProductDirectory(root, gameDirectory === 'mod-alpha' ? 'q1/Mod-Alpha' : 'q1/qw'), 'sound/misc/qw-join-test.wav')))).toEqual(new Uint8Array(sound));
         const beforeMovement = remote.remote.playerView(player.actor).origin;
         expect(remote.remote.scene.queryActors({ min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } }).some(actor => actor.collision.shape.kind === 'model')).toBe(true);
         remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
@@ -89,7 +93,50 @@ for (const gameDirectory of ['qw', 'id1']) test(`hidden QW ${gameDirectory} appl
         expect(remote.presentationEvents.some(event => event.kind === 'q1' && event.event.kind === 'sound')).toBe(true);
         send([{ kind: 'intermission', origin: { x: 100, y: 200, z: 300 }, angles: { x: 0, y: 90, z: 0 } }]); await Bun.sleep(1); await remote.step(50);
         expect(remote.remote.playerView(player.actor).origin).toEqual({ x: 100, y: 200, z: 300 });
-        expect(commands).toContain('begin 3');
+        expect(commands).toContain(`begin ${serverCount}`);
         expect(commands).toContain('download sound/misc/qw-missing.wav');
+        if (gameDirectory === 'mod-alpha') {
+            for (const directory of ['mod-beta', 'qw', 'mod-alpha']) {
+                servedDirectory = directory; servedMap = directory === 'mod-alpha' ? 'dm2' : 'e1m1';
+                serverCount++; downloadOffset = 0; begun = false;
+                send([serverData()]);
+                for (let tick = 0; tick < 200 && (!begun || remote.networkPhase !== 'active'); tick++) await exchange();
+                expect(begun).toBe(true); expect(remote.networkPhase).toBe('active');
+                expect(remote.options.product).toBe(directory === 'qw' ? 'q1-quakeworld' : `q1-quakeworld-mod-${directory}`);
+                expect(remote.content.recipe.map.geometry.requestedPath).toBe(`maps/${servedMap}.bsp`);
+                expect(new Uint8Array(await readFile(join(userProductDirectory(root, directory === 'mod-alpha' ? 'q1/Mod-Alpha' : `q1/${directory}`), 'sound/misc/qw-join-test.wav')))).toEqual(new Uint8Array(sound));
+                const downloaded = await remote.content.mounts.open('sound/misc/qw-join-test.wav');
+                expect(downloaded?.reference.provenance.mount.identity.content).toBe(remote.content.catalog.require(remote.options.product).id);
+                expect(downloaded?.bytes).toEqual(new Uint8Array(sound));
+                expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
+            }
+            const reconnectOptions = remote.options;
+            const staleLookup = remote.remote.downloads?.request('maps/retired-owner.bsp', 'model');
+            const retired = remote.remote.serverData({ ...serverData(), serverCount: ++serverCount, gameDirectory: 'retired-mod' });
+            const replacement = remote.remote.serverData({ ...serverData(), serverCount: ++serverCount, gameDirectory: 'current-mod' });
+            const results = await Promise.allSettled([retired, replacement]);
+            expect(results[0]?.status).toBe('rejected'); expect(results[1]?.status).toBe('fulfilled');
+            expect(remote.options.product).toBe('q1-quakeworld-mod-current-mod');
+            expect(await staleLookup).toBe('skipped');
+            expect(await remote.remote.downloads?.request('sound/current-owner.bin', 'sound')).toBe('waiting');
+            expect(await remote.remote.downloads?.receive({ kind: 'data', percent: 100, bytes: new Uint8Array([1, 2, 3]) })).toBe('complete');
+            expect(new Uint8Array(await readFile(join(root, 'q1/current-mod/sound/current-owner.bin')))).toEqual(new Uint8Array([1, 2, 3]));
+            await exchange();
+            expect(commands).not.toContain('download maps/retired-owner.bsp');
+            expect(commands).toContain('download sound/current-owner.bin');
+            const closing = remote.remote.serverData({ ...serverData(), serverCount: ++serverCount, gameDirectory: 'closing-mod' });
+            const closed = remote.close();
+            await expect(closing).rejects.toThrow('cancelled');
+            await closed;
+            expect(remote.options.product).toBe('q1-quakeworld-mod-current-mod');
+            const reopened = await RemoteApplication.open(reconnectOptions, { print: text => { prints.push(text); } });
+            try {
+                expect(reopened.options.quakeWorldContent).toEqual({ kind: 'mod', directory: 'mod-alpha' });
+                expect(reopened.content.recipe.map.geometry.requestedPath).toBe('maps/dm2.bsp');
+                const retained = await reopened.content.mounts.open('sound/misc/qw-join-test.wav');
+                expect(retained?.bytes).toEqual(new Uint8Array(sound));
+                expect(retained?.reference.provenance.mount.identity.content).toBe(reopened.content.catalog.require(reopened.options.product).id);
+            } finally { await reopened.close(); }
+        }
     } finally { await app?.close(); server.close(); await rm(root, { recursive: true, force: true }); }
 }, 30000);
