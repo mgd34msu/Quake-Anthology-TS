@@ -2,11 +2,13 @@
 
 ## Installed executable and recent fixes
 
-Verified installation on 2026-09-14 at `06:59:40.245Z` (01:59 CDT): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `9683d9dc9a153f00515c27f6e370521f61527a7a`, tree `50c21560805f386fe5a3b73a774a3ac9dc27a3ef`. The executable is 121,489,536 bytes with mode `0755` and SHA-256 `8e8965757e45196e207122c3f9eda27069cd0a6f9eea5037c5452b2eda7c0367`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+Verified installation on 2026-09-14 at `07:40:08.892Z` (02:40 CDT): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `46d1468bd19ec8ecf8e278056e69ff66c103203f`, tree `7efcf18cb80d82e5916f8909b957b37d6c4c5cd8`. The executable is 121,493,632 bytes with mode `0755` and SHA-256 `613204174a34e372cb59a6ea23cf17634aa41434407ecbed408d0f7cb4f19dd7`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
 
 ```sh
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
 ```
+
+This installation also includes Q3 model-material preload `003521b`, redundant packing-zero removal `b2aeb48`, reproducible monster-table generation `8e53aef`, and scalar model transforms `46d1468`. The transform pair retained bit-exact native color and shadow-atlas output; mean time changed from 59.589 to 59.049 ms while p95 worsened from 88.707 to 92.538 ms, so no reliable speed gain is established. Pending QW and Q2 cleanup work is neither accepted nor installed.
 
 Recent accepted fixes are included:
 
@@ -26,7 +28,7 @@ These measurements used separate bounded comparisons. Their percentages cannot b
 
 The tested Q2 classic and rerelease `base1` recipes used QW movement, a Q1 rerelease player, Q3 weapons, and Q1 monsters matching the map edition. LMCTF offhand grapple and Q2 classic grenades were selected but not exercised.
 
-Root inspected both actual compiled GL runs through menus, 500 ms of forward input, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,212.170 ms and the classic interval 30,387.217 ms. Both exited with code 0 and only the expected map-loaded log line. Proof: `.artifacts/resume-20260913/final-9683d9d/runtime-proof.json`.
+Root inspected both actual compiled GL runs through menus, 500 ms of forward input, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,215.590 ms and the classic interval 30,394.620 ms. Recorded ammunition went from 100 to 82 to 0 in rerelease and 100 to 80 to 0 in classic. Both exited with code 0 and only the expected map-loaded log line. Proof: `.artifacts/resume-20260913/final-46d1468/runtime-proof.json`.
 
 The historical menu-audio proof remains bounded to its tested source; five of its six source files remain unchanged from `e3ef2f0`, and `startup.ts` only changes the menu-art loader name. The installed engine now uses the 200 ms startup queue correction described below. Separate native menu checks exercised real input events, decoded music and cue PCM, mute and unmute, saved gains, and device release before game initialization. Those checks and the compiled runs used dummy audio output; audibility through the user's speakers remains unverified. An earlier 30-second trace of the `379086a` source covered 320 frames with dummy audio; this is not a measurement of the latest installed executable. A rare 192 ms pump interval exceeded roughly 137 ms of queued coverage, leaving an approximately 53 ms gap. A cold frame queued two seconds of audio; this is queued audio duration, not two seconds spent mixing. Audible fidelity and overall FPS remain unqualified. The compiled checks do not establish universal renderer parity or HUD fidelity; the bounded classic-lighting comparison below retains its seam difference.
 
@@ -61,7 +63,7 @@ Accepted source `2662c66e64142c4d7a40c201d2cf17c877f55214` retains resolved unif
 
 Accepted source `9683d9dc9a153f00515c27f6e370521f61527a7a` caches immutable local MD5 UVs, positions, and normals within the same view; shell extrusion remains separate. Root passed all 11 model tests with 1,087 assertions, including retail resources, cached-versus-uncached results, four interpolation values, shell isolation, bounds, and attachments. Retained-shadow tests also passed; opt-in CPU/GL checks were skipped. No FPS gain is claimed. This source change is included in the installed executable.
 
-Accepted source `58a3448bbac8c35842d6be5a97881517ebcb8439` reuses model-lighting yaw rows and directions once per entity, retaining the numeric expressions and the required rerelease TypeScript donor behavior. Root passed the retained test with 34 assertions; retained family-lighting checks and actual CPU/GL model captures also passed. No timing gain is claimed. This newest unit is outside the installed `9683d9d` executable. The ceiling-object identification is resolved below.
+Accepted source `58a3448bbac8c35842d6be5a97881517ebcb8439` reuses model-lighting yaw rows and directions once per entity, retaining the numeric expressions and the required rerelease TypeScript donor behavior. Root passed the retained test with 34 assertions; retained family-lighting checks and actual CPU/GL model captures also passed. No timing gain is claimed. This unit is now included in the installed executable. The ceiling-object identification is resolved below.
 
 The frozen `9683d9d` ceiling probe identifies the tan detail as static world-model-0 faces 6047, 6270, and 6044 using `e1u1/broken2_3`. The globes match authored `target_explosion` positions with model scale 1; recorded models and events do not support Scrag or machinegun-fire causation. This establishes object provenance, not donor pixel parity for lighting or animation. Evidence: `.artifacts/resume-20260913/classic-ceiling-effects/report.md`.
 
