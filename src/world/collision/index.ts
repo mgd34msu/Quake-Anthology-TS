@@ -28,6 +28,13 @@ type GeometryCollision = {
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function sweptBounds(query: TraceQuery): Bounds {
     const b = query.shape.kind === 'point' ? { min: zero, max: zero } : query.shape.bounds;
+    if (query.policy.kind === 'q3') {
+        const axis = (key: 'x' | 'y' | 'z', minimum: boolean): number => Math.fround(Math.fround(
+            (minimum ? Math.min(query.start[key], query.end[key]) : Math.max(query.start[key], query.end[key]))
+            + (minimum ? b.min[key] : b.max[key])) + (minimum ? -1 : 1));
+        return { min: { x: axis('x', true), y: axis('y', true), z: axis('z', true) },
+            max: { x: axis('x', false), y: axis('y', false), z: axis('z', false) } };
+    }
     return { min: { x: Math.min(query.start.x, query.end.x) + b.min.x - 1, y: Math.min(query.start.y, query.end.y) + b.min.y - 1, z: Math.min(query.start.z, query.end.z) + b.min.z - 1 }, max: { x: Math.max(query.start.x, query.end.x) + b.max.x + 1, y: Math.max(query.start.y, query.end.y) + b.max.y + 1, z: Math.max(query.start.z, query.end.z) + b.max.z + 1 } };
 }
 /** World and linked actor collision share one session owner. Model targets bypass actors. */
@@ -35,6 +42,7 @@ export class SharedSceneQueries implements SceneQueries {
     readonly spatial: SpatialIndex;
     readonly #geometry: GeometryCollision;
     #readActorState: ((actor: ActorId) => BodyState | null) | null = null;
+    #readActorCollision: ((actor: ActorId) => ActorCollision | null) | null = null;
     nativeQ3ClipModels(): SourceClipModels | null {
         return this.#geometry.kind === 'q3' ? this.#geometry.provider.world.sourceClipModels() : null;
     }
@@ -55,23 +63,26 @@ export class SharedSceneQueries implements SceneQueries {
     link(body: LinkedBody, collision: ActorCollision): void { this.spatial.link(body, collision); }
     unlink(actor: ActorId): void { this.spatial.unlink(actor); }
     bindActorState(read: (actor: ActorId) => BodyState | null): void { this.#readActorState = read; }
+    bindActorCollision(read: (actor: ActorId) => ActorCollision | null): void { this.#readActorCollision = read; }
     #currentActor(linked: SpatialActor): SpatialActor | null {
-        if (this.#readActorState === null) return linked;
-        const state = this.#readActorState(linked.body.actor);
+        if (this.#readActorState === null && this.#readActorCollision === null) return linked;
+        const collision = this.#readActorCollision === null ? linked.collision : this.#readActorCollision(linked.body.actor);
+        if (collision === null) return null;
+        const state = this.#readActorState === null ? linked.body.state : this.#readActorState(linked.body.actor);
         if (state === null) return null;
         return {
             body: { ...linked.body, state: {
                 origin: { ...state.origin }, angles: { ...state.angles }, velocity: { ...state.velocity },
                 bounds: { min: { ...state.bounds.min }, max: { ...state.bounds.max } }, ground: state.ground,
             } },
-            collision: linked.collision,
+            collision,
         };
     }
     queryActors(bounds: Bounds, role: 'solid' | 'trigger' | 'both' = 'both'): readonly SpatialActor[] {
         const actors: SpatialActor[] = [];
-        for (const linked of this.spatial.query(bounds, role)) {
+        for (const linked of this.spatial.query(bounds, this.#readActorCollision === null ? role : 'both')) {
             const actor = this.#currentActor(linked);
-            if (actor !== null) actors.push(actor);
+            if (actor !== null && (role === 'both' || actor.collision.role === role)) actors.push(actor);
         }
         return actors;
     }
@@ -110,23 +121,36 @@ export class SharedSceneQueries implements SceneQueries {
     }
     #trace(query: TraceQuery, excluded: readonly ActorId[]): TraceResult {
         let result = this.geometryTrace(query);
-        if (query.target.kind === 'model' || result.allSolid)
+        if (query.target.kind === 'model' || result.allSolid || query.policy.kind === 'q3' && result.fraction === 0)
             return result;
         const pass = query.passActor === null ? null : this.spatial.get(query.passActor);
+        const passCollision = query.passActor === null ? null : this.#readActorCollision === null
+            ? pass?.collision ?? null : this.#readActorCollision(query.passActor);
         let envelope = sweptBounds(query);
         if (query.policy.kind === 'q1' && query.policy.move === 'missile')
             envelope = sweptBounds({ ...query, shape: { kind: 'box', bounds: { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } } } });
-        for (const linked of this.spatial.query(envelope, 'solid')) {
-            const collision = linked.collision, id = linked.body.actor;
+        for (const linked of this.spatial.query(envelope, this.#readActorCollision === null ? 'solid' : 'both')) {
+            const actor = this.#currentActor(linked);
+            if (actor === null || actor.collision.role !== 'solid') continue;
+            const collision = actor.collision, id = linked.body.actor;
             if (excluded.some(actor => sameActor(actor, id))) continue;
-            if (query.passActor !== null && (sameActor(query.passActor, id) || collision.owner !== null && sameActor(query.passActor, collision.owner) || pass?.collision.owner !== null && pass?.collision.owner !== undefined && sameActor(pass.collision.owner, id)))
-                continue;
+            if (query.passActor !== null) {
+                if (sameActor(query.passActor, id)) continue;
+                const rawPass = passCollision?.q3Owner, rawCandidate = collision.q3Owner;
+                if (query.policy.kind === 'q3' && rawPass !== undefined && rawCandidate !== undefined) {
+                    const passOwner = rawPass.ownerNumber === 1023 ? -1 : rawPass.ownerNumber;
+                    if (rawCandidate.ownerNumber === rawPass.entityNumber || rawCandidate.ownerNumber === passOwner) continue;
+                } else {
+                    if (collision.owner !== null && sameActor(query.passActor, collision.owner)) continue;
+                    const owner = passCollision?.owner;
+                    if (owner !== null && owner !== undefined && (query.policy.kind === 'q3'
+                        ? collision.owner !== null && sameActor(owner, collision.owner) : sameActor(owner, id))) continue;
+                }
+            }
             if (query.policy.kind === 'q1' && query.policy.move === 'no-monsters' && collision.shape.kind !== 'model')
                 continue;
             if (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0)
                 continue;
-            const actor = this.#currentActor(linked);
-            if (actor === null) continue;
             const moving: TraceQuery = query.policy.kind === 'q1' && query.policy.move === 'missile' && collision.monster ? { ...query, shape: { kind: 'box', bounds: { min: { x: -15, y: -15, z: -15 }, max: { x: 15, y: 15, z: 15 } } } } : query;
             let hit: TraceResult;
             if (collision.shape.kind === 'model') {
@@ -136,7 +160,12 @@ export class SharedSceneQueries implements SceneQueries {
             }
             else
                 hit = traceActorBody(moving, actor);
-            if (hit.allSolid || hit.fraction < result.fraction || query.policy.kind === 'q1' && hit.startSolid)
+            // SV_Trace preserves the previous record at equal fraction, even for allsolid.
+            if (query.policy.kind === 'q3') {
+                if (hit.fraction < result.fraction) result = { ...hit, startSolid: hit.startSolid || result.startSolid };
+                else result = { ...result, allSolid: result.allSolid || hit.allSolid, startSolid: result.startSolid || (!hit.allSolid && hit.startSolid) };
+            }
+            else if (hit.allSolid || hit.fraction < result.fraction || query.policy.kind === 'q1' && hit.startSolid)
                 result = { ...hit, startSolid: hit.startSolid || result.startSolid };
             else if (hit.startSolid)
                 result = { ...result, startSolid: true };
@@ -149,11 +178,11 @@ export class SharedSceneQueries implements SceneQueries {
         let result = adaptPointContents(this.#geometry.provider.pointContents(query), query.policy);
         if (query.target.kind === 'model' || query.policy.kind === 'q1')
             return result;
-        for (const linked of this.spatial.query({ min: query.point, max: query.point }, 'solid')) {
+        for (const linked of this.spatial.query({ min: query.point, max: query.point }, this.#readActorCollision === null ? 'solid' : 'both')) {
             if (query.passActor !== null && sameActor(query.passActor, linked.body.actor))
                 continue;
             const actor = this.#currentActor(linked);
-            if (actor === null) continue;
+            if (actor === null || actor.collision.role !== 'solid') continue;
             const collision = actor.collision, state = actor.body.state;
             let added: number;
             if (collision.shape.kind === 'model') {

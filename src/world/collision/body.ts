@@ -30,10 +30,10 @@ export function traceActorBody(query: TraceQuery, actor: SpatialActor): TraceRes
     if (query.policy.kind === 'q2' && query.shape.kind !== 'capsule' && collision.shape.kind === 'box')
         return traceQ2Box(query, actor);
     const model = collision.shape.kind === 'capsule' ? createCapsuleModel(bounds) : createBoxModel(bounds);
-    const result = model.transformedTraceSource({ start: query.start, end: query.end, mask: 0x02000000, shape: query.shape.kind === 'point' ? query.shape : { kind: query.shape.kind, mins: query.shape.bounds.min, maxs: query.shape.bounds.max } }, body.state.origin, zero);
+    const result = model.transformedTraceSource({ start: query.start, end: query.end, mask: query.policy.kind === 'q3' && collision.family === 'q3' ? query.policy.contentsMask : 0x02000000, shape: query.shape.kind === 'point' ? query.shape : { kind: query.shape.kind, mins: query.shape.bounds.min, maxs: query.shape.bounds.max } }, body.state.origin, zero);
     const view = sourceTraceView(result);
     return adaptTraceResult({ kind: 'q3', fraction: result.fraction, end: result.end, startSolid: result.startSolid, allSolid: result.allSolid, sourcePlane: result.plane, contact: view.contact,
-        hit: result.fraction < 1 || result.startSolid ? { kind: 'actor', actor: body.actor } : { kind: 'none' }, contents: actorContents(collision, 'q3'), surfaceFlags: 0 }, query.policy);
+        hit: result.fraction < 1 || result.startSolid ? { kind: 'actor', actor: body.actor } : { kind: 'none' }, contents: query.policy.kind === 'q3' && collision.family === 'q3' ? result.contents : actorContents(collision, 'q3'), surfaceFlags: 0 }, query.policy);
 }
 function traceQ2Box(query: TraceQuery, actor: SpatialActor): TraceResult {
     const n = createNumericOperations(query.numeric), origin = actor.body.state.origin, bounds = actor.body.state.bounds;

@@ -37,6 +37,21 @@ export class QvmGame {
   runFrame(time: number): undefined { this.module.call([QvmGameExport.GAME_RUN_FRAME, time]); }
   consoleCommand(arguments_: readonly string[]): boolean { return this.module.command([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_) !== 0; }
   botFrame(time: number): undefined { this.module.call([QvmGameExport.BOTAI_START_FRAME, time]); }
+  async initializeAsync(levelTime: number, randomSeed: number, restart = false): Promise<void> {
+    await this.module.callAsync([QvmGameExport.GAME_INIT, levelTime, randomSeed, Number(restart)]);
+  }
+  async shutdownAsync(restart: boolean): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_SHUTDOWN, Number(restart)]); }
+  async clientConnectAsync(client: number, firstTime: boolean, isBot: boolean): Promise<string | null> {
+    const denied = await this.module.callAsync([QvmGameExport.GAME_CLIENT_CONNECT, client, Number(firstTime), Number(isBot)]);
+    return denied === 0 ? null : this.module.memory.readString(denied);
+  }
+  async clientBeginAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_BEGIN, client]); }
+  async clientUserinfoChangedAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_USERINFO_CHANGED, client]); }
+  async clientDisconnectAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_DISCONNECT, client]); }
+  async clientCommandAsync(client: number, arguments_: readonly string[]): Promise<void> { await this.module.commandAsync([QvmGameExport.GAME_CLIENT_COMMAND, client], arguments_); }
+  async clientThinkAsync(client: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_CLIENT_THINK, client]); }
+  async runFrameAsync(time: number): Promise<void> { await this.module.callAsync([QvmGameExport.GAME_RUN_FRAME, time]); }
+  async consoleCommandAsync(arguments_: readonly string[]): Promise<boolean> { return await this.module.commandAsync([QvmGameExport.GAME_CONSOLE_COMMAND], arguments_) !== 0; }
   /** The caller performs GAME_SHUTDOWN first and GAME_INIT after source data reload. */
   restart(bytes: Uint8Array): void { this.module.restart(bytes); this.data.clear(); }
   retire(): void { this.module.retire(); }

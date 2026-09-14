@@ -15,6 +15,7 @@ export interface ActorCollision {
     };
     readonly contents: number;
     readonly owner: ActorId | null;
+    readonly q3Owner?: { readonly entityNumber: number; readonly ownerNumber: number };
     readonly role: 'solid' | 'trigger';
     readonly monster: boolean;
     readonly deadMonster: boolean;
