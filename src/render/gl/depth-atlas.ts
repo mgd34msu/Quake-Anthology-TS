@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Q2 rerelease gl_shadowmap.ts depth passes, using already projected caster geometry.
-import type { DepthAtlasPass } from "../../contracts/render.ts";
+import type { DepthAtlasDraw, DepthAtlasPass } from "../../contracts/render.ts";
+import type { Vec4 } from "../../contracts/math.ts";
 import type { loadGl } from "../../platform/gl.ts";
 import { loadGlFramebuffers } from "../../platform/gl-framebuffers.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
@@ -17,10 +18,19 @@ export class DepthAtlasTarget {
   private readonly library: ReturnType<typeof loadGlFramebuffers>;
   private readonly handle = new Uint32Array(1);
   private readonly name: number;
+  private readonly positions = new Float32Array(65536 * 4);
+  private readonly indices = new Uint32Array(196608);
+  private readonly primitiveRestart: boolean;
+  private readonly textureCoordinates: number;
 
   constructor(context: SdlRenderContext, private readonly gl: Gl, private readonly program: StageProgram) {
     this.library = loadGlFramebuffers(context);
     try {
+      const version = /^(\d+)\.(\d+)/.exec(String(gl.glGetString(0x1f02)));
+      const major = Number(version?.[1] ?? 0), minor = Number(version?.[2] ?? 0);
+      this.primitiveRestart = major > 3 || major === 3 && minor >= 1;
+      const coordinates = new Int32Array(1); gl.glGetIntegerv(0x8871, coordinates);
+      this.textureCoordinates = value(coordinates);
       this.library.symbols.glGenFramebuffers(1, this.handle);
       this.name = value(this.handle);
       if (this.name === 0) throw new Error("OpenGL could not allocate a shadow framebuffer");
@@ -62,8 +72,18 @@ export class DepthAtlasTarget {
     const cull = value(integer(0xb45)), polygonMode = integer(0xb40, 2);
     const offsetFactor = value(floating(0x8038)), offsetUnits = value(floating(0x2a00));
     const program = value(integer(0x8b8d));
-    const enables = [0xb71, 0xb44, 0xbe2, 0xb90, 0xbc0, 0x3000, 0xc11, 0x8037].map(name => ({ name, enabled: gl.glIsEnabled(name) !== 0 }));
+    const enables = [0xb71, 0xb44, 0xbe2, 0xb90, 0xbc0, 0x3000, 0xc11, 0x8037, ...(this.primitiveRestart ? [0x8f9d] : [])]
+      .map(name => ({ name, enabled: gl.glIsEnabled(name) !== 0 }));
+    if (value(integer(0xbb1)) >= value(integer(0xd3b))) throw new Error("OpenGL client attribute stack is full");
+    gl.glPushClientAttrib(2);
     try {
+      gl.glBindBuffer(0x8892, 0); gl.glBindBuffer(0x8893, 0);
+      for (const name of [0x8075, 0x8076, 0x8077, 0x8079, 0x8457, 0x845e]) gl.glDisableClientState(name);
+      for (let unit = 0; unit < this.textureCoordinates; unit++) {
+        gl.glClientActiveTexture(0x84c0 + unit); gl.glDisableClientState(0x8078);
+      }
+      gl.glEnableClientState(0x8074); gl.glVertexPointer(4, 0x1406, 0, this.positions);
+      if (this.primitiveRestart) gl.glDisable(0x8f9d);
       fbo.glBindFramebuffer(0x8d40, this.name);
       fbo.glFramebufferTexture2D(0x8d40, 0x8d00, 0xde1, texture, 0);
       gl.glDrawBuffer(0); fbo.glReadBuffer(0);
@@ -78,24 +98,51 @@ export class DepthAtlasTarget {
         gl.glViewport(rect.x, rect.y, rect.width, rect.height);
         gl.glScissor(rect.x, rect.y, rect.width, rect.height);
         if (pass.clearDepth !== null) { gl.glClearDepth(pass.clearDepth); gl.glClear(0x100); }
+        let previous: DepthAtlasDraw | null = null, vertexCount = 0, indexCount = 0;
+        const flush = (): void => {
+          if (indexCount !== 0) gl.glDrawElements(4, indexCount, 0x1405, this.indices);
+          vertexCount = 0; indexCount = 0;
+        };
+        const append = (position: Vec4): void => {
+          const offset = vertexCount++ * 4;
+          this.positions[offset] = position.x; this.positions[offset + 1] = position.y;
+          this.positions[offset + 2] = position.z; this.positions[offset + 3] = position.w;
+        };
         for (const draw of pass.draws) {
-          if (draw.cull === "none") gl.glDisable(0xb44);
-          else { gl.glEnable(0xb44); gl.glCullFace(draw.cull === "front" ? 0x404 : 0x405); }
-          if (draw.polygonOffset === null) gl.glDisable(0x8037);
-          else { gl.glEnable(0x8037); gl.glPolygonOffset(draw.polygonOffset.factor, draw.polygonOffset.units); }
-          const positions = draw.indices.map(index => {
-            const position = draw.positions[index];
-            if (position === undefined) throw new Error("OpenGL validated depth vertex disappeared");
-            return position;
-          });
-          gl.glBegin(4);
-          for (const position of positions) gl.glVertex4f(position.x, position.y, position.z, position.w);
-          gl.glEnd();
+          const same = previous !== null && previous.cull === draw.cull && (previous.polygonOffset === null ? draw.polygonOffset === null
+            : draw.polygonOffset !== null && Object.is(previous.polygonOffset.factor, draw.polygonOffset.factor)
+              && Object.is(previous.polygonOffset.units, draw.polygonOffset.units));
+          if (!same) {
+            flush();
+            if (draw.cull === "none") gl.glDisable(0xb44);
+            else { gl.glEnable(0xb44); gl.glCullFace(draw.cull === "front" ? 0x404 : 0x405); }
+            if (draw.polygonOffset === null) gl.glDisable(0x8037);
+            else { gl.glEnable(0x8037); gl.glPolygonOffset(draw.polygonOffset.factor, draw.polygonOffset.units); }
+            previous = draw;
+          }
+          if (draw.positions.length <= this.positions.length / 4 && draw.indices.length <= this.indices.length) {
+            if (vertexCount + draw.positions.length > this.positions.length / 4 || indexCount + draw.indices.length > this.indices.length) flush();
+            const base = vertexCount;
+            for (const position of draw.positions) append(position);
+            for (const index of draw.indices) this.indices[indexCount++] = base + index;
+          } else {
+            flush();
+            for (let triangle = 0; triangle < draw.indices.length; triangle += 3) {
+              if (vertexCount + 3 > this.positions.length / 4 || indexCount + 3 > this.indices.length) flush();
+              for (let corner = 0; corner < 3; corner++) {
+                const index = draw.indices[triangle + corner], position = index === undefined ? undefined : draw.positions[index];
+                if (position === undefined) throw new Error("OpenGL validated depth vertex disappeared");
+                this.indices[indexCount++] = vertexCount; append(position);
+              }
+            }
+          }
         }
+        flush();
       }
       const error = gl.glGetError();
       if (error !== 0) throw new Error(`OpenGL shadow atlas draw failed: 0x${error.toString(16)}`);
     } finally {
+      gl.glPopClientAttrib();
       fbo.glFramebufferTexture2D(0x8d40, 0x8d00, 0xde1, 0, 0);
       fbo.glBindFramebuffer(0x8ca9, oldTarget);
       fbo.glBindFramebuffer(0x8ca8, oldReadTarget);

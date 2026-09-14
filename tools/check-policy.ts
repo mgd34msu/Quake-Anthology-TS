@@ -226,6 +226,7 @@ const glSymbols = new Set([
   "glLineWidth", "glBlendFunc", "glAlphaFunc", "glCullFace", "glFrontFace", "glMatrixMode", "glLoadIdentity", "glOrtho",
   "glBegin", "glEnd", "glColor3f", "glColor4f", "glColor4b", "glColor4ub", "glTexCoord2f", "glVertex2f", "glVertex4f",
   "glEnableClientState", "glDisableClientState", "glVertexPointer", "glColorPointer", "glTexCoordPointer", "glDrawElements",
+  "glPushClientAttrib", "glPopClientAttrib", "glBindBuffer", "glGenBuffers", "glDeleteBuffers", "glGetPointerv",
   "glArrayElement", "glGenTextures", "glDeleteTextures", "glBindTexture", "glTexParameteri", "glTexParameterfv",
   "glTexEnvi", "glTexEnvf", "glTexImage2D", "glCopyTexImage2D", "glTexSubImage2D", "glFinish", "glPixelStorei", "glReadPixels",
   "glCreateShader", "glShaderSource", "glCompileShader", "glGetShaderiv", "glGetShaderInfoLog", "glDeleteShader",

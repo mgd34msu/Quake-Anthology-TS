@@ -10,6 +10,9 @@ import { packGeometry } from "../../../src/render/gl/buffers.ts";
 import { StageProgram } from "../../../src/render/gl/programs.ts";
 import type { loadGlPrograms } from "../../../src/platform/gl-programs.ts";
 import { outputGammaTable } from "../../../src/render/output-gamma.ts";
+import { loadGl } from "../../../src/platform/gl.ts";
+import { DepthAtlasTarget } from "../../../src/render/gl/depth-atlas.ts";
+import type { DepthAtlasDraw, DepthAtlasPass } from "../../../src/contracts/render.ts";
 
 const white = { x: 1, y: 1, z: 1, w: 1 };
 const state: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal",
@@ -59,6 +62,93 @@ function draw(renderer: GlRenderer, batch: DrawBatch): void {
     prepared.draw();
   } finally { prepared.cleanup(); }
 }
+
+test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("indexed depth atlas retains client state, ordered runs and oversized triangles", () => {
+  using window = SdlWindow.open({ title: "Depth atlas arrays", width: 16, height: 16, backend: "gl", hidden: true, resizable: false, stencilBits: 8 });
+  const native = loadGl(window), gl = native.symbols, program = new StageProgram(window), target = new DepthAtlasTarget(window, gl, program);
+  const textures = new Uint32Array(1), buffers = new Uint32Array(2);
+  const integer = (name: number): number => {
+    const values = new Int32Array(1); gl.glGetIntegerv(name, values);
+    const value = values[0]; if (value === undefined) throw new Error("Missing GL integer"); return value;
+  };
+  // Supported native targets have 64-bit pointers; these values are never dereferenced in JS.
+  const pointer = (name: number): bigint => {
+    const values = new BigUint64Array(1); gl.glGetPointerv(name, values);
+    const value = values[0]; if (value === undefined) throw new Error("Missing GL pointer"); return value;
+  };
+  const version = /^(\d+)\.(\d+)/.exec(String(gl.glGetString(0x1f02)));
+  const major = Number(version?.[1] ?? 0), minor = Number(version?.[2] ?? 0), restart = major > 3 || major === 3 && minor >= 1;
+  const clientPositions = new Float32Array([1, 2, 3, 4]), clientColors = new Float32Array([0.2, 0.4, 0.6, 0.8]);
+  const clientCoordinates = new Float32Array([0.25, 0.75, 0, 0]);
+  const snapshot = () => {
+    const clientTexture = integer(0x84e1), coordinates: { enabled: number; pointer: bigint; buffer: number }[] = [];
+    for (const unit of [1, 3]) {
+      gl.glClientActiveTexture(0x84c0 + unit);
+      coordinates.push({ enabled: gl.glIsEnabled(0x8078), pointer: pointer(0x8092), buffer: integer(0x889a) });
+    }
+    gl.glClientActiveTexture(clientTexture);
+    const color = new Float32Array(4); gl.glGetFloatv(0xb00, color);
+    return { clientTexture, coordinates, color, vertexPointer: pointer(0x808e), colorPointer: pointer(0x8090),
+      vertexSize: integer(0x807a), vertexStride: integer(0x807c), vertexEnabled: gl.glIsEnabled(0x8074), colorEnabled: gl.glIsEnabled(0x8076),
+      arrayBuffer: integer(0x8894), elementBuffer: integer(0x8895), vertexBuffer: integer(0x8896), colorBuffer: integer(0x8898),
+      stackDepth: integer(0xbb1), restart: restart && gl.glIsEnabled(0x8f9d) !== 0 };
+  };
+  let calls = 0, rejectDraw = false;
+  const drawElements = gl.glDrawElements;
+  gl.glDrawElements = Object.assign((...args: Parameters<typeof drawElements>) => {
+    calls++;
+    if (rejectDraw) { rejectDraw = false; throw new Error("depth submission rejected"); }
+    return drawElements(...args);
+  }, drawElements);
+  try {
+    gl.glGenTextures(1, textures); gl.glGenBuffers(2, buffers);
+    const texture = textures[0], arrayBuffer = buffers[0], elementBuffer = buffers[1];
+    if (texture === undefined || arrayBuffer === undefined || elementBuffer === undefined) throw new Error("Missing GL names");
+    gl.glBindTexture(0xde1, texture);
+    gl.glTexImage2D(0xde1, 0, 0x8cac, 16, 16, 0, 0x1902, 0x1406, new Float32Array(256).fill(1));
+    gl.glTexParameteri(0xde1, 0x2801, 0x2600); gl.glTexParameteri(0xde1, 0x2800, 0x2600);
+    gl.glVertexPointer(3, 0x1406, 16, clientPositions); gl.glEnableClientState(0x8074);
+    gl.glColorPointer(4, 0x1406, 0, clientColors); gl.glEnableClientState(0x8076); gl.glColor4f(0.2, 0.4, 0.6, 0.8);
+    for (const unit of [3, 1]) {
+      gl.glClientActiveTexture(0x84c0 + unit); gl.glTexCoordPointer(2, 0x1406, 0, clientCoordinates); gl.glEnableClientState(0x8078);
+    }
+    gl.glBindBuffer(0x8892, arrayBuffer); gl.glBindBuffer(0x8893, elementBuffer);
+    if (restart) gl.glEnable(0x8f9d);
+    const before = snapshot();
+    const depth = (): Float32Array => { const pixels = new Float32Array(256); gl.glGetTexImage(0xde1, 0, 0x1902, 0x1406, pixels); return pixels; };
+    const quad: DepthAtlasDraw = { positions: vertices.map(vertex => ({ ...vertex.position, z: -0.5 })),
+      indices: [0, 1, 2, 0, 2, 3], cull: "none", polygonOffset: null };
+    const pass: DepthAtlasPass = { viewport: { x: 0, y: 0, width: 16, height: 16 }, clearDepth: 1, draws: [quad] };
+    target.draw(texture, 16, 16, [{ ...pass, draws: [quad, quad, { ...quad, cull: "back" }, { ...quad, polygonOffset: { factor: 1, units: 2 } }] },
+      { viewport: { x: 0, y: 0, width: 8, height: 8 }, clearDepth: 0.5, draws: [] }]);
+    expect(calls).toBe(3); expect(snapshot()).toEqual(before);
+    const first = depth();
+    expect(first[0]).toBe(0.5); expect(first[255]).toBe(0.25);
+    expect(() => target.draw(texture, 16, 16, [pass, { ...pass, draws: [{ ...quad, indices: [0, 1, 99] }] }])).toThrow("vertex index is invalid");
+    expect(depth()).toEqual(first); expect(snapshot()).toEqual(before);
+    rejectDraw = true;
+    expect(() => target.draw(texture, 16, 16, [pass])).toThrow("depth submission rejected");
+    expect(snapshot()).toEqual(before);
+    const largePositions = Array.from({ length: 65536 }, (_, index) => quad.positions[index % 4] ?? { x: 0, y: 0, z: 0, w: 1 });
+    calls = 0;
+    target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: largePositions }, { ...quad, positions: largePositions }] }]);
+    expect(calls).toBe(2); expect(depth().every(value => value === 0.25)).toBe(true);
+    calls = 0;
+    target.draw(texture, 16, 16, [{ ...pass, draws: [{ ...quad, positions: [...largePositions, { x: 0, y: 0, z: 0, w: 1 }] }] }]);
+    expect(calls).toBe(1); expect(depth().every(value => value === 0.25)).toBe(true);
+    const oversized: DepthAtlasDraw = { ...quad, positions: [
+      { x: -2, y: -2, z: 0, w: 1 }, { x: -2, y: -2, z: 0, w: 1 }, { x: -2, y: -2, z: 0, w: 1 },
+      { x: -1, y: -1, z: -0.5, w: 1 }, { x: 3, y: -1, z: -0.5, w: 1 }, { x: -1, y: 3, z: -0.5, w: 1 }],
+      indices: Array.from({ length: 196611 }, (_, index) => index < 196608 ? index % 3 : index % 3 + 3) };
+    calls = 0; target.draw(texture, 16, 16, [{ ...pass, draws: [oversized] }]);
+    expect(calls).toBe(4); expect(depth().every(value => value === 0.25)).toBe(true);
+    expect(snapshot()).toEqual(before); expect(gl.glGetError()).toBe(0);
+  } finally {
+    gl.glDrawElements = drawElements;
+    gl.glBindBuffer(0x8892, 0); gl.glBindBuffer(0x8893, 0); gl.glDeleteBuffers(2, buffers); gl.glDeleteTextures(1, textures);
+    target.close(); program.close(); native.close();
+  }
+});
 
 // Run on an owned display: env -u WAYLAND_DISPLAY QUAKE_GL_SMOKE=1 SDL_VIDEODRIVER=x11
 // LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bun test tests/render/gl
