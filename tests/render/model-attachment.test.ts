@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { ModelTransform } from "../../src/contracts/scene.ts";
 import { alignModelAttachment } from "../../src/render/scene/models/attachment.ts";
-import { composeModelTransform, modelWorldPoint } from "../../src/render/scene/models/transform.ts";
+import { composeModelTransform, modelWorldDirection, modelWorldPoint } from "../../src/render/scene/models/transform.ts";
+import { add3, scale3 } from "../../src/core/math.ts";
 import { q2HeldWeapon } from "../../src/content/q2/foundation/held-weapons.ts";
 import { Q3_WEAPON_HAND_GRIP } from "../../src/content/q3/foundation/held-weapons.ts";
 
@@ -10,6 +11,27 @@ function closePoint(actual: ModelTransform["origin"], expected: ModelTransform["
   expect(actual.y).toBeCloseTo(expected.y, 5);
   expect(actual.z).toBeCloseTo(expected.z, 5);
 }
+
+test("model transforms retain every binary32 boundary and signed zero", () => {
+  const transforms: readonly ModelTransform[] = [
+    { origin: { x: 0, y: -0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], scale: { x: 1, y: 1, z: 1 } },
+    { origin: { x: -0, y: -0, z: -0 }, axis: [{ x: -0, y: -0, z: -0 }, { x: -0, y: -0, z: -0 }, { x: -0, y: -0, z: -0 }], scale: { x: 1, y: 1, z: 1 } },
+    { origin: { x: 2 ** 28, y: -(2 ** 27), z: 0.1 }, axis: [{ x: 2, y: 1, z: 0.1 }, { x: -1, y: 1, z: 3 }, { x: 0.3, y: -2, z: 1 }], scale: { x: -2, y: 0.1, z: 3 } },
+    { origin: { x: -3, y: 7, z: 1 }, axis: [{ x: 2 ** 24, y: -(2 ** 24), z: 1 }, { x: -(2 ** 24), y: 2 ** 24, z: -1 }, { x: 1, y: 1, z: 2 ** -149 }], scale: { x: 1, y: 1, z: 1 } },
+    { origin: { x: 1e30, y: -1e30, z: 2 ** -149 }, axis: [{ x: 0.1, y: -0.7, z: 0.3 }, { x: 0.7, y: 0.1, z: -0.2 }, { x: -0.3, y: 0.2, z: 0.9 }], scale: { x: 1e-20, y: -1e20, z: 0 } },
+  ];
+  const values = [0, -0, 1, -1, 0.1, 1 + 2 ** -24, 2 ** -149, -(2 ** -149), 2 ** -150, 2 ** 24 + 1, 1e30, -1e30];
+  for (const transform of transforms) for (const x of values) for (const y of values) for (const z of values) {
+    const value = { x, y, z }, [forward, left, up] = transform.axis;
+    const direction = add3(add3(scale3(forward, x * transform.scale.x), scale3(left, y * transform.scale.y)), scale3(up, z * transform.scale.z));
+    const point = add3(transform.origin, direction);
+    const actualDirection = modelWorldDirection(transform, value), actualPoint = modelWorldPoint(transform, value);
+    for (const component of ["x", "y", "z"] satisfies readonly (keyof typeof value)[]) {
+      expect(Object.is(actualDirection[component], direction[component])).toBe(true);
+      expect(Object.is(actualPoint[component], point[component])).toBe(true);
+    }
+  }
+});
 
 test("model attachment registers the source origin and basis, retaining model size", () => {
   const source: ModelTransform = { origin: { x: 12, y: -7, z: 5 },

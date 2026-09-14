@@ -13,11 +13,22 @@ export function at<T>(values: readonly T[], index: number, label: string): T {
 
 export function modelWorldDirection(transform: ModelTransform, value: Vec3): Vec3 {
   const [forward, left, up] = transform.axis;
-  return add3(add3(scale3(forward, value.x * transform.scale.x), scale3(left, value.y * transform.scale.y)), scale3(up, value.z * transform.scale.z));
+  const x = value.x * transform.scale.x, y = value.y * transform.scale.y, z = value.z * transform.scale.z;
+  return {
+    x: Math.fround(Math.fround(Math.fround(forward.x * x) + Math.fround(left.x * y)) + Math.fround(up.x * z)),
+    y: Math.fround(Math.fround(Math.fround(forward.y * x) + Math.fround(left.y * y)) + Math.fround(up.y * z)),
+    z: Math.fround(Math.fround(Math.fround(forward.z * x) + Math.fround(left.z * y)) + Math.fround(up.z * z)),
+  };
 }
 
 export function modelWorldPoint(transform: ModelTransform, value: Vec3): Vec3 {
-  return add3(transform.origin, modelWorldDirection(transform, value));
+  const [forward, left, up] = transform.axis;
+  const x = value.x * transform.scale.x, y = value.y * transform.scale.y, z = value.z * transform.scale.z;
+  return {
+    x: Math.fround(transform.origin.x + Math.fround(Math.fround(Math.fround(forward.x * x) + Math.fround(left.x * y)) + Math.fround(up.x * z))),
+    y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * x) + Math.fround(left.y * y)) + Math.fround(up.y * z))),
+    z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * x) + Math.fround(left.z * y)) + Math.fround(up.z * z))),
+  };
 }
 
 export function modelLocalDelta(transform: ModelTransform, value: Vec3): Vec3 {
