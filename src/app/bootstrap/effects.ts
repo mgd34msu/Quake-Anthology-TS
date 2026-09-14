@@ -499,6 +499,9 @@ export class ApplicationEffects {
           frames, baseFrame: bfg ? 0 : grenade ? 30 : this.random.nextUnit() < 0.5 ? 15 : 0,
           path: bfg ? Q2_TRANSIENT_MODELS.bfgExplosion : Q2_TRANSIENT_MODELS.rocketExplosion, kind: "poly", flags: bfg ? 8 | 32 : 8, skin: 0,
           light: { radius: 350, color: bfg ? { x: 0, y: 1, z: 0 } : orange } });
+        if (!bfg) this.sounds.push({ content: source.content,
+          path: name.endsWith("-water") ? "weapons/xpld_wat.wav" : grenade ? "weapons/grenlx1a.wav" : "weapons/rocklx1a.wav",
+          origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
         break;
       }
       case "footstep": case "monster-footstep": case "fall": case "fall-short": case "fall-far": break;
