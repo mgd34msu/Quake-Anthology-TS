@@ -335,3 +335,88 @@ test("borrowed readers retain archive source checks and create no archive opens"
     await expect(openMountPlan(plan)).rejects.toThrow("Archive bytes changed before mount");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("borrowed provider scopes preserve subsets, records, policy and independent lifetimes", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "borrowed-provider-"));
+  try {
+    const lowPath = resolve(root, "low.pak"), highPath = resolve(root, "high.pk3");
+    const lowBytes = pak("shared.txt", "low"), highBytes = zip([["shared.txt", "high"], ["foreign.txt", "foreign"]]);
+    await writeFile(lowPath, lowBytes); await writeFile(highPath, highBytes);
+    await writeFile(resolve(root, "guest.cfg"), "loose");
+    const low: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:scope:low", "q1:classic:id1:installed", 1), format: "pak", archivePath: lowPath, archiveDigest: digestBytes(lowBytes) };
+    const high: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:scope:high", "q3:classic:baseq3:installed", 1), format: "pk3", archivePath: highPath, archiveDigest: digestBytes(highBytes) };
+    const loose: ContentMount = { kind: "loose", identity: createMountIdentity("mount:scope:loose", "q1:classic:id1:installed", 1), rootPath: root };
+    const plan: ResolvedMountPlan = { id: "mount-plan:scope:parent", mounts: [high, low, loose], defaultOrder: [high.identity.id, low.identity.id, loose.identity.id], prefixOrders: [] };
+    for (const archives of [[], [low.archiveDigest], [high.archiveDigest, low.archiveDigest]]) {
+      using owner = await openMountPlan(plan, { pure: { archives } });
+      const original = await owner.open("shared.txt"), before = owner.openedResources;
+      if (original === null) throw new Error("Missing parent resource");
+      const scope: ResolvedMountPlan = { id: "mount-plan:scope:child", mounts: [low, loose], defaultOrder: [loose.identity.id, low.identity.id], prefixOrders: [] };
+      const options = { pure: { archives: archives.filter(digest => digest === low.archiveDigest) } };
+      const child = owner.borrowMountPlan(scope, options), sibling = owner.borrowMountPlan({ ...scope, id: "mount-plan:scope:sibling" }, options);
+      if (child === null || sibling === null) throw new Error("Expected borrowed provider scopes");
+      using expected = await openMountPlan(scope, options);
+      expect(child.plan).toEqual(expected.plan);
+      const asset = await child.open("shared.txt");
+      expect(asset).toEqual(await expected.open("shared.txt"));
+      if (asset === null) throw new Error("Missing child resource");
+      expect(await child.read(asset.reference)).toEqual(await owner.read(asset.reference));
+      expect(await child.listFiles("", ".txt")).toEqual(await expected.listFiles("", ".txt"));
+      expect(await child.open("foreign.txt")).toBeNull();
+      if (original.reference.provenance.mount.identity.id === high.identity.id) await expect(child.read(original.reference)).rejects.toThrow("Stale resource mount");
+      expect(child.openedResources).toEqual([asset.reference]);
+      expect(child.referencedArchives).toEqual([low]);
+      expect(sibling.openedResources).toEqual([]);
+      expect(before).toEqual([original.reference]);
+      const ownerRecords = owner.openedResources;
+      await child.open("guest.cfg");
+      expect(owner.openedResources).toEqual(ownerRecords);
+      child.close(); child.close();
+      await expect(child.read("shared.txt")).rejects.toThrow("closed");
+      expect(new TextDecoder().decode(await sibling.read("shared.txt"))).toBe("low");
+      expect(await owner.open("shared.txt")).toEqual(original);
+      const pending = sibling.read("guest.cfg");
+      owner.close();
+      await expect(pending).rejects.toThrow("closed");
+      await expect(sibling.open("shared.txt")).rejects.toThrow("closed");
+      await expect(sibling.read(asset.reference)).rejects.toThrow("closed");
+      await expect(sibling.listFiles("", ".txt")).rejects.toThrow("closed");
+      expect(() => sibling.borrowMountPlan(scope, options)).toThrow("closed");
+      sibling.close();
+    }
+    using owner = await openMountPlan(plan);
+    const scope: ResolvedMountPlan = { id: "mount-plan:scope:identity", mounts: [low], defaultOrder: [low.identity.id], prefixOrders: [] };
+    for (const mount of [
+      { ...low, identity: { ...low.identity, generation: 2 } },
+      { ...low, identity: { ...low.identity, content: high.identity.content } },
+      { ...low, archivePath: highPath },
+      { ...low, archiveDigest: high.archiveDigest },
+      { ...low, format: "zip" } satisfies ArchiveMount,
+    ]) expect(owner.borrowMountPlan({ ...scope, mounts: [mount] })).toBeNull();
+    expect(owner.borrowMountPlan(scope, { looseComparison: "case-insensitive" })).toBeNull();
+    expect(owner.borrowMountPlan(scope, { pure: { archives: [low.archiveDigest] } })).toBeNull();
+    expect(() => owner.borrowMountPlan({ ...scope, defaultOrder: [] })).toThrow("every fallback mount");
+    const changedIdentity: ArchiveMount = { ...low, identity: createMountIdentity("mount:scope:fresh", low.identity.content, 2) };
+    const fallback: ResolvedMountPlan = { ...scope, mounts: [changedIdentity], defaultOrder: [changedIdentity.identity.id] };
+    const borrowed = owner.borrowMountPlan(fallback);
+    expect(borrowed).toBeNull();
+    using fresh = borrowed ?? await openMountPlan(fallback);
+    expect((await fresh.open("shared.txt"))?.reference.provenance.mount.identity).toEqual(changedIdentity.identity);
+    using pure = await openMountPlan(plan, { pure: { archives: [high.archiveDigest] } });
+    expect(pure.borrowMountPlan(scope)).toBeNull();
+    expect(pure.borrowMountPlan(plan)).toBeNull();
+    expect(pure.borrowMountPlan(scope, { pure: { archives: [] } })).toBeNull();
+    const linkedOptions = { links: [{ sourcePrefix: "linked/", targetPrefix: "", mount: loose.identity.id }] };
+    using linked = await openMountPlan(plan, linkedOptions);
+    expect(linked.borrowMountPlan(plan)).toBeNull();
+    const linkedChild = linked.borrowMountPlan(plan, linkedOptions);
+    if (linkedChild === null) throw new Error("Expected matching links to borrow");
+    expect(new TextDecoder().decode(await linkedChild.read("linked/guest.cfg"))).toBe("loose");
+    linkedChild.close();
+    const mutationChild = owner.borrowMountPlan(scope);
+    if (mutationChild === null) throw new Error("Expected mutation child");
+    await writeFile(lowPath, pak("shared.txt", "changed"));
+    await expect(mutationChild.read("shared.txt")).rejects.toThrow("source changed");
+    mutationChild.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

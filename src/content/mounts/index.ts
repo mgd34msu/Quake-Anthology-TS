@@ -97,12 +97,37 @@ function resolveOrder(plan: ResolvedMountPlan, mounts: ReadonlyMap<MountId, Cont
     prefixOrders: plan.prefixOrders.map(order => ({ ...order, mounts: [...pureOrder(order.mounts, mounts, pure)] })) };
 }
 
+function resolveMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions): ResolvedMountPlan {
+  const mounts = new Map<MountId, ContentMount>();
+  for (const mount of plan.mounts) {
+    if (mounts.has(mount.identity.id)) throw new RangeError(`Repeated mount identity: ${mount.identity.id}`);
+    mounts.set(mount.identity.id, mount);
+  }
+  const resolvedPlan = resolveOrder(plan, mounts, options.pure);
+  for (const link of options.links ?? []) {
+    if (mounts.get(link.mount)?.kind !== "loose") throw new RangeError(`Link must target a mounted loose root: ${link.mount}`);
+    normalizeResourcePath(link.sourcePrefix.replace(/\/$/, ""));
+    if (link.targetPrefix) normalizeResourcePath(link.targetPrefix.replace(/\/$/, ""));
+  }
+  const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
+  for (const digest of options.pure?.archives ?? []) if (!available.has(digest)) throw new Error(`Required pure archive is missing: ${digest}`);
+  return resolvedPlan;
+}
+
+function sameMount(left: ContentMount, right: ContentMount): boolean {
+  if (left.identity.id !== right.identity.id || left.identity.content !== right.identity.content || left.identity.generation !== right.identity.generation) return false;
+  if (left.kind === "archive") return right.kind === "archive" && left.archivePath === right.archivePath
+    && left.archiveDigest === right.archiveDigest && left.format === right.format;
+  return right.kind === "loose" && left.rootPath === right.rootPath;
+}
+
 /** A selected plan owns its open archives; no process-global search path is mutated. */
 export class MountedContent {
   readonly #sources = new Map<MountId, MountedSource>();
   readonly #referenced = new Map<MountId, ArchiveMount>();
   readonly #openedResources = new Map<string, ResolvedResourceReference>();
   #closed = false;
+  #ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly parent: MountedContent } = { kind: "owned" };
 
   constructor(readonly plan: ResolvedMountPlan, sources: readonly MountedSource[], readonly options: OpenMountOptions = {}) {
     for (const source of sources) this.#sources.set(source.mount.identity.id, source);
@@ -112,7 +137,36 @@ export class MountedContent {
 
   get referencedArchives(): readonly ArchiveMount[] { return [...this.#referenced.values()]; }
 
-  assertOpen(): void { if (this.#closed) throw new Error("Content mount plan is closed"); }
+  assertOpen(): void {
+    if (this.#closed) throw new Error("Content mount plan is closed");
+    if (this.#ownership.kind === "borrowed") this.#ownership.parent.assertOpen();
+  }
+
+  /** A locally closable scope over identical sources; null requests an independently opened plan. */
+  borrowMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions = {}): MountedContent | null {
+    this.assertOpen();
+    const resolved = resolveMountPlan(plan, options);
+    const sources: MountedSource[] = [];
+    for (const mount of plan.mounts) {
+      const source = this.#sources.get(mount.identity.id);
+      if (source === undefined || !sameMount(source.mount, mount)) return null;
+      sources.push(source);
+    }
+    if ((options.looseComparison ?? "exact") !== (this.options.looseComparison ?? "exact")) return null;
+    const links = options.links ?? [], parentLinks = this.options.links ?? [];
+    if (links.length !== parentLinks.length || links.some((link, index) => {
+      const parent = parentLinks[index];
+      return parent === undefined || link.mount !== parent.mount || link.sourcePrefix !== parent.sourcePrefix || link.targetPrefix !== parent.targetPrefix;
+    })) return null;
+    const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
+    const parentPure = this.options.pure?.archives ?? [], pure = options.pure?.archives ?? [];
+    const expectedPure = parentPure.filter(digest => available.has(digest));
+    if (parentPure.length > 0 && expectedPure.length === 0 || pure.length !== expectedPure.length
+      || pure.some((digest, index) => digest !== expectedPure[index])) return null;
+    const borrowed = new MountedContent(resolved, sources, options);
+    borrowed.#ownership = { kind: "borrowed", parent: this };
+    return borrowed;
+  }
 
   /** Borrows verified sources until this owner closes; the reader cannot close them. */
   borrowOrderedReader(order: Pick<ResolvedMountPlan, "id" | "defaultOrder" | "prefixOrders">): MountedContentReader {
@@ -283,26 +337,14 @@ export class MountedContent {
     if (this.#closed) return;
     this.#closed = true;
     this.#openedResources.clear();
-    for (const source of this.#sources.values()) if (source.kind === "archive") source.archive.close();
+    if (this.#ownership.kind === "owned") for (const source of this.#sources.values()) if (source.kind === "archive") source.archive.close();
   }
 
   [Symbol.dispose](): void { this.close(); }
 }
 
 export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions = {}): Promise<MountedContent> {
-  const mounts = new Map<MountId, ContentMount>();
-  for (const mount of plan.mounts) {
-    if (mounts.has(mount.identity.id)) throw new RangeError(`Repeated mount identity: ${mount.identity.id}`);
-    mounts.set(mount.identity.id, mount);
-  }
-  const resolvedPlan = resolveOrder(plan, mounts, options.pure);
-  for (const link of options.links ?? []) {
-    if (mounts.get(link.mount)?.kind !== "loose") throw new RangeError(`Link must target a mounted loose root: ${link.mount}`);
-    normalizeResourcePath(link.sourcePrefix.replace(/\/$/, ""));
-    if (link.targetPrefix) normalizeResourcePath(link.targetPrefix.replace(/\/$/, ""));
-  }
-  const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
-  for (const digest of options.pure?.archives ?? []) if (!available.has(digest)) throw new Error(`Required pure archive is missing: ${digest}`);
+  const resolvedPlan = resolveMountPlan(plan, options);
   const sources: MountedSource[] = [];
   try {
     for (const mount of plan.mounts) {

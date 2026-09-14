@@ -98,8 +98,10 @@ export class LoadedApplicationContent {
       const pure = this.pure === undefined ? undefined : { archives: this.pure.archives.filter(digest => digests.has(digest)) };
       if (this.pure !== undefined && this.pure.archives.length > 0 && pure?.archives.length === 0)
         throw new Error(`No server-approved archives provide ${content}`);
-      const opened = await openMountPlan({ id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
-        mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, pure === undefined ? {} : { pure });
+      const plan = { id: createMountPlanId("provider", Buffer.from(content).toString("hex")),
+        mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
+      const options = pure === undefined ? {} : { pure };
+      const opened = this.mounts.borrowMountPlan(plan, options) ?? await openMountPlan(plan, options);
       if (this.closed) { opened.close(); throw new Error("Application content closed during mount"); }
       this.opened.add(opened);
       return opened;
