@@ -168,7 +168,11 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
       const lighting: BatchLighting = fragmentLighting === undefined ? { kind: "vertex" } : { ...fragmentLighting, pass: "lightmap" };
       batches.push({ lighting, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: lightmap }, indices: geometry.indices,
         state: { ...state, blend, depthTest: "equal", depthWrite: false, alphaTest: "none" },
-        vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: vertex.lightmapCoord, color: { x: 1, y: 1, z: 1, w: 1 } })) });
+        vertices: vertices.map((vertex, index) => {
+          const source = geometry.vertices[index];
+          if (source === undefined) throw new Error("Missing opaque lightmap coordinates");
+          return { position: vertex.position, texCoord: source.lightmapCoord, color: { x: 1, y: 1, z: 1, w: 1 } };
+        }) });
     }
   }
   if (context.fullbright !== null) batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: context.fullbright }, indices: geometry.indices,

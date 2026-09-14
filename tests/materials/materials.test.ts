@@ -13,10 +13,10 @@ import { prepareMaterialBatches } from "../../src/materials/evaluate.ts";
 import type { MaterialDrawContext } from "../../src/materials/evaluate.ts";
 import type { MaterialGeometry } from "../../src/materials/geometry.ts";
 import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels, lightmapCoordinates, q1LightStyle, q2LightStyle } from "../../src/materials/lighting.ts";
-import type { LightmapFace } from "../../src/materials/lighting.ts";
+import type { LightmapFace, Q1LightmapEncoding } from "../../src/materials/lighting.ts";
 import { evaluateTexCoords, evaluateWaveform, parseShaderScript } from "../../src/materials/material.ts";
 import type { RegisteredImage, ShaderRegistrationHost } from "../../src/materials/material.ts";
-import { createQ1Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1TextureAnimations } from "../../src/materials/legacy.ts";
+import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1TextureAnimations } from "../../src/materials/legacy.ts";
 import { q2LightGridPoint } from "../../src/materials/q2-lightgrid.ts";
 import type { Q2Lightgrid } from "../../src/contracts/scene.ts";
 import { cloudTexCoord } from "../../src/materials/sky.ts";
@@ -144,6 +144,43 @@ describe("source material paths", () => {
     expect(batches[1]?.state.depthTest).toBe("equal");
     expect(batches[1]?.state.depthWrite).toBe(false);
     expect(batches[1]?.vertices[0]?.color).toEqual({ x: 1, y: 1, z: 1, w: 1 });
+  });
+
+  test("opaque legacy lightmaps retain separate numeric passes with one projection per vertex", () => {
+    const lighting = { kind: "lightmap", image: lightmap.frame.image, styles: [0] } satisfies Parameters<typeof createQ1Material>[2];
+    const materials = [createQ1Material("stone", base.frame.image, lighting), createQ2Material("stone", [base.frame.image], lighting)];
+    const encodings: readonly Q1LightmapEncoding[] = ["rgb", "inverted-alpha", "inverted-luminance"];
+    const varied: MaterialGeometry = { indices: [2, 0, 1], vertices: geometry.vertices.map((source, index) => ({ ...source,
+      texCoord: { x: index / 4, y: (index + 1) / 8 }, lightmapCoord: { x: (index + 2) / 8, y: index / 2 },
+      color: { x: index * 50, y: 200 - index * 30, z: 128, w: 255 } })) };
+    for (const material of materials) for (const encoding of encodings) {
+      let projections = 0;
+      const batches = prepareLegacyMaterialBatches(material, varied, { time: 0, animationFrame: 0, alternateAnimation: false,
+        fullbright: white.frame.image, q1LightmapEncoding: encoding, cull: "back", depthRange: [0.125, 0.875],
+        entityRGBA: { x: 128, y: 64, z: 32, w: 255 }, project(position) {
+          projections++; return { x: position.x * 2 + 3, y: position.y * 4 - 1, z: position.z + 0.5, w: 2 };
+        } });
+      expect(projections).toBe(3);
+      expect(batches).toHaveLength(3);
+      const [texture, illumination, fullbright] = batches;
+      if (texture === undefined || illumination === undefined || fullbright === undefined) throw new Error("Missing legacy passes");
+      const positions = [{ x: 3, y: -1, z: 0.5, w: 2 }, { x: 5, y: -1, z: 0.5, w: 2 }, { x: 3, y: 3, z: 0.5, w: 2 }];
+      for (const batch of batches) {
+        expect(batch.vertices.map(value => value.position)).toEqual(positions);
+        expect(batch.indices).toEqual([2, 0, 1]);
+        expect(batch.texturing).toBe("single");
+        expect(batch.lighting).toEqual({ kind: "vertex" });
+      }
+      expect(texture.vertices.map(value => value.texCoord)).toEqual([{ x: 0, y: 0.125 }, { x: 0.25, y: 0.25 }, { x: 0.5, y: 0.375 }]);
+      expect(illumination.vertices.map(value => value.texCoord)).toEqual([{ x: 0.25, y: 0 }, { x: 0.375, y: 0.5 }, { x: 0.5, y: 1 }]);
+      expect(texture.vertices.map(value => value.color)).toEqual(Array.from({ length: 3 }, () => ({ x: 128 / 255, y: 64 / 255, z: 32 / 255, w: 1 })));
+      expect(illumination.vertices.map(value => value.color)).toEqual(Array.from({ length: 3 }, () => ({ x: 1, y: 1, z: 1, w: 1 })));
+      expect(fullbright.vertices).toEqual(texture.vertices);
+      expect(illumination.texture).toEqual({ kind: "bind-image", image: lightmap.frame.image });
+      expect(illumination.state).toEqual({ ...texture.state, depthTest: "equal", depthWrite: false, alphaTest: "none",
+        blend: material.kind === "q1" && encoding !== "rgb" ? { source: "zero", destination: encoding === "inverted-alpha" ? "one-minus-src-alpha" : "one-minus-src-color" }
+          : { source: "dst-color", destination: "zero" } });
+    }
   });
 });
 
