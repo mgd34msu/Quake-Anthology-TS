@@ -74,8 +74,14 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     const contents = new Map<RendererImage, ImageLevel | DepthImageLevel>();
     const render = (view: WorldViewInput, force: boolean) => {
       frame.begin();
-      // Inline preparation deliberately rebuilds and invalidates all world lightmaps.
-      if (force) scene.prepareModel(0, transform, view);
+      if (force) {
+        const { q2FragmentLighting, ...unfragmented } = view;
+        // A nonempty light list invalidates the cache; radius < minimum adds no energy.
+        const invalidated = { ...unfragmented, lights: [...(fixture.family === "q2" && q2FragmentLighting !== undefined ? [] : view.lights ?? []),
+          { origin: camera.origin, radius: 0, minimum: 1, color: { x: 1, y: 1, z: 1 } }] };
+        scene.prepareModel(0, transform, invalidated);
+        for (const model of view.inlineModels ?? []) scene.prepareModel(model.model, model.transform, invalidated);
+      }
       const prepared = scene.prepareView(view);
       let updates = 0;
       for (const operation of prepared.imageOperations) {
@@ -105,6 +111,21 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     const styled = { ...input, q1Styles, q2Styles };
     compare(styled, true);
     compare(styled, false);
+    const brushModels = Array.from({ length: map.models.length }, (_, model) => ({ model, transform }));
+    const brushes = { ...styled, inlineModels: brushModels };
+    render(brushes, false);
+    compare(brushes, false);
+    const movedBrushes = { ...brushes, target: { kind: "seat", seat: identity.seat(1) } satisfies WorldViewInput["target"],
+      inlineModels: [...brushModels, ...brushModels.map(model => ({ ...model, transform: {
+        origin: { x: 0, y: 32, z: 16 }, axis: anglesToAxis({ x: 0, y: 30, z: 0 }), scale: 1.25 } }))] };
+    render(movedBrushes, false);
+    compare(movedBrushes, false);
+    compare(brushes, false);
+    const dimBrushes = { ...movedBrushes, q1Styles: Array.from({ length: 256 }, () => 32),
+      q2Styles: Array.from({ length: 256 }, () => ({ rgb: { x: 0.125, y: 0.25, z: 0.5 }, white: 0.875 })) };
+    compare(dimBrushes, true);
+    compare(movedBrushes, true);
+    compare(movedBrushes, false);
     expect(scene.surfaces.every(surface => surface.kind !== "legacy" || surface.lightmap === null || !surface.lightmap.face.styles.includes(254))).toBe(true);
     q1Styles[254] = 64;
     q2Styles[254] = { rgb: { x: 0.25, y: 0.75, z: 1 }, white: 3 };

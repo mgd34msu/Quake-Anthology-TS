@@ -371,7 +371,7 @@ export class WorldScene {
         }
       }
       const cached = this.staticLightStyles.get(surface);
-      const reusable = model === undefined && lights.length === 0;
+      const reusable = lights.length === 0;
       if (!reusable || cached === undefined || cached.length !== styles.length || styles.some((value, index) => value !== cached[index])) {
         this.staticLightStyles.delete(surface);
         const built = material.kind === "q1" ? buildQ1Lightmap(lightmap.face, input.q1Styles ?? q1DefaultStyles, { encoding: lightmap.encoding, dynamicLights: lights })
