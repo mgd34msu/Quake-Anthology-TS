@@ -69,6 +69,8 @@ The frozen `9683d9d` ceiling probe identifies the tan detail as static world-mod
 
 Accepted `820173d068c92dfb9e735a39d43d0df82029b6f4` retains server-selected ASCII QuakeWorld mod directories through the common catalog, with mod → qw → id1 lookup, case-preserved writes, shared skins, travel, cancellation, and reopen behavior. Root passed 11 native client/download and catalog tests with 187 assertions. This does not qualify retail peers, arbitrary mods, or full hosting. Accepted `751193f85d6a8abfffed6d818eab6531fade72ce` replaces a synthetic Q2 warmup pose with the shared renderer’s `preloadModel(asset)` call; three existing failure/retry tests passed with 12 assertions. Both changes remain outside the installed `46d1468` executable.
 
+Accepted source `33026a68ebf6cec4b7fb40e41ee78d7d0d1706a5` submits shadow-atlas geometry through indexed GL draws. Actual color and full 2048² shadow-atlas bytes matched; 72,573 immediate vertex calls and 6,516 begin/end pairs became four indexed draws with 72,573 indices. Root passed the focused native test with 17 assertions; broader native checks passed 11 tests with 303 assertions. Paired mean frame time fell from 58.993 to 56.813 ms, but median and p95 worsened, so no general speed or FPS gain is claimed. This source change is outside the installed `46d1468` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
