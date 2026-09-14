@@ -136,6 +136,7 @@ export interface Simulation {
   readonly session: SessionId;
   readonly recipe: ExecutableRecipe;
   step(input: InputBatch): SimulationOutput;
+  stepAsync?(input: InputBatch): Promise<SimulationOutput>;
   checkpoint(): SaveImage;
   close(): undefined;
 }

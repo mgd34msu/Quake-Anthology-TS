@@ -252,17 +252,32 @@ export class EngineSession implements SessionResource {
   }
 
   step(input: InputBatch): SimulationOutput {
+    const world = this.beginStep();
+    try { return this.completeStep(world, world.simulation.step(input)); }
+    finally { this.stepping = false; }
+  }
+
+  async stepAsync(input: InputBatch): Promise<SimulationOutput> {
+    const world = this.beginStep();
+    try {
+      const output = await (world.simulation.stepAsync?.(input) ?? world.simulation.step(input));
+      return this.completeStep(world, output);
+    } finally { this.stepping = false; }
+  }
+
+  private beginStep(): WorldLifetime {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Simulation step is already running");
     const world = this.currentWorld;
     if (world === null || world.isClosed) throw new Error("Session has no active simulation");
     this.stepping = true;
-    try {
-      const output = world.simulation.step(input);
-      if (this.isClosed || this.currentWorld !== world || world.isClosed) throw new Error("Simulation closed during its step");
-      this.publish(output);
-      return output;
-    } finally { this.stepping = false; }
+    return world;
+  }
+
+  private completeStep(world: WorldLifetime, output: SimulationOutput): SimulationOutput {
+    if (this.isClosed || this.currentWorld !== world || world.isClosed) throw new Error("Simulation closed during its step");
+    this.publish(output);
+    return output;
   }
 
   /** Remote clients publish decoded snapshots through this path without a local server loop. */

@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import type { ExecutableRecipe } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { SimulationEvent } from "../../src/contracts/session.ts";
+import type { InputBatch, Simulation, SimulationEvent, SimulationOutput } from "../../src/contracts/session.ts";
 import { Q3Random } from "../../src/core/numeric.ts";
 import { EngineSession, ProviderRuntimeState, ResourceScope, SourceClock, eventTargetsSeat } from "../../src/world/session/index.ts";
 
@@ -89,3 +90,117 @@ test("provider clocks preserve units and snapshots do not consume random draws",
   state.close();
   expect(() => state.clock("q1:game")).toThrow("closed");
 });
+
+function stepFixture() {
+  const identity = createIdentityOwner("session stepping");
+  const session = new EngineSession(identity, { kind: "headless" });
+  const clock = new SourceClock({ kind: "milliseconds", value: 50 });
+  const output: SimulationOutput = { snapshot: { session: identity.session, frame: clock.frame,
+    actors: [], bodies: [], inventories: [], configurations: [],
+    scene: { session: identity.session, time: clock.frame.time, world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } }, events: [] };
+  const input: InputBatch = { elapsedMilliseconds: 50, commands: [] };
+  const simulation = (hooks: Partial<Pick<Simulation, "step" | "stepAsync" | "close">> = {}): Simulation => ({ session: identity.session,
+    get recipe(): ExecutableRecipe { throw new Error("Session stepping does not read the recipe"); },
+    step: () => output,
+    checkpoint: () => { throw new Error("Session stepping does not create a checkpoint"); },
+    close: () => undefined, ...hooks });
+  return { session, simulation, output, input };
+}
+
+test("async simulation hooks finish before one session publication", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  const deferred = Promise.withResolvers<SimulationOutput>();
+  const received: InputBatch[] = [];
+  session.attachWorld(simulation({ step: () => { throw new Error("Unexpected synchronous step"); },
+    stepAsync: batch => { received.push(batch); return deferred.promise; } }));
+  const published = spyOn(session, "publish");
+  try {
+    const pending = session.stepAsync(input);
+    expect(received).toEqual([input]);
+    expect(session.snapshot).toBeNull();
+    expect(published).not.toHaveBeenCalled();
+    deferred.resolve(output);
+    expect(await pending).toBe(output);
+    expect(session.snapshot).toBe(output.snapshot);
+    expect(published).toHaveBeenCalledTimes(1);
+  } finally { published.mockRestore(); session.close(); }
+});
+
+test("async session steps fall back to the synchronous source hook", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  let calls = 0;
+  session.attachWorld(simulation({ step: batch => { expect(batch).toBe(input); calls++; return output; } }));
+  try {
+    expect(await session.stepAsync(input)).toBe(output);
+    expect(session.step(input)).toBe(output);
+    expect(calls).toBe(2);
+    expect(session.snapshot).toBe(output.snapshot);
+  } finally { session.close(); }
+});
+
+test("suspended async steps block both step methods and world replacement", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  const deferred = Promise.withResolvers<SimulationOutput>();
+  session.attachWorld(simulation({ stepAsync: () => deferred.promise }));
+  try {
+    const pending = session.stepAsync(input);
+    expect(() => session.step(input)).toThrow("already running");
+    await expect(session.stepAsync(input)).rejects.toThrow("already running");
+    expect(() => session.attachWorld(simulation())).toThrow("Cannot replace a world");
+    deferred.resolve(output);
+    expect(await pending).toBe(output);
+    expect(session.step(input)).toBe(output);
+  } finally { session.close(); }
+});
+
+test("synchronous steps share their reentry guard with async steps", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  const rejected = Promise.withResolvers<SimulationOutput>();
+  session.attachWorld(simulation({ step: () => {
+    expect(() => session.step(input)).toThrow("already running");
+    rejected.resolve(session.stepAsync(input));
+    return output;
+  } }));
+  try {
+    expect(session.step(input)).toBe(output);
+    await expect(rejected.promise).rejects.toThrow("already running");
+  } finally { session.close(); }
+});
+
+test("rejected async steps release the guard without publishing", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  const deferred = Promise.withResolvers<SimulationOutput>();
+  session.attachWorld(simulation({ stepAsync: () => deferred.promise }));
+  try {
+    const pending = session.stepAsync(input);
+    deferred.reject(new Error("guest read failed"));
+    await expect(pending).rejects.toThrow("guest read failed");
+    expect(session.snapshot).toBeNull();
+    expect(session.step(input)).toBe(output);
+  } finally { session.close(); }
+});
+
+for (const retirement of ["session", "world", "world-lifetime"]) {
+  test(`${retirement} retirement prevents a suspended async step publishing`, async () => {
+    const { session, simulation, output, input } = stepFixture();
+    const deferred = Promise.withResolvers<SimulationOutput>();
+    let closed = 0;
+    const world = session.attachWorld(simulation({ stepAsync: () => deferred.promise, close: () => { closed++; return undefined; } }));
+    const published = spyOn(session, "publish");
+    try {
+      const pending = session.stepAsync(input);
+      if (retirement === "session") session.close();
+      else if (retirement === "world") session.closeWorld();
+      else world.close();
+      deferred.resolve(output);
+      await expect(pending).rejects.toThrow("Simulation closed during its step");
+      expect(closed).toBe(1);
+      expect(session.snapshot).toBeNull();
+      expect(published).not.toHaveBeenCalled();
+      if (retirement !== "session") {
+        session.attachWorld(simulation());
+        expect(await session.stepAsync(input)).toBe(output);
+      }
+    } finally { published.mockRestore(); session.close(); }
+  });
+}
