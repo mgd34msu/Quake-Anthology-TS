@@ -146,10 +146,7 @@ export class ApplicationEffects {
           const asset = await this.assets.model(content, path);
           let renderer = this.preparedRenderers.get(content);
           if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.assets.world); this.preparedRenderers.set(content, renderer); }
-          await renderer.preload([{ actor: null, resource: asset.resource, model: asset.model,
-            transform: { origin: zero, axis: anglesToAxis(zero), scale: white }, previousOrigin: zero,
-            pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { ...white, w: 1 },
-            shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q2", bits: 0 }, lightingOrigin: zero, shadowPlane: 0, attachments: [] }]);
+          await renderer.preloadModel(asset);
         } catch (error) { this.preparedRenderers.delete(content); failures.push({ content, path, error: error instanceof Error ? error.message : String(error) }); }
       }
     }
