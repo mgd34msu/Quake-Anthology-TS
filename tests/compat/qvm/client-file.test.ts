@@ -6,11 +6,22 @@ import { join } from "node:path";
 import { createMountIdentity } from "../../../src/contracts/content.ts";
 import type { ArchiveMount, ResolvedMountPlan } from "../../../src/contracts/content.ts";
 import { digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
-import { QvmClientFiles, qvmClientFileSyscall } from "../../../src/compat/qvm/client-file-syscalls.ts";
-import { QvmUiImport } from "../../../src/compat/qvm/abi.ts";
+import { QvmFiles, qvmFileSyscall } from "../../../src/compat/qvm/file-syscalls.ts";
+import { QvmGameImport, QvmUiImport } from "../../../src/compat/qvm/abi.ts";
 import { UserFileStore } from "../../../src/platform/files/writable.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
+import { createQvmSystemCall, rejectQvmSyscall } from "../../../src/compat/qvm/syscalls.ts";
+
+function gameCalls(guest: QvmMemory, files: QvmFiles) {
+  const system = createQvmSystemCall("qagame", call => qvmFileSyscall(call, files) ?? rejectQvmSyscall(call));
+  return (code: QvmGameImport, args: readonly number[] = []) => {
+    const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
+    words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
+    return system({ words, memory: guest.bytes, invoke: () => { throw new Error("Unexpected VM reentry"); },
+      invokeAsync: async () => { throw new Error("Unexpected async VM reentry"); } });
+  };
+}
 
 function descriptorsWithin(root: string): number {
   return readdirSync("/proc/self/fd").filter(name => {
@@ -56,7 +67,7 @@ async function fixture() {
   const plan: ResolvedMountPlan = { id: "mount-plan:files:1", mounts: [mount, loose], defaultOrder: [mount.identity.id, loose.identity.id], prefixOrders: [] };
   const mounts = await openMountPlan(plan), pure = await openMountPlan(plan, { pure: { archives: [mount.archiveDigest] } });
   const guest = new QvmMemory(new Uint8Array(4096));
-  const files = new QvmClientFiles({ mounts, writable: null, assertCurrent: () => undefined });
+  const files = new QvmFiles({ mounts, writable: null, assertCurrent: () => undefined });
   const call = (code: QvmUiImport, args: readonly number[] = []): QvmHostCall => {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
     words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
@@ -71,22 +82,22 @@ test("actual mounted files preserve provenance, ABI EOF bytes, missing and close
   const f = await fixture();
   try {
     f.guest.writeString(128, "scripts/first.arena", 64);
-    expect(await qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files)).toBe(9);
+    expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files)).toBe(9);
     const slot = f.guest.view(256, 4).getInt32(0, true);
     expect(slot).toBe(1);
     expect(f.mounts.openedResources[0]?.provenance.mount.identity.id).toBe(f.mount.identity.id);
     f.guest.bytes.fill(99, 512, 524);
-    expect(qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_READ, [512, 12, slot]), f.files)).toBe(0);
+    expect(qvmFileSyscall(f.call(QvmUiImport.UI_FS_READ, [512, 12, slot]), f.files)).toBe(0);
     expect(new TextDecoder().decode(f.guest.bytes.subarray(512, 521))).toBe("duplicate");
     expect([...f.guest.bytes.subarray(521, 524)]).toEqual([99, 99, 99]);
-    expect(qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FCLOSEFILE, [slot]), f.files)).toBe(0);
+    expect(qvmFileSyscall(f.call(QvmUiImport.UI_FS_FCLOSEFILE, [slot]), f.files)).toBe(0);
     expect(() => f.files.read(slot, new Uint8Array(1))).toThrow("NULL");
-    expect(qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FCLOSEFILE, [slot]), f.files)).toBe(0);
+    expect(qvmFileSyscall(f.call(QvmUiImport.UI_FS_FCLOSEFILE, [slot]), f.files)).toBe(0);
     f.guest.writeString(128, "missing.cfg", 64);
-    expect(await qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files)).toBe(-1);
+    expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files)).toBe(-1);
     expect(f.guest.view(256, 4).getInt32(0, true)).toBe(0);
-    expect(qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_READ, [0, -1, 0]), f.files)).toBe(0);
-    expect(() => qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 1]), f.files)).toThrow("no writable owner");
+    expect(qvmFileSyscall(f.call(QvmUiImport.UI_FS_READ, [0, -1, 0]), f.files)).toBe(0);
+    expect(() => qvmFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 1]), f.files)).toThrow("no writable owner");
   } finally { await f.close(); }
 });
 
@@ -117,8 +128,8 @@ test("listing keeps native order, depth, deduplication, pure filtering and byte 
     expect(await f.pure.listFiles("scripts", ".cfg")).toEqual([]);
     expect(f.pure.openedResources).toEqual([]);
     f.guest.writeString(128, "scripts", 64); f.guest.writeString(192, ".arena", 64);
-    expect(await qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 13]), f.files)).toBe(0);
-    expect(await qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 14]), f.files)).toBe(1);
+    expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 13]), f.files)).toBe(0);
+    expect(await qvmFileSyscall(f.call(QvmUiImport.UI_FS_GETFILELIST, [128, 192, 512, 14]), f.files)).toBe(1);
     expect(f.guest.readString(512)).toBe("first.arena");
     await expect(f.files.list("$modlist", "")).rejects.toThrow("catalog owner");
     await expect(f.mounts.listFiles("../escape", "")).rejects.toThrow("Invalid relative");
@@ -131,7 +142,7 @@ test("retiring while file open is pending never publishes a guest handle", async
   const f = await fixture();
   try {
     f.guest.writeString(128, "scripts/first.arena", 64); f.guest.view(256, 4).setInt32(0, 999, true);
-    const pending = qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files);
+    const pending = qvmFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, 0]), f.files);
     f.files.closeAll();
     await expect(Promise.resolve(pending)).rejects.toThrow("closed");
     expect(f.guest.view(256, 4).getInt32(0, true)).toBe(999);
@@ -143,13 +154,13 @@ test("guest write, append and append-sync use scoped descriptors and mounted rea
   const userRoot = join(f.root, "user-content"), user = { kind: "loose", rootPath: userRoot,
     identity: createMountIdentity("mount:files:user", "q3:classic:baseq3:installed", 1) } satisfies ResolvedMountPlan["mounts"][number];
   const mounted = await openMountPlan({ ...f.mounts.plan, mounts: [user, ...f.mounts.plan.mounts], defaultOrder: [user.identity.id, ...f.mounts.plan.defaultOrder] });
-  const files = new QvmClientFiles({ mounts: mounted, writable: new UserFileStore(userRoot), assertCurrent: () => undefined });
+  const files = new QvmFiles({ mounts: mounted, writable: new UserFileStore(userRoot), assertCurrent: () => undefined });
   try {
     f.guest.writeString(128, "profiles/test.cfg", 64);
-    const open = (mode: number) => qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, mode]), files);
+    const open = (mode: number) => qvmFileSyscall(f.call(QvmUiImport.UI_FS_FOPENFILE, [128, 256, mode]), files);
     const write = (slot: number, text: string) => {
       const bytes = new TextEncoder().encode(text); f.guest.bytes.set(bytes, 512);
-      return qvmClientFileSyscall(f.call(QvmUiImport.UI_FS_WRITE, [512, bytes.length, slot]), files);
+      return qvmFileSyscall(f.call(QvmUiImport.UI_FS_WRITE, [512, bytes.length, slot]), files);
     };
     expect(open(1)).toBe(0);
     const first = f.guest.view(256, 4).getInt32(0, true);
@@ -189,7 +200,7 @@ test("guest write, append and append-sync use scoped descriptors and mounted rea
 
 test("writable publication failure closes its descriptor without retaining a guest handle", async () => {
   const f = await fixture();
-  const files = new QvmClientFiles({ mounts: f.mounts, writable: new UserFileStore(join(f.root, "user")), assertCurrent: () => undefined });
+  const files = new QvmFiles({ mounts: f.mounts, writable: new UserFileStore(join(f.root, "user")), assertCurrent: () => undefined });
   try {
     expect(() => files.openWrite("test.cfg", "write", () => { throw new Error("Publication cancelled"); })).toThrow("Publication cancelled");
     expect(descriptorsWithin(join(f.root, "user"))).toBe(0);
@@ -197,5 +208,66 @@ test("writable publication failure closes its descriptor without retaining a gue
     expect(files.openWrite("test.cfg", "append-sync", slot => { handles.push(slot); })).toBe(0);
     expect(handles).toEqual([1]);
     files.closeAll();
+  } finally { files.closeAll(); await f.close(); }
+});
+
+test("qagame file imports read, seek and list the actual pure mounts with native returns", async () => {
+  const f = await fixture(), files = new QvmFiles({ mounts: f.pure, writable: null, assertCurrent: () => undefined }), call = gameCalls(f.guest, files);
+  try {
+    f.guest.writeString(128, "scripts/first.arena", 64);
+    expect(await call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 0])).toBe(9);
+    const slot = f.guest.view(256, 4).getInt32(0, true);
+    expect(f.pure.openedResources[0]?.provenance.mount.identity.id).toBe(f.mount.identity.id);
+    expect(call(QvmGameImport.G_FS_SEEK, [slot, 3, 0])).toBe(3);
+    expect(call(QvmGameImport.G_FS_READ, [512, 2, slot])).toBe(0);
+    expect(new TextDecoder().decode(f.guest.bytes.subarray(512, 514))).toBe("li");
+    expect(call(QvmGameImport.G_FS_FCLOSE_FILE, [slot])).toBe(0);
+    expect(() => call(QvmGameImport.G_FS_READ, [512, 1, slot])).toThrow("NULL");
+    expect(await call(QvmGameImport.G_FS_FOPEN_FILE, [128, 0, 0])).toBe(1);
+    f.guest.writeString(128, "scripts/loose.arena", 64);
+    expect(await call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 0])).toBe(-1);
+    expect(f.guest.view(256, 4).getInt32(0, true)).toBe(0);
+    f.guest.writeString(128, "scripts", 64); f.guest.writeString(192, ".arena", 64);
+    expect(await call(QvmGameImport.G_FS_GETFILELIST, [128, 192, 512, 128])).toBe(2);
+    expect(f.guest.readString(512)).toBe("first.arena");
+    expect(call(QvmGameImport.G_FS_READ, [0, -1, 0])).toBe(0);
+    expect(call(QvmGameImport.G_FS_WRITE, [0, -1, 0])).toBe(0);
+    expect(() => call(QvmGameImport.G_FS_FOPEN_FILE, [0, 0, 1])).toThrow("nonnull handle");
+    expect(() => call(QvmGameImport.G_FS_FOPEN_FILE, [0, 4095, 0])).toThrow(RangeError);
+    expect(() => call(QvmGameImport.G_PRINT, [128])).toThrow("Unbound qagame");
+  } finally { files.closeAll(); await f.close(); }
+});
+
+test("qagame writes use the injected private owner and mounted readback", async () => {
+  const f = await fixture(), root = join(f.root, "server-user"), user = { kind: "loose", rootPath: root,
+    identity: createMountIdentity("mount:files:server-user", "q3:classic:baseq3:installed", 1) } satisfies ResolvedMountPlan["mounts"][number];
+  const mounts = await openMountPlan({ ...f.mounts.plan, mounts: [user, ...f.mounts.plan.mounts], defaultOrder: [user.identity.id, ...f.mounts.plan.defaultOrder] });
+  const files = new QvmFiles({ mounts, writable: new UserFileStore(root), assertCurrent: () => undefined }), call = gameCalls(f.guest, files);
+  try {
+    f.guest.writeString(128, "profiles/server.cfg", 64); f.guest.bytes.set(new TextEncoder().encode("abc"), 512);
+    expect(call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 1])).toBe(0);
+    const slot = f.guest.view(256, 4).getInt32(0, true);
+    expect(call(QvmGameImport.G_FS_WRITE, [512, 3, slot])).toBe(0);
+    expect(call(QvmGameImport.G_FS_SEEK, [slot, 1, 2])).toBe(0); f.guest.bytes[512] = 90;
+    expect(call(QvmGameImport.G_FS_WRITE, [512, 1, slot])).toBe(0);
+    expect(call(QvmGameImport.G_FS_FCLOSE_FILE, [slot])).toBe(0);
+    expect(descriptorsWithin(root)).toBe(0);
+    expect(await call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 0])).toBe(3);
+    expect(mounts.openedResources.at(-1)?.provenance.mount.identity.id).toBe(user.identity.id);
+    expect(call(QvmGameImport.G_FS_READ, [512, 3, f.guest.view(256, 4).getInt32(0, true)])).toBe(0);
+    expect(new TextDecoder().decode(f.guest.bytes.subarray(512, 515))).toBe("aZc");
+  } finally { files.closeAll(); mounts.close(); await f.close(); }
+});
+
+test("qagame retired asynchronous open and listing never publish into guest memory", async () => {
+  const f = await fixture(); let current = true;
+  const files = new QvmFiles({ mounts: f.mounts, writable: null, assertCurrent: () => { if (!current) throw new Error("Retired qagame files"); } }), call = gameCalls(f.guest, files);
+  try {
+    f.guest.writeString(128, "scripts/first.arena", 64); f.guest.view(256, 4).setInt32(0, 999, true);
+    const open = call(QvmGameImport.G_FS_FOPEN_FILE, [128, 256, 0]); current = false;
+    await expect(Promise.resolve(open)).rejects.toThrow("Retired qagame"); expect(f.guest.view(256, 4).getInt32(0, true)).toBe(999);
+    current = true; f.guest.writeString(128, "scripts", 64); f.guest.writeString(192, ".arena", 64); f.guest.bytes[512] = 99;
+    const list = call(QvmGameImport.G_FS_GETFILELIST, [128, 192, 512, 128]); current = false;
+    await expect(Promise.resolve(list)).rejects.toThrow("Retired qagame"); expect(f.guest.bytes[512]).toBe(99);
   } finally { files.closeAll(); await f.close(); }
 });

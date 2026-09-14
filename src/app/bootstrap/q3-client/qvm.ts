@@ -14,11 +14,11 @@ import { QvmUi } from '../../../compat/qvm/ui.ts';
 import type { Q3BrowserView } from '../../../network/q3/browser-view.ts';
 import { qvmClientBrowserSyscall } from '../../../compat/qvm/client-browser-syscalls.ts';
 import { resolveQvmArtifact } from '../../../compat/qvm/artifacts.ts';
-import { qvmClientCommonSyscall } from '../../../compat/qvm/client-common-syscalls.ts';
+import { qvmCommonSyscall } from '../../../compat/qvm/common-syscalls.ts';
 import { qvmClientCinematicSyscall } from '../../../compat/qvm/client-cinematic-syscalls.ts';
 import { qvmClientRenderSyscall } from '../../../compat/qvm/client-render-syscalls.ts';
 import { qvmClientAudioSyscall } from '../../../compat/qvm/client-audio-syscalls.ts';
-import { QvmClientFiles, qvmClientFileSyscall } from '../../../compat/qvm/client-file-syscalls.ts';
+import { QvmFiles, qvmFileSyscall } from '../../../compat/qvm/file-syscalls.ts';
 import { qvmClientStateSyscall } from '../../../compat/qvm/client-state-syscalls.ts';
 import { qvmClientCollisionSyscall } from '../../../compat/qvm/client-collision-syscalls.ts';
 import { rejectQvmSyscall } from '../../../compat/qvm/syscalls.ts';
@@ -47,7 +47,7 @@ export interface ApplicationQvmClientOptions {
 
 /** The actual guest modules share the same media, scene, input and connection owners as source cgame. */
 export class ApplicationQvmClient {
-  private readonly files: { readonly cgame: QvmClientFiles; readonly ui: QvmClientFiles };
+  private readonly files: { readonly cgame: QvmFiles; readonly ui: QvmFiles };
   private readonly generation: number;
   private readonly globals = new ScriptGlobalDefines();
   private readonly scripts: { readonly cgame: QvmClientScripts; readonly ui: QvmClientScripts };
@@ -64,7 +64,7 @@ export class ApplicationQvmClient {
     const userContent = options.media.assets.content.catalog.product(options.media.content).userContent;
     const fileOptions = { mounts: options.media.provider.mounts, writable: userContent === null ? null : new UserFileStore(userContent.root),
       print: options.session.print, assertCurrent: () => this.assertCurrent() };
-    this.files = { cgame: new QvmClientFiles(fileOptions), ui: new QvmClientFiles(fileOptions) };
+    this.files = { cgame: new QvmFiles(fileOptions), ui: new QvmFiles(fileOptions) };
     const scriptOptions = { mounts: fileOptions.mounts, globals: this.globals, assertCurrent: fileOptions.assertCurrent, print: options.session.print };
     this.scripts = { cgame: new QvmClientScripts(scriptOptions), ui: new QvmClientScripts(scriptOptions) };
   }
@@ -78,12 +78,12 @@ export class ApplicationQvmClient {
     if (call.role !== 'cgame' && call.role !== 'ui') return rejectQvmSyscall(call);
     const o = this.options, session = o.session;
     const common = { cvars: session.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
-    return qvmClientCommonSyscall(call, call.role === 'cgame'
+    return qvmCommonSyscall(call, call.role === 'cgame'
       ? { ...common, role: 'cgame', commands: { append: session.appendConsoleCommand, register: session.registerCgameCommand,
         remove: o.removeCommand, reliable: session.addReliableCommand } }
       : { ...common, role: 'ui', commands: { executeNow: text => { o.commands.executeNow(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }); },
         insert: text => o.commands.insert(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }), append: session.appendConsoleCommand } })
-      ?? qvmClientFileSyscall(call, this.files[call.role])
+      ?? qvmFileSyscall(call, this.files[call.role])
       ?? qvmClientScriptSyscall(call, this.scripts[call.role])
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)
       ?? qvmClientAudioSyscall(call, { role: call.role, sound: o.services.sound, print: session.print })

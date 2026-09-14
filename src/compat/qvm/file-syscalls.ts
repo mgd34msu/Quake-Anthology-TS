@@ -1,13 +1,13 @@
-/* Q3 cl_cgame.c/cl_ui.c filesystem traps over the selected mounted content. GPL-2.0-or-later. */
+/* Q3 sv_game.c/cl_cgame.c/cl_ui.c filesystem traps over the selected mounted content. GPL-2.0-or-later. */
 import type { UserFileStore, WritableBinaryFile, WritableFileMode } from "../../platform/files/writable.ts";
 import { CommonError } from "../../core/common-error.ts";
 import type { MountedContent, OpenedResource } from "../../content/mounts/index.ts";
-import { QvmCgameImport, QvmUiImport } from "./abi.ts";
+import { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 
 interface ReadHandle { readonly kind: "read"; readonly resource: OpenedResource; position: number; }
-type ClientFileHandle = ReadHandle | { readonly kind: "write"; readonly file: WritableBinaryFile };
-export interface QvmClientFileServices {
+type FileHandle = ReadHandle | { readonly kind: "write"; readonly file: WritableBinaryFile };
+export interface QvmFileServices {
   readonly mounts: MountedContent;
   readonly writable: UserFileStore | null;
   readonly print?: (text: string) => void;
@@ -15,13 +15,13 @@ export interface QvmClientFileServices {
 }
 
 /** Guest slots belong to this module lifetime; resource bytes retain their actual mount provenance. */
-export class QvmClientFiles {
-  private readonly handles = new Map<number, ClientFileHandle>();
+export class QvmFiles {
+  private readonly handles = new Map<number, FileHandle>();
   private closed = false;
-  constructor(readonly services: QvmClientFileServices) {}
+  constructor(readonly services: QvmFileServices) {}
 
   assertCurrent(): void {
-    if (this.closed) throw new Error("QVM client files have been closed");
+    if (this.closed) throw new Error("QVM files have been closed");
     this.services.assertCurrent();
   }
   closeAll(): void {
@@ -44,7 +44,7 @@ export class QvmClientFiles {
   openWrite(path: string, mode: WritableFileMode, publish: (slot: number) => void): number {
     this.assertCurrent();
     const writable = this.services.writable;
-    if (writable === null) throw new Error("QVM client filesystem has no writable owner");
+    if (writable === null) throw new Error("QVM filesystem has no writable owner");
     const slot = this.freeSlot();
     const file = writable.open(path.replaceAll("\\", "/"), mode, text => { this.services.print?.(text); this.assertCurrent(); });
     try { this.assertCurrent(); }
@@ -83,7 +83,7 @@ export class QvmClientFiles {
     return resource.bytes.length;
   }
 
-  private handle(slot: number): ClientFileHandle {
+  private handle(slot: number): FileHandle {
     this.assertCurrent();
     if (!Number.isInteger(slot) || slot < 1 || slot > 63) throw new CommonError("drop", "FS_FileForHandle: out of range");
     const handle = this.handles.get(slot);
@@ -152,20 +152,23 @@ export class QvmClientFiles {
 }
 
 /** Null is unhandled; FS_READ and FS_WRITE return zero rather than their byte count. */
-export function qvmClientFileSyscall(call: QvmHostCall, files: QvmClientFiles): QvmHostResult | null {
-  if (call.kind !== "engine" || call.role === "qagame") return null;
-  const ui = call.role === "ui", trap = call.code, { words, guest } = call;
-  const open = ui ? QvmUiImport.UI_FS_FOPENFILE : QvmCgameImport.CG_FS_FOPENFILE;
-  const seek = ui ? QvmUiImport.UI_FS_SEEK : QvmCgameImport.CG_FS_SEEK;
+export function qvmFileSyscall(call: QvmHostCall, files: QvmFiles): QvmHostResult | null {
+  if (call.kind !== "engine") return null;
+  const ui = call.role === "ui", game = call.role === "qagame", trap = call.code, { words, guest } = call;
+  const open = ui ? QvmUiImport.UI_FS_FOPENFILE : game ? QvmGameImport.G_FS_FOPEN_FILE : QvmCgameImport.CG_FS_FOPENFILE;
+  const seek = ui ? QvmUiImport.UI_FS_SEEK : game ? QvmGameImport.G_FS_SEEK : QvmCgameImport.CG_FS_SEEK;
+  const list = ui ? QvmUiImport.UI_FS_GETFILELIST : game ? QvmGameImport.G_FS_GETFILELIST : null;
   if (trap !== open && trap !== open + 1 && trap !== open + 2 && trap !== open + 3 && trap !== seek
-    && !(ui && trap === QvmUiImport.UI_FS_GETFILELIST)) return null;
+    && trap !== list) return null;
   files.assertCurrent();
   if (trap === open) {
     const pathWord = words.getInt32(4, true), destination = words.getInt32(8, true), mode = words.getInt32(12, true);
     if (mode < 0 || mode > 3) throw new CommonError("fatal", "FSH_FOpenFile: bad mode");
 
+    if (game && destination !== 0) guest.view(destination, 4);
+    if (game && destination === 0 && mode !== 0) throw new RangeError("Writable file open requires a nonnull handle pointer");
     if (pathWord === 0) throw new CommonError("fatal", "FS_FOpenFileRead: NULL 'filename' parameter passed\n");
-    if (destination !== 0) guest.view(destination, 4);
+    if (!game && destination !== 0) guest.view(destination, 4);
     const publish = (slot: number): void => { files.assertCurrent(); guest.view(destination, 4).setInt32(0, slot, true); };
     if (mode === 0) return files.open(guest.readString(pathWord), destination === 0 ? null : publish);
     if (destination === 0) throw new RangeError("Writable file open requires a nonnull handle pointer");
