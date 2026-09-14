@@ -10,6 +10,50 @@ import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { Q3RemotePresentation } from '../../../src/app/bootstrap/network/remote-q3.ts';
 import { encodePng } from '../../../src/formats/images/png.ts';
 import { fitUi } from '../../../src/ui/common/layout.ts';
+import { StartupServerBrowser } from '../../../src/app/bootstrap/server-browser.ts';
+import { ConfigStore } from '../../../src/settings/config.ts';
+import { UdpTransport } from '../../../src/network/common/transport.ts';
+import { decodeConnectionless } from '../../../src/network/q3/connectionless.ts';
+import { encodeQ3Status } from '../../../src/network/q3/discovery.ts';
+
+for (const ownership of ['borrowed', 'owned']) test(`remote browser ${ownership} lifetime retains actual UDP polling`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'quake-remote-browser-'));
+  const endpoint = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+  let borrowed: StartupServerBrowser | null = null, client: RemoteApplication | null = null;
+  try {
+    const selection = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2',
+      '--connect-q2', `127.0.0.1:${endpoint.address.port}`, '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden', '--user-content-root', join(root, 'content')]);
+    if (selection.kind !== 'run') throw new Error('Missing browser lifecycle launch');
+    const host = { saveDirectory: join(root, 'saves'), print: (_text: string): undefined => undefined };
+    if (ownership === 'borrowed') borrowed = await StartupServerBrowser.open(new ConfigStore(join(root, 'settings')));
+    client = await RemoteApplication.open(selection.options, borrowed === null ? host : { ...host, serverBrowser: borrowed });
+    const browser = client.serverBrowser, closed = spyOn(browser, 'close');
+    try {
+      if (borrowed !== null) expect(browser).toBe(borrowed);
+      browser.choose('q3'); browser.address = `127.0.0.1:${endpoint.address.port}`;
+      await browser.query();
+      let replied = false;
+      for (let attempt = 0; attempt < 30 && browser.rows()[0]?.status === null; attempt++) {
+        await Bun.sleep(1);
+        for (let event = endpoint.poll(); event !== null; event = endpoint.poll()) {
+          if (event.kind !== 'packet') continue;
+          const packet = decodeConnectionless(event.payload, 'server');
+          if (packet.command !== 'getstatus') continue;
+          const challenge = packet.arguments[0]; if (challenge === undefined) throw new Error('Missing browser challenge');
+          endpoint.send(event.from, encodeQ3Status(`\\challenge\\${challenge}\\sv_hostname\\Borrowed browser\\mapname\\q3dm1\\sv_maxclients\\8`, []));
+          replied = true;
+        }
+        await Bun.sleep(1); await client.step(16);
+      }
+      expect(replied).toBe(true); expect(browser.rows()[0]?.status?.name).toBe('Borrowed browser');
+      await client.close(); client = null;
+      expect(closed).toHaveBeenCalledTimes(ownership === 'owned' ? 1 : 0);
+      if (borrowed !== null) { await borrowed.query(); borrowed.poll(); expect(borrowed.rows()[0]?.status?.name).toBe('Borrowed browser'); }
+    } finally { closed.mockRestore(); }
+  } finally {
+    try { await client?.close(); } finally { try { await borrowed?.close(); } finally { endpoint.close(); await rm(root, { recursive: true, force: true }); } }
+  }
+}, 120000);
 
 test('Q3 remote bindings wait for decoded player state and capture input after admission', async () => {
   const users = await mkdtemp(join(tmpdir(), 'quake-q3-binding-lifecycle-'));

@@ -239,7 +239,9 @@ export class StartupApplication {
       network: { kind: family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
     this.graphics?.close(); this.graphics = null;
     try {
-      const remote = await RemoteApplication.open(options, { ...this.host, print: text => {
+      const browser = this.browser;
+      if (browser === null) throw new Error("Startup browser is unavailable");
+      const remote = await RemoteApplication.open(options, { ...this.host, saveDirectory: this.saves.directory, serverBrowser: browser, print: text => {
         this.host.print(text); const message = text.trim(); if (message !== "") this.status = message.slice(-512); return undefined;
       } }); this.remote = remote;
       try { if (this.stopping) remote.requestQuit(); await remote.run(); }

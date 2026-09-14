@@ -10,6 +10,8 @@ import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
+import { StartupServerBrowser } from "./server-browser.ts";
+import { homedir } from "node:os";
 import { compareQ3Packages } from "../../network/q3/pure.ts";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -80,9 +82,14 @@ interface RemoteWorldFrontend {
   readonly scene: SceneQueries;
 }
 interface RemoteCommand { readonly name: string; readonly args: readonly string[]; readonly seat: SeatId | null; }
+export interface RemoteApplicationHost extends ApplicationHost {
+  readonly serverBrowser?: StartupServerBrowser;
+}
+type RemoteBrowser = { readonly kind: "owned" | "borrowed"; readonly browser: StartupServerBrowser };
 
 /** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
+  get serverBrowser(): StartupServerBrowser { return this.browser.browser; }
   readonly clientCommands: ApplicationInputCommandOwner | null;
   readonly viewSettings = new ApplicationViewSettings(value => {
     this.presentation?.q3Client?.cvars.set("cg_fov", String(value));
@@ -122,7 +129,8 @@ export class RemoteApplication {
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
-    private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>) {
+    private readonly imageSettings: ApplicationImageSettings, private readonly transport: UdpTransport, address: IpAddress, identity: ReturnType<typeof createIdentityOwner>,
+    private readonly browser: RemoteBrowser) {
     const inputProduct = loadedContent.catalog.require(launchOptions.network.kind === "qw-client" ? "q1-quakeworld" : launchOptions.product);
     this.inputConfig = new ConfigStore(inputProduct.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), inputProduct.expectation.contentDirectory));
     this.socksSettings = new ClientSocksSettings({ session: session.session, origin: { kind: "local-console" } }, text => this.print(text));
@@ -229,7 +237,7 @@ export class RemoteApplication {
     }
   }
 
-  static async open(options: ApplicationOptions, host: ApplicationHost): Promise<RemoteApplication> {
+  static async open(options: ApplicationOptions, host: RemoteApplicationHost): Promise<RemoteApplication> {
     const qw = options.network.kind === "qw-client", q1 = options.network.kind === "q1-client" || qw, q3 = options.network.kind === "q3-client";
     if (!q1 && !q3 && options.network.kind !== "q2-client") throw new Error("RemoteApplication requires a native connect address");
     const family = q1 ? "q1" : q3 ? "q3" : "q2";
@@ -242,6 +250,7 @@ export class RemoteApplication {
     const content = await loadApplicationContent(options);
     const identity = createIdentityOwner(`quake:remote:${addressKey(address)}`), session = new EngineSession(identity, { kind: "local" });
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
+    let browser: RemoteBrowser | null = null;
     try {
       const product = content.catalog.product(options.product);
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === remoteContentProduct(options.remoteContent ?? remoteContentSelection("q1-quakeworld", "qw"))) || q3 && options.product !== remoteContentProduct(options.remoteContent ?? remoteContentSelection("q3-baseq3", "baseq3")))
@@ -252,7 +261,12 @@ export class RemoteApplication {
       renderer = NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       await imageSettings.refreshDisplay(renderer);
       transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
-      application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity);
+      const browserSettings = host.saveDirectory !== undefined ? join(host.saveDirectory, "..", "settings")
+        : join(homedir(), ".local", "share", "quake-typescript", "settings");
+      browser = host.serverBrowser === undefined
+        ? { kind: "owned", browser: await StartupServerBrowser.open(new ConfigStore(browserSettings)) }
+        : { kind: "borrowed", browser: host.serverBrowser };
+      application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity, browser);
       await application.viewSettings.load(application.inputConfig);
       const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
       if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
@@ -268,7 +282,10 @@ export class RemoteApplication {
       return application;
     } catch (error) {
       if (application !== null) await application.close();
-      else { transport?.close(); renderer?.close(); session.close(); await imageSettings?.close(); await content.close(); }
+      else {
+        try { transport?.close(); renderer?.close(); session.close(); await imageSettings?.close(); await content.close(); }
+        finally { if (browser?.kind === "owned") await browser.browser.close(); }
+      }
       throw error;
     }
   }
@@ -638,6 +655,7 @@ export class RemoteApplication {
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Remote application step requires positive elapsed milliseconds");
     this.stepping = true;
     try {
+      this.serverBrowser.poll();
       this.sourceEvents = []; this.unhandledEffects = [];
       this.elapsed += elapsedMilliseconds;
       if (this.controls !== null) this.controls.pump();
@@ -738,6 +756,7 @@ export class RemoteApplication {
     }
     try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars, this.socksSettings.cvars.archiveCommands()); } catch (error) { errors.push(error); }
     try { await this.imageSettings.close(); } catch (error) { errors.push(error); }
+    try { if (this.browser.kind === "owned") await this.serverBrowser.close(); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");
   }
