@@ -118,6 +118,48 @@ test.skipIf(!existsSync(path))('guest records borrow located memory across share
       target: { kind: 'model', model: 1, origin, angles: brush.r.currentAngles }, numeric: Q3_BINARY32_PROFILE, passActor: null,
       policy: { kind: 'q3', contentsMask: -1, curves: true, playerCurveClip: true } });
     expect(spatial.entityContact(contactBounds, 5, false)).toBe(brushContact.startSolid || brushContact.allSolid);
+    const savedRecords = records.captureCheckpoint(), savedActors = actors.checkpoint(), savedSources = actors.sourceCheckpoint();
+    const restoredActors = SessionActorRegistry.restore(createIdentityOwner('restored-records'), savedActors, savedSources);
+    const restoredScene = createSceneQueries(world), restoredPhysics = new SharedPhysics({ actors: restoredActors,
+      callbacks: new ActorCallbackTable(restoredActors), scene: restoredScene, numeric: Q3_BINARY32_PROFILE,
+      sourceOrder: (a, b) => a.slot - b.slot, worldActor: () => null, onBlocked: () => { throw new Error('No guest physics traversal'); } });
+    const restoredMemory = new QvmMemory(memory.bytes.slice()), restoredData = new QvmGameData(restoredMemory);
+    restoredData.setClientCount(data.numClients); restoredData.restore(data.checkpoint());
+    const restoredRecords = new Q3GuestRecords(restoredData, { actors: restoredActors, bodies: restoredPhysics.bodies,
+      scene: restoredScene, provider: 'q3:guest', collision: (owned, collision) => restoredPhysics.setCollision(owned, collision) });
+    try {
+      restoredRecords.restoreCheckpoint(savedRecords);
+      expect(restoredMemory.bytes).toEqual(memory.bytes);
+      expect(restoredRecords.visibility(4)).toEqual(records.visibility(4));
+      expect(restoredRecords.visibility(5)).toEqual(records.visibility(5));
+      expect(restoredRecords.entity(5).r.linked).toBe(false);
+      expect(restoredRecords.entity(4).r.linkcount).toBe(records.entity(4).r.linkcount);
+      expect(restoredActors.observations()).toHaveLength(actors.observations().length);
+      const beforeRead = restoredActors.checkpoint();
+      restoredRecords.entity(4).s.groundEntityNum = 15;
+      restoredPhysics.bodies.read(restoredRecords.actor(4).id);
+      expect(restoredActors.checkpoint()).toEqual(beforeRead);
+    } finally { restoredRecords.close(); restoredActors.close(); }
+    const portalGeometry = { ...world, leaves: world.leaves.map((leaf, index) => ({ ...leaf, area: index === 0 ? 1 : 0 })) };
+    const portalScene = createSceneQueries(portalGeometry), portalCandidate = createSceneQueries(portalGeometry);
+    const portalWorld = portalScene.nativeQ3ClipModels()?.world, candidateWorld = portalCandidate.nativeQ3ClipModels()?.world;
+    if (portalWorld === undefined || candidateWorld === undefined) throw new Error('missing Q3 portal world');
+    expect(portalScene.areasConnected(0, 1)).toBe(false);
+    portalScene.adjustAreaPortalState(0, 1, true); portalScene.adjustAreaPortalState(0, 1, true);
+    const portalCheckpoint = portalWorld.capturePortalCheckpoint();
+    expect(portalCheckpoint.portals).toEqual([0, 2, 2, 0]);
+    candidateWorld.restorePortalCheckpoint(portalCheckpoint);
+    expect(candidateWorld.capturePortalCheckpoint()).toEqual(portalCheckpoint);
+    expect(portalCandidate.areaBits(0)).toEqual(portalScene.areaBits(0));
+    for (const connected of [true, false]) {
+      portalScene.adjustAreaPortalState(0, 1, false); portalCandidate.adjustAreaPortalState(0, 1, false);
+      expect(portalCandidate.areasConnected(0, 1)).toBe(connected);
+      expect(candidateWorld.capturePortalCheckpoint()).toEqual(portalWorld.capturePortalCheckpoint());
+      expect(portalCandidate.areaBits(0)).toEqual(portalScene.areaBits(0));
+    }
+    const validPortals = candidateWorld.capturePortalCheckpoint();
+    expect(() => candidateWorld.restorePortalCheckpoint({ ...validPortals, portals: [0, 1, 0, 0] })).toThrow('asymmetric');
+    expect(candidateWorld.capturePortalCheckpoint()).toEqual(validPortals);
     // A later locate keeps the shared actor identity but reads the newly located prefix.
     memory.bytes.copyWithin(65536, 64, 64 + 16 * 700);
     data.locate(65536, 16, 700, 80000, 600);

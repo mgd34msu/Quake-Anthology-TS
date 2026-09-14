@@ -1,3 +1,5 @@
+import { SaveReader } from '../../../../persistence/value.ts';
+import { readSavedActor, savedActorId } from '../../../../persistence/save-image.ts';
 // sharedEntity_t borrowing and SV_LinkEntity semantics from id Software's sv_world.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ActorId, OwnedActor, ProviderId } from '../../../../contracts/identity.ts';
@@ -55,6 +57,11 @@ export class Q3GuestRecords {
     const current = this.actors.get(slot);
     if (current !== undefined) { this.host.actors.assertOwned(current); return current; }
     const actor = this.host.actors.allocateAtSource(this.host.provider, slot, 'q3:guest-slot');
+    this.bind(slot, actor);
+    return actor;
+  }
+
+  private bind(slot: number, actor: OwnedActor): void {
     this.actors.set(slot, actor);
     this.host.bodies.bind(actor, {
       read: () => this.body(slot),
@@ -67,7 +74,6 @@ export class Q3GuestRecords {
         return undefined;
       },
     });
-    return actor;
   }
 
   slot(actor: ActorId): number | null {
@@ -89,7 +95,7 @@ export class Q3GuestRecords {
   body(slot: number): BodyState {
     const entity = this.entity(slot), shared = entity.r;
     return { origin: shared.currentOrigin, angles: shared.currentAngles, velocity: entity.s.pos.delta,
-      bounds: { min: shared.mins, max: shared.maxs }, ground: this.reference(entity.s.groundEntityNum) };
+      bounds: { min: shared.mins, max: shared.maxs }, ground: this.actors.get(entity.s.groundEntityNum)?.id ?? null };
   }
 
   collision(slot: number): ActorCollision {
@@ -144,6 +150,40 @@ export class Q3GuestRecords {
   }
 
   visibility(slot: number): ReturnType<Q3VisibilityBindings['link']> { this.entity(slot); return this.links.get(slot); }
+
+  captureCheckpoint() {
+    if (this.closed) throw new Error('Q3 guest records are retired');
+    return [...this.actors].map(([slot, actor]) => {
+      this.host.actors.assertOwned(actor);
+      const link = this.links.get(slot);
+      return { slot, actor: savedActorId(actor.id), visibility: link === undefined ? null : {
+        areanum: link.areanum, areanum2: link.areanum2, clusters: [...link.clusters], lastCluster: link.lastCluster } };
+    });
+  }
+
+  restoreCheckpoint(value: unknown): void {
+    if (this.closed || this.actors.size !== 0) throw new Error('Q3 guest records restore requires a fresh candidate');
+    const reader = new SaveReader(value, 'q3.guest.records');
+    const entries = reader.list(entry => ({ slot: entry.field('slot').integer(0), actor: readSavedActor(entry.field('actor')),
+      visibility: entry.field('visibility').nullable(link => ({ areanum: link.field('areanum').integer(-1),
+        areanum2: link.field('areanum2').integer(-1), clusters: link.field('clusters').list(cluster => cluster.integer(0)),
+        lastCluster: link.field('lastCluster').integer(-1) })) }));
+    const slots = new Set<number>(), actors = new Set<OwnedActor>();
+    const bindings = entries.map(entry => {
+      this.entity(entry.slot);
+      const actor = this.host.actors.resolveSaved(entry.actor);
+      if (entry.slot >= 1022 || slots.has(entry.slot) || actor === null || actors.has(actor)
+        || actor.owner !== this.host.provider || this.host.actors.atSource(this.host.provider, entry.slot) !== actor
+        || (entry.visibility !== null && entry.visibility.clusters.length > 16)) throw reader.fail('invalid source actor or visibility binding');
+      slots.add(entry.slot); actors.add(actor);
+      return { ...entry, actor };
+    });
+    if (actors.size !== this.host.actors.ownedBy(this.host.provider).length) reader.fail('guest record checkpoint omits owned actors');
+    for (const entry of bindings) {
+      this.bind(entry.slot, entry.actor);
+      if (entry.visibility !== null) this.links.set(entry.slot, entry.visibility);
+    }
+  }
 
   releaseClient(slot: number): void {
     if (!Number.isInteger(slot) || slot < 0 || slot >= this.data.numClients) throw new RangeError('Q3 client slot is outside configured game data');

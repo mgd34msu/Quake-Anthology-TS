@@ -1,8 +1,9 @@
 import { closeSync, constants, fstatSync, ftruncateSync, mkdirSync, openSync, writeSync } from "node:fs";
-import { openContainedParent } from "./contained.ts";
+import { containedFileParts, openContainedParent } from "./contained.ts";
 
 export type WritableFileMode = "write" | "append" | "append-sync";
 export type WritableSeekOrigin = "current" | "end" | "set";
+export interface WritableFileCheckpoint { readonly path: string; readonly mode: WritableFileMode; readonly position: number; }
 
 function platformFailure(error: unknown): boolean {
   return error instanceof Error && "code" in error && typeof error.code === "string"
@@ -13,9 +14,11 @@ function platformFailure(error: unknown): boolean {
 export class WritableBinaryFile {
   private ended = false;
   private position: number;
-  constructor(private readonly descriptor: number, readonly mode: WritableFileMode, private readonly print: (text: string) => void) {
-    this.position = mode === "write" ? 0 : fstatSync(descriptor).size;
+  constructor(private readonly descriptor: number, readonly mode: WritableFileMode, private readonly print: (text: string) => void,
+    private readonly path: string, position = mode === "write" ? 0 : fstatSync(descriptor).size) {
+    this.position = position;
   }
+  captureCheckpoint(): WritableFileCheckpoint { this.live(); return { path: this.path, mode: this.mode, position: this.position }; }
   private live(): void { if (this.ended) throw new Error("Writable file is closed"); }
   write(bytes: Uint8Array): number {
     this.live();
@@ -50,6 +53,21 @@ export class WritableBinaryFile {
 /** One explicitly scoped user-data directory; no package or installed-content root is inferred. */
 export class UserFileStore {
   constructor(readonly root: string) {}
+  /** Resume an existing external file without creating, truncating, or rewinding its contents. */
+  resume(state: WritableFileCheckpoint, print: (text: string) => void = () => {}): WritableBinaryFile {
+    containedFileParts(state.path);
+    if (!Number.isSafeInteger(state.position) || state.position < 0) throw new RangeError("Invalid writable checkpoint cursor");
+    if (state.mode !== "write" && state.mode !== "append" && state.mode !== "append-sync") throw new RangeError("Invalid writable checkpoint mode");
+    const parent = openContainedParent(this.root, state.path, false);
+    try {
+      const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${parent.leaf}`,
+        constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | (state.mode === "write" ? 0 : constants.O_APPEND));
+      try {
+        if (!fstatSync(descriptor).isFile()) throw new Error("Writable source file is not a regular file");
+        return new WritableBinaryFile(descriptor, state.mode, print, state.path, state.position);
+      } catch (error) { closeSync(descriptor); throw error; }
+    } finally { closeSync(parent.descriptor); }
+  }
   open(name: string, mode: WritableFileMode, print: (text: string) => void = () => {}): WritableBinaryFile | null {
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
     const parent = openContainedParent(this.root, name, true);
@@ -63,7 +81,7 @@ export class UserFileStore {
       try {
         if (!fstatSync(descriptor).isFile()) throw new Error("Writable source file is not a regular file");
         if (mode === "write") ftruncateSync(descriptor, 0);
-        return new WritableBinaryFile(descriptor, mode, print);
+        return new WritableBinaryFile(descriptor, mode, print, name);
       } catch (error) { closeSync(descriptor); throw error; }
     } finally { closeSync(parent.descriptor); }
   }

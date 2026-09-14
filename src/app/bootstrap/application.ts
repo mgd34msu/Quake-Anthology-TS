@@ -1,3 +1,4 @@
+import type { Q3GuestOutput } from "./simulation/q3/guest-runtime.ts";
 import { serviceLoading } from "./loading.ts";
 import { UserFileStore } from "../../platform/files/writable.ts";
 import { setImmediate } from "node:timers/promises";
@@ -78,7 +79,7 @@ import { createQ1ApplicationServerHost } from "./simulation/network-q1.ts";
 import { createQ3ApplicationServerHost } from "./simulation/network-q3.ts";
 
 import type { ApplicationNetworkPlayer, Q2ApplicationServerHost } from "./network/types.ts";
-import type { SharedSimulation } from "./simulation/index.ts";
+import type { SharedSimulation, SimulationOptions } from "./simulation/index.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { SimulationTravel } from "./simulation/types.ts";
 
@@ -191,8 +192,7 @@ export class Application {
     });
     return { list: () => saves.list, refresh: () => saves.refresh(),
       ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
-      unavailable: action => this.network !== null ? "Save/load unavailable while hosting a network game."
-        : action === "save" && this.simulation.q3Guest() !== null ? "This source cannot save complete games yet." : null,
+      unavailable: () => this.network !== null ? "Save/load unavailable while hosting a network game." : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
       load: id => queue(() => this.restoreSavedGame(saves.path(id))) };
   }
@@ -203,6 +203,32 @@ export class Application {
     private readonly localSeats: Map<ClientId, SessionSeat>) {
     const product = loadedContent.catalog.require(launchOptions.product);
     this.inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  }
+
+  private static guestOptions(content: LoadedApplicationContent, options: ApplicationOptions, host: ApplicationHost,
+    commands: () => CommandBuffer): Pick<SimulationOptions, "q3Guest"> {
+    if (content.preparedQ3Game === null) return {};
+    if (!options.dedicated) throw new Error("Q3 guest local seats are unsupported");
+    const product = content.catalog.product(content.recipe.map.entities.content);
+    return { q3Guest: {
+      prepared: content.preparedQ3Game,
+      writable: new UserFileStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory)),
+      gameDirectory: basename(product.expectation.contentDirectory), print: text => host.print(text),
+      common: { milliseconds: () => Math.trunc(performance.now()), realTime: output => {
+        const now = new Date(), year = now.getFullYear();
+        output?.({ second: now.getSeconds(), minute: now.getMinutes(), hour: now.getHours(), day: now.getDate(),
+          month: now.getMonth(), year: year - 1900, weekday: now.getDay(),
+          yearDay: Math.trunc((Date.UTC(year, now.getMonth(), now.getDate()) - Date.UTC(year, 0, 1)) / 86400000),
+          isDst: now.getTimezoneOffset() < Math.max(new Date(year, 0, 1).getTimezoneOffset(), new Date(year, 6, 1).getTimezoneOffset()) ? 1 : 0 });
+        return Math.trunc(now.getTime() / 1000);
+      }, commands: { executeNow: text => { commands().executeNow(text); }, append: text => commands().append(text), insert: text => commands().insert(text) } },
+    } };
+  }
+
+  private guestOutput(): Q3GuestOutput {
+    if (this.network?.kind === "q3") return this.network.server.gameOutput();
+    if (!this.options.dedicated || this.options.network.kind !== "offline") throw new Error("Q3 guest requires a dedicated server");
+    return { configstring: () => undefined, sendServerCommand: () => undefined, dropClient: async () => undefined };
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
@@ -220,30 +246,17 @@ export class Application {
     const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
     const localSeats = new Map<ClientId, SessionSeat>();
     let application: Application | null = null;
+    let guestConsole: CommandBuffer | null = null;
     try {
       host.loading?.stage("Preparing world...");
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
-      const guestContent = content.catalog.product(content.recipe.map.entities.content);
       const guestCommands = () => {
-        const commands = application?.sourceCommands;
-        if (commands === null || commands === undefined) throw new Error("Q3 guest console is unavailable");
+        const commands = guestConsole;
+        if (commands === null) throw new Error("Q3 guest console is unavailable");
         return commands;
       };
       const simulation = createSimulation({ dedicated: options.dedicated,
-        ...(content.preparedQ3Game === null ? {} : { q3Guest: {
-          prepared: content.preparedQ3Game,
-          writable: new UserFileStore(guestContent.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), guestContent.expectation.contentDirectory)),
-          gameDirectory: basename(guestContent.expectation.contentDirectory), print: text => host.print(text),
-          common: { milliseconds: () => Math.trunc(performance.now()), realTime: output => {
-            const now = new Date(), year = now.getFullYear();
-            output?.({ second: now.getSeconds(), minute: now.getMinutes(), hour: now.getHours(), day: now.getDate(),
-              month: now.getMonth(), year: year - 1900, weekday: now.getDay(),
-              yearDay: Math.trunc((Date.UTC(year, now.getMonth(), now.getDate()) - Date.UTC(year, 0, 1)) / 86400000),
-              isDst: now.getTimezoneOffset() < Math.max(new Date(year, 0, 1).getTimezoneOffset(), new Date(year, 6, 1).getTimezoneOffset()) ? 1 : 0 });
-            return Math.trunc(now.getTime() / 1000);
-          }, commands: { executeNow: text => { guestCommands().executeNow(text); },
-            append: text => guestCommands().append(text), insert: text => guestCommands().insert(text) } },
-        } }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+        ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
         maxClients: options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16,
         promptSupported: client => !options.dedicated && localSeats.has(client),
@@ -257,6 +270,7 @@ export class Application {
       application = new Application(options, content, session, simulation, host, identity, localSeats);
       application.frontendOverrides = preferences ?? {};
       await application.bindSourceCommands();
+      guestConsole = application.sourceCommands;
       if (options.dedicated) application.openDedicatedConsole();
       else {
         await application.viewSettings.load(application.inputConfig);
@@ -272,8 +286,7 @@ export class Application {
       await application.openNetwork();
       const guest = simulation.q3Guest();
       if (guest !== null) {
-        if (application.network?.kind !== "q3") throw new Error("Q3 guest requires the native dedicated server network");
-        await guest.initialize(application.network.server.gameOutput());
+        await guest.initialize(application.guestOutput());
         const initialized = application;
         await initialized.sourceCommands?.executeAsync(() => initialized.commands());
       }
@@ -742,11 +755,7 @@ export class Application {
   private prepareSavedClients(slots: readonly number[], botClients: readonly SavedBotClientId[]): SavedApplicationClients {
     const previousBots = new Map((this.bots?.clients() ?? []).map(bot => [bot.client.id.slot, bot.client]));
     const savedBots = new Map(botClients.map(client => [client.slot, client]));
-    const humanClients = this.simulation.players().flatMap(actor => {
-      const player = this.simulation.movementPlayer(actor);
-      if (player === null) throw new Error("Connected player has no source client identity");
-      return previousBots.get(player.client.slot)?.id.equals(player.client) === true ? [] : [player.client];
-    });
+    const humanClients = this.simulation.clientIdentities().filter(client => previousBots.get(client.slot)?.id.equals(client) !== true);
     const humanSlots = slots.filter(slot => !savedBots.has(slot));
     if (humanClients.length !== humanSlots.length || humanClients.some(client => !humanSlots.includes(client.slot)))
       throw new Error("Saved human players do not match the connected session client slots");
@@ -790,14 +799,15 @@ export class Application {
   }
 
   private async prepareAndReplaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
-    if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes, restart and restore are unsupported");
+    if (save === undefined && this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes and restart are unsupported");
+    if (save !== undefined && this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     const settings = save === undefined ? null : savedSimulationSettings(save);
     const savedBots = save === undefined ? null : savedBotCheckpoint(save);
     let options = { ...this.options, map: mapResourcePath(map) };
     const recipe = save?.recipe ?? await resolveApplicationTravel(this.content, options.map);
     const content = await loadApplicationContent(options, recipe);
-    const previousContent = this.content, previous = this.graphical;
+    const previousContent = this.content, previous = this.graphical, previousSimulation = this.simulation;
     const frontendOverrides = this.frontendSettings;
     const q3 = this.simulation.q3Source();
     const previousBotClients = this.bots?.clients() ?? [];
@@ -827,13 +837,14 @@ export class Application {
         initialSourceMilliseconds = settings.hostMilliseconds;
       }
       if (settings !== null) savedClients = this.prepareSavedClients(settings.clientSlots, savedBots?.transport.connections.map(connection => connection.client) ?? []);
-      const clients = savedClients?.clients ?? this.simulation.players().map(actor => {
-        const player = this.simulation.movementPlayer(actor);
-        if (player === null) throw new Error("Connected player has no source client identity");
-        return player.client;
-      }).filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
+      const clients = savedClients?.clients ?? this.simulation.clientIdentities().filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
+      let candidateCommands: CommandBuffer | null = null;
+      const guestCommands = () => {
+        if (candidateCommands === null) throw new Error("Q3 guest candidate console is unavailable");
+        return candidateCommands;
+      };
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
-      simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+      simulation = createSimulation({ dedicated: options.dedicated, ...Application.guestOptions(content, options, this.host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
@@ -845,7 +856,7 @@ export class Application {
       if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
         nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
       }
-      const admissions = nextSimulation.quakecSource()?.kind === "quakeworld" ? new Map<number, ActorId>() : new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
+      const admissions = nextSimulation.q3Guest() !== null || nextSimulation.quakecSource()?.kind === "quakeworld" ? new Map<number, ActorId>() : new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
         const actor = nextSimulation.players().find(actor => nextSimulation.movementPlayer(actor)?.client.equals(client));
         if (actor === undefined) throw new Error(`Restore did not bind client ${client.slot}`);
@@ -854,8 +865,10 @@ export class Application {
       const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content, this.nativeWorldCount + 1);
       if (nextNetworkHost !== null) this.validateNetworkHost(nextNetworkHost);
       const preparedCommands = await this.prepareSourceCommands(nextSimulation, content, save !== undefined);
+      candidateCommands = preparedCommands.sourceCommands;
       if (preparedCommands.sourceCommands !== null && this.sourceCommands !== null)
         preparedCommands.sourceCommands.copyPendingFrom(this.sourceCommands);
+      if (save !== undefined) nextSimulation.q3Guest()?.completeRestore(this.guestOutput());
       if (save === undefined) nextBots = await this.createBots(content, simulation, {
         clients: botClients, restart: initialSourceMilliseconds !== 0, commands: preparedCommands.sourceCommands });
       else if (savedBots !== null && savedClients !== null) nextBots = await this.createBots(content, simulation, {
@@ -957,6 +970,7 @@ export class Application {
       };
       await retire("capture retirement", () => previousCapture?.close());
       await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
+      await retire("guest shutdown", () => previousSimulation.shutdownQ3Guest());
       await retire("world retirement", () => replacement.retired.close());
       if (save === undefined && !preserveBots) for (const bot of previousBotClients)
         await retire("bot disconnect", () => this.session.closeClient(bot.client.id));
@@ -988,6 +1002,7 @@ export class Application {
       await discard(() => nextEffects?.close());
       await discard(() => nextInput?.close());
       await discard(() => nextBots?.close());
+      await discard(() => simulation?.q3Guest()?.discard());
       await discard(() => simulation?.close());
       for (const client of savedClients?.added ?? []) await discard(() => client.close());
       await discard(() => art?.close());
@@ -1005,6 +1020,7 @@ export class Application {
 
   async saveGame(path: string): Promise<void> {
     if (this.closed) throw new Error("Application is closed");
+    if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     if (this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
@@ -1016,7 +1032,7 @@ export class Application {
   }
 
   async loadGame(path: string): Promise<void> {
-    if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest saved games are unsupported");
+    if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.closed || this.stepping) throw new Error("Save restoration requires an idle open application");
     await this.restoreSavedGame(path);
   }
@@ -1115,9 +1131,9 @@ export class Application {
       };
       try {
         const guest = this.simulation.q3Guest();
-        if (guest !== null) {
+        if (guest !== null && command.name !== "save" && command.name !== "load") {
           if (command.seat !== null) throw new Error("Q3 guest local seats are unsupported");
-          if (["map", "map_restart", "devmap", "spmap", "spdevmap", "save", "load", "addbot", "removebot", "botlist"].includes(command.name))
+          if (["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist"].includes(command.name))
             throw new Error(`Q3 guest command ${command.name} is unsupported`);
           if (command.name === "exec") {
             const argument = command.arguments_[0];
@@ -1203,6 +1219,7 @@ export class Application {
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
+          if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
           this.pendingSave = await readSaveImage(path);
         }
         else if (command.name === "map") {

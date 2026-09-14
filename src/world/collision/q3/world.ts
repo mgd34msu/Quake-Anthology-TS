@@ -185,6 +185,8 @@ export class CollisionWorld {
   leafCluster(index: number): number { return this.#topology.leafCluster(index); }
   clusterPVS(cluster: number): SourceClusterPVS { return this.#topology.clusterPVS(cluster); }
   clusterVisible(from: number, to: number): boolean { return this.#topology.clusterVisible(from, to); }
+  capturePortalCheckpoint(): ReturnType<CollisionTopology["capturePortalCheckpoint"]> { return this.#topology.capturePortalCheckpoint(); }
+  restorePortalCheckpoint(value: unknown): void { this.#topology.restorePortalCheckpoint(value); }
   adjustAreaPortalState(area1: number, area2: number, open: boolean): void { this.#topology.adjustAreaPortalState(area1, area2, open); }
   areasConnected(area1: number, area2: number): boolean {
     if (this.#settings !== null) this.#topology.setNoAreas(this.#settings.noAreas);

@@ -57,8 +57,8 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(output.snapshot.bodies.length).toBeGreaterThan(0);
       expect(app.simulation.players()).toHaveLength(0);
       expect(() => app.simulation.step({ elapsedMilliseconds: 50, commands: [] })).toThrow('awaited');
-      await expect(app.loadGame(join(root, 'missing.sav'))).rejects.toThrow('unsupported');
-      await expect(app.saveGame(join(root, 'missing.sav'))).rejects.toThrow('checkpoint');
+      await expect(app.loadGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
+      await expect(app.saveGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
       app.queueCommand('addbot', [], null); app.queueCommand('map_restart', [], null);
       await app.step(50);
       expect(printed.some(text => text.includes('Q3 guest command addbot is unsupported'))).toBe(true);
@@ -226,4 +226,69 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
       }
     }
   }
+}, 120000);
+
+
+test('dedicated offline LRCTF Application restores guest bytes and human identities without replay', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'q3-guest-save-'));
+  const launch = { ...options(root), network: { kind: 'offline' } } satisfies Parameters<typeof Application.open>[0];
+  const clock = spyOn(performance, 'now').mockReturnValue(1000);
+  async function open() {
+    const app = await Application.open(launch, { print: () => undefined });
+    try {
+      const guest = app.simulation.q3Guest();
+      if (guest === null) throw new Error('Missing guest');
+      const client = app.session.createClient(0);
+      const admitted = await guest.connect(client.id, '\\name\\Saved Player\\model\\sarge\\ip\\localhost');
+      if (admitted.kind !== 'accepted') throw new Error(admitted.reason);
+      await guest.begin(admitted.player, { serverTime: 0, angles: [0, 0, 0], forwardmove: 0, rightmove: 0, upmove: 0, buttons: 0, weapon: 2 });
+      await guest.command(admitted.player, ['team', 'red']);
+      return { app, client };
+    } catch (error) { await app.close(); throw error; }
+  }
+  async function frames(app: Application, first: number, count: number) {
+    const guest = app.simulation.q3Guest();
+    if (guest === null) throw new Error('Missing guest');
+    const player = guest.players()[0];
+    if (player === undefined) throw new Error('Missing guest human');
+    const trace: { readonly memory: string; readonly server: ReturnType<typeof guest.state.captureSaveState> }[] = [];
+    for (let frame = first; frame < first + count; frame++) {
+      await guest.think(player, { serverTime: (frame + 1) * 50, angles: [0, 0, 0], forwardmove: 127, rightmove: frame % 2 ? 32 : 0, upmove: 0, buttons: 1, weapon: 2 });
+      await app.step(50);
+      trace.push({ memory: new Bun.CryptoHasher('sha256').update(guest.checkpoint().data).digest('hex'), server: structuredClone(guest.state.captureSaveState()) });
+    }
+    return trace;
+  }
+  let active: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    active = await open();
+    await frames(active.app, 0, 12);
+    const path = join(root, 'guest.sav');
+    await active.app.saveGame(path);
+    const continuous = await frames(active.app, 12, 12);
+    await active.app.close(); active = null;
+    active = await open();
+    const { app, client } = active, previous = app.simulation;
+    const shutdown = spyOn(QvmGame.prototype, 'shutdownAsync');
+    const publication = spyOn(app.session, 'replaceWorld').mockImplementationOnce(() => { throw new Error('injected guest publication failure'); });
+    try {
+      await expect(app.loadGame(path)).rejects.toThrow('injected guest publication failure');
+      expect(shutdown).not.toHaveBeenCalled();
+    } finally { publication.mockRestore(); shutdown.mockRestore(); }
+    expect(app.simulation).toBe(previous);
+    expect(client.isClosed).toBe(false);
+    expect(await frames(app, 0, 1)).toHaveLength(1);
+    const initialize = spyOn(QvmGame.prototype, 'initializeAsync');
+    const connect = spyOn(QvmGame.prototype, 'clientConnectAsync');
+    const begin = spyOn(QvmGame.prototype, 'clientBeginAsync');
+    try {
+      await app.loadGame(path);
+      expect(initialize).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(begin).not.toHaveBeenCalled();
+    } finally { initialize.mockRestore(); connect.mockRestore(); begin.mockRestore(); }
+    expect(app.simulation.clientIdentities()).toEqual([client.id]);
+    const restoredPlayer = app.simulation.q3Guest()?.players()[0];
+    if (restoredPlayer === undefined) throw new Error('Missing restored guest player');
+    expect(app.simulation.movementPlayer(restoredPlayer.actor)).toBeNull();
+    expect(await frames(app, 12, 12)).toEqual(continuous);
+  } finally { await active?.app.close(); clock.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 120000);

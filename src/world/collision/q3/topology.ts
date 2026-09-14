@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /* BSP topology and area connectivity translated from id Software's cm_test.c,
  * cm_load.c and q_math.c. Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
@@ -61,6 +62,37 @@ export class CollisionTopology {
     this.#portals = map.portals;
     this.#visibilityRowBytes = map.visibilityRowBytes;
     this.#floodAreas();
+  }
+
+  capturePortalCheckpoint() {
+    return { version: 1, floodValid: this.#floodValid, noAreas: this.#noAreas,
+      areas: this.#map.areas.map(area => ({ flood: area.flood, floodValid: area.floodValid })),
+      portals: Array.from({ length: this.areaCount * this.areaCount }, (_, index) => this.#portals.at(index)) };
+  }
+
+  restorePortalCheckpoint(value: unknown): void {
+    const reader = new SaveReader(value, "q3.collision.portals");
+    reader.field("version").literal(1);
+    const word = (field: SaveReader): number => {
+      const value = field.integer(-0x80000000);
+      if (value > 0x7fffffff) field.fail("expected a signed 32-bit source word");
+      return value;
+    };
+    const floodValid = word(reader.field("floodValid")), noAreas = reader.field("noAreas").boolean();
+    const areas = reader.field("areas").list(area => ({ flood: word(area.field("flood")), floodValid: word(area.field("floodValid")) }));
+    const portals = reader.field("portals").list(word);
+    if (areas.length !== this.areaCount || portals.length !== this.areaCount * this.areaCount) reader.fail("portal checkpoint belongs to another area table");
+    for (let first = 0; first < this.areaCount; first++) {
+      for (let second = first + 1; second < this.areaCount; second++) {
+        if (portals[first * this.areaCount + second] !== portals[second * this.areaCount + first]) reader.fail("asymmetric source portal references");
+      }
+    }
+    for (const [index, area] of areas.entries()) {
+      const target = at(this.#map.areas, index);
+      target.flood = area.flood; target.floodValid = area.floodValid;
+    }
+    for (const [index, count] of portals.entries()) this.#portals.set(index, count);
+    this.#floodValid = floodValid; this.#noAreas = noAreas;
   }
 
   pointLeafnum(point: Vec3): number {

@@ -1,5 +1,9 @@
 /* Q3 sv_game.c/cl_cgame.c/cl_ui.c filesystem traps over the selected mounted content. GPL-2.0-or-later. */
-import type { UserFileStore, WritableBinaryFile, WritableFileMode } from "../../platform/files/writable.ts";
+import type { UserFileStore, WritableBinaryFile, WritableFileCheckpoint, WritableFileMode } from "../../platform/files/writable.ts";
+import { createHash } from "node:crypto";
+import { containedFileParts } from "../../platform/files/contained.ts";
+import { readResource } from "../../persistence/recipe.ts";
+import { SaveReader } from "../../persistence/value.ts";
 import { CommonError } from "../../core/common-error.ts";
 import type { MountedContent, OpenedResource } from "../../content/mounts/index.ts";
 import { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
@@ -7,6 +11,32 @@ import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 
 interface ReadHandle { readonly kind: "read"; readonly resource: OpenedResource; position: number; }
 type FileHandle = ReadHandle | { readonly kind: "write"; readonly file: WritableBinaryFile };
+export type QvmFileHandleCheckpoint =
+  | { readonly slot: number; readonly kind: "read"; readonly resource: OpenedResource; readonly position: number }
+  | { readonly slot: number; readonly kind: "write"; readonly file: WritableFileCheckpoint };
+export interface QvmFilesCheckpoint { readonly handles: readonly QvmFileHandleCheckpoint[]; }
+
+function readFilesCheckpoint(value: unknown): QvmFilesCheckpoint {
+  const slots = new Set<number>();
+  const handles = new SaveReader(value, "qvm-files").field("handles").list((reader): QvmFileHandleCheckpoint => {
+    const slot = reader.field("slot").integer(1);
+    if (slot > 63 || slots.has(slot)) reader.fail("invalid or duplicate file handle slot");
+    slots.add(slot);
+    const kind = reader.field("kind").choice("read", "write");
+    if (kind === "write") {
+      const file = reader.field("file"), path = file.field("path").string();
+      containedFileParts(path);
+      return { slot, kind, file: { path, mode: file.field("mode").choice("write", "append", "append-sync"), position: file.field("position").integer(0) } };
+    }
+    const resource = reader.field("resource"), reference = readResource(resource.field("reference")), bytes = resource.field("bytes").bytes().slice();
+    if (bytes.length !== reference.byteLength || `sha256:${createHash("sha256").update(bytes).digest("hex")}` !== reference.digest) resource.fail("opened bytes differ from resource identity");
+    // Streamed loose files may seek beyond EOF. Their exact cursor remains valid.
+    const position = reader.field("position").integer(0);
+    if (reference.provenance.kind === "archive" && reference.provenance.mount.format === "pk3" && position > bytes.length) reader.fail("ZIP cursor exceeds opened bytes");
+    return { slot, kind, resource: { reference, bytes }, position };
+  });
+  return { handles };
+}
 export interface QvmFileServices {
   readonly mounts: MountedContent;
   readonly writable: UserFileStore | null;
@@ -19,6 +49,40 @@ export class QvmFiles {
   private readonly handles = new Map<number, FileHandle>();
   private closed = false;
   constructor(readonly services: QvmFileServices) {}
+
+  captureCheckpoint(): QvmFilesCheckpoint {
+    this.assertCurrent();
+    return readFilesCheckpoint({ handles: [...this.handles].map(([slot, handle]): QvmFileHandleCheckpoint => handle.kind === "write"
+      ? { slot, kind: "write", file: handle.file.captureCheckpoint() }
+      : { slot, kind: "read", resource: handle.resource, position: handle.position }) });
+  }
+
+  /** Restore only into an unpublished empty owner. Lowest free slot allocation follows the occupied slots. */
+  restoreCheckpoint(value: unknown): void {
+    this.assertCurrent();
+    if (this.handles.size !== 0) throw new Error("QVM file restore requires an empty owner");
+    const checkpoint = readFilesCheckpoint(value), staged = new Map<number, FileHandle>();
+    try {
+      for (const handle of checkpoint.handles) {
+        if (handle.kind === "read") staged.set(handle.slot, { kind: "read", resource: handle.resource, position: handle.position });
+        else {
+          const writable = this.services.writable;
+          if (writable === null) throw new Error("QVM filesystem has no writable owner");
+          const file = writable.resume(handle.file, text => { this.services.print?.(text); this.assertCurrent(); });
+          staged.set(handle.slot, { kind: "write", file });
+        }
+      }
+      this.assertCurrent();
+    } catch (error) {
+      const errors: unknown[] = [error];
+      for (const handle of staged.values()) if (handle.kind === "write") {
+        try { handle.file.close(); } catch (closeError) { errors.push(closeError); }
+      }
+      if (errors.length > 1) throw new AggregateError(errors, "QVM file restore cleanup failed");
+      throw error;
+    }
+    for (const [slot, handle] of staged) this.handles.set(slot, handle);
+  }
 
   assertCurrent(): void {
     if (this.closed) throw new Error("QVM files have been closed");
