@@ -7,7 +7,7 @@ import { createContentDigest, createMountIdentity, createMountPlanId } from "../
 import type { ArchiveMount, ContentMount, ResolvedMountPlan, ResolvedResourceReference } from "../../../src/contracts/content.ts";
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
-import { discoverInstalledContent, quakeWorldContentContext, quakeWorldContentProduct } from "../../../src/content/catalog/index.ts";
+import { discoverInstalledContent, remoteContentSelection, remoteContentProduct } from "../../../src/content/catalog/index.ts";
 import { canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 
 function pak(path: string, text: string): Uint8Array {
@@ -441,9 +441,9 @@ test("explicit QW mod context uses common archives and user overlays above qw an
     for (const entry of cases) {
       const directory = entry[0], expected = entry[1];
       if (directory === undefined || expected === undefined) throw new Error("Missing QW case");
-      const context = quakeWorldContentContext(directory);
-      const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, quakeWorld: context });
-      const product = catalog.require(quakeWorldContentProduct(context));
+      const context = remoteContentSelection("q1-quakeworld", directory);
+      const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, remoteContent: context });
+      const product = catalog.require(remoteContentProduct(context));
       const mounts = await catalog.mountsFor(product.id);
       using opened = await openMountPlan({ id: createMountPlanId("test", directory), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
       expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe(expected);
@@ -457,9 +457,65 @@ test("explicit QW mod context uses common archives and user overlays above qw an
     const absent = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false });
     expect(() => absent.require("q1-quakeworld-mod-beta")).toThrow();
     for (const directory of ["", "..", "../alpha", "a/b", "a\\b", "a:b", ".", "a..b", "a;quit"])
-      expect(() => quakeWorldContentContext(directory)).toThrow();
-    expect(quakeWorldContentContext("ID1")).toEqual({ kind: "base" });
+      expect(() => remoteContentSelection("q1-quakeworld", directory)).toThrow();
+    expect(remoteContentSelection("q1-quakeworld", "ID1")).toEqual({ base: "q1-quakeworld", directory: "qw" });
     for (const directory of ["_ctf", "-arena", ".hidden", "+foo"])
-      expect(quakeWorldContentContext(directory)).toEqual({ kind: "mod", directory });
+      expect(remoteContentSelection("q1-quakeworld", directory)).toEqual({ base: "q1-quakeworld", directory });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("remote stock overlay preserves metadata while retail dependencies and ordinary discovery stay strict", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "remote-stock-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const base: ProductExpectation = { id: "q2-classic-baseq2", family: "q2", edition: "classic", campaign: "baseq2", title: "Quake II",
+    contentDirectory: "q2/baseq2", baseProduct: null, requiredContentArchives: ["q2/baseq2/pak0.pak"], requiredPrograms: [], mapWitness: null, unresolvedReason: null };
+  const stock: ProductExpectation = { ...base, id: "q2-classic-xatrix", campaign: "xatrix", title: "The Reckoning", contentDirectory: "q2/xatrix",
+    baseProduct: base.id, requiredContentArchives: ["q2/xatrix/pak0.pak"], requiredPrograms: ["game.so"], mapWitness: "maps/xswamp.bsp" };
+  const products = [base, stock], selected = remoteContentSelection("q2-classic-baseq2", "XATRIX");
+  try {
+    await mkdir(resolve(corpusRoot, "q2/baseq2"), { recursive: true });
+    await mkdir(resolve(userContentRoot, "q2/xatrix"), { recursive: true });
+    await writeFile(resolve(corpusRoot, "q2/baseq2/pak0.pak"), pak("shared.txt", "retail"));
+    const ordinary = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false });
+    expect(() => ordinary.require(stock.id)).toThrow("requires");
+    const remote = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, remoteContent: selected });
+    const product = remote.require(remoteContentProduct(selected, products));
+    expect(product.expectation).toEqual(stock);
+    const mounts = await remote.mountsFor(product.id);
+    using opened = await openMountPlan({ id: createMountPlanId("test", "remote-stock"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe("retail");
+    await writeFile(resolve(userContentRoot, "q2/xatrix/pak0.pak"), new Uint8Array([1, 2, 3]));
+    const corrupt = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, remoteContent: selected });
+    expect(() => corrupt.require(stock.id)).toThrow("requires");
+    await rm(resolve(userContentRoot, "q2/xatrix/pak0.pak"));
+    await rm(resolve(corpusRoot, "q2/baseq2/pak0.pak"));
+    const missingBase = await discoverInstalledContent({ corpusRoot, userContentRoot, products, discoverMods: false, remoteContent: selected });
+    expect(() => missingBase.require(stock.id)).toThrow("base product");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("remote QW default and mod can use an empty user qw overlay above strict id1", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "remote-qw-base-"));
+  const corpusRoot = resolve(root, "corpus"), userContentRoot = resolve(root, "user");
+  const base: ProductExpectation = { id: "q1-classic-id1", family: "q1", edition: "classic", campaign: "id1", title: "id1", contentDirectory: "q1/id1",
+    baseProduct: null, requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null };
+  const qw: ProductExpectation = { ...base, id: "q1-quakeworld", edition: "quakeworld", title: "qw", contentDirectory: "q1/qw", baseProduct: base.id };
+  try {
+    await mkdir(resolve(corpusRoot, "q1/id1"), { recursive: true });
+    await mkdir(resolve(userContentRoot, "q1/qw"), { recursive: true });
+    await writeFile(resolve(corpusRoot, "q1/id1/shared.txt"), "id1");
+    for (const directory of ["qw", "id1", "_mod"]) {
+      const selection = remoteContentSelection("q1-quakeworld", directory);
+      const catalog = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [base, qw], discoverMods: false, remoteContent: selection });
+      const product = catalog.require(remoteContentProduct(selection, [base, qw]));
+      const mounts = await catalog.mountsFor(product.id);
+      using opened = await openMountPlan({ id: createMountPlanId("test", `qw-${directory}`), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+      expect(new TextDecoder().decode(await opened.read("shared.txt"))).toBe("id1");
+    }
+    const ordinary = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [base, qw], discoverMods: false });
+    expect(() => ordinary.require(qw.id)).toThrow("requires");
+    await rm(resolve(corpusRoot, "q1/id1"), { recursive: true });
+    const missing = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [base, qw], discoverMods: false, remoteContent: remoteContentSelection("q1-quakeworld", "qw") });
+    expect(() => missing.require(qw.id)).toThrow("base product");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

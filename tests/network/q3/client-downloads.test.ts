@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decodeArchive } from '../../../src/content/archive/index.ts';
-import { Q3ApplicationClientDownloads } from '../../../src/app/bootstrap/network/q3-client-downloads.ts';
+import { Q3ApplicationClientDownloads, q3DownloadPath } from '../../../src/app/bootstrap/network/q3-client-downloads.ts';
+import { remoteContentSelection } from '../../../src/content/catalog/index.ts';
 import { Q3ServerDownload } from '../../../src/network/q3/download.ts';
 import { q3ArchiveChecksums } from '../../../src/network/q3/pure.ts';
 import { MessageWriter } from '../../../src/network/q3/message.ts';
@@ -24,12 +25,16 @@ function fixturePk3(): Uint8Array<ArrayBuffer> {
   view.setUint32(end + 12, centralLength, true); view.setUint32(end + 16, localLength, true); return bytes;
 }
 
-function fixture(checksumDelta = 0, earlierLoaded = false, reload: () => Promise<void> = async () => {}) {
+function fixture(checksumDelta = 0, earlierLoaded = false, reload: () => Promise<void> = async () => {}, physicalDirectory?: string) {
   const root = mkdtempSync(join(tmpdir(), 'q3-download-sink-')), bytes = fixturePk3(), archive = decodeArchive(bytes, 'pk3');
   const checksum = q3ArchiveChecksums(archive, 0).checksum ^ checksumDelta; archive.close();
   const commands: string[] = [], events: string[] = [];
+  const owner = physicalDirectory === undefined ? undefined : {
+    selection: remoteContentSelection('q3-baseq3', ''), writeRoot: join(root, physicalDirectory), baseWriteRoot: join(root, physicalDirectory),
+  };
+  if (owner !== undefined) { mkdirSync(owner.writeRoot); writeFileSync(join(owner.writeRoot, 'custom.pk3'), 'existing package'); }
   const client = new Q3ApplicationClientDownloads(root, { assertCurrent() {}, reliable: text => { commands.push(text); },
-    sendPacket: () => { events.push('packet'); }, progress() {}, async reloadPackages() { events.push('reload'); await reload(); } });
+    sendPacket: () => { events.push('packet'); }, progress() {}, async reloadPackages() { events.push('reload'); await reload(); } }, owner);
   client.begin([...(earlierLoaded ? [{ name: 'baseq3/custom', checksum: checksum ^ 1 }] : []), { name: 'baseq3/custom', checksum }], earlierLoaded ? [checksum ^ 1] : [], name => existsSync(join(root, name)));
   let position = 0;
   const server = new Q3ServerDownload({ enabled: () => true, pure: () => false, print() {}, drop(reason) { throw new Error(reason); },
@@ -39,8 +44,25 @@ function fixture(checksumDelta = 0, earlierLoaded = false, reload: () => Promise
     const writer = new MessageWriter(); writer.writeLong(0); server.write(writer, time, { rate: 1000000, maxRate: 0, snapshotMsec: 50 }); writer.writeByte(ServerOpcode.Eof);
     return decodeServerMessage(writer.toBytes(), { product: 'baseq3', messageNumber: 1, reliableSequence: 0, serverCommandSequence: 0, parseEntitiesNumber: 0, baseline: () => null, history: () => null }).operations.flatMap(operation => operation.kind === 'download' ? [operation.block] : []);
   };
-  return { root, bytes, client, server, blocks, commands, events };
+  return { root, bytes, client, server, blocks, commands, events, checksum };
 }
+
+test('Q3 selected and base directory mapping preserves wire names and physical collision suffixes', async () => {
+  const f = fixture(0, false, async () => {}, 'BaseQ3');
+  try {
+    for (const block of f.blocks(2000)) { if (block.kind === 'start') f.client.publishSize(block.fileSize); await f.client.receive(block); }
+    expect(readFileSync(join(f.root, 'BaseQ3/custom.pk3'), 'utf8')).toBe('existing package');
+    expect(readdirSync(join(f.root, 'BaseQ3'))).toHaveLength(2);
+    expect(existsSync(join(f.root, 'baseq3'))).toBe(false);
+    expect(f.commands[0]).toBe('download baseq3/custom.pk3');
+    expect(f.commands.at(-1)).toBe('donedl');
+    const owner = { selection: remoteContentSelection('q3-baseq3', 'mymod'), writeRoot: join(f.root, 'MyMod'), baseWriteRoot: join(f.root, 'BaseQ3') };
+    expect(q3DownloadPath('MYMOD/custom.123.pk3', owner)).toBe('MyMod/custom.123.pk3');
+    expect(q3DownloadPath('BASEQ3/custom.pk3', owner)).toBe('BaseQ3/custom.pk3');
+    expect(q3DownloadPath('other/custom.pk3', owner)).toBe('other/custom.pk3');
+    expect(() => q3DownloadPath('../custom.pk3', owner)).toThrow();
+  } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
+});
 
 test('native Q3 block retry and EOF publish a checked package atomically before donedl', async () => {
   const f = fixture();

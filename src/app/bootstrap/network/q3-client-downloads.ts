@@ -5,6 +5,26 @@ import type { Download } from '../../../network/q3/server-message.ts';
 import type { ServerPak } from '../../../network/q3/pak-references.ts';
 import { checkQ3DownloadName, compareQ3Packages, q3ArchiveChecksums } from '../../../network/q3/pure.ts';
 import { DownloadSink } from '../../../network/services/downloads.ts';
+import { basename, dirname, resolve } from 'node:path';
+import type { RemoteContentMounts } from '../content.ts';
+
+type DownloadMounts = Pick<RemoteContentMounts, 'selection' | 'writeRoot' | 'baseWriteRoot'>;
+
+/** Translate selected/base wire directories to their mounted filesystem spelling. */
+export function q3DownloadPath(path: string, owner: DownloadMounts): string {
+  checkQ3DownloadName(path);
+  if (owner.selection.base !== 'q3-baseq3' || dirname(resolve(owner.writeRoot)) !== dirname(resolve(owner.baseWriteRoot)))
+    throw new Error('Q3 download roots must belong to the selected Q3 family');
+  const separator = path.indexOf('/');
+  if (separator < 0) return path;
+  const directory = path.slice(0, separator).toLowerCase();
+  const physical = directory === owner.selection.directory ? basename(owner.writeRoot)
+    : directory === 'baseq3' ? basename(owner.baseWriteRoot) : null;
+  if (physical === null) return path;
+  const mapped = physical + path.slice(separator);
+  checkQ3DownloadName(mapped);
+  return mapped;
+}
 
 export interface Q3ApplicationDownloadBindings {
   assertCurrent(): void;
@@ -24,7 +44,9 @@ export class Q3ApplicationClientDownloads {
   private size = 0;
   private generation = 0;
   private receiving = false;
-  constructor(private readonly root: string, private readonly bindings: Q3ApplicationDownloadBindings) {
+  constructor(private readonly root: string, private readonly bindings: Q3ApplicationDownloadBindings, private readonly owner?: DownloadMounts) {
+    if (owner !== undefined && resolve(root) !== dirname(resolve(owner.writeRoot)))
+      throw new Error('Q3 download root differs from the selected mount family');
     this.source = new Q3ClientDownload({
       assertCurrent: () => bindings.assertCurrent(),
       reliable: text => bindings.reliable(text), sendPacket: () => bindings.sendPacket(),
@@ -32,7 +54,7 @@ export class Q3ApplicationClientDownloads {
       openTemporary: path => {
         const request = this.current;
         if (request === null || path !== `${request.local}.tmp` || this.size <= 0) throw new Error('Unexpected Q3 download temporary request');
-        const sink = DownloadSink.create(this.root, request.local, { kind: 'protocol-completion', maximumBytes: this.size });
+        const sink = DownloadSink.create(this.root, this.destination(request.local), { kind: 'protocol-completion', maximumBytes: this.size });
         this.sink = sink;
         // The source closes its writer before publish; the shared sink retains its inode through validation.
         return { writeBytes: bytes => sink.append(bytes), close() {} };
@@ -68,7 +90,7 @@ export class Q3ApplicationClientDownloads {
     this.bindings.assertCurrent();
     if (this.receiving) throw new Error('Cannot replace Q3 downloads during block processing');
     this.close();
-    const list = compareQ3Packages(referenced, loadedChecksums, exists, true);
+    const list = compareQ3Packages(referenced, loadedChecksums, path => exists(this.destination(path)), true);
     const loaded = new Set(loadedChecksums.map(checksum => checksum >>> 0));
     const fields = list.split('@');
     if (fields[0] !== '' || fields.length % 2 !== 1) throw new Error('Incomplete Q3 package download list');
@@ -86,6 +108,9 @@ export class Q3ApplicationClientDownloads {
       this.queue.push({ remote, local, checksum: pack.checksum });
     }
     return this.startNext();
+  }
+  private destination(path: string): string {
+    return this.owner === undefined ? path : q3DownloadPath(path, this.owner);
   }
   private startNext(): boolean {
     const request = this.queue.shift(); this.current = request ?? null; this.size = 0;

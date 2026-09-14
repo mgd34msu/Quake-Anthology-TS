@@ -1,3 +1,4 @@
+import type { RemoteContentMounts } from "../content.ts";
 import type { ClientDownloadPermission } from './client-download-policy.ts';
 import type { WorldText } from "../../../text/world.ts";
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
@@ -35,7 +36,8 @@ export interface Q2RemotePresentationOptions {
     print(text: string): void;
     sendCommand(text: string): void;
     loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
-    refreshDownloads?(assertCurrent: () => void): Promise<LoadedApplicationContent>;
+    prepareServerData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<RemoteContentMounts>;
+    refreshDownloads?(assertCurrent: () => void): Promise<RemoteContentMounts>;
 }
 export function q2RemoteEntityBounds(solid: number, longSolid: boolean): Bounds {
     const size = longSolid ? solid & 255 : (solid & 31) * 8;
@@ -53,6 +55,7 @@ function interpolateAngles(from: Vec3, to: Vec3, fraction: number): Vec3 {
 /** Decoded source records are presentation state. This owner has no Simulation or combat table. */
 export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePresentationAccess {
     readonly downloads: Q2DownloadReceiver;
+    private downloadContent: RemoteContentMounts | null = null;
     readonly client: SessionClient;
     private selectedProtocol: Q2ProtocolIdentity;
     private strafejumpHack = false;
@@ -98,13 +101,13 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.userinfo = options.userinfo;
         this.content = options.content;
         const refreshDownloads = options.refreshDownloads;
-        this.downloads = new Q2DownloadReceiver(() => this.content, options.sendCommand, options.print,
+        this.downloads = new Q2DownloadReceiver(() => { if (this.downloadContent === null) throw new Error('Q2 downloads require prepared server content'); return this.downloadContent; }, options.sendCommand, options.print,
             refreshDownloads === undefined ? undefined : async () => {
                 const revision = this.downloads.revision;
                 const assertCurrent = (): void => { if (this.downloads.revision !== revision) throw new Error('Q2 package refresh was retired'); };
                 const fresh = await refreshDownloads(assertCurrent);
                 assertCurrent();
-                this.content = fresh;
+                this.downloadContent = fresh;
             }, options.downloadPermission);
         this.collision = createSceneQueries(options.content.world);
         this.client = options.session.createClient(0);
@@ -131,6 +134,12 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.actors.set(number, actor);
         return actor;
     }
+    async serverData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<void> {
+        const revision = this.downloads.revision;
+        const current = (): void => { assertCurrent(); if (revision !== this.downloads.revision) throw new Error('Q2 server content preparation was retired'); };
+        const prepared = await this.options.prepareServerData(data, current);
+        current(); this.downloadContent = prepared;
+    }
     async gameState(state: Q2ApplicationGameState): Promise<void> {
         const offered = this.options.protocol;
         if (offered.kind === 'q2-r1q2') this.selectedProtocol = negotiatedR1Q2Protocol(offered, state.data.r1q2Version);
@@ -149,6 +158,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (state.data.clientnum < 0)
             throw new Error('Q2 remote multi-seat/cinematic serverdata requires its source presentation binding');
         this.content = content;
+        const owner = this.downloadContent;
+        if (owner !== null) this.downloadContent = { ...owner, catalog: content.catalog, product: content.catalog.product(owner.product.id), mounts: content.mounts };
         this.generation++;
         this.actors.clear();
         this.configs.clear();

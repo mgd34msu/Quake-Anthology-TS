@@ -131,7 +131,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
             expect(remote.options.product).toBe('q1-quakeworld-mod-current-mod');
             const reopened = await RemoteApplication.open(reconnectOptions, { print: text => { prints.push(text); } });
             try {
-                expect(reopened.options.quakeWorldContent).toEqual({ kind: 'mod', directory: 'mod-alpha' });
+                expect(reopened.options.remoteContent).toEqual({ base: 'q1-quakeworld', directory: 'mod-alpha' });
                 expect(reopened.content.recipe.map.geometry.requestedPath).toBe('maps/dm2.bsp');
                 const retained = await reopened.content.mounts.open('sound/misc/qw-join-test.wav');
                 expect(retained?.bytes).toEqual(new Uint8Array(sound));

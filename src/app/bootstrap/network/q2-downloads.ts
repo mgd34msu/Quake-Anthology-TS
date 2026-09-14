@@ -1,11 +1,11 @@
+import { remoteContentSelection } from "../../../content/catalog/index.ts";
 import { clientDownloadCategory } from './client-download-policy.ts';
 import type { ClientDownloadPermission } from './client-download-policy.ts';
 import { readQ2DownloadServer } from "../../../network/q2/handshake.ts";
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { mkdir } from "node:fs/promises";
 import { HttpDownloadQueue, fetchHttpDownloadMetadata } from '../../../network/services/http-downloads.ts';
 import { openArchive } from '../../../content/archive/index.ts';
-import { defaultUserContentRoot, userProductDirectory } from '../../../content/user-data.ts';
 /* Quake II server/sv_user.c SV_BeginDownload_f/SV_NextDownload_f. GPL-2.0-or-later. */
 import { canDownloadResource } from '../../../content/mounts/index.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
@@ -21,7 +21,7 @@ import { parseSp2 } from '../../../formats/q12-model/sprite.ts';
 import { readQ2Bsp } from '../../../formats/q2-map/index.ts';
 import { blockChecksum } from '../../../core/md4.ts';
 import { SKY_FACE_SUFFIXES } from '../../../materials/sky.ts';
-import type { LoadedApplicationContent } from '../content.ts';
+import type { RemoteContentMounts } from '../content.ts';
 import type { Q2ApplicationGameState } from './types.ts';
 import { q2ApplicationLayout } from './q2-layout.ts';
 
@@ -110,22 +110,29 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     private httpTask: Promise<void> | null = null;
     private httpError: Error | null = null;
     private readonly attempted = new Set<string>();
+    private readonly httpPaths = new Map<string, string>();
     private retryPath: string | null = null;
     private generation = 0;
     private state: Q2ApplicationGameState | null = null;
     private paths: AsyncGenerator<string, void, unknown> | null = null;
     private pending: { readonly path: string; readonly sink: DownloadSink; percent: number } | null = null;
     private readonly refused = new Set<string>();
-    constructor(private readonly content: () => LoadedApplicationContent,
+    constructor(private readonly content: () => RemoteContentMounts,
         private readonly command: (text: string) => void, private readonly print: (text: string) => void,
         private readonly refreshPackages?: () => Promise<void>,
         private readonly permission: ClientDownloadPermission = () => true) {}
     get revision(): number { return this.generation; }
 
     setHttpServer(server: URL | null): void { this.close(); this.server = server; }
-    private root(): string {
-        const content = this.content(), product = content.catalog.product(content.recipe.map.entities.content);
-        return product.userContent?.root ?? userProductDirectory(content.catalog.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
+    private root(path: string): string {
+        const content = this.content();
+        return path.toLowerCase().startsWith('players/') ? content.baseWriteRoot : content.writeRoot;
+    }
+    private httpDestination(path: string): string { return `${basename(this.root(path))}/${path}`; }
+    private httpResource(destination: string): string {
+        const path = this.httpPaths.get(destination);
+        if (path === undefined) throw new Error('Unknown Q2 HTTP download destination');
+        return path;
     }
     private start(task: Promise<void>): void {
         const generation = this.generation;
@@ -139,8 +146,9 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
             || !this.permission({ transport: 'http', category: clientDownloadCategory(path) })) return;
         this.attempted.add(path);
         const game = state.data.gamedir || 'baseq2';
-        const url = new URL(`${game}/${path.split('/').map(encodeURIComponent).join('/')}`, server);
-        const result = await http.enqueue({ path, url, kind, expected: { kind: 'protocol-completion', maximumBytes: 0x7fffffff },
+        const url = new URL(`${encodeURIComponent(game)}/${path.split('/').map(encodeURIComponent).join('/')}`, server);
+        const destination = this.httpDestination(path); this.httpPaths.set(destination, path);
+        const result = await http.enqueue({ path: destination, url, kind, expected: { kind: 'protocol-completion', maximumBytes: 0x7fffffff },
             validate: async (staged: string) => {
                 if (!this.permission({ transport: 'http', category: clientDownloadCategory(path) })) throw new Error('Q2 HTTP download permission changed');
                 if (kind === 'package') { const archive = await openArchive(staged, path.toLowerCase().endsWith('.pak') ? 'pak' : 'zip'); await archive.close(); }
@@ -155,27 +163,29 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         const current = (): void => { if (generation !== this.generation || signal.aborted) throw new Error('Q2 download generation retired');
             if (!this.permission({ transport: 'http', category: 'metadata' })) throw new Error('Q2 HTTP download permission changed'); };
         const game = state.data.gamedir || 'baseq2', map = state.configStrings.get(33);
-        if (!/^[a-zA-Z0-9_-]+$/.test(game)) throw new Error('Invalid Q2 download game directory');
-        await mkdir(this.root(), { recursive: true }); current();
+        const owner = this.content();
+        await mkdir(dirname(owner.writeRoot), { recursive: true }); current();
         const assets = new Map<string, HttpAssetScope>(), packages = new Set<string>();
         const addAsset = (path: string, scope: HttpAssetScope = 'search-path'): void => {
             if (assets.get(path) !== 'game-local') assets.set(path, scope);
         };
-        this.http = new HttpDownloadQueue({ root: this.root(), assertCurrent: current,
-            resolved: async path => {
+        this.http = new HttpDownloadQueue({ root: dirname(owner.writeRoot), assertCurrent: current,
+            resolved: async destination => {
+                current();
+                const path = this.httpResource(destination);
                 if (!this.permission({ transport: 'http', category: clientDownloadCategory(path) })) return true;
-                const content = this.content(), product = content.catalog.product(content.recipe.map.entities.content);
+                const content = this.content(), product = content.product;
                 const directory = product.expectation.contentDirectory;
-                const roots = new Set([resolve(content.catalog.corpusRoot, directory), resolve(this.root())]);
+                const roots = new Set([resolve(content.catalog.corpusRoot, directory), resolve(content.writeRoot)]);
                 if (product.looseRoot !== null) roots.add(resolve(product.looseRoot));
                 const found = await content.mounts.open(path, mount => assets.get(path) !== 'game-local'
                     || roots.has(resolve(mount.kind === 'archive' ? dirname(mount.archivePath) : mount.rootPath)));
                 current(); return found !== null;
             },
-            refreshPackage: async () => { if (this.refreshPackages === undefined) throw new Error('Q2 package refresh is unavailable'); await this.refreshPackages(); current(); },
+            refreshPackage: async destination => { this.httpResource(destination); if (this.refreshPackages === undefined) throw new Error('Q2 package refresh is unavailable'); await this.refreshPackages(); current(); },
             progress: () => undefined });
-        const lists = [`${game}.filelist`];
-        if (map !== undefined) { this.validate(map); lists.push(`${game}/${map.slice(0, -4)}.filelist`); addAsset(map); }
+        const lists = [`${encodeURIComponent(game)}.filelist`];
+        if (map !== undefined) { this.validate(map); lists.push(`${encodeURIComponent(game)}/${map.slice(0, -4).split('/').map(encodeURIComponent).join('/')}.filelist`); addAsset(map); }
         for (const list of lists) {
             if (!this.permission({ transport: 'http', category: 'metadata' })) return;
             const bytes = await fetchHttpDownloadMetadata(new URL(list, server), 1 << 20, signal); current();
@@ -221,7 +231,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
             throw new Error(`Q2 server requested a non-asset download: ${path}`);
     }
 
-    private async *resources(state: Q2ApplicationGameState, content: LoadedApplicationContent): AsyncGenerator<string, void, unknown> {
+    private async *resources(state: Q2ApplicationGameState, content: RemoteContentMounts): AsyncGenerator<string, void, unknown> {
         const layout = q2ApplicationLayout({ kind: 'q2-classic', version: 34 });
         const names = (first: number, count: number): string[] => Array.from({ length: count - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
         const map = state.configStrings.get(layout.models + 1);
@@ -267,9 +277,9 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     async prepare(state: Q2ApplicationGameState): Promise<Q2DownloadPreparation> {
-        const game = this.content().catalog.product(this.content().recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1);
-        if ((state.data.gamedir || 'baseq2') !== game)
-            throw new Error(`Q2 server game ${state.data.gamedir} differs from selected installed game ${game}`);
+        const selected = remoteContentSelection('q2-classic-baseq2', state.data.gamedir), owner = this.content();
+        if (owner.selection.base !== selected.base || owner.selection.directory !== selected.directory)
+            throw new Error('Q2 server game differs from prepared content');
         if (this.state !== state) { this.close(); this.state = state; if (this.server !== null && this.permission({ transport: 'http', category: 'metadata' })) this.start(this.httpInitial(state)); }
         if (this.httpTask !== null) return 'waiting';
         if (this.httpError !== null) throw this.httpError;
@@ -277,28 +287,32 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         if (this.pending !== null) return 'waiting';
         const generation = this.generation, paths = this.paths, content = this.content();
         if (paths === null) return 'canceled';
-        for (;;) {
-            const next = this.retryPath === null ? await paths.next() : { done: false, value: this.retryPath };
-            this.retryPath = null;
-            if (generation !== this.generation) return 'canceled';
-            if (next.done) return 'ready';
-            const path = next.value;
-            this.validate(path);
-            const installed = await content.mounts.resolve(path);
-            if (generation !== this.generation) return 'canceled';
-            if (installed !== null || this.refused.has(path)) continue;
-            if (this.http !== null && !this.attempted.has(path) && this.permission({ transport: 'http', category: clientDownloadCategory(path) })) {
-                this.retryPath = path; this.start(this.httpAsset(path)); return 'waiting';
+        try {
+            for (;;) {
+                const next = this.retryPath === null ? await paths.next() : { done: false, value: this.retryPath };
+                this.retryPath = null;
+                if (generation !== this.generation) return 'canceled';
+                if (next.done) return 'ready';
+                const path = next.value;
+                this.validate(path);
+                const installed = await content.mounts.resolve(path);
+                if (generation !== this.generation) return 'canceled';
+                if (installed !== null || this.refused.has(path)) continue;
+                if (this.http !== null && !this.attempted.has(path) && this.permission({ transport: 'http', category: clientDownloadCategory(path) })) {
+                    this.retryPath = path; this.start(this.httpAsset(path)); return 'waiting';
+                }
+                if (!this.permission({ transport: 'native', category: clientDownloadCategory(path) })) continue;
+                await mkdir(this.root(path), { recursive: true });
+                if (generation !== this.generation) return 'canceled';
+                if (!this.permission({ transport: 'native', category: clientDownloadCategory(path) })) continue;
+                const sink = DownloadSink.create(this.root(path), path, { kind: 'protocol-completion', maximumBytes: 0x7fffffff });
+                this.pending = { path, sink, percent: 0 };
+                this.command(`download ${path}`);
+                return 'waiting';
             }
-            if (!this.permission({ transport: 'native', category: clientDownloadCategory(path) })) continue;
-            await mkdir(this.root(), { recursive: true });
+        } catch (error) {
             if (generation !== this.generation) return 'canceled';
-            if (!this.permission({ transport: 'native', category: clientDownloadCategory(path) })) continue;
-            const sink = DownloadSink.create(this.root(), path, { kind: 'protocol-completion', maximumBytes: 0x7fffffff });
-            this.pending = { path, sink, percent: 0 };
-            try { this.command(`download ${path}`); }
-            catch (error) { this.close(); throw error; }
-            return 'waiting';
+            this.close(); throw error;
         }
     }
 
@@ -329,7 +343,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
 
     close(): void {
         this.generation++; this.http?.cancel(); this.http = null; this.metadata.abort(); this.metadata = new AbortController();
-        this.httpTask = null; this.httpError = null; this.attempted.clear(); this.retryPath = null;
+        this.httpTask = null; this.httpError = null; this.attempted.clear(); this.httpPaths.clear(); this.retryPath = null;
         this.pending?.sink.close(); this.pending = null;
         this.paths = null; this.state = null; this.refused.clear();
     }

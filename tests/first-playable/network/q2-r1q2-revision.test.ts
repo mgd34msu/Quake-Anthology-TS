@@ -1,3 +1,9 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openRemoteContent } from "../../../src/app/bootstrap/content.ts";
+import type { RemoteContentMounts } from "../../../src/app/bootstrap/content.ts";
+import { remoteContentSelection } from "../../../src/content/catalog/index.ts";
 import { expect, test } from 'bun:test';
 import { Q2ServerMessageReader } from '../../../src/network/q2/server-messages.ts';
 import { Q2RemotePresentation, q2RemoteEntityBounds } from '../../../src/app/bootstrap/network/remote.ts';
@@ -86,13 +92,19 @@ test('negotiated R1Q2 strafejump flag suppresses native landing delay for both r
 
 
 test('remote presentation admits negotiated flags and publishes matching native entity bounds', async () => {
+    const userRoot = await mkdtemp(join(tmpdir(), 'q2-r1q2-content-'));
     const corpusRoot = process.env['QUAKE_Q2_CORPUS_ROOT'];
-    const launch = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2',
+    const launch = parseApplicationCommand(['--user-content-root', userRoot, '--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2',
         ...(corpusRoot === undefined ? [] : ['--content-root', corpusRoot])]);
     if (launch.kind !== 'run') throw new Error('Missing launch');
     const content = await loadApplicationContent(launch.options);
     const identity = createIdentityOwner('r1q2 source presentation'), session = new EngineSession(identity, { kind: 'headless' });
-    const remote = new Q2RemotePresentation({ identity, session, content, protocol: { kind: 'q2-r1q2', version: 35, revision: 1905 },
+    const downloadOwners: RemoteContentMounts[] = [];
+    const prepareServerData = async (data: { readonly gamedir: string }, assertCurrent: () => void): Promise<RemoteContentMounts> => {
+        const owner = await openRemoteContent(launch.options, remoteContentSelection('q2-classic-baseq2', data.gamedir), assertCurrent);
+        downloadOwners.push(owner); return owner;
+    };
+    const remote = new Q2RemotePresentation({ identity, session, content, prepareServerData, protocol: { kind: 'q2-r1q2', version: 35, revision: 1905 },
         userinfo: () => '', print: () => undefined, sendCommand: () => undefined });
     try {
         const checksum = blockChecksum(await content.mounts.read(content.recipe.map.geometry));
@@ -111,5 +123,5 @@ test('remote presentation admits negotiated flags and publishes matching native 
             const bounds = remote.output?.snapshot.bodies.find(body => !remote.player?.actor.equals(body.actor))?.body.bounds;
             expect(bounds).toEqual(q2RemoteEntityBounds(baseline.entity.solid, revision === 1905));
         }
-    } finally { session.close(); await content.close(); }
+    } finally { for (const owner of downloadOwners) owner.mounts.close(); session.close(); await content.close(); await rm(userRoot, { recursive: true, force: true }); }
 });

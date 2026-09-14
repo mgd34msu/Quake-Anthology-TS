@@ -102,7 +102,7 @@ describe("installed content catalog", () => {
 test("remote QW content context cannot select local execution or a different product", async () => {
   const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1"]);
   if (command.kind !== "run") throw new Error("Expected launch options");
-  const quakeWorldContent = { kind: "mod", directory: "example" } satisfies import("../../../src/content/catalog/index.ts").QuakeWorldContentContext;
-  await expect(loadApplicationContent({ ...command.options, product: "q1-quakeworld-mod-example", quakeWorldContent })).rejects.toThrow("matching remote client product");
-  await expect(loadApplicationContent({ ...command.options, network: { kind: "qw-client", remote: "127.0.0.1:27500" }, quakeWorldContent })).rejects.toThrow("matching remote client product");
+  const remoteContent = { base: "q1-quakeworld", directory: "example" } satisfies import("../../../src/content/catalog/index.ts").RemoteContentSelection;
+  await expect(loadApplicationContent({ ...command.options, product: "q1-quakeworld-mod-example", remoteContent })).rejects.toThrow("matching remote client product");
+  await expect(loadApplicationContent({ ...command.options, network: { kind: "qw-client", remote: "127.0.0.1:27500" }, remoteContent })).rejects.toThrow("matching remote client product");
 });

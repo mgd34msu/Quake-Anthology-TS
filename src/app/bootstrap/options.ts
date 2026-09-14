@@ -6,7 +6,7 @@ import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
-  readonly quakeWorldContent?: import("../../content/catalog/index.ts").QuakeWorldContentContext;
+  readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
   readonly q1Protocol?: Q1ProtocolIdentity;
   readonly q2Protocol?: Extract<Q2ProtocolIdentity, { kind: "q2-classic" }> | { readonly kind: "q2-r1q2"; readonly version: 35; readonly revision: 1904 | 1905 };
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;

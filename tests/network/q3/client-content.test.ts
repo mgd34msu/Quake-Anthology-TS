@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { applicationPreset, LoadedApplicationContent, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
+import { applicationPreset, LoadedApplicationContent, loadApplicationContent, openRemoteContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { Q3ApplicationPackages } from "../../../src/app/bootstrap/network/q3-downloads.ts";
 import { Q3ClientContent } from "../../../src/app/bootstrap/network/q3-client-content.ts";
@@ -7,7 +7,7 @@ import { Q3ClientContent } from "../../../src/app/bootstrap/network/q3-client-co
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
+import { discoverInstalledContent, presetChoice, resolveLaunch, remoteContentSelection } from "../../../src/content/catalog/index.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
 import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
@@ -36,10 +36,11 @@ test("Q3 server policy reaches map and provider mounts without inheriting seed r
       expect(provider.options.pure).toEqual(client.policy);
       const model = await provider.open("models/players/sarge/lower.md3");
       expect(model?.reference.provenance.mount.identity.id).toBe(base.mount.identity.id);
-      client.packages.collect();
+      client.packages.collect(client.content);
       expect(client.packages.references.references.snapshot().find(reference => reference.pack.basename === "pak0")?.flags).toBe(1);
       expect(() => client.referencedPureCommand(99)).toThrow("actually loaded cgame");
       expect(client.matches(info, 123)).toBe(true);
+      expect(client.matches(info + "BASEQ3", 123)).toBe(true);
       expect(client.matches(info, 124)).toBe(false);
       expect(client.matches(info.replace("\\sv_pure\\1", "\\sv_pure\\0"), 123)).toBe(false);
       const restarted = await Q3ClientContent.open(parsed.options, info, 124, client.content);
@@ -79,6 +80,45 @@ function providerPk3(entries: readonly (readonly [string, string])[]): Uint8Arra
   return result;
 }
 
+test("Q3 remote packages precede map loading and survive a selected-overlay refresh", async () => {
+  const temporary = await mkdtemp(resolve(tmpdir(), "q3-remote-overlay-"));
+  try {
+    const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--user-content-root", temporary]);
+    if (parsed.kind !== "run") throw new Error("Missing Q3 options");
+    const roots = { corpusRoot: parsed.options.corpusRoot, userContentRoot: temporary };
+    const selected = remoteContentSelection("q3-baseq3", "RemoteAssetProof");
+    const before = await openRemoteContent(roots, selected, () => undefined);
+    try {
+      expect(await before.mounts.resolve("maps/remote-unpublished.bsp")).toBeNull();
+      const packages = await Q3ApplicationPackages.open(before, 17);
+      expect(packages.packs.some(pack => pack.pack.game === "baseq3")).toBe(true);
+      expect(packages.packs.some(pack => pack.pack.game === selected.directory)).toBe(false);
+      await writeFile(resolve(before.writeRoot, "remote.pk3"), providerPk3([["remote-marker.txt", "selected overlay"]]));
+      const refreshed = await openRemoteContent(roots, selected, () => undefined);
+      try {
+        const refreshedPackages = await Q3ApplicationPackages.open(refreshed, 18);
+        expect(refreshedPackages.packs.some(pack => pack.pack.game === selected.directory && pack.pack.basename === "remote")).toBe(true);
+        expect(refreshedPackages.references.references.checksumFeed).toBe(18);
+        expect(await before.mounts.resolve("remote-marker.txt")).toBeNull();
+        const client = await Q3ClientContent.open({ ...parsed.options, product: refreshed.product.expectation.id, remoteContent: selected, network: { kind: 'q3-client', remote: '127.0.0.1:27960' } },
+          `\\sv_pure\\0\\fs_game\\${selected.directory}`, 18, refreshed);
+        try {
+          expect(client.content.mounts).not.toBe(refreshed.mounts);
+          refreshed.mounts.close();
+          const provider = await client.content.forContent(client.content.recipe.map.entities.content);
+          expect(new TextDecoder().decode(await provider.read("remote-marker.txt"))).toBe("selected overlay");
+          const base = await openRemoteContent(roots, remoteContentSelection("q3-baseq3", "BASEQ3"), () => undefined);
+          try {
+            expect(base.product.expectation.id).toBe("q3-baseq3");
+            expect(await base.mounts.resolve("remote-marker.txt")).toBeNull();
+            expect(new TextDecoder().decode(await provider.read("remote-marker.txt"))).toBe("selected overlay");
+          } finally { base.mounts.close(); }
+        } finally { await client.close(); }
+      } finally { refreshed.mounts.close(); }
+    } finally { before.mounts.close(); }
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+}, 60000);
+
 test("borrowed application providers expose only their own Q3 package references", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "q3-provider-reuse-"));
   try {
@@ -107,7 +147,7 @@ test("borrowed application providers expose only their own Q3 package references
       const mounts = await openMountPlan(recipe.mounts, { pure });
       const content = new LoadedApplicationContent(catalog, recipe, decodeQ3World(map), mounts, null, pure);
       try {
-        const packages = await Q3ApplicationPackages.open(content, 123);
+        const packages = await Q3ApplicationPackages.open({ catalog, mounts }, 123);
         const borrowing = spyOn(mounts, "borrowMountPlan");
         const provider = await content.forContent(baseId), modProvider = await content.forContent(modId);
         try {
@@ -124,13 +164,13 @@ test("borrowed application providers expose only their own Q3 package references
         expect(provider.openedResources).toEqual([module.reference]);
         expect(modProvider.openedResources).toEqual([]);
         expect(mounts.openedResources).toEqual([]);
-        packages.collect();
+        packages.collect(content);
         expect(packages.references.references.snapshot().find(entry => entry.pack.game === "baseq3")?.flags).toBe(5);
         expect(packages.references.references.snapshot().find(entry => entry.pack.game === "custom")?.flags).toBe(0);
         expect(await provider.open("vm/ui.qvm")).toBeNull();
         const modUi = await modProvider.open("vm/ui.qvm");
         expect(modUi === null).toBe(archives.length > 0);
-        packages.collect();
+        packages.collect(content);
         expect(packages.references.references.snapshot().find(entry => entry.pack.game === "custom")?.flags).toBe(archives.length > 0 ? 0 : 3);
         const resolved = await modProvider.open("shared.txt");
         expect(new TextDecoder().decode(resolved?.bytes)).toBe(archives.length > 0 ? "base" : "mod");

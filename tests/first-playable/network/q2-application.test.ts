@@ -1,3 +1,9 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openRemoteContent } from "../../../src/app/bootstrap/content.ts";
+import type { RemoteContentMounts } from "../../../src/app/bootstrap/content.ts";
+import { remoteContentSelection } from "../../../src/content/catalog/index.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createQ2ApplicationServerHost } from "../../../src/app/bootstrap/simulation/network.ts";
 import { Q2WireCodec, Q2ServerMessageReader, PlayerStateT, EntityStateT, encodeQ2Frame, q2OutOfBand, readQ2OutOfBand, readQ2Status } from "../../../src/network/q2/index.ts";
@@ -11,7 +17,8 @@ import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 test('native Q2 UDP signon admits and moves the actual Application player', async () => {
-    const parsed = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop', '--listen-q2', '0', '--bind', '127.0.0.1']);
+    const userRoot = await mkdtemp(join(tmpdir(), 'q2-application-content-'));
+    const parsed = parseApplicationCommand(['--user-content-root', userRoot, '--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop', '--listen-q2', '0', '--bind', '127.0.0.1']);
     if (parsed.kind !== 'run')
         throw new Error('No application launch');
     const prints: string[] = [], server = await Application.open(parsed.options, { print: text => { prints.push(text); return undefined; } });
@@ -28,7 +35,12 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
     let releaseDownload: () => void = () => undefined;
     const downloads: Extract<Q2ServerRecord['event'], { kind: 'download' }>[] = [];
     let requestedPrecacheDownload = false;
-    const remote = new Q2RemotePresentation({ identity, session, content, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
+    const downloadOwners: RemoteContentMounts[] = [];
+    const prepareServerData = async (data: { readonly gamedir: string }, assertCurrent: () => void): Promise<RemoteContentMounts> => {
+        const owner = await openRemoteContent(parsed.options, remoteContentSelection('q2-classic-baseq2', data.gamedir), assertCurrent);
+        downloadOwners.push(owner); return owner;
+    };
+    const remote = new Q2RemotePresentation({ identity, session, content, prepareServerData, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
             throw new Error('Client transport unavailable'); client.command(text); }, loadContent: async (state) => {
             const map = state.configStrings.get(33);
             if (map === undefined)
@@ -142,7 +154,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);
         expect(remote.isPlayer(player.actor)).toBe(true);
-        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, content,
+        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, content, prepareServerData,
             protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Second Peer\\skin\\male/grunt', print: () => undefined,
             sendCommand: text => otherClient?.command(text), loadContent: async () => content });
         otherClient = new Q2ClientNetwork({ transport: await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), remote: address, host: otherRemote, qport: 4219 });
@@ -226,6 +238,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         expect(server.simulation.players()).toHaveLength(0);
     }
     finally {
+        for (const owner of downloadOwners) owner.mounts.close();
         releaseDownload();
         discovery.close();
         otherClient?.close();
@@ -234,6 +247,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         session.close();
         otherSession.close();
         await content.close();
+        await rm(userRoot, { recursive: true, force: true });
     }
 }, 30000);
 

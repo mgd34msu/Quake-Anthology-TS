@@ -67,6 +67,7 @@ export interface Q2ApplicationServerHost {
     print(text: string): void;
 }
 export interface Q2ApplicationClientHost {
+    serverData?(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<void>;
     readonly downloads?: Q2ApplicationClientDownloads;
     readonly protocol: Q2ProtocolIdentity;
     readonly messageOptions: Q2ServerMessageOptions;

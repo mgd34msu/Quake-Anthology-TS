@@ -439,7 +439,9 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     userinfo(text: string): void {
         this.channel?.queueReliable(encodeQ2ClientControl({ kind: 'userinfo', text }));
     }
+    private loadingGeneration = 0;
     private cancelLoading(): void {
+        this.loadingGeneration++;
         this.pendingGameState = null;
         this.options.host.downloads?.close();
     }
@@ -479,8 +481,14 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     private async serverRecords(records: readonly Q2ServerRecord[], now: number): Promise<void> {
         for (const record of records) {
             switch (record.event.kind) {
-                case 'server-data':
+                case 'server-data': {
                     this.cancelLoading();
+                    const generation = this.loadingGeneration;
+                    const assertCurrent = (): void => {
+                        if (generation !== this.loadingGeneration || this.options.transport.closed) throw new Error('Q2 server directory selection was retired');
+                    };
+                    await this.options.host.serverData?.(record.event.data, assertCurrent);
+                    assertCurrent();
                     this.serverData = record.event.data;
                     this.lastFrame = -1;
                     this.previous = new UsercmdT();
@@ -488,6 +496,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                     this.pendingCommands = [];
                     this.state = 'loading';
                     break;
+                }
                 case 'command-text':
                     await this.serverCommands(record.event.text);
                     break;

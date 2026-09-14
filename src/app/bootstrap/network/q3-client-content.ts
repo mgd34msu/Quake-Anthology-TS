@@ -7,6 +7,7 @@ import { loadApplicationContent } from "../content.ts";
 import type { LoadedApplicationContent } from "../content.ts";
 import type { ApplicationOptions } from "../options.ts";
 import { Q3ApplicationPackages } from "./q3-downloads.ts";
+import { remoteContentSelection } from "../../../content/catalog/index.ts";
 
 interface PureSystemInfo {
   readonly pure: boolean;
@@ -21,7 +22,7 @@ function systemInfo(info: string, checksumFeed: number): PureSystemInfo {
   const loaded = new ServerPakSet();
   loaded.setChecksums(q3InfoValue(info, "sv_paks"));
   return { pure: nativeAtoi(q3InfoValue(info, "sv_pure")) !== 0,
-    game: q3InfoValue(info, "fs_game").toLowerCase(), checksums: loaded.checksums, checksumFeed: checksumFeed >>> 0 };
+    game: remoteContentSelection("q3-baseq3", q3InfoValue(info, "fs_game")).directory, checksums: loaded.checksums, checksumFeed: checksumFeed >>> 0 };
 }
 
 /** Each filesystem restart owns fresh mounts and references, including same-map feed changes. */
@@ -34,12 +35,12 @@ export class Q3ClientContent {
   get pure(): boolean { return this.settings.pure; }
 
   static async open(options: ApplicationOptions, info: string, checksumFeed: number,
-    catalogContent: LoadedApplicationContent): Promise<Q3ClientContent> {
+    catalogContent: Pick<LoadedApplicationContent, "catalog" | "mounts">): Promise<Q3ClientContent> {
     const settings = systemInfo(info, checksumFeed);
     const product = catalogContent.catalog.require(options.product);
     if (product.expectation.family !== "q3") throw new Error("Q3 client content requires a Q3 product");
     const game = product.expectation.contentDirectory.split("/").at(-1)?.toLowerCase();
-    if ((settings.game === "" ? "baseq3" : settings.game) !== game)
+    if (settings.game !== game)
       throw new Error("Server game directory differs from the selected Q3 content");
     const catalog = await Q3ApplicationPackages.open(catalogContent, checksumFeed);
     const policy = settings.checksums.length === 0 ? undefined : catalog.references.pureMountPolicy(settings.checksums);
@@ -64,7 +65,7 @@ export class Q3ClientContent {
   /** Call after the actual cgame/UI media initialization, before entering the server. */
   referencedPureCommand(serverId: number): string {
     if (this.closed) throw new Error("Q3 client content is closed");
-    this.packages.collect();
+    this.packages.collect(this.content);
     if (this.pure) {
       const references = this.packages.references.references.snapshot();
       for (const [flag, name] of [[PakReferenceFlag.Cgame, "cgame"], [PakReferenceFlag.Ui, "UI"]] satisfies readonly (readonly [PakReferenceFlag, string])[]) {

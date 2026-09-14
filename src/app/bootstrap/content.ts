@@ -1,3 +1,7 @@
+import { mkdir } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { findContentPath } from "../../content/mounts/paths.ts";
+import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { prepareQuakeCSource, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
 import { resolveLaunchResource } from "../../content/catalog/launch.ts";
@@ -5,8 +9,8 @@ import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
-import { discoverInstalledContent, quakeWorldContentProduct, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
-import type { InstalledCatalog, LaunchPreset } from "../../content/catalog/index.ts";
+import { discoverInstalledContent, remoteContentProduct, remoteContentSelection, expectedProducts, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import type { InstalledCatalog, LaunchPreset, CatalogProduct, RemoteContentSelection } from "../../content/catalog/index.ts";
 import { openMountPlan } from "../../content/mounts/index.ts";
 import type { MountedContent, PureMountPolicy } from "../../content/mounts/index.ts";
 import { readQ1Bsp } from "../../formats/q1-map/index.ts";
@@ -17,6 +21,43 @@ import { decodeQ3World } from "../../formats/q3-map/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export type ApplicationWorld = Q1Map | Q2DecodedMap | Q3WorldGeometry;
+
+export interface RemoteContentMounts {
+  readonly selection: RemoteContentSelection;
+  readonly catalog: InstalledCatalog;
+  readonly product: CatalogProduct;
+  readonly mounts: MountedContent;
+  readonly writeRoot: string;
+  readonly baseWriteRoot: string;
+}
+
+export async function openRemoteContent(roots: Pick<ApplicationOptions, "corpusRoot" | "userContentRoot">,
+  requested: RemoteContentSelection, assertCurrent: () => void, generation = 0): Promise<RemoteContentMounts> {
+  assertCurrent();
+  const selection = remoteContentSelection(requested.base, requested.directory);
+  const base = expectedProducts.find(product => product.id === selection.base);
+  if (base === undefined) throw new Error(`Missing remote base product ${selection.base}`);
+  const userRoot = roots.userContentRoot ?? defaultUserContentRoot();
+  const familyRoot = await findContentPath(userRoot, dirname(base.contentDirectory)) ?? userProductDirectory(userRoot, dirname(base.contentDirectory));
+  assertCurrent();
+  const baseWriteRoot = await findContentPath(familyRoot, basename(base.contentDirectory)) ?? join(familyRoot, basename(base.contentDirectory));
+  assertCurrent();
+  const writeRoot = selection.directory === basename(base.contentDirectory).toLowerCase() ? baseWriteRoot
+    : await findContentPath(familyRoot, selection.directory) ?? join(familyRoot, selection.directory);
+  assertCurrent();
+  await mkdir(writeRoot, { recursive: true }); assertCurrent();
+  await mkdir(baseWriteRoot, { recursive: true }); assertCurrent();
+  const catalog = await discoverInstalledContent({ ...roots, userContentRoot: userRoot, discoverMods: false, remoteContent: selection, generation });
+  assertCurrent();
+  catalog.require(selection.base);
+  const product = catalog.require(remoteContentProduct(selection));
+  if ((product.userContent?.root ?? product.looseRoot) !== writeRoot) throw new Error("Remote download directory does not match its content owner");
+  const mounts = await catalog.mountsFor(product.id); assertCurrent();
+  const opened = await openMountPlan({ id: createMountPlanId("remote-server", String(generation)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+  try { assertCurrent(); }
+  catch (error) { opened.close(); throw error; }
+  return { selection, catalog, product, mounts: opened, writeRoot, baseWriteRoot };
+}
 
 function baseProduct(family: GameFamily): string {
   switch (family) {
@@ -155,11 +196,14 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
 }
 
 export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy): Promise<LoadedApplicationContent> {
-  if (options.quakeWorldContent !== undefined && (options.network.kind !== "qw-client"
-    || options.product !== quakeWorldContentProduct(options.quakeWorldContent)))
-    throw new Error("QuakeWorld content context requires its matching remote client product");
+  const remote = options.remoteContent;
+  if (remote !== undefined) {
+    const network = remote.base === "q1-quakeworld" ? "qw-client" : remote.base === "q2-classic-baseq2" ? "q2-client" : "q3-client";
+    if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
+      throw new Error("Remote content context requires its matching remote client product");
+  }
   const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false,
-    ...(options.quakeWorldContent === undefined ? {} : { quakeWorld: options.quakeWorldContent }) });
+    ...(remote === undefined ? {} : { remoteContent: remote }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), ...(pure === undefined ? {} : { mounts: { pure } }) });

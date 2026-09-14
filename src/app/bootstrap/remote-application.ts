@@ -1,5 +1,4 @@
-import { findContentPath } from "../../content/mounts/paths.ts";
-import { discoverInstalledContent, quakeWorldContentContext, quakeWorldContentProduct } from "../../content/catalog/index.ts";
+import { remoteContentSelection, remoteContentProduct } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
 import type { CommandContext } from "../../contracts/common.ts";
 import { ClientSocksSettings } from "./network/socks-settings.ts";
@@ -18,7 +17,7 @@ import { defaultUserContentRoot, userProductDirectory } from "../../content/user
 import { existsSync } from "node:fs";
 import { ServerPakSet } from "../../network/q3/pak-references.ts";
 import { Q3ApplicationPackages } from "./network/q3-downloads.ts";
-import { Q3ApplicationClientDownloads } from "./network/q3-client-downloads.ts";
+import { Q3ApplicationClientDownloads, q3DownloadPath } from "./network/q3-client-downloads.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { q3InfoValue } from "../../network/q3/admission.ts";
 import { Q3ClientContent } from "./network/q3-client-content.ts";
@@ -41,8 +40,8 @@ import { ApplicationAssets } from "./assets.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 import { ApplicationAudio } from "./audio.ts";
-import { loadApplicationContent } from "./content.ts";
-import type { LoadedApplicationContent } from "./content.ts";
+import { loadApplicationContent, openRemoteContent } from "./content.ts";
+import type { LoadedApplicationContent, RemoteContentMounts } from "./content.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
@@ -53,9 +52,6 @@ import { Q3ClientNetwork } from "./network/q3-client.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
 import { q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
-import { createMountPlanId } from "../../contracts/content.ts";
-import { openMountPlan } from "../../content/mounts/index.ts";
-import type { MountedContent } from "../../content/mounts/index.ts";
 import type { QwServerData } from "./network/qw-types.ts";
 import { QwClientNetwork } from "./network/qw-client.ts";
 import { QwRemotePresentation } from "./network/remote-qw.ts";
@@ -114,10 +110,9 @@ export class RemoteApplication {
   private q3Content: Q3ClientContent | null = null;
   private qwAllSkins = '';
   private qwDownloads: QwDownloadReceiver | null = null;
-  private qwMounts: MountedContent | null = null;
-  private qwContentGeneration = 0;
+  private remoteContent: RemoteContentMounts | null = null;
+  private remoteContentGeneration = 0;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
-  private downloadCatalogSeed: LoadedApplicationContent | null = null;
   private q3InitialViewPending = false;
   private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
@@ -176,17 +171,17 @@ export class RemoteApplication {
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "qw-client") {
       const remote = new QwRemotePresentation({ identity, session, content: loadedContent,
-        skinOptions: { read: async path => (await (this.qwMounts ?? this.content.mounts).open(path))?.bytes ?? null,
+        skinOptions: { read: async path => (await (this.remoteContent?.mounts ?? this.content.mounts).open(path))?.bytes ?? null,
           noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
           baseskin: () => this.clientCommands?.cvars.variableString("baseskin") ?? "base", allskins: () => this.qwAllSkins },
         downloads: {
           request: (path, category) => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.request(path, category); },
           receive: result => { if (this.qwDownloads === null) throw new Error("QW download before serverdata"); return this.qwDownloads.receive(result); },
-          close: () => { this.qwContentGeneration++; this.qwDownloads?.close(); this.qwDownloads = null; },
+          close: () => { this.remoteContentGeneration++; this.qwDownloads?.close(); this.qwDownloads = null; },
         },
         prepareServerData: data => this.prepareQwDownloads(data),
         print: text => this.print(text), sendCommand: text => this.network.command(text),
-        loadContent: async world => { const content = await this.loadServerWorld(world, undefined, true); this.qwMounts?.close(); this.qwMounts = null; return content; },
+        loadContent: world => this.loadServerWorld(world, undefined, true),
         mapChecksum: async world => quakeWorldMapChecksum2(await this.content.mounts.read(world.map)) });
       this.remote = remote;
       this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" });
@@ -221,7 +216,8 @@ export class RemoteApplication {
       const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}\\fov\\${this.viewSettings.fieldOfView}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
-        loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshDownloadCatalog(assertCurrent) });
+        prepareServerData: (data, assertCurrent) => this.selectRemoteContent(remoteContentSelection("q2-classic-baseq2", data.gamedir), assertCurrent),
+        loadContent: state => this.loadQ2ServerWorld(state), refreshDownloads: assertCurrent => this.refreshRemoteContent(assertCurrent) });
       this.remote = remote;
       this.network = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     }
@@ -248,7 +244,7 @@ export class RemoteApplication {
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     try {
       const product = content.catalog.product(options.product);
-      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === quakeWorldContentProduct(options.quakeWorldContent ?? { kind: "base" })) || q3 && options.product !== "q3-baseq3")
+      if (product.expectation.family !== family || product.expectation.edition === "rerelease" || q1 && options.product !== "q1-classic-id1" && !(qw && options.product === remoteContentProduct(options.remoteContent ?? remoteContentSelection("q1-quakeworld", "qw"))) || q3 && options.product !== remoteContentProduct(options.remoteContent ?? remoteContentSelection("q3-baseq3", "baseq3")))
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34/35 or baseq3 protocol 68 content");
       imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
         dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
@@ -334,92 +330,78 @@ export class RemoteApplication {
     const map = state.configStrings.get(layout.models + 1);
     if (map === undefined) throw new Error("Q2 server supplied no world model");
     const names = (first: number, maximum: number): string[] => Array.from({ length: maximum - 1 }, (_, index) => state.configStrings.get(first + index + 1) ?? '').filter(Boolean);
-    const seed = this.downloadCatalogSeed;
-    const content = await this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) }, undefined, seed !== null);
-    if (this.downloadCatalogSeed === seed) this.downloadCatalogSeed = null;
-    await seed?.close();
-    return content;
+    return this.loadServerWorld({ map, models: names(layout.models, layout.maxModels), sounds: names(layout.sounds, layout.maxSounds), images: names(layout.images, layout.maxImages) }, undefined, true);
   }
-  private async refreshDownloadCatalog(assertOwnerCurrent: () => void): Promise<LoadedApplicationContent> {
-    const generation = this.worldLoadGeneration;
-    const assertCurrent = (): void => {
-      assertOwnerCurrent();
-      if (this.closed || this.closing || generation !== this.worldLoadGeneration) throw new Error("Remote package refresh was cancelled");
-    };
-    assertCurrent();
-    const fresh = await loadApplicationContent({ ...this.options, map: this.content.recipe.map.geometry.requestedPath });
-    try { assertCurrent(); } catch (error) { await fresh.close(); throw error; }
-    const old = this.downloadCatalogSeed; this.downloadCatalogSeed = fresh;
-    try { await old?.close(); assertCurrent(); }
-    catch (error) { if (this.downloadCatalogSeed === fresh) { this.downloadCatalogSeed = null; await fresh.close(); } throw error; }
-    return fresh;
-  }
-  private async prepareQwDownloads(data: QwServerData): Promise<void> {
-    const context = quakeWorldContentContext(data.gameDirectory);
-    const productId = quakeWorldContentProduct(context);
-    const generation = ++this.qwContentGeneration;
+
+  private async selectRemoteContent(selection: RemoteContentMounts["selection"], assertPeerCurrent: () => void): Promise<RemoteContentMounts> {
+    const generation = ++this.remoteContentGeneration;
     this.worldLoadGeneration++;
-    this.qwDownloads?.close(); this.qwDownloads = null;
-    const current = (): boolean => !this.closed && !this.closing && generation === this.qwContentGeneration;
+    const roots = this.options;
     const assertCurrent = (): void => {
-      if (!current()) throw new Error("QW directory selection was cancelled");
+      assertPeerCurrent();
+      if (this.closed || this.closing || generation !== this.remoteContentGeneration) throw new Error("Remote directory selection was cancelled");
     };
-    const options = { ...this.options, product: productId, quakeWorldContent: context };
-    const userRoot = options.userContentRoot ?? defaultUserContentRoot();
-    const q1Root = await findContentPath(userRoot, "q1") ?? userProductDirectory(userRoot, "q1");
-    const skinRoot = await findContentPath(q1Root, "qw") ?? join(q1Root, "qw");
-    const gameRoot = context.kind === "base" ? skinRoot : await findContentPath(q1Root, context.directory) ?? join(q1Root, context.directory);
+    const prepared = await openRemoteContent(roots, selection, assertCurrent, generation);
+    try { assertCurrent(); }
+    catch (error) { prepared.mounts.close(); throw error; }
+    const previous = this.remoteContent;
+    this.remoteContent = prepared;
+    this.launchOptions = { ...roots, product: prepared.product.expectation.id, remoteContent: prepared.selection };
+    previous?.mounts.close();
+    return prepared;
+  }
+
+  private refreshRemoteContent(assertCurrent: () => void): Promise<RemoteContentMounts> {
+    const selection = this.options.remoteContent;
+    if (selection === undefined) throw new Error("Remote package refresh has no selected directory");
+    return this.selectRemoteContent(selection, assertCurrent);
+  }
+
+  private async prepareQwDownloads(data: QwServerData): Promise<void> {
+    this.qwDownloads?.close(); this.qwDownloads = null;
+    const generation = this.remoteContentGeneration + 1;
+    const prepared = await this.selectRemoteContent(remoteContentSelection("q1-quakeworld", data.gameDirectory), () => {});
+    const current = (): boolean => !this.closed && !this.closing && generation === this.remoteContentGeneration;
+    const assertCurrent = (): void => { if (!current()) throw new Error("QW directory selection was cancelled"); };
     assertCurrent();
-    await mkdir(gameRoot, { recursive: true }); await mkdir(skinRoot, { recursive: true });
-    assertCurrent();
-    const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: userRoot, discoverMods: false, quakeWorld: context });
-    assertCurrent();
-    const product = catalog.require(productId);
-    if (product.userContent !== null && product.userContent.root !== gameRoot)
-      throw new Error("QW download directory does not match its content owner");
-    const mounts = await catalog.mountsFor(product.id);
-    assertCurrent();
-    const prepared = await openMountPlan({ id: createMountPlanId("qw-server", String(data.serverCount)), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
-    try { assertCurrent(); } catch (error) { prepared.close(); throw error; }
-    const receiver = new QwDownloadReceiver({ gameRoot, skinRoot,
+    const gameRoot = prepared.writeRoot, skinRoot = prepared.baseWriteRoot;
+    this.qwDownloads = new QwDownloadReceiver({ gameRoot, skinRoot,
       exists: async (path, category) => {
         if (!current()) return false;
-        const owner = this.qwMounts ?? this.content.mounts;
+        const owner = this.remoteContent?.mounts ?? this.content.mounts;
         try { return existsSync(join(category === "skin" ? skinRoot : gameRoot, path)) || await owner.resolve(path) !== null; }
         catch (error) { if (!current()) return false; throw error; }
       },
       sendCommand: text => { assertCurrent(); this.network.command(text); }, print: text => this.print(text), noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
       demoRecording: () => false, demoPlayback: () => false });
-    this.qwMounts?.close(); this.qwMounts = prepared;
-    this.qwDownloads = receiver;
-    this.launchOptions = options;
   }
 
   private async prepareQ3Downloads(connection: Q3ClientConnection): Promise<boolean> {
     const generation = connection.generation;
     const assertCurrent = (): void => {
-      if (this.closed || !(this.network instanceof Q3ClientNetwork) || this.network.native !== connection || generation !== connection.generation)
+      if (this.closed || this.closing || !(this.network instanceof Q3ClientNetwork) || this.network.native !== connection || generation !== connection.generation)
         throw new Error("Q3 package download belongs to a retired connection");
     };
     assertCurrent();
-    const seed = this.downloadCatalogSeed ?? this.content, product = seed.catalog.require(this.options.product);
-    const directory = product.userContent?.root ?? userProductDirectory(this.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory);
-    const root = dirname(directory), packages = await Q3ApplicationPackages.open(seed, connection.checksumFeed);
+    this.q3Downloads?.close(); this.q3Downloads = null;
+    const selected = remoteContentSelection("q3-baseq3", q3InfoValue(connection.gameState.get(1) ?? "", "fs_game") || "baseq3");
+    const seed = await this.selectRemoteContent(selected, assertCurrent);
+    const root = dirname(seed.writeRoot), packages = await Q3ApplicationPackages.open(seed, connection.checksumFeed);
     assertCurrent();
+    if (this.remoteContent !== seed) throw new Error("Q3 package content selection was replaced");
     const info = connection.gameState.get(1) ?? "", referenced = new ServerPakSet();
     referenced.setChecksums(q3InfoValue(info, "sv_referencedPaks"));
     referenced.setNames(q3InfoValue(info, "sv_referencedPakNames"));
-    this.q3Downloads?.close();
     const downloads = new Q3ApplicationClientDownloads(root, { assertCurrent: () => { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package download was replaced"); },
       reliable: text => connection.reliable.add(text), sendPacket: () => { assertCurrent(); if (this.network instanceof Q3ClientNetwork) this.network.sendPacket(); },
       progress: (name, count, size) => { if (count === 0 || count === size) this.print(`Downloading ${name}: ${count}/${size} bytes\n`); },
       reloadPackages: async () => {
-        await this.refreshDownloadCatalog(() => { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package refresh was cancelled"); });
-      } });
+        await this.refreshRemoteContent(() => { assertCurrent(); if (this.q3Downloads !== downloads) throw new Error("Q3 package refresh was cancelled"); });
+      } }, seed);
     this.q3Downloads = downloads;
     const loadedChecksums = packages.packs.map(pack => pack.pack.checksum), exists = (path: string): boolean => existsSync(join(root, path));
     if (this.downloadPermission?.({ transport: "native", category: "package" }) !== true) {
-      const missing = compareQ3Packages(referenced.snapshot(), loadedChecksums, exists, false);
+      const missing = compareQ3Packages(referenced.snapshot(), loadedChecksums, path => exists(q3DownloadPath(path, seed)), false);
       if (missing.length !== 0) this.print(`Missing server packages: ${missing}\nDownloads are disabled. Enable cl_allowDownload to download server packages.\n`);
       return false;
     }
@@ -429,31 +411,39 @@ export class RemoteApplication {
   }
 
   private async loadQ3ServerWorld(world: Q1RemoteWorld, connection: Q3ClientConnection): Promise<LoadedApplicationContent> {
-    const generation = connection.generation;
-    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, this.downloadCatalogSeed ?? this.content);
+    const generation = connection.generation, contentGeneration = this.remoteContentGeneration;
+    const seed = this.remoteContent;
+    if (seed === null) throw new Error("Q3 world loading requires its selected content owner");
+    const assertCurrent = (): void => {
+      if (this.closed || this.closing || generation !== connection.generation || contentGeneration !== this.remoteContentGeneration)
+        throw new Error("Remote Q3 content loading was cancelled");
+    };
+    assertCurrent();
+    const prepared = await Q3ClientContent.open({ ...this.options, map: mapResourcePath(world.map) }, connection.gameState.get(1) ?? "", connection.checksumFeed, seed);
     try {
-      if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
+      assertCurrent();
       const content = await this.loadServerWorld(world, prepared.content);
-      if (this.closed || generation !== connection.generation) throw new Error("Remote Q3 content loading was cancelled");
+      assertCurrent();
       this.q3Content = prepared;
-      const seed = this.downloadCatalogSeed; this.downloadCatalogSeed = null; await seed?.close();
       return content;
     } catch (error) { await prepared.close(); throw error; }
   }
 
   private async loadServerWorld(world: Q1RemoteWorld & { readonly images?: readonly string[] }, preparedContent?: LoadedApplicationContent, refreshContent = false): Promise<LoadedApplicationContent> {
-    await this.capture?.beforeWorldChange();
     const generation = ++this.worldLoadGeneration;
+    const options = { ...this.options, map: mapResourcePath(world.map) }, pending = this.remoteContent;
     const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote world loading was cancelled"); };
+    assertCurrent();
+    await this.capture?.beforeWorldChange();
     assertCurrent();
     this.controls?.stopHaptics();
     const path = world.map;
     const map = mapResourcePath(path);
     if (this.presentation !== null) this.uiPreferences = { ...this.presentation.ui.preferences.values };
     const differentMap = map !== this.content.recipe.map.geometry.requestedPath;
-    const replaceContent = differentMap || preparedContent !== undefined || refreshContent;
+    const replaceContent = differentMap || preparedContent !== undefined || refreshContent || pending !== null;
     if (replaceContent || this.presentation !== null || this.remote.player !== null) {
-      const options = { ...this.options, map }, content = preparedContent ?? (differentMap || refreshContent ? await loadApplicationContent(options) : this.content);
+      const content = preparedContent ?? (replaceContent ? await loadApplicationContent(options) : this.content);
       const previous = this.frontend, previousOutput = previous?.audio.selectedOutput ?? null;
       let frontend: RemoteWorldFrontend;
       let outputDetached = false;
@@ -516,6 +506,7 @@ export class RemoteApplication {
     this.commands = [];
     this.sourceEvents = [];
     this.print(`Loaded remote world ${map}.\n`);
+    if (this.remoteContent === pending) { pending?.mounts.close(); this.remoteContent = null; }
     return this.content;
   }
 
@@ -741,11 +732,10 @@ export class RemoteApplication {
     try { await this.controls?.saveSettings(); } catch (error) { errors.push(error); }
     try { if (frontend !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (frontend !== null) await saveAudioSettings(this.inputConfig, frontend.audio); } catch (error) { errors.push(error); }
-    for (const close of [() => this.qwMounts?.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.transport.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
+    for (const close of [() => this.remoteContent?.mounts.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => this.network.close(), () => this.transport.close(), () => this.session.close(), () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close(), () => this.renderer.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }
-    try { await this.downloadCatalogSeed?.close(); this.downloadCatalogSeed = null; } catch (error) { errors.push(error); }
     try { if (this.clientCommands !== null) await this.clientConfig?.saveCvars("settings/client.cfg", this.clientCommands.cvars, this.socksSettings.cvars.archiveCommands()); } catch (error) { errors.push(error); }
     try { await this.imageSettings.close(); } catch (error) { errors.push(error); }
     try { await this.content.close(); } catch (error) { errors.push(error); }

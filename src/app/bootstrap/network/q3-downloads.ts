@@ -13,9 +13,9 @@ import type { LoadedApplicationContent } from '../content.ts';
 /** Native checksums and download paths refer only to the application's selected mounts. */
 export class Q3ApplicationPackages {
   private readonly processed = new Set<ResourceId>();
-  private constructor(readonly content: LoadedApplicationContent, readonly packs: readonly Q3MountedPak[], readonly references: Q3ContentReferences,
+  private constructor(readonly packs: readonly Q3MountedPak[], readonly references: Q3ContentReferences,
     private readonly members: ReadonlyMap<MountId, ReadonlySet<string>>) {}
-  static async open(content: LoadedApplicationContent, checksumFeed: number): Promise<Q3ApplicationPackages> {
+  static async open(content: Pick<LoadedApplicationContent, 'catalog' | 'mounts'>, checksumFeed: number): Promise<Q3ApplicationPackages> {
     const plan = content.mounts.plan, mounts = new Map(plan.mounts.map(mount => [mount.identity.id, mount]));
     const packs: Q3MountedPak[] = [], members = new Map<MountId, ReadonlySet<string>>();
     for (const id of plan.defaultOrder) {
@@ -31,11 +31,11 @@ export class Q3ApplicationPackages {
         members.set(id, new Set(archive.entries.filter(entry => !entry.isDirectory).map(entry => entry.path.toLowerCase())));
       } finally { archive.close(); }
     }
-    return new Q3ApplicationPackages(content, packs, new Q3ContentReferences(packs, checksumFeed, () => 1), members);
+    return new Q3ApplicationPackages(packs, new Q3ContentReferences(packs, checksumFeed, () => 1), members);
   }
-  collect(): void {
-    for (const mounts of this.content.openedMounts()) for (const reference of mounts.openedResources) {
-      if (this.processed.has(reference.id) || this.content.catalog.product(reference.provenance.mount.identity.content).expectation.family !== 'q3') continue;
+  collect(content: LoadedApplicationContent): void {
+    for (const mounts of content.openedMounts()) for (const reference of mounts.openedResources) {
+      if (this.processed.has(reference.id) || content.catalog.product(reference.provenance.mount.identity.content).expectation.family !== 'q3') continue;
       this.references.opened(reference); this.processed.add(reference.id);
     }
   }

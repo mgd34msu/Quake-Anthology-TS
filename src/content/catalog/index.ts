@@ -45,19 +45,46 @@ export interface CatalogProduct {
   readonly diagnostics: readonly string[];
 }
 
-export type QuakeWorldContentContext =
-  | { readonly kind: "base" }
-  | { readonly kind: "mod"; readonly directory: string };
-
-export function quakeWorldContentContext(gameDirectory: string): QuakeWorldContentContext {
-  if (!/^[a-zA-Z0-9_+.-]+$/.test(gameDirectory) || gameDirectory === "." || gameDirectory.includes(".."))
-    throw new Error("QuakeWorld game directory must be a single safe directory name");
-  const directory = gameDirectory.toLowerCase();
-  return directory === "qw" || directory === "id1" ? { kind: "base" } : { kind: "mod", directory };
+export type RemoteContentBase = "q1-quakeworld" | "q2-classic-baseq2" | "q3-baseq3";
+export interface RemoteContentSelection {
+  readonly base: RemoteContentBase;
+  readonly directory: string;
 }
 
-export function quakeWorldContentProduct(context: QuakeWorldContentContext): string {
-  return context.kind === "base" ? "q1-quakeworld" : `q1-quakeworld-mod-${context.directory}`;
+export function remoteContentSelection(base: RemoteContentBase, gameDirectory: string): RemoteContentSelection {
+  const directory = gameDirectory.toLowerCase();
+  if (base === "q1-quakeworld" && (directory === "qw" || directory === "id1")) return { base, directory: "qw" };
+  if (base === "q2-classic-baseq2" && directory === "") return { base, directory: "baseq2" };
+  if (base === "q3-baseq3" && directory === "") return { base, directory: "baseq3" };
+  if (!/^[a-zA-Z0-9_+.-]+$/.test(directory) || directory === "." || directory.includes(".."))
+    throw new Error("Remote game directory must be a single safe directory name");
+  return { base, directory };
+}
+
+function remoteExpectation(selection: RemoteContentSelection, products: readonly ProductExpectation[]): ProductExpectation {
+  const context = remoteContentSelection(selection.base, selection.directory);
+  const base = products.find(product => product.id === context.base);
+  if (base === undefined) throw new Error(`Missing remote base product ${context.base}`);
+  const directory = `${dirname(base.contentDirectory)}/${context.directory}`;
+  const known = products.find(product => product.contentDirectory.toLowerCase() === directory.toLowerCase()
+    && product.family === base.family && product.edition === base.edition);
+  if (known !== undefined) {
+    const visited = new Set<string>();
+    let current: ProductExpectation | undefined = known;
+    while (current !== undefined && !visited.has(current.id)) {
+      if (current.id === base.id) return known;
+      visited.add(current.id);
+      current = products.find(product => product.id === current?.baseProduct);
+    }
+    throw new Error(`Remote product ${known.id} does not inherit ${base.id}`);
+  }
+  return { id: `${base.id}-mod-${context.directory}`, family: base.family, edition: base.edition,
+    campaign: `mod-${context.directory}`, title: context.directory, contentDirectory: directory, baseProduct: base.id,
+    requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null };
+}
+
+export function remoteContentProduct(selection: RemoteContentSelection, products: readonly ProductExpectation[] = expectedProducts): string {
+  return remoteExpectation(selection, products).id;
 }
 
 export interface DiscoverContentOptions {
@@ -66,7 +93,7 @@ export interface DiscoverContentOptions {
   readonly products?: readonly ProductExpectation[];
   readonly generation?: number;
   readonly discoverMods?: boolean;
-  readonly quakeWorld?: QuakeWorldContentContext;
+  readonly remoteContent?: RemoteContentSelection;
 }
 
 export interface MountPlanSelection {
@@ -315,17 +342,16 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const userContentRoot = options.userContentRoot === undefined ? null : resolve(options.userContentRoot);
   const generation = options.generation ?? 0;
   if (!Number.isSafeInteger(generation) || generation < 0) throw new RangeError("Catalog generation must be a nonnegative integer");
-  const selected = options.quakeWorld;
-  const context = selected === undefined ? undefined : quakeWorldContentContext(selected.kind === "base" ? "qw" : selected.directory);
-  const remoteProduct: ProductExpectation | null = context?.kind === "mod" ? {
-    id: quakeWorldContentProduct(context), family: "q1", edition: "quakeworld", campaign: `mod-${context.directory}`,
-    title: context.directory, contentDirectory: `q1/${context.directory}`, baseProduct: "q1-quakeworld",
-    requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null,
-  } : null;
-  const expected = [...options.products ?? expectedProducts, ...remoteProduct === null ? [] : [remoteProduct]];
+  const selected = options.remoteContent;
+  const stock = options.products ?? expectedProducts;
+  const remoteProduct = selected === undefined ? null : remoteExpectation(selected, stock);
+  const remoteOverlays = new Set<string>();
+  if (remoteProduct !== null && remoteProduct.id !== selected?.base) remoteOverlays.add(remoteProduct.id);
+  if (selected?.base === "q1-quakeworld") remoteOverlays.add(selected.base);
+  const expected = remoteProduct === null || stock.some(product => product.id === remoteProduct.id) ? stock : [...stock, remoteProduct];
   const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected);
   const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods]);
-  const userModIds = new Set([...userMods.map(product => product.id), ...remoteProduct === null ? [] : [remoteProduct.id]]);
+  const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
   const expectations = [...expected, ...corpusMods, ...userMods];
   const archives = new Map<string, Promise<CatalogArchive>>();
   const inspect = (path: string, format: ArchiveFormat): Promise<CatalogArchive> => {
@@ -385,12 +411,12 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     const userMaps = userArchives.flatMap(archive => archive.entries.filter(entry => /^maps\/.*\.bsp$/i.test(entry.path)).map(entry => ({ path: entry.path, source: archive.path, memberIndex: entry.ordinal })));
     const allMaps: ContentMap[] = [...userMaps, ...userRoot === null ? [] : await looseMaps(userRoot), ...corpusMaps];
     const requirements: string[] = [...diagnostics, ...userModIds.has(expectation.id) ? userDiagnostics : []];
-    for (const archive of expectation.requiredContentArchives) {
+    for (const archive of remoteOverlays.has(expectation.id) ? [] : expectation.requiredContentArchives) {
       const path = await findContentPath(corpusRoot, archive) ?? (userModIds.has(expectation.id) && userContentRoot !== null ? await findContentPath(userContentRoot, archive) : null);
       if (path === null || !(await stat(path)).isFile()) requirements.push(archive);
     }
     if (looseRoot === null && !userModIds.has(expectation.id)) requirements.push(expectation.contentDirectory);
-    if (expectation.mapWitness !== null && !(userModIds.has(expectation.id) ? allMaps : corpusMaps).some(map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase())) requirements.push(expectation.mapWitness);
+    if (!remoteOverlays.has(expectation.id) && expectation.mapWitness !== null && !(userModIds.has(expectation.id) ? allMaps : corpusMaps).some(map => map.path.toLowerCase() === expectation.mapWitness?.toLowerCase())) requirements.push(expectation.mapWitness);
     const availability: ProductAvailability = expectation.unresolvedReason !== null ? { kind: "unresolved", reason: expectation.unresolvedReason }
       : requirements.length > 0 ? { kind: "missing", requirements } : { kind: "installed" };
     products.push({ id, expectation, availability, archives: [...userArchives, ...found], looseRoot, userContent: userRoot === null ? null : { root: userRoot, archives: userArchives }, maps: allMaps, diagnostics: [...diagnostics, ...userDiagnostics] });

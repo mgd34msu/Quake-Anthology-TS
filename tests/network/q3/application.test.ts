@@ -197,6 +197,9 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
     expect(native.snapshotPing(retained.messageNumber)).toBe(receiptPing);
     expect(remote.cgameSource.snapshotPing?.(retained.messageNumber)).toBe(receiptPing);
     await expect(remote.systemInfo('\\sv_pure\\1\\fs_game\\baseq3')).rejects.toThrow('requires pure verification');
+    await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\downloaded-mod')).resolves.toBeUndefined();
+    await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\BASEQ3')).resolves.toBeUndefined();
+    await expect(remote.systemInfo('\\sv_pure\\0\\fs_game\\../escape')).rejects.toThrow();
   } finally { network.close(); session.close(); await app.close(); }
 }, 60000);
 
@@ -348,13 +351,14 @@ test('native Q3 downloads a referenced user package before guest init and pure a
     server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-user-content') }, host);
     await server.content.mounts.open('wire-probe.dat');
     server.simulation.q3Source()?.host.cvars.set('sv_allowDownload', '1', true);
+    server.simulation.q3Source()?.host.cvars.set('fs_game', 'remote-asset-proof', true);
     const nextAddress = server.networkAddress; if (nextAddress === null) throw new Error('Missing restarted listener');
     init.mockClear(); pure.mockClear();
     client = await RemoteApplication.open({ ...selectedClient.options, network: { kind: "q3-client", remote: `127.0.0.1:${nextAddress.port}` }, userContentRoot: users }, host);
     const remote = client;
     expect(remote.clientCommands?.cvars.get("cl_allowDownload")?.integerValue).toBe(0);
     remote.clientCommands?.commands.executeNow("seta cl_allowDownload 1");
-    expect(existsSync(users)).toBe(false);
+    expect(existsSync(join(users, 'q3a/baseq3/zzz-wire-fixture.pk3'))).toBe(false);
     let downloading = false, initializedDuringDownload = false;
     for (let tick = 0; tick < 300 && remote.networkPhase !== 'active'; tick++) {
       await remote.step(50); await Bun.sleep(2); await server.step(50); await Bun.sleep(2);
@@ -367,6 +371,7 @@ test('native Q3 downloads a referenced user package before guest init and pure a
     expect(initializedDuringDownload).toBe(false);
     expect(await Bun.file(join(users, 'q3a/baseq3/zzz-wire-fixture.pk3')).bytes()).toEqual(bytes);
     expect(init.mock.calls.length).toBe(1);
+    expect(remote.content.catalog.require('q3-baseq3-mod-remote-asset-proof').expectation.contentDirectory).toBe('q3a/remote-asset-proof');
     expect(pure.mock.results.some(result => result.type === 'return' && result.value.kind === 'authentic')).toBe(true);
     expect(remote.session.world).toBeNull();
     const resource = await remote.content.mounts.open('wire-probe.dat');
@@ -424,7 +429,7 @@ test('native Q3 retries an interrupted second referenced package before guest in
     const first = packages.find(pack => pack.name === published); if (first === undefined) throw new Error('Unknown first package');
     expect(await Bun.file(join(destination, first.name)).bytes()).toEqual(first.bytes);
     await client.close(); client = null;
-    expect(readdirSync(destination).filter(name => name !== 'settings')).toEqual([first.name]);
+    expect(readdirSync(destination).filter(name => name.endsWith('.pk3'))).toEqual([first.name]);
     for (let tick = 0; tick < 5; tick++) { await server.step(50); await Bun.sleep(2); }
     client = await RemoteApplication.open({ ...options.options, userContentRoot: users }, host);
     for (let tick = 0; tick < 1200 && client.networkPhase !== 'active'; tick++) {

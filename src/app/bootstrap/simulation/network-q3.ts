@@ -47,7 +47,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       packages = await preparing;
       if (packages.references.references.checksumFeed !== (checksumFeed >>> 0)) throw new Error('Q3 world changed checksum feed without replacing content host');
       if (cvars.variableValue('sv_pure') !== 0 && !touchedCgame) { await options.content.mounts.resolve('vm/cgame.qvm'); touchedCgame = true; }
-      packages.collect();
+      packages.collect(options.content);
       const refs = packages.references.references;
       cvars.set('sv_serverid', String(serverId), true);
       cvars.set('sv_paks', cvars.variableValue('sv_pure') !== 0 ? refs.loadedPakChecksums() : '', true);

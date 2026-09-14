@@ -1,4 +1,5 @@
 import type { WorldText } from "../../../text/world.ts";
+import { remoteContentSelection } from "../../../content/catalog/index.ts";
 /* Q3 CL_ParseGamestate / CL_SetCGameTime and cgame host projection. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner, SeatId } from '../../../contracts/identity.ts';
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
@@ -104,7 +105,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   async clearActive(): Promise<void> { await this.options.shutdown?.(); this.options.downloads?.close(); this.loadingDownloads = false; this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
   async systemInfo(info: string): Promise<void> {
     if (Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
-    const game = q3InfoValue(info, 'fs_game'); if (game !== '' && game !== 'baseq3') throw new Error(`Unsupported Q3 remote game directory: ${game}`);
+    remoteContentSelection('q3-baseq3', q3InfoValue(info, 'fs_game'));
   }
   async gamestate(state: Gamestate, _generation: number): Promise<void> {
     const connection = this.connection; if (connection === null) throw new Error('Q3 gamestate has no connection');
