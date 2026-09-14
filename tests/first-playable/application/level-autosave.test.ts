@@ -8,6 +8,81 @@ import { tmpdir } from "node:os";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { readSaveImage } from "../../../src/persistence/save-image.ts";
+import { ConfigStore } from "../../../src/settings/config.ts";
+
+for (const [product, map, family, ammo] of [
+  ["q1-classic-id1", "e1m1", "q1", "q1:ammo/nails"],
+  ["q2-classic-baseq2", "base1", "q2", "q2:ammo_shells"],
+] satisfies readonly (readonly [string, string, string, Parameters<Application["simulation"]["inventory"]["count"]>[1]])[]) {
+  test(`initial decoded ${product} autosave restores progressed state without overwriting the selected file`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "quake-initial-autosave-"));
+    const parsed = parseApplicationCommand(["--game", product, "--map", map, "--movement", family, "--character", family, "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
+    if (parsed.kind !== "run") throw new Error("Missing options");
+    const host = { print: () => undefined, saveDirectory: join(root, "saves") };
+    const path = join(host.saveDirectory, product, "autosave.sav");
+    let app: Application | null = null;
+    try {
+      app = await Application.open(parsed.options, host);
+      const local = app.localPlayers[0];
+      if (local === undefined) throw new Error("Missing initial player");
+      const initialOrigin = app.simulation.playerView(local.actor).origin;
+      app.input({ kind: "key", seat: local.seat.id, timeMilliseconds: 0, code: 119, down: true, repeat: false });
+      for (let frame = 0; frame < 10; frame++) await app.step(50);
+      app.input({ kind: "key", seat: local.seat.id, timeMilliseconds: 500, code: 119, down: false, repeat: false });
+      const owner = app.simulation.actors.resolveOwned(local.actor);
+      if (owner === null) throw new Error("Missing owned player");
+      app.simulation.combat.setHealth(owner, 73);
+      app.simulation.inventory.give(owner, ammo, 17);
+      await app.step(50);
+      expect(app.simulation.playerUi(local.actor).health).toBe(73);
+      expect(app.simulation.inventory.count(local.actor, ammo)).toBe(17);
+      if (family === "q2") {
+        const source = app.simulation.q2Source(), state = source?.players.states.get(local.actor);
+        if (state === undefined) throw new Error("Missing Q2 camera state");
+        state.fov = 55;
+        await app.step(50);
+        expect(app.simulation.playerView(local.actor).fieldOfView).toBe(55);
+      }
+      const view = app.simulation.playerView(local.actor), ui = app.simulation.playerUi(local.actor);
+      expect(view.origin).not.toEqual(initialOrigin);
+      await app.saveGame(path);
+      const bytes = await Bun.file(path).bytes(), image = await readSaveImage(path);
+      const savedSequence = app.simulation.movementPlayer(local.actor)?.lastSequence;
+      const outputDirectory = Bun.env["QUAKE_INITIAL_SAVE_RECEIPTS"];
+      if (outputDirectory !== undefined) {
+        await Bun.write(join(outputDirectory, product, "autosave.sav"), bytes);
+        await Bun.write(join(outputDirectory, product, "checkpoint.json"), JSON.stringify({ product, map, health: ui.health, ammo, ammoCount: 17, view, frame: image.frame,
+          sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex") }, null, 2));
+      }
+      const contentRoot = app.content.catalog.product(app.content.recipe.map.entities.content).userContent?.root;
+      await app.close(); app = null;
+      if (family === "q2") {
+        if (contentRoot === undefined) throw new Error("Missing private content root");
+        await new ConfigStore(contentRoot).dump("view.json", JSON.stringify({ version: 1, fieldOfView: 110 }));
+      }
+      app = await Application.open(parsed.options, host, image.recipe, undefined, image);
+      const restored = app.localPlayers[0];
+      if (restored === undefined) throw new Error("Missing restored player");
+      expect(await Bun.file(path).bytes()).toEqual(bytes);
+      expect(app.simulation.playerView(restored.actor)).toEqual(view);
+      expect(app.simulation.playerUi(restored.actor)).toEqual(ui);
+      if (family === "q2") expect(app.simulation.q2Source()?.players.states.get(restored.actor)?.fov).toBe(55);
+      expect(app.simulation.checkpoint().frame).toEqual(image.frame);
+      expect(app.simulation.movementPlayer(restored.actor)?.lastSequence).toBe(savedSequence);
+      const restoredOrigin = app.simulation.playerView(restored.actor).origin;
+      app.input({ kind: "key", seat: restored.seat.id, timeMilliseconds: 550, code: 115, down: true, repeat: false });
+      for (let frame = 0; frame < 10; frame++) {
+        await app.step(50);
+        expect(await Bun.file(path).bytes()).toEqual(bytes);
+      }
+      app.input({ kind: "key", seat: restored.seat.id, timeMilliseconds: 1050, code: 115, down: false, repeat: false });
+      expect(app.simulation.playerView(restored.actor).origin).not.toEqual(restoredOrigin);
+      expect(app.simulation.playerUi(restored.actor).health).toBeGreaterThan(0);
+      expect(app.simulation.inventory.count(restored.actor, ammo)).toBe(17);
+      expect(app.simulation.checkpoint().frame).not.toEqual(image.frame);
+    } finally { await app?.close(); await rm(root, { recursive: true, force: true }); }
+  }, 60000);
+}
 
 test("level autosave captures initial and next playable worlds and preserves saves on failed travel and restore", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-level-autosave-"));

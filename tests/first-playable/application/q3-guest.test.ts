@@ -1,3 +1,4 @@
+import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { Q3PresentationAudio } from "../../../src/content/q3/presentation/audio.ts";
 import { ApplicationAudio } from "../../../src/app/bootstrap/audio.ts";
 import { Q3ServerConnection } from '../../../src/network/q3/server.ts';
@@ -528,13 +529,42 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         await app.close(); app = null;
         expect(() => browsers[1]?.assertOpen()).toThrow('closed');
       } finally { browserOpen.mockRestore(); nativeInitialize.mockRestore(); nativeConnect.mockRestore(); nativeBegin.mockRestore(); nativeUserinfo.mockRestore(); }
+      const initialImage = await readSaveImage(path);
+      const initialInitialize = spyOn(QvmGame.prototype, 'initializeAsync'), initialConnect = spyOn(QvmGame.prototype, 'clientConnectAsync');
+      const initialBegin = spyOn(QvmGame.prototype, 'clientBeginAsync'), initialUserinfo = spyOn(QvmGame.prototype, 'clientUserinfoChangedAsync');
+      const initialShutdown = spyOn(QvmGame.prototype, 'shutdownAsync');
+      try {
+        const initialUis: QvmUi[] = [], originalInitialUi = QvmUi.prototype.init;
+        const failure = spyOn(QvmUi.prototype, 'init').mockImplementation(async function(this: QvmUi, connecting) {
+          initialUis.push(this);
+          if (initialUis.length === 2) throw new Error('injected initial restore UI failure');
+          return originalInitialUi.call(this, connecting);
+        });
+        try { await expect(Application.open(native.options, { print: () => undefined }, undefined, undefined, initialImage)).rejects.toThrow('injected initial restore UI failure'); }
+        finally { failure.mockRestore(); }
+        expect(initialShutdown).not.toHaveBeenCalled();
+        for (const module of initialUis) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
+        app = await Application.open(native.options, { print: () => undefined }, undefined, undefined, initialImage);
+        const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Missing initially restored guest');
+        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(restored.state.captureSaveState()).toEqual(savedServer);
+        expect(app.localPlayers).toHaveLength(2);
+        for (const player of app.localPlayers) expect(restored.player(player.seat.client.id)?.actor).toBe(player.actor);
+        expect(initialInitialize).not.toHaveBeenCalled(); expect(initialConnect).not.toHaveBeenCalled();
+        expect(initialBegin).not.toHaveBeenCalled(); expect(initialUserinfo).not.toHaveBeenCalled();
+        await suffix(app);
+        expect(restored.state.getUserCommand(0)?.forwardmove).toBe(0);
+        expect(initialInitialize).not.toHaveBeenCalled(); expect(initialConnect).not.toHaveBeenCalled(); expect(initialBegin).not.toHaveBeenCalled();
+        await app.close(); app = null;
+      } finally { initialInitialize.mockRestore(); initialConnect.mockRestore(); initialBegin.mockRestore(); initialUserinfo.mockRestore(); initialShutdown.mockRestore(); }
+
     } finally { clock.mockRestore(); }
     expect(() => firstView.q3Client?.source.current()).toThrow('retired');
     expect(() => secondView.q3Client?.source.current()).toThrow('retired');
   } finally {
     await app?.close(); frame.mockRestore(); cgInit.mockRestore(); uiInit.mockRestore(); audioCommand.mockRestore(); sounds.mockRestore(); await rm(root, { recursive: true, force: true });
   }
-}, 120000);
+}, 180000);
 
 test('failed second local guest client preparation retires both guest module owners', async () => {
   const root = await mkdtemp(join(tmpdir(), 'q3-local-guest-failure-'));

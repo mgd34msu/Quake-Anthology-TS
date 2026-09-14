@@ -193,20 +193,20 @@ export class StartupApplication {
       loading?.controllerSettings.close(); loading?.router.close(); loading?.controllers.close();
       const game = await serviceLoading(async () => {
         loading?.menu.setStatus("Loading map...", true);
-        const selected = action.kind === "play" ? await this.model.resolve() : await (async () => {
+        const selected = action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
           const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
           const bots = savedBotCheckpoint(image);
           const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
           if (seats < 1 || seats > 4) throw new Error("This saved game requires between 1 and 4 local players.");
-          return { recipe: image.recipe, options: { ...this.model.options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
+          const { botSkill: _botSkill, ...options } = this.model.options;
+          return { recipe: image.recipe, image, options: { ...options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
             seats } };
         })();
         loading?.menu.setStatus("Preparing world...", true);
         const game = await Application.open(selected.options, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true,
-          stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values);
+          stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values, selected.image);
         this.game = game;
         try {
-          if (action.kind === "load") await game.loadGame(action.path);
           loading?.menu.setStatus("Starting game...", true);
           if (!this.stopping) { const started = performance.now(); await Bun.sleep(4); await game.step(performance.now() - started); }
           return game;
