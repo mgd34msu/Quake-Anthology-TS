@@ -51,6 +51,10 @@ The installed executable includes these three additional source units:
 - `81eb805` reuses GL packing buffers. Root passed two actual GL and byte tests with 402 assertions. Four color and shadow-depth captures and 5,813 packing calls covering 13,230,732 bytes matched; backing allocations fell from 40,691 to five. This is not an FPS claim. A whole-world command-hash difference remains unresolved; swap-only hashes do not prove world equivalence.
 - `ec8fd304c263bc3041d1d72a5785510346c84be0` reuses mounted archive owners for scoped content providers. Root passed all 13 mount and Q3 client-content tests with 514 assertions, including actual retail pure admission. Mount shapes matched, and a paired trace avoided 12 archive opens and six hashes. No end-to-end loading-time gain is claimed.
 
+Accepted Q3 media warmup `3648f289d71f49f9ee2a015b08e33f97a64a9071` and startup queue correction `512b9295cc0bf4d36b841aef8b81af3c00171652` are not in the installed `ec8fd30` executable. Independent Q3 checks passed eight tests with 46 assertions; startup PCM, Vorbis, lifecycle, and bootstrap checks also passed. A combined 30.056-second native dummy-output run covered 330 frames, 216 play calls, and 2,523,240 nonzero PCM samples. The first queue held 200 ms instead of two seconds; the next pump arrived after 166.89 ms with 37.46 ms still queued. Q3 effect construction ran during loading for 485 ms. First-event effects preparation took 12.87 ms versus about 143 ms in the earlier candidate; first-use model materials still took 9.34 ms.
+
+Neither later empty-queue observation proves an audible gap. Row 51's queue-only shortfall of 21.664805 ms is below the obtained 1,024-frame output block of 23.219955 ms, which SDL's queued-byte count excludes once handed off for playback. Row 212 likewise does not prove a gap. These checks do not establish gap-free playback, physical speaker fidelity, or universal FPS.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
