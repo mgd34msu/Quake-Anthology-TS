@@ -104,7 +104,7 @@ export class ApplicationQvmClient {
     if (opened === null) throw new Error(`Missing native module: ${path}`);
     const artifact = resolveQvmArtifact({ module: { id: `q3:${role}`, artifactPath: path, digest: opened.reference.digest,
       revision: `${opened.reference.provenance.mount.identity.id}:${opened.reference.provenance.mount.identity.generation}` }, role, bytes: opened.bytes });
-    if (artifact.kind !== 'bytecode' || artifact.known?.product !== 'baseq3') throw new Error(`Unsupported native baseq3 module: ${path}`);
+    if (artifact.kind !== 'bytecode' || artifact.known !== null && artifact.known.product !== 'baseq3') throw new Error(`Unsupported native baseq3 module: ${path}`);
     return { artifact, host: call => this.host(call) };
   }
   static async create(options: ApplicationQvmClientOptions): Promise<ApplicationQvmClient> {

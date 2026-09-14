@@ -1,3 +1,5 @@
+import { knownQvmArtifacts } from "../../../src/compat/qvm/artifacts.ts";
+import type { ModuleIdentity, Q3ApiIdentity } from "../../../src/contracts/execution.ts";
 import { Q3RemotePresentation } from "../../../src/app/bootstrap/network/remote-q3.ts";
 import { Q3ServerConnection } from "../../../src/network/q3/server.ts";
 import { Q3RendererResources } from "../../../src/content/q3/presentation/resources.ts";
@@ -475,3 +477,106 @@ test('native Q3 retries an interrupted second referenced package before guest in
     expect(readdirSync(destination).filter(name => name.startsWith('.download-'))).toEqual([]);
   } finally { await client?.close(); await server.close(); init.mockRestore(); pure.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 }, 90000);
+
+
+test('unknown mounted LRCTF clients run the production baseQ3 ABI for thirty active seconds', async () => {
+  const { RemoteApplication } = await import('../../../src/app/bootstrap/remote-application.ts');
+  const root = mkdtempSync(join(tmpdir(), 'q3-unknown-client-'));
+  const common = ['--content-root', join(homedir(), 'Projects/qfiles'), '--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch'];
+  const selected = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+  if (selected.kind !== 'run') throw new Error('Missing server options');
+  const prints: string[] = [], modules: { role: 'ui' | 'cgame'; module: ModuleIdentity; api: Q3ApiIdentity }[] = [];
+  const originalUiInit = QvmUi.prototype.init, originalCgInit = QvmCgame.prototype.init;
+  const uiInit = spyOn(QvmUi.prototype, 'init').mockImplementation(async function(this: QvmUi, connecting: boolean) {
+    await originalUiInit.call(this, connecting);
+    modules.push({ role: 'ui', module: this.module.profile.module, api: this.api }); return undefined;
+  });
+  const cgInit = spyOn(QvmCgame.prototype, 'init').mockImplementation(async function(this: QvmCgame, message: number, command: number, client: number) {
+    await originalCgInit.call(this, message, command, client);
+    modules.push({ role: 'cgame', module: this.module.profile.module, api: this.api }); return undefined;
+  });
+  const frames = spyOn(QvmCgame.prototype, 'drawActiveFrame'), uiRetire = spyOn(QvmUi.prototype, 'retire'), cgRetire = spyOn(QvmCgame.prototype, 'retire');
+  let browser: StartupServerBrowser | null = null, server: Application | null = null;
+  let app: Awaited<ReturnType<typeof RemoteApplication.open>> | null = null;
+  try {
+    browser = await StartupServerBrowser.open(new ConfigStore(join(root, 'browser-settings')));
+    const retainedBrowser = browser;
+    const host = { saveDirectory: join(root, 'saves'), serverBrowser: browser, print: (text: string): undefined => { prints.push(text); return undefined; } };
+    server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-content') }, host);
+    const source = server.simulation.q3Source(); if (source === null) throw new Error('Missing baseQ3 server source');
+    source.host.cvars.set('sv_pure', '0', true); source.host.cvars.set('fs_game', 'lrctf', true);
+    const address = server.networkAddress; if (address === null) throw new Error('No listener');
+    const parsed = parseApplicationCommand([...common, '--connect-q3', `127.0.0.1:${address.port}`, '--renderer', 'cpu', '--width', '320', '--height', '240', '--hidden']);
+    if (parsed.kind !== 'run') throw new Error('Missing client options');
+    app = await RemoteApplication.open({ ...parsed.options, userContentRoot: join(root, 'client-content') }, host);
+    const remote = app, authority = server;
+    const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await authority.step(50); await Bun.sleep(1); };
+    for (let tick = 0; tick < 100 && remote.networkPhase !== 'active'; tick++) await exchange();
+    expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull();
+    expect(modules.map(module => module.role)).toEqual(['ui', 'cgame']);
+    expect(modules.find(module => module.role === 'ui')?.api).toEqual({ kind: 'q3-ui', version: 6 });
+    const selectedModules: { role: string; digest: string; archive: string; revision: string }[] = [];
+    for (const module of modules) {
+      expect(knownQvmArtifacts.some(known => known.digest === module.module.digest)).toBe(false);
+      const opened = await remote.content.mounts.open(`vm/${module.role}.qvm`);
+      if (opened === null || opened.reference.provenance.kind !== 'archive') throw new Error('Selected LRCTF module is not mounted archive bytecode');
+      expect(opened.reference.digest).toBe(module.module.digest);
+      expect(opened.reference.provenance.mount.archivePath.endsWith('/lrctf/pak02.pk3')).toBe(true);
+      selectedModules.push({ role: module.role, digest: opened.reference.digest, archive: opened.reference.provenance.mount.archivePath, revision: module.module.revision });
+    }
+    const player = remote.localPlayers[0], peer = authority.networkClients[0];
+    if (player === undefined || peer === undefined) throw new Error('No active LRCTF client');
+    const initialPosition = authority.simulation.bodies.read(peer.actor)?.origin;
+    const sourceClient = source.records.byActor(peer.actor)?.client;
+    if (initialPosition === undefined || sourceClient === undefined || sourceClient === null) throw new Error('Missing authoritative player state');
+    const before = { ...initialPosition }, initialAmmo = sourceClient.ps.ammo.get(2) ?? 0;
+    let minimumAmmo = initialAmmo, maximumDistance = 0, ticks = 0;
+    const started = performance.now(), startedFrame = remote.frameCount;
+    remote.queueCommand('weapon', ['2'], player.seat.id);
+    remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
+    remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: true, timeMilliseconds: performance.now() });
+    let captured = false;
+    while (performance.now() - started < 30000) {
+      const tickStarted = performance.now(); await exchange(); ticks++;
+      expect(remote.networkPhase).toBe('active');
+      const position = authority.simulation.bodies.read(peer.actor)?.origin;
+      if (position !== undefined) maximumDistance = Math.max(maximumDistance, Math.hypot(position.x - before.x, position.y - before.y, position.z - before.z));
+      minimumAmmo = Math.min(minimumAmmo, sourceClient.ps.ammo.get(2) ?? initialAmmo);
+      if (ticks === 20) remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
+      if (ticks === 60) remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: false, timeMilliseconds: performance.now() });
+      const artifactDirectory = process.env['Q3_UNKNOWN_MODULE_ARTIFACTS'];
+      if (!captured && ticks >= 60 && artifactDirectory !== undefined) {
+        const capture = remote.captureNextFrame(); await exchange();
+        const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
+        mkdirSync(artifactDirectory, { recursive: true }); await Bun.write(join(artifactDirectory, 'active.png'), encodePng(320, 240, await capture)); captured = true;
+      }
+      const remaining = 50 - (performance.now() - tickStarted); if (remaining > 0) await Bun.sleep(remaining);
+    }
+    const activeMilliseconds = performance.now() - started;
+    remote.input({ seat: player.seat.id, kind: 'key', code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
+    remote.input({ seat: player.seat.id, kind: 'mouse-button', button: 1, down: false, timeMilliseconds: performance.now() });
+    expect(activeMilliseconds).toBeGreaterThanOrEqual(30000); expect(maximumDistance).toBeGreaterThan(8);
+    expect(initialAmmo).toBeGreaterThan(0); expect(minimumAmmo).toBeLessThan(initialAmmo);
+    expect(frames.mock.calls.length).toBeGreaterThan(60);
+    expect(prints.some(text => text.includes('Unbound '))).toBe(false);
+    await remote.close(); app = null;
+    expect(uiRetire.mock.calls.length).toBe(1); expect(cgRetire.mock.calls.length).toBe(1);
+    expect(() => retainedBrowser.assertOpen()).not.toThrow();
+    const artifactDirectory = process.env['Q3_UNKNOWN_MODULE_ARTIFACTS'];
+    if (artifactDirectory !== undefined) {
+      mkdirSync(artifactDirectory, { recursive: true });
+      writeFileSync(join(artifactDirectory, 'result.json'), JSON.stringify({ scope: 'LRCTF client bytecode against baseQ3 protocol68 server, non-pure', selectedModules, modules,
+        activeMilliseconds, ticks, frames: remote.frameCount - startedFrame, initialPosition: before, maximumDistance, initialAmmo, minimumAmmo,
+        retired: { ui: uiRetire.mock.calls.length, cgame: cgRetire.mock.calls.length }, captured, prints }, null, 2));
+    }
+  } finally {
+    try { await app?.close(); } finally {
+      try { await server?.close(); } finally {
+        try { await browser?.close(); } finally {
+          uiInit.mockRestore(); cgInit.mockRestore(); frames.mockRestore(); uiRetire.mockRestore(); cgRetire.mockRestore();
+          rmSync(root, { recursive: true, force: true });
+        }
+      }
+    }
+  }
+}, 120000);
