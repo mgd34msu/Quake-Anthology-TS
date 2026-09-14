@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import type { NavigationRuntimeCheckpoint } from "../../../bots/navigation/runtime.ts";
 import type { SelectedBotNavigation } from "../../../bots/behavior/index.ts";
 import { projectBotMovement } from "../../../bots/behavior/prediction.ts";
 import type { BotMovementPrediction } from "../../../bots/behavior/q3/navigation-types.ts";
@@ -24,8 +26,17 @@ function profileFor(player: LocomotionPlayer): NavigationProfile {
     maximumStep: 18, minimumFloorNormal: 0.7, maximumDrop: 128, team: null, monster: false };
 }
 
+export interface ApplicationBotNavigationCheckpoint {
+  readonly version: 1;
+  readonly base: NavigationRuntimeCheckpoint;
+  readonly clients: readonly { readonly client: number; readonly reusable: boolean; readonly runtime: NavigationRuntimeCheckpoint }[];
+}
+export interface ApplicationBotNavigation extends SelectedBotNavigation {
+  checkpoint(): ApplicationBotNavigationCheckpoint;
+  restoreCheckpoint(value: unknown, remapClient?: (saved: number) => number): void;
+}
 export interface ApplicationBotNavigationOptions { readonly content: LoadedApplicationContent; readonly simulation: SharedSimulation; }
-export async function createApplicationBotNavigation({ content, simulation }: ApplicationBotNavigationOptions): Promise<SelectedBotNavigation> {
+export async function createApplicationBotNavigation({ content, simulation }: ApplicationBotNavigationOptions): Promise<ApplicationBotNavigation> {
   if (content.recipe !== simulation.recipe) throw new Error("Navigation and simulation must use the same loaded recipe");
   const firstPlayer = () => simulation.players().map(actor => simulation.movementPlayer(actor)).find(player => player !== null) ?? null;
   const first = firstPlayer() ?? locomotionTemplate(content.recipe);
@@ -106,14 +117,43 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content),
     navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
     mapBytes: await content.mounts.read(content.recipe.map.geometry) });
-  const clients = new Map<number, { readonly player: Readonly<MovementPlayer>; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer }>();
+  type CachedNavigation = { readonly player: Readonly<MovementPlayer> | null; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer };
+  const clients = new Map<number, CachedNavigation>();
   const forClient = (client: number): NavigationRuntime => {
     const player = playerFor(client), cached = clients.get(client);
     if (cached?.player === player && playerLocomotionMatches(player, cached.locomotion)) return cached.runtime;
     const runtime = new NavigationRuntime({ ...loaded.runtime.graph, profile: profileFor(player) }, worldFor(player));
     clients.set(client, { player, runtime, locomotion: capturePlayerLocomotion(player) }); return runtime;
   };
-  return { runtime: loaded.runtime, forClient, crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
+  return { runtime: loaded.runtime, forClient,
+    checkpoint() {
+      return { version: 1, base: loaded.runtime.checkpoint(), clients: Array.from(clients, ([client, cached]) => {
+        const current = simulation.players().map(actor => simulation.movementPlayer(actor)).find(player => player?.client.slot === client);
+        return { client, reusable: current !== undefined && current !== null && current === cached.player
+          && playerLocomotionMatches(current, cached.locomotion), runtime: cached.runtime.checkpoint() };
+      }) };
+    },
+    restoreCheckpoint(value, remapClient = client => client) {
+      const reader = new SaveReader(value, "applicationNavigation");
+      reader.field("version").literal(1);
+      const base = new NavigationRuntime(loaded.runtime.graph, loaded.runtime.world);
+      base.restoreCheckpoint(reader.field("base").value);
+      const restored = new Map<number, CachedNavigation>();
+      const savedClients = new Set<number>();
+      reader.field("clients").list(entry => {
+        const saved = entry.field("client").integer(0), client = remapClient(saved);
+        if (!Number.isSafeInteger(client) || client < 0 || savedClients.has(saved) || restored.has(client)) entry.fail("invalid or duplicate navigation client mapping");
+        savedClients.add(saved);
+        const reusable = entry.field("reusable").boolean();
+        const player = reusable ? playerFor(client) : null;
+        const locomotion = capturePlayerLocomotion(player ?? first);
+        const runtime = new NavigationRuntime({ ...loaded.runtime.graph, profile: profileFor(locomotion) }, worldFor(player));
+        runtime.restoreCheckpoint(entry.field("runtime").value);
+        restored.set(client, { player, locomotion, runtime });
+      });
+      loaded.runtime.restoreCheckpoint(base.checkpoint());
+      clients.clear(); for (const [client, cached] of restored) clients.set(client, cached);
+    }, crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
     travelWeapon: () => null,
     predictClientMovement(query: BotMovementPrediction) {
       const player = playerFor(query.entityNum), projection = createPlayerMovementPrediction(simulation, player, query.origin, query.velocity, Math.round(query.frameTime * 1000), query.presence === 4);

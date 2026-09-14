@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Bot character profiles translated from id Software's be_ai_char.c and
  * game/chars.h. Copyright (C) 1999-2005 Id Software, Inc.
@@ -165,10 +166,11 @@ function encodeString(text: string): Uint8Array {
 // Release32: filename[64], float skill, then 81 char/padding/union records.
 // String words are managed pointer identities; their target bytes own the text.
 class CharacterProfile {
-  private readonly allocation: BotMemoryAllocation;
+  readonly allocation: BotMemoryAllocation;
 
-  constructor(private readonly memory: BotMemory, private readonly strings: CharacterStrings) {
-    this.allocation = memory.allocate(PROFILE_BYTES, "heap", true);
+  constructor(private readonly memory: BotMemory, private readonly strings: CharacterStrings, restored?: BotMemoryAllocation) {
+    if (restored !== undefined && restored.bytes.length !== PROFILE_BYTES) throw new Error("Saved bot character allocation size mismatch");
+    this.allocation = restored ?? memory.allocate(PROFILE_BYTES, "heap", true);
   }
 
   private get view(): DataView {
@@ -301,6 +303,38 @@ export class BotCharacterLibrary {
 
   get diagnostics(): readonly CharacterDiagnostic[] {
     return Object.freeze([...this.reported]);
+  }
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { generation: this.generation, reported: structuredClone(this.reported), nextPointer: this.strings.nextPointer,
+      strings: [...this.strings.allocations].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })),
+      profiles: this.profiles.map(profile => profile === undefined ? null : memory.reference(profile.allocation)) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.characters"), image = { generation: reader.field("generation").integer(0), nextPointer: reader.field("nextPointer").integer(1),
+      reported: reader.field("reported").list(entry => ({ severity: entry.field("severity").choice("info", "warning", "error", "fatal"),
+        code: entry.field("code").choice("loaded", "missing-source", "missing-skill", "fallback", "parse-error", "invalid-input", "invalid-handle", "invalid-index", "uninitialized", "wrong-type", "invalid-bounds", "unsupported-log-format"),
+        source: entry.field("source").string(), message: entry.field("message").string(), location: entry.field("location").nullable(location => ({ path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() })) })),
+      strings: reader.field("strings").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
+      profiles: reader.field("profiles").list(entry => entry.nullable(reference => reference.integer(0))) };
+    if (this.profiles.some(profile => profile !== undefined) || this.strings.allocations.size !== 0
+      || image.profiles.length !== MAX_CHARACTER_HANDLES + 1 || image.profiles[0] !== null
+      || !Number.isSafeInteger(image.generation) || image.generation < 0
+      || !Number.isSafeInteger(image.nextPointer) || image.nextPointer < 1 || image.nextPointer > 0x100000000) throw new Error("Invalid bot character restoration");
+    for (const entry of image.strings) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.strings.allocations.has(entry.pointer)) throw new Error("Invalid saved bot character string pointer");
+      const allocation = memory.allocation(entry.allocation);
+      if (!allocation.bytes.includes(0)) throw new Error("Saved bot character string is unterminated");
+      this.strings.allocations.set(entry.pointer, allocation);
+    }
+    for (const [index, reference] of image.profiles.entries()) {
+      if (reference === null) continue;
+      const profile = new CharacterProfile(this.memory, this.strings, memory.allocation(reference));
+      for (let characteristic = 0; characteristic < STORED_CHARACTERISTICS; characteristic++) void profile.value(characteristic)?.value;
+      this.profiles[index] = profile;
+    }
+    this.strings.nextPointer = image.nextPointer; this.generation = image.generation;
+    this.reported.push(...structuredClone(image.reported));
   }
 
   load(characterFile: string | (() => string), skill: number): number {

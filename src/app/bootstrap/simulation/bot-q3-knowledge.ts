@@ -1,3 +1,4 @@
+import { botKnowledgePersistence } from "./bot-knowledge-checkpoint.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../../content/q3/foundation/arsenal.ts";
@@ -55,7 +56,7 @@ export function createQ3BotKnowledge(options: {
       });
     },
   });
-  return { knowledge, uncoveredWeapons: [],
+  return { ...botKnowledgePersistence("q3", actorsForHandle), knowledge, uncoveredWeapons: [],
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {
       const actor = actorForClient(client), entry = entries.find(entry => entry.weapon === decisionSlot);
       return actor !== null && entry !== undefined && inventory.count(actor, entry.item) > 0

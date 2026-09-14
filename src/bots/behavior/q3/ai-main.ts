@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Game bot lifecycle and scheduling translated from id Software's game/ai_main.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -217,6 +218,13 @@ export class GameAi {
 
   constructor(game: SourceBotGame, library: BotLibrary, host: GameAiHost) {
     this.context = new GameAiContext(game, library, host);
+  }
+
+  captureSaveState() { return { localTime: this.localTime, botlibResidual: this.botlibResidual, lastBotThinkTime: this.lastBotThinkTime, context: this.context.captureSaveState() }; }
+  restoreSaveState(value: unknown, remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+    const reader = new SaveReader(value, "bot.ai");
+    this.localTime = reader.field("localTime").number(); this.botlibResidual = reader.field("botlibResidual").number(); this.lastBotThinkTime = reader.field("lastBotThinkTime").number();
+    this.context.restoreSaveState(reader.field("context").value, remapObservation);
   }
 
   testAas(origin: Vec3): void { botTestAAS(this.context, origin); }

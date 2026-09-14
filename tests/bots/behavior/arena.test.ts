@@ -9,6 +9,12 @@ import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { SharedSimulation } from "../../../src/app/bootstrap/simulation/runtime.ts";
 import { ApplicationBots } from "../../../src/app/bootstrap/simulation/bots.ts";
+import { decodeApplicationBotsCheckpoint } from "../../../src/app/bootstrap/simulation/bots.ts";
+import { createApplicationBotNavigation } from "../../../src/app/bootstrap/simulation/navigation.ts";
+import { readSaveImage, writeSaveImage } from "../../../src/persistence/save-image.ts";
+import { decodeCheckpointValue } from "../../../src/persistence/value.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { loadMountedBotAssetFiles } from "../../../src/bots/behavior/index.ts";
 import { NavigationRuntime, navigationFromAsset, parseAas } from "../../../src/bots/navigation/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
@@ -30,6 +36,67 @@ import { BotActionFlag } from "../../../src/bots/behavior/library/actions.ts";
 import { BotMoveFlag } from "../../../src/bots/behavior/q3/movement-state.ts";
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
+
+test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native bots continue disk checkpoint after disposing the original session without admission replay", async () => {
+  const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);
+  if (launch.kind !== "run") throw new Error("Expected native bot checkpoint fixture");
+  const content = await loadApplicationContent(launch.options), directory = await mkdtemp(resolve(tmpdir(), "bot-save-"));
+  const files = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
+  const identity = createIdentityOwner("bot-save-original"), session = new EngineSession(identity, { kind: "headless" });
+  const options = { recipe: content.recipe, world: content.world, mounts: content.mounts, mode: "deathmatch", skill: 3, seed: 7, maxClients: 4, dedicated: true } satisfies Omit<ConstructorParameters<typeof SharedSimulation>[0], "identity">;
+  const simulation = new SharedSimulation({ ...options, identity }); session.attachWorld(simulation);
+  const bots = new ApplicationBots({ session, simulation, files, navigation: await createApplicationBotNavigation({ content, simulation }),
+    leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => undefined,
+    openLog: () => ({ kind: "failed", error: new Error("Fixture does not open logs") }) });
+  let restoredSession: EngineSession | null = null, restoredBots: ApplicationBots | null = null;
+  const step = (session: EngineSession, simulation: SharedSimulation, bots: ApplicationBots) => {
+    const commands = bots.frame(simulation.timeSeconds * 1000 + 50, 50);
+    session.step({ elapsedMilliseconds: 50, commands }); bots.receive(simulation.drainPresentationEvents());
+    return { commands: commands.map(command => ({ ...command, actor: command.actor.slot })), random: simulation.random.checkpoint(),
+      players: simulation.players().map(actor => ({ slot: actor.slot, origin: simulation.playerView(actor).origin, health: simulation.combat.read(actor)?.health })) };
+  };
+  try {
+    bots.consoleCommand(["addbot", "sarge", "3"]); bots.consoleCommand(["addbot", "ranger", "3"]);
+    for (let frame = 0; frame < 80; frame++) step(session, simulation, bots);
+    bots.consoleCommand(["addbot", "visor", "3"]);
+    for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
+    expect(bots.disconnect(2)).toBe(true);
+    for (let frame = 0; frame < 5; frame++) step(session, simulation, bots);
+    const actors = simulation.actors.checkpoint(), random = simulation.random.checkpoint();
+    const botImage = bots.checkpoint(), image = simulation.checkpoint();
+    expect(simulation.actors.checkpoint()).toEqual(actors); expect(simulation.random.checkpoint()).toEqual(random);
+    const path = resolve(directory, "native.qts"); await writeSaveImage(path, image);
+    const suffix = Array.from({ length: 20 }, () => step(session, simulation, bots));
+    bots.close(); session.close();
+    const saved = await readSaveImage(path), replacementIdentity = createIdentityOwner("bot-save-replacement");
+    const replacementSession = new EngineSession(replacementIdentity, { kind: "headless" }); restoredSession = replacementSession;
+    const clients = botImage.transport.connections.map(connection => replacementSession.createClient(connection.client.slot));
+    const replacement = new SharedSimulation({ ...options, identity: replacementIdentity, restore: saved, restoredClients: clients.map(client => client.id) });
+    replacementSession.attachWorld(replacement);
+    const botSection = saved.providers.find(provider => provider.schema === "world:bots");
+    if (botSection === undefined) throw new Error("Saved native simulation omitted its bot attachment");
+    const badNavigation = await createApplicationBotNavigation({ content, simulation: replacement });
+    const replacementActors = replacement.actors.checkpoint();
+    expect(() => new ApplicationBots({ session: replacementSession, simulation: replacement, files, navigation: badNavigation,
+      leafCount: content.world.leaves.length, print: () => undefined, insertConsoleCommand: () => { throw new Error("Rejected bot restore replayed a command"); },
+      openLog: () => { throw new Error("Rejected bot restore opened a log"); },
+      restore: { image: decodeApplicationBotsCheckpoint({ ...botImage, director: { ...botImage.director, assets: "different-mounted-assets" } }),
+        resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null } })).toThrow("Saved bot assets differ");
+    expect(replacement.actors.checkpoint()).toEqual(replacementActors);
+    expect(replacement.random.checkpoint()).toEqual(random);
+    const restored = new ApplicationBots({ session: replacementSession, simulation: replacement, files,
+      navigation: await createApplicationBotNavigation({ content, simulation: replacement }), leafCount: content.world.leaves.length,
+      print: () => undefined, insertConsoleCommand: () => { throw new Error("Bot restore replayed a console command"); },
+      openLog: () => { throw new Error("Bot restore replayed log initialization"); },
+      restore: { image: decodeApplicationBotsCheckpoint(decodeCheckpointValue(botSection.bytes)), resolveClient: saved => clients.find(client => client.id.slot === saved.slot) ?? null } });
+    restoredBots = restored;
+    expect(replacement.random.checkpoint()).toEqual(random);
+    expect(clients).toHaveLength(2);
+    expect(Array.from({ length: 20 }, () => step(replacementSession, replacement, restored))).toEqual(suffix);
+  } finally {
+    restoredBots?.close(); restoredSession?.close(); bots.close(); session.close(); await content.close(); await rm(directory, { recursive: true, force: true });
+  }
+}, 120000);
 
 test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena roster and source bot brain produce shared player movement and combat", async () => {
   const launch = parseApplicationCommand(["--content-root", corpus, "--game", "q3-baseq3", "--map", "q3dm1",
@@ -95,6 +162,34 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("retail arena r
       bots.receive(simulation.drainPresentationEvents());
     }
     expect(player.pers.connected).toBe(ConnectionState.CONNECTED);
+    const originalTransport = bots.checkpointOrchestration(), originalDirector = bots.director.checkpointOrchestration();
+    const savedRandom = simulation.random.checkpoint(), savedPlayers = simulation.players();
+    for (let index = 0; index < 70; index++) {
+      botClient.reliable.assignAcknowledgement(botClient.reliable.sequence);
+      botClient.reliable.add(`print checkpoint-${index}`);
+    }
+    const transportImage = bots.checkpointOrchestration();
+    const resolveClient = (saved: { readonly slot: number; readonly generation: number }) =>
+      saved.slot === botClient.client.id.slot && saved.generation === botClient.client.id.generation ? botClient.client : null;
+    bots.restoreOrchestration(transportImage, resolveClient);
+    expect(bots.checkpointOrchestration()).toEqual(transportImage);
+    expect(bots.clients()[0]?.reliable).not.toBe(botClient.reliable);
+    expect(simulation.random.checkpoint()).toEqual(savedRandom);
+    expect(simulation.players()).toEqual(savedPlayers);
+    const invalidTransport = { ...transportImage, connections: transportImage.connections.map(connection => ({ ...connection,
+      actor: { ...connection.actor, generation: connection.actor.generation + 1 } })) };
+    const activeBots = bots;
+    expect(() => activeBots.restoreOrchestration(invalidTransport, resolveClient)).toThrow();
+    expect(bots.checkpointOrchestration()).toEqual(transportImage);
+    expect(originalDirector.sequences.length).toBeGreaterThan(0);
+    const changedDirector = { ...originalDirector, sequences: originalDirector.sequences.map(entry => ({ ...entry, next: entry.next + 7 })) };
+    bots.director.restoreOrchestration(changedDirector, saved => simulation.actors.resolveSaved(saved));
+    expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
+    expect(() => activeBots.director.restoreOrchestration({ ...changedDirector,
+      sequences: [...changedDirector.sequences, ...changedDirector.sequences] }, saved => simulation.actors.resolveSaved(saved))).toThrow();
+    expect(bots.director.checkpointOrchestration()).toEqual(changedDirector);
+    bots.restoreOrchestration(originalTransport, resolveClient);
+    bots.director.restoreOrchestration(originalDirector, saved => simulation.actors.resolveSaved(saved));
     const q2Launch = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
     if (q2Launch.kind !== "run") throw new Error("Expected Q2 arsenal fixture");
     const q2Content = existsSync(resolve(corpus, "q2/baseq2/pak0.pak")) ? await loadApplicationContent(q2Launch.options) : null;

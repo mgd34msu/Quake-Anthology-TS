@@ -1,5 +1,6 @@
 // Directed source reachabilities, NAV conditional-node checks, and movement-backed route admission.
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { SaveReader } from "../../persistence/value.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { aasBBoxAreas, aasPointArea, aasTraceAreas } from "./aas.ts";
 import { aasAreaTravelFlags, aasTravelFlag } from "./graph.ts";
@@ -46,6 +47,16 @@ class Queue {
   }
 }
 
+export interface NavigationRuntimeCheckpoint {
+  readonly version: 1;
+  readonly map: { readonly name: string; readonly format: string; readonly digest: string };
+  readonly enabled: readonly { readonly id: number; readonly enabled: boolean }[];
+  readonly blocked: readonly { readonly id: number; readonly reason: string }[];
+  readonly admissionSeconds: readonly { readonly id: number; readonly seconds: number }[];
+  readonly worldRevision: number;
+  readonly generation: number;
+}
+
 export class NavigationRuntime {
   readonly #nodes = new Map<number, NavigationNode>();
   readonly #outgoing = new Map<number, NavigationEdge[]>();
@@ -67,6 +78,43 @@ export class NavigationRuntime {
       if (!Number.isFinite(edge.travelSeconds) || edge.travelSeconds < 0) throw new RangeError("Invalid navigation edge cost");
       ids.add(edge.id); list.push(edge);
     }
+  }
+  checkpoint(): NavigationRuntimeCheckpoint {
+    return { version: 1, map: { ...this.graph.map },
+      enabled: Array.from(this.#enabled, ([id, enabled]) => ({ id, enabled })),
+      blocked: Array.from(this.#blocked, ([id, reason]) => ({ id, reason })),
+      admissionSeconds: Array.from(this.#admissionSeconds, ([id, seconds]) => ({ id, seconds })),
+      worldRevision: this.#worldRevision, generation: this.#generation };
+  }
+  restoreCheckpoint(value: unknown): void {
+    const reader = new SaveReader(value, "navigation");
+    reader.field("version").literal(1);
+    const map = reader.field("map");
+    map.field("name").literal(this.graph.map.name);
+    map.field("format").literal(this.graph.map.format);
+    map.field("digest").literal(this.graph.map.digest);
+    const readEntries = <T>(name: string, known: ReadonlySet<number>, read: (entry: SaveReader) => T): Map<number, T> => {
+      const entries = new Map<number, T>();
+      reader.field(name).list(entry => {
+        const id = entry.field("id").integer(0);
+        if (!known.has(id) || entries.has(id)) entry.fail("unknown or duplicate navigation identity");
+        entries.set(id, read(entry));
+      });
+      return entries;
+    };
+    const edges = new Set(this.graph.edges.map(edge => edge.id));
+    const enabled = readEntries("enabled", new Set(this.#nodes.keys()), entry => entry.field("enabled").boolean());
+    const blocked = readEntries("blocked", edges, entry => entry.field("reason").string());
+    const admissions = readEntries("admissionSeconds", edges, entry => {
+      const seconds = entry.field("seconds").finite();
+      if (seconds < 0) entry.fail("negative admission duration");
+      return seconds;
+    });
+    const revision = reader.field("worldRevision").finite(), generation = reader.field("generation").integer(0);
+    this.#enabled.clear(); for (const [id, state] of enabled) this.#enabled.set(id, state);
+    this.#blocked.clear(); for (const [id, reason] of blocked) this.#blocked.set(id, reason);
+    this.#admissionSeconds.clear(); for (const [id, seconds] of admissions) this.#admissionSeconds.set(id, seconds);
+    this.#worldRevision = revision; this.#generation = generation;
   }
   get generation(): number { this.#refresh(); return this.#generation; }
   node(id: number): NavigationNode | null { return this.#nodes.get(id) ?? null; }

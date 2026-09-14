@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 /*
  * Retained token_t storage from Quake III Arena botlib/l_script.h and l_script.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -108,6 +109,15 @@ export class SourceTokenMemory {
 
   constructor(private readonly borrow: () => Uint8Array) {}
 
+  captureSaveState() { return { bytes: this.bytes.slice(), textExtent: this.textExtent }; }
+  restoreSaveState(value: unknown, verifyBytes = false): void {
+    const reader = new SaveReader(value, "script.token"), bytes = reader.field("bytes").bytes();
+    const extent = reader.field("textExtent").nullable(cell => cell.integer(0));
+    if (bytes.length !== SOURCE_TOKEN_BYTES || (extent !== null && extent > 1024)) reader.fail("invalid token extent");
+    if (verifyBytes && bytes.some((byte, index) => byte !== this.bytes[index])) reader.fail("token bytes disagree with restored allocation");
+    if (!verifyBytes) this.bytes.set(bytes);
+    this.textExtent = extent; this.snapshot = null; this.cachedView = null;
+  }
   get bytes(): Uint8Array {
     const bytes = this.borrow();
     if (bytes.length !== SOURCE_TOKEN_BYTES) throw new RangeError("token_t requires exactly 1068 source bytes");

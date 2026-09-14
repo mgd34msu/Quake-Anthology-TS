@@ -1,3 +1,4 @@
+import type { BotKnowledgePersistence } from "./bot-knowledge-checkpoint.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { BotArsenalKnowledge } from "../../../bots/behavior/q3/game-host.ts";
@@ -7,7 +8,7 @@ import { createQ2BotKnowledge } from "./bot-q2-knowledge.ts";
 import { createQ3BotKnowledge } from "./bot-q3-knowledge.ts";
 import type { SharedSimulation } from "./runtime.ts";
 
-export interface BotArsenalBinding {
+export interface BotArsenalBinding extends BotKnowledgePersistence {
   readonly knowledge: BotArsenalKnowledge;
   readonly uncoveredWeapons: readonly string[];
   resolveWeapon(client: number, decisionSlot: number): ItemId | null;

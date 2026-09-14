@@ -91,9 +91,9 @@ test("provider clocks preserve units and snapshots do not consume random draws",
   expect(() => state.clock("q1:game")).toThrow("closed");
 });
 
-function stepFixture() {
+function stepFixture(mode: "headless" | "local" = "headless") {
   const identity = createIdentityOwner("session stepping");
-  const session = new EngineSession(identity, { kind: "headless" });
+  const session = new EngineSession(identity, { kind: mode });
   const clock = new SourceClock({ kind: "milliseconds", value: 50 });
   const output: SimulationOutput = { snapshot: { session: identity.session, frame: clock.frame,
     actors: [], bodies: [], inventories: [], configurations: [],
@@ -239,4 +239,83 @@ test("invalid replacement leaves the published world and its resources usable", 
   expect(session.step(input)).toBe(output);
   foreign.session.close();
   session.close();
+});
+
+
+test("prepared clients remain unpublished and discarded identities are never reused", () => {
+  const { session, simulation, input, output } = stepFixture("local");
+  const world = session.attachWorld(simulation());
+  const prepared = session.prepareClient(1);
+  const connection = prepared.connect("loopback");
+  expect(() => session.createSeat(0, prepared)).toThrow("not owned");
+  session.closeClient(prepared.id);
+  expect(prepared.isClosed).toBe(false);
+  expect(session.world).toBe(world);
+  expect(session.step(input)).toBe(output);
+  prepared.close();
+  expect(connection.isClosed).toBe(true);
+  const current = session.createClient(1);
+  expect(current.id.equals(prepared.id)).toBe(false);
+  expect(current.id.generation).toBeGreaterThan(prepared.id.generation);
+  session.closeClient(prepared.id);
+  expect(current.isClosed).toBe(false);
+  session.close();
+});
+
+test("prepared bot clients publish with the world and removed clients retire afterward", () => {
+  const { session, simulation } = stepFixture("local");
+  session.attachWorld(simulation());
+  const human = session.createClient(0), connection = human.connect("loopback");
+  const seat = session.createSeat(0, human);
+  const oldBot = session.createClient(2);
+  const nextBot = session.prepareClient(1);
+  nextBot.connect("loopback");
+  let candidateResourceCloses = 0;
+  nextBot.worldResources.defer(() => { candidateResourceCloses++; return undefined; });
+  const next = simulation();
+  const replacement = session.replaceWorld(next, [], { added: [nextBot], removed: [oldBot] });
+  expect(session.world?.simulation).toBe(next);
+  expect(oldBot.isClosed).toBe(false);
+  expect(human.connection).toBe(connection);
+  expect(seat.client).toBe(human);
+  expect(candidateResourceCloses).toBe(0);
+  expect(session.createSeat(1, nextBot).client).toBe(nextBot);
+  replacement.retired.close();
+  expect(oldBot.isClosed).toBe(true);
+  expect(nextBot.isClosed).toBe(false);
+  expect(candidateResourceCloses).toBe(0);
+  session.close();
+  expect(candidateResourceCloses).toBe(1);
+});
+
+test("invalid client publication leaves world and local seats untouched", () => {
+  const { session, simulation, input, output } = stepFixture("local");
+  const world = session.attachWorld(simulation());
+  const human = session.createClient(0), seat = session.createSeat(0, human);
+  const first = session.prepareClient(1), second = session.prepareClient(1);
+  expect(() => session.replaceWorld(simulation(), [], { added: [first, second], removed: [] })).toThrow("Duplicate prepared client slot");
+  expect(() => session.replaceWorld(simulation(), [], { added: [first], removed: [human] })).toThrow("local seat");
+  const occupied = session.createClient(1);
+  expect(() => session.replaceWorld(simulation(), [], { added: [first], removed: [] })).toThrow("occupied");
+  expect(session.world).toBe(world);
+  expect(human.isClosed).toBe(false);
+  expect(occupied.isClosed).toBe(false);
+  expect(first.isClosed).toBe(false);
+  expect(second.isClosed).toBe(false);
+  expect(seat.client).toBe(human);
+  expect(session.step(input)).toBe(output);
+  first.close(); second.close();
+  session.close();
+});
+
+test("session shutdown owns unpublished prepared-client cleanup", () => {
+  const { session } = stepFixture();
+  const prepared = session.prepareClient(3);
+  let closes = 0;
+  prepared.resources.defer(() => { closes++; return undefined; });
+  session.close();
+  expect(prepared.isClosed).toBe(true);
+  expect(closes).toBe(1);
+  prepared.close();
+  expect(closes).toBe(1);
 });

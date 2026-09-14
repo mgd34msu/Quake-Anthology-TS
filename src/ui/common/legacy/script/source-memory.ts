@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
  * Source and indent storage from Quake III Arena botlib/l_precomp.c/h.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -42,6 +44,18 @@ class SourceIndent {
 
   constructor(readonly id: number, private readonly backing: IndentBacking) {}
 
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) }
+      : { ...this.backing };
+  }
+  static restoreSaveState(id: number, value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore): SourceIndent {
+    const reader = new SaveReader(value, "script.indent"), kind = reader.field("kind").choice("heap", "managed");
+    if (kind === "managed") return new SourceIndent(id, { kind, type: reader.field("type").integer(), skip: reader.field("skip").integer(), script: reader.field("script").integer(0), next: reader.field("next").integer(0) });
+    if (memory === undefined) return reader.fail("heap indent requires memory owner");
+    const allocation = restore.allocation(reader.field("allocation").integer(0));
+    if (allocation.bytes.length !== SOURCE_INDENT_BYTES) reader.fail("invalid indent extent");
+    return new SourceIndent(id, { kind, memory, allocation });
+  }
   get type(): SourceIndentType {
     const value = this.backing.kind === "heap" ? this.view.getInt32(0, true) : this.backing.type;
     switch (value) {
@@ -95,7 +109,34 @@ export class SourceRecord {
   private cachedHashView: DataView | null = null;
   private borrowedPunctuations: readonly ScriptPunctuation[] | null = null;
 
-  constructor(filename: string, script: number, private readonly memory: ScriptMemory | undefined, lifetime: "heap" | "stack") {
+  constructor(filename: string, script: number, private readonly memory: ScriptMemory | undefined, lifetime: "heap" | "stack", saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore }) {
+    if (saved !== undefined) {
+      const reader = new SaveReader(saved.value, "script.source"), backing = reader.field("backing"), hash = reader.field("hash");
+      if (backing.field("kind").choice("heap", "managed") === "heap") {
+        const allocation = saved.restore.allocation(backing.field("allocation").integer(0));
+        if (allocation.bytes.length !== SOURCE_RECORD_BYTES) reader.fail("invalid source extent");
+        this.backing = { kind: "heap", allocation };
+        this.token = new PrecompToken(0, { get bytes() { return allocation.bytes.subarray(2076, SOURCE_RECORD_BYTES); } });
+      } else {
+        this.backing = { kind: "managed", filename: backing.field("filename").string(), includePath: backing.field("includePath").string(), script: backing.field("script").integer(0), tokens: backing.field("tokens").integer(0), indent: backing.field("indent").integer(0), skip: backing.field("skip").integer() };
+        this.token = localToken();
+      }
+      if (hash.field("kind").choice("heap", "managed") === "heap") {
+        if (memory === undefined) throw reader.fail("heap hash requires memory owner");
+        const allocation = saved.restore.allocation(hash.field("allocation").integer(0));
+        if (allocation.bytes.length !== SOURCE_DEFINE_HASH_BUCKETS * 4) reader.fail("invalid define hash extent");
+        this.hash = { kind: "heap", memory, allocation };
+      } else {
+        const heads = new Map<number, number>();
+        for (const entry of hash.field("heads").list(cell => cell)) { const bucket = entry.field("bucket").integer(0); if (bucket >= SOURCE_DEFINE_HASH_BUCKETS || heads.has(bucket)) entry.fail("invalid hash bucket"); heads.set(bucket, entry.field("id").integer(0)); }
+        this.hash = { kind: "managed", heads };
+      }
+      this.nextIndent = reader.field("nextIndent").integer(1);
+      for (const entry of reader.field("indents").list(cell => cell)) { const id = entry.field("id").integer(1); if (id >= this.nextIndent || this.indents.has(id)) entry.fail("invalid indent identity"); this.indents.set(id, SourceIndent.restoreSaveState(id, entry.field("state").value, memory, saved.restore)); }
+      this.token.restoreSaveState(reader.field("token").value, this.backing.kind === "heap");
+      this.borrowedPunctuations = reader.field("punctuations").nullable(cell => cell.list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() })));
+      return;
+    }
     if (memory !== undefined && lifetime === "heap") {
       const allocation = memory.allocate(SOURCE_RECORD_BYTES, "heap", false);
       allocation.bytes.fill(0);
@@ -113,6 +154,16 @@ export class SourceRecord {
       this.hash = { kind: "heap", memory, allocation: memory.allocate(SOURCE_DEFINE_HASH_BUCKETS * 4, "heap", true) };
       if (this.backing.kind === "heap") this.view.setUint32(SOURCE_DEFINE_HASH, 1, true);
     }
+  }
+
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return { backing: this.backing.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.backing.allocation) } : { ...this.backing },
+      hash: this.hash.kind === "heap" ? { kind: "heap", allocation: capture.reference(this.hash.allocation) } : { kind: "managed", heads: [...this.hash.heads].map(([bucket, id]) => ({ bucket, id })) },
+      nextIndent: this.nextIndent, indents: [...this.indents.values()].map(indent => ({ id: indent.id, state: indent.captureSaveState(capture) })),
+      token: this.token.captureSaveState(), punctuations: this.borrowedPunctuations?.map(value => ({ ...value })) ?? null };
+  }
+  static restoreSaveState(value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore): SourceRecord {
+    return new SourceRecord("", 0, memory, "stack", { value, restore });
   }
 
   get filename(): string { return this.backing.kind === "heap" ? this.readPath(SOURCE_FILENAME) : this.backing.filename; }

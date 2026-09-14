@@ -1,3 +1,4 @@
+import { SaveReader } from "../persistence/value.ts";
 /*
  * COM_Parse, COM_ParseExt, COM_Compress, SkipWhitespace and SkipRestOfLine from game/q_shared.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -79,6 +80,14 @@ export function compressCommonText(source: string, end: CommonParseCursor["end"]
 }
 
 export class CommonParseState {
+  captureSaveState() { return { token: this.currentToken, line: this.currentLine, name: this.currentName }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "common.parser");
+    const token = reader.field("token").string(), line = reader.field("line").integer(0), name = reader.field("name").string();
+    if (token.length >= MAX_TOKEN_CHARS || name.length >= MAX_TOKEN_CHARS) reader.fail("parser string exceeds source storage");
+    this.currentToken = token; this.currentLine = line; this.currentName = name;
+  }
+
   private currentToken = "";
   private currentLine = 0;
   private currentName = "";

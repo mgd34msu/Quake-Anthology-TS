@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Elementary bot actions translated from id Software's botlib/be_ea.c,
  * game/be_ea.h and game/botlib.h.
@@ -142,6 +143,18 @@ export class BotActionBuffer {
   }
 
   get maxClients(): number { return this.clientCapacity; }
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture): { readonly capacity: number; readonly allocation: number | null } {
+    return { capacity: this.clientCapacity, allocation: this.inputs === null ? null : memory.reference(this.inputs.allocation) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.actions"), image = { capacity: reader.field("capacity").integer(0), allocation: reader.field("allocation").nullable(entry => entry.integer(0)) };
+    if (this.inputs !== null || !Number.isSafeInteger(image.capacity) || image.capacity < 0) throw new Error("Invalid bot action restoration");
+    const allocation = image.allocation === null ? null : memory.allocation(image.allocation);
+    if (allocation !== null && allocation.bytes.length !== image.capacity * BOT_INPUT_BYTES) throw new Error("Saved bot action allocation size mismatch");
+    this.clientCapacity = image.capacity;
+    this.inputs = allocation === null ? null : { allocation, views: new Map<number, BotInputView>() };
+  }
 
   setup(maxClients: number): void {
     if (!Number.isInteger(maxClients) || maxClients < 0 || maxClients * BOT_INPUT_BYTES > 0x7fffffff) {

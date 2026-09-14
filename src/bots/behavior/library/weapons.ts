@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
 /*
  * Bot weapon configuration and selection translated from id Software's
  * code/botlib/be_ai_weap.c and code/game/be_ai_weap.h.
@@ -84,6 +86,7 @@ export interface WeaponInfo {
 }
 
 export interface WeaponConfig {
+  readonly allocation: BotMemoryAllocation;
   readonly path: string;
   readonly weaponCapacity: number;
   readonly definedWeaponCount: number;
@@ -133,6 +136,41 @@ class WeaponPointers {
   private readonly records = new Map<number, WeaponPointer>();
   private readonly configs = new WeakMap<WeightConfig, number>();
   private next = 1;
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture, weights: WeightConfigStore) {
+    return { next: this.next, records: [...this.records].map(([pointer, record]) => ({ pointer, kind: record.kind,
+      target: record.kind === "config" ? weights.reference(record.config) : memory.reference(record.allocation),
+      references: record.kind === "config" ? record.references : 0 })),
+      configs: weights.configurations().flatMap(config => {
+        const pointer = this.configs.get(config);
+        return pointer === undefined ? [] : [{ pointer, config: weights.reference(config) }];
+      }) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore, weights: WeightConfigStore): void {
+    const reader = new SaveReader(value, "bot.weapons.pointers"), image = { next: reader.field("next").integer(1),
+      records: reader.field("records").list(entry => ({ pointer: entry.field("pointer").integer(1), kind: entry.field("kind").choice("config", "indexes"),
+        target: entry.field("target").integer(0), references: entry.field("references").integer(0) })),
+      configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })) };
+    if (this.records.size !== 0 || !Number.isSafeInteger(image.next) || image.next < 1 || image.next > 0x100000000) throw new Error("Invalid weapon pointer restoration");
+    for (const entry of image.records) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.records.has(entry.pointer)) throw new Error("Invalid saved weapon pointer");
+      if (entry.kind === "config") {
+        if (!Number.isSafeInteger(entry.references) || entry.references < 1) throw new Error("Invalid saved weapon weight reference count");
+        this.records.set(entry.pointer, { kind: "config", config: weights.resolve(entry.target), references: entry.references });
+      } else {
+        if (entry.kind !== "indexes") throw new Error("Invalid saved weapon pointer kind");
+        this.records.set(entry.pointer, { kind: "indexes", allocation: memory.allocation(entry.target) });
+      }
+    }
+    for (const entry of image.configs) {
+      const config = weights.resolve(entry.config);
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.next || this.configs.has(config)) throw new Error("Invalid saved weapon weight identity");
+      const live = this.records.get(entry.pointer);
+      if (live !== undefined && (live.kind !== "config" || live.config !== config)) throw new Error("Saved weapon weight identities disagree");
+      this.configs.set(config, entry.pointer);
+    }
+    this.next = image.next;
+  }
 
   config(config: WeightConfig): number {
     const existing = this.configs.get(config);
@@ -517,6 +555,46 @@ class WeaponConfigTokens {
 
 class RetiredWeaponSetup extends Error {}
 
+function bindWeaponConfig(path: string, allocation: BotMemoryAllocation, diagnostics: readonly ScriptDiagnostic[], free: () => void): WeaponConfig {
+  const header = new WeaponConfigCell(allocation, 0), capacity = header.int(0), count = header.int(4);
+  if (capacity < 0 || count < 0 || WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + count * PROJECTILE_INFO_BYTES > allocation.bytes.length) throw new Error("Saved weapon configuration header exceeds allocation");
+  const weapons = Array.from({ length: capacity }, (_, index) => {
+    const view = weaponConfigView(allocation, WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES);
+    return view.valid ? Object.freeze(view) : undefined;
+  });
+  const projectiles = Array.from({ length: count }, (_, index) => Object.freeze(projectileConfigView(allocation, WEAPON_CONFIG_BYTES + capacity * WEAPON_INFO_BYTES + index * PROJECTILE_INFO_BYTES)));
+  const definedWeaponCount = weapons.filter(weapon => weapon !== undefined).length;
+    const weaponOffset = (index: number): number => {
+      const start = WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES;
+      if (!Number.isInteger(index) || start < WEAPON_CONFIG_BYTES || start + WEAPON_INFO_BYTES > allocation.bytes.length) {
+        throw new RangeError("weapon info copy exceeds the source configuration allocation");
+      }
+      return start;
+    };
+    return Object.freeze({
+      allocation,
+      path,
+      get weaponCapacity(): number { return new WeaponConfigCell(allocation, 0).int(0); },
+      definedWeaponCount,
+      weapons: Object.freeze(weapons),
+      projectiles: Object.freeze(projectiles),
+      diagnostics: Object.freeze(diagnostics),
+      weaponBytes(index: number): Uint8Array {
+        const start = weaponOffset(index);
+        return allocation.bytes.subarray(start, start + WEAPON_INFO_BYTES);
+      },
+      projectileBytes(index: number): Uint8Array {
+        const start = ((WEAPON_CONFIG_BYTES + Math.imul(this.weaponCapacity, WEAPON_INFO_BYTES)) >>> 0) + index * PROJECTILE_INFO_BYTES;
+        if (!Number.isInteger(index) || index < 0 || index >= this.projectiles.length || start + PROJECTILE_INFO_BYTES > allocation.bytes.length) {
+          throw new RangeError("projectile dump exceeds the source configuration allocation");
+        }
+        return allocation.bytes.subarray(start, start + PROJECTILE_INFO_BYTES);
+      },
+      weaponInfo(index: number): WeaponInfo { return Object.freeze(weaponConfigView(allocation, weaponOffset(index))); },
+      free,
+    });
+}
+
 class WeaponConfigParser {
   private readonly preprocessor: WeaponConfigTokens;
   private readonly reader: StructureReader;
@@ -609,35 +687,7 @@ class WeaponConfigParser {
     if (this.weaponCapacity === 0) {
       diagnostics.push(new WeaponPrintDiagnostic("warning", "no weapon info loaded", location(this.path)));
     }
-    const allocation = this.allocation;
-    const weaponOffset = (index: number): number => {
-      const start = WEAPON_CONFIG_BYTES + index * WEAPON_INFO_BYTES;
-      if (!Number.isInteger(index) || start < WEAPON_CONFIG_BYTES || start + WEAPON_INFO_BYTES > allocation.bytes.length) {
-        throw new RangeError("weapon info copy exceeds the source configuration allocation");
-      }
-      return start;
-    };
-    return Object.freeze({
-      path: this.path,
-      get weaponCapacity(): number { return new WeaponConfigCell(allocation, 0).int(0); },
-      definedWeaponCount,
-      weapons: Object.freeze(weapons),
-      projectiles: Object.freeze(projectiles),
-      diagnostics: Object.freeze(diagnostics),
-      weaponBytes(index: number): Uint8Array {
-        const start = weaponOffset(index);
-        return allocation.bytes.subarray(start, start + WEAPON_INFO_BYTES);
-      },
-      projectileBytes(index: number): Uint8Array {
-        const start = ((WEAPON_CONFIG_BYTES + Math.imul(this.weaponCapacity, WEAPON_INFO_BYTES)) >>> 0) + index * PROJECTILE_INFO_BYTES;
-        if (!Number.isInteger(index) || index < 0 || index >= this.projectiles.length || start + PROJECTILE_INFO_BYTES > allocation.bytes.length) {
-          throw new RangeError("projectile dump exceeds the source configuration allocation");
-        }
-        return allocation.bytes.subarray(start, start + PROJECTILE_INFO_BYTES);
-      },
-      weaponInfo(index: number): WeaponInfo { return Object.freeze(weaponConfigView(allocation, weaponOffset(index))); },
-      free: this.freeConfig,
-    });
+    return bindWeaponConfig(this.path, this.allocation, diagnostics, this.freeConfig);
   }
 
   private readProjectile(offset: number): ProjectileInfo {
@@ -852,6 +902,39 @@ export class WeaponAi {
 
   get config(): WeaponConfig | undefined {
     return this.currentConfig;
+  }
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { generation: this.generation, setupRevision: this.setupRevision, reported: structuredClone(this.reported),
+      pointers: this.pointers.checkpoint(memory, this.host.weights),
+      states: this.states.map(state => state === undefined ? null : { allocation: memory.reference(state.allocation), revision: state.revision }),
+      config: this.currentConfig === undefined ? null : { allocation: memory.reference(this.currentConfig.allocation),
+        path: this.currentConfig.path, diagnostics: structuredClone(this.currentConfig.diagnostics) } };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.weapons"), image = { generation: reader.field("generation").integer(0), setupRevision: reader.field("setupRevision").integer(0),
+      reported: reader.field("reported").list(entry => ({ origin: entry.field("origin").choice("source", "print"), severity: entry.field("severity").choice("message", "warning", "error", "fatal"), message: entry.field("message").string(),
+        location: { path: entry.field("location").field("path").string(), line: entry.field("location").field("line").integer(0), column: entry.field("location").field("column").integer(0) } })),
+      pointers: reader.field("pointers").value,
+      states: reader.field("states").list(entry => entry.nullable(state => ({ allocation: state.field("allocation").integer(0), revision: state.field("revision").integer(0) }))),
+      config: reader.field("config").nullable(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), diagnostics: entry.field("diagnostics").list(readScriptDiagnostic) })) };
+    if (this.states.some(state => state !== undefined) || this.currentConfig !== undefined || image.states.length !== MAX_WEAPON_STATES + 1
+      || image.states[0] !== null || !Number.isSafeInteger(image.generation) || image.generation < 0
+      || !Number.isSafeInteger(image.setupRevision) || image.setupRevision < 0) throw new Error("Invalid bot weapon restoration");
+    this.pointers.restore(image.pointers, memory, this.host.weights);
+    for (const [index, saved] of image.states.entries()) {
+      if (saved === null) continue;
+      const allocation = memory.allocation(saved.allocation);
+      if (allocation.bytes.length !== 8 || !Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved bot weapon state");
+      const state = new WeaponState(allocation, this.pointers); state.revision = saved.revision;
+      void state.config; void state.indexPointer;
+      this.states[index] = state;
+    }
+    if (image.config !== null) {
+      const allocation = memory.allocation(image.config.allocation);
+      this.currentConfig = bindWeaponConfig(image.config.path, allocation, structuredClone(image.config.diagnostics), () => this.memory.free(allocation));
+    }
+    this.generation = image.generation; this.setupRevision = image.setupRevision; this.reported.push(...structuredClone(image.reported));
   }
 
   get diagnostics(): readonly WeaponDiagnostic[] {

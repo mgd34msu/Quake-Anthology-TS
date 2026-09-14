@@ -1,3 +1,4 @@
+import { botKnowledgePersistence } from "./bot-knowledge-checkpoint.ts";
 import { WeaponState } from "../../../content/q3/base/shared/definitions.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -88,7 +89,7 @@ export function createQ1BotKnowledge(options: {
       });
     },
   });
-  return { knowledge, uncoveredWeapons,
+  return { ...botKnowledgePersistence("q1", actorsForHandle), knowledge, uncoveredWeapons,
     resolveWeapon(client: number, decisionSlot: number): ItemId | null {
       const actor = options.actorForClient(client), entry = entries.get(decisionSlot);
       return actor !== null && entry !== undefined && usable(actor, entry) ? entry.item : null;

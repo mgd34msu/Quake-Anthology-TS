@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "../../../ui/common/legacy/script/memory.ts";
 /*
  * Bot source loading from id Software's botlib/l_script.c and l_precomp.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -44,6 +46,28 @@ export class BotScriptSources implements BotScriptReader {
     private readonly memory: ScriptMemory = new BotMemory(),
     readonly debugEval?: (text: string) => void,
   ) {}
+
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return { baseFolder: this.baseFolder, terminal: this.terminal, globals: this.globals.captureSaveState(capture),
+      sourceFiles: this.sourceFiles.map(source => source?.captureSaveState(capture) ?? null) };
+  }
+  restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
+    if (this.sourceFiles.some(source => source !== undefined)) throw new Error("Script restore requires an empty handle owner");
+    const reader = new SaveReader(value, "bot.sources"), folder = reader.field("baseFolder").string(), terminal = reader.field("terminal").boolean();
+    if (folder.length >= MAX_SOURCE_PATH || sourceString(folder) !== folder) reader.fail("invalid script base folder");
+    const files = reader.field("sourceFiles").list(cell => cell.nullable(entry => entry.value));
+    if (files.length !== MAX_SOURCE_FILES || files[0] !== null || (terminal && files.some(value => value !== null))) reader.fail("invalid script handle table");
+    this.globals.restoreSaveState(reader.field("globals").value, restore);
+    for (const [handle, saved] of files.entries()) {
+      if (saved === null) continue;
+      this.sourceFiles[handle] = ScriptSourceReader.restoreSaveState(saved, this, { memory: this.memory,
+        ...(this.debugEval === undefined ? {} : { debugEval: this.debugEval }),
+        report: diagnostic => { this.requireLive(); this.print(diagnostic.severity === "warning" ? 2 : 3,
+          `file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`); this.requireLive(); },
+      }, restore);
+    }
+    this.baseFolder = folder; this.terminal = terminal;
+  }
 
   /** Bot consumers pair PC_SetBaseFolder("botfiles") with LoadSourceFile. */
   resolveRoot(path: string): ScriptSource | undefined {

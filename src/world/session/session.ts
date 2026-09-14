@@ -177,6 +177,7 @@ export class EngineSession implements SessionResource {
   readonly resources = new ResourceScope("Session resources");
   readonly session: SessionId;
   private readonly clients = new Map<number, SessionClient>();
+  private readonly preparedClients = new Set<SessionClient>();
   private readonly seats = new Map<number, SessionSeat>();
   private readonly generations = new Map<number, number>();
   private currentWorld: WorldLifetime | null = null;
@@ -186,6 +187,7 @@ export class EngineSession implements SessionResource {
   constructor(private readonly identity: IdentityOwner, readonly mode: SessionMode) {
     this.session = identity.session;
     this.resources.defer(() => closeAll([...this.clients.values()].reverse(), "Client shutdown failed"));
+    this.resources.defer(() => closeAll([...this.preparedClients].reverse(), "Prepared client shutdown failed"));
     this.resources.defer(() => closeAll([...this.seats.values()].reverse(), "Seat shutdown failed"));
     this.resources.defer(() => this.closeWorld());
   }
@@ -204,11 +206,28 @@ export class EngineSession implements SessionResource {
     readonly seat: SessionSeat;
     readonly presentation: SeatPresentation;
     readonly cleanup: () => undefined;
-  }[] = []): { readonly world: WorldLifetime; readonly retired: SessionResource } {
+  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] }): {
+    readonly world: WorldLifetime; readonly retired: SessionResource;
+  } {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
     if (this.currentWorld?.simulation === simulation) throw new Error("Simulation is already attached");
+    const additions = new Map<number, SessionClient>();
+    const removals = new Set<SessionClient>();
+    for (const client of clients.removed) {
+      if (removals.has(client)) throw new Error("Duplicate retired client");
+      if (client.isClosed || this.clients.get(client.id.slot) !== client) throw new Error("Retired client is not owned by this session");
+      if ([...this.seats.values()].some(seat => seat.client === client && !seat.isClosed)) throw new Error("Cannot retire a client with a local seat during world replacement");
+      removals.add(client);
+    }
+    for (const client of clients.added) {
+      if (client.isClosed || !this.preparedClients.has(client)) throw new Error("Replacement client was not prepared by this session");
+      if (additions.has(client.id.slot)) throw new Error("Duplicate prepared client slot");
+      const existing = this.clients.get(client.id.slot);
+      if (existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${client.id.slot} is occupied`);
+      additions.set(client.id.slot, client);
+    }
     const nextPresentations = new Map<SessionSeat, PresentationLifetime>();
     for (const entry of presentations) {
       if (this.seats.get(entry.seat.id.index) !== entry.seat) throw new Error("Presentation seat is not owned by this session");
@@ -226,8 +245,10 @@ export class EngineSession implements SessionResource {
       if (previous !== null) retired.push(previous);
     }
     for (const client of this.clients.values()) {
-      if (!client.isClosed) retired.push(client.replaceWorldResources());
+      if (!client.isClosed && !removals.has(client)) retired.push(client.replaceWorldResources());
     }
+    for (const client of removals) { this.clients.delete(client.id.slot); retired.push(client); }
+    for (const [slot, client] of additions) { this.clients.set(slot, client); this.preparedClients.delete(client); }
     this.currentWorld = world;
     this.published = null;
     return { world, retired: { close: () => closeAll(retired, "Retired world shutdown failed") } };
@@ -249,7 +270,7 @@ export class EngineSession implements SessionResource {
     return undefined;
   }
 
-  createClient(slot: number): SessionClient {
+  prepareClient(slot: number): SessionClient {
     this.resources.assertOpen();
     const existing = this.clients.get(slot);
     if (existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${slot} is occupied`);
@@ -257,7 +278,15 @@ export class EngineSession implements SessionResource {
     const id = this.identity.client(slot, generation);
     const client = new SessionClient(id);
     this.generations.set(slot, generation);
+    this.preparedClients.add(client);
+    client.resources.defer(() => { this.preparedClients.delete(client); return undefined; });
+    return client;
+  }
+
+  createClient(slot: number): SessionClient {
+    const client = this.prepareClient(slot);
     this.clients.set(slot, client);
+    this.preparedClients.delete(client);
     return client;
   }
 
@@ -335,6 +364,6 @@ export class EngineSession implements SessionResource {
   close(): undefined {
     if (this.isClosed) return undefined;
     try { return this.resources.close(); }
-    finally { this.clients.clear(); this.seats.clear(); this.published = null; }
+    finally { this.clients.clear(); this.preparedClients.clear(); this.seats.clear(); this.published = null; }
   }
 }

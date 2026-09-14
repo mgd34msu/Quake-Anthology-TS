@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 import type { BotOrderState } from "../orders.ts";
 // Ported from id Software's game/ai_main.h, g_local.h, q_shared.h and ai_main.c state operations.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -495,6 +496,60 @@ export class BotState {
     });
   }
 
+  captureSaveState(waypointId: (value: BotWaypoint | null) => number | null) {
+    const activationId = (value: BotActivateGoal | null): number | null => {
+      if (value === null) return null;
+      const index = this.activateGoalHeap.indexOf(value);
+      if (index < 0) throw new Error("Bot activation pointer escapes its heap");
+      return index;
+    };
+    return { bytes: this.#bytes.slice(), aiNode: this.aiNode, setup: { ...this.setup },
+      scriptedOrder: this.scriptedOrder === null ? null : { progress: this.scriptedOrder.progress,
+        order: this.scriptedOrder.order.kind === "point" ? { kind: "point", point: { ...this.scriptedOrder.order.point } }
+          : { kind: "follow", entity: { ...this.scriptedOrder.order.entity } } },
+      activateStack: activationId(this.activateStack), activationNext: this.activateGoalHeap.map(goal => activationId(goal.next)),
+      checkpoints: waypointId(this.checkpoints), patrolPoints: waypointId(this.patrolPoints), currentPatrolPoint: waypointId(this.currentPatrolPoint) };
+  }
+
+  restoreSaveState(value: unknown, waypoint: (id: number | null) => BotWaypoint | null,
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+    const reader = new SaveReader(value, "bot.state"), bytes = reader.field("bytes").bytes();
+    if (bytes.length !== BOT_STATE_SOURCE_BYTES) reader.fail("incorrect bot state byte extent");
+    if (this.sourceAllocation !== null && bytes.some((byte, index) => byte !== this.#bytes[index])) reader.fail("bot bytes disagree with restored game allocation");
+    const activation = (entry: SaveReader): BotActivateGoal | null => entry.nullable(cell => {
+      const goal = this.activateGoalHeap[cell.integer(0)];
+      if (goal === undefined) return cell.fail("activation pointer outside heap");
+      return goal;
+    });
+    const next = reader.field("activationNext").list(activation);
+    if (next.length !== this.activateGoalHeap.length) reader.fail("incorrect activation heap extent");
+    const node = reader.field("aiNode").nullable(cell => cell.choice("intermission", "observer", "respawn", "stand", "seek-activate-entity", "seek-nbg", "seek-ltg", "battle-fight", "battle-chase", "battle-retreat", "battle-nbg"));
+    const setup = reader.field("setup"), kind = setup.field("kind").choice("empty", "setting-up", "failed", "complete");
+    let progress: BotSetupProgress;
+    switch (kind) {
+      case "empty": progress = { kind }; break;
+      case "complete": progress = { kind }; break;
+      case "setting-up": progress = { kind, stage: setup.field("stage").choice("allocated", "character", "settings", "goal-state", "item-weights", "weapon-state", "weapon-weights", "chat-state", "chat-file", "chat-gender", "published", "move-state", "walker", "counted", "scheduled", "interbred", "session") }; break;
+      case "failed": {
+        const stage = setup.field("stage").choice("aas", "character", "item-weights", "weapon-weights", "chat-file");
+        progress = stage === "aas" || stage === "character" ? { kind, stage } : { kind, stage, errorCode: setup.field("errorCode").integer() }; break;
+      }
+    }
+    const order = reader.field("scriptedOrder").nullable((entry): BotOrderState => {
+      const order = entry.field("order"), kind = order.field("kind").choice("point", "follow");
+      const progress = entry.field("progress").choice("in-progress", "success", "error");
+      if (kind === "point") { const point = order.field("point"); return { progress, order: { kind, point: { x: point.field("x").number(), y: point.field("y").number(), z: point.field("z").number() } } }; }
+      const entity = order.field("entity");
+      return { progress, order: { kind, entity: remapObservation(entity.field("number").integer(0), entity.field("generation").integer(0)) } };
+    });
+    this.#bytes.set(bytes); this.aiNode = node; this.setup = progress; this.scriptedOrder = order;
+    this.activateStack = activation(reader.field("activateStack"));
+    for (const [index, goal] of this.activateGoalHeap.entries()) { const target = next[index]; if (target === undefined) return reader.fail("missing activation link"); goal.next = target; }
+    this.checkpoints = waypoint(reader.field("checkpoints").nullable(cell => cell.integer(0)));
+    this.patrolPoints = waypoint(reader.field("patrolPoints").nullable(cell => cell.integer(0)));
+    this.currentPatrolPoint = waypoint(reader.field("currentPatrolPoint").nullable(cell => cell.integer(0)));
+  }
+
   /** ClientName writes its fixed buffer before Q_CleanStr edits those same bytes. */
   copyTeamLeaderClientName(rawName: string): void {
     sourceStrncpy(this.#bytes, 6900, rawName, 31);
@@ -568,6 +623,23 @@ export class BotStateStore {
     const allocated = new BotState(this.product, allocation);
     this.cells[client] = allocated;
     return allocated;
+  }
+
+  captureSaveState(memory: GameMemory, waypointId: (value: BotWaypoint | null) => number | null) {
+    return this.cells.map(state => state === null ? null : { allocation: state.sourceAllocation === null ? null : memory.captureAllocation(state.sourceAllocation), state: state.captureSaveState(waypointId) });
+  }
+
+  restoreSaveState(value: unknown, memory: GameMemory, waypoint: (id: number | null) => BotWaypoint | null,
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+    const reader = new SaveReader(value, "bot.states");
+    const states = reader.list(entry => entry.nullable(cell => {
+      const allocation = cell.field("allocation").nullable(pointer => memory.restoreAllocation(pointer.value));
+      const state = new BotState(this.product, allocation);
+      state.restoreSaveState(cell.field("state").value, waypoint, remapObservation);
+      return state;
+    }));
+    if (states.length !== this.cells.length) reader.fail("incorrect bot state slot count");
+    this.cells.splice(0, this.cells.length, ...states);
   }
 
   /** BotAISetup(false) zeros the pointer array without clearing its former records. */

@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 import { BotCvar } from "./ai-context.ts";
 /*
  * Ported from id Software's code/game/g_bot.c.
@@ -6,7 +7,6 @@ import { BotCvar } from "./ai-context.ts";
 import { CommonParseCursor } from "../../../core/common-parse.ts";
 import type { CommonParseState } from "../../../core/common-parse.ts";
 import { CvarFlag } from "../../../core/cvars/index.ts";
-import type { VmCvar } from "../../../core/cvars/index.ts";
 import { infoSetValueForKey } from "./info.ts";
 import { infoValueForKey } from "../../../core/info-string.ts";
 import { qvmFloatToInt } from "../../../core/numeric.ts";
@@ -89,11 +89,30 @@ export class GameBotCatalog {
   private readonly bots: GameInfoCatalog = { infos: [], count: 0 };
   private readonly arenas: GameInfoCatalog = { infos: [], count: 0 };
   private readonly queue = Array.from({ length: BOT_SPAWN_QUEUE_DEPTH }, () => ({ clientNum: 0, spawnTime: 0 }));
-  private minimumPlayers: VmCvar | null = null;
+  private minimumPlayers: BotCvar | null = null;
   private checkMinimumTime = 0;
 
   constructor(readonly game: SourceBotGame, private readonly files: BotCatalogFiles,
     private readonly parser: CommonParseState, private readonly host: GameBotCatalogHost) {}
+
+  captureSaveState() {
+    const catalog = (value: GameInfoCatalog) => ({ count: value.count, infos: value.infos.map(allocation => this.game.memory.captureAllocation(allocation)) });
+    return { bots: catalog(this.bots), arenas: catalog(this.arenas), queue: this.queue.map(value => ({ ...value })), minimumPlayers: this.minimumPlayers?.captureSaveState() ?? null, checkMinimumTime: this.checkMinimumTime, parser: this.parser.captureSaveState() };
+  }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "bot.catalog");
+    const catalog = (target: GameInfoCatalog, cell: SaveReader): void => {
+      const infos = cell.field("infos").list(entry => this.game.memory.restoreAllocation(entry.value)), count = cell.field("count").integer(0);
+      if (count > infos.length || infos.length > MAX_INFOS) cell.fail("invalid catalog extent");
+      target.infos.splice(0, target.infos.length, ...infos); target.count = count;
+    };
+    catalog(this.bots, reader.field("bots")); catalog(this.arenas, reader.field("arenas"));
+    const queue = reader.field("queue").list(cell => ({ clientNum: cell.field("clientNum").integer(), spawnTime: cell.field("spawnTime").number() }));
+    if (queue.length !== this.queue.length) reader.fail("incorrect spawn queue extent");
+    this.queue.splice(0, this.queue.length, ...queue);
+    this.minimumPlayers = reader.field("minimumPlayers").nullable(cell => { const cvar = new BotCvar(this.game.options.cvars); cvar.restoreSaveState(cell.value); return cvar; });
+    this.checkMinimumTime = reader.field("checkMinimumTime").number(); this.parser.restoreSaveState(reader.field("parser").value);
+  }
 
   get numBots(): number { return this.bots.count; }
   get numArenas(): number { return this.arenas.count; }

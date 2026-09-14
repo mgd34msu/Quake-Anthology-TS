@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
 /*
  * Fuzzy weight configuration translated from id Software's
  * code/botlib/be_ai_weight.c and be_ai_weight.h.
@@ -99,6 +101,36 @@ class WeightHeap {
   private nextPointer = 1;
 
   constructor(readonly memory: BotMemory) {}
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { nextPointer: this.nextPointer, pointers: [...this.pointers].map(([pointer, record]) => ({ pointer,
+      kind: record.kind, allocation: memory.reference(record.kind === "name" ? record.allocation : record.separator.allocation) })) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.weights.heap"), image = { nextPointer: reader.field("nextPointer").integer(1),
+      pointers: reader.field("pointers").list(entry => ({ pointer: entry.field("pointer").integer(1), kind: entry.field("kind").choice("name", "separator"), allocation: entry.field("allocation").integer(0) })) };
+    if (this.pointers.size !== 0 || !Number.isSafeInteger(image.nextPointer) || image.nextPointer < 1 || image.nextPointer > 0x100000000) throw new Error("Invalid fuzzy heap restoration");
+    for (const entry of image.pointers) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextPointer || this.pointers.has(entry.pointer)) throw new Error("Invalid saved fuzzy pointer");
+      const allocation = memory.allocation(entry.allocation);
+      if (entry.kind === "name") {
+        if (!allocation.bytes.includes(0)) throw new Error("Saved fuzzy name is unterminated");
+        this.pointers.set(entry.pointer, { kind: "name", allocation });
+      } else {
+        if (entry.kind !== "separator" || allocation.bytes.length !== FUZZY_SEPARATOR_BYTES) throw new Error("Saved fuzzy separator size mismatch");
+        this.pointers.set(entry.pointer, { kind: "separator", separator: new FuzzySeparator(this, allocation, entry.pointer) });
+      }
+    }
+    this.nextPointer = image.nextPointer;
+    const visited = new Set<number>(), pending = new Set<number>();
+    const visit = (separator: FuzzySeparator | null): void => {
+      if (separator === null || visited.has(separator.pointer)) return;
+      if (pending.has(separator.pointer)) throw new Error("Saved fuzzy separator graph has a cycle");
+      pending.add(separator.pointer); visit(separator.child); visit(separator.next);
+      pending.delete(separator.pointer); visited.add(separator.pointer);
+    };
+    for (const record of this.pointers.values()) if (record.kind === "separator") visit(record.separator);
+  }
 
   allocateName(name: string): number {
     const encoded = stringBytes(name);
@@ -626,10 +658,17 @@ class OwnedWeightConfig implements WeightConfig {
     private readonly heap: WeightHeap,
     private readonly allocation: BotMemoryAllocation,
     private readonly reported: readonly ScriptDiagnostic[],
-    filename: string,
+    filename?: string,
   ) {
-    const bytes = this.allocation.bytes.subarray(WEIGHT_FILENAME_OFFSET);
-    bytes.set(stringBytes(filename).subarray(0, CACHED_FILENAME_LENGTH));
+    if (filename !== undefined) {
+      const bytes = this.allocation.bytes.subarray(WEIGHT_FILENAME_OFFSET);
+      bytes.set(stringBytes(filename).subarray(0, CACHED_FILENAME_LENGTH));
+    }
+  }
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    this.requireOpen();
+    return { path: this.path, allocation: memory.reference(this.allocation), reported: structuredClone(this.reported) };
   }
 
   private get view(): DataView { return allocationView(this.allocation); }
@@ -832,6 +871,46 @@ export class WeightConfigStore {
   private readonly cached: (OwnedWeightConfig | undefined)[] = [];
   private readonly owned = new Set<OwnedWeightConfig>();
   private generation = 0;
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    const configs = [...this.owned];
+    return { generation: this.generation, heap: this.heap.checkpoint(memory), configs: configs.map(config => config.checkpoint(memory)),
+      cached: Array.from(this.cached, config => config === undefined ? null : configs.indexOf(config)) };
+  }
+  reference(config: WeightConfig): number {
+    let index = 0;
+    for (const owned of this.owned) { if (owned === config) return index; index++; }
+    throw new Error("Saved weight configuration belongs to another owner");
+  }
+  configurations(): readonly WeightConfig[] { return [...this.owned]; }
+  resolve(reference: number): WeightConfig {
+    const config = Number.isSafeInteger(reference) && reference >= 0 ? [...this.owned][reference] : undefined;
+    if (config === undefined) throw new Error("Saved weight configuration reference is missing");
+    return config;
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.weights"), image = { generation: reader.field("generation").integer(0), heap: reader.field("heap").value,
+      configs: reader.field("configs").list(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), reported: entry.field("reported").list(readScriptDiagnostic) })),
+      cached: reader.field("cached").list(entry => entry.nullable(reference => reference.integer(0))) };
+    if (this.owned.size !== 0 || this.cached.length !== 0 || !Number.isSafeInteger(image.generation) || image.generation < 0
+      || image.cached.length > this.maxCachedConfigs) throw new Error("Invalid weight configuration restoration");
+    this.heap.restore(image.heap, memory);
+    const configs = image.configs.map(saved => {
+      const allocation = memory.allocation(saved.allocation);
+      if (allocation.bytes.length !== WEIGHT_CONFIG_BYTES) throw new Error("Saved weight configuration allocation size mismatch");
+      const config = new OwnedWeightConfig(saved.path, this.heap, allocation, structuredClone(saved.reported));
+      void config.maxInventoryIndex;
+      return config;
+    });
+    const cached = image.cached.map(reference => {
+      if (reference === null) return undefined;
+      const config = Number.isSafeInteger(reference) && reference >= 0 ? configs[reference] : undefined;
+      if (config === undefined) throw new Error("Saved weight cache reference is missing");
+      return config;
+    });
+    for (const config of configs) this.owned.add(config);
+    this.cached.push(...cached); this.generation = image.generation;
+  }
 
   constructor(resolver: BotScriptReader, options: WeightConfigStoreOptions = {}) {
     this.resolver = resolver;

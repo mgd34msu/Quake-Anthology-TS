@@ -149,7 +149,7 @@ import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, s
 import { readContentId } from "../../../persistence/recipe.ts";
 import { readRandom, readVector } from "../../../persistence/shared.ts";
 import { captureMovementPlayer, readMovementPlayer, readQ1Travel, readQ2View, readQ3Character } from "./player-checkpoint.ts";
-import { simulationProviderCheckpoint, simulationSaveReader, savedSimulationSettings, simulationQuakeCCheckpoint, validateSimulationSave, nativeQ3RuntimeReader } from "./save.ts";
+import { simulationProviderCheckpoint, simulationSaveReader, savedSimulationSettings, simulationQuakeCCheckpoint, validateSimulationSave, nativeQ3RuntimeReader, savedSourceCvars } from "./save.ts";
 import { saveQ2Attack, restoreQ2Attack } from "../../../content/q2/foundation/checkpoint.ts";
 import type { PlayerAdmission, PlayerView, PlayerUi, PlayerUiItem, SimulationTravel, SimulationOptions, SimulationPresentation, SimulationPresentationEvent } from "./types.ts";
 
@@ -1441,6 +1441,8 @@ export class SharedSimulation implements Simulation {
         print: text => { this.events.message({ kind: "print", level: 2, text }); } });
       for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
         teamplay: "0", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", sv_cheats: "0", footsteps: "1" })) cvars.register(name, value);
+      const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
+      if (savedCvars !== undefined) cvars.restoreSaveState(savedCvars);
       const services: Q1CompositionServices = { sharedGrapple: this.sharedGrapple(),
         cvar: name => cvars.variableValue(name), setCvar: (name, value) => { cvars.set(name, value, true); if (name === "sv_gravity") this.setWorldGravity(cvars.variableValue(name)); if (name === "skill") { const skill = cvars.variableValue(name); if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Q1 skill must be 0..3"); this.q1Campaign.skill = skill; } return undefined; },
         emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event }); return this.events.emit(content, { kind: "q1-composition", event }); },
@@ -1530,6 +1532,8 @@ export class SharedSimulation implements Simulation {
     serverCvars.register("sv_airaccelerate", "0", 0);
     for (const variable of this.options.q2Cvars ?? []) serverCvars.set(variable.name, variable.value, true);
     this.initializeServerSettings(serverCvars);
+    const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
+    if (savedCvars !== undefined) serverCvars.restoreSaveState(savedCvars);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
       match: recipe.match.provider === "q2:lmctf" ? { kind: "lmctf", ...(this.options.travel?.source.kind === "q2" && this.options.travel.source.lmctf !== undefined ? { travel: this.options.travel.source.lmctf } : {}) } : { kind: recipe.match.provider === "q2:ctf" ? "ctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
@@ -1588,6 +1592,7 @@ export class SharedSimulation implements Simulation {
     }
     bindQ2ServerCvars(serverCvars, product);
     serverCvars.setServerActive(true);
+    if (savedCvars !== undefined) serverCvars.restoreSaveState(savedCvars);
     owningMonsters = product.monsters;
     return { kind: "q2", product, game: product.game, weapons, monsters: product.monsters, movers: product.movers, items: product.items, players: product.players, baseEntities: product.baseEntities };
   }
@@ -2503,6 +2508,7 @@ export class SharedSimulation implements Simulation {
 
   step(input: InputBatch): SimulationOutput {
     this.assertOpen();
+    this.assertBotRestoreReady();
     if (this.source.kind === "q3-qvm") throw new Error("Q3 guest requires the awaited simulation step");
     if (this.stepping) throw new Error("Simulation step is already running");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
@@ -3220,12 +3226,16 @@ export class SharedSimulation implements Simulation {
 
   takeTransitions(): readonly TransitionIntent[] { return this.transitions.splice(0); }
   takeLevelChange() { const change = this.levelChange; this.levelChange = null; return change; }
+  private assertBotRestoreReady(): void {
+    if (this.options.restore?.providers.some(record => record.schema === "world:bots") && this.botServices.configuration === null)
+      throw new Error("Saved bot services must be restored before simulation advances or saves");
+  }
   checkpoint(): SaveImage {
     this.assertOpen();
+    this.assertBotRestoreReady();
     if (this.stepping || this.transitions.length !== 0 || this.levelChange !== null) throw new Error("Save requires a completed frame without pending world travel");
     const source = this.source;
     if (source.kind === "loading" || source.kind === "q3-qvm") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
-    if (this.botServices.configuration !== null) throw new Error("Save requires complete attached bot decision state");
     if (this.quakeWorldCommands.length !== 0 || this.q3Commands.size !== 0 || this.primaryCommandBlocks.size !== 0) throw new Error("Save requires completed source commands");
     if (source.kind === "q3") this.events.assertOutputConsumed();
     if (source.kind === "q3" && [...this.playerStates.keys()].some(actor => !this.q3Arsenals.has(actor))) throw new Error("Q3 save requires completed client admission");
@@ -3233,6 +3243,13 @@ export class SharedSimulation implements Simulation {
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint())];
     const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 11 : 1, bytes });
+    const bots = this.botServices.checkpoint();
+    if (bots !== null) {
+      this.events.assertOutputConsumed();
+      add("world:bots", encodeCheckpointValue(bots));
+      const cvars = source.kind === "q1" ? source.cvars : source.kind === "q2" ? this.q2ServerRegistry : null;
+      if (cvars !== null) add("world:source-cvars", encodeCheckpointValue(cvars.captureSaveState()));
+    }
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else if (source.kind === "q2") providers.push(...captureQ2Product(source.product));
     else if (source.kind === "q3") {
@@ -3249,7 +3266,7 @@ export class SharedSimulation implements Simulation {
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds,
       sourceSchedulingMilliseconds: this.sourceSchedulingMilliseconds,
       attackSequence: this.attackSequence, q1ClientVisibility: this.q1ClientVisibility.capture(),
-      sourceCvars: source.kind === "q1" ? source.cvars.snapshots().map(value => ({ name: value.name, value: value.value })) : [],
+      sourceCvars: source.kind === "q1" && bots === null ? source.cvars.snapshots().map(value => ({ name: value.name, value: value.value })) : [],
       campaign: { flags: this.q1Campaign.flags, skill: this.q1Campaign.skill }, physics: this.physics.capture(), events: this.events.capture(),
       portals: [...this.areaPortals].map(([portal, open]) => ({ portal, open })),
       selectedBallistics: this.selectedBallistics === null ? null : { milliseconds: this.selectedMilliseconds, randomSeed: this.selectedRandom.seed,
@@ -3389,7 +3406,7 @@ export class SharedSimulation implements Simulation {
       for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
     } else if (selected.value !== undefined && selected.value !== null) selected.fail("Saved selected arsenal has no matching authority");
     const bytes = (schema: SaveImage["providers"][number]["schema"]) => simulationProviderCheckpoint(save, schema).bytes;
-    if (source.kind === "q1") reader.field("sourceCvars").list(value => { source.cvars.set(value.field("name").string(), value.field("value").string(), true); return undefined; });
+    if (source.kind === "q1" && savedSourceCvars(save) === undefined) reader.field("sourceCvars").list(value => { source.cvars.set(value.field("name").string(), value.field("value").string(), true); return undefined; });
     if (source.kind === "q1") source.game.restore(decodeQ1FoundationCheckpoint(bytes("q1:foundation")), { scheduleThinks: false });
     else if (source.kind === "q2") restoreQ2Product(source.product, save.providers);
     const monsters = reader.field("selectedMonsters");

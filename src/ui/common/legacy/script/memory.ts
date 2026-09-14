@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 /*
  * Script storage from Quake III Arena botlib/l_script.c and l_script.h.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -8,6 +9,9 @@ export interface ScriptMemoryAllocation {
   /** Borrow for one operation; an already returned view cannot be revoked. */
   readonly bytes: Uint8Array;
 }
+
+export interface ScriptMemoryCapture { reference(allocation: ScriptMemoryAllocation): number }
+export interface ScriptMemoryRestore { allocation(id: number): ScriptMemoryAllocation }
 
 /** Supplied by the actual bot memory owner in runtime compositions. */
 export interface ScriptMemory {
@@ -51,6 +55,22 @@ export class SourceScriptStorage {
     private readonly allocation: ScriptMemoryAllocation,
   ) {
     this.token = new SourceTokenMemory(() => this.bytes.subarray(TOKEN, TOKEN + SOURCE_TOKEN_BYTES));
+  }
+
+  captureSaveState(capture: ScriptMemoryCapture) {
+    if (this.disposed) throw new Error("Cannot checkpoint disposed script storage");
+    return { allocation: capture.reference(this.allocation), punctuationTable: this.punctuationTable === null ? null : capture.reference(this.punctuationTable), token: this.token.captureSaveState() };
+  }
+  static restoreSaveState(value: unknown, memory: ScriptMemory, restore: ScriptMemoryRestore): SourceScriptStorage {
+    const reader = new SaveReader(value, "script.storage");
+    const allocation = restore.allocation(reader.field("allocation").integer(0));
+    if (allocation.bytes.length < SOURCE_SCRIPT_BYTES + 1) reader.fail("invalid script storage extent");
+    const script = new SourceScriptStorage(memory, allocation);
+    script.punctuationTable = reader.field("punctuationTable").nullable(cell => restore.allocation(cell.integer(0)));
+    if (script.punctuationTable !== null && script.punctuationTable.bytes.length !== SOURCE_PUNCTUATION_TABLE_BYTES) reader.fail("invalid punctuation table extent");
+    script.token.restoreSaveState(reader.field("token").value, true);
+    void script.buffer; void script.path;
+    return script;
   }
 
   static allocate(length: number, path: string, memory: ScriptMemory): SourceScriptStorage {

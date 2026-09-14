@@ -17,6 +17,7 @@ import type { BotLogOpenResult } from "../library/log.ts";
 import { geneticParentsAndChildSelection } from "../library/genetic.ts";
 import type { GeneticSelectionInput, GeneticSelectionResult } from "../library/genetic.ts";
 import { BotMoveStateStore } from "./movement-state.ts";
+import { SaveReader } from "../../../persistence/value.ts";
 
 export interface SourceBotLibraryOptions {
   readonly files: BotSourceFiles;
@@ -26,6 +27,7 @@ export interface SourceBotLibraryOptions {
   print(severity: 1 | 2 | 3 | 4, text: string): undefined;
   clientCommand(client: number, command: string): undefined;
   openLog(filename: string): BotLogOpenResult;
+  resumeLog?(filename: string, position: number): BotLogOpenResult;
 }
 
 export class BotLibrary {
@@ -50,7 +52,8 @@ export class BotLibrary {
     const reloadCharacters = (): boolean => variables.getValue("bot_reloadcharacters") !== 0;
     this.globals = new ScriptGlobalDefines(diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message), memory);
     this.sources = new BotScriptSources(options.files, this.globals, print, text => print(1, text), memory);
-    this.log = new BotLog({ variables, globals: this.logGlobals, print, openFile: options.openLog });
+    this.log = new BotLog({ variables, globals: this.logGlobals, print, openFile: options.openLog,
+      ...(options.resumeLog === undefined ? {} : { resumeFile: options.resumeLog }) });
     this.weights = new WeightConfigStore(this.sources, { memory, reloadCharacters, print });
     this.characters = new BotCharacterLibrary(this.sources, { memory, log: this.log, reloadCharacters,
       report: diagnostic => print(diagnostic.severity === "warning" ? 2 : 3, diagnostic.message) });
@@ -81,6 +84,33 @@ export class BotLibrary {
   }
 
   get debugBuild(): boolean { return this.options.debug; }
+  captureSaveState(memory: import("../library/memory.ts").BotMemoryCapture) {
+    if (this.closed) throw new Error("Cannot checkpoint a closed bot library");
+    return { version: 1, initialized: this.initialized, debug: this.options.debug, time: this.logGlobals.time,
+      variables: this.variables.checkpoint(memory), sources: this.sources.captureSaveState(memory),
+      characters: this.characters.checkpoint(memory), actions: this.actions.checkpoint(memory), chat: this.chat.checkpoint(memory),
+      weights: this.weights.checkpoint(memory), weapons: this.weapons.checkpoint(memory), goals: this.goals.checkpoint(memory),
+      movement: this.moveStates.checkpoint(memory, this.variables), log: this.log.captureSaveState() };
+  }
+  restoreSaveState(value: unknown, memory: import("../library/memory.ts").BotMemoryRestore,
+    world: GoalWorld | null, actor: (saved: import("../../../contracts/session.ts").SavedActorId) => import("../../../contracts/identity.ts").ActorId,
+    edge: (client: number, id: number) => import("../../navigation/types.ts").NavigationEdge | null): void {
+    if (this.initialized || this.closed) throw new Error("Bot library restoration requires a fresh owner");
+    const reader = new SaveReader(value, "bot.library"); reader.field("version").literal(1);
+    if (reader.field("debug").boolean() !== this.options.debug) throw new Error("Saved bot library debug profile differs");
+    const initialized = reader.field("initialized").boolean(), time = reader.field("time").finite();
+    this.variables.restore(reader.field("variables").value, memory);
+    this.sources.restoreSaveState(reader.field("sources").value, memory);
+    this.weights.restore(reader.field("weights").value, memory);
+    this.characters.restore(reader.field("characters").value, memory);
+    this.actions.restore(reader.field("actions").value, memory);
+    this.chat.restore(reader.field("chat").value, memory);
+    this.weapons.restore(reader.field("weapons").value, memory);
+    this.goals.restore(reader.field("goals").value, memory, world, actor);
+    this.moveStates.restore(reader.field("movement").value, memory, this.variables, edge);
+    this.log.restoreSaveState(reader.field("log").value);
+    this.logGlobals.time = time; this.initialized = initialized;
+  }
   time(): number { return this.logGlobals.time; }
   private capacity(name: string): number {
     const value = Math.trunc(this.variables.value(name, "32"));

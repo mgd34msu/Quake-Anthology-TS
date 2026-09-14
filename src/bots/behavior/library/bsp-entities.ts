@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * BSP entity observations from Quake III Arena botlib/be_aas_bspq3.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -127,6 +128,40 @@ export class AasBspEntities {
   constructor(private readonly print: AasBspPrint, private readonly memory = new BotMemory()) {}
 
   get loaded(): boolean { return this.isLoaded; }
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { count: this.entityCount, loaded: this.isLoaded, nextAllocation: this.nextAllocation,
+      entityText: this.entityText === null ? null : memory.reference(this.entityText), entities: this.entities.map(entity => entity.pairs),
+      allocations: [...this.allocations].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.bsp"), image = { count: reader.field("count").integer(0), loaded: reader.field("loaded").boolean(),
+      nextAllocation: reader.field("nextAllocation").integer(1), entityText: reader.field("entityText").nullable(entry => entry.integer(0)),
+      entities: reader.field("entities").list(entry => entry.integer(0)), allocations: reader.field("allocations").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })) };
+    if (this.isLoaded || this.allocations.size !== 0 || !Number.isInteger(image.count) || image.count < 0 || image.count > MAX_ENTITIES
+      || image.entities.length !== MAX_ENTITIES || !Number.isSafeInteger(image.nextAllocation) || image.nextAllocation < 1
+      || image.nextAllocation > 0x100000000) throw new Error("Invalid bot BSP entity restoration");
+    for (const entry of image.allocations) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextAllocation || this.allocations.has(entry.pointer)) throw new Error("Invalid saved BSP allocation pointer");
+      this.allocations.set(entry.pointer, memory.allocation(entry.allocation));
+    }
+    for (const [index, pair] of image.entities.entries()) {
+      const entity = this.entities[index];
+      if (entity === undefined) throw new Error("Saved BSP entity exceeds capacity");
+      const visited = new Set<number>();
+      for (let pointer = pair; pointer !== 0; pointer = this.pointer(pointer, 8)) {
+        if (visited.has(pointer) || this.allocation(pointer).bytes.length !== 12) throw new Error("Invalid saved BSP epair list");
+        visited.add(pointer);
+        for (const offset of [0, 4]) {
+          const string = this.allocation(this.pointer(pointer, offset));
+          if (!string.bytes.includes(0)) throw new Error("Saved BSP epair string is unterminated");
+        }
+      }
+      entity.pairs = pair;
+    }
+    this.entityText = image.entityText === null ? null : memory.allocation(image.entityText);
+    this.entityCount = image.count; this.nextAllocation = image.nextAllocation; this.isLoaded = image.loaded;
+  }
 
   load(entityText: string): 0 {
     this.dump();

@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
  * Lexical parser translated from Quake III Arena botlib/l_script.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -348,6 +350,12 @@ function location(path: string, line: number, column: number): SourceLocation {
   return Object.freeze({ path, line, column });
 }
 
+export function readScriptDiagnostic(reader: SaveReader): ScriptDiagnostic {
+  const location = reader.field("location");
+  return { severity: reader.field("severity").choice("warning", "error"), message: reader.field("message").string(),
+    location: { path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() } };
+}
+
 export class ScriptLexer {
   private readonly source: string | SourceScriptStorage;
   private readonly diagnosticPath: string;
@@ -389,6 +397,45 @@ export class ScriptLexer {
       this.source = source;
     }
     if (this.source instanceof SourceScriptStorage && options.flags !== undefined) this.source.flags = options.flags;
+  }
+
+  get sourceStorage(): SourceScriptStorage | null { return this.source instanceof SourceScriptStorage ? this.source : null; }
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return { source: typeof this.source === "string" ? { kind: "text", text: this.source } : { kind: "storage", state: this.source.captureSaveState(capture) },
+      diagnosticPath: this.diagnosticPath, maxTokenLength: this.maxTokenLength,
+      diagnosticFlags: this.diagnosticFlags,
+      diagnosticOffset: this.diagnosticOffset,
+      diagnosticLine: this.diagnosticLine,
+      diagnosticLastOffset: this.diagnosticLastOffset,
+      diagnosticLastLine: this.diagnosticLastLine,
+      diagnosticWhitespaceStart: this.diagnosticWhitespaceStart,
+      diagnosticWhitespaceEnd: this.diagnosticWhitespaceEnd,
+      column: this.column,
+      diagnosticTokenAvailable: this.diagnosticTokenAvailable,
+      diagnosticToken: this.diagnosticToken.captureSaveState(), output: this.output.captureSaveState(), tokenContext: { ...this.tokenContext },
+      punctuations: this.punctuations.map(value => ({ ...value })), reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) };
+  }
+  static restoreSaveState(value: unknown, memory: ScriptMemory | undefined, restore: ScriptMemoryRestore, report?: (diagnostic: ScriptDiagnostic) => void): ScriptLexer {
+    const reader = new SaveReader(value, "script.lexer"), savedSource = reader.field("source");
+    let source: string | SourceScriptStorage;
+    if (savedSource.field("kind").choice("text", "storage") === "text") source = savedSource.field("text").string();
+    else { if (memory === undefined) return reader.fail("stored lexer requires memory owner"); source = SourceScriptStorage.restoreSaveState(savedSource.field("state").value, memory, restore); }
+    const lexer = new ScriptLexer(source, reader.field("diagnosticPath").string(), { maxTokenLength: reader.field("maxTokenLength").integer(4), ...(report === undefined ? {} : { report }) });
+    lexer.diagnosticFlags = reader.field("diagnosticFlags").integer();
+    lexer.diagnosticOffset = reader.field("diagnosticOffset").integer();
+    lexer.diagnosticLine = reader.field("diagnosticLine").integer();
+    lexer.diagnosticLastOffset = reader.field("diagnosticLastOffset").integer();
+    lexer.diagnosticLastLine = reader.field("diagnosticLastLine").integer();
+    lexer.diagnosticWhitespaceStart = reader.field("diagnosticWhitespaceStart").integer();
+    lexer.diagnosticWhitespaceEnd = reader.field("diagnosticWhitespaceEnd").integer();
+    lexer.column = reader.field("column").integer();
+    lexer.diagnosticTokenAvailable = reader.field("diagnosticTokenAvailable").boolean();
+    lexer.diagnosticToken.restoreSaveState(reader.field("diagnosticToken").value); lexer.output.restoreSaveState(reader.field("output").value);
+    const context = reader.field("tokenContext"); lexer.tokenContext = { path: context.field("path").string(), column: context.field("column").integer(), leadingWhitespace: context.field("leadingWhitespace").string() };
+    lexer.punctuations = reader.field("punctuations").list(entry => ({ text: entry.field("text").string(), punctuation: entry.field("punctuation").integer() }));
+    lexer.punctuationLookup = punctuationTable(lexer.punctuations);
+    lexer.reported.push(...reader.field("reported").list(readScriptDiagnostic));
+    return lexer;
   }
 
   get diagnostics(): readonly ScriptDiagnostic[] {

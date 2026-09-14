@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 // Ported from id Software's code/botlib/l_log.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { BotLibVars } from "./libvars.ts";
@@ -7,6 +8,7 @@ export type BotLogIoResult =
   | { readonly kind: "failed"; readonly error: Error };
 
 export interface BotLogStream {
+  checkpoint?(): { readonly position: number };
   write(bytes: Uint8Array): BotLogIoResult;
   flush(): BotLogIoResult;
   close(): BotLogIoResult;
@@ -23,6 +25,8 @@ export interface BotLogOptions {
   readonly globals: BotLogGlobals;
   readonly print: (severity: 1 | 3, text: string) => undefined;
   readonly openFile: (filename: string) => BotLogOpenResult;
+  /** Opens an existing log without writes or truncation, retaining the saved position. */
+  readonly resumeFile?: (filename: string, position: number) => BotLogOpenResult;
 }
 
 interface OpenLog { stream: BotLogStream | null; readonly file: BotLogFile }
@@ -75,9 +79,47 @@ function twoDigits(value: number): string {
 export class BotLog {
   private current: OpenLog | null = null;
   private filename = "";
+  private openedFilename = "";
   private numwrites = 0;
 
   constructor(private readonly options: BotLogOptions) {}
+
+  captureSaveState() {
+    const entry = this.current;
+    if (entry === null) return { filename: this.filename, openedFilename: this.openedFilename, numwrites: this.numwrites, state: { kind: "closed" } };
+    if (entry.stream === null) return { filename: this.filename, openedFilename: this.openedFilename, numwrites: this.numwrites, state: { kind: "closed-retained" } };
+    const checkpoint = entry.stream.checkpoint;
+    if (checkpoint === undefined) throw new Error("Active bot log stream does not support continuation checkpoints");
+    const position = checkpoint.call(entry.stream).position;
+    if (!Number.isSafeInteger(position) || position < 0) throw new Error("Bot log stream returned an invalid byte position");
+    return { filename: this.filename, openedFilename: this.openedFilename, numwrites: this.numwrites, state: { kind: "open", position } };
+  }
+  restoreSaveState(value: unknown): void {
+    if (this.current !== null) throw new Error("Log restore requires an empty owner");
+    const reader = new SaveReader(value, "bot.log"), state = reader.field("state"), kind = state.field("kind").choice("closed", "closed-retained", "open");
+    const filename = reader.field("filename").string(), openedFilename = reader.field("openedFilename").string(), numwrites = reader.field("numwrites").integer(0);
+    if (filename.length > 1024 || filenameString(filename) !== filename || filenameString(openedFilename) !== openedFilename || numwrites > 2147483647) reader.fail("invalid log state");
+    let entry: OpenLog | null = null;
+    if (kind === "closed-retained") entry = this.createEntry(null);
+    if (kind === "open") {
+      if (openedFilename.length === 0 || filename !== openedFilename.slice(0, 1024)) reader.fail("invalid active log filename");
+      const resume = this.options.resumeFile;
+      if (resume === undefined) return reader.fail("active log continuation requires a resumable file host");
+      const result = resume(openedFilename, state.field("position").integer(0));
+      if (result.kind === "failed") throw result.error;
+      entry = this.createEntry(result.stream);
+    }
+    this.current = entry; this.filename = filename; this.openedFilename = openedFilename; this.numwrites = numwrites;
+  }
+
+  private createEntry(stream: BotLogStream | null): OpenLog {
+    const entry: OpenLog = { stream, file: { write: formatted => {
+      if (this.current !== entry) throw new Error("Cannot write a closed bot log borrow");
+      const result = liveStream(entry).write(outputBytes(formatted));
+      return result.kind === "ok" ? formatted.length : -1;
+    } } };
+    return entry;
+  }
 
   open(filename: string | null): BotLogIoResult {
     if (this.options.variables.value("log", "0") === 0) return ok;
@@ -94,17 +136,10 @@ export class BotLog {
     if (opened.kind === "failed") {
       return this.printOutcome(3, `can't open the log file ${name}\n`, opened);
     }
-    let entry: OpenLog;
-    entry = {
-      stream: opened.stream,
-      file: { write: formatted => {
-        if (this.current !== entry) throw new Error("Cannot write a closed bot log borrow");
-        const result = liveStream(entry).write(outputBytes(formatted));
-        return result.kind === "ok" ? formatted.length : -1;
-      } },
-    };
+    const entry = this.createEntry(opened.stream);
     this.current = entry;
     this.filename = name.slice(0, 1024);
+    this.openedFilename = name;
     // The source has already opened/truncated and copied its fixed name buffer.
     this.options.print(1, `Opened log ${this.storedFilename()}\n`);
     return ok;

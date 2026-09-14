@@ -1,4 +1,3 @@
-import { ApplicationQ2Console } from "../../src/app/bootstrap/q2-console.ts";
 import { Q2Ctf } from "../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { expect, spyOn, test } from "bun:test";
@@ -152,8 +151,8 @@ test("failed restore preparation retains commands and clients, while cleanup fai
     await application.saveGame(saved);
     const original = application.simulation;
     application.queueCommand("save", [queued], null);
-    const prepare = spyOn(ApplicationQ2Console.prototype, "initialize").mockRejectedValueOnce(new Error("injected console preparation failure"));
-    try { await expect(application.loadGame(saved)).rejects.toThrow("injected console preparation failure"); }
+    const prepare = spyOn(application.session, "replaceWorld").mockImplementationOnce(() => { throw new Error("injected publication validation failure"); });
+    try { await expect(application.loadGame(saved)).rejects.toThrow("injected publication validation failure"); }
     finally { prepare.mockRestore(); }
     expect(application.simulation).toBe(original);
     expect(client.connection).toBe(connection);

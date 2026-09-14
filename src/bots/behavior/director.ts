@@ -1,16 +1,17 @@
 import { botClearActivateGoalStack } from "./q3/ai-navigation.ts";
+import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { botOrderActive, botOrderStatus, sameBotOrder } from "./orders.ts";
 import type { BotGoalStatus, BotOrder } from "./orders.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { OwnedActor, ProviderId } from "../../contracts/identity.ts";
-import type { ActorCommand } from "../../contracts/session.ts";
+import type { ActorCommand, SavedActorId } from "../../contracts/session.ts";
 import type { UserCommand } from "../../content/q3/base/shared/player-state.ts";
 import { CommonParseState } from "../../core/common-parse.ts";
 import { CvarFlag } from "../../core/cvars/index.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
 import type { BotSourceFiles } from "./assets.ts";
 import { AasBspEntities } from "./library/bsp-entities.ts";
-import type { GoalNavigation, SourcePickupGoal, SourcePickupGoals } from "./library/goals.ts";
+import type { GoalNavigation, GoalWorld, SourcePickupGoal, SourcePickupGoals } from "./library/goals.ts";
 import { GameAi } from "./q3/ai-main.ts";
 import type { BotSettings, BotState } from "./q3/ai-state.ts";
 import { GameBotCatalog } from "./q3/catalog.ts";
@@ -36,6 +37,7 @@ export interface SourceBotDirectorOptions {
   readonly library: SourceBotLibraryOptions;
   readonly files: BotSourceFiles;
   readonly entities: string;
+  readonly restoring?: boolean;
   navigation(library: BotLibrary): BotNavigation & GoalNavigation;
 }
 
@@ -44,6 +46,12 @@ export interface SourceBotRosterEntry {
   readonly sourceClient: number;
   readonly settings: Readonly<BotSettings>;
   readonly state: BotState;
+}
+
+/** Director-owned state only. AI, catalog, library and navigation have separate lifetimes. */
+export interface SourceBotDirectorOrchestration {
+  readonly version: 1;
+  readonly sequences: readonly { readonly actor: SavedActorId; readonly owner: ProviderId; readonly next: number }[];
 }
 
 /** Source arena/AI scheduling generates commands for the existing shared player pipeline. */
@@ -57,28 +65,21 @@ export class SourceBotDirector {
   private readonly generated: ActorCommand[] = [];
   private loaded = false;
   private closed = false;
+  private running = false;
 
   constructor(readonly options: SourceBotDirectorOptions) {
     const { host } = options, game = host.game;
     this.library = new BotLibrary(options.library);
     this.navigation = options.navigation(this.library);
     this.bspEntities = new AasBspEntities((severity, text) => options.library.print(severity, text), this.library.memory);
-    this.bspEntities.load(options.entities);
+    if (options.restoring !== true) this.bspEntities.load(options.entities);
     this.ai = new GameAi(game, this.library, { navigation: this.navigation, bspEntities: this.bspEntities,
       pointContents: point => host.pointContents(point),
       getSnapshotEntity: (client, sequence) => host.snapshotEntity(client, sequence),
       getConsoleMessage: client => host.consoleMessage(client),
       insertConsoleCommand: text => game.options.engine.insertConsoleCommand(text),
       checkBotSpawn: () => this.catalog.checkSpawn(),
-      loadMap: () => this.library.loadMap({ bspEntities: this.bspEntities, navigation: this.navigation,
-        ...(game.pickups === null ? {} : { sourcePickups: this.sourcePickupGoals(game) }),
-        pointArea: origin => this.navigation.pointArea(origin), host: {
-          trace: (start, end, bounds, passEntity, mask) => game.world.trace({ start, end, passEntityNum: passEntity, mask,
-            shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max } }),
-          pointContents: point => host.pointContents(point),
-          nextEntity: after => this.ai.context.observations.nextEntity(after),
-          entityInfo: entity => this.ai.context.observations.info(entity),
-        } }),
+      loadMap: () => this.library.loadMap(this.goalWorld()),
       userCommand: (client, command) => {
         const actor = host.actor(client);
         if (actor === null) throw new Error(`Bot command has no admitted shared actor for client ${client}`);
@@ -91,6 +92,45 @@ export class SourceBotDirector {
       allocateClient: () => host.allocateClient(), setupClient: (client, settings, restart) => this.ai.setupClient(client, settings, restart),
       shutdownClient: (client, restart) => { this.ai.shutdownClient(client, restart); const actor = host.actor(client); if (actor !== null) this.sequences.delete(actor); },
     });
+  }
+
+  private goalWorld(): GoalWorld {
+    const { host } = this.options, game = host.game;
+    return { bspEntities: this.bspEntities, navigation: this.navigation,
+      ...(game.pickups === null ? {} : { sourcePickups: this.sourcePickupGoals(game) }),
+      pointArea: origin => this.navigation.pointArea(origin), host: {
+        trace: (start, end, bounds, passEntity, mask) => game.world.trace({ start, end, passEntityNum: passEntity, mask,
+          shape: bounds === null ? { kind: "point" } : { kind: "box", mins: bounds.min, maxs: bounds.max } }),
+        pointContents: point => host.pointContents(point), nextEntity: after => this.ai.context.observations.nextEntity(after),
+        entityInfo: entity => this.ai.context.observations.info(entity),
+      } };
+  }
+
+  captureSaveState() {
+    const orchestration = this.checkpointOrchestration(), assets = this.options.files.provenance?.();
+    if (assets === undefined) throw new Error("Exact bot persistence requires complete mounted asset provenance");
+    const memory = this.library.memory.checkpoint();
+    return { version: 1, assets, memory: memory.image, bsp: this.bspEntities.checkpoint(memory),
+      library: this.library.captureSaveState(memory), ai: this.ai.captureSaveState(), catalog: this.catalog.captureSaveState(), orchestration };
+  }
+  restoreSaveState(value: unknown, resolveActor: (saved: SavedActorId) => import("../../contracts/identity.ts").ActorId,
+    resolveOwned: (saved: SavedActorId) => OwnedActor | null,
+    edge: (client: number, id: number) => import("../navigation/types.ts").NavigationEdge | null,
+    remapObservation: (number: number, generation: number) => { readonly number: number; readonly generation: number }): void {
+    if (this.loaded || this.closed || this.options.restoring !== true) throw new Error("Bot director restoration requires an inert constructor");
+    const reader = new SaveReader(value, "bot.director"); reader.field("version").literal(1);
+    const assets = this.options.files.provenance?.();
+    if (assets === undefined || reader.field("assets").string() !== assets) throw new Error("Saved bot assets differ from mounted bot files");
+    reader.field("library").field("initialized").literal(true);
+    reader.field("bsp").field("loaded").literal(true);
+    if (!this.navigation.ready) throw new Error("Saved bot director requires completed selected navigation");
+    const memory = this.library.memory.restore(reader.field("memory").value);
+    this.bspEntities.restore(reader.field("bsp").value, memory);
+    this.library.restoreSaveState(reader.field("library").value, memory, this.goalWorld(), resolveActor, edge);
+    this.ai.restoreSaveState(reader.field("ai").value, remapObservation);
+    this.catalog.restoreSaveState(reader.field("catalog").value);
+    this.loaded = true;
+    this.restoreOrchestration(reader.field("orchestration").value, resolveOwned);
   }
 
   private sourcePickupGoals(game: SourceBotGame): SourcePickupGoals {
@@ -126,10 +166,38 @@ export class SourceBotDirector {
 
   /** Called once by the session's source frame phase; it never runs actor physics itself. */
   frame(milliseconds: number): readonly ActorCommand[] {
-    if (!this.loaded || this.closed) throw new Error("Bot commands require a live loaded director");
+    if (!this.loaded || this.closed || this.running) throw new Error("Bot commands require a live idle director");
     if (this.generated.length !== 0) throw new Error("Bot command output from the previous source frame was not drained");
-    this.ai.startFrame(milliseconds);
-    return this.generated.splice(0);
+    this.running = true;
+    try { this.ai.startFrame(milliseconds); return this.generated.splice(0); }
+    finally { this.running = false; }
+  }
+  checkpointOrchestration(): SourceBotDirectorOrchestration {
+    if (!this.loaded || this.closed || this.running || this.generated.length !== 0) throw new Error("Bot director checkpoint requires a completed frame in a live map");
+    return { version: 1, sequences: [...this.sequences].map(([actor, next]) => ({
+      actor: { slot: actor.id.slot, generation: actor.id.generation }, owner: actor.owner, next,
+    })) };
+  }
+  /** Call after restoring the child owners and transport; this never initializes them. */
+  restoreOrchestration(value: unknown, resolve: (actor: SavedActorId) => OwnedActor | null): void {
+    const reader = new SaveReader(value, "bot.director.orchestration"), image = { version: reader.field("version").literal(1),
+      sequences: reader.field("sequences").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, owner: namespaced(entry.field("owner")), next: entry.field("next").integer(0) })) };
+    if (!this.loaded || this.closed || this.generated.length !== 0) throw new Error("Restore bot director orchestration only after its child owners are live");
+    if (image.version !== 1) throw new Error("Unsupported bot director orchestration version");
+    const sequences = new Map<OwnedActor, number>();
+    for (const entry of image.sequences) {
+      if (!Number.isSafeInteger(entry.next) || entry.next < 0) throw new Error("Invalid saved bot command sequence");
+      const actor = resolve(entry.actor);
+      if (actor === null || actor.owner !== entry.owner || sequences.has(actor)) throw new Error("Saved bot sequence has an invalid or duplicate actor");
+      let connected = false;
+      for (let client = 0; client < this.options.host.game.maxClients; client++) {
+        if (this.options.host.actor(client) === actor) { connected = true; break; }
+      }
+      if (!connected) throw new Error("Saved bot command sequence has no restored transport connection");
+      sequences.set(actor, entry.next);
+    }
+    this.sequences.clear();
+    for (const [actor, next] of sequences) this.sequences.set(actor, next);
   }
   connect(client: number, restart: boolean): boolean { return this.catalog.connect(client, restart); }
   shutdownClient(client: number, restart: boolean): void { this.catalog.shutdownClient(client, restart); }

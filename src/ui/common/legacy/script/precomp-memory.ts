@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
  * Token and define ownership from Quake III Arena botlib/l_precomp.c/h.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -16,6 +18,13 @@ export class PrecompToken {
     this.token = new SourceTokenMemory(() => allocation.bytes);
   }
 
+  captureSaveState() { return { token: this.token.captureSaveState(), context: { ...this.context }, unsupported: this.unsupported ?? null }; }
+  restoreSaveState(value: unknown, verifyBytes = false): void {
+    const reader = new SaveReader(value, "script.precompToken"), context = reader.field("context");
+    this.token.restoreSaveState(reader.field("token").value, verifyBytes);
+    this.context = { path: context.field("path").string(), column: context.field("column").integer(0), leadingWhitespace: context.field("leadingWhitespace").string() };
+    this.unsupported = reader.field("unsupported").nullable(cell => cell.string()) ?? undefined;
+  }
   copyFrom(other: PrecompToken): void {
     this.token.copyFrom(other.token);
     this.context = other.context;
@@ -98,6 +107,29 @@ export class PrecompMemory {
 
   constructor(private readonly memory: ScriptMemory | undefined) {}
 
+  captureSaveState(capture: ScriptMemoryCapture) {
+    return { nextToken: this.nextToken, nextDefine: this.nextDefine,
+      tokens: [...this.tokens.values()].map(token => ({ id: token.id, allocation: capture.reference(token.allocation), state: token.captureSaveState() })),
+      defines: [...this.defines.values()].map(define => ({ id: define.id, allocation: capture.reference(define.allocation) })) };
+  }
+  restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
+    const reader = new SaveReader(value, "script.heap");
+    this.nextToken = reader.field("nextToken").integer(1); this.nextDefine = reader.field("nextDefine").integer(1);
+    this.tokens.clear(); this.defines.clear();
+    for (const entry of reader.field("tokens").list(cell => cell)) {
+      const id = entry.field("id").integer(1);
+      if (id >= this.nextToken || this.tokens.has(id)) entry.fail("invalid token identity");
+      const token = new PrecompToken(id, restore.allocation(entry.field("allocation").integer(0)));
+      token.restoreSaveState(entry.field("state").value, true); this.tokens.set(id, token);
+    }
+    for (const entry of reader.field("defines").list(cell => cell)) {
+      const id = entry.field("id").integer(1);
+      if (id >= this.nextDefine || this.defines.has(id)) entry.fail("invalid define identity");
+      const allocation = restore.allocation(entry.field("allocation").integer(0));
+      if (allocation.bytes.length < SOURCE_DEFINE_BYTES + 1) entry.fail("invalid define extent");
+      this.defines.set(id, new PrecompDefine(id, allocation, this));
+    }
+  }
   copyToken(token: PrecompToken): PrecompToken {
     const copied = new PrecompToken(this.nextToken++, this.allocate(SOURCE_TOKEN_BYTES));
     copied.copyFrom(token);

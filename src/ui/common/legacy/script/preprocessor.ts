@@ -1,3 +1,6 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import { readScriptDiagnostic } from "./lexer.ts";
+import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
 /*
  * Source preprocessor translated from Quake III Arena botlib/l_precomp.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -149,6 +152,11 @@ class MacroTable {
         this.entries.delete(id);
       }
     }
+  }
+  captureSaveState() { return [...this.entries]; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "script.macros"); this.entries.clear();
+    for (const id of reader.list(cell => cell.integer(1))) { if (this.entries.has(id)) reader.fail("duplicate macro identity"); this.memory.define(id); this.entries.add(id); }
   }
   private hash(name: string): number {
     let hash = 0;
@@ -616,9 +624,9 @@ class PreprocessorEngine {
   private disposed = false;
   private readingAsync = false;
 
-  constructor(root: ScriptSource, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions,
-    private readonly lifetime: "source" | "global" = "source", heap?: PrecompMemory) {
-    if (root.path.length === 0) throw new RangeError("root source path cannot be empty");
+  constructor(root: ScriptSource | null, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions,
+    private readonly lifetime: "source" | "global" = "source", heap?: PrecompMemory, saved?: { readonly value: unknown; readonly restore: ScriptMemoryRestore }) {
+    if (root !== null && root.path.length === 0) throw new RangeError("root source path cannot be empty");
     this.resolver = { resolve: request => this.invokeCallback(() => resolver.resolve(request)) };
     const now = options.now ?? (() => new Date());
     this.now = () => this.invokeCallback(now);
@@ -636,6 +644,33 @@ class PreprocessorEngine {
       defines: positiveInteger(options.maxDefines, DEFAULT_DIAGNOSTIC_LIMIT, "maxDefines"),
       expressionTokens: positiveInteger(options.maxExpressionTokens, DEFAULT_DIAGNOSTIC_LIMIT, "maxExpressionTokens"),
     });
+    if (saved !== undefined) {
+      const reader = new SaveReader(saved.value, "script.preprocessor"), limits = reader.field("limits");
+      this.limits = {
+        includeDepth: limits.field("includeDepth").integer(1),
+        macroExpansions: limits.field("macroExpansions").integer(1),
+        queuedTokens: limits.field("queuedTokens").integer(1),
+        outputTokens: limits.field("outputTokens").integer(1),
+        sourceTokens: limits.field("sourceTokens").integer(1),
+        defines: limits.field("defines").integer(1),
+        expressionTokens: limits.field("expressionTokens").integer(1),
+      };
+      this.heap.restoreSaveState(reader.field("heap").value, saved.restore);
+      this.source = SourceRecord.restoreSaveState(reader.field("source").value, this.memory, saved.restore);
+      this.macros = new MacroTable(this.source, this.heap); this.macros.restoreSaveState(reader.field("macros").value);
+      this.nextFrame = reader.field("nextFrame").integer(1);
+      for (const cell of reader.field("frames").list(cell => cell)) {
+        const id = cell.field("id").integer(1); if (id >= this.nextFrame || this.frames.has(id)) cell.fail("invalid frame identity");
+        const lexer = ScriptLexer.restoreSaveState(cell.field("lexer").value, this.memory, saved.restore, diagnostic => this.recordDiagnostic(diagnostic));
+        this.frames.set(id, { id, lexer, storage: lexer.sourceStorage, diagnosticNext: cell.field("diagnosticNext").integer(0), tokenCount: cell.field("tokenCount").integer(0) });
+      }
+      this.rootFrame = this.frame(reader.field("rootFrame").integer(1));
+      this.cursorToken.restoreSaveState(reader.field("cursorToken").value); this.output.restoreSaveState(reader.field("output").value);
+      this.expansionCount = reader.field("expansionCount").integer(0); this.outputCount = reader.field("outputCount").integer(0);
+      this.reported.push(...reader.field("reported").list(readScriptDiagnostic));
+      return;
+    }
+    if (root === null) throw new Error("Fresh source construction requires a root");
     this.rootFrame = this.createFrame(root);
     this.setNextFrame(this.rootFrame, 0);
     this.source = new SourceRecord(root.path, this.rootFrame.id, this.memory, lifetime === "global" ? "stack" : "heap");
@@ -644,6 +679,19 @@ class PreprocessorEngine {
     for (const macro of options.globalDefines?.definitions ?? []) this.macros.prepend(this.heap.copyDefine(macro));
     if (options.installBuiltins === true) this.installBuiltins();
     this.installInitialDefines(options.initialDefines ?? []);
+  }
+
+  captureSaveState(capture: ScriptMemoryCapture) {
+    this.requireLive();
+    if (this.readingAsync) throw new Error("Cannot checkpoint an in-flight asynchronous script read");
+    return { lifetime: this.lifetime, limits: { ...this.limits }, heap: this.heap.captureSaveState(capture), source: this.source.captureSaveState(capture), macros: this.macros.captureSaveState(),
+      nextFrame: this.nextFrame, rootFrame: this.rootFrame.id, frames: [...this.frames.values()].map(frame => ({ id: frame.id, lexer: frame.lexer.captureSaveState(capture), diagnosticNext: frame.diagnosticNext, tokenCount: frame.tokenCount })),
+      cursorToken: this.cursorToken.captureSaveState(), output: this.output.captureSaveState(), expansionCount: this.expansionCount, outputCount: this.outputCount,
+      reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) };
+  }
+  static restoreSaveState(value: unknown, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions, restore: ScriptMemoryRestore): PreprocessorEngine {
+    const lifetime = new SaveReader(value, "script.preprocessor").field("lifetime").choice("source", "global");
+    return new PreprocessorEngine(null, resolver, options, lifetime, undefined, { value, restore });
   }
 
   get diagnostics(): readonly ScriptDiagnostic[] {
@@ -1709,6 +1757,13 @@ export class ScriptGlobalDefines {
     this.heap = new PrecompMemory(memory);
   }
 
+  captureSaveState(capture: ScriptMemoryCapture) { return { first: this.first, heap: this.heap.captureSaveState(capture), reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) }; }
+  restoreSaveState(value: unknown, restore: ScriptMemoryRestore): void {
+    const reader = new SaveReader(value, "script.globals");
+    this.heap.restoreSaveState(reader.field("heap").value, restore); this.first = reader.field("first").integer(0);
+    this.reported.splice(0, this.reported.length, ...reader.field("reported").list(readScriptDiagnostic));
+  }
+
   get diagnostics(): readonly ScriptDiagnostic[] { return Object.freeze([...this.reported]); }
 
   add(text: string): boolean {
@@ -1785,6 +1840,11 @@ export class ScriptSourceReader {
     options: ScriptPreprocessorOptions = {},
   ): ScriptSourceReader {
     return new ScriptSourceReader(new PreprocessorEngine(root, resolver, options));
+  }
+
+  captureSaveState(capture: ScriptMemoryCapture) { return this.engine.captureSaveState(capture); }
+  static restoreSaveState(value: unknown, resolver: AsyncIncludeResolver, options: ScriptPreprocessorOptions, restore: ScriptMemoryRestore): ScriptSourceReader {
+    return new ScriptSourceReader(PreprocessorEngine.restoreSaveState(value, resolver, options, restore));
   }
 
   next(): ScriptTokenRecord | undefined { return this.engine.nextRecord(); }

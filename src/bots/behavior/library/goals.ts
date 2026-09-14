@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readScriptDiagnostic } from "../../../ui/common/legacy/script/lexer.ts";
 /*
  * Goal AI translated from id Software's code/botlib/be_ai_goal.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -47,6 +49,7 @@ export interface ItemInfo {
 }
 
 export interface ItemConfig {
+  readonly allocation: BotMemoryAllocation;
   readonly path: string;
   readonly items: readonly ItemInfo[];
   readonly diagnostics: readonly ScriptDiagnostic[];
@@ -287,7 +290,7 @@ function parseItemConfig(preprocessor: ItemConfigTokens, path: string, maximum: 
   }
   const diagnostics = [...preprocessor.diagnostics];
   if (items.length === 0) diagnostics.push({ severity: "warning", message: "no item info loaded", location: { path, line: 1, column: 1 } });
-  return Object.freeze({ path, items: Object.freeze(items), diagnostics: Object.freeze(diagnostics), free: () => memory.free(allocation) });
+  return Object.freeze({ allocation, path, items: Object.freeze(items), diagnostics: Object.freeze(diagnostics), free: () => memory.free(allocation) });
 }
 
 export interface GoalDiagnostic {
@@ -642,6 +645,97 @@ export class BotGoalLibrary {
   private readonly mapWords = new DataView(new ArrayBuffer(20));
   private readonly infoEntities = new Map<number, MapLocation>();
   private nextInfoPointer = 1;
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { generation: this.generation, setupRevision: this.setupRevision, mapRevision: this.mapRevision,
+      configuredGameType: this.configuredGameType, hasWorld: this.world !== null, reported: structuredClone(this.reported),
+      nextId: this.references.nextId, configs: [...this.references.configs].map(([pointer, config]) => ({ pointer, config: this.options.weightStore.reference(config) })),
+      indexes: [...this.references.indexes].map(([pointer, allocation]) => ({ pointer, allocation: memory.reference(allocation) })),
+      states: [...this.states].map(([handle, state]) => ({ handle, allocation: memory.reference(state.allocation) })),
+      config: this.config === null ? null : { allocation: memory.reference(this.config.allocation), path: this.config.path, diagnostics: structuredClone(this.config.diagnostics) },
+      nextSourceGoal: this.nextSourceGoal, sourceGoals: [...this.sourceGoals].map(([number, binding]) => ({ number,
+        actor: { slot: binding.actor.slot, generation: binding.actor.generation }, name: binding.name, goal: copyGoal(binding.goal) })),
+      levelItemHeap: this.levelItemHeap === null ? null : memory.reference(this.levelItemHeap), mapWords: [...new Uint8Array(this.mapWords.buffer)],
+      nextInfoPointer: this.nextInfoPointer, infoEntities: [...this.infoEntities].map(([pointer, entity]) => ({ pointer,
+        allocation: memory.reference(entity.allocation), kind: entity instanceof CampSpot ? "camp" : "location" })) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore,
+    world: GoalWorld | null, actor: (saved: import("../../../contracts/session.ts").SavedActorId) => ActorId): void {
+    const reader = new SaveReader(value, "bot.goals");
+    const vector = (reader: SaveReader) => ({ x: reader.field("x").number(), y: reader.field("y").number(), z: reader.field("z").number() });
+    const image = { generation: reader.field("generation").integer(0), setupRevision: reader.field("setupRevision").integer(0), mapRevision: reader.field("mapRevision").integer(0),
+      configuredGameType: reader.field("configuredGameType").integer(), hasWorld: reader.field("hasWorld").boolean(),
+      reported: reader.field("reported").list(entry => ({ severity: entry.field("severity").choice("message", "warning", "error", "fatal"), message: entry.field("message").string() })),
+      nextId: reader.field("nextId").integer(1), configs: reader.field("configs").list(entry => ({ pointer: entry.field("pointer").integer(1), config: entry.field("config").integer(0) })),
+      indexes: reader.field("indexes").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0) })),
+      states: reader.field("states").list(entry => ({ handle: entry.field("handle").integer(1), allocation: entry.field("allocation").integer(0) })),
+      config: reader.field("config").nullable(entry => ({ allocation: entry.field("allocation").integer(0), path: entry.field("path").string(), diagnostics: entry.field("diagnostics").list(readScriptDiagnostic) })),
+      nextSourceGoal: reader.field("nextSourceGoal").integer(0), sourceGoals: reader.field("sourceGoals").list(entry => {
+        const goal = entry.field("goal");
+        return { number: entry.field("number").integer(), actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, name: entry.field("name").string(),
+          goal: { origin: vector(goal.field("origin")), mins: vector(goal.field("mins")), maxs: vector(goal.field("maxs")), area: goal.field("area").integer(), entity: goal.field("entity").integer(),
+            number: goal.field("number").integer(), flags: goal.field("flags").integer(), itemInfo: goal.field("itemInfo").integer() } };
+      }), levelItemHeap: reader.field("levelItemHeap").nullable(entry => entry.integer(0)), mapWords: reader.field("mapWords").list(entry => entry.integer(0)),
+      nextInfoPointer: reader.field("nextInfoPointer").integer(1), infoEntities: reader.field("infoEntities").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0), kind: entry.field("kind").choice("camp", "location") })) };
+    if (this.states.size !== 0 || this.config !== null || this.world !== null || image.hasWorld !== (world !== null)
+      || image.mapWords.length !== 20 || image.mapWords.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)
+      || ![image.generation, image.setupRevision, image.mapRevision].every(value => Number.isSafeInteger(value) && value >= 0)
+      || ![image.nextId, image.nextInfoPointer].every(value => Number.isSafeInteger(value) && value >= 1 && value <= 0x100000000)) throw new Error("Invalid goal library restoration");
+    const pointers = new Set<number>();
+    const admit = (pointer: number): void => {
+      if (!Number.isSafeInteger(pointer) || pointer < 1 || pointer >= image.nextId || pointers.has(pointer)) throw new Error("Invalid saved goal pointer");
+      pointers.add(pointer);
+    };
+    for (const entry of image.configs) {
+      admit(entry.pointer); const config = this.options.weightStore.resolve(entry.config);
+      if (this.references.configIds.has(config)) throw new Error("Duplicate saved goal weight identity");
+      this.references.configs.set(entry.pointer, config); this.references.configIds.set(config, entry.pointer);
+    }
+    for (const entry of image.indexes) { admit(entry.pointer); this.references.indexes.set(entry.pointer, memory.allocation(entry.allocation)); }
+    for (const entry of image.states) {
+      if (!Number.isSafeInteger(entry.handle) || entry.handle < 1 || entry.handle > MAX_GOAL_STATES || this.states.has(entry.handle)) throw new Error("Invalid saved goal state handle");
+      const allocation = memory.allocation(entry.allocation);
+      if (allocation.bytes.length !== GOAL_STATE_BYTES) throw new Error("Saved goal state allocation size mismatch");
+      const state = new GoalState(allocation, this.references);
+      void state.weightConfig; void state.weightIndexes;
+      if (state.stackTop < 0 || state.stackTop > MAX_GOAL_STACK) throw new Error("Saved goal stack exceeds capacity");
+      this.states.set(entry.handle, state);
+    }
+    if (image.config !== null) {
+      const allocation = memory.allocation(image.config.allocation), bytes = allocation.bytes;
+      if (bytes.length < ITEM_CONFIG_BYTES) throw new Error("Saved item configuration is truncated");
+      const count = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(0, true);
+      if (count < 0 || ITEM_CONFIG_BYTES + count * ITEM_INFO_BYTES > bytes.length) throw new Error("Saved item count exceeds allocation");
+      this.config = { allocation, path: image.config.path,
+        items: Array.from({ length: count }, (_, index) => new ItemConfigCell(allocation, ITEM_CONFIG_BYTES + index * ITEM_INFO_BYTES)),
+        diagnostics: structuredClone(image.config.diagnostics), free: () => this.memory.free(allocation) };
+    }
+    for (const entry of image.sourceGoals) {
+      if (!isSourceGoalNumber(entry.number) || this.sourceGoals.has(entry.number)) throw new Error("Invalid saved source pickup goal identity");
+      this.sourceGoals.set(entry.number, { actor: actor(entry.actor), name: entry.name, goal: copyGoal(entry.goal) });
+    }
+    this.levelItemHeap = image.levelItemHeap === null ? null : memory.allocation(image.levelItemHeap);
+    if (this.levelItemHeap !== null && this.levelItemHeap.bytes.length % LEVEL_ITEM_BYTES !== 0) throw new Error("Saved level item heap size mismatch");
+    for (const entry of image.infoEntities) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || entry.pointer >= image.nextInfoPointer || this.infoEntities.has(entry.pointer)) throw new Error("Invalid saved goal info pointer");
+      const allocation = memory.allocation(entry.allocation);
+      if (entry.kind !== "camp" && entry.kind !== "location" || allocation.bytes.length !== (entry.kind === "camp" ? CAMP_SPOT_BYTES : MAP_LOCATION_BYTES)) throw new Error("Saved goal info allocation size mismatch");
+      this.infoEntities.set(entry.pointer, entry.kind === "camp" ? new CampSpot(allocation, entry.pointer) : new MapLocation(allocation, entry.pointer));
+    }
+    new Uint8Array(this.mapWords.buffer).set(image.mapWords);
+    this.references.nextId = image.nextId; this.nextInfoPointer = image.nextInfoPointer; this.nextSourceGoal = image.nextSourceGoal;
+    this.generation = image.generation; this.setupRevision = image.setupRevision; this.mapRevision = image.mapRevision;
+    this.configuredGameType = image.configuredGameType; this.world = world; this.reported.push(...structuredClone(image.reported));
+    const visit = (start: number, next: (pointer: number) => number): void => {
+      const seen = new Set<number>();
+      for (let pointer = start; pointer !== 0; pointer = next(pointer)) {
+        if (seen.has(pointer)) throw new Error("Saved goal list has a cycle");
+        seen.add(pointer);
+      }
+    };
+    visit(this.levelHead, pointer => this.levelItem(pointer).next); visit(this.freeLevelHead, pointer => this.levelItem(pointer).next);
+    visit(this.locationHead, pointer => this.infoEntity(pointer).next); visit(this.campHead, pointer => this.infoEntity(pointer).next);
+  }
 
   private get levelHead(): number { return this.mapWords.getUint32(0, true); }
   private set levelHead(value: number) { this.mapWords.setUint32(0, value, true); }

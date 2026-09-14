@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // botlib/l_memory.c release32 allocation IDs and heap/hunk lifetime.
 
@@ -14,6 +15,15 @@ export interface BotMemoryHost {
   availableMemory(): number;
 }
 export interface BotMemoryOptions { readonly host?: BotMemoryHost; readonly debug?: BotMemoryDebugProfile }
+export interface BotMemoryCheckpoint {
+  readonly version: 1;
+  readonly allocations: readonly { readonly kind: "heap" | "hunk"; readonly bytes: Uint8Array; readonly provenance: BotMemoryProvenance | null }[];
+}
+export interface BotMemoryCapture {
+  readonly image: BotMemoryCheckpoint;
+  reference(allocation: BotMemoryAllocation): number;
+}
+export interface BotMemoryRestore { allocation(reference: number): BotMemoryAllocation }
 interface AllocationRecord {
   readonly backing: BotMemoryAllocation;
   readonly kind: "heap" | "hunk";
@@ -29,6 +39,41 @@ export class BotMemory {
   private readonly live = new Map<BotMemoryAllocation, AllocationRecord>();
   private disposed = false;
   constructor(private readonly options: BotMemoryOptions = {}) {}
+
+  checkpoint(): BotMemoryCapture {
+    if (this.disposed) throw new Error("Cannot checkpoint disposed bot memory");
+    const references = new Map<BotMemoryAllocation, number>();
+    const allocations = [...this.live].map(([allocation, record], index) => {
+      references.set(allocation, index);
+      return { kind: record.kind, bytes: allocation.bytes.slice(), provenance: record.provenance === null ? null : { ...record.provenance } };
+    });
+    return { image: { version: 1, allocations }, reference: allocation => {
+      const reference = references.get(allocation);
+      if (reference === undefined) throw new Error("Bot checkpoint references an unowned or freed allocation");
+      return reference;
+    } };
+  }
+
+  restore(value: unknown): BotMemoryRestore {
+    const reader = new SaveReader(value, "bot.memory"), image = { version: reader.field("version").literal(1),
+      allocations: reader.field("allocations").list(entry => ({ kind: entry.field("kind").choice("heap", "hunk"),
+        bytes: entry.field("bytes").bytes(), provenance: entry.field("provenance").nullable(source => ({
+          file: source.field("file").string(), line: source.field("line").integer(0), label: source.field("label").string() })) })) };
+    if (this.disposed || this.live.size !== 0 || image.version !== 1) throw new Error("Bot memory restore requires a fresh owner and supported image");
+    for (const entry of image.allocations) {
+      if ((entry.kind !== "heap" && entry.kind !== "hunk") || entry.bytes.length > 0x7fffffff - prefixBytes) throw new Error("Invalid saved bot allocation");
+    }
+    const allocations = image.allocations.map(entry => {
+      const allocation = this.allocate(entry.bytes.length, entry.kind, false, entry.provenance === null ? null : { ...entry.provenance });
+      allocation.bytes.set(entry.bytes);
+      return allocation;
+    });
+    return { allocation: reference => {
+      const allocation = Number.isSafeInteger(reference) && reference >= 0 ? allocations[reference] : undefined;
+      if (allocation === undefined) throw new Error("Saved bot allocation reference is invalid");
+      return allocation;
+    } };
+  }
 
   allocate(size: number, kind: "heap" | "hunk", clear: boolean, provenance: BotMemoryProvenance | null = null): BotMemoryAllocation {
     if (this.disposed) throw new Error("Bot memory owner is disposed");

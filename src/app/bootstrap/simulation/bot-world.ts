@@ -1,3 +1,6 @@
+import type { SavedActorId } from "../../../contracts/session.ts";
+import { readSavedActor, savedActorId } from "../../../persistence/save-image.ts";
+import { SaveReader } from "../../../persistence/value.ts";
 import { BotInventory } from "../../../bots/behavior/q3/ai-definitions.ts";
 import { observeQ1Supply, previewQ1Supply } from "../../../content/q1/foundation/pickups.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
@@ -11,6 +14,7 @@ import { createBotArsenalBinding } from "./bot-arsenal.ts";
 import type { SharedSimulation } from "./runtime.ts";
 
 interface Options {
+  readonly restoring?: boolean;
   readonly simulation: SharedSimulation;
   readonly cvars: CvarRegistry;
   actor(client: number): ActorId | null;
@@ -51,9 +55,11 @@ export function createSharedBotWorld(options: Options) {
   const knowledge = createBotArsenalBinding(simulation, client => actorForId(client));
   if (knowledge === null) throw new Error("Shared bot arsenal binding is unavailable");
   const cvars = options.cvars;
-  for (const [name, value] of Object.entries({ sv_maxclients: String(simulation.options.maxClients), g_gametype: "0", mapname: mapName,
+  if (!options.restoring) {
+    for (const [name, value] of Object.entries({ sv_maxclients: String(simulation.options.maxClients), g_gametype: "0", mapname: mapName,
     sv_mapname: mapName, g_spSkill: "2", bot_enable: "1", bot_minplayers: "0", dedicated: "1", g_gravity: String(simulation.physics.gravity) })) cvars.register(name, value);
-  cvars.set("mapname", mapName, true); cvars.set("sv_mapname", mapName, true);
+    cvars.set("mapname", mapName, true); cvars.set("sv_mapname", mapName, true);
+  }
   const ids = new Map<ActorId, number>(), actors = new Map<number, ActorId>(), userinfos = new Map<number, string>(), strings = new Map<number, string>(), models = new Map<string, number>();
   let nextEntity = 64, nextGeneration = 1;
   const freeIds: number[] = [], generations = new Map<number, number>(), begun = new Set<number>();
@@ -193,6 +199,84 @@ export function createSharedBotWorld(options: Options) {
     },
     clientBegin: client => { begun.add(client); options.begin(client); },
   };
-  refresh();
-  return { game, knowledge, entityId, actorForId, refresh };
+  if (!options.restoring) refresh();
+  return { game, knowledge, entityId, actorForId, refresh,
+    checkpoint() {
+      return { version: 1, source: source.kind, memory: game.memory.captureSaveState(), nextEntity, nextGeneration,
+        actors: Array.from(ids, ([actor, id]) => ({ actor: savedActorId(actor), id })),
+        freeIds: [...freeIds], generations: Array.from(generations, ([id, generation]) => ({ id, generation })),
+        begun: [...begun], userinfos: Array.from(userinfos, ([id, value]) => ({ id, value })),
+        strings: Array.from(strings, ([id, value]) => ({ id, value })), models: Array.from(models, ([name, id]) => ({ name, id })) };
+    },
+    restoreCheckpoint(value: unknown, actor: (saved: SavedActorId) => ActorId): void {
+      const reader = new SaveReader(value, "sharedBotWorld");
+      reader.field("version").literal(1); reader.field("source").literal(source.kind);
+      const restoredMemory = new GameMemory(() => 0, options.print);
+      restoredMemory.restoreSaveState(reader.field("memory").value);
+      const entityLimit = reader.field("nextEntity").integer(64), generationLimit = reader.field("nextGeneration").integer(1);
+      if (entityLimit > 1022) reader.field("nextEntity").fail("observation entity capacity exceeded");
+      const readEntity = (entry: SaveReader): number => {
+        const id = entry.integer(64);
+        if (id >= entityLimit) entry.fail("observation entity outside allocated range");
+        return id;
+      };
+      const restoredIds = new Map<ActorId, number>(), restoredActors = new Map<number, ActorId>(), seenActors = new Set<string>();
+      reader.field("actors").list(entry => {
+        const id = readEntity(entry.field("id")), saved = readSavedActor(entry.field("actor")), key = `${saved.slot}:${saved.generation}`;
+        if (restoredActors.has(id) || seenActors.has(key)) entry.fail("duplicate observation entity or actor");
+        const resolved = actor(saved);
+        if ([...restoredIds.keys()].some(existing => existing.equals(resolved))) entry.fail("duplicate remapped observation actor");
+        seenActors.add(key); restoredIds.set(resolved, id); restoredActors.set(id, resolved);
+      });
+      const restoredFree: number[] = [], free = new Set<number>();
+      reader.field("freeIds").list(entry => {
+        const id = readEntity(entry);
+        if (free.has(id) || restoredActors.has(id)) entry.fail("duplicate or active free observation entity");
+        free.add(id); restoredFree.push(id);
+      });
+      if (restoredActors.size + free.size !== entityLimit - 64) reader.fail("allocated observation entities are missing");
+      const restoredGenerations = new Map<number, number>(), usedGenerations = new Set<number>();
+      reader.field("generations").list(entry => {
+        const id = readEntity(entry.field("id")), generation = entry.field("generation").integer(1);
+        if (generation >= generationLimit || restoredGenerations.has(id) || usedGenerations.has(generation)) entry.fail("invalid or duplicate observation generation");
+        usedGenerations.add(generation); restoredGenerations.set(id, generation);
+      });
+      if (restoredGenerations.size !== entityLimit - 64) reader.fail("observation generations are missing");
+      const restoredBegun = new Set<number>();
+      reader.field("begun").list(entry => {
+        const id = entry.integer(0);
+        if (id >= simulation.options.maxClients || restoredBegun.has(id)) entry.fail("invalid or duplicate begun client");
+        restoredBegun.add(id);
+      });
+      const readStrings = (name: string): Map<number, string> => {
+        const result = new Map<number, string>();
+        reader.field(name).list(entry => {
+          const id = entry.field("id").integer(0);
+          if (result.has(id)) entry.fail("duplicate string index");
+          result.set(id, entry.field("value").string());
+        });
+        return result;
+      };
+      const restoredUserinfos = readStrings("userinfos"), restoredStrings = readStrings("strings");
+      const restoredModels = new Map<string, number>(), modelIds = new Set<number>();
+      reader.field("models").list(entry => {
+        const name = entry.field("name").string(), id = entry.field("id").integer(simulation.options.world.models.length);
+        if (name === "" || name.startsWith("*") || restoredModels.has(name) || modelIds.has(id)) entry.fail("invalid or duplicate model index");
+        restoredModels.set(name, id); modelIds.add(id);
+      });
+      for (let index = 0; index < restoredModels.size; index++) {
+        if (!modelIds.has(simulation.options.world.models.length + index)) reader.field("models").fail("model indices are not contiguous");
+      }
+      game.memory.restoreSaveState(restoredMemory.captureSaveState());
+      ids.clear(); for (const [actor, id] of restoredIds) ids.set(actor, id);
+      actors.clear(); for (const [id, actor] of restoredActors) actors.set(id, actor);
+      freeIds.splice(0, freeIds.length, ...restoredFree);
+      generations.clear(); for (const [id, generation] of restoredGenerations) generations.set(id, generation);
+      begun.clear(); for (const id of restoredBegun) begun.add(id);
+      userinfos.clear(); for (const [id, value] of restoredUserinfos) userinfos.set(id, value);
+      strings.clear(); for (const [id, value] of restoredStrings) strings.set(id, value);
+      models.clear(); for (const [name, id] of restoredModels) models.set(name, id);
+      nextEntity = entityLimit; nextGeneration = generationLimit;
+    },
+  };
 }

@@ -35,6 +35,16 @@ export class GameMemoryAllocation {
 
 /** Module-owned static storage. G_InitMemory rewinds it without clearing former bytes. */
 export class GameMemory {
+  captureAllocation(allocation: GameMemoryAllocation) {
+    if (allocation.bytes.buffer !== this.pool.buffer) throw new Error("Game allocation belongs to another pool");
+    return { offset: allocation.bytes.byteOffset - this.pool.byteOffset, length: allocation.bytes.byteLength };
+  }
+  restoreAllocation(value: unknown): GameMemoryAllocation {
+    const reader = new SaveReader(value, "q3.memory.pointer");
+    const offset = reader.field("offset").integer(0), length = reader.field("length").integer(0);
+    if (offset > this.pool.length || length > this.pool.length - offset) reader.fail("allocation outside game pool");
+    return new GameMemoryAllocation(this.pool.subarray(offset, offset + length));
+  }
   captureSaveState() { return { pool: this.pool.slice(), allocPoint: this.allocPoint }; }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.memory"), bytes = reader.field("pool").bytes();

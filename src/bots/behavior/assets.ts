@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import type { MountedContent, OpenedResource } from "../../content/mounts/index.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 
@@ -7,6 +8,7 @@ export interface BotAssetResources { open(path: string): Promise<OpenedResource 
 export interface BotSourceFiles {
   read(path: string): Uint8Array | null;
   list(directory: string, extension: string): readonly string[];
+  provenance?(): string;
 }
 
 function key(path: string): string { return path.replaceAll("\\", "/").replace(/^\.\//, "").toLowerCase(); }
@@ -22,6 +24,17 @@ export class BotAssetFiles implements BotSourceFiles {
     this.files.set(normalized, bytes.slice());
   }
   read(path: string): Uint8Array | null { return this.files.get(key(path))?.slice() ?? null; }
+  provenance(): string {
+    const hash = createHash("sha256");
+    for (const path of this.paths) {
+      const bytes = this.files.get(key(path));
+      if (bytes === undefined) throw new Error("Bot asset provenance lost its mounted payload");
+      const name = new TextEncoder().encode(path), size = new Uint8Array(8), view = new DataView(size.buffer);
+      view.setUint32(0, name.length, true); view.setUint32(4, bytes.length, true);
+      hash.update(size); hash.update(name); hash.update(bytes);
+    }
+    return hash.digest("hex");
+  }
   list(directory: string, extension: string): readonly string[] {
     const prefix = key(directory).replace(/\/$/, "") + "/", suffix = extension.toLowerCase();
     const result: string[] = [];

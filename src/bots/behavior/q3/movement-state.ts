@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 // Port of id Software's botlib/be_ai_move.c state lifetime and game/be_ai_move.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { vec3 } from "../../../core/math.ts";
@@ -131,9 +132,10 @@ export class BotMoveState {
   readonly avoidReachTries: [number];
   readonly avoidSpots: readonly BotAvoidSpot[];
 
-  constructor(memory: BotMemory = new BotMemory()) {
+  constructor(memory: BotMemory = new BotMemory(), restored?: BotMemoryAllocation) {
     this.#memory = memory;
-    this.#allocation = { allocation: memory.allocate(MOVE_STATE_BYTES, "heap", true), data: null };
+    if (restored !== undefined && restored.bytes.length !== MOVE_STATE_BYTES) throw new Error("Saved bot move allocation size mismatch");
+    this.#allocation = { allocation: restored ?? memory.allocate(MOVE_STATE_BYTES, "heap", true), data: null };
     this.#origin = moveVector(this.#allocation, 0);
     this.#velocity = moveVector(this.#allocation, 12);
     this.#viewOffset = moveVector(this.#allocation, 24);
@@ -197,6 +199,10 @@ export class BotMoveState {
 
   free(): void { this.#memory.free(this.#allocation.allocation); }
 
+  checkpoint(memory: import("../library/memory.ts").BotMemoryCapture) {
+    return { allocation: memory.reference(this.#allocation.allocation), walkEdge: this.walkProgress?.edge.id ?? null };
+  }
+
   /** i386 source reads tries[1], the adjacent avoidspots[0].origin.x word.
    * Compatibility for that source layout, not defined universal C behavior. */
   nativeResetLastAvoidProbe(): number { return moveData(this.#allocation).getInt32(128, true); }
@@ -222,6 +228,43 @@ export class BotMoveStateStore {
   offhandGrapple: BotMoveVariable | null = null;
   grappleOnCommand: BotMoveVariable | null = null;
   grappleOffCommand: BotMoveVariable | null = null;
+
+  checkpoint(memory: import("../library/memory.ts").BotMemoryCapture, variables: import("../library/libvars.ts").BotLibVars) {
+    const reference = (variable: BotMoveVariable | null) => variable === null ? null : variables.reference(variable);
+    return { states: this.states.map(state => state === null ? null : state.checkpoint(memory)),
+      variables: { svMaxStep: reference(this.svMaxStep), svMaxBarrier: reference(this.svMaxBarrier), svGravity: reference(this.svGravity),
+        rocketLauncherIndex: reference(this.rocketLauncherIndex), bfgIndex: reference(this.bfgIndex), grappleIndex: reference(this.grappleIndex),
+        missileEntityType: reference(this.missileEntityType), offhandGrapple: reference(this.offhandGrapple),
+        grappleOnCommand: reference(this.grappleOnCommand), grappleOffCommand: reference(this.grappleOffCommand) } };
+  }
+  restore(value: unknown, memory: import("../library/memory.ts").BotMemoryRestore,
+    variables: import("../library/libvars.ts").BotLibVars, edge: (client: number, id: number) => NavigationEdge | null): void {
+    const reader = new SaveReader(value, "bot.movement"), refsReader = reader.field("variables");
+    const variable = (name: string) => refsReader.field(name).nullable(entry => entry.integer(1));
+    const image = { states: reader.field("states").list(entry => entry.nullable(state => ({ allocation: state.field("allocation").integer(0), walkEdge: state.field("walkEdge").nullable(edge => edge.integer(0)) }))),
+      variables: { svMaxStep: variable("svMaxStep"), svMaxBarrier: variable("svMaxBarrier"), svGravity: variable("svGravity"), rocketLauncherIndex: variable("rocketLauncherIndex"),
+        bfgIndex: variable("bfgIndex"), grappleIndex: variable("grappleIndex"), missileEntityType: variable("missileEntityType"), offhandGrapple: variable("offhandGrapple"),
+        grappleOnCommand: variable("grappleOnCommand"), grappleOffCommand: variable("grappleOffCommand") } };
+    if (this.states.some(state => state !== null) || image.states.length !== MAX_MOVE_STATES + 1 || image.states[0] !== null) throw new Error("Invalid bot move state restoration");
+    const states = image.states.map(saved => {
+      if (saved === null) return null;
+      const state = new BotMoveState(this.memory, memory.allocation(saved.allocation));
+      if (saved.walkEdge !== null) {
+        const restored = edge(state.client, saved.walkEdge);
+        if (restored === null) throw new Error("Saved bot movement references an unknown navigation edge");
+        state.walkProgress = { edge: restored, phase: "traverse" };
+      }
+      return state;
+    });
+    const resolve = (pointer: number | null) => pointer === null ? null : variables.resolve(pointer);
+    const saved = image.variables;
+    const refs = { svMaxStep: resolve(saved.svMaxStep), svMaxBarrier: resolve(saved.svMaxBarrier), svGravity: resolve(saved.svGravity),
+      rocketLauncherIndex: resolve(saved.rocketLauncherIndex), bfgIndex: resolve(saved.bfgIndex), grappleIndex: resolve(saved.grappleIndex),
+      missileEntityType: resolve(saved.missileEntityType), offhandGrapple: resolve(saved.offhandGrapple),
+      grappleOnCommand: resolve(saved.grappleOnCommand), grappleOffCommand: resolve(saved.grappleOffCommand) };
+    for (const [index, state] of states.entries()) this.states[index] = state;
+    Object.assign(this, refs);
+  }
 
   constructor(readonly host: BotMoveStateHost, private readonly memory: BotMemory = new BotMemory()) {}
   allocate(): number {

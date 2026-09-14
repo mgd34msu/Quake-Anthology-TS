@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Reusable chat AI translated from id Software's botlib/be_ai_chat.c and
  * game/be_ai_chat.h. Copyright (C) 1999-2005 Id Software, Inc.
@@ -12,7 +13,7 @@ import type { BotScriptReader } from "./script-sources.ts";
 import type { BotRandom } from "./weights.ts";
 import type { BotLog } from "./log.ts";
 import { BotMemory, type BotMemoryAllocation } from "./memory.ts";
-import { CHAT_ESCAPE, CHAT_MESSAGE_SIZE, ChatDataMemory, ChatDataParser, ChatInitial, InitialChatNotFoundError, chatTextEquals, type ChatMessage, type ChatTextSource, type InitialChat, type ChatMatchPiece, type ChatMatchTemplate, type ChatReply, type ChatReplyKey, type MatchTemplate, type RandomChatList, type ReplyChat, type SynonymGroup } from "./chat-data.ts";
+import { CHAT_ESCAPE, CHAT_MESSAGE_SIZE, ChatDataMemory, ChatDataParser, ChatInitial, InitialChatNotFoundError, chatTextEquals, type ChatMessage, type ChatTextSource, type InitialChat, type ChatMatchPiece, ChatMatchTemplate, ChatReply, type ChatReplyKey, type MatchTemplate, type RandomChatList, type ReplyChat, type SynonymGroup } from "./chat-data.ts";
 import type { StoredRandomChatList } from "./chat-data.ts";
 export type { ChatTextSource } from "./chat-data.ts";
 
@@ -71,6 +72,54 @@ const NO_VARIABLES: ChatVariables = [null, null, null, null, null, null, null, n
 const CONSOLE_MESSAGE_BYTES = 276;
 const CHAT_STATE_BYTES = 316;
 const CHAT_CACHE_BYTES = 132;
+
+function restoredChatData(allocation: BotMemoryAllocation | null) {
+  let cursor = 0;
+  const reserve = (bytes: number): number => {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || allocation === null || cursor + bytes > allocation.bytes.length) throw new Error("Saved chat data layout exceeds allocation");
+    const offset = cursor; cursor += bytes; return offset;
+  };
+  const view = (): DataView => {
+    if (allocation === null) throw new Error("Saved chat data has no allocation");
+    const bytes = allocation.bytes; return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  };
+  return { reserve, float: (offset: number) => view().getFloat32(offset, true), integer: (offset: number) => view().getUint32(offset, true),
+    string: (length: number): (() => string) => {
+      const offset = reserve(length + 1);
+      const read = (): string => {
+        const bytes = allocation?.bytes;
+        if (bytes === undefined || bytes[offset + length] !== 0) throw new Error("Saved chat string is unterminated");
+        return readMessage(bytes.subarray(offset, offset + length + 1));
+      };
+      void read(); return read;
+    }, finish: () => {
+      if (cursor !== (allocation?.bytes.length ?? 0)) throw new Error("Saved chat layout does not cover its allocation");
+    } };
+}
+function restoreSynonyms(allocation: BotMemoryAllocation | null, layout: readonly (readonly number[])[]): readonly SynonymGroup[] {
+  const data = restoredChatData(allocation);
+  const groups = layout.map((lengths): SynonymGroup => {
+    const record = data.reserve(16), entries = lengths.map(length => {
+      const entry = data.reserve(12), text = data.string(length);
+      return { get text() { return text(); }, get weight() { return data.float(entry + 4); } };
+    });
+    const [first, second, ...rest] = entries;
+    if (first === undefined || second === undefined) throw new Error("Saved synonym group requires two entries");
+    return { get context() { return data.integer(record); }, get totalWeight() { return data.float(record + 4); }, entries: [first, second, ...rest] };
+  });
+  data.finish(); return groups;
+}
+function restoreRandoms(allocation: BotMemoryAllocation | null,
+  layout: readonly { readonly nameBytes: number; readonly messageBytes: readonly number[] }[]): readonly StoredRandomChatList[] {
+  const data = restoredChatData(allocation), lists = layout.map(saved => {
+    const record = data.reserve(16), name = data.string(saved.nameBytes);
+    const messages = saved.messageBytes.map(length => { data.reserve(8); return data.string(length); }).reverse();
+    if (data.integer(record + 4) !== messages.length) throw new Error("Saved random chat message count mismatch");
+    return { get name() { return name(); }, get numMessages() { return data.integer(record + 4); },
+      get messages() { return messages.map(read => read()); }, message(index: number) { return messages[index]?.(); } };
+  });
+  data.finish(); return lists;
+}
 function chatFixed(value: number, digits: number): string {
   if (!Number.isFinite(value)) return Number.isNaN(value) ? "nan" : value < 0 ? "-inf" : "inf";
   const negative = value < 0 || Object.is(value, -0), absolute = Math.abs(value);
@@ -153,7 +202,7 @@ function* replyMessages(first: ChatReply | null): Generator<ChatMessage, undefin
 }
 
 class ConsoleMessageCell {
-  constructor(private readonly allocation: BotMemoryAllocation, private readonly offset: number,
+  constructor(readonly allocation: BotMemoryAllocation, readonly offset: number,
     readonly pointer: number, private readonly cells: ReadonlyMap<number, ConsoleMessageCell>) {}
   private bytes(): Uint8Array { return this.allocation.bytes.subarray(this.offset, this.offset + CONSOLE_MESSAGE_BYTES); }
   private view(): DataView { const bytes = this.bytes(); return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
@@ -352,6 +401,88 @@ export class BotChatLibrary {
   private freeConsoleMessages: ConsoleMessageCell | null = null;
   private readonly consoleMessageCells = new Map<number, ConsoleMessageCell>();
   private readonly initialChats = new Map<number, ChatInitial>();
+
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    const reference = (allocation: BotMemoryAllocation | null) => allocation === null ? null : memory.reference(allocation);
+    return { revision: this.generation.setupRevision, issues: structuredClone(this.issues),
+      cache: Array.from(this.generation.cache, entry => entry === undefined ? null : memory.reference(entry.allocation)),
+      states: this.states.map(state => state === undefined ? null : { allocation: memory.reference(state.allocation), revision: state.revision }),
+      synonyms: this.synonyms.map(group => group.entries.map(entry => entry.text.length)),
+      randoms: this.randoms.map(list => ({ nameBytes: list.name.length, messageBytes: [...list.messages].reverse().map(message => message.length) })),
+      synonymsAllocation: reference(this.synonymsAllocation), randomsAllocation: reference(this.randomsAllocation),
+      matches: this.matches?.checkpointGraph(memory) ?? null, replies: this.replies?.checkpointGraph(memory) ?? null,
+      consoleMessageHeap: reference(this.consoleMessageHeap), freeConsoleMessages: this.freeConsoleMessages?.pointer ?? 0,
+      consoleMessageCells: [...this.consoleMessageCells].map(([pointer, cell]) => ({ pointer, allocation: memory.reference(cell.allocation), offset: cell.offset })),
+      initialChats: [...this.initialChats.values()].map(chat => chat.checkpoint(memory)) };
+  }
+  restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): void {
+    const reader = new SaveReader(value, "bot.chat"), allocation = (name: string) => reader.field(name).nullable(entry => entry.integer(0));
+    const image = { revision: reader.field("revision").integer(0),
+      issues: reader.field("issues").list(entry => ({ severity: entry.field("severity").choice("info", "warning", "error", "fatal"),
+        code: entry.field("code").choice("loaded", "empty-replies", "load-error", "parse-warning", "invalid-handle", "invalid-variable", "message-heap-full", "cache-full", "expansion-error", "expansion-limit", "test-output", "print-fragment", "missing-random", "integrity-error"),
+        source: entry.field("source").string(), message: entry.field("message").string(), location: entry.field("location").nullable(location => ({ path: location.field("path").string(), line: location.field("line").integer(), column: location.field("column").integer() })) })),
+      cache: reader.field("cache").list(entry => entry.nullable(reference => reference.integer(0))),
+      states: reader.field("states").list(entry => entry.nullable(state => ({ allocation: state.field("allocation").integer(0), revision: state.field("revision").integer(0) }))),
+      synonyms: reader.field("synonyms").list(entry => entry.list(length => length.integer(0))),
+      randoms: reader.field("randoms").list(entry => ({ nameBytes: entry.field("nameBytes").integer(0), messageBytes: entry.field("messageBytes").list(length => length.integer(0)) })),
+      synonymsAllocation: allocation("synonymsAllocation"), randomsAllocation: allocation("randomsAllocation"),
+      matches: reader.field("matches").value, replies: reader.field("replies").value,
+      consoleMessageHeap: allocation("consoleMessageHeap"), freeConsoleMessages: reader.field("freeConsoleMessages").integer(0),
+      consoleMessageCells: reader.field("consoleMessageCells").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0), offset: entry.field("offset").integer(0) })),
+      initialChats: reader.field("initialChats").list(entry => entry.value) };
+    if (this.states.some(state => state !== undefined) || this.initialChats.size !== 0 || this.consoleMessageCells.size !== 0
+      || image.states.length !== this.states.length || image.states[0] !== null
+      || !Number.isSafeInteger(image.revision) || image.revision < 0) throw new Error("Invalid bot chat restoration");
+    for (const saved of image.initialChats) {
+      const chat = ChatInitial.restore(saved, memory);
+      if (this.initialChats.has(chat.pointer)) throw new Error("Duplicate saved initial chat pointer");
+      this.initialChats.set(chat.pointer, chat);
+    }
+    for (const saved of image.consoleMessageCells) {
+      const allocation = memory.allocation(saved.allocation);
+      if (!Number.isSafeInteger(saved.pointer) || saved.pointer < 1 || this.consoleMessageCells.has(saved.pointer)
+        || !Number.isSafeInteger(saved.offset) || saved.offset < 0 || saved.offset + CONSOLE_MESSAGE_BYTES > allocation.bytes.length) throw new Error("Invalid saved chat console cell");
+      this.consoleMessageCells.set(saved.pointer, new ConsoleMessageCell(allocation, saved.offset, saved.pointer, this.consoleMessageCells));
+    }
+    const consoleCell = (pointer: number): ConsoleMessageCell | null => {
+      if (pointer === 0) return null;
+      const cell = this.consoleMessageCells.get(pointer);
+      if (cell === undefined) throw new Error("Saved chat console pointer is missing");
+      return cell;
+    };
+    this.freeConsoleMessages = consoleCell(image.freeConsoleMessages);
+    const visit = (first: ConsoleMessageCell | null): number => {
+      const seen = new Set<number>();
+      for (let cell = first; cell !== null; cell = cell.next) {
+        if (seen.has(cell.pointer)) throw new Error("Saved chat console list cycles");
+        seen.add(cell.pointer); void cell.prev;
+      }
+      return seen.size;
+    };
+    visit(this.freeConsoleMessages);
+    for (const [index, saved] of image.states.entries()) {
+      if (saved === null) continue;
+      const allocation = memory.allocation(saved.allocation);
+      if (allocation.bytes.length !== CHAT_STATE_BYTES || !Number.isSafeInteger(saved.revision) || saved.revision < 0) throw new Error("Invalid saved chat state allocation");
+      const state = new ChatState(allocation, this.consoleMessageCells, this.initialChats); state.revision = saved.revision;
+      if (visit(state.firstMessage) !== state.numConsoleMessages) throw new Error("Saved chat console count mismatch");
+      void state.lastMessage; void state.chat; this.states[index] = state;
+    }
+    this.generation = { setupRevision: image.revision, cache: image.cache.map(saved => {
+      if (saved === null) return undefined;
+      const allocation = memory.allocation(saved);
+      if (allocation.bytes.length !== CHAT_CACHE_BYTES) throw new Error("Saved chat cache allocation size mismatch");
+      const cache = new CachedChat(allocation, this.initialChats); void cache.chat; return cache;
+    }) };
+    this.synonymsAllocation = image.synonymsAllocation === null ? null : memory.allocation(image.synonymsAllocation);
+    this.randomsAllocation = image.randomsAllocation === null ? null : memory.allocation(image.randomsAllocation);
+    this.synonyms = restoreSynonyms(this.synonymsAllocation, image.synonyms);
+    this.randoms = restoreRandoms(this.randomsAllocation, image.randoms);
+    this.matches = image.matches === null ? null : ChatMatchTemplate.restoreGraph(image.matches, this.memory, memory);
+    this.replies = image.replies === null ? null : ChatReply.restoreGraph(image.replies, this.memory, memory);
+    this.consoleMessageHeap = image.consoleMessageHeap === null ? null : memory.allocation(image.consoleMessageHeap);
+    this.issues.push(...structuredClone(image.issues));
+  }
 
   constructor(private readonly reader: BotScriptReader, private readonly host: BotChatHost, private readonly options: BotChatOptions = {}, private readonly memory = new BotMemory()) {}
   get diagnostics(): readonly ChatDiagnostic[] { return [...this.issues]; }

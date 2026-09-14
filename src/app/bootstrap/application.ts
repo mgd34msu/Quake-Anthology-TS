@@ -17,8 +17,8 @@ import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPrefe
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
 import { ApplicationQ2Console, q2OperatorPlayerName } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
-import { botAdmissionError, ApplicationBots, openApplicationBotLog } from "./simulation/bots.ts";
-import type { ApplicationBotClient } from "./simulation/bots.ts";
+import { botAdmissionError, ApplicationBots, openApplicationBotLog, resumeApplicationBotLog } from "./simulation/bots.ts";
+import type { ApplicationBotClient, ApplicationBotsOptions, ApplicationBotTransportCheckpoint } from "./simulation/bots.ts";
 import { createApplicationBotNavigation } from "./simulation/navigation.ts";
 import { loadMountedBotAssetFiles } from "../../bots/behavior/index.ts";
 import type { ActorId, ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
@@ -42,7 +42,7 @@ import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
 import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
 import { EngineSession } from "../../world/session/index.ts";
-import type { SessionSeat } from "../../world/session/index.ts";
+import type { SessionClient, SessionSeat } from "../../world/session/index.ts";
 import { SharedTransitionCoordinator } from "../../world/gameplay/transitions.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
@@ -63,7 +63,7 @@ import { createSimulationPredictionHost } from "./simulation/prediction.ts";
 import { NativeRenderer } from "./renderer.ts";
 import { ApplicationSeatUi } from "./ui.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
-import { createSimulation, savedSimulationSettings } from "./simulation/index.ts";
+import { createSimulation, savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { createQ2ApplicationServerHost } from "./simulation/network.ts";
 import { Q2ServerNetwork } from "./network/q2.ts";
 import { Q1ServerNetwork } from "./network/q1.ts";
@@ -91,6 +91,14 @@ type NativeServer = { readonly address: IpAddress } & (
   | { readonly kind: "qw"; readonly server: QwServerNetwork }
   | { readonly kind: "q2"; readonly server: Q2ServerNetwork<IpAddress> }
   | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
+
+type SavedBotClientId = ApplicationBotTransportCheckpoint["connections"][number]["client"];
+interface SavedApplicationClients {
+  readonly clients: readonly ClientId[];
+  readonly added: readonly SessionClient[];
+  readonly removed: readonly SessionClient[];
+  resolveBotClient(saved: SavedBotClientId): SessionClient | null;
+}
 
 interface ApplicationCommandRequest { readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; }
 interface Q3SeatClient { readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost>; }
@@ -155,6 +163,7 @@ export class Application {
   private pendingRestart: number | null = null;
   private pendingSave: SaveImage | null = null;
   private savedGames: StartupSaves | null = null;
+  private pendingLevelAutosave = false;
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
@@ -164,6 +173,7 @@ export class Application {
 
   private async autosaveLevel(): Promise<void> {
     if (!this.levelRecoveryAvailable || this.network !== null || this.localPlayers.length === 0) return;
+    if (this.simulation.q3Source() !== null && this.lastOutput?.simulation !== this.simulation) { this.pendingLevelAutosave = true; return; }
     const directory = join(this.saveDirectory, this.content.catalog.product(this.content.recipe.map.entities.content).expectation.id);
     try {
       await mkdir(directory, { recursive: true });
@@ -182,8 +192,7 @@ export class Application {
     return { list: () => saves.list, refresh: () => saves.refresh(),
       ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
       unavailable: action => this.network !== null ? "Save/load unavailable while hosting a network game."
-        : action === "save" && (this.simulation.q3Source() !== null || this.simulation.q3Guest() !== null) ? "This source cannot save complete games yet."
-        : action === "save" && this.botClients.length !== 0 ? "Saving bot decision state is not supported yet." : null,
+        : action === "save" && this.simulation.q3Guest() !== null ? "This source cannot save complete games yet." : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
       load: id => queue(() => this.restoreSavedGame(saves.path(id))) };
   }
@@ -279,24 +288,27 @@ export class Application {
   }
 
   private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
-    clients: readonly ApplicationBotClient[] = [], restart = false, requested = false, commands = this.sourceCommands): Promise<ApplicationBots | null> {
-    if (simulation.q3Source() === null && clients.length === 0 && !requested) return null;
+    setup: Pick<ApplicationBotsOptions, "clients" | "restart" | "restore"> & {
+      readonly requested?: boolean; readonly commands?: CommandBuffer | null;
+    } = {}): Promise<ApplicationBots | null> {
+    const { clients = [], restart = false, requested = false, commands = this.sourceCommands, restore } = setup;
+    if (simulation.q3Source() === null && clients.length === 0 && !requested && restore === undefined) return null;
     const unsupported = botAdmissionError(simulation);
     if (unsupported !== null) {
-      if (clients.length !== 0 || requested) throw new Error(unsupported);
+      if (clients.length !== 0 || requested || restore !== undefined) throw new Error(unsupported);
       return null;
     }
     const definitions = simulation.q3Source() === null ? content.catalog.product("q3-baseq3").id : content.recipe.map.entities.content;
     const files = await loadMountedBotAssetFiles(await content.forContent(definitions), content.catalog);
     const navigation = await createApplicationBotNavigation({ content, simulation });
     const configuration = simulation.q1Source()?.cvars ?? simulation.q2ServerCvars() ?? undefined;
-    return new ApplicationBots({ session: this.session, simulation, files, navigation, clients, restart, automaticFrame: true,
+    return new ApplicationBots({ session: this.session, simulation, files, navigation, ...(restore === undefined ? { clients, restart } : { restore }), automaticFrame: true,
       ...(configuration === undefined ? {} : { configuration }),
       leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
       insertConsoleCommand: text => {
         if (commands === null) throw new Error("Bot console has no source command buffer");
         commands.insert(text);
-      }, openLog: openApplicationBotLog });
+      }, openLog: openApplicationBotLog, resumeLog: resumeApplicationBotLog });
   }
 
   get frontendSettings(): FrontendPreferenceOverrides {
@@ -401,7 +413,7 @@ export class Application {
     this.q2Console = prepared.q2Console;
   }
 
-  private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent): Promise<{
+  private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent, restoring = false): Promise<{
     readonly sourceCommands: CommandBuffer | null; readonly q2Console: ApplicationQ2Console | null;
   }> {
     let sourceCommands: CommandBuffer | null = null;
@@ -410,7 +422,7 @@ export class Application {
       q2Console = new ApplicationQ2Console({ simulation: () => simulation, content: () => content,
         print: text => { this.host.print(text); return undefined; }, execute: (name, args) => this.queueCommand(name, args, null) });
       for (const name of ["addbot", "removebot", "botlist", "kick"]) q2Console.commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-      await q2Console.initialize();
+      if (!restoring) await q2Console.initialize();
       sourceCommands = q2Console.commands;
       this.bindServerSettingCommand(sourceCommands);
       return { sourceCommands, q2Console };
@@ -421,7 +433,8 @@ export class Application {
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
       commands.register("quit", () => this.requestQuit());
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-      q1.cvars.register("bot_minplayers", "0"); sourceCommands = commands; return { sourceCommands, q2Console };
+      if (!restoring) q1.cvars.register("bot_minplayers", "0");
+      sourceCommands = commands; return { sourceCommands, q2Console };
     }
     const guest = simulation.q3Guest();
     if (guest !== null) {
@@ -445,7 +458,7 @@ export class Application {
     }
     const source = simulation.q3Source();
     if (source === null) return { sourceCommands, q2Console };
-    source.host.cvars.set("dedicated", this.options.dedicated ? "1" : "0", true);
+    if (!restoring) source.host.cvars.set("dedicated", this.options.dedicated ? "1" : "0", true);
     const game = () => {
       const current = simulation.q3Source();
       if (current === null) throw new Error("Source console no longer owns a Quake III game");
@@ -726,6 +739,45 @@ export class Application {
     return undefined;
   }
 
+  private prepareSavedClients(slots: readonly number[], botClients: readonly SavedBotClientId[]): SavedApplicationClients {
+    const previousBots = new Map((this.bots?.clients() ?? []).map(bot => [bot.client.id.slot, bot.client]));
+    const savedBots = new Map(botClients.map(client => [client.slot, client]));
+    const humanClients = this.simulation.players().flatMap(actor => {
+      const player = this.simulation.movementPlayer(actor);
+      if (player === null) throw new Error("Connected player has no source client identity");
+      return previousBots.get(player.client.slot)?.id.equals(player.client) === true ? [] : [player.client];
+    });
+    const humanSlots = slots.filter(slot => !savedBots.has(slot));
+    if (humanClients.length !== humanSlots.length || humanClients.some(client => !humanSlots.includes(client.slot)))
+      throw new Error("Saved human players do not match the connected session client slots");
+    for (const client of this.localSeats.keys()) {
+      if (savedBots.has(client.slot) || !humanClients.some(current => current.equals(client)))
+        throw new Error("Saved bot slots conflict with a local seat");
+    }
+    const added: SessionClient[] = [], restoredBots = new Map<number, SessionClient>();
+    try {
+      for (const saved of botClients) {
+        const existing = previousBots.get(saved.slot);
+        if (existing?.isClosed) throw new Error("Current bot client is closed");
+        const client = existing ?? this.session.prepareClient(saved.slot);
+        if (existing === undefined) added.push(client);
+        restoredBots.set(saved.slot, client);
+      }
+      const clients = slots.map(slot => {
+        const client = restoredBots.get(slot)?.id ?? humanClients.find(client => client.slot === slot);
+        if (client === undefined) throw new Error("Saved client slot has no restored session identity");
+        return client;
+      });
+      return { clients, added, removed: [...previousBots.values()].filter(client => !savedBots.has(client.id.slot)),
+        resolveBotClient: saved => savedBots.get(saved.slot)?.generation === saved.generation ? restoredBots.get(saved.slot) ?? null : null };
+    } catch (error) {
+      const failures: unknown[] = [error];
+      for (const client of added) { try { client.close(); } catch (failure) { failures.push(failure); } }
+      if (failures.length > 1) throw new AggregateError(failures, "Saved client preparation failed");
+      throw error;
+    }
+  }
+
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "travel";
@@ -741,6 +793,7 @@ export class Application {
     if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes, restart and restore are unsupported");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     const settings = save === undefined ? null : savedSimulationSettings(save);
+    const savedBots = save === undefined ? null : savedBotCheckpoint(save);
     let options = { ...this.options, map: mapResourcePath(map) };
     const recipe = save?.recipe ?? await resolveApplicationTravel(this.content, options.map);
     const content = await loadApplicationContent(options, recipe);
@@ -759,6 +812,7 @@ export class Application {
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     let simulation: SharedSimulation | null = null, assets: ApplicationAssets | null = null, art: NativeUiArt | null = null;
     let nextBots: ApplicationBots | null = null;
+    let savedClients: SavedApplicationClients | null = null;
     let nextAudio: ApplicationAudio | null = null;
     let nextEffects: ApplicationEffects | null = null;
     let nextInput: ApplicationInput | null = null;
@@ -772,13 +826,12 @@ export class Application {
         options = { ...applicationOptionsForRecipe(options, content), skill: settings.skill, mode: settings.mode, seed: settings.seed };
         initialSourceMilliseconds = settings.hostMilliseconds;
       }
-      const clients = this.simulation.players().map(actor => {
+      if (settings !== null) savedClients = this.prepareSavedClients(settings.clientSlots, savedBots?.transport.connections.map(connection => connection.client) ?? []);
+      const clients = savedClients?.clients ?? this.simulation.players().map(actor => {
         const player = this.simulation.movementPlayer(actor);
         if (player === null) throw new Error("Connected player has no source client identity");
         return player.client;
       }).filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
-      if (settings !== null && (settings.clientSlots.length !== clients.length || settings.clientSlots.some(slot => !clients.some(client => client.slot === slot))))
-        throw new Error("Saved players do not match the connected session client slots");
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
       simulation = createSimulation({ dedicated: options.dedicated, ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? this.simulation.options.maxClients,
@@ -787,7 +840,7 @@ export class Application {
         ...(save === undefined ? { serverProfile, ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
-      if (save !== undefined && nextSimulation.q3Source() !== null) throw new Error("Q3 application restoration requires complete bot service state");
+      if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
       const nextQ1 = nextSimulation.q1Source();
       if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
         nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
@@ -800,10 +853,13 @@ export class Application {
       }));
       const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content, this.nativeWorldCount + 1);
       if (nextNetworkHost !== null) this.validateNetworkHost(nextNetworkHost);
-      const preparedCommands = await this.prepareSourceCommands(nextSimulation, content);
+      const preparedCommands = await this.prepareSourceCommands(nextSimulation, content, save !== undefined);
       if (preparedCommands.sourceCommands !== null && this.sourceCommands !== null)
         preparedCommands.sourceCommands.copyPendingFrom(this.sourceCommands);
-      nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0, false, preparedCommands.sourceCommands);
+      if (save === undefined) nextBots = await this.createBots(content, simulation, {
+        clients: botClients, restart: initialSourceMilliseconds !== 0, commands: preparedCommands.sourceCommands });
+      else if (savedBots !== null && savedClients !== null) nextBots = await this.createBots(content, simulation, {
+        commands: preparedCommands.sourceCommands, restore: { image: savedBots, resolveClient: savedClients.resolveBotClient } });
       if (options.dedicated && preparedCommands.sourceCommands !== null)
         for (const name of ["save", "load"]) preparedCommands.sourceCommands.register(name, invocation => this.queueCommand(name, invocation.args, null));
       if (previous !== null) {
@@ -876,10 +932,11 @@ export class Application {
       if (this.closed) throw new Error("Application closed during world preparation");
       const replacement = this.session.replaceWorld(nextSimulation, stagedPresentations.map(presentation => ({
         seat: presentation.local.player.seat, presentation, cleanup: () => presentation.close(),
-      })));
+      })), savedClients ?? { added: [], removed: [] });
       if (previous !== null && nextGraphical !== null) previous.input.transferPlatformTo(nextGraphical.input);
       publishAudio?.();
       this.worldSimulation = nextSimulation;
+      if (save !== undefined) this.pendingLevelAutosave = false;
       this.loadedContent = content;
       this.launchOptions = options;
       this.bots = nextBots;
@@ -901,7 +958,7 @@ export class Application {
       await retire("capture retirement", () => previousCapture?.close());
       await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
       await retire("world retirement", () => replacement.retired.close());
-      if (!preserveBots) for (const bot of previousBotClients)
+      if (save === undefined && !preserveBots) for (const bot of previousBotClients)
         await retire("bot disconnect", () => this.session.closeClient(bot.client.id));
       if (previous !== null) {
         await retire("audio retirement", () => previous.audio.close());
@@ -932,6 +989,7 @@ export class Application {
       await discard(() => nextInput?.close());
       await discard(() => nextBots?.close());
       await discard(() => simulation?.close());
+      for (const client of savedClients?.added ?? []) await discard(() => client.close());
       await discard(() => art?.close());
       await discard(() => assets?.close());
       await discard(() => content.close());
@@ -947,7 +1005,6 @@ export class Application {
 
   async saveGame(path: string): Promise<void> {
     if (this.closed) throw new Error("Application is closed");
-    if (this.botClients.length !== 0 && this.simulation.q3Source() === null) throw new Error("Saving bot decision state is not yet supported");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     if (this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
@@ -1124,7 +1181,7 @@ export class Application {
         }
         if (sourceClient !== undefined && await sourceClient.client.command([command.name, ...command.arguments_])) continue;
         if (command.name === "addbot" || command.name === "botlist") {
-          if (this.bots === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);
+          if (this.bots === null) this.bots = await this.createBots(this.content, this.simulation, { requested: true });
           if (this.bots === null) throw new Error("Bot observations are unavailable for this world");
           this.bots.consoleCommand([command.name, ...command.arguments_]);
         } else if (command.name === "kick") { await this.kickClients(command.arguments_);
@@ -1194,7 +1251,7 @@ export class Application {
       const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
       if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
         const unsupported = botAdmissionError(this.simulation);
-        if (unsupported === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);
+        if (unsupported === null) this.bots = await this.createBots(this.content, this.simulation, { requested: true });
         else { this.host.print(`${unsupported}\n`); botConfiguration?.set("bot_minplayers", "0", true); }
       }
       const retained = this.lastOutput;
@@ -1269,6 +1326,10 @@ export class Application {
         await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
       await this.capture?.drain();
+      if (this.pendingLevelAutosave && this.pendingTransition === null && this.pendingMap === null && this.pendingRestart === null && this.pendingSave === null) {
+        this.pendingLevelAutosave = false;
+        await this.autosaveLevel();
+      }
       await this.commands();
       await this.sourceActions();
       const currentGraphics = this.graphical;

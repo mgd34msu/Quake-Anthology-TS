@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 /*
  * Chat configuration readers translated from id Software's botlib/be_ai_chat.c.
  * Copyright (C) 1999-2005 Id Software, Inc.
@@ -60,6 +61,33 @@ export class ChatInitial {
   private readonly types = new Map<number, ChatInitialType>();
   private readonly messages = new Map<number, ChatInitialMessage>();
   constructor(readonly allocation: BotMemoryAllocation, readonly pointer: number) {}
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return { allocation: memory.reference(this.allocation), pointer: this.pointer, types: [...this.types.keys()], messages: [...this.messages.keys()] };
+  }
+  static restore(value: unknown, memory: import("./memory.ts").BotMemoryRestore): ChatInitial {
+    const reader = new SaveReader(value, "bot.chat.initial"), image = { allocation: reader.field("allocation").integer(0), pointer: reader.field("pointer").integer(1),
+      types: reader.field("types").list(entry => entry.integer(1)), messages: reader.field("messages").list(entry => entry.integer(1)) };
+    const chat = new ChatInitial(memory.allocation(image.allocation), image.pointer);
+    for (const pointer of image.types) {
+      if (!Number.isSafeInteger(pointer) || pointer < 1 || chat.types.has(pointer)) throw new Error("Invalid saved initial chat type pointer");
+      chat.view(pointer - 1, 44); chat.types.set(pointer, new ChatInitialType(chat, pointer - 1));
+    }
+    for (const pointer of image.messages) {
+      if (!Number.isSafeInteger(pointer) || pointer < 1 || chat.messages.has(pointer)) throw new Error("Invalid saved initial chat message pointer");
+      chat.view(pointer - 1, 12); chat.messages.set(pointer, new ChatInitialMessage(chat, pointer - 1));
+    }
+    const types = new Set<number>();
+    for (let type = chat.firstType; type !== null; type = type.next) {
+      if (types.has(type.pointer)) throw new Error("Saved initial chat type list cycles");
+      types.add(type.pointer); const messages = new Set<number>();
+      for (const message of type.messages()) {
+        if (messages.has(message.pointer)) throw new Error("Saved initial chat message list cycles");
+        messages.add(message.pointer); void message.text;
+      }
+      if (messages.size !== type.numMessages) throw new Error("Saved initial chat message count mismatch");
+    }
+    return chat;
+  }
   view(offset: number, size: number): DataView {
     const bytes = this.allocation.bytes;
     if (offset < 0 || offset + size > bytes.length) throw new RangeError("initial chat record exceeds its allocation");
@@ -166,6 +194,49 @@ type ChatGraphPointer = ChatGraphString | ChatMatchString | ChatMatchPiece | Cha
 class ChatGraphMemory {
   private readonly pointers = new Map<number, ChatGraphPointer>();
   constructor(private readonly memory: BotMemory) {}
+  checkpoint(memory: import("./memory.ts").BotMemoryCapture) {
+    return [...this.pointers.values()].map(cell => ({ pointer: cell.pointer, allocation: memory.reference(cell.allocation),
+      kind: cell instanceof ChatGraphString ? "string" : cell instanceof ChatMatchString ? "match-string"
+        : cell instanceof ChatMatchPiece ? "piece" : cell instanceof ChatMatchTemplate ? "template"
+          : cell instanceof ChatReplyKey ? "key" : cell instanceof ChatReplyMessage ? "message" : "reply",
+      offset: cell instanceof ChatGraphString ? cell.offset : 0 }));
+  }
+  static restore(value: unknown, memory: BotMemory, references: import("./memory.ts").BotMemoryRestore): ChatGraphMemory {
+    const image = new SaveReader(value, "bot.chat.graph").list(entry => ({ pointer: entry.field("pointer").integer(1), allocation: entry.field("allocation").integer(0),
+      kind: entry.field("kind").choice("string", "match-string", "piece", "template", "key", "message", "reply"), offset: entry.field("offset").integer(0) }));
+    const graph = new ChatGraphMemory(memory);
+    for (const entry of image) {
+      if (!Number.isSafeInteger(entry.pointer) || entry.pointer < 1 || graph.pointers.has(entry.pointer)) throw new Error("Invalid saved chat graph pointer");
+      const allocation = references.allocation(entry.allocation);
+      switch (entry.kind) {
+        case "string": {
+          if (!Number.isSafeInteger(entry.offset) || entry.offset < 0 || entry.offset >= allocation.bytes.length) throw new Error("Invalid saved chat string offset");
+          const cell = new ChatGraphString(graph, allocation, entry.pointer, entry.offset); void cell.text; graph.register(cell); break;
+        }
+        case "match-string": graph.register(new ChatMatchString(graph, allocation, entry.pointer)); break;
+        case "piece": graph.register(new ChatMatchPiece(graph, allocation, entry.pointer)); break;
+        case "template": graph.register(new ChatMatchTemplate(graph, allocation, entry.pointer)); break;
+        case "key": graph.register(new ChatReplyKey(graph, allocation, entry.pointer)); break;
+        case "message": graph.register(new ChatReplyMessage(graph, allocation, entry.pointer)); break;
+        case "reply": graph.register(new ChatReply(graph, allocation, entry.pointer)); break;
+        default: throw new Error("Invalid saved chat graph kind");
+      }
+    }
+    const visited = new Set<number>(), pending = new Set<number>();
+    const visit = (cell: ChatGraphPointer | null): void => {
+      if (cell === null || visited.has(cell.pointer)) return;
+      if (pending.has(cell.pointer)) throw new Error("Saved chat graph contains a cycle");
+      pending.add(cell.pointer);
+      if (cell instanceof ChatMatchString || cell instanceof ChatReplyMessage) { visit(cell.string); visit(cell.next); }
+      else if (cell instanceof ChatMatchPiece) { visit(cell.firstString); visit(cell.next); }
+      else if (cell instanceof ChatMatchTemplate) { visit(cell.first); visit(cell.next); }
+      else if (cell instanceof ChatReplyKey) { visit(cell.string); visit(cell.match); visit(cell.next); }
+      else if (cell instanceof ChatReply) { visit(cell.keys); visit(cell.firstMessage); visit(cell.next); }
+      pending.delete(cell.pointer); visited.add(cell.pointer);
+    };
+    for (const cell of graph.pointers.values()) visit(cell);
+    return graph;
+  }
   private register<T extends ChatGraphPointer>(cell: T): T { this.pointers.set(cell.pointer, cell); return cell; }
   private allocate<T extends ChatGraphPointer>(size: number, create: (allocation: BotMemoryAllocation, pointer: number) => T): T {
     const allocation = this.memory.allocate(size, "hunk", true);
@@ -248,10 +319,11 @@ class ChatGraphBlock {
   protected readPointer(offset: number): number { return this.view().getUint32(offset, true); }
   protected writePointer(offset: number, value: ChatGraphPointer | null): void { this.view().setUint32(offset, value?.pointer ?? 0, true); }
   freeBlock(): void { this.owner.free(this.allocation); }
+  checkpointGraph(memory: import("./memory.ts").BotMemoryCapture) { return { root: this.pointer, pointers: this.owner.checkpoint(memory) }; }
 }
 
 class ChatGraphString extends ChatGraphBlock {
-  constructor(owner: ChatGraphMemory, allocation: BotMemoryAllocation, pointer: number, private readonly offset: number) { super(owner, allocation, pointer); }
+  constructor(owner: ChatGraphMemory, allocation: BotMemoryAllocation, pointer: number, readonly offset: number) { super(owner, allocation, pointer); }
   get text(): string {
     const bytes = this.allocation.bytes;
     let result = "";
@@ -301,6 +373,12 @@ export class ChatMatchPiece extends ChatGraphBlock {
 }
 
 export class ChatMatchTemplate extends ChatGraphBlock {
+  static restoreGraph(value: unknown, memory: BotMemory, references: import("./memory.ts").BotMemoryRestore): ChatMatchTemplate {
+    const reader = new SaveReader(value, "bot.chat.matches");
+    const root = ChatGraphMemory.restore(reader.field("pointers").value, memory, references).templateAt(reader.field("root").integer(1));
+    if (root === null) throw new Error("Saved chat match graph has no root");
+    return root;
+  }
   get context(): number { return this.view().getUint32(0, true); }
   set context(value: number) { this.view().setUint32(0, value, true); }
   get type(): number { return this.view().getInt32(4, true); }
@@ -362,6 +440,12 @@ class ChatReplyMessage extends ChatGraphBlock implements ChatMessage {
 }
 
 export class ChatReply extends ChatGraphBlock {
+  static restoreGraph(value: unknown, memory: BotMemory, references: import("./memory.ts").BotMemoryRestore): ChatReply {
+    const reader = new SaveReader(value, "bot.chat.replies");
+    const root = ChatGraphMemory.restore(reader.field("pointers").value, memory, references).replyAt(reader.field("root").integer(1));
+    if (root === null) throw new Error("Saved chat reply graph has no root");
+    return root;
+  }
   get keys(): ChatReplyKey | null { return this.owner.keyAt(this.readPointer(0)); }
   set keys(value: ChatReplyKey | null) { this.writePointer(0, value); }
   get priority(): number { return this.view().getFloat32(4, true); }

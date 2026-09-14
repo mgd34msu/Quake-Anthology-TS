@@ -6,6 +6,7 @@ import type { ProviderCheckpoint, SaveImage } from "../../../contracts/session.t
 import { readSavedActor } from "../../../persistence/save-image.ts";
 import { readQ2AttackCheckpoint } from "../../../persistence/q2-foundation.ts";
 import { SaveReader, decodeCheckpointValue } from "../../../persistence/value.ts";
+import { decodeApplicationBotsCheckpoint, type DecodedApplicationBotsCheckpoint } from "./bots.ts";
 
 export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderCheckpoint["schema"]): ProviderCheckpoint {
   const matches = image.providers.filter(value => value.schema === schema);
@@ -13,6 +14,28 @@ export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderC
   const provider = schema === "world:source-slots" ? "world:actors" : image.recipe.map.entities.provider;
   if (value === undefined || matches.length !== 1 || value.provider !== provider || value.version !== (schema === "world:simulation" ? 11 : 1)) throw new Error(`Missing or unsupported saved provider ${schema}`);
   return value;
+}
+
+export function savedSourceCvars(image: SaveImage): unknown {
+  if (!image.providers.some(record => record.schema === "world:source-cvars")) return undefined;
+  return decodeCheckpointValue(simulationProviderCheckpoint(image, "world:source-cvars").bytes);
+}
+
+export function savedBotCheckpoint(image: SaveImage): DecodedApplicationBotsCheckpoint | null {
+  if (!image.providers.some(record => record.schema === "world:bots")) return null;
+  const bots = decodeApplicationBotsCheckpoint(decodeCheckpointValue(simulationProviderCheckpoint(image, "world:bots").bytes));
+  const players = simulationSaveReader(image).field("players").list(value => ({
+    slot: value.field("clientSlot").integer(0), actor: readSavedActor(value.field("actor")),
+  }));
+  const slots = new Set<number>();
+  for (const connection of bots.transport.connections) {
+    if (slots.has(connection.client.slot)) throw new Error("Duplicate saved bot client slot");
+    slots.add(connection.client.slot);
+    const player = players.find(player => player.slot === connection.client.slot);
+    if (player === undefined || player.actor.slot !== connection.actor.slot || player.actor.generation !== connection.actor.generation)
+      throw new Error("Saved bot connection does not own its shared player");
+  }
+  return bots;
 }
 
 export function simulationQuakeCCheckpoint(image: SaveImage): QuakeCCheckpoint | null {
@@ -43,6 +66,16 @@ export function validateSimulationSave(image: SaveImage): void {
   simulationProviderCheckpoint(image, "world:source-slots");
   const guest = simulationQuakeCCheckpoint(image);
   const execution = image.recipe.execution.find(module => module.role === "server-game");
+  const bots = savedBotCheckpoint(image);
+  if (bots !== null && execution?.kind !== "typescript") throw new Error("Saved bot services have no supported source owner");
+  if (bots !== null && execution?.kind === "typescript" && execution.api.kind !== "q3-qagame")
+    simulationProviderCheckpoint(image, "world:source-cvars");
+  if (image.providers.some(record => record.schema === "world:source-cvars")) {
+    if (execution?.kind !== "typescript" || execution.api.kind !== "q1-netquake" && execution.api.kind !== "q1-quakeworld"
+      && execution.api.kind !== "q2-classic-game" && execution.api.kind !== "q2-rerelease-game")
+      throw new Error("Saved common cvars have no matching source owner");
+    simulationProviderCheckpoint(image, "world:source-cvars");
+  }
   if (guest === null && execution?.kind === "typescript") {
     if (execution.api.kind === "q1-netquake" || execution.api.kind === "q1-quakeworld") simulationProviderCheckpoint(image, "q1:foundation");
     else if (execution.api.kind === "q2-classic-game" || execution.api.kind === "q2-rerelease-game") {
