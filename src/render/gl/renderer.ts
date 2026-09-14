@@ -6,7 +6,7 @@ import { loadGl } from "../../platform/gl.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
 import type { Vec4 } from "../../contracts/math.ts";
 import type { BlendFactor, DepthImageLevel, DrawBatch, ImageResourceOperation, PreparedBackendDraw, Rect, RendererBackend, RendererDrawBuffer, RendererImage, RendererResourceOwner, RenderOperation, RenderState, RenderViewState } from "../../contracts/render.ts";
-import { packGeometry, type GeometryArrays } from "./buffers.ts";
+import { GeometryBuffer, type GeometryArrays } from "./buffers.ts";
 import { StageProgram } from "./programs.ts";
 import { GlTextures, withPixelStore } from "./textures.ts";
 import { DepthAtlasTarget } from "./depth-atlas.ts";
@@ -32,6 +32,7 @@ export class GlRenderer implements RendererBackend {
   private readonly program: StageProgram;
   private readonly textures: GlTextures;
   private activeArrays: GeometryArrays | null = null;
+  private idleGeometry: GeometryBuffer | null = null;
   private depthAtlas: DepthAtlasTarget | null = null;
   private fog: Q2FogPass | null = null;
   private objectOpacity: GlObjectOpacity | null = null;
@@ -244,7 +245,11 @@ export class GlRenderer implements RendererBackend {
   prepareGeometry(batch: DrawBatch): PreparedBackendDraw {
     this.opened();
     const resolveTexture = createTextureResolver(resource => this.applyImageResource(resource));
-    const arrays = packGeometry(batch);
+    const buffer = this.idleGeometry ?? new GeometryBuffer();
+    this.idleGeometry = null;
+    let arrays: GeometryArrays;
+    try { arrays = buffer.pack(batch); }
+    catch (error) { this.idleGeometry = buffer; throw error; }
     const state: RenderState = { ...batch.state, blend: { ...batch.state.blend },
       depthRange: [batch.state.depthRange[0], batch.state.depthRange[1]],
       polygonOffset: batch.state.polygonOffset === null ? null : { ...batch.state.polygonOffset } };
@@ -266,6 +271,7 @@ export class GlRenderer implements RendererBackend {
         this.identityMatrices();
         this.program.use(environment, state.alphaTest, batch.lighting, batch.textureEffect === "luminance-alpha");
         this.activeArrays = arrays;
+        phase = "active";
         const gl = this.gl;
         gl.glEnableClientState(0x8074);
         gl.glEnableClientState(0x8076);
@@ -286,7 +292,6 @@ export class GlRenderer implements RendererBackend {
         }
         this.selectTexture(0);
         gl.glLineWidth(lineWidth);
-        phase = "active";
       },
       applyTexture: (unit, operation) => {
         this.opened();
@@ -308,11 +313,14 @@ export class GlRenderer implements RendererBackend {
       },
       cleanup: () => {
         if (phase === "cleaned") return;
+        if (this.closed) { phase = "cleaned"; return; }
         this.opened();
-        if (phase === "prepared") { phase = "cleaned"; return; }
-        this.disableArrays();
-        this.gl.glLineWidth(1);
+        if (phase !== "prepared") {
+          this.disableArrays();
+          this.gl.glLineWidth(1);
+        }
         phase = "cleaned";
+        this.idleGeometry = buffer;
       },
     };
   }
@@ -536,6 +544,7 @@ export class GlRenderer implements RendererBackend {
     this.window.setRenderingEnabled(true);
     this.window.makeCurrent();
     this.disableArrays();
+    this.idleGeometry = null;
     this.outputGamma?.close(); this.outputGamma = null;
     this.objectOpacity?.close(); this.objectOpacity = null;
     this.depthAtlas?.close(); this.depthAtlas = null;

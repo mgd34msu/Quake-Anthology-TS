@@ -12,8 +12,51 @@ export interface GeometryArrays {
   readonly indices: Uint32Array;
 }
 
+type AllocateGeometry = (vertices: number, indices: number, lighting: DrawBatch["lighting"]["kind"]) => GeometryArrays;
+
+/** Storage belongs to one prepared draw until its native pointers are disabled. */
+export class GeometryBuffer {
+  private storage = new ArrayBuffer(0);
+  private arrays: GeometryArrays | null = null;
+
+  private readonly allocate: AllocateGeometry = (vertices, indices, lighting) => {
+    const world = lighting === "vertex" ? 0 : vertices * 3;
+    const normals = lighting === "q2-world" ? vertices * 3 : 0;
+    const bytes = (vertices * 12 + world + normals + indices) * 4;
+    if (this.storage.byteLength < bytes) this.storage = new ArrayBuffer(Math.max(bytes, this.storage.byteLength * 2));
+    const previous = this.arrays;
+    if (previous !== null && previous.positions.buffer === this.storage && previous.positions.length === vertices * 4
+      && previous.worldPositions.length === world && previous.normals.length === normals && previous.indices.length === indices) return previous;
+    let offset = 0;
+    const floats = (length: number): Float32Array => {
+      const array = new Float32Array(this.storage, offset, length);
+      offset += length * 4;
+      return array;
+    };
+    const positions = floats(vertices * 4), colors = floats(vertices * 4);
+    const coordinates = floats(vertices * 2), coordinates2 = floats(vertices * 2);
+    const worldPositions = floats(world), normalValues = floats(normals);
+    this.arrays = { positions, colors, coordinates, coordinates2, worldPositions, normals: normalValues,
+      indices: new Uint32Array(this.storage, offset, indices) };
+    return this.arrays;
+  };
+
+  pack(batch: DrawBatch): GeometryArrays { return pack(batch, this.allocate); }
+}
+
+const allocateFresh: AllocateGeometry = (vertices, indices, lighting) => ({
+  positions: new Float32Array(vertices * 4), colors: new Float32Array(vertices * 4),
+  coordinates: new Float32Array(vertices * 2), coordinates2: new Float32Array(vertices * 2),
+  worldPositions: new Float32Array(lighting === "vertex" ? 0 : vertices * 3),
+  normals: new Float32Array(lighting === "q2-world" ? vertices * 3 : 0), indices: new Uint32Array(indices),
+});
+
 /** Own every native client pointer until the draw disables its arrays. */
 export function packGeometry(batch: DrawBatch): GeometryArrays {
+  return pack(batch, allocateFresh);
+}
+
+function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
   const { vertices, indices } = batch;
   const size = batch.primitive === "lines" ? 2 : 3;
   if (indices.length % size !== 0 || indices.length > 0x7fffffff)
@@ -25,13 +68,9 @@ export function packGeometry(batch: DrawBatch): GeometryArrays {
     if (!Number.isInteger(index) || index < 0 || index >= vertices.length)
       throw new RangeError("OpenGL vertex index is outside its allocation");
   }
-  const arrays: GeometryArrays = {
-    positions: new Float32Array(vertices.length * 4), colors: new Float32Array(vertices.length * 4),
-    coordinates: new Float32Array(vertices.length * 2), coordinates2: new Float32Array(vertices.length * 2),
-    worldPositions: new Float32Array(batch.lighting.kind === "vertex" ? 0 : vertices.length * 3),
-    normals: new Float32Array(batch.lighting.kind === "q2-world" ? vertices.length * 3 : 0),
-    indices: new Uint32Array(indices),
-  };
+  const arrays = allocate(vertices.length, indices.length, batch.lighting.kind);
+  arrays.indices.set(indices);
+  if (batch.texturing === "single") arrays.coordinates2.fill(0);
   let four = 0, two = 0;
   for (const vertex of vertices) {
     const { position, color, texCoord } = vertex;
