@@ -57,6 +57,8 @@ Neither later empty-queue observation proves an audible gap. Row 51's queue-only
 
 Accepted source `4477db29f195080cf73cbfceb66d1e543a30f9fc` projects each opaque lightmapped vertex once while retaining separate draws. Root passed all eight material tests with 166 assertions; targeted retail lightmap and offscreen CPU/GL world checks also passed. No FPS gain is claimed. This change is not in the installed `ec8fd30` executable.
 
+Accepted source `2662c66e64142c4d7a40c201d2cf17c877f55214` retains resolved uniform locations in program-owned records. Root passed the native uniform-state test with 154 assertions; frozen native checks passed eight tests with 442 assertions. All 32 captures and the actual final color and full shadow atlas matched. In one isolated pair based on `ec8fd30` plus the eight audio files, excluding later legacy projection reuse, program-use time fell from 7.400 to 4.049 ms and location lookups fell from 916,651 to 84 across 16 warmup frames. Whole-frame mean fell from 68.631 to 63.522 ms, but changes outside the edited span prevent attributing that entire difference to this unit. No sustained FPS gain is established. This source change is not in the installed `ec8fd30` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
