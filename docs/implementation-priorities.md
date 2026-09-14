@@ -58,7 +58,7 @@ Complete NetQuake and QuakeWorld QC hosts, QVM game/cgame/UI roles and TypeScrip
 
 Accepted `729b1dd` binds cgame entity-token and PVS queries to the loaded Q3 world owner, with root five tests/3,196 assertions. Known-baseq3 admission remains gated; broader QVM/mod compatibility stays open.
 
-Accepted `5258ee0` binds all 18 UI LAN browser calls through shared discovery and cache ownership. IPv4 and JSON cache scope and native admission gates remain; LRCTF follow-up is pending, so this does not close broader module compatibility.
+Accepted `5258ee0` binds all 18 UI LAN browser calls through shared discovery and cache ownership. IPv4 and JSON cache scope and native admission gates remain. A bounded artifact-only gate bypass reached one active frame with real mounted LRCTF UI/cgame modules after UI71 completion, against a baseq3 server advertising fs_game=lrctf with sv_pure=0. Production known-baseq3 admission is unchanged; LRCTF server rules, pure mods, full gameplay, missionpack, and unknown-module compatibility remain open. Accepted `1aa524d` reuses browser reads with root 19 tests/254 assertions.
 
 **Done when:** The required QC, QVM and native-mod behavior runs through normal application admission, execution, travel, save and teardown across every required host. A pinned-program whitelist is insufficient. Required programs or host combinations that remain unsupported keep this priority open; explicit failure only explains the limitation.
 
