@@ -55,6 +55,8 @@ Accepted Q3 media warmup `3648f289d71f49f9ee2a015b08e33f97a64a9071` and startup 
 
 Neither later empty-queue observation proves an audible gap. Row 51's queue-only shortfall of 21.664805 ms is below the obtained 1,024-frame output block of 23.219955 ms, which SDL's queued-byte count excludes once handed off for playback. Row 212 likewise does not prove a gap. These checks do not establish gap-free playback, physical speaker fidelity, or universal FPS.
 
+Accepted source `4477db29f195080cf73cbfceb66d1e543a30f9fc` projects each opaque lightmapped vertex once while retaining separate draws. Root passed all eight material tests with 166 assertions; targeted retail lightmap and offscreen CPU/GL world checks also passed. No FPS gain is claimed. This change is not in the installed `ec8fd30` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
