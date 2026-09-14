@@ -416,7 +416,7 @@ export class StartupSelectionModel {
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
-  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false }), options);
+  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot() }), options);
   await model.prepareMaps();
   return model;
 }
