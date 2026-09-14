@@ -86,7 +86,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       }
       return this.content;
     };
-    return { scene, zeroPicture: await this.provider.shaders.registerPicture("*white"),
+    return { scene, zeroPicture: this.provider.shaders.sourceDefaultPicture,
       model: async path => {
         const content = contentFor(path), provider = await this.assets.provider(content);
         if (!path.startsWith("*") && await provider.mounts.resolve(path) === null) return DEFAULT_MODEL;
@@ -101,7 +101,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       },
       skin: async path => { const provider = await this.assets.provider(contentFor(path)), opened = await provider.mounts.open(path);
         return opened === null ? null : { path, surfaces: parseSkin(new TextDecoder().decode(opened.bytes)) }; },
-      shader: (path, mip) => this.provider.shaders.registerPicture(path, mip),
+      shader: (path, mip) => this.provider.shaders.registerSourcePicture(path, mip),
       world: async () => ({ map: { models: this.assets.world.map.models } }),
       remapShader: async (original, replacement, offset) => {
         const value = Number.parseFloat(offset), timeOffset = Number.isNaN(value) ? 0 : value;

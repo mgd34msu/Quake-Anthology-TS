@@ -125,6 +125,10 @@ export class SceneTextureLoader {
 
   load(name: string, options: SceneTextureLoadOptions = {}): Promise<SceneTexture | null> {
     this.requireOpen();
+    if (options.family === undefined || options.family === "q3") {
+      if (name === this.white.name) return Promise.resolve(this.white);
+      if (name === this.missing.name) return Promise.resolve(this.missing);
+    }
     const key = `${name}\0${options.mipmap !== false}\0${options.wrap ?? "repeat"}\0${options.family ?? "q3"}\0${options.usage ?? ""}`;
     const existing = this.loaded.get(key);
     if (existing !== undefined) return existing;

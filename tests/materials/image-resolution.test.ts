@@ -21,6 +21,76 @@ function loader(files: ReadonlyMap<string, SceneAsset>, originals: ReadonlyMap<s
   });
 }
 
+test("source white shader resolves owned builtins before files and keeps vertex blending through replacement", async () => {
+  const textures = loader(new Map<string, SceneAsset>()), replacementTextures = loader(new Map<string, SceneAsset>());
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:white-picture"));
+  try {
+    await shaders.initializeSourceMaterials(async () => {
+      shaders.addScript("white\n{\n\t{\n\t\tmap *white\n\t\tblendfunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA\n\t\trgbgen vertex\n\t}\n}\n");
+    });
+    for (const mipmap of [true, false]) {
+      expect(await textures.load("*white", { mipmap, wrap: "clamp", family: "q3" })).toBe(textures.white);
+      expect(await textures.load("*default", { mipmap, family: "q3" })).toBe(textures.missing);
+    }
+    expect(await textures.load("*WHITE")).toBeNull();
+    const picture = await shaders.registerSourcePicture("white");
+    if (picture === null) throw new Error("Authored white shader failed to register");
+    const stage = picture.material.compiled.registered.definition.stages[0];
+    expect(stage?.rgbGen).toEqual({ kind: "vertex" });
+    expect(stage?.alphaGen).toEqual({ kind: "vertex" });
+    expect(stage?.blend).toEqual({ source: "src-alpha", destination: "one-minus-src-alpha" });
+    const binding = picture.material.compiled.registered.stages[0];
+    if (binding?.kind !== "loaded" || binding.binding.kind !== "images" || binding.binding.playback.kind !== "single") throw new Error("White shader has no single image binding");
+    expect(binding.binding.playback.image.image).toBe(textures.white.image);
+    expect(shaders.warnings.some(warning => warning.includes("*white"))).toBe(false);
+    const replacement = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(replacement);
+    shaders.commitReplacement(replacement);
+    const replaced = await shaders.registerSourcePicture("white");
+    expect(replaced?.material.order).toBe(picture.material.order);
+    const replacedBinding = replaced?.material.compiled.registered.stages[0];
+    if (replacedBinding?.kind !== "loaded" || replacedBinding.binding.kind !== "images" || replacedBinding.binding.playback.kind !== "single") throw new Error("Replaced white shader has no single image binding");
+    expect(replacedBinding.binding.playback.image.image).toBe(replacementTextures.white.image);
+  } finally { textures.close(); replacementTextures.close(); }
+});
+
+test("source picture registration rejects missing shaders while retaining default draws and image replacement", async () => {
+  const textures = loader(new Map<string, SceneAsset>()), replacementTextures = loader(new Map<string, SceneAsset>());
+  const registrations = new SceneMaterialRegistrations();
+  const shaders = new SceneShaderRegistry(textures, registrations.provider("q3:classic:retail:missing-picture"));
+  try {
+    await shaders.initializeSourceMaterials(async () => {
+      shaders.addScript("icons/present { { map $whiteimage } }\nicons/broken { { map absent.tga } }");
+    });
+    const zero = shaders.sourceDefaultPicture;
+    expect(zero.material.compiled).toBe(shaders.sourceMaterials.default);
+    for (const mipmap of [true, false]) {
+      expect(await shaders.registerSourcePicture("radar/q3ctf1.tga", mipmap)).toBeNull();
+      expect(await shaders.registerSourcePicture("icons/broken", mipmap)).toBeNull();
+    }
+    const allocated = registrations.snapshot();
+    expect(await shaders.registerSourcePicture("RADAR/Q3CTF1", false)).toBeNull();
+    expect(registrations.snapshot()).toEqual(allocated);
+    const generic = await shaders.registerPicture("radar/q3ctf1.tga");
+    expect(generic.material.order).toBeGreaterThan(0);
+    const missing = await shaders.register("radar/q3ctf1.tga", { kind: "unlit", lightmapIndex: -4, mipmap: false });
+    expect(generic.material.compiled).toBe(missing);
+    expect(shaders.sourceWorldMaterial(missing)).toBe(shaders.sourceMaterials.default);
+    const valid = await shaders.registerSourcePicture("icons/present");
+    if (valid === null) throw new Error("Valid shader registration failed");
+    expect(valid.material.order).toBeGreaterThan(0);
+    const beforeReplacement = registrations.snapshot();
+    const replacement = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(replacement);
+    expect(registrations.snapshot()).toEqual(beforeReplacement);
+    shaders.commitReplacement(replacement);
+    expect(shaders.sourceDefaultPicture.material.compiled).toBe(zero.material.compiled);
+    expect(shaders.sourceDefaultPicture.material.order).toBe(zero.material.order);
+    expect(await shaders.registerSourcePicture("radar/q3ctf1.tga")).toBeNull();
+    expect((await shaders.registerSourcePicture("icons/present"))?.material.order).toBe(valid.material.order);
+  } finally { textures.close(); replacementTextures.close(); }
+});
+
 test("scene shader registration follows admission across providers and deferred image completion", async () => {
   const registrations = new SceneMaterialRegistrations(), deferred = Promise.withResolvers<SceneAsset | null>();
   const images = new SceneImageRegistry({ identity: Symbol("registration"), session: createIdentityOwner("registration").session, generation: 0 });

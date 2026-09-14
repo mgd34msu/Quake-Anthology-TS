@@ -253,6 +253,18 @@ export class SceneShaderRegistry {
 
   async registerPicture(name: string, mipmap = false): Promise<MaterialPicture> {
     const compiled = await this.register(name, { kind: "unlit", lightmapIndex: -4, mipmap });
+    return this.picture(name, compiled);
+  }
+
+  async registerSourcePicture(name: string, mipmap = false): Promise<MaterialPicture | null> {
+    const compiled = await this.register(name, { kind: "unlit", lightmapIndex: -4, mipmap });
+    if (this.sourceWorldMaterial(compiled) === this.sourceMaterials.default) return null;
+    return this.picture(name, compiled);
+  }
+
+  get sourceDefaultPicture(): MaterialPicture { return this.picture("*default", this.sourceMaterials.default); }
+
+  private picture(name: string, compiled: RegisteredSceneMaterial): MaterialPicture {
     let order = this.pictureOrders.get(compiled.registration);
     if (order === undefined) { order = this.pictureOrders.size + 1; this.pictureOrders.set(compiled.registration, order); }
     return { kind: "material", name, material: { order, compiled } };
