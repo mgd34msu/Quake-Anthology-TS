@@ -77,6 +77,8 @@ Accepted source `729b1dde51a0fcebdb5a269f91e042b24dda1fd7` binds cgame entity-to
 
 Accepted `077c73452384605231cc2391c0ed59afa0656801` shares browser polling while preserving borrowed application ownership; root passed two hidden-window, dummy-audio, real-UDP checks with eight assertions. Accepted `e76943bada4997cbf12821fc5e7aa3e044727f30` tracks discovery requests independently; root passed 11 focused tests with 80 assertions and retained browser sort/persistence checks. These changes are not in the installed `18bedc4` executable. Existing admission gates remain unchanged; this does not qualify the full Q3 browser, native vanilla peers, or general mods.
 
+Accepted source `5258ee0d499909f8bc2bd6cd00f705f959fb1c8a` binds all 18 Q3 UI LAN calls to shared browser ownership, master discovery, cached views, and independent request state. Root passed 31 tests with 467 assertions; a separate known-baseQ3 guest travel check passed with 41 assertions. Scope retains IPv4, JSON cache storage, and existing native admission gates. The LRCTF baseline failed at UI trap 71; its follow-up probe is pending, so broader unknown-module admission is not established. This unit is not in the installed `18bedc4` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
