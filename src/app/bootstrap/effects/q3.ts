@@ -1,3 +1,4 @@
+import { compiledDrawGroup, type SceneOperation } from "../../../render/scene/submissions.ts";
 import { byteToDirection, directionToByte } from "../../../content/q3/base/shared/direction-byte.ts";
 import type { Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
 /* Source cgame effect producers joined to shared assets, collision and drawing. */
@@ -6,7 +7,7 @@ import type { Axis, Vec3 } from "../../../contracts/math.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { NumericProfile } from "../../../contracts/numeric.ts";
 import type { SceneEntity, SceneQueries } from "../../../contracts/scene.ts";
-import type { RenderOperation, SceneCamera } from "../../../contracts/render.ts";
+import type { SceneCamera } from "../../../contracts/render.ts";
 import { SoundBank } from "../../../audio/bank.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
 import type { CompiledMaterial } from "../../../materials/compile.ts";
@@ -361,10 +362,10 @@ export class Q3ApplicationEffects {
     }
     await this.renderer.preload(this.models, entity => this.options.get(entity) ?? {});
   }
-  frame(camera: SceneCamera, viewer: ActorId | null = null): { readonly operations: readonly RenderOperation[]; readonly q3Lights: readonly DynamicLight[] } {
+  frame(camera: SceneCamera, viewer: ActorId | null = null): { readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
     const input = { camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
     const visible = viewer === null ? this.models : this.models.filter(entity => !this.hiddenModels.get(entity)?.equals(viewer));
-    const context = this.assets.world.materialContext(input), batches = [...this.renderer.prepare(visible, input, entity => this.options.get(entity) ?? {})];
+    const context = this.assets.world.materialContext(input), operations: SceneOperation[] = [...this.renderer.prepare(visible, input, entity => this.options.get(entity) ?? {})];
     for (const captured of this.refs) {
       if (viewer !== null && captured.hiddenFor?.equals(viewer)) continue;
       const ref = captured.ref;
@@ -372,16 +373,16 @@ export class Q3ApplicationEffects {
         || ref.customShader === null || length3(sub3(ref.origin, camera.origin)) < captured.cullRadius) continue;
       const shader = this.shaders.get(ref.customShader.name); if (shader === undefined) throw new Error(`Unregistered effect shader ${ref.customShader.name}`);
       const geometry = ref.kind === "sprite" ? spriteGeometry(ref, camera.axis, camera.clip.kind === "portal" && camera.clip.mirror) : railGeometry(ref, camera.origin);
-      batches.push(...prepareMaterialBatches(shader, geometry, { ...context, entityRGBA: ref.shaderRGBA, shaderTexCoord: ref.shaderTexCoord, timeOffset: ref.shaderTime }));
+      operations.push(compiledDrawGroup(shader, prepareMaterialBatches(shader, geometry, { ...context, entityRGBA: ref.shaderRGBA, shaderTexCoord: ref.shaderTexCoord, timeOffset: ref.shaderTime })));
     }
     const media = this.readyWeapons;
     if (media !== null) media.view.viewAxis = camera.axis;
     for (const poly of [...this.polys, ...media?.particles.addParticles(camera.origin) ?? []]) {
       if (poly.shader === null) continue;
       const shader = this.shaders.get(poly.shader.name); if (shader === undefined) throw new Error(`Unregistered mark shader ${poly.shader.name}`);
-      batches.push(...prepareMaterialBatches(shader, polyGeometry(poly), context));
+      operations.push(compiledDrawGroup(shader, prepareMaterialBatches(shader, polyGeometry(poly), context)));
     }
-    return { operations: [{ kind: "draw", batches }], q3Lights: this.lights };
+    return { operations, q3Lights: this.lights };
   }
   drainSounds(): readonly SourceEffectSound[] { return this.sounds.splice(0); }
   close(): void { this.effects.pool.initialize(); this.marks.reset(); this.refs = []; this.models.length = 0; this.sounds.length = 0; this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear(); }

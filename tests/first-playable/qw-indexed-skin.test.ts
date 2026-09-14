@@ -1,3 +1,4 @@
+import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, spyOn, test } from "bun:test";
 import { loadApplicationContent } from "../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -63,7 +64,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
       for (const colors of [{ top: 4, bottom: 12 }, { top: 12, bottom: 4 }]) {
         const options = () => ({ indexedSkin: skin, playerColors: colors }); await scene.preload([entity], options);
         const input = { camera, lights: [{ origin, radius: 96, minimum: 0, color: { x: 1, y: 1, z: 1 } }], time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) }, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
-        const batches = scene.prepare([entity], input, options); expect(batches.length).toBeGreaterThan(0);
+        const batches = sceneModelBatches(scene.prepare([entity], input, options)); expect(batches.length).toBeGreaterThan(0);
         frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
         const pending = renderer.captureNextFrame(); renderer.execute(frames.finish()); const image = await pending;
         expect(image.filter((value, index) => index % 4 !== 3 && value > 5).length).toBeGreaterThan(100);
@@ -79,7 +80,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
         try {
           const foreign = new SceneModelRenderer(provider, world); await foreign.preload([entity], source);
           const input = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
-          const batches = foreign.prepare([entity], input, source);
+          const batches = sceneModelBatches(foreign.prepare([entity], input, source));
           expect(batches.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.width === 296 && batch.texture.image.height === 194)).toBe(true);
           expect(prepareSceneEntity(entity, { camera, timeSeconds: 0, options: source }).surfaces[0]?.geometry).toEqual(native.surfaces[0]?.geometry);
           frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });

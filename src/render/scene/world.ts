@@ -1,3 +1,5 @@
+import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations } from "./submissions.ts";
+import type { SceneOperation } from "./submissions.ts";
 /* Unified world preparation uses Q1/Q2 brush surfaces and Q3 tr_bsp/tr_world.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec3 } from "../../contracts/math.ts";
@@ -76,7 +78,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly curveError?: number;
   readonly identityLight?: number;
   readonly renderText?: readonly string[];
-  readonly operations?: readonly RenderOperation[];
+  readonly operations?: readonly SceneOperation[];
   readonly beforeView?: readonly RenderOperation[];
   /** Entity lighting, video upload, shadows and private game overlays join here. */
   readonly materialContext?: Partial<Pick<MaterialDrawContext, "lighting" | "entityRGBA" | "projectionShadow">>;
@@ -269,10 +271,10 @@ export class WorldScene {
   }
 
   /** Inline and external BSP models share surface preparation and upload ownership. */
-  prepareModel(modelIndex: number, transform: ModelTransform, input: WorldViewInput): readonly RenderOperation[] {
+  prepareModel(modelIndex: number, transform: ModelTransform, input: WorldViewInput): readonly SceneOperation[] {
     const source = at<DecodedWorld["models"][number]>(this.map.models, modelIndex);
     const range = "surfaces" in source ? source.surfaces : source.faces;
-    const context = this.materialContext(input, transform), operations: RenderOperation[] = [];
+    const context = this.materialContext(input, transform), operations: SceneOperation[] = [];
     for (let index = 0; index < range.count; index++)
       operations.push(...this.surfaceOperations(at(this.surfaces, range.first + index), input, context, transform));
     return operations;
@@ -329,7 +331,7 @@ export class WorldScene {
   }
 
   prepareView(input: WorldViewInput): PreparedWorldView {
-    const visibility = visibleWorld(this.map, input.camera, input), operations: RenderOperation[] = [];
+    const visibility = visibleWorld(this.map, input.camera, input), operations: SceneOperation[] = [];
     const context = this.materialContext(input), worldModel = this.map.models[0];
     const worldRange = worldModel === undefined ? { first: 0, count: this.surfaces.length } : "surfaces" in worldModel ? worldModel.surfaces : worldModel.faces;
     const surfaces = visibility.surfaces.map(index => at(this.surfaces, index)).filter(surface => surface.index >= worldRange.first && surface.index < worldRange.first + worldRange.count);
@@ -338,7 +340,7 @@ export class WorldScene {
       if (surface.kind !== "legacy") throw new Error("Compiled surface lost its shader");
       return surface.q1Sky !== null || surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0 ? 2 : surface.material.alpha < 1 ? 9 : 3;
     };
-    surfaces.sort((a, b) => order(a) - order(b));
+    if (surfaces.some(surface => surface.shader === null)) surfaces.sort((a, b) => order(a) - order(b));
     const frustum = cameraFrustum(input.camera);
     for (const surface of surfaces) if (boundsInFrustum(surface.bounds, frustum)) operations.push(...this.surfaceOperations(surface, input, context));
     for (const model of input.inlineModels ?? []) {
@@ -354,17 +356,17 @@ export class WorldScene {
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
-      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations } };
+      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: finishSceneOperations(operations) } };
   }
 
-  private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly RenderOperation[] {
+  private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly SceneOperation[] {
     if (surface.kind === "q3") return this.shaderOperations(surface, surface.shader, input, context, model);
     const material = surface.material;
     if (surface.shader === null) {
       if (material.kind === "q2" && (material.surfaceFlags & 128) !== 0 && (material.surfaceFlags & 4) === 0) return [];
       if (surface.plane !== null && dot3(context.localViewOrigin, surface.plane.normal) - surface.plane.distance < -0.01) return [];
-      if (surface.q1Sky !== null) return [{ kind: "draw", batches: this.q1SkyBatches(surface, surface.q1Sky, input, context) }];
-      if (material.kind === "q2" && (material.surfaceFlags & 4) !== 0) return this.q2SkyOperations(surface.geometry, input, context);
+      if (surface.q1Sky !== null) return [sequenceDrawGroup("sky", this.q1SkyBatches(surface, surface.q1Sky, input, context))];
+      if (material.kind === "q2" && (material.surfaceFlags & 4) !== 0) return [{ kind: "scene-group", order: { kind: "sequence", phase: "sky" }, operations: this.q2SkyOperations(surface.geometry, input, context) }];
     }
     if (surface.lightmap !== null) {
       const lightmap = surface.lightmap;
@@ -406,10 +408,10 @@ export class WorldScene {
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
         normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
-    return [{ kind: "draw", batches }];
+    return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
   }
 
-  private shaderOperations(surface: WorldSurface, sourceShader: CompiledMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly RenderOperation[] {
+  private shaderOperations(surface: WorldSurface, sourceShader: CompiledMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly SceneOperation[] {
     const remap = this.remapped.get(sourceShader), shader = remap?.shader ?? sourceShader;
     const grid = surface.kind === "q3" ? surface.grid : null, fog = surface.kind === "q3" ? surface.fog : null;
     if (shader.material.surfaceParameters.includes("nodraw")) return [];
@@ -434,10 +436,10 @@ export class WorldScene {
     });
     const drawContext = { ...(fog === null ? context : this.materialContext(input, model, fog)), timeOffset: remap?.timeOffset ?? 0,
       dynamicLightBatches, ...(lightmapLighting === undefined ? {} : { lightmapLighting }) };
-    if (shader.finished.iterator.kind === "sky") return this.skyOperations(shader, geometry, input, drawContext);
+    if (shader.finished.iterator.kind === "sky") return [{ kind: "scene-group", order: { kind: "compiled", material: shader }, operations: this.skyOperations(shader, geometry, input, drawContext) }];
     const batches = prepareMaterialBatches(shader, geometry, drawContext);
-    return [{ kind: "draw", batches: (context.deformView.mirror !== (model !== undefined && modelScale(model) < 0)) ? batches.map(batch => ({ ...batch, state: { ...batch.state,
-      cull: batch.state.cull === "none" ? "none" : batch.state.cull === "front" ? "back" : "front" } })) : batches }];
+    return [compiledDrawGroup(shader, (context.deformView.mirror !== (model !== undefined && modelScale(model) < 0)) ? batches.map(batch => ({ ...batch, state: { ...batch.state,
+      cull: batch.state.cull === "none" ? "none" : batch.state.cull === "front" ? "back" : "front" } })) : batches)];
   }
 
   private q1SkyBatches(surface: WorldSurface, sky: { readonly solid: RendererImage; readonly overlay: RendererImage }, input: WorldViewInput, context: MaterialDrawContext): readonly DrawBatch[] {

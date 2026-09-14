@@ -6,10 +6,12 @@ import { anglesToAxis } from "../../../core/math.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
 import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
 import type { WorldViewInput } from "../../../render/scene/world.ts";
-import type { DrawBatch, SceneCamera } from "../../../contracts/render.ts";
+import type { SceneCamera } from "../../../contracts/render.ts";
 import type { ClientEntity } from "../../../content/q3/presentation/state.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "../assets.ts";
 import type { SimulationPresentation } from "../simulation/types.ts";
+
+import type { SceneModelGroup } from "../../../render/scene/submissions.ts";
 
 interface Model {
   readonly actor: ActorId; readonly source: SimulationPresentation; readonly entity: SceneEntity;
@@ -20,6 +22,7 @@ interface Group { readonly renderer: SceneModelRenderer; readonly models: Model[
 /** Selected foreign models use their own assets and animation with cgame's interpolated player pose. */
 export class ApplicationQ3ForeignModels {
   private readonly groups = new Map<ProviderSceneAssets, Group>();
+  private readonly ordered: { readonly group: Group; readonly model: Model }[] = [];
   private readonly poses = new Map<ActorId, { readonly origin: Vec3; readonly angles: Vec3 }>();
   constructor(readonly assets: ApplicationAssets, readonly actor: ActorId, readonly sourceActor: (number: number) => ActorId) {}
   character(entity: ClientEntity): void {
@@ -27,6 +30,7 @@ export class ApplicationQ3ForeignModels {
   }
   async prepare(presentations: readonly SimulationPresentation[]): Promise<void> {
     this.poses.clear();
+    this.ordered.length = 0;
     for (const group of this.groups.values()) group.models.length = 0;
     for (const source of presentations) {
       if (source.family === "q3" || !source.visible || source.path === "" || source.viewWeapon && !source.actor.equals(this.actor)) continue;
@@ -39,22 +43,23 @@ export class ApplicationQ3ForeignModels {
         previousOrigin: source.origin, pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 },
         skin: source.skin, color: { x: 1, y: 1, z: 1, w: source.alpha ?? 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
-      group.models.push({ actor: source.actor, source, entity, options: { viewModel: source.viewWeapon,
-        player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null } });
+      const model: Model = { actor: source.actor, source, entity, options: { viewModel: source.viewWeapon,
+        player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null } };
+      group.models.push(model); this.ordered.push({ group, model });
     }
     for (const group of this.groups.values()) await group.renderer.preload(group.models.map(model => model.entity), entity => group.models.find(model => model.entity === entity)?.options ?? {});
   }
-  draw(input: WorldViewInput, thirdPerson: boolean, drawWeapon: boolean, weaponCamera: SceneCamera): readonly DrawBatch[] {
-    const batches: DrawBatch[] = [];
-    for (const group of this.groups.values()) for (const model of group.models) {
+  draw(input: WorldViewInput, thirdPerson: boolean, drawWeapon: boolean, weaponCamera: SceneCamera): readonly SceneModelGroup[] {
+    const groups: SceneModelGroup[] = [];
+    for (const { group, model } of this.ordered) {
       const personal = model.actor.equals(this.actor);
       if (model.source.viewWeapon ? !drawWeapon || thirdPerson || input.camera.clip.kind === "portal" : personal && !thirdPerson && input.camera.clip.kind === "none") continue;
       const pose = this.poses.get(model.actor);
       const entity = pose === undefined || model.source.viewWeapon ? model.entity : { ...model.entity,
         transform: { ...model.entity.transform, origin: pose.origin, axis: anglesToAxis(pose.angles) }, lightingOrigin: pose.origin };
-      batches.push(...group.renderer.prepare([entity], model.source.viewWeapon ? { ...input, camera: weaponCamera } : input, () => model.options));
+      groups.push(...group.renderer.prepare([entity], model.source.viewWeapon ? { ...input, camera: weaponCamera } : input, () => model.options));
     }
-    return batches;
+    return groups;
   }
-  close(): void { this.groups.clear(); this.poses.clear(); }
+  close(): void { this.ordered.length = 0; this.groups.clear(); this.poses.clear(); }
 }

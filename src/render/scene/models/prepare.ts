@@ -2,7 +2,7 @@
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { GameRandom } from "../../../core/game-numeric.ts";
 import type { Bounds, Vec2, Vec4 } from "../../../contracts/math.ts";
-import type { DrawBatch } from "../../../contracts/render.ts";
+import type { SceneModelGroup } from "../submissions.ts";
 import type { DecodedModel, ModelVertex, Q2AliasModel, SceneEntity } from "../../../contracts/scene.ts";
 import { anglesToAxis, vectorToAngles, add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { buildMd2Geometry, buildMdlGeometry, interpolateAliasFrames, sampleTimedFrame } from "../../../formats/q12-model/animation.ts";
@@ -17,7 +17,7 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelBatchContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
+import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
 function countFrames(model: DecodedModel): number {
   return model.kind === "brush-model" ? 1 : model.frames.length;
@@ -292,13 +292,13 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       : model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? model.skinSelection.flags : 0 };
 }
 
-export function prepareSceneEntityBatches(entity: SceneEntity, context: ModelPreparationContext, material: ModelBatchContext): readonly DrawBatch[] {
-  return preparedModelBatches(prepareSceneEntity(entity, context), material);
+export function prepareSceneEntityGroups(entity: SceneEntity, context: ModelPreparationContext, material: ModelGroupContext): readonly SceneModelGroup[] {
+  return preparedModelGroups(prepareSceneEntity(entity, context), material);
 }
 
-export function preparedModelBatches(model: PreparedModelEntity, material: ModelBatchContext): readonly DrawBatch[] {
+export function preparedModelGroups(model: PreparedModelEntity, material: ModelGroupContext): readonly SceneModelGroup[] {
   const own = model.cull === "out" || model.personalModel ? [] : model.surfaces.flatMap(surface => material.draw(surface));
-  return [...own, ...model.attachments.flatMap(attachment => preparedModelBatches(attachment, material))];
+  return [...own, ...model.attachments.flatMap(attachment => preparedModelGroups(attachment, material))];
 }
 
 export function modelProjectedRadius(entity: SceneEntity, radius: number, context: ModelPreparationContext): number {

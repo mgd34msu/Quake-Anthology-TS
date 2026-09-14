@@ -1,3 +1,4 @@
+import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { createContentDigest, createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../src/contracts/content.ts";
@@ -109,7 +110,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       for (const frame of small ? [0, 110, 112, 120] : [0, 40]) {
         const animated = { ...entity, pose: { kind: "frame", frame, previousFrame: frame, backLerp: 0 } } satisfies SceneEntity;
         const input = { camera, time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: f.identity.seat(0) }, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
-        const batches = scene.prepare([animated], input, options); expect(batches.length).toBeGreaterThan(0);
+        const batches = sceneModelBatches(scene.prepare([animated], input, options)); expect(batches.length).toBeGreaterThan(0);
         frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear,
           clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
         const capture = renderer.captureNextFrame(); renderer.execute(frames.finish()); const pixels = await capture;
@@ -172,12 +173,12 @@ test("retained Q2 aliases select by each eye, preserve native bounds and commit 
       const turning = { ...near.entity, model: skeletal, flags: { kind: "q2", bits: 8 },
         transform: { ...entity.transform, axis: anglesToAxis({ x: 0, y: 90, z: 0 }) } } satisfies SceneEntity;
       const still = { ...turning, transform: { ...turning.transform, axis: entity.transform.axis } };
-      const before = renderer.prepare([turning], input), fixed = renderer.prepare([still], input);
+      const before = sceneModelBatches(renderer.prepare([turning], input)), fixed = sceneModelBatches(renderer.prepare([still], input));
       expect(before.length).toBeGreaterThan(0); expect(fixed.length).toBeGreaterThan(0);
-      expect(renderer.prepare([turning, still], input)).toEqual([...before, ...fixed]);
+      expect(sceneModelBatches(renderer.prepare([turning, still], input))).toEqual([...before, ...fixed]);
       turning.transform.axis = anglesToAxis({ x: 0, y: -90, z: 0 });
-      const after = renderer.prepare([turning], input);
-      expect(after).toEqual(renderer.prepare([{ ...turning, transform: { ...turning.transform } }], input));
+      const after = sceneModelBatches(renderer.prepare([turning], input));
+      expect(after).toEqual(sceneModelBatches(renderer.prepare([{ ...turning, transform: { ...turning.transform } }], input)));
       expect(after.flatMap(batch => batch.vertices.map(vertex => vertex.color)))
         .not.toEqual(before.flatMap(batch => batch.vertices.map(vertex => vertex.color)));
       expect(prepareSceneEntity(attached, { camera, timeSeconds: 0 }).attachments).toHaveLength(1);

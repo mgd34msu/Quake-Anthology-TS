@@ -1,8 +1,10 @@
+import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
+import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches } from "../../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { DecodedWorld, SceneEntity, SceneLight } from "../../../src/contracts/scene.ts";
-import type { Palette, RendererResourceOwner, SceneCamera } from "../../../src/contracts/render.ts";
+import type { DrawBatch, Palette, RenderOperation, RendererResourceOwner, SceneCamera } from "../../../src/contracts/render.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { localPoint, localVector, worldPoint, worldVector, createViewProjector } from "../../../src/render/scene/view.ts";
@@ -24,6 +26,58 @@ import type { WorldViewInput } from "../../../src/render/scene/world.ts";
 test("HUD clipping keeps texture coordinates inside an independent seat", () => {
   expect(clipPicture({ x: -10, y: 0, width: 20, height: 10 }, { s1: 0, t1: 0, s2: 1, t2: 1 }, { x: 0, y: 0, width: 100, height: 100 }))
     .toEqual({ rect: { x: 0, y: 0, width: 10, height: 10 }, uv: { s1: 0.5, t1: 0, s2: 1, t2: 1 } });
+});
+
+test("shared view orders remapped world and multipass effects across legacy groups without crossing state barriers", async () => {
+  const identity = createIdentityOwner("material-order"), owner = { identity: Symbol("material-order"), session: identity.session, generation: 0 };
+  const images = new SceneImageRegistry(owner), textures = new SceneTextureLoader(images, { read: async () => null });
+  const shaders = new SceneShaderRegistry(textures);
+  shaders.addScript(`ordering/world { sort 3 cull none { map $whiteimage rgbGen const ( 0.1 0.1 0.1 ) } }
+ordering/remap { sort 9 cull none { map $whiteimage blendFunc add rgbGen const ( 0.2 0.2 0.2 ) } }
+ordering/mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZERO GL_ONE_MINUS_SRC_COLOR } }
+ordering/flash { cull none
+ { map $whiteimage blendFunc add rgbGen const ( 0.4 0.4 0.4 ) }
+ { map $whiteimage blendFunc add rgbGen const ( 0.6 0.6 0.6 ) }
+}`, "<material ordering>");
+  const bounds = { min: { x: 32, y: -8, z: -8 }, max: { x: 32, y: 8, z: 8 } };
+  const map: Extract<DecodedWorld, { readonly kind: "q3-bsp" }> = {
+    kind: "q3-bsp", format: "ibsp46", entities: "{}", shaders: [{ name: "ordering/world", surfaceFlags: 0, contentFlags: 0 }],
+    planes: [], nodes: [], leaves: [{ cluster: 0, area: 0, bounds, surfaces: { first: 0, count: 1 }, brushes: { first: 0, count: 0 } }],
+    leafSurfaces: [0], leafBrushes: [], models: [{ bounds, surfaces: { first: 0, count: 1 }, brushes: { first: 0, count: 0 } }],
+    brushes: [], brushSides: [], vertices: [{ x: 32, y: -8, z: -8 }, { x: 32, y: 8, z: -8 }, { x: 32, y: 0, z: 8 }].map(position => ({
+      position, normal: { x: -1, y: 0, z: 0 }, texCoord: { x: 0, y: 0 }, lightmapCoord: { x: 0, y: 0 }, color: { x: 255, y: 255, z: 255, w: 255 },
+    })), indices: [0, 1, 2], fogs: [], surfaces: [{ kind: "triangles", shader: 0, fog: -1, vertices: { first: 0, count: 3 }, indices: { first: 0, count: 3 },
+      lightmap: { image: -1, x: 0, y: 0, width: 0, height: 0, origin: { x: 0, y: 0, z: 0 }, vectors: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }] } }],
+    lightmaps: [], lightGrid: [], visibility: null,
+  };
+  const scene = await WorldScene.load(map, shaders);
+  try {
+    const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+      viewport: { x: 0, y: 0, width: 32, height: 32 }, projection: perspectiveProjection(90, 90, 4096), clip: { kind: "none" } };
+    const input: WorldViewInput = { camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 } };
+    const context = scene.materialContext(input), geometry = { vertices: map.vertices, indices: map.indices };
+    const mark = await shaders.register("ordering/mark"), flash = await shaders.register("ordering/flash");
+    expect(mark.finished.sort).toBe(4); expect(flash.finished.sort).toBe(9);
+    const markBatches = prepareMaterialBatches(mark, geometry, context), flashBatches = prepareMaterialBatches(flash, geometry, context);
+    expect(flashBatches).toHaveLength(2);
+    const legacyBatches: readonly DrawBatch[] = flashBatches.map(batch => ({ ...batch, state: { ...batch.state, depthWrite: true } }));
+    const markGroup = compiledDrawGroup(mark, markBatches), flashGroup = compiledDrawGroup(flash, flashBatches);
+    const legacy = sequenceDrawGroup("opaque", legacyBatches);
+    const drawBatches = (operations: readonly RenderOperation[]) => operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+    const before = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
+    expect(before.slice(1)).toEqual([...legacyBatches, ...markBatches, ...flashBatches]);
+    await scene.remapShader("ordering/world", "ordering/remap");
+    const remapped = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
+    expect(remapped.slice(0, legacyBatches.length + markBatches.length)).toEqual([...legacyBatches, ...markBatches]);
+    expect(remapped.at(legacyBatches.length + markBatches.length)?.vertices[0]?.color.x).toBeCloseTo(0.2, 2);
+    expect(remapped.slice(-2)).toEqual([...flashBatches]);
+    const barrier: RenderOperation = { kind: "depth-range", range: [0, 0.3] };
+    expect(finishSceneOperations([flashGroup, barrier, markGroup])).toEqual([...flashGroup.operations, barrier, ...markGroup.operations]);
+    const translucent = sequenceDrawGroup("translucent", markBatches);
+    expect(drawBatches(finishSceneOperations([translucent, legacy]))).toEqual([...markBatches, ...legacyBatches]);
+    expect(drawBatches(finishSceneOperations([flashGroup, translucent, legacy, markGroup])))
+      .toEqual([...markBatches, ...flashBatches, ...markBatches, ...legacyBatches]);
+  } finally { scene.close(); images.close(); }
 });
 
 const root = process.env["QFILES_ROOT"] ?? "/home/buzzkill/Projects/qfiles";
@@ -84,7 +138,7 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     if (fixture.family !== "q3" && map.models.length > 1) {
       const brush = scene.prepareModel(fixture.family === "q2" ? 20 : 1, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }), scale: 1.5 },
         { ...input, materialContext: { entityRGBA: { x: 255, y: 255, z: 255, w: 127.5 } } });
-      const batches = brush.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+      const batches = finishSceneOperations(brush).flatMap(operation => operation.kind === "draw" ? operation.batches : []);
       expect(batches.length).toBeGreaterThan(0);
       expect(batches.some(batch => batch.vertices.some(vertex => vertex.color.w > 0 && vertex.color.w <= 0.5))).toBe(true);
       expect(batches.every(batch => !batch.state.depthWrite)).toBe(true);
@@ -111,9 +165,9 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
       expect(shadows.stats.facesRendered).toBe(6);
       expect(shadows.stats.entityCasters).toBe(1);
       const lit = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
-      const batches = models.prepare([entity], lit);
+      const groups = models.prepare([entity], lit), batches = sceneModelBatches(groups);
       expect(batches.some(batch => batch.lighting.kind === "q2-model-shadow" && batch.lighting.shadeScale > 1)).toBe(true);
-      drawInput = { ...lit, operations: [{ kind: "draw", batches }] };
+      drawInput = { ...lit, operations: groups };
     }
     const prepared = scene.prepareView(drawInput);
     expect(prepared.visibility.surfaces.length).toBeGreaterThan(0);
@@ -157,7 +211,7 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
         expect(overridden.surfaces.some(other => other.shader === null)).toBe(true);
         const directed = { ...input, camera: { ...camera, origin: { x: surface.bounds.min.x, y: surface.bounds.min.y, z: surface.bounds.max.z + 32 } } };
         const preparedOverride = overridden.prepareModel(0, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }) }, directed);
-        expect(preparedOverride.some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
+        expect(finishSceneOperations(preparedOverride).some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
         expect(images.drainOperations().some(operation => operation.kind === "update-image" && operation.image === surface.lightmap?.image)).toBe(true);
         await overridden.remapShader(name, name);
         const shadowLight: SceneLight = { origin: directed.camera.origin, color: { x: 1, y: 1, z: 1 }, radius: 512, additive: false,

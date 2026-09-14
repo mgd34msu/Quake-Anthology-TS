@@ -1,3 +1,4 @@
+import { sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import { weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import { ForeignHeldWeapons } from "./held-weapon.ts";
@@ -6,7 +7,7 @@ import type { SimulationPresentation, SimulationPresentationEvent } from "./simu
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { SceneEntity, SceneLight } from "../../contracts/scene.ts";
-import type { RenderOperation, SceneCamera } from "../../contracts/render.ts";
+import type { SceneCamera } from "../../contracts/render.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
@@ -44,6 +45,7 @@ interface BrushPresentation {
 
 export class ApplicationWorldScene {
   private readonly groups = new Map<ContentId, ModelGroup>();
+  private readonly ordered: { readonly group: ModelGroup; readonly pass: ModelPass }[] = [];
   private readonly objects = new Map<ModelPass, PresentationObject>();
   private readonly characters = new Map<string, Q3CharacterPresenter>();
   private readonly selectedWeapons = new Map<string, SelectedQ3WeaponPresenter>();
@@ -71,6 +73,7 @@ export class ApplicationWorldScene {
 
   async prepare(viewer: ActorId, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.objects.clear();
+    this.ordered.length = 0;
     this.flares = [];
     this.previousTime = this.preparedTime;
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
@@ -85,6 +88,7 @@ export class ApplicationWorldScene {
       }
       const pass: ModelPass = { entity, options: options ?? (() => ({})) };
       group.passes.push(pass);
+      this.ordered.push({ group, pass });
       const logical = object ?? { opacity: entity.opacity ?? 1, passes: [] };
       logical.passes.push({ group, pass }); this.objects.set(pass, logical);
     };
@@ -170,7 +174,7 @@ export class ApplicationWorldScene {
     };
   }
 
-  view(input: WorldViewInput, operations: readonly RenderOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
+  view(input: WorldViewInput, operations: readonly SceneOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
     input = { ...input, inlineModels: this.inlineModels, ...this.styles() };
     const skinningFrame: ModelSkinningFrame = new WeakMap();
 
@@ -181,26 +185,24 @@ export class ApplicationWorldScene {
         profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
     }
-    const modelOperations: RenderOperation[] = [], emitted = new Set<PresentationObject>();
+    const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
     const prepare = (group: ModelGroup, pass: ModelPass) => group.renderer.prepare([pass.entity],
       pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
       current => ({ ...pass.options(current), infrared }), skinningFrame);
-    let batches: import("../../contracts/render.ts").DrawBatch[] = [];
-    const flush = (): void => { if (batches.length > 0) { modelOperations.push({ kind: "draw", batches }); batches = []; } };
-    for (const group of this.groups.values()) for (const pass of group.passes) {
+    for (const { group, pass } of this.ordered) {
       const object = this.objects.get(pass);
-      if (object === undefined || object.opacity === 1) { batches.push(...prepare(group, pass)); continue; }
+      if (object === undefined || object.opacity === 1) { modelOperations.push(...prepare(group, pass)); continue; }
       if (emitted.has(object)) continue;
-      emitted.add(object); flush();
-      if (object.opacity !== 0) modelOperations.push({ kind: "object-opacity", opacity: object.opacity,
-        batches: object.passes.flatMap(pass => prepare(pass.group, pass.pass)) });
+      emitted.add(object);
+      if (object.opacity !== 0) modelOperations.push({ kind: "scene-group", order: { kind: "sequence", phase: "translucent" },
+        operations: [{ kind: "object-opacity", opacity: object.opacity,
+          batches: object.passes.flatMap(pass => sceneModelBatches(prepare(pass.group, pass.pass))) }] });
     }
-    flush();
-    if (this.flares.length > 0) modelOperations.push({ kind: "draw", batches: this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath)) });
+    if (this.flares.length > 0) modelOperations.push(sequenceDrawGroup("translucent", this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath))));
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
       materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
     return this.assets.world.prepareView({ ...input, operations: [...brushes, ...modelOperations, ...operations] });
   }
 
-  close(): undefined { this.objects.clear(); this.groups.clear(); this.characters.clear(); this.selectedWeapons.clear(); return undefined; }
+  close(): undefined { this.ordered.length = 0; this.objects.clear(); this.groups.clear(); this.characters.clear(); this.selectedWeapons.clear(); return undefined; }
 }

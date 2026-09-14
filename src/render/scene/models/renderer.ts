@@ -1,3 +1,5 @@
+import { compiledDrawGroup, sequenceDrawGroup } from "../submissions.ts";
+import type { SceneModelGroup } from "../submissions.ts";
 import type { GameFamily } from "../../../contracts/content.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { DrawBatch, Palette } from "../../../contracts/render.ts";
@@ -21,7 +23,7 @@ import { shadowCaster, shadowMesh } from "../shadows.ts";
 import type { ShadowCaster, ShadowMesh, ShadowSphere } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
 import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q2AliasLight, q2ShellColor } from "./lighting.ts";
-import { prepareSceneEntity, preparedModelBatches } from "./prepare.ts";
+import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
 import { replacementEntity } from "./replacements.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
@@ -186,7 +188,7 @@ export class SceneModelRenderer {
     return texture;
   }
 
-  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly DrawBatch[] {
+  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly SceneModelGroup[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
     const entityLights = new Map<SceneEntity, EntityLighting>();
@@ -276,7 +278,7 @@ export class SceneModelRenderer {
       }
       return result;
     };
-    return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
+    return entities.flatMap(entity => preparedModelGroups(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
       ...(skinningFrame === undefined ? {} : { skinningFrame }),
       ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
@@ -350,7 +352,7 @@ export class SceneModelRenderer {
       && center.z - radius < fog.bounds.max.z && center.z + radius > fog.bounds.min.z) ?? null;
   }
 
-  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, shade?: Vec3): readonly DrawBatch[] {
+  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, shade?: Vec3): readonly SceneModelGroup[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
@@ -365,7 +367,7 @@ export class SceneModelRenderer {
         timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
         project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
-      return prepareMaterialBatches(material.compiled, surface.localGeometry, context);
+      return [compiledDrawGroup(material.compiled, prepareMaterialBatches(material.compiled, surface.localGeometry, context))];
     }
     const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;
     const lighting = { kind: "vertex" } satisfies Parameters<typeof createQ1Material>[2];
@@ -381,7 +383,7 @@ export class SceneModelRenderer {
       && !(options.infrared === true && (flags & 32768) !== 0);
     const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, shadows.lights) : [];
     const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
-    return batches.map((batch, index): DrawBatch => {
+    return [sequenceDrawGroup(alpha < 1 ? "translucent" : "opaque", batches.map((batch, index): DrawBatch => {
       const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
         cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
       if (index !== 0 || affecting.length === 0 || shadows === undefined || shadows.atlas === null) return { ...batch, state };
@@ -391,6 +393,6 @@ export class SceneModelRenderer {
         ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
       return batch.texturing === "single" ? { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) }
         : { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) };
-    });
+    }))];
   }
 }

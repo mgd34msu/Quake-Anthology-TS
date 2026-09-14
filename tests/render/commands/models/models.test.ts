@@ -1,3 +1,4 @@
+import { sceneModelBatches, finishSceneOperations } from "../../../../src/render/scene/submissions.ts";
 import { resolve } from "node:path";
 import { weaponViewCamera } from "../../../../src/app/bootstrap/weapon-view.ts";
 import { createMd5Model, parseMd5Anim, parseMd5Mesh, q1ReplacementSkinSelection } from "../../../../src/formats/q3-model/index.ts";
@@ -166,13 +167,32 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     const cache2 = new SceneModelRenderer({ family: "q2", textures: textures2, shaders: shaders2, palette }, world);
     const cache3 = new SceneModelRenderer({ family: "q3", textures: textures3, shaders: shaders3, palette: null }, world);
     await Promise.all([cache2.preload([body2]), cache3.preload([body3], options)]);
-    const batches2 = cache2.prepare([body2], input), batches3 = cache3.prepare([body3], input, options);
+    const batches2 = sceneModelBatches(cache2.prepare([body2], input)), batches3 = sceneModelBatches(cache3.prepare([body3], input, options));
     expect(batches2.some(batch => batch.indices.length > 0)).toBe(true);
     expect(batches3.some(batch => batch.indices.length > 0)).toBe(true);
     expect(batches2.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
       && batch.texture.image.source.name.startsWith("models/monsters/soldier/"))).toBe(true);
     expect(batches3.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
       && batch.texture.image.source.name.startsWith("models/players/sarge/"))).toBe(true);
+    if (body3.model.kind !== "q3-md3") throw new Error("Expected Sarge MD3 fixture");
+    const originalSurface = body3.model.surfaces[0];
+    if (originalSurface === undefined) throw new Error("Sarge fixture has no surface");
+    shaders3.addScript(`ordering/model-flash { cull none
+ { map $whiteimage blendFunc add rgbGen const ( 0.4 0.4 0.4 ) }
+ { map $whiteimage blendFunc add rgbGen const ( 0.6 0.6 0.6 ) }
+}
+ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZERO GL_ONE_MINUS_SRC_COLOR } }`, "<multisurface ordering>");
+    const layered = { ...body3, model: { ...body3.model, surfaces: [
+      { ...originalSurface, name: "ordering-flash" }, { ...originalSurface, name: "ordering-mark" },
+    ] } };
+    const layeredOptions = () => ({ customSkin: [{ name: "ordering-flash", shader: "ordering/model-flash" }, { name: "ordering-mark", shader: "ordering/model-mark" }] });
+    await cache3.preload([layered], layeredOptions);
+    const groups = cache3.prepare([layered], input, layeredOptions);
+    expect(groups.map(group => group.order.kind === "compiled" ? group.order.material.finished.sort : null)).toEqual([9, 4]);
+    expect(groups.map(group => sceneModelBatches([group]).length)).toEqual([2, 1]);
+    const ordered = finishSceneOperations(groups).flatMap(operation => operation.kind === "draw" ? operation.batches : []);
+    expect(ordered.map(batch => batch.state.blend.source)).toEqual(["zero", "one", "one"]);
+    expect(ordered.every(batch => batch.indices.length > 0)).toBe(true);
     expect(cache2.lighting.sample(origin, input).floor).not.toBeNull();
     expect(batches3.flatMap(batch => batch.vertices).some(vertex => vertex.color.x > 0)).toBe(true);
     const q1Asset = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/v_shot.mdl", "q1");
@@ -185,24 +205,24 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     const gunInput = { ...input, camera: { ...view, origin: gunOrigin } };
     await cache1.preload([gun], () => ({ viewModel: true }));
     const sampled = cache1.lighting.sample(gunOrigin, gunInput).color;
-    const gunBatches = cache1.prepare([gun], gunInput, () => ({ viewModel: true }));
+    const gunBatches = sceneModelBatches(cache1.prepare([gun], gunInput, () => ({ viewModel: true })));
     const vertex = gunBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (vertex === undefined) throw new Error("Expected a lit Q1 gun vertex on the actual Q2 map");
     expect(sampled.x).toBeGreaterThan(sampled.y);
     // Actual BSP sample is (156,98,18): Q1 clamps shade to (64,94,24), including gun minimum.
     expect(vertex.color.x / vertex.color.y).toBeCloseTo(64 / 94, 2);
     expect(vertex.color.x / vertex.color.z).toBeCloseTo(64 / 24, 2);
-    const ordinary = cache1.prepare([gun], gunInput)[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
+    const ordinary = sceneModelBatches(cache1.prepare([gun], gunInput))[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (ordinary === undefined) throw new Error("Expected ordinary Q1 model lighting");
     expect(ordinary.color.x / ordinary.color.y).toBeCloseTo(sampled.x / sampled.y, 2);
     const dynamic = { origin: gunOrigin, radius: 25.6, color: { x: 0, y: 0, z: 1 }, scale: 1, cone: null, shadow: { kind: "none" } } satisfies import("../../../../src/contracts/render.ts").Q2FragmentLight;
     const dynamicInput = { ...gunInput, q2FragmentLighting: { lights: [dynamic], atlas: null } };
-    const dynamicBatches = cache1.prepare([gun], dynamicInput, () => ({ viewModel: true }));
+    const dynamicBatches = sceneModelBatches(cache1.prepare([gun], dynamicInput, () => ({ viewModel: true })));
     const dynamicVertex = dynamicBatches[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (dynamicVertex === undefined) throw new Error("Expected Q2 dynamic lighting on the Q1 gun");
     // Map-owned blue dynamic adds25.5 source units after the minimum24.
     expect(dynamicVertex.color.x / dynamicVertex.color.z).toBeCloseTo(64 / 49.5, 2);
-    const once = cache1.prepare([gun], { ...dynamicInput, lights: [{ ...dynamic, minimum: 0 }] }, () => ({ viewModel: true }));
+    const once = sceneModelBatches(cache1.prepare([gun], { ...dynamicInput, lights: [{ ...dynamic, minimum: 0 }] }, () => ({ viewModel: true })));
     expect(once[0]?.vertices.map(value => value.color)).toEqual(dynamicBatches[0]?.vertices.map(value => value.color));
     const modulatedWorld = await WorldScene.load(map, shaders2, { q2LightModulate: 2, q2SkyName: "unit1_" });
     try {
@@ -217,7 +237,7 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
       expect(staticSample).toEqual({ x: sampled.x * 2, y: sampled.y * 2, z: sampled.z * 2 });
       const withDynamic = modulated.lighting.sample(gunOrigin, { ...gunInput, lights: [{ ...dynamic, minimum: 0 }] }).color;
       expect(withDynamic.z).toBeCloseTo(staticSample.z + 0.1, 6);
-      const lit = modulated.prepare([gun], dynamicInput, () => ({ viewModel: true }))[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.z > 0 && value.color.z < 250);
+      const lit = sceneModelBatches(modulated.prepare([gun], dynamicInput, () => ({ viewModel: true })))[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.z > 0 && value.color.z < 250);
       if (lit === undefined) throw new Error("Missing modulated Q1 gun");
       expect(lit.color.x / lit.color.z).toBeCloseTo(64 / 61.5, 2);
     } finally { modulatedWorld.close(); }
@@ -229,9 +249,9 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
       const gun3 = { ...gun, transform: { ...gun.transform, origin: origin3 }, previousOrigin: origin3, lightingOrigin: origin3 };
       const input3 = { ...input, camera: { ...view, origin: origin3 } };
       await cache13.preload([gun3], () => ({ viewModel: true }));
-      const current = cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true }))[0];
-      const previous = cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true }))[0];
-      const halfway = cache13.prepare([gun3], input3, () => ({ viewModel: true }))[0];
+      const current = sceneModelBatches(cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true })))[0];
+      const previous = sceneModelBatches(cache13.prepare([{ ...gun3, pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } }], input3, () => ({ viewModel: true })))[0];
+      const halfway = sceneModelBatches(cache13.prepare([gun3], input3, () => ({ viewModel: true })))[0];
       if (current === undefined || previous === undefined || halfway === undefined) throw new Error("Expected Q1 gun geometry on the Q3 map");
       expect(current.vertices.some(vertex => vertex.color.x !== vertex.color.y)).toBe(true);
       expect(current.vertices.some((vertex, index) => vertex.color.x !== previous.vertices[index]?.color.x)).toBe(true);
@@ -243,7 +263,7 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
     } finally { world3.close(); }
     const uploads = images.drainOperations().length;
     expect(uploads).toBeGreaterThan(0);
-    cache2.prepare([body2], input); cache3.prepare([body3], input, options);
+    sceneModelBatches(cache2.prepare([body2], input)); sceneModelBatches(cache3.prepare([body3], input, options));
     expect(images.drainOperations()).toHaveLength(0);
   } finally { world?.close(); images.close(); q2.close(); q3.close(); }
 }, 60000);

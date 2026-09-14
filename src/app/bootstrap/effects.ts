@@ -1,10 +1,11 @@
+import { sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
 /* Application joins for Quake cl_tent/r_part and Quake II cl_tent/cl_fx.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
-import type { DrawBatch, RenderOperation, RendererImage, SceneCamera } from "../../contracts/render.ts";
+import type { RendererImage, SceneCamera } from "../../contracts/render.ts";
 import type { SceneEntity, SceneLight, SceneParticle, SceneQueries, SceneLightStyle } from "../../contracts/scene.ts";
 import type { WorldScene } from "../../render/scene/world.ts";
 import type { ModelTransform } from "../../render/scene/view.ts";
@@ -30,7 +31,7 @@ import { Q2_TRANSIENT_MODELS } from "../../content/q2/foundation/effect-resource
 export type { SourceEffectSound } from "./effects/q3.ts";
 
 export interface ApplicationEffectFrame {
-  readonly operations: readonly RenderOperation[];
+  readonly operations: readonly SceneOperation[];
   readonly lights: readonly SurfaceDynamicLight[];
   readonly q3Lights: readonly DynamicLight[];
 }
@@ -219,26 +220,26 @@ export class ApplicationEffects {
   frame(camera: SceneCamera, viewer: ActorId | null = null): ApplicationEffectFrame {
     if (this.closed) throw new Error("Effect world is closed");
     const time = { kind: "seconds", value: this.time ?? 0 } satisfies WorldSnapshot["frame"]["time"];
-    const project = createViewProjector(camera), batches: DrawBatch[] = [], q3Lights: DynamicLight[] = [];
+    const project = createViewProjector(camera), prepared: SceneOperation[] = [], q3Lights: DynamicLight[] = [];
     for (const group of this.groups.values()) {
       const family = group.provider.family;
       if (family !== "q3" && group.sampled.length > 0) {
         const image = this.images.get(family); if (image === undefined) throw new Error("Particles have no source texture");
-        batches.push(prepareParticleBatch(group.sampled, { camera, indexedProfile: family, paletteColor: index => this.palette(group, index) }, image, project));
+        prepared.push(sequenceDrawGroup("translucent", [prepareParticleBatch(group.sampled, { camera, indexedProfile: family, paletteColor: index => this.palette(group, index) }, image, project)]));
       }
       const models = [...group.statics, ...group.models, ...group.beams.flatMap(beam => viewer?.equals(beam.actor) && beam.local !== null ? beam.local : beam.remote)];
-      batches.push(...group.renderer.prepare(models, { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights }));
+      prepared.push(...group.renderer.prepare(models, { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights }));
     }
     for (const beam of this.beams) if (beam.model === null) {
       const group = this.groups.get(beam.content); if (group === undefined) throw new Error("Beam has no source palette");
       const color = this.palette(group, beam.color);
-      batches.push(q2BeamBatch(beam.start, beam.end, beam.width, { ...color, w: 76.5 }, project, group.provider.textures.white.image,
+      prepared.push(sequenceDrawGroup("translucent", [q2BeamBatch(beam.start, beam.end, beam.width, { ...color, w: 76.5 }, project, group.provider.textures.white.image,
         { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "less-equal", depthWrite: false,
-          alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null }));
+          alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null })]));
     }
     const q1Styles = Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
-    const operations: RenderOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
-      { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), { kind: "draw", batches }];
+    const operations: SceneOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
+      { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), ...prepared];
     const sourceLights: SurfaceDynamicLight[] = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
       const frame = effects.frame(camera, viewer); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);

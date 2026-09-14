@@ -1,7 +1,8 @@
+import type { SceneModelGroup } from "../submissions.ts";
 /* Model submission adapted from Q1 r_alias/r_sprite, Q2 gl_mesh and Q3 tr_mesh.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
-import type { DrawBatch, RenderImage, RenderState, SceneCamera } from "../../../contracts/render.ts";
+import type { RenderImage, RenderState, SceneCamera } from "../../../contracts/render.ts";
 import type { IndexedModelSkin, ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
@@ -90,8 +91,8 @@ export interface PreparedModelEntity {
   readonly modelEffectFlags: number;
 }
 
-export interface ModelBatchContext {
-  draw(surface: PreparedModelSurface): readonly DrawBatch[];
+export interface ModelGroupContext {
+  draw(surface: PreparedModelSurface): readonly SceneModelGroup[];
 }
 
 export function modelImage(selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>,

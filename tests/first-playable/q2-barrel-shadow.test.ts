@@ -1,3 +1,4 @@
+import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { Application } from "../../src/app/bootstrap/application.ts";
@@ -26,12 +27,12 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_BARREL_SHADO
     ordinary = args[1].lights;
     barrel = args[0].some(entity => entity.resource.requestedPath === "models/objects/barrels/tris.md2" && entity.transform.origin.x === 184);
     if (barrel) probes.push({ renderer: this, args });
-    const batches = prepare.apply(this, args);
+    const groups = prepare.apply(this, args), batches = sceneModelBatches(groups);
     if (barrel && !omitShadowLights) for (const batch of batches) if (batch.lighting.kind === "q2-model-shadow") {
       for (const component of ["x", "y", "z"] satisfies readonly (keyof Vec3)[])
         expect(batch.lighting.lights.reduce((sum, light) => sum + light.fraction[component], 0)).toBeLessThan(1);
     }
-    barrel = false; return batches;
+    barrel = false; return groups;
   });
   try {
     await app.step(25); await app.step(25); await app.step(25);

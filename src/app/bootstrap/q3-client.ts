@@ -17,7 +17,7 @@ import type { WeaponHudReader } from "../../content/q3/presentation/player-state
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { CommandContext } from "../../contracts/common.ts";
-import type { DrawBatch, Rect, RenderCommand, RenderFrame, RenderState, SceneCamera } from "../../contracts/render.ts";
+import type { Rect, RenderCommand, RenderFrame, RenderState, SceneCamera } from "../../contracts/render.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { freemem } from "node:os";
@@ -38,6 +38,7 @@ import { prepareMaterialText } from "../../render/commands/material2d.ts";
 import { SceneModelRenderer } from "../../render/scene/models/renderer.ts";
 import { ModelLightSampler } from "../../render/scene/models/light-sampler.ts";
 import { lightForPoint } from "../../materials/q3-lighting.ts";
+import { compiledDrawGroup, finishSceneOperations, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import { prepareMaterialBatches } from "../../materials/evaluate.ts";
 import { DEFAULT_RAIL_SETTINGS, beamBatch, defaultModelBatch, railGeometry, spriteGeometry } from "../../render/scene/particles/primitives.ts";
 import { visibleWorld } from "../../render/scene/visibility.ts";
@@ -299,15 +300,18 @@ export class ApplicationQ3Client {
     const sample = this.lightSampler.sample(point, { camera: this.latestCamera, time: { kind: "milliseconds", value: this.source.time }, target: { kind: "seat", seat: this.options.local.player.seat.id } });
     return { ambientLight: { x: sample.color.x * 255, y: sample.color.y * 255, z: sample.color.z * 255 }, directedLight: { x: 0, y: 0, z: 0 }, lightDir: { x: 0, y: 0, z: 1 } };
   }
-  private batches(scene: Q3PresentedScene, input: WorldViewInput): readonly DrawBatch[] {
-    const batches: DrawBatch[] = [], noWorldModel = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0;
+  private operations(scene: Q3PresentedScene, input: WorldViewInput): readonly SceneOperation[] {
+    const operations: SceneOperation[] = [], noWorldModel = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0;
     const weaponInput = { ...input, camera: q3WeaponCamera(input.camera, this.options.splitScreen === true && !noWorldModel) };
-    for (const [provider, models] of this.models(scene)) for (const model of models) {
+    for (const model of scene.models) {
+      if (model.entity.model.kind === "brush-model") continue;
+      const provider = this.media.modelProviders.get(model.source.model);
+      if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
       const selected = (model.source.renderFlags & 4) !== 0 ? weaponInput : input;
-      batches.push(...this.renderer(provider).prepare([model.entity], selected,
+      operations.push(...this.renderer(provider).prepare([model.entity], selected,
         () => ({ ...model.options, noWorldModel, shaderTexCoord: model.source.shaderTexCoord })));
     }
-    if (this.requireBackend().kind === "typescript" && (scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) batches.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
+    if (this.requireBackend().kind === "typescript" && (scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) operations.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
       (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponViewCamera(weaponInput.camera,
         this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []))));
     const context = this.options.assets.world.materialContext(input);
@@ -316,13 +320,13 @@ export class ApplicationQ3Client {
       const geometry = "kind" in source ? source.kind === "sprite"
         ? spriteGeometry(source, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
         : source.kind === "beam" ? effect.geometry : railGeometry(source, input.camera.origin, DEFAULT_RAIL_SETTINGS) : effect.geometry;
-      batches.push(...prepareMaterialBatches(picture.material.compiled, geometry, "shaderRGBA" in source
-        ? { ...context, entityRGBA: source.shaderRGBA, shaderTexCoord: source.shaderTexCoord, timeOffset: source.shaderTime } : context));
+      operations.push(compiledDrawGroup(picture.material.compiled, prepareMaterialBatches(picture.material.compiled, geometry, "shaderRGBA" in source
+        ? { ...context, entityRGBA: source.shaderRGBA, shaderTexCoord: source.shaderTexCoord, timeOffset: source.shaderTime } : context)));
     }
     const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
-    for (const entity of scene.specialEntities) batches.push(entity.kind === "beam" ? beamBatch(entity, project, state, white)
-      : defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white));
-    return batches;
+    for (const entity of scene.specialEntities) operations.push(sequenceDrawGroup("opaque", [entity.kind === "beam" ? beamBatch(entity, project, state, white)
+      : defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white)]));
+    return operations;
   }
   private portal(scene: Q3PresentedScene, input: WorldViewInput): WorldViewInput | null {
     if (scene.portals.length === 0 || input.camera.clip.kind !== "none") return null;
@@ -356,13 +360,13 @@ export class ApplicationQ3Client {
         inlineModels: scene.models.flatMap(model => model.entity.model.kind === "brush-model" ? [{ model: model.entity.model.model,
           transform: { origin: model.entity.transform.origin, axis: model.entity.transform.axis }, animationFrame: model.entity.pose.kind === "frame" ? model.entity.pose.frame : 0 }] : []) };
       if ((scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0) this.frames.view({ target: input.target, time, viewport: scene.viewport,
-        clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches: this.batches(scene, input) }] });
+        clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.operations(scene, input)) });
       else {
         const publish = (view: WorldViewInput): void => {
           const effects = additionalEffects?.(view.camera);
           const combined = effects === undefined ? view : { ...view, lights: effects.lights,
             q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) };
-          this.frames.world(world.prepareView({ ...combined, operations: [{ kind: "draw", batches: this.batches(scene, combined) }, ...effects?.operations ?? []] }));
+          this.frames.world(world.prepareView({ ...combined, operations: [...this.operations(scene, combined), ...effects?.operations ?? []] }));
         };
         const child = this.portal(scene, input);
         if (child !== null) publish(child);

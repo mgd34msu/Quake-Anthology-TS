@@ -1,3 +1,4 @@
+import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { encodePcx } from "../../src/formats/images/indexed.ts";
@@ -154,7 +155,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       const textures = new SceneTextureLoader(images, { read: async name => name === sourceName ? asset(bytes, sourceName) : name === `${custom}.pcx` ? asset(skinBytes, "original-skin") : read(name) }, palette); loaders.push(textures);
       const scene = new SceneModelRenderer({ family: "q2", palette, textures, shaders }, world), options = () => ({ player: true, customShader: `${custom}.pcx` });
       await scene.preload([entity], options);
-      const batches = scene.prepare([entity], input, options);
+      const batches = sceneModelBatches(scene.prepare([entity], input, options));
       expect(batches.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated" && batch.texture.image.source.name === sourceName)).toBe(true);
       const texture = await textures.load(`${custom}.pcx`, { family: "q2", usage: "skin" });
       expect([texture?.width, texture?.height]).toEqual([decodePcx(skinBytes).width, decodePcx(skinBytes).height]);

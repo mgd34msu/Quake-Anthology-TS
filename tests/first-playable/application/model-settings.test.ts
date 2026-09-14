@@ -1,3 +1,4 @@
+import { sceneModelBatches } from "../../../src/render/scene/submissions.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -20,7 +21,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retai
   let witness: ActorId | null = null;
   const textures = new Map<SeatId, Set<string>>(), original = SceneModelRenderer.prototype.prepare;
   const prepare = spyOn(SceneModelRenderer.prototype, "prepare").mockImplementation(function(this: SceneModelRenderer, ...args) {
-    const batches = original.call(this, ...args), target = args[1].target;
+    const groups = original.call(this, ...args), batches = sceneModelBatches(groups), target = args[1].target;
     if (target.kind === "seat") {
       const selected = textures.get(target.seat) ?? new Set<string>();
       for (const batch of batches) if (batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "resource") selected.add(batch.texture.image.source.resource.requestedPath);
@@ -33,7 +34,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} model controls retai
         actorTextures.set(target.seat.index + ":" + actor.slot, names);
       }
     }
-    return batches;
+    return groups;
   });
   const prints: string[] = [];
   let app: Application | null = null;
@@ -96,11 +97,11 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
   if (parsed.kind !== "run") throw new Error("Missing application options");
   const gunImages = new Set<string>(), original = SceneModelRenderer.prototype.prepare;
   const prepare = spyOn(SceneModelRenderer.prototype, "prepare").mockImplementation(function(this: SceneModelRenderer, ...args) {
-    const batches = original.call(this, ...args);
+    const groups = original.call(this, ...args), batches = sceneModelBatches(groups);
     if (args[0].some(entity => entity.resource.requestedPath === "progs/v_shot.mdl")) for (const batch of batches) {
       if (batch.texture.kind === "bind-image") gunImages.add(batch.texture.image.source.kind === "resource" ? batch.texture.image.source.resource.requestedPath : "indexed-native");
     }
-    return batches;
+    return groups;
   });
   const prints: string[] = [];
   let app: Application | null = null;
@@ -137,7 +138,7 @@ for (const backend of ["cpu", "gl"]) test(`local ${backend} Q1 model menu accept
     await capture("enhanced"); expect(native.replacement?.model.kind).toBe("md5");
     expect([...gunImages].some(name => name.includes("v_shot") && name.endsWith(".lmp"))).toBe(true);
     await command("r_model_distance 1"); await capture("distance-original"); expect(gunImages.has("indexed-native")).toBe(true);
-    key(27); await application.step(1); await click(3); await activate("ui:settings:category:video"); await click(10, 450);
+    key(27); await application.step(1); await activate("ui:application:settings"); await activate("ui:settings:category:video"); await click(10, 450);
     expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:1");
     focus("ui:settings:r_model_distance"); key(KeyCode.End); key(KeyCode.Backspace);
     for (const character of "source") { text(character); await application.step(1); expect(assets.modelPolicy.distance).toBe(1); }
