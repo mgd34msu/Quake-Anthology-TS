@@ -623,6 +623,7 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
 
 function writeFragment(framebuffer: Framebuffer, alphaBits: 0 | 8, pixel: number, r: number, g: number, blue: number, alpha: number,
   state: Pick<RenderState, "blend">, mode: "alpha" | "add" | "multiply" | "dst-color-inverse-dst-alpha" | "general"): void {
+  r = clamp(r); g = clamp(g); blue = clamp(blue); alpha = clamp(alpha);
   const colors = framebuffer.colorWords;
   const destination = colors[pixel];
   if (destination === undefined) throw new RangeError("Fragment is outside the color buffer");

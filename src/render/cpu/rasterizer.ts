@@ -1110,6 +1110,7 @@ export class SoftwareRenderer implements RendererBackend {
     const dg = ((destination >>> (LITTLE_ENDIAN ? 8 : 16)) & 255) / 255;
     const db = ((destination >>> (LITTLE_ENDIAN ? 16 : 8)) & 255) / 255;
     const da = this.alphaBits === 0 ? 1 : (LITTLE_ENDIAN ? destination >>> 24 : destination & 255) / 255;
+    r = clamp(r); g = clamp(g); b = clamp(b); alpha = clamp(alpha);
     const offset = index * 4;
     this.drawPixels[offset] = blend(r, dr, alpha, da, state, false);
     this.drawPixels[offset + 1] = blend(g, dg, alpha, da, state, false);

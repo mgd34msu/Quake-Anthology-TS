@@ -277,9 +277,11 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
           projection: perspectiveProjection(80, 55.41, 4096), clip: { kind: "none" } };
         const lightingFrames = async (scene: WorldScene, images: SceneImageRegistry, renderer: import("../../../src/app/bootstrap/renderer.ts").NativeRenderer, label: string): Promise<number[]> => {
           const values: number[] = [], frames = new SceneFrameBuilder(images);
+          // Four styles at 0.05 with modulation 2 contribute at most 0.4; the dynamic light adds at most 0.2.
+          const q2Styles = Array.from({ length: 256 }, () => ({ rgb: { x: 0.05, y: 0.05, z: 0.05 }, white: 0.15 }));
           let unlitPixel: Uint8Array | null = null;
           for (const enabled of [false, true]) {
-            const input: WorldViewInput = { camera, target: { kind: "preview", id: label }, time: { kind: "milliseconds", value: 0 } };
+            const input: WorldViewInput = { camera, target: { kind: "preview", id: label }, time: { kind: "milliseconds", value: 0 }, q2Styles };
             const light: SceneLight = { origin: camera.origin, radius: 400, color: { x: 1, y: 0.5, z: 0.25 }, additive: false,
               profile: { kind: "q2", scale: 0.1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
             const shadows = scene.prepareShadows(enabled ? [light] : [], input);
