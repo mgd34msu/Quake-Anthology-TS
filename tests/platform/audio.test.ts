@@ -58,9 +58,10 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   test("shared mixer adapts its queue to frames slower than the default lookahead", async () => {
     using engine = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => performance.now(), random: () => 0 });
     engine.openDevice({ bufferFrames: 256 });
-    expect(engine.pump()).toBe(3840);
+    expect(engine.pump()).toBe(9600);
     await Bun.sleep(130);
-    expect(engine.pump()).toBeGreaterThan(6000);
+    engine.pump();
+    expect(engine.queuedFrames).toBeGreaterThan(6000);
     for (let frame = 0; frame < 8; frame++) engine.pump();
     engine.stopAll();
     expect(engine.pump()).toBe(3840);

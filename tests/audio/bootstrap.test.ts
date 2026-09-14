@@ -181,8 +181,10 @@ test("measured audio work respects explicit lookahead and the device queue limit
   {
     using audio = new UnifiedAudio({ sampleRate: 44100, milliseconds: () => 0, random: () => 0 });
     audio.openDevice();
+    expect(audio.pump(undefined, 5000)).toBe(8820);
+    expect(audio.sampleClock).toBe(8820);
+    audio.stopAll();
     expect(audio.pump(undefined, 5000)).toBe(88200);
-    expect(audio.sampleClock).toBe(88200);
     expect(() => audio.pump(undefined, -1)).toThrow("Invalid measured audio frame work");
   }
 });

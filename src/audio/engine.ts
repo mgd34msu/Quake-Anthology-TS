@@ -62,6 +62,7 @@ export class UnifiedAudio {
     private paused = false;
     private effectsGain = 0.7;
     private frame = 0;
+    private outputStarted = false;
     private previousPumpFrame: number | null = null;
     private readonly pumpIntervals: number[] = [];
     constructor(private readonly options: UnifiedAudioOptions) {
@@ -404,13 +405,18 @@ export class UnifiedAudio {
             return 0;
         if (!Number.isFinite(measuredWorkMilliseconds) || measuredWorkMilliseconds < 0) throw new RangeError("Invalid measured audio frame work");
         const workFrames = Math.ceil(measuredWorkMilliseconds * this.sampleRate / 1000);
+        const initialFill = !this.outputStarted && device.state === "paused" && device.queuedFrames === 0;
         const playbackFrame = device.playbackFrames;
         const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
-        this.pumpIntervals.push(Math.max(interval, workFrames));
-        if (this.pumpIntervals.length > 8)
-            this.pumpIntervals.shift();
+        if (!initialFill) {
+            this.pumpIntervals.push(Math.max(interval, workFrames));
+            if (this.pumpIntervals.length > 8)
+                this.pumpIntervals.shift();
+        }
+        // Q3's s_mixahead default supplies the initial horizon; paused loading is not a refill interval.
         const target = aheadFrames ?? Math.min(device.maxQueuedFrames,
-            Math.max(Math.ceil(this.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
+            initialFill ? Math.max(Math.ceil(this.sampleRate * 0.2), device.bufferFrames * 2)
+                : Math.max(Math.ceil(this.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
         if (!Number.isSafeInteger(target) || target < 0 || target > device.maxQueuedFrames)
             throw new RangeError("Invalid audio lookahead");
         this.previousPumpFrame = playbackFrame;
@@ -423,12 +429,14 @@ export class UnifiedAudio {
             this.queuedPcm = queued.slice(queued.length - device.queuedFrames * 2);
         }
         device.resume();
+        this.outputStarted = true;
         return frames;
     }
     pause(paused: boolean): void { this.check(); this.paused = paused; this.previousPumpFrame = null; this.pumpIntervals.length = 0; if (paused)
         this.device?.pause();
-    else
-        this.device?.resume(); }
+    else if (this.device !== null) {
+        this.device.resume(); this.outputStarted = true;
+    } }
     stopAll(): void {
         for (const state of this.seats) {
             state.mixer.stopAll();
