@@ -39,7 +39,8 @@ function speaker(entity: Q2Entity, game: Q2GameServices): undefined {
   entity.noise = noise.includes(".wav") ? noise : `${noise}.wav`;
   entity.volume = numberField(entity.spawn, "volume") || 1;
   const authoredAttenuation = numberField(entity.spawn, "attenuation");
-  entity.attenuation = authoredAttenuation === -1 ? 0 : authoredAttenuation || 1;
+  const rereleaseLoop = game.options.edition === "rerelease" && (entity.spawnflags & 3) !== 0;
+  entity.attenuation = authoredAttenuation === -1 ? (rereleaseLoop ? -1 : 0) : authoredAttenuation || (rereleaseLoop ? 3 : 1);
   entity.sound = (entity.spawnflags & 1) !== 0 ? entity.noise : "";
   if (entity.sound !== "") emitSpeaker(entity, game, "start");
   entity.use = Use_Target_Speaker;
@@ -168,9 +169,18 @@ const Use_Multi: Q2Use = (self, services, _other, activator) => {
     return multi(self, services, activator);
   };
 
+/** Convert source loop distance to the shared Q2 loop coefficient of 0.003. */
+function speakerLoopAttenuation(entity: Q2Entity, game: Q2GameServices): number {
+  if (game.options.edition === "classic") return 1;
+  if (entity.attenuation === -1) return 0;
+  return entity.attenuation > 0 && entity.attenuation !== 3 ? entity.attenuation / 5 : 1;
+}
+
 function emitSpeaker(entity: Q2Entity, game: Q2GameServices, operation: "start" | "stop" | "once"): undefined {
   return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: entity.noise, channel: 2,
-    volume: entity.volume, attenuation: entity.attenuation, reliable: (entity.spawnflags & 4) !== 0, loop: operation });
+    volume: operation === "once" ? entity.volume : 1,
+    attenuation: operation === "once" ? entity.attenuation : speakerLoopAttenuation(entity, game),
+    reliable: (entity.spawnflags & 4) !== 0, loop: operation });
 }
 
 const Use_Target_Speaker: Q2Use = (self, services) => {

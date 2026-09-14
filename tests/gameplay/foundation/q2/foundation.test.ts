@@ -74,6 +74,60 @@ function targetGame(selected: Q2GameOptions = options) {
 }
 
 describe("Q2 permanent gameplay foundation", () => {
+  for (const edition of ["classic", "rerelease"] satisfies readonly Q2GameOptions["edition"][]) {
+    for (const authored of [
+      { field: "", once: 1, rereleaseLoop: 1 },
+      { field: '"attenuation" "0"', once: 1, rereleaseLoop: 1 },
+      { field: '"attenuation" "-1"', once: 0, rereleaseLoop: 0 },
+      { field: '"attenuation" "1"', once: 1, rereleaseLoop: 0.2 },
+      { field: '"attenuation" "2"', once: 2, rereleaseLoop: 0.4 },
+      { field: '"attenuation" "3"', once: 3, rereleaseLoop: 1 },
+      { field: '"attenuation" "5"', once: 5, rereleaseLoop: 1 },
+      { field: '"attenuation" "-2"', once: -2, rereleaseLoop: 1 },
+    ]) {
+      for (const spawnflags of [1, 2]) {
+        test(`speaker ${edition} loop flag ${spawnflags} ${authored.field || "default attenuation"} starts, stops and restarts at source gain and distance`, () => {
+          const scene = targetGame({ ...options, edition });
+          try {
+            const speaker = scene.game.load(`{ "classname" "target_speaker" "noise" "world/mach" "origin" "100 200 300" "volume" "0.25" "spawnflags" "${spawnflags}" ${authored.field} }`).spawned[0];
+            if (speaker === undefined) throw new Error("Missing speaker");
+            const start: Extract<Q2PresentationEvent, { kind: "sound" }> = { kind: "sound", actor: speaker.actor.id, origin: { x: 100, y: 200, z: 300 }, path: "world/mach.wav", channel: 2,
+              volume: 1, attenuation: edition === "classic" ? 1 : authored.rereleaseLoop, reliable: false, loop: "start" };
+            if (spawnflags === 2) {
+              expect(speaker.sound).toBe("");
+              expect(scene.events).toEqual([]);
+              scene.host.callbacks.use(speaker.actor, scene.player.id, scene.player.id);
+            }
+            expect(speaker.sound).toBe("world/mach.wav");
+            expect(scene.events).toEqual([start]);
+            scene.host.callbacks.use(speaker.actor, scene.player.id, scene.player.id);
+            expect(speaker.sound).toBe("");
+            expect(scene.events).toEqual([start, { ...start, loop: "stop" }]);
+            scene.host.callbacks.use(speaker.actor, scene.player.id, scene.player.id);
+            expect(speaker.sound).toBe("world/mach.wav");
+            expect(scene.events).toEqual([start, { ...start, loop: "stop" }, start]);
+          } finally { scene.host.actors.close(); }
+        });
+      }
+      for (const volume of [0, 0.25]) {
+        test(`speaker ${edition} one-shot ${authored.field || "default attenuation"} volume ${volume} retains authored parameters`, () => {
+          const scene = targetGame({ ...options, edition });
+          try {
+            const speaker = scene.game.load(`{ "classname" "target_speaker" "noise" "world/mach.wav" "volume" "${volume}" "spawnflags" "4" ${authored.field} }`).spawned[0];
+            if (speaker === undefined) throw new Error("Missing speaker");
+            expect(scene.events).toEqual([]);
+            const once: Extract<Q2PresentationEvent, { kind: "sound" }> = { kind: "sound", actor: speaker.actor.id, origin: zero, path: "world/mach.wav", channel: 2,
+              volume: volume || 1, attenuation: authored.once, reliable: true, loop: "once" };
+            scene.host.callbacks.use(speaker.actor, scene.player.id, scene.player.id);
+            scene.host.callbacks.use(speaker.actor, scene.player.id, scene.player.id);
+            expect(speaker.sound).toBe("");
+            expect(scene.events).toEqual([once, once]);
+          } finally { scene.host.actors.close(); }
+        });
+      }
+    }
+  }
+
   test("triggered monster placement clears multiple foreign collision lifetimes", () => {
     const { game, host, player } = targetGame(options), victims: OwnedActor[] = [];
     const body = host.bodies.read(player.id); if (body === null) throw new Error("player body");
