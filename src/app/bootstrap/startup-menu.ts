@@ -20,7 +20,7 @@ import type { StartupSaveList } from "./startup-saves.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
-import type { StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
+import type { StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 
 export interface StartupMenuOptions {
   readonly sound?: (sound: UiSound) => void;
@@ -33,6 +33,7 @@ export interface StartupMenuOptions {
   readonly titleFont: TextFontSelection;
   readonly now: () => number;
   readonly play: () => void;
+  readonly playPreset?: (id: string, skill: number) => void;
   readonly browser?: StartupServerBrowser;
   readonly connect?: (connection: BrowserConnection) => void;
   readonly load: (id: string) => void;
@@ -45,6 +46,9 @@ export interface StartupMenuOptions {
 const main: UiMenuId = "menu:startup:main";
 const browserMenu: UiMenuId = "menu:startup:servers";
 const browserOptionsMenu: UiMenuId = "menu:startup:server-filters";
+const nativeFamilyMenu: UiMenuId = "menu:startup:native-family";
+const nativeCampaignMenu: UiMenuId = "menu:startup:native-campaign";
+const nativeDifficultyMenu: UiMenuId = "menu:startup:native-difficulty";
 const session: UiMenuId = "menu:startup:session";
 const optionsMenu: UiMenuId = "menu:startup:options";
 const displayMenu: UiMenuId = "menu:settings:display:0";
@@ -74,8 +78,10 @@ export class StartupMenu {
   private rosterPage = 0;
   private monsterField: { readonly kind: "none" } | { readonly kind: "source" } | { readonly kind: "class"; readonly classname: string | null } = { kind: "none" };
   private savePage = 0;
-  private multiplayer = false;
-  private multiplayerMode: "coop" | "deathmatch" = "deathmatch";
+  private nativeFamily: StartupNativePreset["family"] = "q1";
+  private nativeEdition = "classic";
+  private nativePreset: StartupNativePreset | null = null;
+  private nativeSkill = "1";
 
   constructor(private readonly options: StartupMenuOptions) {
     this.text = new UiTextRenderer(options.seat);
@@ -86,15 +92,45 @@ export class StartupMenu {
       ...(options.clipboard === undefined ? {} : { clipboard: options.clipboard }),
       focus: () => undefined, sound: sound => options.sound?.(sound), measureText: (text, scale) => this.measure(text, scale), executeScript: () => { throw new Error("Startup menu has no legacy scripts"); } });
     this.register(main, () => [
-      this.button("single", "Single Player", 0, () => this.configure(false)),
-      this.button("multi", "Multiplayer", 1, () => this.configure(true)),
+      this.button("native", "Play a game", 0, () => { this.status = ""; this.controller.openMenu(nativeFamilyMenu); }),
+      this.button("custom", "Custom game", 1, () => { this.status = ""; this.controller.openMenu(session); }),
       this.button("load", "Load Game", 2, () => { this.savePage = 0; this.controller.openMenu(loadMenu); options.refreshSaves(); }),
       this.button("options", "Options", 3, () => this.controller.openMenu(optionsMenu)),
       this.button("quit", "Quit", 4, options.quit),
     ]);
+    this.register(nativeFamilyMenu, () => [
+      ...([
+        { family: "q1", edition: "classic", label: "Quake classic" },
+        { family: "q1", edition: "rerelease", label: "Quake rerelease" },
+        { family: "q2", edition: "classic", label: "Quake II classic" },
+        { family: "q2", edition: "rerelease", label: "Quake II rerelease" },
+        { family: "q3", edition: "classic", label: "Quake III Arena" },
+      ] satisfies { family: StartupNativePreset["family"]; edition: string; label: string }[]).map((game, index) => ({
+        ...this.button(`game:${game.family}:${game.edition}`, game.label, index, () => {
+          this.nativeFamily = game.family; this.nativeEdition = game.edition; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
+        }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family && preset.edition === game.edition),
+      })), this.back(),
+    ]);
+    this.register(nativeCampaignMenu, () => [
+      ...this.nativeCampaigns().map((preset, index) => ({
+        ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, 2.6), index, () => {
+          this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.status = ""; this.controller.openMenu(nativeDifficultyMenu);
+        }, true), enabled: !this.busy && preset.unavailable === null,
+      })), this.back(),
+    ]);
+    this.register(nativeDifficultyMenu, () => {
+      const preset = this.nativePreset;
+      if (preset === null) return [this.back()];
+      return [...preset.difficulties.map((difficulty, index) => ({
+        ...this.button(`difficulty:${difficulty.id}`, `${this.nativeSkill === difficulty.id ? "> " : ""}${difficulty.label}`, index, () => {
+          this.nativeSkill = difficulty.id;
+        }, true), enabled: !this.busy && difficulty.unavailable === null,
+      })), { ...this.button("play-preset", "Play", 7, () => options.playPreset?.(preset.id, Number(this.nativeSkill)), true),
+        enabled: !this.busy && preset.unavailable === null && options.playPreset !== undefined }, this.back()];
+    });
     this.register(browserMenu, () => this.browserControls());
     this.register(browserOptionsMenu, () => this.browserOptionsControls());
-    this.register(session, () => [...(this.multiplayer && options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu), true)] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
+    this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu), true)] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("play", "Play", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
     this.register(categoryMenu, () => [
@@ -167,15 +203,14 @@ export class StartupMenu {
     });
     this.controller.openMenu(main);
   }
-  private rows(fields: readonly StartupSelectionField[]): readonly StartupSelectionRow[] {
-    return this.options.model.rows().filter(row => fields.includes(row.id) && (this.multiplayer || row.id !== "mode" && row.id !== "rules"));
+  private familyLabel(family: StartupNativePreset["family"]): string {
+    return family === "q1" ? "Quake" : family === "q2" ? "Quake II" : "Quake III Arena";
   }
-  private configure(multiplayer: boolean): void {
-    const mode = this.options.model.options.mode;
-    if (mode === "coop" || mode === "deathmatch") this.multiplayerMode = mode;
-    this.multiplayer = multiplayer;
-    this.options.model.select("mode", multiplayer ? this.multiplayerMode : "singleplayer");
-    this.status = ""; this.controller.openMenu(session);
+  private nativeCampaigns(): readonly StartupNativePreset[] {
+    return this.options.model.presets().filter(preset => preset.family === this.nativeFamily && preset.edition === this.nativeEdition);
+  }
+  private rows(fields: readonly StartupSelectionField[]): readonly StartupSelectionRow[] {
+    return this.options.model.rows().filter(row => fields.includes(row.id));
   }
   resumeServerBrowser(): void { if (this.options.browser !== undefined) this.controller.openMenu(browserMenu); }
 
@@ -287,11 +322,19 @@ export class StartupMenu {
         color: accent ? { x: 1, y: 0.73, z: 0.35, w: 1 } : { x: 0.86, y: 0.89, z: 0.92, w: 1 }, align: "left", shadow: true });
     };
     const backdrop = menuBackdrop(context), panel = menuPanel(context, active === main);
-    const title = active === main ? "QUAKE" : active === session ? this.multiplayer ? "Multiplayer" : "Single Player"
+    const title = active === main ? "QUAKE" : active === session ? "Custom game"
+      : active === nativeFamilyMenu ? "Play a game"
+      : active === nativeCampaignMenu ? `${this.familyLabel(this.nativeFamily)}${this.nativeFamily === "q3" ? "" : this.nativeEdition === "classic" ? " classic" : " rerelease"}`
+      : active === nativeDifficultyMenu ? "Difficulty"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
     if (!active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
 
+    if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, 1.6), 64, 86, 1.6);
+    if (active === nativeCampaignMenu) {
+      const unavailable = this.nativeCampaigns().find(preset => preset.unavailable !== null);
+      if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, 1.8), 64, 395, 1.8, true);
+    }
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });
 

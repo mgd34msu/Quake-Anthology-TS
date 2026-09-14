@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
+import { discoverInstalledContent, InstalledCatalog, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
 import { applicationPreset } from "../../src/app/bootstrap/content.ts";
@@ -114,7 +114,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     click(1); click(0);
     expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "source" });
     menu.controller.closeMenu(); menu.controller.closeMenu();
-    click(0); click(2); click(1); click(1);
+    click(1); click(2); click(1); click(1);
     await model.prepareMonsterRoster();
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     expect(model.monsterRosterRows()[0]?.value).toBe("native");
@@ -216,3 +216,75 @@ for (const profile of [{ family: "q1", product: "q1-classic-id1", map: "e1m1" },
     }
   } finally { browser.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
 }, 30000);
+
+test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("native campaign presets replace gameplay choices without changing the custom draft", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus]);
+  if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, { ...command.options, botSkill: 5, serverProfilePath: "/custom-match.json", quakeCProgram: "progs.dat" });
+  await model.prepareMaps();
+  model.select("weapons", "q3-baseq3");
+  model.select("grapple", "q2-classic-ctf/offhand");
+  model.select("grenades", "q2-classic-baseq2");
+  model.select("mode", "deathmatch");
+  model.select("enemies", "custom");
+  model.select("environment", "disabled");
+  model.select("doppler", "disabled");
+  model.setDisplay({ width: 1280, height: 720, gamma: 1.3 });
+  const draft = model.options, rows = model.rows();
+  const launch = await model.resolvePreset("q1-rerelease-id1", 3);
+  const native = catalog.require("q1-rerelease-id1").id;
+  expect(launch.options).toMatchObject({ product: "q1-rerelease-id1", map: "maps/start.bsp", movement: "q1", character: "q1", characterModel: "player", skill: 3, mode: "singleplayer", seats: 1, width: 1280, height: 720, gamma: 1.3 });
+  expect(launch.options.botSkill).toBeUndefined();
+  expect(launch.options.serverProfilePath).toBeUndefined();
+  expect(launch.options.quakeCProgram).toBeUndefined();
+  expect(launch.recipe.movement.content).toBe(native);
+  expect(launch.recipe.character.definition.content).toBe(native);
+  expect(launch.recipe.character.appearance.content).toBe(native);
+  expect(launch.recipe.timing.find(timing => timing.provider === "q1:movement")?.clock.kind).toBe("q1-netquake");
+  expect(launch.recipe.campaign).toMatchObject({ kind: "campaign", mission: { content: native }, gamecode: { content: native } });
+  expect(launch.recipe.weapons).toEqual([{ provider: "q1:official", content: native }]);
+  expect(launch.recipe.enemies).toEqual({ kind: "map-defined" });
+  expect(launch.recipe.equipment.grapple.kind).toBe("disabled");
+  expect(launch.recipe.equipment.handGrenades.kind).toBe("disabled");
+  expect(launch.recipe.presentation).toMatchObject({ assets: native, environment: { kind: "audio-content" }, doppler: { kind: "source" } });
+  expect(model.options).toEqual(draft);
+  expect(model.rows()).toEqual(rows);
+  await expect(model.resolvePreset("q2-classic-lmctf")).rejects.toThrow("official campaign preset unavailable");
+  await expect(model.resolvePreset("q1-rerelease-id1", 5)).rejects.toThrow("Invalid preset difficulty");
+}, 60000);
+
+test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native Q3 preset uses the authored training arena and bot difficulty", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus]);
+  if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  const launch = await model.resolvePreset("q3-baseq3", 5);
+  expect(launch.options).toMatchObject({ map: "maps/q3dm0.bsp", mode: "singleplayer", botSkill: 5, character: "q3", characterModel: "sarge", movement: "q3" });
+  expect(launch.recipe.campaign.kind).toBe("campaign");
+  expect(model.presets().find(preset => preset.id === "q3-baseq3")?.difficulties).toHaveLength(5);
+  if (catalog.product("q3-missionpack").availability.kind === "installed") {
+    expect(model.presets().find(preset => preset.id === "q3-missionpack")?.unavailable).toContain("team setup");
+    await expect(model.resolvePreset("q3-missionpack")).rejects.toThrow("team setup");
+  }
+}, 60000);
+
+
+test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("native rerelease presets do not depend on installed classic providers", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--movement", "q2", "--character", "q2"]);
+  if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+  const installed = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const catalog = new InstalledCatalog(corpus, installed.products.filter(product => product.expectation.family === "q2" && product.expectation.edition === "rerelease"), installed.rootArchives, installed.generation);
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  for (const preset of model.presets()) {
+    const launch = await model.resolvePreset(preset.id);
+    const content = catalog.require(preset.id).id;
+    expect(launch.recipe.movement.content).toBe(content);
+    expect(launch.recipe.character.definition.content).toBe(content);
+    expect(launch.recipe.timing.find(timing => timing.provider === "q2:movement")?.clock.kind).toBe("q2-rerelease");
+    expect(launch.recipe.presentation.assets).toBe(content);
+    expect(launch.recipe.map.geometryContent).toBe(content);
+  }
+}, 60000);

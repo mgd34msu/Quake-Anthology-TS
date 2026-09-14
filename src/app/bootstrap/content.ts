@@ -79,7 +79,7 @@ function execution(provider: ProviderReference, family: GameFamily, rerelease: b
   }
 }
 
-export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions): LaunchPreset {
+export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
   if (q3Guest && (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
@@ -94,8 +94,8 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
     throw new Error("Native QuakeWorld currently requires dedicated deathmatch with Q1 movement and character; NetQuake protocol overrides and mixed roles are unsupported");
   const provider: ProviderReference = { provider: `${family}:official`, content: product.id };
-  const movement: ProviderReference = { provider: `${options.movement}:movement`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.movement)).id };
-  const character: ProviderReference = { provider: `${options.character}:character`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.character)).id };
+  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.movement)).id };
+  const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean) => {
@@ -117,7 +117,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
       api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : nativeProgram !== undefined
         ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: nativeProgram },
           api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } : execution(provider, family, rerelease)],
-    timing: [providerTiming, timing(movement, options.movement, false), timing(character, options.character, false)],
+    timing: [providerTiming, timing(movement, options.movement, catalog.product(movement.content).expectation.edition === "rerelease"), timing(character, options.character, catalog.product(character.content).expectation.edition === "rerelease")],
     ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 

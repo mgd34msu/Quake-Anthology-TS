@@ -8,19 +8,26 @@ import { parseQ2Entities } from "../../content/q2/foundation/fields.ts";
 import { FileSource } from "../../content/archive/source.ts";
 import { parseQ1Entities, q1EntityValue, Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION } from "../../formats/q1-map/index.ts";
 import type { CampaignSelection, EnemySelection, EquipmentSelection, MonsterSelectionTarget, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
-import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/index.ts";
 import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../content/catalog/equipment.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
 import { applicationPreset } from "./content.ts";
+import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export type StartupSelectionField = "doppler" | "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
+export interface StartupNativePreset extends StartupSelectionChoice {
+  readonly family: GameFamily;
+  readonly edition: string;
+  readonly difficulties: readonly StartupSelectionChoice[];
+  readonly defaultSkill: string;
+}
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
@@ -132,6 +139,66 @@ export class StartupSelectionModel {
       for (const archive of archives.values()) archive.close();
       for (const file of files.values()) file.close();
     }
+  }
+  private async q3TrainingMap(product: CatalogProduct): Promise<string | null> {
+    const paths = [...this.files(product)].filter(path => path === "scripts/arenas.txt" || /^scripts\/[^/]+\.arena$/.test(path));
+    for (const path of paths) {
+      const parser = new CommonParseState(), cursor = new CommonParseCursor(Buffer.from(await this.catalog.read(product.id, path)).toString("latin1"));
+      while (parser.parse(cursor) === "{") {
+        const fields = new Map<string, string>();
+        for (;;) {
+          const key = parser.parse(cursor);
+          if (key === "}" || key === "") break;
+          fields.set(key, parser.parse(cursor, false));
+        }
+        const map = fields.get("map");
+        if (fields.get("special")?.toLowerCase() === "training" && map !== undefined) return `maps/${map}.bsp`;
+      }
+    }
+    return null;
+  }
+  presets(): readonly StartupNativePreset[] {
+    return this.catalog.products.filter(product => product.availability.kind === "installed"
+      && expectedProducts.some(expected => expected.id === product.expectation.id)
+      && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
+      && product.expectation.campaign !== "ctf" && product.expectation.campaign !== "lmctf").map(product => {
+      const { family, edition, campaign } = product.expectation;
+      const difficulties = family === "q3"
+        ? [choice("1", "I Can Win"), choice("2", "Bring It On"), choice("3", "Hurt Me Plenty"), choice("4", "Hardcore"), choice("5", "Nightmare")]
+        : [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")];
+      return { ...productChoice(product), family, edition, difficulties, defaultSkill: family === "q3" ? "2" : "1",
+        unavailable: campaign === "missionpack" ? "Team Arena campaign team setup is not connected yet." : null };
+    });
+  }
+  async resolvePreset(id: string, difficulty?: number): Promise<StartupLaunch> {
+    const selected = this.presets().find(preset => preset.id === id);
+    if (selected === undefined) throw new Error(`Installed official campaign preset unavailable: ${id}`);
+    if (selected.unavailable !== null) throw new Error(selected.unavailable);
+    const level = difficulty ?? Number(selected.defaultSkill);
+    if (!selected.difficulties.some(choice => Number(choice.id) === level)) throw new Error("Invalid preset difficulty");
+    const product = this.catalog.require(id), family = product.expectation.family;
+    const preferred = family === "q3" ? await this.q3TrainingMap(product)
+      : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null);
+    const map = this.playableMaps.get(id)?.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
+    if (map === undefined || map.unavailable !== null) throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
+    const characterModel = family === "q1" ? "player" : family === "q2" ? "male" : "sarge";
+    const model = this.modelsFor(product).find(model => model.id === characterModel);
+    if (model === undefined || model.unavailable !== null) throw new Error(`${selected.label}: native ${characterModel} model is unavailable`);
+    const { botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
+      quakeCProgram: _quakeCProgram, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
+    const skill = family === "q3" ? 1 : level;
+    if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid campaign difficulty");
+    const bot: Pick<ApplicationOptions, "botSkill"> = family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
+    const renderer = this.values.renderer;
+    if (renderer !== "gl" && renderer !== "cpu") throw new Error("Invalid renderer selection");
+    const options: ApplicationOptions = { ...preferences, ...this.display,
+      ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
+      product: id, map: map.id, movement: family, character: family, characterModel, skill, ...bot,
+      mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } };
+    const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
+    const character: ProviderReference = { provider: `${family}:character`, content: product.id };
+    const preset = applicationPreset(this.catalog, options, { movement, character });
+    return { options, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }) };
   }
   private maps(): readonly StartupSelectionChoice[] { return this.playableMaps.get(this.geometry().expectation.id) ?? []; }
   private defaultMap(): string {

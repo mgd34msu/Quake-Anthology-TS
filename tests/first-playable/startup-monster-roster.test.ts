@@ -2,6 +2,7 @@ import { decodePng } from "../../src/formats/images/png.ts";
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { KeyCode } from "../../src/input/key-codes.ts";
 import { StartupMenu } from "../../src/app/bootstrap/startup-menu.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
@@ -30,7 +31,9 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
   const font = await loadMenuFont({ catalog, mounts: mounted, family: "q2", rerelease: false, images });
   const typography = await loadMenuTypography(catalog, images, font.font.classic);
   const art = await loadNativeUiArt("resource:test:roster-font", images, async path => decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path));
+  const nativeLaunches: { readonly id: string; readonly skill: number }[] = [];
   const menu = new StartupMenu({ seat, model, art, font: typography.body, titleFont: typography.title, now: () => 0,
+    playPreset: (id, skill) => { nativeLaunches.push({ id, skill }); },
     play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,
     quit: () => undefined, applyDisplay: () => undefined });
   const renderer = new SoftwareRenderer(640, 480, owner), target = new CpuRenderTarget(renderer);
@@ -72,7 +75,46 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     await Bun.write(resolve(captureRoot, `${name}.png`), encodePng(640, 480, renderer.pixels));
   };
   try {
-    click(100, 130); click(100, 198); click(100, 164);
+    const customDraft = model.options;
+    const key = (code: number): void => {
+      for (const down of [true, false]) menu.input({ seat, timeMilliseconds: 0, kind: "key", code, down, repeat: false });
+    };
+    for (const [familyIndex, family] of ["q1", "q2", "q3"].entries()) {
+      for (const [editionIndex, edition] of (family === "q3" ? ["classic"] : ["classic", "rerelease"]).entries()) {
+        const presets = model.presets().filter(preset => preset.family === family && preset.edition === edition);
+        if (presets.length === 0) continue;
+        click(100, 130); expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+        await capture("native-game-choices");
+        click(100, 130 + (familyIndex * 2 + editionIndex) * 34);
+        expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign");
+        await capture(`native-${family}-${edition}-campaigns`);
+        for (const [index, preset] of presets.entries()) {
+          const before = nativeLaunches.length;
+          click(100, 130 + index * 34);
+          if (preset.unavailable !== null) {
+            expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign"); expect(nativeLaunches).toHaveLength(before); continue;
+          }
+          expect(menu.controller.activeMenu).toBe("menu:startup:native-difficulty");
+          if (index === 0) await capture(`native-${family}-${edition}-difficulty`);
+          click(100, 368);
+          expect(nativeLaunches.at(-1)).toEqual({ id: preset.id, skill: Number(preset.defaultSkill) });
+          click(100, 130); click(100, 368);
+          expect(nativeLaunches.at(-1)).toEqual({ id: preset.id, skill: Number(preset.difficulties[0]?.id) });
+          key(KeyCode.Escape);
+          expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign");
+        }
+        key(KeyCode.Escape); key(KeyCode.Escape);
+        expect(menu.controller.activeMenu).toBe("menu:startup:main");
+        expect(model.options).toEqual(customDraft);
+      }
+    }
+    expect(nativeLaunches.length).toBeGreaterThan(0);
+    key(KeyCode.Enter); expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+    key(KeyCode.Enter); expect(menu.controller.activeMenu).toBe("menu:startup:native-campaign");
+    key(KeyCode.Enter); expect(menu.controller.activeMenu).toBe("menu:startup:native-difficulty");
+    for (let index = 0; index < 3; index++) key(KeyCode.Escape);
+    await capture("native-main-menu");
+    click(100, 164); click(100, 198); click(100, 164);
     await capture("roster-combat-source-presets");
     const preset = model.rows().find(row => row.id === "enemies")?.choices.findIndex(option => option.id === "q1:monsters/classic/id1") ?? -1;
     expect(preset).toBeGreaterThanOrEqual(0); click(100, 130 + preset * 34);

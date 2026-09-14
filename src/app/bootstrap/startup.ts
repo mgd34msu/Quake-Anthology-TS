@@ -40,7 +40,7 @@ import { savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 
-type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "load"; readonly path: string };
+type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "preset"; readonly id: string; readonly skill: number } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
   readonly audio: StartupAudio;
@@ -138,6 +138,7 @@ export class StartupApplication {
       menu = new StartupMenu({ sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
         clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
+        playPreset: (id, skill) => { this.pending = { kind: "preset", id, skill }; },
         play: () => { this.pending = { kind: "play" }; }, load: id => {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
@@ -193,7 +194,8 @@ export class StartupApplication {
       loading?.controllerSettings.close(); loading?.router.close(); loading?.controllers.close();
       const game = await serviceLoading(async () => {
         loading?.menu.setStatus("Loading map...", true);
-        const selected = action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
+        const selected = action.kind === "preset" ? { ...await this.model.resolvePreset(action.id, action.skill), image: undefined }
+          : action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
           const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
           const bots = savedBotCheckpoint(image);
           const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
