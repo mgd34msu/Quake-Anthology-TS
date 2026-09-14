@@ -53,15 +53,17 @@ export class WritableBinaryFile {
 /** One explicitly scoped user-data directory; no package or installed-content root is inferred. */
 export class UserFileStore {
   constructor(readonly root: string) {}
-  /** Resume an existing external file without creating, truncating, or rewinding its contents. */
+  /** Preserve external contents; append streams may create their destination on a fresh install. */
   resume(state: WritableFileCheckpoint, print: (text: string) => void = () => {}): WritableBinaryFile {
     containedFileParts(state.path);
     if (!Number.isSafeInteger(state.position) || state.position < 0) throw new RangeError("Invalid writable checkpoint cursor");
     if (state.mode !== "write" && state.mode !== "append" && state.mode !== "append-sync") throw new RangeError("Invalid writable checkpoint mode");
-    const parent = openContainedParent(this.root, state.path, false);
+    const append = state.mode !== "write";
+    if (append) mkdirSync(this.root, { recursive: true, mode: 0o700 });
+    const parent = openContainedParent(this.root, state.path, append);
     try {
       const descriptor = openSync(`/proc/self/fd/${parent.descriptor}/${parent.leaf}`,
-        constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | (state.mode === "write" ? 0 : constants.O_APPEND));
+        constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | (append ? constants.O_APPEND | constants.O_CREAT : 0), 0o600);
       try {
         if (!fstatSync(descriptor).isFile()) throw new Error("Writable source file is not a regular file");
         return new WritableBinaryFile(descriptor, state.mode, print, state.path, state.position);

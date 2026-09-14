@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
@@ -89,5 +89,44 @@ test("QVM read checkpoint rejects altered byte identity and invalid slot or curs
     restored.restoreCheckpoint({ handles: [{ ...handle, position: 100 }] });
     const output = new Uint8Array([99]); restored.read(1, output); expect(output[0]).toBe(99);
     expect(restored.captureCheckpoint().handles[0]).toEqual({ ...handle, position: 100 });
+  } finally { f.close(); }
+});
+
+test("QVM append checkpoint resumes in a fresh managed directory without truncating existing logs", async () => {
+  const f = await fixture();
+  try {
+    for (const mode of ["append", "append-sync"] satisfies readonly ("append" | "append-sync")[]) {
+      const root = join(f.root, mode, "content", "q3a", "mod");
+      const files = new QvmFiles({ mounts: (await openMountPlan({ id: "mount-plan:empty:1", mounts: [], defaultOrder: [], prefixOrders: [] })), writable: new UserFileStore(root), assertCurrent() {} });
+      try {
+        const checkpoint: ReturnType<QvmFiles["captureCheckpoint"]> = { handles: [{ slot: 1, kind: "write", file: { path: "logs/games.log", mode, position: 495 } }] };
+        files.restoreCheckpoint(checkpoint);
+        expect(files.captureCheckpoint()).toEqual(checkpoint);
+        files.write(1, bytes("continued"));
+        expect(readFileSync(join(root, "logs/games.log"), "utf8")).toBe("continued");
+      } finally { files.closeAll(); files.services.mounts.close(); }
+      const resumed = new UserFileStore(root).resume({ path: "logs/games.log", mode, position: 495 });
+      try { resumed.write(bytes(" again")); }
+      finally { resumed.close(); }
+      expect(readFileSync(join(root, "logs/games.log"), "utf8")).toBe("continued again");
+    }
+    const missing = join(f.root, "missing-write-root");
+    expect(() => new UserFileStore(missing).resume({ path: "state", mode: "write", position: 0 })).toThrow();
+    expect(existsSync(missing)).toBe(false);
+    const outside = join(f.root, "outside"), root = join(f.root, "contained");
+    mkdirSync(outside); mkdirSync(root);
+    symlinkSync(outside, join(root, "logs"));
+    expect(() => new UserFileStore(root).resume({ path: "logs/games.log", mode: "append", position: 495 })).toThrow();
+    expect(readdirSync(outside)).toEqual([]);
+    symlinkSync(join(outside, "games.log"), join(root, "games.log"));
+    expect(() => new UserFileStore(root).resume({ path: "games.log", mode: "append", position: 495 })).toThrow();
+    expect(readdirSync(outside)).toEqual([]);
+    const staged = f.create(), before = descriptors(f.root);
+    expect(() => staged.restoreCheckpoint({ handles: [
+      { slot: 1, kind: "write", file: { path: "staged.log", mode: "append", position: 495 } },
+      { slot: 2, kind: "write", file: { path: "absent-state", mode: "write", position: 0 } },
+    ] })).toThrow();
+    expect(descriptors(f.root)).toBe(before);
+    expect(staged.captureCheckpoint().handles).toEqual([]);
   } finally { f.close(); }
 });
