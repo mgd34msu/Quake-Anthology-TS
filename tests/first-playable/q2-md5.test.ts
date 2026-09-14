@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../src/content/archive/index.ts";
@@ -35,7 +36,7 @@ async function fixture() {
   const palette = await required("pics/colormap.pcx"), colors = decodePcx(palette.bytes).palette;
   if (colors === null) throw new Error("Missing palette");
   const textures = new SceneTextureLoader(images, { read: async path => { const asset = await open(path); return asset === null ? null : { bytes: asset.bytes, source: { kind: "resource", resource: asset.reference } }; } }, { colors, source: palette.reference });
-  const shaders = new SceneShaderRegistry(textures);
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
   const provider = { family: "q2", mounts: { open }, textures, shaders, palette: { colors, source: palette.reference } } satisfies ConstructorParameters<typeof SceneModelRenderer>[0] & ApplicationModelProvider;
   return { archive, identity, owner, images, overrides, ranks, required, provider };
 }

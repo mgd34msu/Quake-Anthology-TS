@@ -108,6 +108,7 @@ interface SourceRefEntityFields extends Omit<SourceHandles<RefModelEntity>, "kin
 export type SourceRefEntityRecord = {
   [Kind in RefEntity["kind"] | "poly"]: SourceRefEntityFields & { kind: Kind };
 }[RefEntity["kind"] | "poly"];
+export type Q3AdmittedRefEntity = RefEntity | Extract<SourceRefEntityRecord, { readonly kind: "poly" }>;
 /** Typed producers retain their existing shapes; VM handles stay numeric until consumed. */
 export type SourceRefEntity = SourceHandles<RefEntity> | SourceRefEntityRecord;
 
@@ -140,7 +141,11 @@ export function createPortalEntity(): RefPortalEntity {
 }
 
 /** RE_AddRefEntityToScene owns a value copy; resource handle identity is retained. */
-export function copyRefEntity(entity: RefEntity): RefEntity {
+export function copyRefEntity(entity: RefEntity): RefEntity;
+export function copyRefEntity(entity: Q3AdmittedRefEntity): Q3AdmittedRefEntity;
+export function copyRefEntity(entity: Q3AdmittedRefEntity): Q3AdmittedRefEntity {
+  if (entity.kind === "poly") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin }, lightingOrigin: { ...entity.lightingOrigin },
+    axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }], shaderRGBA: { ...entity.shaderRGBA }, shaderTexCoord: { ...entity.shaderTexCoord } };
   if (entity.kind === "portal-surface") return { ...entity, origin: { ...entity.origin }, oldOrigin: { ...entity.oldOrigin },
     axis: [{ ...entity.axis[0] }, { ...entity.axis[1] }, { ...entity.axis[2] }] };
   const color = { ...entity.shaderRGBA }, texCoord = { ...entity.shaderTexCoord };

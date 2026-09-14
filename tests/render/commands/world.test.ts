@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
 import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
 import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches } from "../../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
@@ -31,7 +32,7 @@ test("HUD clipping keeps texture coordinates inside an independent seat", () => 
 test("shared view orders remapped world and multipass effects across legacy groups without crossing state barriers", async () => {
   const identity = createIdentityOwner("material-order"), owner = { identity: Symbol("material-order"), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner), textures = new SceneTextureLoader(images, { read: async () => null });
-  const shaders = new SceneShaderRegistry(textures);
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
   shaders.addScript(`ordering/world { sort 3 cull none { map $whiteimage rgbGen const ( 0.1 0.1 0.1 ) } }
 ordering/remap { sort 9 cull none { map $whiteimage blendFunc add rgbGen const ( 0.2 0.2 0.2 ) } }
 ordering/mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZERO GL_ONE_MINUS_SRC_COLOR } }
@@ -77,6 +78,32 @@ ordering/flash { cull none
     expect(drawBatches(finishSceneOperations([translucent, legacy]))).toEqual([...markBatches, ...legacyBatches]);
     expect(drawBatches(finishSceneOperations([flashGroup, translucent, legacy, markGroup])))
       .toEqual([...markBatches, ...flashBatches, ...markBatches, ...legacyBatches]);
+    shaders.addScript("ordering/lightmapped { sort 3 { map $lightmap } }");
+    const lightmappedMap: typeof map = { ...map, shaders: [{ name: "ordering/lightmapped", surfaceFlags: 0, contentFlags: 0 }], surfaces: map.surfaces.map(surface => ({ ...surface, kind: "planar", lightmap: { ...surface.lightmap, image: 0 } })),
+      lightmaps: [new Uint8Array(128 * 128 * 3).fill(96)] };
+    const lightmapped = await WorldScene.load(lightmappedMap, shaders);
+    const replacementTextures = new SceneTextureLoader(images, { read: async () => null }), replacementShaders = shaders.replacement(replacementTextures);
+    try {
+      const original = lightmapped.surfaces[0]?.shader, originalImage = lightmapped.surfaces[0]?.lightmap;
+      if (original === undefined || original === null) throw new Error("Missing lightmapped registration");
+      expect(original.finished.lightmapIndex).toBe(0);
+      const originalContent = original.registered, registrations = shaders.registrations.owner.snapshot();
+      await shaders.prepareReplacement(replacementShaders);
+      const staged = await lightmapped.prepareImages(replacementShaders);
+      expect(staged.materialWorld).toBe(lightmapped.materialWorld);
+      expect(staged.surfaces[0]?.shader?.registration).toBe(original.registration);
+      expect(staged.surfaces[0]?.lightmap).not.toBe(originalImage);
+      expect(original.registered).toBe(originalContent);
+      expect(shaders.registrations.owner.snapshot()).toEqual(registrations);
+      shaders.commitReplacement(replacementShaders); lightmapped.commitImages(staged);
+      expect(lightmapped.surfaces[0]?.shader).toBe(original);
+      expect(original.registered).not.toBe(originalContent);
+      const secondWorld = await WorldScene.load({ ...lightmappedMap }, shaders);
+      try {
+        expect(secondWorld.materialWorld).not.toBe(lightmapped.materialWorld);
+        expect(secondWorld.surfaces[0]?.shader?.registration).not.toBe(original.registration);
+      } finally { secondWorld.close(); }
+    } finally { lightmapped.close(); replacementTextures.close(); }
   } finally { scene.close(); images.close(); }
 });
 
@@ -118,7 +145,7 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     const owner: RendererResourceOwner = { identity: Symbol(fixture.family), session: identity.session, generation: 0 };
     const images = new SceneImageRegistry(owner);
     const textures = new SceneTextureLoader(images, { read: async name => { const bytes = await read(name); return bytes === null ? null : { bytes, source: { kind: "generated", name: `${fixture.archive}:${name}` } }; } }, palette);
-    const shaders = new SceneShaderRegistry(textures);
+    const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
     if (fixture.family === "q3") for (const entry of archive.entries) {
       if (entry.path.startsWith("scripts/") && entry.path.endsWith(".shader")) shaders.addScript(new TextDecoder().decode(await archive.readEntry(entry)), entry.path);
     }

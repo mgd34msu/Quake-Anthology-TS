@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { SceneTextureLoader } from "../../src/render/scene/textures.ts";
 import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
@@ -190,7 +191,7 @@ test("mipmapped implicit pictures retain 2D alpha blending and native first-regi
   const pixels = Uint8Array.from({ length: 64 }, (_, index) => index % 4 === 3 ? 128 : 255);
   const png = encodePng(4, 4, pixels);
   const textures = new SceneTextureLoader(images, { read: async path => path.endsWith(".png") ? { bytes: png, source: { kind: "generated", name: path } } : null });
-  const registry = new SceneShaderRegistry(textures);
+  const registry = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
   const picture = await registry.registerPicture("icons/noammo-fixture", true);
   expect(picture.material.compiled.material.stages[0]?.color.kind).toBe("vertex");
   expect(picture.material.compiled.material.stages[0]?.blend).toEqual({ source: "src-alpha", destination: "one-minus-src-alpha" });

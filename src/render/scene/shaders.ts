@@ -1,3 +1,4 @@
+import type { ProviderShaderRegistrations, RegisteredSceneMaterial, ShaderLogicalKey, ShaderRegistration, ShaderReplacementStage, ShaderWorldIdentity } from "./material-registrations.ts";
 import type { RendererImage } from "../../contracts/render.ts";
 import { compileImplicitMaterial, DEFAULT_SHADER_PROFILE, shaderRenderMaterial } from "../../materials/compile.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
@@ -9,22 +10,25 @@ import { SkyBuilder } from "../../materials/sky.ts";
 import { SceneTextureLoader, type SceneTexture } from "./textures.ts";
 import type { MaterialPicture } from "../../text/draw2d.ts";
 
+export type SceneShaderBinding = { readonly kind: "unlit"; readonly lightmapIndex: -1 | -2 | -3 | -4; readonly mipmap: boolean }
+  | { readonly kind: "world"; readonly world: ShaderWorldIdentity; readonly lightmapIndex: number;
+      readonly lightmap: RendererImage | null; readonly baseTexture: SceneTexture | null };
+
 /** Named shaders are registered separately for each lightmap, as R_FindShader does. */
 export class SceneShaderRegistry {
   private readonly programs = new Map<string, ShaderRegistrationProgram>();
   private readonly cinematicPrograms = new Set<string>();
-  private readonly compiled = new Map<string, Promise<CompiledMaterial>>();
+  private readonly compiled = new Map<string, Promise<RegisteredSceneMaterial>>();
   private readonly remaps = new Map<string, { readonly name: string; readonly timeOffset: number }>();
-  private readonly pictureOrders = new Map<CompiledMaterial, number>();
-  private readonly retained = new Map<string, { current: CompiledMaterial; readonly value: CompiledMaterial }>();
-  private readonly imageRequests = new Map<string, { readonly name: string; readonly lightmapIndex: number; readonly mipmap: boolean }>();
+  private readonly pictureOrders = new Map<ShaderRegistration, number>();
+  private readonly imageRequests = new Map<string, { readonly name: string; readonly binding: Extract<SceneShaderBinding, { readonly kind: "unlit" }> }>();
   readonly sky = new SkyBuilder();
   readonly warnings: string[] = [];
   sun: RegisteredSun | null = null;
 
-  constructor(public textures: SceneTextureLoader, readonly profile: FinishShaderProfile = DEFAULT_SHADER_PROFILE,
+  constructor(public textures: SceneTextureLoader, readonly registrations: ProviderShaderRegistrations, readonly profile: FinishShaderProfile = DEFAULT_SHADER_PROFILE,
     private readonly playCinematic: (name: string) => Promise<RegisteredShaderVideo | null> = async () => null,
-    private readonly family: "q1" | "q2" | "q3" = "q3") {}
+    private readonly family: "q1" | "q2" | "q3" = "q3", private stage: ShaderReplacementStage | null = null) {}
 
   addScript(text: string, source = "<shader>"): void {
     for (const entry of inspectShaderScript(text, source).entries) {
@@ -50,29 +54,28 @@ export class SceneShaderRegistry {
     return this.remaps.get(this.key(name)) ?? { name, timeOffset: 0 };
   }
 
-  register(name: string, lightmap: RendererImage | null = null, lightmapIndex = -1, baseTexture: SceneTexture | null = null, mipmap = lightmapIndex !== -4): Promise<CompiledMaterial> {
-    const key = `${this.key(name)}\0${lightmapIndex}\0${lightmap?.ordinal ?? -1}\0${baseTexture?.image.ordinal ?? -1}`;
+  register(name: string, binding: SceneShaderBinding = { kind: "unlit", lightmapIndex: -1, mipmap: true }): Promise<RegisteredSceneMaterial> {
+    const lightmap = binding.kind === "world" ? binding.lightmap : null, baseTexture = binding.kind === "world" ? binding.baseTexture : null;
+    const lightmapIndex = binding.lightmapIndex, mipmap = binding.kind === "unlit" ? binding.mipmap : lightmapIndex !== -4;
+    const logical: ShaderLogicalKey = { name: this.key(name), binding: binding.kind === "unlit"
+      ? { kind: "unlit", lightmapIndex: binding.lightmapIndex } : { kind: "world", world: binding.world, lightmapIndex, baseTextureName: baseTexture?.name ?? null } };
+    const key = `${this.registrations.key(logical)}\0${lightmap?.ordinal ?? -1}\0${baseTexture?.image.ordinal ?? -1}`;
     const previous = this.compiled.get(key);
     if (previous !== undefined) return previous;
-    if (lightmap === null && baseTexture === null) this.imageRequests.set(key, { name, lightmapIndex, mipmap });
-    const pending = this.compile(name, lightmap, lightmapIndex, baseTexture, mipmap).then(current => {
-      if (lightmap !== null || baseTexture !== null) return current;
-      const previous = this.retained.get(key);
-      if (previous !== undefined) { previous.current = current; return previous.value; }
-      const state: { current: CompiledMaterial; readonly value: CompiledMaterial } = { current, value: { get registered() { return state.current.registered; },
-        get finished() { return state.current.finished; }, get material() { return state.current.material; } } };
-      this.retained.set(key, state); return state.value;
-    }).catch((error: unknown) => {
-      if (this.compiled.get(key) === pending) this.compiled.delete(key);
-      throw error;
-    });
+    if (binding.kind === "unlit") this.imageRequests.set(key, { name, binding });
+    const publisher = this.stage ?? this.registrations, registration = publisher.reserve(logical);
+    const pending = this.compile(name, lightmap, lightmapIndex, baseTexture, mipmap)
+      .then(current => publisher.publish(registration, current)).catch((error: unknown) => {
+        if (this.compiled.get(key) === pending) this.compiled.delete(key);
+        throw error;
+      });
     this.compiled.set(key, pending);
     return pending;
   }
 
   /** Stage replacement images without changing source-retained shader handles. */
   replacement(textures: SceneTextureLoader): SceneShaderRegistry {
-    const result = new SceneShaderRegistry(textures, this.profile, this.playCinematic, this.family);
+    const result = new SceneShaderRegistry(textures, this.registrations, this.profile, this.playCinematic, this.family, this.registrations.beginReplacement());
     for (const [key, program] of this.programs) result.programs.set(key, program);
     for (const key of this.cinematicPrograms) result.cinematicPrograms.add(key);
     for (const [key, remap] of this.remaps) result.remaps.set(key, remap);
@@ -81,30 +84,38 @@ export class SceneShaderRegistry {
 
   async prepareReplacement(replacement: SceneShaderRegistry): Promise<void> {
     for (const request of this.imageRequests.values())
-      await replacement.register(request.name, null, request.lightmapIndex, null, request.mipmap);
+      await replacement.register(request.name, request.binding);
+  }
+
+  validateReplacement(replacement: SceneShaderRegistry): void {
+    if (replacement.registrations !== this.registrations || replacement.stage === null) throw new Error("Shader replacement belongs to another provider or is already complete");
+    replacement.stage.validate();
   }
 
   commitReplacement(replacement: SceneShaderRegistry): void {
+    this.validateReplacement(replacement);
+    const stage = replacement.stage;
+    if (stage === null) throw new Error("Shader replacement lost its stage");
+    stage.commit(); replacement.stage = null;
+    for (const [key, pending] of replacement.compiled)
+      replacement.compiled.set(key, pending.then(material => this.registrations.owner.retained(material.registration)));
     this.textures = replacement.textures;
-    for (const [key, state] of this.retained) {
-      const next = replacement.retained.get(key);
-      if (next !== undefined) { state.current = next.current; next.current = state.value; }
-    }
     this.compiled.clear();
-    for (const [key, pending] of replacement.compiled) {
-      const retained = this.retained.get(key);
-      this.compiled.set(key, retained === undefined ? pending : Promise.resolve(retained.value));
-    }
-    for (const [key, state] of replacement.retained) if (!this.retained.has(key)) this.retained.set(key, state);
+    for (const [key, pending] of replacement.compiled) this.compiled.set(key, pending);
     this.imageRequests.clear();
     for (const [key, request] of replacement.imageRequests) this.imageRequests.set(key, request);
     this.sun = replacement.sun;
   }
 
+  discardReplacement(): void {
+    if (this.stage === null) throw new Error("Live shader registry cannot be discarded as a replacement");
+    this.stage.discard(); this.compiled.clear(); this.imageRequests.clear();
+  }
+
   async registerPicture(name: string, mipmap = false): Promise<MaterialPicture> {
-    const compiled = await this.register(name, null, -4, null, mipmap);
-    let order = this.pictureOrders.get(compiled);
-    if (order === undefined) { order = this.pictureOrders.size + 1; this.pictureOrders.set(compiled, order); }
+    const compiled = await this.register(name, { kind: "unlit", lightmapIndex: -4, mipmap });
+    let order = this.pictureOrders.get(compiled.registration);
+    if (order === undefined) { order = this.pictureOrders.size + 1; this.pictureOrders.set(compiled.registration, order); }
     return { kind: "material", name, material: { order, compiled } };
   }
 

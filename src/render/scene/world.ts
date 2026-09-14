@@ -1,3 +1,4 @@
+import type { RegisteredSceneMaterial, ShaderWorldIdentity } from "./material-registrations.ts";
 import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations } from "./submissions.ts";
 import type { SceneOperation } from "./submissions.ts";
 /* Unified world preparation uses Q1/Q2 brush surfaces and Q3 tr_bsp/tr_world.
@@ -46,9 +47,9 @@ interface SurfaceBase {
   readonly geometry: MaterialGeometry;
 }
 export type WorldSurface = SurfaceBase & (
-  { readonly kind: "q3"; readonly shader: CompiledMaterial; readonly lightmap: RendererImage | null;
+  { readonly kind: "q3"; readonly shader: RegisteredSceneMaterial; readonly lightmap: RendererImage | null;
       readonly grid: PatchGrid | null; readonly fog: FogVolume | null; readonly flare: boolean }
-  | { readonly kind: "legacy"; readonly shader: CompiledMaterial | null; readonly material: Q1Material | Q2Material; readonly fullbright: RendererImage | null;
+  | { readonly kind: "legacy"; readonly shader: RegisteredSceneMaterial | null; readonly material: Q1Material | Q2Material; readonly fullbright: RendererImage | null;
       readonly lightmap: { readonly face: LightmapFace; readonly image: RendererImage; readonly direct: RendererImage; readonly encoding: Q1LightmapEncoding } | null;
       readonly q1Sky: { readonly solid: RendererImage; readonly overlay: RendererImage } | null }
 );
@@ -118,16 +119,18 @@ export class WorldScene {
   fogImage: RendererImage;
   dlightImage: RendererImage;
   readonly noise = new RendererNoise();
+  readonly materialWorld: ShaderWorldIdentity;
   private shadowScene: Q2ShadowScene;
   private readonly owned: RendererImage[] = [];
   private q2Sky: readonly RendererImage[] = [];
-  private readonly remapped = new Map<CompiledMaterial, { readonly shader: CompiledMaterial; readonly timeOffset: number }>();
+  private readonly remapped = new Map<RegisteredSceneMaterial, { readonly shader: RegisteredSceneMaterial; readonly timeOffset: number }>();
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
   private staticShadowWorld: { readonly surfaces: readonly WorldSurface[]; readonly first: number; readonly count: number; readonly world: StaticShadowWorld } | null = null;
 
   private constructor(readonly map: DecodedWorld, readonly shaders: SceneShaderRegistry,
     surfaces: readonly WorldSurface[], readonly options: WorldSceneOptions) {
     this.surfaces = surfaces;
+    this.materialWorld = shaders.registrations.owner.world(map);
     this.shadowScene = new Q2ShadowScene(shaders.textures.images);
     this.bounds = map.models[0]?.bounds ?? geometryBounds(map.kind === "q3-bsp" ? map.vertices : map.vertices.map(position => ({ position })));
     this.fogImage = shaders.textures.images.register("*fog", rgbaImage(createFogTexture()), { wrap: "clamp", filter: "linear" });
@@ -145,7 +148,7 @@ export class WorldScene {
 
   static async load(map: DecodedWorld, shaders: SceneShaderRegistry, options: WorldSceneOptions = {}): Promise<WorldScene> {
     const owned: RendererImage[] = [], surfaces: WorldSurface[] = [];
-    const images = shaders.textures.images;
+    const images = shaders.textures.images, materialWorld = shaders.registrations.owner.world(map);
     let result: WorldScene | null = null;
     try {
     const generated = (name: string, level: Parameters<typeof rgbaImage>[0], wrap: "clamp" | "repeat" = "clamp"): RendererImage => {
@@ -179,7 +182,7 @@ export class WorldScene {
           plane = { normal, distance: dot3(a, normal) };
         }
         const lightmapIndex = surface.kind === "planar" || surface.kind === "patch" ? surface.lightmap.image : -3;
-        const material = await shaders.register(shader.name, lightmaps[lightmapIndex] ?? null, lightmapIndex);
+        const material = await shaders.register(shader.name, { kind: "world", world: materialWorld, lightmap: lightmaps[lightmapIndex] ?? null, lightmapIndex, baseTexture: null });
         const actual = grid?.mesh ?? geometry;
         surfaces.push({ kind: "q3", index, bounds: geometryBounds(actual.vertices), plane, geometry: actual, shader: material, lightmap: lightmaps[lightmapIndex] ?? null,
           grid, fog: surface.fog < 0 ? null : fogs[surface.fog] ?? null, flare: surface.kind === "flare" });
@@ -236,7 +239,7 @@ export class WorldScene {
           material = createQ2Material(name, frames, lighting, info.flags, "material" in info ? info.material : "");
         }
         const shaderName = `textures/${name}`;
-        const shader = shaders.hasAuthored(shaderName) ? await shaders.register(shaderName, lightmap?.image ?? null, lightmap === null ? -1 : index, texture) : null;
+        const shader = shaders.hasAuthored(shaderName) ? await shaders.register(shaderName, { kind: "world", world: materialWorld, lightmap: lightmap?.image ?? null, lightmapIndex: lightmap === null ? -1 : index, baseTexture: texture }) : null;
         surfaces.push({ kind: "legacy", shader, index, bounds: geometryBounds(prepared.geometry.vertices), plane: prepared.plane, geometry: prepared.geometry,
           material, fullbright: texture.fullbright, lightmap, q1Sky });
       }
@@ -411,7 +414,7 @@ export class WorldScene {
     return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
   }
 
-  private shaderOperations(surface: WorldSurface, sourceShader: CompiledMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly SceneOperation[] {
+  private shaderOperations(surface: WorldSurface, sourceShader: RegisteredSceneMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform): readonly SceneOperation[] {
     const remap = this.remapped.get(sourceShader), shader = remap?.shader ?? sourceShader;
     const grid = surface.kind === "q3" ? surface.grid : null, fog = surface.kind === "q3" ? surface.fog : null;
     if (shader.material.surfaceParameters.includes("nodraw")) return [];
@@ -486,13 +489,14 @@ export class WorldScene {
 
   commitImages(replacement: WorldScene): void {
     this.close();
-    this.surfaces = replacement.surfaces;
+    this.surfaces = replacement.surfaces.map(surface => surface.shader === null ? surface : { ...surface, shader: this.shaders.registrations.owner.retained(surface.shader.registration) });
     this.fogImage = replacement.fogImage; this.dlightImage = replacement.dlightImage;
     this.shadowScene = replacement.shadowScene;
     this.q2Sky = replacement.q2Sky;
     this.owned.push(...replacement.owned); replacement.owned.length = 0;
     this.remapped.clear();
-    for (const [material, remap] of replacement.remapped) this.remapped.set(material, remap);
+    for (const [material, remap] of replacement.remapped) this.remapped.set(this.shaders.registrations.owner.retained(material.registration),
+      { ...remap, shader: this.shaders.registrations.owner.retained(remap.shader.registration) });
   }
 
   async remapShader(original: string, replacement: string, timeOffset = 0): Promise<void> {
@@ -500,7 +504,7 @@ export class WorldScene {
     for (const surface of this.surfaces) {
       if (surface.shader === null || surface.shader.material.name.toLowerCase() !== original.toLowerCase()) continue;
       if (original.toLowerCase() === replacement.toLowerCase()) this.remapped.delete(surface.shader);
-      else this.remapped.set(surface.shader, { shader: await this.shaders.register(replacement, surface.kind === "q3" ? surface.lightmap : surface.lightmap?.image ?? null, surface.shader.finished.lightmapIndex), timeOffset });
+      else this.remapped.set(surface.shader, { shader: await this.shaders.register(replacement, { kind: "world", world: this.materialWorld, lightmap: surface.kind === "q3" ? surface.lightmap : surface.lightmap?.image ?? null, lightmapIndex: surface.shader.finished.lightmapIndex, baseTexture: null }), timeOffset });
       this.staticShadowWorld = null;
     }
   }

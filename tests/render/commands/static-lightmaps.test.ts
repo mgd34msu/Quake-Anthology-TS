@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -56,7 +57,7 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     const owner: RendererResourceOwner = { identity: Symbol(fixture.family), session: identity.session, generation: 0 };
     const images = new SceneImageRegistry(owner);
     const textures = new SceneTextureLoader(images, { read: async name => { const bytes = await read(name); return bytes === null ? null : { bytes, source: { kind: "generated", name: `${fixture.archive}:${name}` } }; } }, palette);
-    const shaders = new SceneShaderRegistry(textures);
+    const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
     const entities = parseEntities(map.entities);
     const world = entities.find(entity => entity.get("classname") === "worldspawn");
     const options = { q2SkyName: world?.get("sky") ?? "unit1_", q2LightModulate: 1, q1LightmapEncoding: fixture.encoding ?? "rgb" };

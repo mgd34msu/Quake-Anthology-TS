@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../render/scene/material-registrations.ts";
 import { CinematicPlayback, cinematicBytes } from "../../media/playback.ts";
 import { cinematicDimensions } from "../../media/presentation.ts";
 import { MaterialCinematic } from "../../media/material.ts";
@@ -84,6 +85,7 @@ async function shaderPaths(content: LoadedApplicationContent, mounts: MountedCon
 /** Presentation caches are distinct from authoritative map and game state. */
 export class ApplicationAssets {
   readonly images: SceneImageRegistry;
+  readonly materialRegistrations = new SceneMaterialRegistrations();
   private readonly movies = new Map<string, Promise<RegisteredShaderVideo | null>>();
   private readonly activeTextures = new Set<SceneTextureLoader>();
   private readonly activeMovies = new Set<MaterialCinematic>();
@@ -120,6 +122,7 @@ export class ApplicationAssets {
     if (this.closed) throw new Error("Application assets are closed");
     const existing = this.providers.get(content);
     if (existing !== undefined) return existing;
+    const registrations = this.materialRegistrations.provider(content);
     const pending = (async (): Promise<ProviderSceneAssets> => {
       const family = this.content.catalog.product(content).expectation.family;
       const mounts = await this.content.forContent(content), palette = await paletteFor(mounts, family);
@@ -128,7 +131,7 @@ export class ApplicationAssets {
         this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue });
       this.activeTextures.add(textures);
       try {
-        const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
+        const shaders = new SceneShaderRegistry(textures, registrations, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
         for (const path of await shaderPaths(this.content, mounts)) {
           const asset = await mounts.open(path);
           if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
@@ -254,13 +257,14 @@ export class ApplicationAssets {
     } catch (error) {
       typography?.close(); fonts?.close();
       for (const world of worlds) world.replacement.close();
-      for (const replacement of replacements.values()) replacement.textures.disposeImages();
+      for (const replacement of replacements.values()) { replacement.shaders.discardReplacement(); replacement.textures.disposeImages(); }
       throw error;
     }
     const preparedFonts = fonts, preparedTypography = typography;
     if (preparedFonts === null || preparedTypography === null) throw new Error("Image refresh fonts were not prepared");
     return { provider: stagedProvider, font: preparedFonts.font, typography: preparedTypography, policy,
       commit: () => {
+        for (const replacement of replacements.values()) replacement.provider.shaders.validateReplacement(replacement.shaders);
         for (const commit of models) commit();
         for (const replacement of replacements.values()) {
           const previous = replacement.provider.textures;
@@ -279,7 +283,7 @@ export class ApplicationAssets {
       discard: () => {
         preparedTypography.close(); preparedFonts.close();
         for (const world of worlds) world.replacement.close();
-        for (const replacement of replacements.values()) replacement.textures.disposeImages();
+        for (const replacement of replacements.values()) { replacement.shaders.discardReplacement(); replacement.textures.disposeImages(); }
       } };
   }
 

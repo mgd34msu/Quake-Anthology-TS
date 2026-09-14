@@ -8,7 +8,7 @@ import { CommonParseCursor, CommonParseState } from "../../../core/common-parse.
 import { CommonError } from "../../../core/common-error.ts";
 import { dot3 } from "../../../core/math.ts";
 import { DEFAULT_MODEL } from "./ref-entity.ts";
-import type { RefEntity, RefPoly, SceneModel, SceneShader, SceneSkin } from "./ref-entity.ts";
+import type { Q3AdmittedRefEntity, RefPoly, SceneModel, SceneShader, SceneSkin } from "./ref-entity.ts";
 import type { Refdef } from "./refdef.ts";
 import type { Q3SceneRecorder } from "./scene.ts";
 export interface AssetReader { read(path: string): Promise<Uint8Array>; has(path: string): boolean; list(prefix?: string): readonly string[]; }
@@ -30,7 +30,7 @@ export interface RendererResources {
   modelForHandle(handle: number): SceneModel;
   shaderForHandle(handle: number): SceneShader | null;
   clearScene(): void;
-  addRefEntity(entity: RefEntity): void;
+  addRefEntity(entity: Q3AdmittedRefEntity): void;
   addPoly(poly: RefPoly): void;
   addLight(light: DynamicLight): void;
   remapShader(original: string, replacement: string, offset: string): Promise<void>;
@@ -102,7 +102,7 @@ export class Q3RendererResources implements RendererResources {
     return skin;
   }
   clearScene(): void { this.host.scene.clearScene(); }
-  addRefEntity(entity: RefEntity): void { this.host.scene.addRefEntity(entity); }
+  addRefEntity(entity: Q3AdmittedRefEntity): void { this.host.scene.addRefEntity(entity); }
   addPoly(poly: RefPoly): void { this.host.scene.addPoly(poly); }
   addLight(light: DynamicLight): void { this.host.scene.addLight(light); }
   remapShader(original: string, replacement: string, offset: string): Promise<void> { return this.host.remapShader(original, replacement, offset); }

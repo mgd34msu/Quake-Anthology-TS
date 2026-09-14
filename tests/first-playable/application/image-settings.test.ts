@@ -41,6 +41,7 @@ for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl
       const path = join(users, "q2/baseq2/textures", `${name}.png`);
       await mkdir(dirname(path), { recursive: true }); await Bun.write(path, encodePng(16, 16, pixels));
     }
+    for (let offset = 0; offset < pixels.length; offset += 4) pixels.set([255, 0, 0, 255], offset);
     for (const name of ["models/weapons/v_blast/skin.png", "models/weapons/v_blast/md5/skin.png"]) {
       const path = join(users, "q2/baseq2", name);
       await mkdir(dirname(path), { recursive: true }); await Bun.write(path, encodePng(16, 16, pixels));
@@ -95,7 +96,7 @@ for (const interaction of ["console", "menu"]) for (const backend of ["cpu", "gl
       const video = async (): Promise<void> => {
         key(27); await application.step(25);
         expect(presentation.ui.controller.activeMenu).toBe("menu:application:game");
-        await clickRow(3); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:root");
+        await activate("ui:application:settings"); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:root");
         await activate("ui:settings:category:video"); expect(presentation.ui.controller.activeMenu).toBe("menu:settings:video:0");
       };
       const resume = async (): Promise<void> => { await clickRow(11); await clickRow(11); await clickRow(1); };

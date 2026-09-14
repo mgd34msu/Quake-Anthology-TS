@@ -1,3 +1,4 @@
+import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
 import { sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
 /* Application joins for Quake cl_tent/r_part and Quake II cl_tent/cl_fx.
@@ -31,6 +32,7 @@ import { Q2_TRANSIENT_MODELS } from "../../content/q2/foundation/effect-resource
 export type { SourceEffectSound } from "./effects/q3.ts";
 
 export interface ApplicationEffectFrame {
+  readonly q3Admissions: readonly Q3SceneAdmission[];
   readonly operations: readonly SceneOperation[];
   readonly lights: readonly SurfaceDynamicLight[];
   readonly q3Lights: readonly DynamicLight[];
@@ -240,13 +242,13 @@ export class ApplicationEffects {
     const q1Styles = Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
     const operations: SceneOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
       { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), ...prepared];
-    const sourceLights: SurfaceDynamicLight[] = [];
+    const sourceLights: SurfaceDynamicLight[] = [], q3Admissions: Q3SceneAdmission[] = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
-      const frame = effects.frame(camera, viewer); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
+      const frame = effects.frame(camera, viewer); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
       sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
     }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });
-    return { operations, lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
+    return { q3Admissions, operations, lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
   }
   shadowSceneLights(camera: SceneCamera, style: (index: number) => number): readonly SceneLight[] {
     return [...this.shadowLights.values()].flatMap(light => {

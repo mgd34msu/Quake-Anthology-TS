@@ -160,3 +160,46 @@ test("guest record marshalling preserves complete values and rejects truncated r
   expect(saved.areaMask[0]).toBe(123); expect(saved.text[0].startsWith("A\0")).toBe(true);
   expect(() => readQvmRefdef(new DataView(new ArrayBuffer(367)))).toThrow();
 });
+
+test("guest scene admission keeps refentity slots, polygon membership, and earlier snapshots", async () => {
+  const f = await fixture();
+  f.guest.writeString(512, "vm/picture", 32);
+  await qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_REGISTERSHADER, [512]), f.resources, f.draw);
+  const entity = f.guest.view(1024, 140);
+  for (const type of [0, 1, 7, 3, 2, 2]) {
+    entity.setInt32(0, type, true); entity.setInt32(8, type === 1 ? 9041 : 0, true);
+    entity.setInt32(108, type === 1 ? 9042 : 0, true); entity.setInt32(112, type === 1 ? 9043 : 17, true); entity.setFloat32(132, 8, true);
+    entity.setFloat32(68, 12, true);
+    qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDREFENTITYTOSCENE, [1024]), f.resources, f.draw);
+  }
+  const vertices = f.guest.view(2048, 72);
+  for (let index = 0; index < 3; index++) {
+    vertices.setFloat32(index * 24, 20, true); vertices.setFloat32(index * 24 + 4, index, true);
+    vertices.setFloat32(index * 24 + 8, index % 2, true);
+  }
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDPOLYTOSCENE, [17, 3, 2048]), f.resources, f.draw);
+  entity.setFloat32(68, 900, true); vertices.setFloat32(0, 900, true);
+  const refdef = f.guest.view(1536, 368);
+  refdef.setInt32(8, 640, true); refdef.setInt32(12, 480, true); refdef.setFloat32(16, 90, true); refdef.setFloat32(20, 75, true);
+  for (const offset of [36, 52, 68]) refdef.setFloat32(offset, 1, true);
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_RENDERSCENE, [1536]), f.resources, f.draw);
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_RENDERSCENE, [1536]), f.resources, f.draw);
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_CLEARSCENE), f.resources, f.draw);
+  qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_RENDERSCENE, [1536]), f.resources, f.draw);
+  const first = f.scenes[0], repeated = f.scenes[1], cleared = f.scenes[2];
+  if (first === undefined || repeated === undefined || cleared === undefined) throw new Error("Missing guest scene snapshots");
+  expect(first.admission.entities.map(entity => entity.kind)).toEqual(["model", "poly", "portal-surface", "beam", "sprite", "sprite"]);
+  expect(first.admission.entities.map(entity => entity.origin.x)).toEqual([12, 12, 12, 12, 12, 12]);
+  expect(first.admission.entities[4]).not.toBe(first.admission.entities[5]);
+  const unsupported = first.admission.entities[1];
+  if (unsupported?.kind !== "poly") throw new Error("Missing admitted RT_POLY source record");
+  expect(unsupported.model).toBe(9041); expect(unsupported.customSkin).toBe(9042); expect(unsupported.customShader).toBe(9043);
+  expect(first.specialEntities.map(entity => entity.entityIndex)).toEqual([0, 3]);
+  expect(first.portals.map(portal => portal.entityIndex)).toEqual([2]);
+  expect(first.effects.map(effect => effect.admission)).toEqual([{ kind: "refentity", index: 4 }, { kind: "refentity", index: 5 }, { kind: "polygon", index: 0 }]);
+  expect(first.admission.polygons[0]?.vertices[0]?.position.x).toBe(20);
+  expect(first.admission.id.equals(repeated.admission.id)).toBe(false);
+  expect(first.effects).toEqual(repeated.effects); expect(first.specialEntities).toEqual(repeated.specialEntities);
+  expect(cleared.admission.entities).toHaveLength(0); expect(cleared.admission.polygons).toHaveLength(0);
+  expect(first.admission.entities).toHaveLength(6); expect(first.admission.polygons).toHaveLength(1);
+});

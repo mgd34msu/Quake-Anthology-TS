@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -97,7 +98,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(`${roo
   const identity = createIdentityOwner("installed-gif"), owner = { identity: Symbol("installed-gif"), session: identity.session, generation: 0 };
   const images = new SceneImageRegistry(owner, { sample: () => now });
   const textures = new SceneTextureLoader(images, { read: async path => path === asset ? { bytes, source: { kind: "generated", name: path } } : null });
-  const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, undefined, family);
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"), DEFAULT_SHADER_PROFILE, undefined, family);
   const picture = await shaders.registerPicture(asset), width = gif.width, height = gif.height;
   const viewport = { x: 0, y: 0, width, height };
   const batches = prepareMaterialText({ seat: identity.seat(0), rect: viewport, uv: { s: 0, t: 0, s2: 1, t2: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, picture }, viewport, context);

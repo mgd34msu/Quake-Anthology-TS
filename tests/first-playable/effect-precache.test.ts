@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ test("cinematic metadata preserves normalized first definitions and replacements
   const images = new SceneImageRegistry({ identity: Symbol("effect-cinematic"), session: identity.session, generation: 0 });
   const textures = new SceneTextureLoader(images, { read: async () => null });
   let plays = 0;
-  const shaders = new SceneShaderRegistry(textures, undefined, async () => { plays++; return null; });
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"), undefined, async () => { plays++; return null; });
   try {
     shaders.addScript("Fx/Movie { { videoMap intro.roq } }\nfx/still { { map $whiteimage } }");
     shaders.addScript("fx/movie { { map $whiteimage } }\nfx/still { { videoMap later.roq } }");
@@ -43,7 +44,7 @@ test("failed effect shader registration retries its image provider", async () =>
     if (fail) { fail = false; throw Error("effect image unavailable"); }
     return { bytes, source: { kind: "generated", name: path } };
   } });
-  const shaders = new SceneShaderRegistry(textures);
+  const shaders = new SceneShaderRegistry(textures, new SceneMaterialRegistrations().provider("q3:classic:retail:test"));
   try {
     shaders.addScript("fx/retry { { map retry.png } }");
     await expect(shaders.register("fx/retry")).rejects.toThrow("effect image unavailable");

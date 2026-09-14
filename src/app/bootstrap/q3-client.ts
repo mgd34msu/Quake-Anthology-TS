@@ -324,7 +324,7 @@ export class ApplicationQ3Client {
         ? { ...context, entityRGBA: source.shaderRGBA, shaderTexCoord: source.shaderTexCoord, timeOffset: source.shaderTime } : context)));
     }
     const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
-    for (const entity of scene.specialEntities) operations.push(sequenceDrawGroup("opaque", [entity.kind === "beam" ? beamBatch(entity, project, state, white)
+    for (const { source: entity } of scene.specialEntities) operations.push(sequenceDrawGroup("opaque", [entity.kind === "beam" ? beamBatch(entity, project, state, white)
       : defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white)]));
     return operations;
   }
@@ -334,7 +334,7 @@ export class ApplicationQ3Client {
     for (const index of visible.surfaces) {
       const surface = world.surfaces[index];
       if (surface?.kind !== "q3" || surface.shader.finished.sort !== 1 || surface.plane === null) continue;
-      const child = portalCamera(surface.plane, scene.portals, input.camera, this.source.time);
+      const child = portalCamera(surface.plane, scene.portals.map(portal => portal.source), input.camera, this.source.time);
       if (child === null || portalSurfaceOffscreen(surface.geometry, input.camera, surface.shader.material.portalRange, child.mirror)) continue;
       return { ...input, camera: child.camera, pvsOrigin: child.pvsOrigin };
     }

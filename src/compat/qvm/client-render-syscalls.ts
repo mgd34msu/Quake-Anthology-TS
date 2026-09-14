@@ -115,7 +115,7 @@ export function qvmClientRenderSyscall(call: QvmHostCall, resources: Q3RendererR
   if (trap === (ui ? 21 : 40)) { resources.clearScene(); return 0; }
   if (trap === (ui ? 22 : 41)) {
     const source = readQvmRefEntity(guest.view(words.getInt32(4, true), QVM_REF_ENTITY_BYTES));
-    if (source.kind === "poly") return 0;
+    if (source.kind === "poly") { resources.addRefEntity(source); return 0; }
     if (source.kind === "portal-surface") { resources.addRefEntity(source); return 0; }
     const customShader = typeof source.customShader === "number" ? resources.shaderForHandle(source.customShader) : source.customShader;
     if (source.kind === "model") {

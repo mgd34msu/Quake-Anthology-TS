@@ -1,3 +1,4 @@
+import { snapshotQ3SceneAdmission, type Q3SceneAdmission } from "../../../content/q3/presentation/scene.ts";
 import { compiledDrawGroup, type SceneOperation } from "../../../render/scene/submissions.ts";
 import { byteToDirection, directionToByte } from "../../../content/q3/base/shared/direction-byte.ts";
 import type { Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
@@ -22,7 +23,7 @@ import type { LocalEntityMedia } from "../../../content/q3/presentation/local-en
 import { ImpactMarkSystem } from "../../../content/q3/presentation/marks.ts";
 import { worldMarkProjector } from "../../../content/q3/presentation/mark-projector.ts";
 import { copyRefEntity, createModelEntity, createSpriteEntity, createLightningEntity, DEFAULT_MODEL, RF_NOSHADOW } from "../../../content/q3/presentation/ref-entity.ts";
-import type { RefEntity, RefPoly, SceneModel, SceneShader } from "../../../content/q3/presentation/ref-entity.ts";
+import type { RefEntity, SceneModel, SceneShader } from "../../../content/q3/presentation/ref-entity.ts";
 import { PlayerStateRecord } from "../../../content/q3/base/shared/player-state.ts";
 import type { Product } from "../../../content/q3/base/shared/definitions.ts";
 import { Weapon } from "../../../content/q3/base/shared/definitions.ts";
@@ -59,13 +60,13 @@ interface WeaponEffects {
   shotgun(shot: Q3ShotgunEvent, shooter: ActorId): void;
 }
 const numeric: NumericProfile = { id: "q3:effect", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32" };
-interface CapturedRef { readonly ref: RefEntity; readonly cullRadius: number; readonly hiddenFor?: ActorId; }
+interface CapturedRef { readonly entityIndex: number; readonly ref: RefEntity; readonly cullRadius: number; readonly hiddenFor?: ActorId; }
 
 export class Q3ApplicationEffects {
   private refs: CapturedRef[] = [];
-  private polys: readonly RefPoly[] = [];
+  private admission = snapshotQ3SceneAdmission("mixed", [], []);
   private lights: DynamicLight[] = [];
-  private readonly models: SceneEntity[] = [];
+  private readonly models: { readonly entityIndex: number; readonly entity: SceneEntity }[] = [];
   private readonly options = new Map<SceneEntity, ModelSourceOptions>();
   private readonly hiddenModels = new Map<SceneEntity, ActorId>();
   private readonly bloodOwners: WeakMap<RefEntity, ActorId>;
@@ -321,7 +322,7 @@ export class Q3ApplicationEffects {
           const side = qvmRotatePointAroundVector(direction, perpendicularVector(direction), event.trajectory.type === TrajectoryType.TR_STATIONARY ? 0 : Math.trunc(this.state.time / 4));
           ref.axis = [direction, side, cross3(direction, side)];
         }
-        this.refs.push({ ref, cullRadius: 0 });
+        this.refs.push({ entityIndex: this.refs.length, ref, cullRadius: 0 });
         if (weapon.missileDlight !== 0) this.lights.push({ origin: event.end, radius: weapon.missileDlight, color: weapon.missileDlightColor });
         media.loop(weapon.missileSound, event.actor, event.end, evaluateTrajectoryDelta(event.trajectory, this.state.time));
       }
@@ -330,13 +331,13 @@ export class Q3ApplicationEffects {
         const weapon = media.registry.weapon(event.weapon), ref = createModelEntity(weapon.flashModel);
         const direction = normalize3OrZero(sub3(event.end, event.origin)), side = perpendicularVector(direction);
         ref.origin = event.origin; ref.oldOrigin = event.origin; ref.axis = [direction, side, cross3(direction, side)];
-        this.refs.push({ ref, cullRadius: 0, hiddenFor: actor });
+        this.refs.push({ entityIndex: this.refs.length, ref, cullRadius: 0, hiddenFor: actor });
         if (length3(weapon.flashDlightColor) > 0) this.lights.push({ origin: event.origin, radius: 300 + (media.host.random.rand() & 31), color: weapon.flashDlightColor });
       }
       for (const [actor, { event, time }] of this.bolts) {
         if (this.state.time - time > 50) { this.bolts.delete(actor); continue; }
         const ref = createLightningEntity(); ref.origin = event.origin; ref.oldOrigin = event.end; ref.customShader = media.registry.effects.lightningShader;
-        this.refs.push({ ref, cullRadius: 0 });
+        this.refs.push({ entityIndex: this.refs.length, ref, cullRadius: 0 });
         media.loop(media.registry.weapon(event.weapon).firingSound, actor, event.origin, vec3(0, 0, 0));
       }
     }
@@ -345,11 +346,11 @@ export class Q3ApplicationEffects {
     this.system.addEntities({ time: this.state.time, frameTime: elapsedMilliseconds, viewOrigin: { x: far.x + 65536, y: far.y + 65536, z: far.z + 65536 } }, {
       addRefEntity: ref => {
         const owner = this.effects.pool.activeEntities().find(local => local.refEntity === ref), hiddenFor = this.bloodOwners.get(ref);
-        this.refs.push({ ref: copyRefEntity(ref), cullRadius: owner?.radius ?? 0, ...(hiddenFor === undefined ? {} : { hiddenFor }) });
+        this.refs.push({ entityIndex: this.refs.length, ref: copyRefEntity(ref), cullRadius: owner?.radius ?? 0, ...(hiddenFor === undefined ? {} : { hiddenFor }) });
       },
       addLight: light => { this.lights.push(light); },
     });
-    this.polys = this.marks.addMarks();
+    this.admission = snapshotQ3SceneAdmission("mixed", this.refs.map(captured => captured.ref), this.marks.addMarks());
     for (const captured of this.refs) {
       const ref = captured.ref; if (ref.kind !== "model" || ref.model.kind !== "model") continue;
       const entity: SceneEntity = { actor: null, resource: ref.model.resource, model: ref.model.model,
@@ -357,15 +358,15 @@ export class Q3ApplicationEffects {
         pose: { kind: "frame", frame: ref.frame, previousFrame: ref.oldFrame, backLerp: ref.backLerp }, skin: ref.skinNum,
         color: { x: ref.shaderRGBA.x / 255, y: ref.shaderRGBA.y / 255, z: ref.shaderRGBA.z / 255, w: ref.shaderRGBA.w / 255 },
         shaderTime: { kind: "seconds", value: ref.shaderTime }, flags: { kind: "q3", bits: ref.renderFlags }, lightingOrigin: ref.lightingOrigin, shadowPlane: ref.shadowPlane, attachments: [] };
-      this.models.push(entity); this.options.set(entity, { customShader: ref.customShader?.name ?? null });
+      this.models.push({ entityIndex: captured.entityIndex, entity }); this.options.set(entity, { customShader: ref.customShader?.name ?? null });
       if (captured.hiddenFor !== undefined) this.hiddenModels.set(entity, captured.hiddenFor);
     }
-    await this.renderer.preload(this.models, entity => this.options.get(entity) ?? {});
+    await this.renderer.preload(this.models.map(model => model.entity), entity => this.options.get(entity) ?? {});
   }
-  frame(camera: SceneCamera, viewer: ActorId | null = null): { readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
+  frame(camera: SceneCamera, viewer: ActorId | null = null): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
     const input = { camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
-    const visible = viewer === null ? this.models : this.models.filter(entity => !this.hiddenModels.get(entity)?.equals(viewer));
-    const context = this.assets.world.materialContext(input), operations: SceneOperation[] = [...this.renderer.prepare(visible, input, entity => this.options.get(entity) ?? {})];
+    const visible = viewer === null ? this.models : this.models.filter(model => !this.hiddenModels.get(model.entity)?.equals(viewer));
+    const context = this.assets.world.materialContext(input), operations: SceneOperation[] = [...this.renderer.prepare(visible.map(model => model.entity), input, entity => this.options.get(entity) ?? {})];
     for (const captured of this.refs) {
       if (viewer !== null && captured.hiddenFor?.equals(viewer)) continue;
       const ref = captured.ref;
@@ -377,13 +378,14 @@ export class Q3ApplicationEffects {
     }
     const media = this.readyWeapons;
     if (media !== null) media.view.viewAxis = camera.axis;
-    for (const poly of [...this.polys, ...media?.particles.addParticles(camera.origin) ?? []]) {
+    const admission = snapshotQ3SceneAdmission("mixed", this.admission.entities, [...this.admission.polygons, ...media?.particles.addParticles(camera.origin) ?? []]);
+    for (const poly of admission.polygons) {
       if (poly.shader === null) continue;
       const shader = this.shaders.get(poly.shader.name); if (shader === undefined) throw new Error(`Unregistered mark shader ${poly.shader.name}`);
       operations.push(compiledDrawGroup(shader, prepareMaterialBatches(shader, polyGeometry(poly), context)));
     }
-    return { operations, q3Lights: this.lights };
+    return { admission, operations, q3Lights: this.lights };
   }
   drainSounds(): readonly SourceEffectSound[] { return this.sounds.splice(0); }
-  close(): void { this.effects.pool.initialize(); this.marks.reset(); this.refs = []; this.models.length = 0; this.sounds.length = 0; this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear(); }
+  close(): void { this.effects.pool.initialize(); this.marks.reset(); this.refs = []; this.admission = snapshotQ3SceneAdmission("mixed", [], []); this.models.length = 0; this.sounds.length = 0; this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear(); }
 }

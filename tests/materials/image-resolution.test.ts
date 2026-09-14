@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../src/render/scene/material-registrations.ts";
 import { sceneModelBatches } from "../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -19,6 +20,74 @@ function loader(files: ReadonlyMap<string, SceneAsset>, originals: ReadonlyMap<s
     read: async path => files.get(path) ?? null, readOriginal: async path => originals.get(path) ?? null,
   });
 }
+
+test("scene shader registration follows admission across providers and deferred image completion", async () => {
+  const registrations = new SceneMaterialRegistrations(), deferred = Promise.withResolvers<SceneAsset | null>();
+  const images = new SceneImageRegistry({ identity: Symbol("registration"), session: createIdentityOwner("registration").session, generation: 0 });
+  const firstTextures = new SceneTextureLoader(images, { read: () => deferred.promise });
+  const secondTextures = new SceneTextureLoader(images, { read: async () => null });
+  const first = new SceneShaderRegistry(firstTextures, registrations.provider("q3:classic:retail:first"));
+  const second = new SceneShaderRegistry(secondTextures, registrations.provider("q3:classic:retail:second"));
+  try {
+    first.addScript("registration/same { sort 3 { map delayed.bmp } }\nregistration/early { sort 1 { map $whiteimage } }");
+    second.addScript("registration/same { sort 3 { map $whiteimage } }");
+    const pending = first.register("registration/same");
+    expect(first.register("REGISTRATION/SAME.tga")).toBe(pending);
+    const completedSecond = await second.register("registration/same");
+    expect(registrations.snapshot()).toEqual([completedSecond]);
+    deferred.resolve(asset(bmp(2, 2), "delayed.bmp"));
+    const completedFirst = await pending;
+    expect(completedFirst.registration).not.toBe(completedSecond.registration);
+    expect(await first.register("registration/same")).toBe(completedFirst);
+    const earlier = registrations.snapshot();
+    expect(earlier).toEqual([completedFirst, completedSecond]);
+    const low = await first.register("registration/early");
+    expect(registrations.snapshot()).toEqual([low, completedFirst, completedSecond]);
+    expect(earlier).toEqual([completedFirst, completedSecond]);
+  } finally { firstTextures.close(); secondTextures.close(); images.close(); }
+});
+
+test("scene shader registration keeps retained pictures isolated until replacement commit and discards failed stages", async () => {
+  const registrations = new SceneMaterialRegistrations();
+  const images = new SceneImageRegistry({ identity: Symbol("retained-registration"), session: createIdentityOwner("retained-registration").session, generation: 0 });
+  const textures = new SceneTextureLoader(images, { read: async name => asset(bmp(2, 2), name) });
+  const replacementTextures = new SceneTextureLoader(images, { read: async name => asset(bmp(4, 4), name) });
+  const failedTextures = new SceneTextureLoader(images, { read: async () => { throw new Error("replacement image failed"); } });
+  const shaders = new SceneShaderRegistry(textures, registrations.provider("q3:classic:retail:retained"));
+  try {
+    shaders.addScript("registration/picture { sort 3 { map registration/picture.bmp } }");
+    const picture = await shaders.registerPicture("registration/picture"), original = await shaders.register("registration/picture", { kind: "unlit", lightmapIndex: -4, mipmap: false });
+    expect(picture.material.compiled).toBe(original);
+    const content = original.registered, before = registrations.snapshot();
+    const failed = shaders.replacement(failedTextures);
+    await expect(shaders.prepareReplacement(failed)).rejects.toThrow("replacement image failed");
+    failed.discardReplacement();
+    expect(original.registered).toBe(content); expect(registrations.snapshot()).toEqual(before);
+    const discarded = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(discarded);
+    const discardedNew = await discarded.register("registration/discarded.bmp");
+    discarded.discardReplacement();
+    expect(original.registered).toBe(content); expect(registrations.snapshot()).toEqual(before);
+    const replacement = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(replacement);
+    const stagedPicture = await replacement.register("registration/picture", { kind: "unlit", lightmapIndex: -4, mipmap: false });
+    expect(stagedPicture.registration).toBe(original.registration);
+    expect(stagedPicture.registered).not.toBe(content);
+    const stagedNew = await replacement.register("registration/staged.bmp");
+    const live = await shaders.register("registration/live.bmp");
+    expect(registrations.snapshot()).toEqual([original, live]);
+    shaders.commitReplacement(replacement);
+    expect(original.registered).not.toBe(content);
+    expect((await shaders.registerPicture("registration/picture")).material.compiled).toBe(original);
+    expect((await shaders.registerPicture("registration/picture")).material.order).toBe(picture.material.order);
+    const publishedNew = await shaders.register("registration/staged.bmp");
+    expect(publishedNew.registration).toBe(stagedNew.registration);
+    expect(registrations.snapshot()).toEqual([original, live, publishedNew]);
+    const later = await shaders.register("registration/discarded.bmp");
+    expect(later.registration).not.toBe(discardedNew.registration);
+    expect(registrations.snapshot()).toEqual([original, live, publishedNew, later]);
+  } finally { textures.close(); replacementTextures.close(); failedTextures.close(); images.close(); }
+});
 
 test("Q2 explicit, extensionless and absent native requests discover JPEG and BMP", async () => {
   const pixels = new Uint8Array(8 * 8 * 4).fill(192);
@@ -141,7 +210,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
     if (colors === null) throw new Error("Missing native palette");
     const palette = { colors, source: reference("pics/colormap.pcx", paletteBytes) };
     const worldTextures = new SceneTextureLoader(images, { read }, palette); loaders.push(worldTextures);
-    const shaders = new SceneShaderRegistry(worldTextures), world = await WorldScene.load(decodeQ2Map(await required("maps/base1.bsp")), shaders);
+    const shaders = new SceneShaderRegistry(worldTextures, new SceneMaterialRegistrations().provider("q3:classic:retail:test")), world = await WorldScene.load(decodeQ2Map(await required("maps/base1.bsp")), shaders);
     const path = "models/monsters/soldier/tris.md2", modelBytes = await required(path), model = parseMd2(modelBytes), skinBytes = await required(model.skins[0] ?? "missing-native-skin");
     const axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] satisfies SceneCamera["axis"], origin = { x: 128, y: -320, z: 24 };
     const camera: SceneCamera = { origin: { ...origin, x: origin.x - 110, z: origin.z + 6 }, axis, projection: perspectiveProjection(65, 50, 4096), viewport: { x: 0, y: 0, width: 320, height: 240 }, clip: { kind: "none" } };

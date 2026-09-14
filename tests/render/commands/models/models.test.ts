@@ -1,3 +1,4 @@
+import { SceneMaterialRegistrations } from "../../../../src/render/scene/material-registrations.ts";
 import { sceneModelBatches, finishSceneOperations } from "../../../../src/render/scene/submissions.ts";
 import { resolve } from "node:path";
 import { weaponViewCamera } from "../../../../src/app/bootstrap/weapon-view.ts";
@@ -133,7 +134,7 @@ test("Q3 particle pool submits registered animation geometry and retires expired
 test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lighting", async () => {
   const q2 = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
   const q3 = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
-  const identity = createIdentityOwner("model-render-cache");
+  const identity = createIdentityOwner("model-render-cache"), registrations = new SceneMaterialRegistrations();
   const images = new SceneImageRegistry({ identity: Symbol("models"), session: identity.session, generation: 0 });
   let world: WorldScene | null = null;
   try {
@@ -145,8 +146,8 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
       const entry = archive.findEntries(name)[0];
       return entry === undefined ? null : { bytes: await archive.readEntry(entry), source: { kind: "generated", name } satisfies Parameters<SceneImageRegistry["register"]>[3] };
     } });
-    const textures2 = new SceneTextureLoader(images, reader(q2), palette), shaders2 = new SceneShaderRegistry(textures2);
-    const textures3 = new SceneTextureLoader(images, reader(q3)), shaders3 = new SceneShaderRegistry(textures3);
+    const textures2 = new SceneTextureLoader(images, reader(q2), palette), shaders2 = new SceneShaderRegistry(textures2, registrations.provider("q2:classic:retail:test"));
+    const textures3 = new SceneTextureLoader(images, reader(q3)), shaders3 = new SceneShaderRegistry(textures3, registrations.provider("q3:classic:retail:test"));
     const mapAsset = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "maps/base1.bsp", "q2");
     const map = decodeQ2Map(mapAsset.bytes);
     world = await WorldScene.load(map, shaders2);
@@ -199,7 +200,7 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     const q1Palette = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "gfx/palette.lmp", "q1");
     const palette1 = { colors: q1Palette.bytes, source: q1Palette.resource };
     const textures1 = new SceneTextureLoader(images, { read: async () => null }, palette1);
-    const cache1 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, world);
+    const cache1 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1, registrations.provider("q1:classic:retail:test")), palette: palette1 }, world);
     const q1Entity = entity(parseMdl(q1Asset.bytes), q1Asset.resource, "q1"), gunOrigin = { x: -392, y: 840, z: -69.96875 };
     const gun = { ...q1Entity, transform: { ...q1Entity.transform, origin: gunOrigin }, previousOrigin: gunOrigin, lightingOrigin: gunOrigin };
     const gunInput = { ...input, camera: { ...view, origin: gunOrigin } };
@@ -226,7 +227,7 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     expect(once[0]?.vertices.map(value => value.color)).toEqual(dynamicBatches[0]?.vertices.map(value => value.color));
     const modulatedWorld = await WorldScene.load(map, shaders2, { q2LightModulate: 2, q2SkyName: "unit1_" });
     try {
-      const modulated = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, modulatedWorld);
+      const modulated = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1, registrations.provider("q1:classic:retail:test")), palette: palette1 }, modulatedWorld);
       await modulated.preload([gun], () => ({ viewModel: true }));
       const worldBatches = modulatedWorld.prepareView(dynamicInput).view.operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
       const fragment = worldBatches.find(batch => batch.lighting.kind === "q2-world")?.lighting;
@@ -244,7 +245,7 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     const q3Map = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "maps/q3dm1.bsp", "q3");
     const world3 = await WorldScene.load(decodeQ3World(q3Map.bytes), shaders3);
     try {
-      const cache13 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1), palette: palette1 }, world3);
+      const cache13 = new SceneModelRenderer({ family: "q1", textures: textures1, shaders: new SceneShaderRegistry(textures1, registrations.provider("q1:classic:retail:test")), palette: palette1 }, world3);
       const origin3 = { x: 212, y: 2360, z: 82.125 };
       const gun3 = { ...gun, transform: { ...gun.transform, origin: origin3 }, previousOrigin: origin3, lightingOrigin: origin3 };
       const input3 = { ...input, camera: { ...view, origin: origin3 } };

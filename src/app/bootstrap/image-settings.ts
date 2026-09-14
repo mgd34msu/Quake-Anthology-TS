@@ -174,13 +174,14 @@ export class ApplicationImageSettings {
         for (const presentation of presentations) bindings.push(await presentation.prepareImageRefresh(images));
         sky = await rerelease?.prepareImageRefresh(images);
       } else assets.setModelPolicy(modelPolicy);
+      images?.commit();
     } catch (error) {
       for (const binding of bindings) binding.discard(); images?.discard();
       for (const value of this.appliedValues) this.cvars.set(value.name, value.value, true);
       this.options.print(`Image settings rejected: ${error instanceof Error ? error.message : String(error)}\n`);
       return;
     }
-    images?.commit(); for (const binding of bindings) binding.commit(); sky?.();
+    for (const binding of bindings) binding.commit(); sky?.();
     assets.finishImageRefresh();
     this.applied = selected;
     this.appliedValues = this.archivedValues();
