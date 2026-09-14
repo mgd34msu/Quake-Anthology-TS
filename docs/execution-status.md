@@ -61,7 +61,9 @@ Accepted source `2662c66e64142c4d7a40c201d2cf17c877f55214` retains resolved unif
 
 Accepted source `9683d9dc9a153f00515c27f6e370521f61527a7a` caches immutable local MD5 UVs, positions, and normals within the same view; shell extrusion remains separate. Root passed all 11 model tests with 1,087 assertions, including retail resources, cached-versus-uncached results, four interpolation values, shell isolation, bounds, and attachments. Retained-shadow tests also passed; opt-in CPU/GL checks were skipped. No FPS gain is claimed. This source change is included in the installed executable.
 
-Accepted source `58a3448bbac8c35842d6be5a97881517ebcb8439` reuses model-lighting yaw rows and directions once per entity, retaining the numeric expressions and the required rerelease TypeScript donor behavior. Root passed the retained test with 34 assertions; retained family-lighting checks and actual CPU/GL model captures also passed. No timing gain is claimed. This newest unit is outside the installed `9683d9d` executable. Identification of the observed ceiling effects remains open; they are not classified as either an artifact or expected behavior.
+Accepted source `58a3448bbac8c35842d6be5a97881517ebcb8439` reuses model-lighting yaw rows and directions once per entity, retaining the numeric expressions and the required rerelease TypeScript donor behavior. Root passed the retained test with 34 assertions; retained family-lighting checks and actual CPU/GL model captures also passed. No timing gain is claimed. This newest unit is outside the installed `9683d9d` executable. The ceiling-object identification is resolved below.
+
+The frozen `9683d9d` ceiling probe identifies the tan detail as static world-model-0 faces 6047, 6270, and 6044 using `e1u1/broken2_3`. The globes match authored `target_explosion` positions with model scale 1; recorded models and events do not support Scrag or machinegun-fire causation. This establishes object provenance, not donor pixel parity for lighting or animation. Evidence: `.artifacts/resume-20260913/classic-ceiling-effects/report.md`.
 
 ## Historical execution records
 
