@@ -75,6 +75,8 @@ Accepted source `18bedc4bb83621676cef289494c588c5d488c7f9` shares remote content
 
 Accepted source `729b1dde51a0fcebdb5a269f91e042b24dda1fd7` binds cgame entity-token and PVS queries to the existing loaded Q3 world owner. Root passed five tests with 3,196 assertions after reviewing the donor token, leaf, and visibility behavior. The known-baseq3 admission gate is unchanged; this does not qualify broader QVM or mod compatibility. These bindings are not in the installed `18bedc4` executable.
 
+Accepted `077c73452384605231cc2391c0ed59afa0656801` shares browser polling while preserving borrowed application ownership; root passed two hidden-window, dummy-audio, real-UDP checks with eight assertions. Accepted `e76943bada4997cbf12821fc5e7aa3e044727f30` tracks discovery requests independently; root passed 11 focused tests with 80 assertions and retained browser sort/persistence checks. These changes are not in the installed `18bedc4` executable. Existing admission gates remain unchanged; this does not qualify the full Q3 browser, native vanilla peers, or general mods.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
