@@ -71,6 +71,8 @@ Accepted `820173d068c92dfb9e735a39d43d0df82029b6f4` retains server-selected ASCI
 
 Accepted source `33026a68ebf6cec4b7fb40e41ee78d7d0d1706a5` submits shadow-atlas geometry through indexed GL draws. Actual color and full 2048² shadow-atlas bytes matched; 72,573 immediate vertex calls and 6,516 begin/end pairs became four indexed draws with 72,573 indices. Root passed the focused native test with 17 assertions; broader native checks passed 11 tests with 303 assertions. Paired mean frame time fell from 58.993 to 56.813 ms, but median and p95 worsened, so no general speed or FPS gain is claimed. This source change is outside the installed `46d1468` executable.
 
+Accepted source `18bedc4bb83621676cef289494c588c5d488c7f9` shares remote content selection and a mounted owner before world creation across QW, Q2, and Q3. Stock metadata, base lookup chains, case-preserved roots, independent active-world ownership, same-map refresh, and cancellation are retained. Root passed actual QW mod admission, Q2 UDP directory transitions, Q3 non-base package admission through real QVM and authentic pure checks, and catalog/base cases: five tests with 103 assertions. Q2 retains one HTTP queue and baseq2 player assets; Q3 uses selected/base physical prefixes and preworld packages. This does not expand arbitrary-mod QVM or wire ABI support; the Q3 proof used known baseq3 modules and game types 0–4. Configurations remain owned by the launch base. The unit is not in the installed `46d1468` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
