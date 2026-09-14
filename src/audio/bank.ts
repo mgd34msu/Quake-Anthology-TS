@@ -1,4 +1,4 @@
-import type { ResourceId } from "../contracts/content.ts";
+import type { ContentId, ResourceId } from "../contracts/content.ts";
 import type { MountedContent } from "../content/mounts/index.ts";
 import type { SoundAsset, SoundFamily } from "./types.ts";
 import { decodeSoundBytes, openPcmBytes } from "./streams.ts";
@@ -35,9 +35,10 @@ export class SoundBank {
     endRegistration(): void { for (const key of this.assets.keys())
         if (!this.touched.has(key))
             this.assets.delete(key); }
-    async openMusic(path: string): Promise<PcmStream | null> {
+    async openMusic(path: string, source: ContentId | null = null): Promise<PcmStream | null> {
         const opened = await this.content.open(path);
-        return opened === null ? null : openPcmBytes(opened.bytes, path);
+        return opened === null || (source !== null && opened.reference.provenance.mount.identity.content !== source)
+            ? null : openPcmBytes(opened.bytes, path);
     }
     clear(): void { this.assets.clear(); this.touched.clear(); }
 }

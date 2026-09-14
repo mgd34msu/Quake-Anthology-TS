@@ -1,14 +1,18 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createContentDigest, createMountIdentity, createMountPlanId } from "../../../src/contracts/content.ts";
 import type { ArchiveMount, ContentMount, ResolvedMountPlan, ResolvedResourceReference } from "../../../src/contracts/content.ts";
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
-import { discoverInstalledContent, remoteContentSelection, remoteContentProduct } from "../../../src/content/catalog/index.ts";
+import { discoverInstalledContent, expectedProducts, remoteContentSelection, remoteContentProduct } from "../../../src/content/catalog/index.ts";
 import { canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
+import { SoundBank } from "../../../src/audio/bank.ts";
+import { UnifiedAudio } from "../../../src/audio/engine.ts";
+import type { PcmStream } from "../../../src/audio/streams.ts";
+import { ApplicationMusic, q1MusicFallback } from "../../../src/app/bootstrap/audio/music.ts";
 
 function pak(path: string, text: string): Uint8Array {
   const bytes = new Uint8Array(12 + text.length + 64);
@@ -53,6 +57,104 @@ test("reads selected archive, preserves pure order, and detects replacement loos
 });
 
 const corpusRoot = resolve(import.meta.dir, "../../../../qfiles");
+
+function musicWav(sample: number): Uint8Array {
+  const bytes = new Uint8Array(48), view = new DataView(bytes.buffer);
+  bytes.set(new TextEncoder().encode("RIFF")); view.setUint32(4, 40, true);
+  bytes.set(new TextEncoder().encode("WAVEfmt "), 8); view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 22050, true);
+  view.setUint32(28, 44100, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  bytes.set(new TextEncoder().encode("data"), 36); view.setUint32(40, 4, true);
+  view.setInt16(44, sample, true); view.setInt16(46, sample, true);
+  return bytes;
+}
+
+for (const campaign of ["id1", "hipnotic", "rogue"]) {
+  test(`Q1 music fallback preserves ${campaign} bank precedence and campaign identity`, async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "q1-music-fallback-"));
+    const products = expectedProducts.filter(product => product.family === "q1" && ["classic", "rerelease"].includes(product.edition)
+      && ["id1", "hipnotic", "rogue"].includes(product.campaign)).map(product => ({ ...product, requiredContentArchives: [], requiredPrograms: [] }));
+    const classic = `q1/${campaign}`, alternateDirectory = `q1/rerelease/${campaign}`;
+    try {
+      for (const product of products) await mkdir(resolve(root, product.contentDirectory, "music"), { recursive: true });
+      await writeFile(resolve(root, classic, "music/track06.wav"), musicWav(1000));
+      await writeFile(resolve(root, alternateDirectory, "music/06.wav"), musicWav(2000));
+      await writeFile(resolve(root, alternateDirectory, "music/track07.wav"), musicWav(3000));
+      await writeFile(resolve(root, "q1/rerelease/id1/music/track08.wav"), musicWav(4000));
+      const catalog = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: false });
+      const selected = catalog.product(`q1-classic-${campaign}`).id, alternate = q1MusicFallback(selected, catalog);
+      if (alternate === null) throw new Error("Missing official music pair");
+      expect(alternate).toBe(catalog.product(`q1-rerelease-${campaign}`).id);
+      expect(q1MusicFallback(alternate, catalog)).toBe(selected);
+      const primaryMounts = await catalog.mountsFor(selected), fallbackMounts = await catalog.mountsFor(alternate);
+      using primary = await openMountPlan({ id: createMountPlanId("music", "selected"), mounts: primaryMounts, defaultOrder: primaryMounts.map(mount => mount.identity.id), prefixOrders: [] });
+      using fallback = await openMountPlan({ id: createMountPlanId("music", "fallback"), mounts: fallbackMounts, defaultOrder: fallbackMounts.map(mount => mount.identity.id), prefixOrders: [] });
+      const bank = new SoundBank(primary), fallbackBank = new SoundBank(fallback), attempts: string[] = [], printed: string[] = [];
+      using engine = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 0, random: () => 0 });
+      const music = new ApplicationMusic(engine, text => { printed.push(text); return undefined; });
+      const open = async (path: string) => { attempts.push(path); return fallbackBank.openMusic(path, alternate); };
+      try {
+        music.volume = 1;
+        await music.play(selected, "q1", campaign, bank, "6", open);
+        expect(attempts).toEqual([]);
+        expect(engine.mix(1)[0]).toBe(1000);
+        await music.play(selected, "q1", campaign, bank, "7", open);
+        expect(attempts).toEqual(["music/07.ogg", "music/track07.ogg", "music/07.wav", "music/track07.wav"]);
+        expect(engine.mix(1)[0]).toBe(3000);
+        expect(printed).toEqual([]);
+        await music.play(selected, "q1", campaign, bank, "8", open);
+        if (campaign === "id1") expect(engine.mix(1)[0]).toBe(4000);
+        else {
+          expect(engine.mix(1)[0]).toBe(0);
+          expect(printed).toEqual([`Music unavailable: ${selected}/8\n`]);
+        }
+      } finally { music.stop(); }
+      await rm(resolve(root, alternateDirectory), { recursive: true });
+      const missing = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: false });
+      expect(q1MusicFallback(selected, missing)).toBeNull();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}
+
+test.skipIf(!existsSync(corpusRoot))("Q1 music fallback resolves real classic track 6 to rerelease bytes and one PCM chunk", async () => {
+  const cpu = process.cpuUsage(), started = performance.now();
+  const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
+  const selected = catalog.product("q1-classic-id1").id, alternate = q1MusicFallback(selected, catalog);
+  if (alternate === null) throw new Error("No installed alternate official Q1 soundtrack");
+  expect(alternate).toBe(catalog.product("q1-rerelease-id1").id);
+  for (const id of ["q1-quakeworld", "q1-rerelease-dopa", "q2-classic-lmctf", "q2-classic-baseq2", "q3-baseq3"]) {
+    expect(q1MusicFallback(catalog.product(id).id, catalog)).toBeNull();
+  }
+  const primaryMounts = await catalog.mountsFor(selected), fallbackMounts = await catalog.mountsFor(alternate);
+  using primary = await openMountPlan({ id: createMountPlanId("music", "real-selected"), mounts: primaryMounts, defaultOrder: primaryMounts.map(mount => mount.identity.id), prefixOrders: [] });
+  using fallback = await openMountPlan({ id: createMountPlanId("music", "real-fallback"), mounts: fallbackMounts, defaultOrder: fallbackMounts.map(mount => mount.identity.id), prefixOrders: [] });
+  const bytes = await fallback.open("music/track06.ogg");
+  if (bytes === null) throw new Error("Missing real alternate track bytes");
+  expect(bytes.reference.provenance.mount.identity.content).toBe(alternate);
+  expect(bytes.reference.provenance.kind).toBe("loose");
+  expect(bytes.bytes.byteLength).toBe(10764607);
+  expect(bytes.reference.digest).toBe(digestBytes(await readFile(resolve(corpusRoot, "q1/rerelease/id1/music/track06.ogg"))));
+  const bank = new SoundBank(primary), fallbackBank = new SoundBank(fallback), streams: PcmStream[] = [], printed: string[] = [];
+  using engine = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 0, random: () => 0 });
+  const music = new ApplicationMusic(engine, text => { printed.push(text); return undefined; });
+  try {
+    await music.play(selected, "q1", "id1", bank, "6");
+    expect(printed).toEqual([`Music unavailable: ${selected}/6\n`]);
+    printed.length = 0;
+    await music.play(selected, "q1", "id1", bank, "6", async path => {
+      const stream = await fallbackBank.openMusic(path, alternate);
+      if (stream !== null) streams.push(stream);
+      return stream;
+    });
+    expect(printed).toEqual([]); expect(streams.length).toBe(1);
+    const stream = streams[0];
+    if (stream === undefined) throw new Error("Fallback did not open the real track");
+    expect(stream.sampleRate).toBeGreaterThan(0); expect(stream.frameCount).toBeGreaterThan(65536);
+    const pcm = stream.read(65536);
+    expect(pcm?.samples.some(sample => sample !== 0)).toBe(true);
+    console.info(`Q1 music fallback resource=${bytes.reference.id} bytes=${bytes.bytes.byteLength} rate=${stream.sampleRate} channels=${stream.channels} chunkFrames=${pcm?.frameCount} wallMs=${Math.round(performance.now() - started)} cpuUs=${JSON.stringify(process.cpuUsage(cpu))}`);
+  } finally { music.stop(); }
+});
 test.skipIf(!existsSync(corpusRoot))("rerelease rules read rerelease assets while classic map geometry wins", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot });
   const classic = catalog.product("q2-classic-baseq2").id;

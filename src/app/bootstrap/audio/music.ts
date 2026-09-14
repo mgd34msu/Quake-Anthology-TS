@@ -2,6 +2,18 @@ import { CdMusic, MusicPlayer, remapQ2MusicTrack } from "../../../audio/index.ts
 import type { SoundBank, UnifiedAudio } from "../../../audio/index.ts";
 import type { PcmStream } from "../../../audio/streams.ts";
 import type { ContentId, GameFamily } from "../../../contracts/content.ts";
+import type { InstalledCatalog } from "../../../content/catalog/index.ts";
+import type { OpenMusicTrack } from "../../../audio/music.ts";
+
+/** Only the official original campaigns share numbered soundtracks across Q1 editions. */
+export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
+  const pairs = [["q1-classic-id1", "q1-rerelease-id1"], ["q1-classic-hipnotic", "q1-rerelease-hipnotic"], ["q1-classic-rogue", "q1-rerelease-rogue"]];
+  const selected = catalog.product(content);
+  const pair = pairs.find(ids => ids.includes(selected.expectation.id));
+  const alternate = pair?.find(id => id !== selected.expectation.id);
+  const product = catalog.products.find(candidate => candidate.expectation.id === alternate && candidate.availability.kind === "installed");
+  return product?.id ?? null;
+}
 
 /** One world soundtrack owns the shared engine's intro/loop stream. */
 export class ApplicationMusic {
@@ -28,7 +40,7 @@ export class ApplicationMusic {
     this.current = null;
   }
 
-  async play(content: ContentId, family: GameFamily, campaign: string, bank: SoundBank, track: string): Promise<void> {
+  async play(content: ContentId, family: GameFamily, campaign: string, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null): Promise<void> {
     const selected = track.trim();
     if (selected === "" || selected === "0") { this.stop(); return; }
     if (this.current?.content === content && this.current.track === selected && this.current.player.playing) return;
@@ -36,13 +48,18 @@ export class ApplicationMusic {
     const request = this.request;
     const player = new MusicPlayer(this.engine.sampleRate, family);
     player.setVolume(this.gain);
-    const cd = new CdMusic(player, path => bank.openMusic(path));
+    let openMusic: OpenMusicTrack = path => bank.openMusic(path);
+    const cd = new CdMusic(player, path => openMusic(path));
     this.current = { content, player, cd, track: selected };
     this.engine.attachMusic({ id: "world", audience: { kind: "world" }, gain: 1 }, player);
     if (/^[0-9]+$/.test(selected) && family !== "q3") {
       const number = Number(selected);
       const mapped = family === "q2" ? remapQ2MusicTrack(number, campaign) : number;
-      const played = await cd.play(mapped, true);
+      let played = await cd.play(mapped, true);
+      if (!played && family === "q1" && fallback !== null && request === this.request) {
+        openMusic = fallback;
+        played = await cd.play(mapped, true);
+      }
       if (request !== this.request) return;
       if (!played) this.print(`Music unavailable: ${content}/${selected}\n`);
       player.paused = this.paused;
@@ -54,9 +71,12 @@ export class ApplicationMusic {
       const normalized = name.replaceAll("\\", "/");
       const path = normalized.startsWith("music/") ? normalized : `music/${normalized}`;
       const candidates = /\.(?:wav|ogg)$/i.test(path) ? [path] : family === "q3" ? [`${path}.wav`, `${path}.ogg`] : [`${path}.ogg`, `${path}.wav`];
-      for (const candidate of candidates) {
-        const stream = await bank.openMusic(candidate);
-        if (stream !== null) return stream;
+      for (const openTrack of [openMusic, family === "q1" ? fallback : null]) {
+        if (openTrack === null) continue;
+        for (const candidate of candidates) {
+          const stream = await openTrack(candidate);
+          if (stream !== null) return stream;
+        }
       }
       return null;
     };
