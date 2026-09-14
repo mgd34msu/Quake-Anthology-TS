@@ -15,6 +15,7 @@ import type { Q3SeatAudioOperation } from '../audio/q3.ts';
 import type { ApplicationQ3Assets } from './assets.ts';
 import { ApplicationQ3Cinematics } from './cinematics.ts';
 import { q3ClientCollision } from './collision.ts';
+import { SharedSceneQueries } from '../../../world/collision/index.ts';
 
 export interface ApplicationQ3ServiceOptions {
   readonly media: ApplicationQ3Assets;
@@ -37,7 +38,10 @@ export async function createApplicationQ3Services(options: ApplicationQ3ServiceO
   const { media, seat, output } = options;
   const scene = new Q3SceneRecorder({ seat, viewport: options.viewport, farClip: 16384, nearClip: 4, rail: DEFAULT_RAIL_SETTINGS,
     actor: () => null, publish: value => output.scene(value) });
-  const resources = new Q3RendererResources(await media.resourceHost(scene));
+  const map = media.assets.content.world;
+  const clip = options.queries instanceof SharedSceneQueries ? options.queries.nativeQ3ClipModels() : null;
+  const resources = new Q3RendererResources(await media.resourceHost(scene), map.kind === 'q3-bsp' && clip !== null
+    ? { map, clusterPVS: cluster => clip.world.clusterPVS(cluster) } : undefined);
   const target = new Q3PresentationAudio({ seat, sounds: media.bank, actor: number => options.actorAt(number), frameNumber: options.clock.frameNumber,
     play: sound => output.audio({ kind: 'play', sound }), loop: sound => output.audio({ kind: 'loop', sound }),
     updateActor: (actor, origin) => output.audio({ kind: 'position', actor, origin }), stopLoop: (_seat, actor) => output.audio({ kind: 'stop-loop', actor }) });

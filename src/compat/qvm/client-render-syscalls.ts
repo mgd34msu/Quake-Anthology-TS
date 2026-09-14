@@ -108,6 +108,10 @@ export function qvmClientRenderSyscall(call: QvmHostCall, resources: Q3RendererR
   if (resource !== null) return resource;
   const trap = call.code, ui = role === "ui";
   if (!ui && trap === 36) return resources.loadWorld(guest.readString(words.getInt32(4, true))).then(() => 0);
+  if (!ui && trap === 86) return Number(resources.getEntityToken(token => guest.writeString(words.getInt32(4, true), token, words.getInt32(8, true))));
+  if (!ui && trap === 88) return Number(resources.inPVS(
+    () => { const point = guest.view(words.getInt32(4, true), 12); return { x: point.getFloat32(0, true), y: point.getFloat32(4, true), z: point.getFloat32(8, true) }; },
+    () => { const point = guest.view(words.getInt32(8, true), 12); return { x: point.getFloat32(0, true), y: point.getFloat32(4, true), z: point.getFloat32(8, true) }; }));
   if (trap === (ui ? 21 : 40)) { resources.clearScene(); return 0; }
   if (trap === (ui ? 22 : 41)) {
     const source = readQvmRefEntity(guest.view(words.getInt32(4, true), QVM_REF_ENTITY_BYTES));

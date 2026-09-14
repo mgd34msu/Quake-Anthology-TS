@@ -14,8 +14,14 @@ import type { MaterialPicture, MaterialTextDraw } from "../../../src/text/draw2d
 import { DEFAULT_RAIL_SETTINGS } from "../../../src/render/scene/particles/primitives.ts";
 import { compileShaderScript } from "../../../src/materials/compile.ts";
 import type { RegisteredImage } from "../../../src/materials/material.ts";
+import type { Q3ResourceWorld } from "../../../src/content/q3/presentation/resources.ts";
+import { openArchive } from "../../../src/content/archive/index.ts";
+import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
+import { createSceneQueries } from "../../../src/world/collision/index.ts";
+import { CommonParseCursor, CommonParseState } from "../../../src/core/common-parse.ts";
+import { resolve } from "node:path";
 
-async function fixture() {
+async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = async () => {}) {
   const identity = createIdentityOwner("qvm-render"), seat = identity.seat(1), scenes: Q3PresentedScene[] = [], pictures: MaterialTextDraw[] = [];
   const target = { x: 0, y: 0, width: 640, height: 480 };
   const scene = new Q3SceneRecorder({ seat, viewport: target, nearClip: 4, farClip: 4096, rail: DEFAULT_RAIL_SETTINGS,
@@ -28,7 +34,7 @@ async function fixture() {
   const picture: MaterialPicture = { kind: "material", name: "vm/picture", material: { order: 17, compiled } };
   const skin = { path: "vm/skin", surfaces: [{ name: "body", shader: "vm/picture" }] };
   const resources = new Q3RendererResources({ scene, zeroPicture: picture, model: async () => DEFAULT_MODEL, skin: async () => skin,
-    shader: async () => picture, world: async () => ({ map: { models: [] } }), remapShader: async () => {} });
+    shader: async () => picture, world: async () => { await load(); return { map: { models: [] } }; }, remapShader: async () => {} }, world);
   const draw = new Draw2D(new TextCommandSink(seat, target, () => {}, value => { pictures.push(value); }), "pixels");
   const guest = new QvmMemory(new Uint8Array(4096));
   const call = (code: QvmCgameImport, args: readonly number[] = []): QvmHostCall => {
@@ -62,6 +68,87 @@ test("guest handles register the same resource objects and submit through the sh
   qvmClientRenderSyscall(pictureCall, f.resources, f.draw);
   expect(f.pictures[0]?.picture).toBe(f.picture);
   expect(() => f.resources.skinForHandle(9)).toThrow("Invalid cgame skin handle");
+});
+
+test("QVM world traps iterate retail entity bytes and query the loaded collision PVS", async () => {
+  const archive = await openArchive(resolve(import.meta.dir, "../../../../qfiles/q3a/baseq3/pak0.pk3"));
+  try {
+    const entry = archive.findEntries("maps/q3dm1.bsp")[0];
+    if (entry === undefined) throw new Error("Missing retail map");
+    const map = decodeQ3World(await archive.readEntry(entry)), queries = createSceneQueries(map), clip = queries.nativeQ3ClipModels();
+    if (clip === null) throw new Error("Missing loaded Q3 collision owner");
+    const f = await fixture({ map, clusterPVS: cluster => clip.world.clusterPVS(cluster) });
+    const token = () => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_GET_ENTITY_TOKEN, [512, 1024]), f.resources, f.draw);
+    expect(token()).toBe(0);
+    expect(() => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_INPVS, [4094, 4094]), f.resources, f.draw)).toThrow("bad model");
+    await f.resources.loadWorld("maps/q3dm1.bsp");
+    const cursor = new CommonParseCursor(map.entities), parser = new CommonParseState();
+    let count = 0;
+    for (;;) {
+      const expected = parser.parse(cursor), result = token();
+      expect(f.guest.readString(512)).toBe(expected);
+      if (cursor.offset === null || expected.length === 0) { expect(result).toBe(0); break; }
+      expect(result).toBe(1); count++;
+    }
+    expect(count).toBeGreaterThan(100);
+    expect(token()).toBe(1); expect(f.guest.readString(512)).toBe("{");
+    const points = map.leaves.filter(leaf => leaf.cluster >= 0).slice(0, 200).map(leaf => ({
+      x: (leaf.bounds.min.x + leaf.bounds.max.x) / 2, y: (leaf.bounds.min.y + leaf.bounds.max.y) / 2, z: (leaf.bounds.min.z + leaf.bounds.max.z) / 2,
+    }));
+    let positive = false, negative = false;
+    let visiblePoint: (typeof points)[number] | undefined;
+    for (const first of points) {
+      for (const second of points) {
+        const from = clip.world.leafCluster(clip.world.pointLeafnum(first)), to = clip.world.leafCluster(clip.world.pointLeafnum(second));
+        if (from < 0 || to < 0) continue;
+        const expected = (clip.world.clusterPVS(from).byteAt(to >> 3) & (1 << (to & 7))) !== 0;
+        if (expected ? positive : negative) continue;
+        for (const [pointer, point] of [[2048, first], [2060, second]] satisfies readonly (readonly [number, typeof first])[]) {
+          const record = f.guest.view(pointer, 12);
+          record.setFloat32(0, point.x, true); record.setFloat32(4, point.y, true); record.setFloat32(8, point.z, true);
+        }
+        expect(qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_INPVS, [2048, 2060]), f.resources, f.draw)).toBe(Number(expected));
+        if (expected) { positive = true; visiblePoint = first; } else negative = true;
+        if (positive && negative) break;
+      }
+      if (positive && negative) break;
+    }
+    expect(positive).toBe(true); expect(negative).toBe(true);
+    const noVisQueries = createSceneQueries({ ...map, visibility: null }), noVisClip = noVisQueries.nativeQ3ClipModels();
+    if (noVisClip === null) throw new Error("Missing no-vis collision owner");
+    const noVis = await fixture({ map, clusterPVS: cluster => noVisClip.world.clusterPVS(cluster) });
+    await noVis.resources.loadWorld("maps/q3dm1.bsp");
+    const point = visiblePoint; if (point === undefined) throw new Error("Missing visible retail leaf point");
+    expect(noVis.resources.inPVS(() => point, () => point)).toBe(true);
+    expect(() => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_INPVS, [4094, 512]), f.resources, f.draw)).toThrow();
+  } finally { archive.close(); }
+});
+
+test("world token and PVS traps retain source exhaustion, plane-side and lazy pointer semantics", async () => {
+  const leaf = { cluster: 0, area: 0, bounds: { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } }, surfaces: { first: 0, count: 0 }, brushes: { first: 0, count: 0 } };
+  const map: Q3ResourceWorld["map"] = { entities: '{ "quoted key" "quoted value" }',
+    planes: [{ normal: { x: 1, y: 0, z: 0 }, distance: 0, type: 0, signbits: 0 }],
+    nodes: [{ plane: 0, bounds: leaf.bounds, children: [{ kind: "leaf", index: 1 }, { kind: "leaf", index: 0 }] }],
+    leaves: [leaf, { ...leaf, cluster: 1 }] };
+  const visited: number[] = [];
+  let failLoad = false;
+  const f = await fixture({ map, clusterPVS: cluster => { visited.push(cluster); return { byteAt: () => 1 << cluster }; } }, async () => {
+    if (failLoad) throw new Error("world load failed");
+  });
+  await f.resources.loadWorld("test");
+  const token = (capacity = 32, pointer = 512) => qvmClientRenderSyscall(f.call(QvmCgameImport.CG_GET_ENTITY_TOKEN, [pointer, capacity]), f.resources, f.draw);
+  expect(token()).toBe(1); expect(f.guest.readString(512)).toBe("{");
+  failLoad = true;
+  await expect(f.resources.loadWorld("failed")).rejects.toThrow("world load failed");
+  expect(token(7)).toBe(1); expect(f.guest.readString(512)).toBe("quoted");
+  expect(() => token(32, 4090)).toThrow();
+  expect(token()).toBe(1); expect(f.guest.readString(512)).toBe("}");
+  expect(token()).toBe(0); expect(token()).toBe(1);
+  const origin = { x: 0, y: 0, z: 0 }, front = { x: 1, y: 0, z: 0 };
+  expect(f.resources.inPVS(() => origin, () => front)).toBe(false); expect(visited).toEqual([0]);
+  const flat = await fixture({ map: { ...map, nodes: [] }, clusterPVS: () => ({ byteAt: () => 255 }) });
+  await flat.resources.loadWorld("empty-nodes");
+  expect(qvmClientRenderSyscall(flat.call(QvmCgameImport.CG_R_INPVS, [4094, 4094]), flat.resources, flat.draw)).toBe(1);
 });
 
 test("guest record marshalling preserves complete values and rejects truncated records", () => {

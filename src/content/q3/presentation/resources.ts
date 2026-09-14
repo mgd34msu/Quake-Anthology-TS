@@ -1,7 +1,12 @@
 import type { DynamicLight } from "./scene-host.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
 import type { MaterialPicture } from "../../../text/draw2d.ts";
-import type { Bounds } from "../../../contracts/math.ts";
+import type { Bounds, Vec3 } from "../../../contracts/math.ts";
+import type { Q3WorldGeometry } from "../../../contracts/scene.ts";
+import type { SourceClusterPVS } from "../../../world/collision/q3/topology.ts";
+import { CommonParseCursor, CommonParseState } from "../../../core/common-parse.ts";
+import { CommonError } from "../../../core/common-error.ts";
+import { dot3 } from "../../../core/math.ts";
 import { DEFAULT_MODEL } from "./ref-entity.ts";
 import type { RefEntity, RefPoly, SceneModel, SceneShader, SceneSkin } from "./ref-entity.ts";
 import type { Refdef } from "./refdef.ts";
@@ -10,6 +15,10 @@ export interface AssetReader { read(path: string): Promise<Uint8Array>; has(path
 export interface SoundAssetReader extends AssetReader { readFileLength(path: string): number | Promise<number>; readSync(path: string): Uint8Array; }
 export interface ClientSoundBank { registerSound(path: string | null, compressed: boolean): Promise<PcmSound | null>; indexForSound(sound: PcmSound | null): number; }
 export interface WorldScene { readonly map: { readonly models: readonly { readonly bounds: Bounds }[] }; }
+export interface Q3ResourceWorld {
+  readonly map: Pick<Q3WorldGeometry, "entities" | "nodes" | "leaves" | "planes">;
+  clusterPVS(cluster: number): SourceClusterPVS;
+}
 /** The selected mount plan and shared renderer own these resources, not cgame. */
 export interface RendererResources {
   registerModel(path: string | null): Promise<SceneModel>;
@@ -45,7 +54,10 @@ export class Q3RendererResources implements RendererResources {
   private readonly skins = new Map<string, SceneSkin | null>();
   private readonly pictures = new Map<string, MaterialPicture>();
   private readonly shaders = new Map<number, MaterialPicture>();
-  constructor(readonly host: Q3ResourceHost) {}
+  private readonly entityParser = new CommonParseState();
+  private entityCursor = new CommonParseCursor("");
+  private worldLoaded = false;
+  constructor(readonly host: Q3ResourceHost, private readonly world?: Q3ResourceWorld) {}
   async registerModel(path: string | null): Promise<SceneModel> {
     if (path === null || path.length === 0) return DEFAULT_MODEL;
     const prior = this.modelNames.get(path); if (prior !== undefined) return prior;
@@ -95,5 +107,43 @@ export class Q3RendererResources implements RendererResources {
   addLight(light: DynamicLight): void { this.host.scene.addLight(light); }
   remapShader(original: string, replacement: string, offset: string): Promise<void> { return this.host.remapShader(original, replacement, offset); }
   renderScene(refdef: Refdef): void { this.host.scene.renderScene(refdef); }
-  loadWorld(path: string): Promise<WorldScene> { return this.host.world(path); }
+  async loadWorld(path: string): Promise<WorldScene> {
+    const scene = await this.host.world(path);
+    this.entityCursor = new CommonParseCursor(this.world?.map.entities ?? "");
+    this.worldLoaded = true;
+    return scene;
+  }
+  getEntityToken(write: (token: string) => void): boolean {
+    const token = this.entityParser.parse(this.entityCursor);
+    write(token);
+    if (this.entityCursor.offset === null || token.length === 0) { this.entityCursor.offset = 0; return false; }
+    return true;
+  }
+  private pointCluster(read: () => Vec3): number {
+    if (!this.worldLoaded || this.world === undefined) throw new CommonError("drop", "R_PointInLeaf: bad model");
+    const map = this.world.map;
+    let leaf = 0;
+    if (map.nodes.length !== 0) {
+      const point = read();
+      let index = 0;
+      for (;;) {
+        const node = map.nodes[index];
+        if (node === undefined) throw new RangeError("R_PointInLeaf: invalid node");
+        const plane = map.planes[node.plane];
+        if (plane === undefined) throw new RangeError("R_PointInLeaf: invalid plane");
+        const child = node.children[dot3(point, plane.normal) - plane.distance > 0 ? 0 : 1];
+        if (child.kind === "leaf") { leaf = child.index; break; }
+        index = child.index;
+      }
+    }
+    const result = map.leaves[leaf];
+    if (result === undefined) throw new RangeError("R_PointInLeaf: invalid leaf");
+    return result.cluster;
+  }
+  inPVS(readFirst: () => Vec3, readSecond: () => Vec3): boolean {
+    const first = this.pointCluster(readFirst);
+    if (this.world === undefined) throw new CommonError("drop", "R_PointInLeaf: bad model");
+    const visibility = this.world.clusterPVS(first), second = this.pointCluster(readSecond);
+    return (visibility.byteAt(second >> 3) & (1 << (second & 7))) !== 0;
+  }
 }
