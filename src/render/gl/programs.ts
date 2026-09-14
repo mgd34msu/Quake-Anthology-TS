@@ -167,6 +167,8 @@ export class StageProgram {
   private readonly program: number;
   private readonly depthProgram: number;
   private readonly uniforms = new Map<string, number>();
+  private readonly locations: Partial<Record<"secondaryMode" | "alphaMode" | "u_luminance_alpha" | "u_lighting_mode" | "u_light_count" | "u_shadow_texel" | "u_shadow_near" | "u_shade_scale", number>> = {};
+  private readonly lightLocations: Partial<Record<"u_light_pos" | "u_light_radius" | "u_light_color" | "u_light_scale" | "u_light_cone_cos" | "u_light_cone_dir" | "u_light_frac" | "u_light_shadow" | "u_light_atlas" | "u_light_matrix", number>>[] = [];
   private readonly integers = new Map<number, number>();
   private readonly scalars = new Map<number, number>();
   private readonly vectors3 = new Map<number, readonly [number, number, number]>();
@@ -246,51 +248,52 @@ void main() { gl_FragColor = vec4(1.0); }
     if (this.closed) throw new Error("OpenGL stage program is closed");
     const gl = this.library.symbols;
     gl.glUseProgram(this.program);
-    this.integer(this.uniform("secondaryMode"), environment === null ? 0 : secondaryModes[environment]);
-    this.integer(this.uniform("alphaMode"), alphaModes[alphaTest]);
-    this.integer(this.uniform("u_luminance_alpha"), luminanceAlpha ? 1 : 0);
-    this.integer(this.uniform("u_lighting_mode"), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
-    if (lighting.kind === "vertex") { this.integer(this.uniform("u_light_count"), 0); return; }
+    this.integer((this.locations.secondaryMode ??= this.uniform("secondaryMode")), environment === null ? 0 : secondaryModes[environment]);
+    this.integer((this.locations.alphaMode ??= this.uniform("alphaMode")), alphaModes[alphaTest]);
+    this.integer((this.locations.u_luminance_alpha ??= this.uniform("u_luminance_alpha")), luminanceAlpha ? 1 : 0);
+    this.integer((this.locations.u_lighting_mode ??= this.uniform("u_lighting_mode")), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
+    if (lighting.kind === "vertex") { this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), 0); return; }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
-    this.integer(this.uniform("u_light_count"), lighting.lights.length);
+    this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), lighting.lights.length);
     if (lighting.atlas !== null) {
       finiteUniforms([lighting.atlas.texelSize, lighting.atlas.nearPlane]);
       if (!Number.isFinite(lighting.atlas.texelSize) || lighting.atlas.texelSize <= 0 || !Number.isFinite(lighting.atlas.nearPlane) || lighting.atlas.nearPlane <= 0)
         throw new RangeError("Q2 shadow atlas texel size and near plane must be positive");
-      this.scalar(this.uniform("u_shadow_texel"), lighting.atlas.texelSize);
-      this.scalar(this.uniform("u_shadow_near"), lighting.atlas.nearPlane);
+      this.scalar((this.locations.u_shadow_texel ??= this.uniform("u_shadow_texel")), lighting.atlas.texelSize);
+      this.scalar((this.locations.u_shadow_near ??= this.uniform("u_shadow_near")), lighting.atlas.nearPlane);
     }
     if (lighting.kind === "q2-model-shadow") {
       finiteUniforms([lighting.shadeScale]);
-      this.scalar(this.uniform("u_shade_scale"), lighting.shadeScale);
+      this.scalar((this.locations.u_shade_scale ??= this.uniform("u_shade_scale")), lighting.shadeScale);
     }
     for (const [index, light] of lighting.lights.entries()) {
+      const locations = this.lightLocations[index] ??= {};
       finiteUniforms([light.origin.x, light.origin.y, light.origin.z, light.radius]);
       if (light.radius <= 0) throw new RangeError("Q2 fragment light radius must be positive");
-      this.vector3(this.uniform(`u_light_pos[${index}]`), light.origin.x, light.origin.y, light.origin.z);
-      this.scalar(this.uniform(`u_light_radius[${index}]`), light.radius);
+      this.vector3((locations.u_light_pos ??= this.uniform(`u_light_pos[${index}]`)), light.origin.x, light.origin.y, light.origin.z);
+      this.scalar((locations.u_light_radius ??= this.uniform(`u_light_radius[${index}]`)), light.radius);
       if ("color" in light) {
         finiteUniforms([light.color.x, light.color.y, light.color.z, light.scale]);
         if (light.cone !== null) finiteUniforms([light.cone.direction.x, light.cone.direction.y, light.cone.direction.z, light.cone.cosHalfAngle]);
-        this.vector3(this.uniform(`u_light_color[${index}]`), light.color.x, light.color.y, light.color.z);
-        this.scalar(this.uniform(`u_light_scale[${index}]`), light.scale);
-        this.scalar(this.uniform(`u_light_cone_cos[${index}]`), light.cone?.cosHalfAngle ?? 0);
+        this.vector3((locations.u_light_color ??= this.uniform(`u_light_color[${index}]`)), light.color.x, light.color.y, light.color.z);
+        this.scalar((locations.u_light_scale ??= this.uniform(`u_light_scale[${index}]`)), light.scale);
+        this.scalar((locations.u_light_cone_cos ??= this.uniform(`u_light_cone_cos[${index}]`)), light.cone?.cosHalfAngle ?? 0);
         const direction = light.cone?.direction;
-        this.vector3(this.uniform(`u_light_cone_dir[${index}]`), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
+        this.vector3((locations.u_light_cone_dir ??= this.uniform(`u_light_cone_dir[${index}]`)), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
       } else {
         finiteUniforms([light.fraction.x, light.fraction.y, light.fraction.z]);
-        this.vector3(this.uniform(`u_light_frac[${index}]`), light.fraction.x, light.fraction.y, light.fraction.z);
+        this.vector3((locations.u_light_frac ??= this.uniform(`u_light_frac[${index}]`)), light.fraction.x, light.fraction.y, light.fraction.z);
       }
       const shadow = light.shadow;
       if (shadow.kind !== "none" && lighting.atlas === null) throw new Error("Q2 shadow receiver is missing its atlas");
-      this.scalar(this.uniform(`u_light_shadow[${index}]`), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);
+      this.scalar((locations.u_light_shadow ??= this.uniform(`u_light_shadow[${index}]`)), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);
       if (shadow.kind !== "none") {
         const rect = shadow.atlasRect;
         finiteUniforms([rect.x, rect.y, rect.z, rect.w]);
-        this.vector4(this.uniform(`u_light_atlas[${index}]`), rect.x, rect.y, rect.z, rect.w);
+        this.vector4((locations.u_light_atlas ??= this.uniform(`u_light_atlas[${index}]`)), rect.x, rect.y, rect.z, rect.w);
         if (shadow.kind === "cone") {
           finiteUniforms(shadow.matrix);
-          this.matrix(this.uniform(`u_light_matrix[${index}]`), shadow.matrix);
+          this.matrix((locations.u_light_matrix ??= this.uniform(`u_light_matrix[${index}]`)), shadow.matrix);
         }
       }
     }

@@ -257,6 +257,9 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
   const lighting = (): import("../../../src/contracts/render.ts").BatchLighting => ({ kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [light], atlas });
   const reference = new StageProgram(window), cached = new StageProgram(window);
   const referenceTrace = traceUniforms(reference["library"].symbols, reference["uniforms"]), trace = traceUniforms(cached["library"].symbols, cached["uniforms"]);
+  const lookup = cached["uniforms"].get;
+  let locationLookups = 0;
+  cached["uniforms"].get = function (...args) { locationLookups++; return lookup.apply(this, args); };
   function freshReference(): void {
     reference["integers"].clear(); reference["scalars"].clear(); reference["vectors3"].clear(); reference["vectors4"].clear(); reference["matrices"].clear();
   }
@@ -267,7 +270,9 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
   try {
     use(null, "none", lighting());
     const initial = trace.calls;
+    const initialLookups = locationLookups;
     use(null, "none", lighting()); expect(trace.calls).toBe(initial);
+    expect(locationLookups).toBe(initialLookups);
     cached.useDepth(); cached.restore(0); use(null, "none", lighting()); expect(trace.calls).toBe(initial);
     const changed = (change: () => void): void => { const before = trace.calls; change(); use(null, "none", lighting()); expect(trace.calls).toBe(before + 1); };
     changed(() => { light = { ...light, radius: 65 }; });
@@ -322,7 +327,18 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
   } finally { cached.close(); reference.close(); }
   expect(() => cached.use(null, "none")).toThrow("closed");
   const restarted = new StageProgram(window), restartTrace = traceUniforms(restarted["library"].symbols, restarted["uniforms"]);
-  try { restarted.use(null, "none", lighting()); expect(restartTrace.calls).toBeGreaterThan(5); }
+  const resolveLocation = restarted["library"].symbols.glGetUniformLocation;
+  let missing = true, resolutionCalls = 0;
+  restarted["library"].symbols.glGetUniformLocation = Object.assign((...args: Parameters<typeof resolveLocation>) => {
+    resolutionCalls++; return missing ? -1 : resolveLocation(...args);
+  }, resolveLocation);
+  try {
+    expect(() => restarted.use(null, "none", lighting())).toThrow("uniform is missing: secondaryMode");
+    expect(() => restarted.use(null, "none", lighting())).toThrow("uniform is missing: secondaryMode");
+    expect(resolutionCalls).toBe(2);
+    missing = false;
+    restarted.use(null, "none", lighting()); expect(restartTrace.calls).toBeGreaterThan(5);
+  }
   finally { restarted.close(); }
 });
 
