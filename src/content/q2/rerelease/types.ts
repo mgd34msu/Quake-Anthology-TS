@@ -1,3 +1,4 @@
+import type { DebugLine } from "../../../debug/shapes.ts";
 /* Quake II rerelease game DLL extensions, GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3, Vec4 } from "../../../contracts/math.ts";
@@ -76,6 +77,7 @@ export function createQ2RereleaseOptions(changes: Partial<Q2RereleaseOptions> = 
     deathmatchForceRespawn: false, deathmatchNoFallDamage: false, deathmatchSpawnFarthest: false, deathmatchForceRespawnTime: 0, deathmatchAllowExit: false, coopPlayerCollision: true, autoSaveMinimumTime: 60, ...changes };
 }
 export type Q2RereleaseEvent =
+  | { readonly kind: "debug-shapes"; readonly lines: readonly DebugLine[]; readonly lifetimeMilliseconds: number }
   | { readonly kind: "world-text"; readonly text: WorldTextInput; readonly lifetime: number }
   | { readonly kind: "localized-print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string; readonly args: readonly string[] }
   | { readonly kind: "mission-objective"; readonly actor: ActorId; readonly text: string; readonly args: readonly string[]; readonly talkSound: boolean }

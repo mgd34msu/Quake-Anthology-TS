@@ -1,3 +1,4 @@
+import type { DebugLine } from "../../../debug/shapes.ts";
 import type { PreparedQ3Game } from "./q3/guest-artifact.ts";
 import type { Q3GuestRuntimeOptions } from "./q3/guest-runtime.ts";
 import type { SceneFlare } from "../../../contracts/flare.ts";
@@ -146,6 +147,11 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
   | { readonly kind: "q3-ballistics"; readonly event: Q3SharedBallisticEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
 export type SimulationPresentationEvent = SourcePresentationEvent & { readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
+
+export interface DebugShapePresentationAccess {
+  lines(): readonly DebugLine[];
+  lineWidth(): number;
+}
 
 export interface SimulationPresentationAccess {
   worldText(): readonly WorldText[];

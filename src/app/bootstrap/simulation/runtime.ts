@@ -1,3 +1,5 @@
+import { WorldDebugLineStore } from "../../../debug/world.ts";
+import type { DebugLine } from "../../../debug/shapes.ts";
 import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
 import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
@@ -230,6 +232,9 @@ export class SharedSimulation implements Simulation {
   private readonly monsterSources = new Map<ProviderId, SelectedMonsterSource>();
   private readonly monsterMissions = new Map<ActorId, MonsterMission>();
   private q2ServerRegistry: CvarRegistry | null = null;
+  private readonly debugLineStore = new WorldDebugLineStore();
+  private debugLineFrame = -1;
+  private debugLineSnapshot: readonly DebugLine[] = [];
   private readonly worldTextStore = new WorldTextStore();
   private worldTextFrame = -1;
   private worldTextSnapshot: readonly WorldText[] = [];
@@ -1583,7 +1588,7 @@ export class SharedSimulation implements Simulation {
       if (program !== "baseq2" && program !== "xatrix" && program !== "rogue" && program !== "mg2" && program !== "n64") throw new Error(`Unsupported Q2 rerelease program ${program}`);
       const rereleaseHooks: Q2RereleaseHooks = {
         lightStyle: style => this.events.lightStyle(style),
-        emit: event => { if (event.kind === "world-text") { this.worldTextStore.submit({ ...event.text, content }, this.timeSeconds, event.lifetime); return undefined; } if (event.kind === "screen-blend") { const view = this.q2Views.get(event.actor); if (view !== undefined) this.q2Views.set(event.actor, { ...view, blend: event.blend }); } return this.events.emit(content, { kind: "q2-rerelease", event }); },
+        emit: event => { if (event.kind === "debug-shapes") return this.submitDebugShapes(event); if (event.kind === "world-text") { this.worldTextStore.submit({ ...event.text, content }, this.timeSeconds, event.lifetime); return undefined; } if (event.kind === "screen-blend") { const view = this.q2Views.get(event.actor); if (view !== undefined) this.q2Views.set(event.actor, { ...view, blend: event.blend }); } return this.events.emit(content, { kind: "q2-rerelease", event }); },
         playerIdentity: actor => { const identity = this.options.playerIdentity; if (identity === undefined) throw new Error("Q2 rerelease admission requires session seat identity"); return identity(this.requirePlayer(actor).client); },
         clipTrigger: (trigger, actor, game) => {
           const body = this.bodies.read(actor), brush = game.body(trigger), model = sourceModel(trigger.model);
@@ -3100,6 +3105,18 @@ export class SharedSimulation implements Simulation {
   }
   private requirePlayer(actor: ActorId): MovementPlayer { const player = this.player(actor); if (player === null) throw new Error("Actor is not an admitted player"); return player; }
   registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined { return this.events.registerResource(content, path, resource); }
+  submitDebugShapes(event: { readonly lines: readonly DebugLine[]; readonly lifetimeMilliseconds: number }): undefined {
+    this.assertOpen();
+    this.debugLineStore.submit(event.lines, Math.round(this.timeSeconds * 1000), event.lifetimeMilliseconds);
+    return undefined;
+  }
+  beginPresentationFrame(frame: number): void {
+    this.assertOpen();
+    if (this.debugLineFrame === frame) return;
+    this.debugLineFrame = frame;
+    this.debugLineSnapshot = this.debugLineStore.snapshot(Math.round(this.timeSeconds * 1000), frame);
+  }
+  debugLines(): readonly DebugLine[] { return this.debugLineSnapshot; }
   worldText(): readonly WorldText[] {
     if (this.worldTextFrame !== this.sourceFrame.frame) {
       this.worldTextFrame = this.sourceFrame.frame;
@@ -3528,7 +3545,7 @@ export class SharedSimulation implements Simulation {
   close(): undefined { if (this.closed) return undefined;
     const guest = this.q3Guest();
     if (guest !== null && !guest.isRetired) throw new Error("Q3 guest shutdown must be awaited before closing its shared world");
-    this.closed = true; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
+    this.closed = true; this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
   private assertOpen(): undefined { if (this.closed) throw new Error("Simulation is closed"); return undefined; }
 }
 

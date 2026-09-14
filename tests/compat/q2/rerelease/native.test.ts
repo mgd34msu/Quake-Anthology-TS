@@ -1,3 +1,4 @@
+import type { RereleaseDebugShapesEvent } from "../../../../src/compat/q2/rerelease/debug-shapes.ts";
 import { WorldTextStore } from "../../../../src/text/world.ts";
 import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rerelease/world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -33,7 +34,7 @@ const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", im
 export const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
-export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices) {
+export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices, debugShapes?: (event: RereleaseDebugShapesEvent) => void, debugDrawing?: "headless") {
   const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
   const product = catalog.require("q2-rerelease-baseq2");
   using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
@@ -106,6 +107,8 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
     ...(foreignDamage === undefined ? {} : { foreignDamage }),
     clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
     ...(worldText === undefined ? {} : { worldText }),
+    ...(debugShapes === undefined ? {} : { debugShapes }),
+    ...(debugDrawing === undefined ? {} : { debugDrawing }),
     sound: event => { sounds.push(event); },
     messages: { buffer, acceptsClient: slot => slot === 1, unicast: message => { unicasts.push(message); }, multicast: message => { multicasts.push(message); } },
     engine: world.engine, spatial: world.spatial, semantics, instructionBudget: Bun.env["Q2_RR_FULL_MAP"] === "1" ? 20_000_000 : 5_000_000 });

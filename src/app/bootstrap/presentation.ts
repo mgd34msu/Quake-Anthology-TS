@@ -1,3 +1,5 @@
+import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
+import type { DebugShapePresentationAccess } from "./simulation/types.ts";
 import { createSourceSceneOrder } from "../../render/scene/submissions.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { Q1MessageLocalization } from "./q1-localization.ts";
@@ -73,7 +75,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
     private readonly worldTextCullFactor: (() => number) | null = null,
-    private readonly fieldOfView: () => number = () => 90) {
+    private readonly fieldOfView: () => number = () => 90,
+    private readonly debugShapes: DebugShapePresentationAccess | null = null) {
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets);
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -213,6 +216,9 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
       this.frames.command(command);
     }
+    const debugLines = this.debugShapes?.lines();
+    if (debugLines !== undefined && debugLines.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
+      beforeView: [], operations: [{ kind: "draw", batches: prepareDebugShapes(debugLines, camera, this.assets.world.shaders.textures.white.image, this.debugShapes?.lineWidth()) }] });
     if (this.worldText.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
       beforeView: [], operations: [{ kind: "draw", batches: prepareWorldText(this.worldText, camera, text => {
         const font = this.worldFonts.get(text.content);

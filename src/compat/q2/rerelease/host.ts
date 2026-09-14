@@ -1,3 +1,5 @@
+import { RereleaseDebugShapeImports } from "./debug-shapes.ts";
+import type { RereleaseDebugShapesEvent } from "./debug-shapes.ts";
 import { RereleaseWorldTextImports } from "./world-text.ts";
 import type { RereleaseWorldTextEvent } from "./world-text.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -60,6 +62,9 @@ export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "in
   readonly spatial: RereleaseSpatialServices;
   readonly semantics: RereleaseSemanticBindings;
   readonly messages?: RereleaseMessageServices;
+  /** Explicit q2repro !USE_REF capability; absent renderer bindings still fail otherwise. */
+  readonly debugDrawing?: "headless";
+  readonly debugShapes?: (event: RereleaseDebugShapesEvent) => void;
   readonly worldText?: (event: RereleaseWorldTextEvent) => void;
   readonly sound?: (event: RereleaseSoundEvent) => void;
   readonly nativeEntries?: RereleaseNativeEntries;
@@ -72,6 +77,7 @@ export class RereleaseQ2GuestHost {
   readonly core: RereleaseCoreImports;
   readonly foreignActors: RereleaseForeignActors | null;
   readonly #messages: RereleaseMessageImports | null;
+  readonly #debugShapes: RereleaseDebugShapeImports | null;
   readonly #worldText: RereleaseWorldTextImports | null;
   readonly #sounds: RereleaseSoundImports | null;
   readonly #lifetimes = new Map<number, { readonly actor: OwnedActor; readonly generation: number; readonly address: bigint }>();
@@ -82,10 +88,13 @@ export class RereleaseQ2GuestHost {
   #initialized = false;
   #closed = false;
   constructor(readonly options: RereleaseQ2HostOptions) {
+    if (options.debugDrawing === "headless" && (options.debugShapes !== undefined || options.worldText !== undefined))
+      throw new Error("Headless Q2 debug drawing cannot bind renderer callbacks");
     this.core = new RereleaseCoreImports(options.runner.options.cpu.memory, options.services);
     this.module = new RereleaseGuestModule({ ...options,
       actorAtSlot: slot => options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null,
       invokeImport: call => this.#import(call) });
+    this.#debugShapes = options.debugShapes === undefined ? null : new RereleaseDebugShapeImports(this.module.memory, options.debugShapes);
     this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
     this.#sounds = options.sound === undefined ? null : new RereleaseSoundImports(this.module.memory, options.sound, address => this.module.entities().fromPointer(address).slot);
     this.#messages = options.messages === undefined ? null : new RereleaseMessageImports(this.module.memory, options.messages, address => this.module.entities().fromPointer(address).slot);
@@ -196,6 +205,15 @@ export class RereleaseQ2GuestHost {
     } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, bytes.length + 1); }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
+    if (this.options.debugDrawing === "headless" && call.api === "game") {
+      switch (call.name) {
+        case "Draw_Line": case "Draw_Point": case "Draw_Circle": case "Draw_Bounds": case "Draw_Sphere":
+        case "Draw_Cylinder": case "Draw_Ray": case "Draw_Arrow": case "Draw_OrientedWorldText": case "Draw_StaticWorldText":
+          return { kind: "void" };
+      }
+    }
+    const shapes = this.#debugShapes?.invoke(call);
+    if (shapes !== undefined) return shapes;
     const text = this.#worldText?.invoke(call);
     if (text !== undefined) return text;
     const sound = this.#sounds?.invoke(call);

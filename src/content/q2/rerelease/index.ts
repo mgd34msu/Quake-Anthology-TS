@@ -1,3 +1,6 @@
+import type { DebugShape } from "../../../debug/shapes.ts";
+import type { Vec4 } from "../../../contracts/math.ts";
+import { q2DebugShape } from "./debug-shapes.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { OwnedActor } from "../../../contracts/identity.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -29,6 +32,9 @@ export interface Q2RereleaseModuleOptions { readonly players: Q2RereleasePlayers
 export function createQ2RereleaseModule(options: Q2RereleaseModuleOptions): Q2RereleaseModule { return new Q2RereleaseModule(options); }
 
 export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPolicy {
+  drawDebugShape(shape: DebugShape, color: Vec4, lifetimeSeconds: number, depthTest: boolean): undefined {
+    return this.hooks.emit(q2DebugShape(shape, color, lifetimeSeconds, depthTest));
+  }
   readonly pickedUpBy = new Map<ActorId, Set<number>>();
   private readonly pickupMessages = new Map<ActorId, string>();
   readonly triggers: Q2RereleaseTriggers;

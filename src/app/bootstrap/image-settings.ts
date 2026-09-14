@@ -28,6 +28,7 @@ export class ApplicationImageSettings {
   private readonly store: ConfigStore;
   private applied = "";
   private saved = "";
+  private appliedDebugLineWidth = 2;
   private displayApplied = "";
   private restoredSize: { readonly width: number; readonly height: number } | null = null;
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
@@ -39,6 +40,7 @@ export class ApplicationImageSettings {
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);
     this.cvars.register("r_fullscreen", "0", CvarFlag.Archive);
     this.cvars.register("r_swapInterval", "1", CvarFlag.Archive);
+    this.cvars.register("gl_debug_linewidth", "2", CvarFlag.None);
     this.cvars.register("gl_debug_distfrac", "0.004", CvarFlag.None);
     this.cvars.register("r_override_textures", "1", CvarFlag.Archive);
     this.cvars.register("r_texture_overrides", "-1", CvarFlag.Archive);
@@ -63,6 +65,9 @@ export class ApplicationImageSettings {
     this.cvars.document("r_swapInterval", {
       summary: "GL vertical synchronization (vsync), when supported by the display backend. Has no effect on the CPU renderer.",
       usage: "r_swapInterval <0|1>", examples: ["r_swapInterval 1"], allowedValues: ["0: off", "1: on"] });
+    this.cvars.document("gl_debug_linewidth", {
+      summary: "Width in pixels for shared debug shapes. Not saved.",
+      usage: "gl_debug_linewidth <width>", examples: ["gl_debug_linewidth 2"], allowedValues: ["Positive finite numbers"] });
     this.cvars.document("gl_debug_distfrac", {
       summary: "Distance culling factor for world text that requests distance culling: text is hidden when its cell size is smaller than forward camera distance times this factor. Not saved.",
       usage: "gl_debug_distfrac <factor>", examples: ["gl_debug_distfrac 0.004"] });
@@ -110,6 +115,15 @@ export class ApplicationImageSettings {
   get policy(): ImagePolicy {
     return imagePolicyFromControls({ overrideLevel: this.cvars.variableValue("r_override_textures"),
       overrideMask: this.cvars.variableValue("r_texture_overrides"), formats: this.cvars.variableString("r_texture_formats") });
+  }
+  get debugLineWidth(): number {
+    const width = this.cvars.variableValue("gl_debug_linewidth");
+    if (Number.isFinite(width) && width > 0) this.appliedDebugLineWidth = width;
+    else {
+      this.cvars.set("gl_debug_linewidth", String(this.appliedDebugLineWidth), true);
+      this.options.print("Debug line width must be a positive finite number.\n");
+    }
+    return this.appliedDebugLineWidth;
   }
   get gamma(): number { return this.cvars.variableValue("r_gamma"); }
   get modelPolicy(): ModelReplacementPolicy {
