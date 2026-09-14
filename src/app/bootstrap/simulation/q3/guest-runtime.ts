@@ -46,6 +46,14 @@ export interface Q3GuestRuntimeOptions {
   assertCurrent(): void;
 }
 export type Q3SavedGuestClientId = Pick<ClientId, 'slot' | 'generation'>;
+export interface Q3GuestMapClient { readonly client: ClientId; readonly userinfo: string; }
+export interface Q3GuestMapTransition {
+  /** Restore through the destination registry before applying its new map settings. */
+  readonly cvars: ReturnType<Q3ServerState['cvars']['captureSaveState']>;
+  readonly clients: readonly Q3GuestMapClient[];
+}
+export type Q3GuestInitialization = { readonly kind: 'new' }
+  | { readonly kind: 'map-change'; readonly clients: readonly Q3GuestMapClient[] };
 function readGuestClients(reader: SaveReader) {
   return reader.list(entry => ({ sourceEntity: entry.field('sourceEntity').integer(0),
     client: { slot: entry.field('client').field('slot').integer(0), generation: entry.field('client').field('generation').integer(0) },
@@ -89,6 +97,7 @@ export class Q3QvmServerGame {
   private readonly parser = new CommonParseState();
   private restoreClient: ((saved: Q3SavedGuestClientId) => ClientId) | null = null;
   private readonly clients = new Map<number, ClientEntry>();
+  private readonly reconnecting = new Map<number, Q3GuestMapClient>();
 
   constructor(private readonly options: Q3GuestRuntimeOptions) {
     if (!Number.isInteger(options.maxClients) || options.maxClients < 1 || options.maxClients > 64) throw new RangeError('Q3 guest requires 1..64 clients');
@@ -133,7 +142,7 @@ export class Q3QvmServerGame {
 
   private captureHost(): QvmHostCheckpoint {
     this.running();
-    if (this.externalOperations !== 0 || this.currentCall !== null || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active')) {
+    if (this.externalOperations !== 0 || this.currentCall !== null || this.reconnecting.size !== 0 || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active')) {
       throw new Error('Q3 guest checkpoint requires completed client operations');
     }
     return { state: { module: this.game.module.profile.module, format: 'q3:qagame-host', bytes: encodeCheckpointValue({
@@ -199,7 +208,7 @@ export class Q3QvmServerGame {
     const errors: unknown[] = [];
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
-    this.game.retire(); this.clients.clear(); this.lifecycle = { kind: 'retired' };
+    this.game.retire(); this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
     if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest discard failed');
   }
 
@@ -253,12 +262,24 @@ export class Q3QvmServerGame {
     this.current();
   }
 
-  async initialize(output: Q3GuestOutput): Promise<void> {
+  async initialize(output: Q3GuestOutput, start: Q3GuestInitialization = { kind: 'new' }): Promise<void> {
     this.current();
     if (this.lifecycle.kind !== 'created') throw new Error('Q3 guest has already initialized');
+    if (start.kind === 'map-change') {
+      const slots = new Set<number>();
+      for (const entry of start.clients) {
+        this.validateClient(entry.client);
+        if (slots.has(entry.client.slot)) throw new Error('Q3 map transition repeats a client slot');
+        slots.add(entry.client.slot);
+      }
+      for (const entry of start.clients) {
+        this.reconnecting.set(entry.client.slot, entry);
+        this.state.setUserinfo(entry.client.slot, entry.userinfo);
+      }
+    }
     this.lifecycle = { kind: 'initializing', output };
     try {
-      await this.game.initializeAsync(this.options.now(), this.options.seed);
+      await this.game.initializeAsync(this.options.now(), this.options.seed, false);
       await this.refreshServerInfo();
       this.current(); this.lifecycle = { kind: 'running', output };
     } catch (error) {
@@ -267,18 +288,33 @@ export class Q3QvmServerGame {
     }
   }
   async connect(client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission> {
+    if (this.reconnecting.has(client.slot)) throw new Error('Q3 carried client requires map reconnection');
+    return this.admit(client, userinfo, true);
+  }
+  async reconnect(client: ClientId): Promise<Q3ApplicationAdmission> {
+    this.running();
+    const previous = this.reconnecting.get(client.slot);
+    if (previous === undefined || !previous.client.equals(client)) throw new Error('Q3 client is not carried by this map transition');
+    try { return await this.admit(client, this.state.getUserinfo(client.slot) ?? previous.userinfo, false); }
+    finally { this.reconnecting.delete(client.slot); }
+  }
+  private validateClient(client: ClientId): void {
+    if (client.session !== this.options.records.actors.session || !Number.isInteger(client.slot) || client.slot < 0 || client.slot >= this.options.maxClients)
+      throw new RangeError('Q3 client slot belongs to another server or is outside its capacity');
+  }
+  private async admit(client: ClientId, userinfo: string, firstTime: boolean): Promise<Q3ApplicationAdmission> {
     this.externalOperations++;
     try {
       this.running();
       if (this.player(client) !== null) throw new Error('Q3 client already has a guest slot');
       const slot = client.slot;
-      if (client.session !== this.options.records.actors.session || !Number.isInteger(slot) || slot < 0 || slot >= this.options.maxClients) throw new RangeError('Q3 client slot belongs to another server or is outside its capacity');
+      this.validateClient(client);
       if (this.clients.has(slot)) return { kind: 'rejected', reason: 'Client slot is already occupied.' };
       const player = { client, actor: this.records.actor(slot).id, sourceEntity: slot };
       const entry: ClientEntry = { player, phase: { kind: 'connecting' } };
       this.clients.set(slot, entry); this.state.setUserinfo(slot, userinfo);
       try {
-        const denied = await this.game.clientConnectAsync(slot, true, false);
+        const denied = await this.game.clientConnectAsync(slot, firstTime, false);
         this.current();
         if (this.clients.get(slot) !== entry || entry.phase.kind === 'dropping') return { kind: 'rejected', reason: entry.phase.kind === 'dropping' ? entry.phase.reason : 'Client disconnected during admission.' };
         if (denied !== null) { this.release(entry); return { kind: 'rejected', reason: denied }; }
@@ -322,6 +358,7 @@ export class Q3QvmServerGame {
     } finally { this.externalOperations--; }
   }
   private async drop(slot: number, reason: string): Promise<void> {
+    this.reconnecting.delete(slot);
     const entry = this.clients.get(slot);
     if (entry !== undefined) entry.phase = { kind: 'dropping', reason };
     await this.output().dropClient(slot, reason); this.current();
@@ -363,15 +400,39 @@ export class Q3QvmServerGame {
   async shutdown(): Promise<void> {
     if (this.lifecycle.kind === 'retired') return;
     if (this.externalOperations !== 0 || this.game.module.interpreter.isActive) throw new Error('Q3 guest shutdown must await the active operation');
-    const lifecycle = this.lifecycle, errors: unknown[] = [];
+    const errors: unknown[] = [];
+    try { await this.shutdownSource(); } catch (error) { errors.push(error); }
+    this.releaseSource(errors);
+    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest shutdown failed');
+  }
+  async shutdownForMapChange(): Promise<Q3GuestMapTransition> {
+    this.running();
+    if (this.externalOperations !== 0 || this.game.module.interpreter.isActive || this.reconnecting.size !== 0
+      || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active'))
+      throw new Error('Q3 map transition requires completed client operations');
+    const errors: unknown[] = [];
+    let transition: Q3GuestMapTransition | null = null;
+    try {
+      await this.shutdownSource();
+      transition = { cvars: this.state.cvars.captureSaveState(), clients: [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping')
+        .map(entry => ({ client: entry.player.client, userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? '' })) };
+    } catch (error) { errors.push(error); }
+    this.releaseSource(errors);
+    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest map shutdown failed');
+    if (transition === null) throw new Error('Q3 map transition did not capture source state');
+    return transition;
+  }
+  private async shutdownSource(): Promise<void> {
+    const lifecycle = this.lifecycle;
     if (lifecycle.kind === 'initializing' || lifecycle.kind === 'running' || lifecycle.kind === 'shutting-down') {
       this.lifecycle = { kind: 'shutting-down', output: lifecycle.output };
-      for (const entry of [...this.clients.values()]) { try { await this.disconnect(entry.player); } catch (error) { errors.push(error); } }
-      try { await this.game.shutdownAsync(false); } catch (error) { errors.push(error); }
+      await this.game.shutdownAsync(false);
     }
+  }
+  private releaseSource(errors: unknown[]): void {
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
-    this.game.retire(); this.clients.clear(); this.lifecycle = { kind: 'retired' };
-    if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest shutdown failed');
+    for (const slot of new Set([...this.clients.keys(), ...this.reconnecting.keys()])) this.state.clearClient(slot);
+    this.game.retire(); this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
   }
 }
