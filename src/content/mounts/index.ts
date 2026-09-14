@@ -85,6 +85,18 @@ function pureLoosePath(path: string): boolean {
   return /\.(?:cfg|menu|game|dm_68|dat)$/i.test(path);
 }
 
+export type MountedContentReader = Readonly<Pick<MountedContent, "plan" | "open" | "resolve" | "read">>;
+
+function resolveOrder(plan: ResolvedMountPlan, mounts: ReadonlyMap<MountId, ContentMount>, pure: PureMountPolicy | undefined): ResolvedMountPlan {
+  validateOrder(plan.defaultOrder, mounts);
+  for (const order of plan.prefixOrders) {
+    normalizeResourcePath(order.prefix.replace(/\/$/, ""));
+    validateOrder(order.mounts, mounts);
+  }
+  return { ...plan, defaultOrder: [...pureOrder(plan.defaultOrder, mounts, pure)],
+    prefixOrders: plan.prefixOrders.map(order => ({ ...order, mounts: [...pureOrder(order.mounts, mounts, pure)] })) };
+}
+
 /** A selected plan owns its open archives; no process-global search path is mutated. */
 export class MountedContent {
   readonly #sources = new Map<MountId, MountedSource>();
@@ -101,6 +113,22 @@ export class MountedContent {
   get referencedArchives(): readonly ArchiveMount[] { return [...this.#referenced.values()]; }
 
   assertOpen(): void { if (this.#closed) throw new Error("Content mount plan is closed"); }
+
+  /** Borrows verified sources until this owner closes; the reader cannot close them. */
+  borrowOrderedReader(order: Pick<ResolvedMountPlan, "id" | "defaultOrder" | "prefixOrders">): MountedContentReader {
+    this.assertOpen();
+    const mounts = new Map(this.plan.mounts.map(mount => [mount.identity.id, mount]));
+    const plan = resolveOrder({ ...order, mounts: this.plan.mounts }, mounts, this.options.pure);
+    const openedResources = new Map<string, ResolvedResourceReference>();
+    const open: MountedContentReader["open"] = (path, acceptMount = () => true) => this.#open(plan, path, acceptMount, openedResources);
+    return { plan, open, resolve: async path => (await open(path))?.reference ?? null,
+      read: async resource => {
+        if (typeof resource !== "string") return this.#read(resource, openedResources);
+        const opened = await open(resource);
+        if (opened === null) throw new Error(`Resource not found: ${resource}`);
+        return opened.bytes;
+      } };
+  }
 
   #allowed(source: MountedSource, path: string): boolean {
     const pure = this.options.pure;
@@ -124,15 +152,20 @@ export class MountedContent {
     return { bytes: await readLooseEntry(source.mount.rootPath, actualPath), provenance: { kind: "loose", mount: source.mount, memberPath: actualPath } };
   }
 
-  #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution): OpenedResource {
+  #opened(requestedPath: string, read: { readonly bytes: Uint8Array; readonly provenance: ResourceProvenance }, resolution: ResourceResolution, openedResources: Map<string, ResolvedResourceReference>): OpenedResource {
     const resource = { requestedPath, provenance: read.provenance, digest: digestBytes(read.bytes), byteLength: read.bytes.length, resolution };
     if (read.provenance.kind === "archive") this.#referenced.set(read.provenance.mount.identity.id, read.provenance.mount);
     const reference = { ...resource, id: createResourceId(resource) };
-    this.#openedResources.set(`${reference.provenance.mount.identity.id}:${requestedPath}`, reference);
+    openedResources.set(`${reference.provenance.mount.identity.id}:${requestedPath}`, reference);
     return { reference, bytes: read.bytes };
   }
 
   async open(path: string, acceptMount: (mount: ContentMount) => boolean = () => true): Promise<OpenedResource | null> {
+    return this.#open(this.plan, path, acceptMount, this.#openedResources);
+  }
+
+  async #open(plan: ResolvedMountPlan, path: string, acceptMount: (mount: ContentMount) => boolean,
+    openedResources: Map<string, ResolvedResourceReference>): Promise<OpenedResource | null> {
     this.assertOpen();
     const requestedPath = normalizeResourcePath(path);
     for (const link of this.options.links ?? []) {
@@ -142,20 +175,22 @@ export class MountedContent {
       if (!acceptMount(source.mount)) return null;
       const targetPath = normalizeResourcePath(link.targetPrefix + requestedPath.slice(link.sourcePrefix.length));
       const read = await this.#readSource(source, targetPath);
-      return read === null ? null : this.#opened(requestedPath, read, { kind: "link", plan: this.plan.id, sourcePrefix: link.sourcePrefix, targetPath });
+      this.assertOpen();
+      return read === null ? null : this.#opened(requestedPath, read, { kind: "link", plan: plan.id, sourcePrefix: link.sourcePrefix, targetPath }, openedResources);
     }
-    const prefix = this.plan.prefixOrders.find(order => requestedPath.toLowerCase().startsWith(order.prefix.toLowerCase()));
-    const order = prefix?.mounts ?? this.plan.defaultOrder;
+    const prefix = plan.prefixOrders.find(order => requestedPath.toLowerCase().startsWith(order.prefix.toLowerCase()));
+    const order = prefix?.mounts ?? plan.defaultOrder;
     for (const [rank, id] of order.entries()) {
       const source = this.#sources.get(id);
       if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
       if (!acceptMount(source.mount)) continue;
       const read = await this.#readSource(source, requestedPath);
+      this.assertOpen();
       if (read !== null) {
         const resolution: ResourceResolution = prefix === undefined
-          ? { kind: "default-order", plan: this.plan.id, rank }
-          : { kind: "prefix-order", plan: this.plan.id, prefix: prefix.prefix, rank };
-        return this.#opened(requestedPath, read, resolution);
+          ? { kind: "default-order", plan: plan.id, rank }
+          : { kind: "prefix-order", plan: plan.id, prefix: prefix.prefix, rank };
+        return this.#opened(requestedPath, read, resolution, openedResources);
       }
     }
     return null;
@@ -210,6 +245,10 @@ export class MountedContent {
   }
 
   async read(resource: string | ResolvedResourceReference): Promise<Uint8Array> {
+    return this.#read(resource, this.#openedResources);
+  }
+
+  async #read(resource: string | ResolvedResourceReference, openedResources: Map<string, ResolvedResourceReference>): Promise<Uint8Array> {
     this.assertOpen();
     if (typeof resource === "string") {
       const opened = await this.open(resource);
@@ -234,8 +273,9 @@ export class MountedContent {
       if (read === null) throw new Error(`Resource is no longer available: ${resource.requestedPath}`);
       bytes = read.bytes;
     }
+    this.assertOpen();
     if (bytes.length !== resource.byteLength || digestBytes(bytes) !== resource.digest) throw new Error(`Resource bytes changed since resolution: ${resource.requestedPath}`);
-    this.#openedResources.set(`${resource.provenance.mount.identity.id}:${resource.requestedPath}`, resource);
+    openedResources.set(`${resource.provenance.mount.identity.id}:${resource.requestedPath}`, resource);
     return bytes;
   }
 
@@ -255,11 +295,7 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
     if (mounts.has(mount.identity.id)) throw new RangeError(`Repeated mount identity: ${mount.identity.id}`);
     mounts.set(mount.identity.id, mount);
   }
-  validateOrder(plan.defaultOrder, mounts);
-  for (const order of plan.prefixOrders) {
-    normalizeResourcePath(order.prefix.replace(/\/$/, ""));
-    validateOrder(order.mounts, mounts);
-  }
+  const resolvedPlan = resolveOrder(plan, mounts, options.pure);
   for (const link of options.links ?? []) {
     if (mounts.get(link.mount)?.kind !== "loose") throw new RangeError(`Link must target a mounted loose root: ${link.mount}`);
     normalizeResourcePath(link.sourcePrefix.replace(/\/$/, ""));
@@ -267,8 +303,6 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
   }
   const available = new Set(plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archiveDigest] : []));
   for (const digest of options.pure?.archives ?? []) if (!available.has(digest)) throw new Error(`Required pure archive is missing: ${digest}`);
-  const resolvedPlan: ResolvedMountPlan = { ...plan, defaultOrder: pureOrder(plan.defaultOrder, mounts, options.pure),
-    prefixOrders: plan.prefixOrders.map(order => ({ ...order, mounts: pureOrder(order.mounts, mounts, options.pure) })) };
   const sources: MountedSource[] = [];
   try {
     for (const mount of plan.mounts) {

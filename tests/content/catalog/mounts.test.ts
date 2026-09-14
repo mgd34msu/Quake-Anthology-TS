@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { createMountIdentity } from "../../../src/contracts/content.ts";
-import type { ArchiveMount, ContentMount, ResolvedMountPlan } from "../../../src/contracts/content.ts";
+import { createContentDigest, createMountIdentity, createMountPlanId } from "../../../src/contracts/content.ts";
+import type { ArchiveMount, ContentMount, ResolvedMountPlan, ResolvedResourceReference } from "../../../src/contracts/content.ts";
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
 import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
-import { canDownloadResource, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
+import { canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 
 function pak(path: string, text: string): Uint8Array {
   const bytes = new Uint8Array(12 + text.length + 64);
@@ -238,3 +238,100 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ProductExpecta
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 }
+
+test("borrowed ordered readers match reopened archive plans without changing ownership", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "borrowed-mount-order-"));
+  try {
+    const lowPath = resolve(root, "low.pak"), highPath = resolve(root, "high.pk3");
+    await writeFile(lowPath, pak("shared.txt", "PAK bytes"));
+    await writeFile(highPath, zip([["shared.txt", "ZIP first"], ["shared.txt", "ZIP last"], ["zip-only.txt", "fallback"]]));
+    await writeFile(resolve(root, "guest.cfg"), "loose config");
+    const low: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:borrow:low", "q1:classic:id1:installed", 7), format: "pak", archivePath: lowPath, archiveDigest: await digestFile(lowPath) };
+    const high: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:borrow:high", "q3:classic:baseq3:installed", 8), format: "pk3", archivePath: highPath, archiveDigest: await digestFile(highPath) };
+    const loose: ContentMount = { kind: "loose", identity: createMountIdentity("mount:borrow:loose", "q3:classic:baseq3:installed", 8), rootPath: root };
+    const plan: ResolvedMountPlan = { id: "mount-plan:borrow:owner", mounts: [high, low, loose], defaultOrder: [high.identity.id, low.identity.id, loose.identity.id], prefixOrders: [] };
+    const reverse = [low.identity.id, loose.identity.id, high.identity.id];
+    const orders: readonly Pick<ResolvedMountPlan, "id" | "defaultOrder" | "prefixOrders">[] = [
+      { id: "mount-plan:borrow:default", defaultOrder: plan.defaultOrder, prefixOrders: [] },
+      { id: "mount-plan:borrow:reverse", defaultOrder: reverse, prefixOrders: [] },
+      { id: "mount-plan:borrow:prefix", defaultOrder: reverse, prefixOrders: [{ prefix: "shared", mounts: plan.defaultOrder }] },
+    ];
+    let unrestrictedReference: ResolvedResourceReference | null = null;
+    for (const pure of [[], [low.archiveDigest], [high.archiveDigest, low.archiveDigest]]) {
+      const options = { pure: { archives: pure }, links: [{ sourcePrefix: "linked/", targetPrefix: "", mount: loose.identity.id }] };
+      using owner = await openMountPlan(plan, options);
+      const original = await owner.resolve("shared.txt");
+      if (pure.length === 0) unrestrictedReference = original;
+      if (pure.length === 1 && unrestrictedReference !== null) {
+        await expect(owner.borrowOrderedReader(plan).read(unrestrictedReference)).rejects.toThrow("excluded by pure policy");
+      }
+      for (const order of orders) {
+        const reader = owner.borrowOrderedReader(order);
+        using reopened = await openMountPlan({ ...plan, ...order }, options);
+        expect(reader.plan).toEqual(reopened.plan);
+        expect("close" in reader).toBe(false);
+        expect(Symbol.dispose in reader).toBe(false);
+        for (const path of ["shared.txt", "zip-only.txt", "guest.cfg", "linked/guest.cfg", "absent.txt"]) {
+          const actual = await reader.open(path), expected = await reopened.open(path);
+          expect(actual).toEqual(expected);
+          if (actual === null) continue;
+          if (expected === null) throw new Error("Missing reopened resource");
+          expect(await reader.resolve(path)).toEqual(expected.reference);
+          expect(await reader.read(path)).toEqual(expected.bytes);
+          expect(await owner.read(actual.reference)).toEqual(expected.bytes);
+          expect(await reader.read(actual.reference)).toEqual(expected.bytes);
+        }
+        if (original === null) throw new Error("Missing owner resource");
+        expect(await reader.read(original)).toEqual(await owner.read(original));
+        expect(await reader.open("shared.txt", mount => mount.identity.id === low.identity.id)).toEqual(await reopened.open("shared.txt", mount => mount.identity.id === low.identity.id));
+      }
+      const reader = owner.borrowOrderedReader({ id: "mount-plan:borrow:reverse", defaultOrder: reverse, prefixOrders: [] });
+      const reference = await reader.resolve("shared.txt");
+      if (reference === null || reference.provenance.kind !== "archive") throw new Error("Missing borrowed archive resource");
+      await expect(reader.read({ ...reference, digest: createContentDigest("0".repeat(64)) })).rejects.toThrow("bytes changed since resolution");
+      await expect(reader.read({ ...reference, provenance: { ...reference.provenance, memberIndex: 999 } })).rejects.toThrow("Archive member identity changed");
+      await expect(reader.read({ ...reference, provenance: { ...reference.provenance, mount: { ...reference.provenance.mount,
+        identity: { ...reference.provenance.mount.identity, generation: 999 } } } })).rejects.toThrow("Stale resource mount");
+      expect(() => owner.borrowOrderedReader({ ...plan, defaultOrder: reverse.slice(1) })).toThrow("every fallback mount");
+      expect(() => owner.borrowOrderedReader({ ...plan, defaultOrder: [high.identity.id, high.identity.id, loose.identity.id] })).toThrow("repeats mount");
+      expect(() => owner.borrowOrderedReader({ ...plan, defaultOrder: [...reverse, createMountIdentity("mount:borrow:unknown", "q1:classic:id1:installed", 0).id] })).toThrow("unknown mount");
+      expect(() => owner.borrowOrderedReader({ ...plan, prefixOrders: [{ prefix: "../bad", mounts: reverse }] })).toThrow("Invalid relative");
+      expect(() => owner.borrowOrderedReader({ ...plan, prefixOrders: [{ prefix: "shared", mounts: reverse.slice(1) }] })).toThrow("every fallback mount");
+      const inFlight = reader.open("guest.cfg");
+      owner.close();
+      await expect(inFlight).rejects.toThrow("closed");
+      await expect(reader.open("shared.txt")).rejects.toThrow("closed");
+      await expect(reader.resolve("shared.txt")).rejects.toThrow("closed");
+      await expect(reader.read("shared.txt")).rejects.toThrow("closed");
+      await expect(reader.read(reference)).rejects.toThrow("closed");
+      expect(() => owner.borrowOrderedReader(plan)).toThrow("closed");
+      owner.close();
+    }
+    await expect(openMountPlan(plan, { pure: { archives: [createContentDigest("0".repeat(64))] } })).rejects.toThrow("Required pure archive is missing");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("borrowed readers retain archive source checks and create no archive opens", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "borrowed-mount-opens-"));
+  try {
+    const path = resolve(root, "counted.pak"), bytes = pak("shared.txt", "original");
+    await writeFile(path, bytes);
+    const mount: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:borrow:counted", "q1:classic:id1:installed", 0), format: "pak", archivePath: path, archiveDigest: digestBytes(bytes) };
+    const plan: ResolvedMountPlan = { id: "mount-plan:borrow:counted", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] };
+    using owner = await openMountPlan(plan);
+    for (let index = 0; index < 12; index++) {
+      const reader = owner.borrowOrderedReader({ ...plan, id: createMountPlanId("borrow", String(index)) });
+      expect(new TextDecoder().decode(await reader.read("shared.txt"))).toBe("original");
+    }
+    expect(owner.openedResources).toEqual([]);
+    expect(owner.referencedArchives).toEqual([mount]);
+    const reader = owner.borrowOrderedReader(plan);
+    const mutableOrder = [...plan.defaultOrder];
+    const copied = owner.borrowOrderedReader({ ...plan, defaultOrder: mutableOrder });
+    mutableOrder.length = 0;
+    expect(new TextDecoder().decode(await copied.read("shared.txt"))).toBe("original");
+    await writeFile(path, pak("shared.txt", "modified"));
+    await expect(reader.read("shared.txt")).rejects.toThrow("source changed");
+    await expect(openMountPlan(plan)).rejects.toThrow("Archive bytes changed before mount");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

@@ -124,8 +124,8 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
     for (const content of new Set(group.requests.map(request => request.content))) {
       const order = await orderForContent(options.catalog, mounted.plan, content);
       const allowed = await options.catalog.mountsFor(content);
-      using sourceMounts = await openMountPlan({ ...mounted.plan, id: createMountPlanId(group.kind, Buffer.from(content).toString("hex")),
-        defaultOrder: order, prefixOrders: [] }, options.mounts);
+      const sourceMounts = mounted.borrowOrderedReader({ id: createMountPlanId(group.kind, Buffer.from(content).toString("hex")),
+        defaultOrder: order, prefixOrders: [] });
       for (const request of group.requests.filter(request => request.content === content)) {
         const resource = await sourceMounts.resolve(request.path);
         if (resource === null || !allowed.some(mount => mountPath(mount) === mountPath(resource.provenance.mount))) {
