@@ -45,6 +45,12 @@ Four later source units are accepted but are not in the installed `379086a` exec
 - `4fe1c6d` clamps CPU fragments before blending to match normalized GL targets and makes the color-ratio fixture explicitly unsaturated without changing its thresholds. Root numeric and CPU checks passed 16 tests with 282 assertions; the broader real-world, material, and shadow checks passed 17 tests with 257 assertions.
 - `c07d296736e53f502dcf0618fb9ada368d9f0a03` caches decoding for four menu images and gives each caller independent pixels. Root UI checks passed nine tests with 119 assertions, with one opt-in SDL test skipped. In one actual Play transition, menu-art preparation fell from 901.514 to 9.857 ms. Returned-menu pixels matched exactly, and both native runs exited normally. Loaded frames were visually reviewed; their first simulation steps used uncontrolled wall-clock timing, so no full pixel-parity claim is made. A remaining maximum audio pump interval of 820 ms is unresolved.
 
+Three additional accepted source units also remain outside the installed `379086a` executable:
+
+- `6e858cc` precaches effect skins and materials before gameplay. Root passed five effect-cache tests with 26 assertions, including failure and lifetime behavior. One 30-second artifact comparison moved an approximately 80 ms effect-resource stall into loading, with gameplay resource work at most 0.080 ms and about 2.105 seconds added to loading. The final source includes later type, freeze, and lifetime changes beyond that measured artifact. Audio queue policy is unchanged; the cold-frame two-second queue remains open.
+- `81eb805` reuses GL packing buffers. Root passed two actual GL and byte tests with 402 assertions. Four color and shadow-depth captures and 5,813 packing calls covering 13,230,732 bytes matched; backing allocations fell from 40,691 to five. This is not an FPS claim. A whole-world command-hash difference remains unresolved; swap-only hashes do not prove world equivalence.
+- `ec8fd304c263bc3041d1d72a5785510346c84be0` reuses mounted archive owners for scoped content providers. Root passed all 13 mount and Q3 client-content tests with 514 assertions, including actual retail pure admission. Mount shapes matched, and a paired trace avoided 12 archive opens and six hashes. No end-to-end loading-time gain is claimed.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
