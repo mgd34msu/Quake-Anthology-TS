@@ -541,6 +541,7 @@ export class Q3SourceRuntime {
     this.remapTeams(); this.settings.update(); this.loaded = true;
     const unknown = this.mapReport.outcomes.filter(outcome => outcome.kind === "unknown");
     if (unknown.length !== 0) throw new Error("Unimplemented authored Q3 spawns: " + unknown.map(outcome => outcome.classname).join(", "));
+    this.host.configstrings.set(0, this.host.serverState.serverInfo());
     return this.mapReport;
   }
 
@@ -592,6 +593,7 @@ export class Q3SourceRuntime {
       for (let index = 0; index < MAX_GENTITIES; index++) this.host.engine.print(gameFormat("%4i: %s\n", [index, this.pool.at(index).classname]));
       this.setCvar("g_listEntity", "0");
     }
+    this.host.configstrings.set(0, this.host.serverState.serverInfo());
     this.publishEvents();
   }
 

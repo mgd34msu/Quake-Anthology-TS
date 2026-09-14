@@ -62,7 +62,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       cvars.set('sv_pakNames', cvars.variableValue('sv_pure') !== 0 ? refs.loadedPakNames() : '', true);
       cvars.set('sv_referencedPaks', refs.referencedPakChecksums(), true);
       cvars.set('sv_referencedPakNames', refs.referencedPakNames(), true);
-      for (const [index, value] of [[1, cvars.infoString(CvarFlag.SystemInfo, 8192)], [0, cvars.infoString(CvarFlag.ServerInfo)]] satisfies readonly (readonly [number, string])[]) {
+      for (const [index, value] of [[1, cvars.infoString(CvarFlag.SystemInfo, 8192)], [0, state.serverInfo()]] satisfies readonly (readonly [number, string])[]) {
         if (!guest) source.host.configstrings.set(index, value);
         else if (state.configstrings.get(index) !== value) {
           state.configstrings.set(index, value); await configstring?.(index, value);
@@ -108,7 +108,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     gameState: (player, serverId) => {
       const entries = configEntries().filter(entry => entry.kind !== 'configstring' || (entry.index !== 0 && entry.index !== 1));
       cvars.set('sv_serverid', String(serverId), true);
-      entries.unshift({ kind: 'configstring', index: 0, value: cvars.infoString(CvarFlag.ServerInfo) },
+      entries.unshift({ kind: 'configstring', index: 0, value: state.serverInfo() },
         { kind: 'configstring', index: 1, value: cvars.infoString(CvarFlag.SystemInfo, 8192) });
       for (let number = 1; number < entityCount(); number++) if (linked(number)) entries.push({ kind: 'baseline', number, entity: wireEntity(number) });
       return { kind: 'gamestate', commandSequence: 0, entries, clientNumber: player.sourceEntity, checksumFeed: archiveState().references.references.checksumFeed | 0 };

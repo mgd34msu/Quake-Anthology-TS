@@ -26,7 +26,7 @@ import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
 import { replacementEntity } from "./replacements.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
-import { attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldPoint } from "./transform.ts";
+import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, q3ModelViewOrigin } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
 import type { ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
 
@@ -307,7 +307,7 @@ export class SceneModelRenderer {
         const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
         const base = this.world.materialContext(input, transform);
         const context = { ...base, entityRGBA: byteColor(entity.color),
-          localViewOrigin: modelLocalDelta(surface.transform, sub3(input.camera.origin, surface.transform.origin)),
+          localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, source.nonNormalizedAxes === true),
           timeOffset: (entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000) + material.timeOffset,
           deformView: { ...base.deformView, nonNormalizedAxis: source.nonNormalizedAxes === true ? transform.axis[0] : null } };
         const geometry = shadowMaterialGeometry(material.compiled, surface.localGeometry, context);
@@ -370,7 +370,7 @@ export class SceneModelRenderer {
       const project = createViewProjector(input.camera);
       const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
         shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
-        localViewOrigin: modelLocalDelta(surface.transform, sub3(input.camera.origin, surface.transform.origin)), depthRange: surface.depthRange,
+        localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, options.nonNormalizedAxes === true), depthRange: surface.depthRange,
         timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
         project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };

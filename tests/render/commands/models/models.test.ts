@@ -176,6 +176,18 @@ test("retained Q1, Q2 and Q3 model resources preserve actual Q2 and Q3 world lig
       && batch.texture.image.source.name.startsWith("models/monsters/soldier/"))).toBe(true);
     expect(batches3.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated"
       && batch.texture.image.source.name.startsWith("models/players/sarge/"))).toBe(true);
+    const rocketAsset = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/weapons2/rocketl/rocketl.md3", "q3");
+    const rocket = entity(toSceneMd3(parseMd3(rocketAsset.bytes)), rocketAsset.resource, "q3");
+    const respawnOrigin = { x: 674.6016845703125, y: 2103.394287109375, z: 25.288625717163086 };
+    const respawningRocket = { ...rocket, transform: { origin: respawnOrigin,
+      axis: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }], scale: { x: 1, y: 1, z: 1 } },
+      previousOrigin: respawnOrigin, pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } } satisfies SceneEntity;
+    const respawnOptions = () => ({ nonNormalizedAxes: true });
+    await cache3.preload([respawningRocket], respawnOptions);
+    const respawnInput = { ...input, camera: { ...view, origin: { ...respawnOrigin, x: respawnOrigin.x - 100 } } };
+    const respawnBatches = sceneModelBatches(cache3.prepare([respawningRocket], respawnInput, respawnOptions));
+    expect(respawnBatches.some(batch => batch.indices.length > 0)).toBe(true);
+    expect(respawnBatches.every(batch => batch.vertices.every(vertex => [vertex.position.x, vertex.position.y, vertex.position.z, vertex.position.w].every(Number.isFinite)))).toBe(true);
     if (body3.model.kind !== "q3-md3") throw new Error("Expected Sarge MD3 fixture");
     const originalSurface = body3.model.surfaces[0];
     if (originalSurface === undefined) throw new Error("Sarge fixture has no surface");

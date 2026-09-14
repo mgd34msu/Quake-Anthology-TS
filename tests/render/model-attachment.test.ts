@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ModelTransform } from "../../src/contracts/scene.ts";
 import { alignModelAttachment } from "../../src/render/scene/models/attachment.ts";
-import { composeModelTransform, modelWorldDirection, modelWorldPoint } from "../../src/render/scene/models/transform.ts";
+import { composeModelTransform, modelWorldDirection, modelWorldPoint, modelLocalDelta, q3ModelViewOrigin } from "../../src/render/scene/models/transform.ts";
 import { add3, scale3 } from "../../src/core/math.ts";
 import { q2HeldWeapon } from "../../src/content/q2/foundation/held-weapons.ts";
 import { Q3_WEAPON_HAND_GRIP } from "../../src/content/q3/foundation/held-weapons.ts";
@@ -53,4 +53,18 @@ test("Q2 blaster uses the held mesh and reference grip instead of its first-pers
   const placement = alignModelAttachment(held.grip, Q3_WEAPON_HAND_GRIP);
   closePoint(modelWorldPoint(placement, held.grip.origin), Q3_WEAPON_HAND_GRIP.origin);
   expect(q2HeldWeapon("models/weapons/v_shotg/tris.md2")).toBeNull();
+});
+
+
+test("Q3 shader view origin follows R_RotateForEntity including item respawn axes", () => {
+  const origin = { x: 674.6016845703125, y: 2103.394287109375, z: 25.288625717163086 };
+  const camera = add3(origin, { x: 8, y: 10, z: 12 });
+  const zero: ModelTransform = { origin, axis: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }], scale: { x: 1, y: 1, z: 1 } };
+  expect(q3ModelViewOrigin(zero, camera, true)).toEqual({ x: 0, y: 0, z: 0 });
+  expect(() => modelLocalDelta(zero, camera)).toThrow("Model transform is singular");
+  const scaledCamera = { x: 8, y: 10, z: 12 };
+  const scaled: ModelTransform = { ...zero, origin: { x: 0, y: 0, z: 0 }, axis: [{ x: 2, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 0, z: 4 }] };
+  expect(q3ModelViewOrigin(scaled, scaledCamera, false)).toEqual({ x: 16, y: 30, z: 48 });
+  expect(q3ModelViewOrigin(scaled, scaledCamera, true)).toEqual({ x: 8, y: 15, z: 24 });
+  expect(q3ModelViewOrigin({ ...scaled, axis: [zero.axis[0], scaled.axis[1], scaled.axis[2]] }, camera, true)).toEqual({ x: 0, y: 0, z: 0 });
 });

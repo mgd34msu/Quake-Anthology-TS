@@ -6,7 +6,7 @@ import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared
 import { ConnectionState } from "../../../content/q3/base/game/state.ts";
 import { pickTeam } from "../../../content/q3/team-arena/session.ts";
 import { createBotArsenalKnowledge } from "./arsenal-knowledge.ts";
-import { Weapon, ItemType, statSchema } from "../../../content/q3/base/shared/definitions.ts";
+import { Weapon, ItemType, statSchema, weaponCount } from "../../../content/q3/base/shared/definitions.ts";
 import { updateQ3BotInventory, updateQ3BotItemInventory } from "./ai-combat.ts";
 import type { SourceBotGame, BotObservedPickup, BotPickupObservations } from "./game-host.ts";
 
@@ -45,7 +45,7 @@ export function q3BotGame(source: Q3SourceRuntime, insertConsoleCommand: (text: 
     get entityCount() { return source.pool.numEntities; },
     world: source.world, random: source.random, clock: source.level, memory: source.memory,
     knowledge: arsenal === undefined ? createBotArsenalKnowledge({ updateInventory: updateQ3BotInventory,
-      candidates: (library, handle) => Array.from({ length: source.options.product === "missionpack" ? 14 : 11 }, (_, weapon) => weapon).flatMap(weapon => {
+      candidates: (library, handle) => Array.from({ length: weaponCount(source.options.product) - 1 }, (_, index) => index + 1).flatMap(weapon => {
         const info = library.weapons.getWeaponInfo(handle, weapon); return info === undefined || !info.valid ? [] : [{ info, maximumRange: weapon === Weapon.WP_GAUNTLET ? 60 : null,
           melee: weapon === Weapon.WP_GAUNTLET, personalityRole: weapon, supply: null }];
       }) }) : { ...arsenal.knowledge, updateInventory: state => {

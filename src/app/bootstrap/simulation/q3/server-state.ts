@@ -63,11 +63,19 @@ export class Q3ServerState {
   constructor(private readonly options: Q3ServerStateOptions) {
     const settings = options.settings;
     this.cvars = new CvarRegistry({ dialect: 'q3', context: { session: options.session, origin: { kind: 'server-console' } }, print: text => options.print(text) });
-    this.cvars.set('sv_maxclients', String(settings.maxClients), true);
+    this.cvars.register('sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
     this.cvars.set('sv_mapname', settings.mapName, true);
     this.cvars.register('mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
     for (const variable of settings.cvars ?? []) this.cvars.set(variable.name, variable.value, true);
+    this.refreshServerInfo();
   }
+  refreshServerInfo(): string | null {
+    const value = this.serverInfo();
+    if (this.values.get(0) === value) return null;
+    this.values.set(0, value);
+    return value;
+  }
+  serverInfo(): string { return this.cvars.infoString(CvarFlag.ServerInfo); }
   private configIndex(index: number): void {
     if (!Number.isInteger(index) || index < 0 || index >= 1024) throw new RangeError('Q3 configstring outside source range');
   }

@@ -1,6 +1,6 @@
 import type { Axis, Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { ModelTag, ModelTransform, SceneEntity } from "../../../contracts/scene.ts";
-import { add3, addPointToBounds, cross3, dot3, emptyBounds, scale3, sub3 } from "../../../core/math.ts";
+import { add3, addPointToBounds, cross3, dot3, emptyBounds, length3, scale3, sub3, vec3 } from "../../../core/math.ts";
 import { interpolateMd3Tags } from "../../../formats/q3-model/md3.ts";
 import { sampleMd5Pose } from "../../../formats/q3-model/md5.ts";
 import { jointAttachmentTag } from "../../../formats/q3-model/scene.ts";
@@ -29,6 +29,14 @@ export function modelWorldPoint(transform: ModelTransform, value: Vec3): Vec3 {
     y: Math.fround(transform.origin.y + Math.fround(Math.fround(Math.fround(forward.y * x) + Math.fround(left.y * y)) + Math.fround(up.y * z))),
     z: Math.fround(transform.origin.z + Math.fround(Math.fround(Math.fround(forward.z * x) + Math.fround(left.z * y)) + Math.fround(up.z * z))),
   };
+}
+
+/** Q3 R_RotateForEntity projects onto the axes, with reciprocal first-axis length. */
+export function q3ModelViewOrigin(transform: Pick<ModelTransform, "origin" | "axis">, camera: Vec3, nonNormalizedAxes: boolean): Vec3 {
+  const delta = sub3(camera, transform.origin), [forward, left, up] = transform.axis;
+  const length = length3(forward);
+  const scale = nonNormalizedAxes ? length === 0 ? 0 : Math.fround(1 / length) : 1;
+  return vec3(dot3(delta, forward) * scale, dot3(delta, left) * scale, dot3(delta, up) * scale);
 }
 
 export function modelLocalDelta(transform: ModelTransform, value: Vec3): Vec3 {
