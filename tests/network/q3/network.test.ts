@@ -6,7 +6,13 @@ import type { Q3AcceptedConnect, Q3OutgoingDatagram } from "../../../src/network
 import { Q3ClientConnection } from "../../../src/network/q3/client.ts";
 import { Q3ClientDownload, Q3ServerDownload } from "../../../src/network/q3/download.ts";
 import { MessageReader, MessageWriter } from "../../../src/network/q3/message.ts";
-import { Netchannel } from "../../../src/network/q3/netchan.ts";
+import { ClientMessageReader, encodeClientMessage } from "../../../src/network/q3/client-message.ts";
+import { encodeConnect } from "../../../src/network/q3/connectionless.ts";
+import { Q3ServerConfigStrings } from "../../../src/network/q3/configstrings.ts";
+import { Q3ServerNetwork } from "../../../src/app/bootstrap/network/q3.ts";
+import type { Q3ApplicationServerHost } from "../../../src/app/bootstrap/network/q3-types.ts";
+import type { WireUserCommand } from "../../../src/network/q3/message.ts";
+import { Netchannel, xorClientMessage } from "../../../src/network/q3/netchan.ts";
 import { verifyQ3PureCommand, q3ArchiveChecksums } from "../../../src/network/q3/pure.ts";
 import { Q3ServerConnection } from "../../../src/network/q3/server.ts";
 import { ServerOpcode, decodeServerMessage } from "../../../src/network/q3/server-message.ts";
@@ -67,10 +73,10 @@ test("real shared loopback exchanges gamestate, user commands, snapshots and a d
       await client.receiveDatagram(packet.payload, now);
     }
   }
-  function readServer(): void {
+  async function readServer(): Promise<void> {
     for (let packet = serverTransport.poll(); packet !== null; packet = serverTransport.poll()) {
       if (packet.kind !== "packet") throw new Error("Loopback delivery failed");
-      server.receiveDatagram(packet.payload);
+      await server.receiveDatagram(packet.payload);
     }
   }
   const rate = { rate: 25000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: true, lan: true };
@@ -79,7 +85,7 @@ test("real shared loopback exchanges gamestate, user commands, snapshots and a d
     await readClient(); expect(client.serverId).toBe(42); expect(client.clientNumber).toBe(1); expect(client.identity.seat?.index).toBe(1);
     client.reliable.add('userinfo "\\name\\Ranger"');
     for (const serverTime of [100, 200]) client.commands.append({ serverTime, angles: [0, 16384, 0], buttons: 1, weapon: 5, forwardmove: 127, rightmove: 0, upmove: 0 });
-    client.transmit({ realTime: now, packetDup: 1, noDelta: false }, clientDelivery); readServer();
+    client.transmit({ realTime: now, packetDup: 1, noDelta: false }, clientDelivery); await readServer();
     expect(entered).toEqual([100]); expect(moves).toEqual([200]); expect(executed).toEqual(['userinfo "\\name\\Ranger"']);
     const player = new PlayerStateRecord<number, number, number>("missionpack", 0, 5, 0);
     player.clientNum = 1; player.commandTime = 200; player.origin = { x: 10, y: 20, z: 30 }; player.stats.set(0, 100);
@@ -88,7 +94,7 @@ test("real shared loopback exchanges gamestate, user commands, snapshots and a d
     await readClient(); expect(received).toHaveLength(1); expect(received[0]?.playerState.origin).toEqual(player.origin);
     expect(client.reliable.acknowledge).toBe(1);
     now = 1100; client.commands.append({ serverTime: 300, angles: [0, 16384, 0], buttons: 0, weapon: 5, forwardmove: 64, rightmove: 0, upmove: 0 });
-    client.transmit({ realTime: now, packetDup: 1, noDelta: false }, clientDelivery); readServer();
+    client.transmit({ realTime: now, packetDup: 1, noDelta: false }, clientDelivery); await readServer();
     expect(server.deltaMessage).toBe(2); expect(moves).toEqual([200, 300]); expect(executed).toHaveLength(1);
     player.origin = { ...player.origin, x: 11 }; player.commandTime = 300;
     snapshots.capture(server.channel.outgoingSequence, player, Uint8Array.of(254), [entity]); server.sendSnapshot(0, rate, serverDelivery, () => {});
@@ -97,7 +103,7 @@ test("real shared loopback exchanges gamestate, user commands, snapshots and a d
   } finally { hub.close(); }
 });
 
-test("challenge and compressed connect produce actual source admission fields", () => {
+test("challenge and compressed connect produce actual source admission fields", async () => {
   const replies: Q3OutgoingDatagram[] = [], admitted: Q3AcceptedConnect[] = [];
   const serverAddress = { kind: "ipv4", host: [127, 0, 0, 1], port: 27960 } satisfies import("../../../src/network/q3/admission.ts").Q3Address;
   const clientAddress = { kind: "ipv4", host: [127, 0, 0, 1], port: 31000 } satisfies import("../../../src/network/q3/admission.ts").Q3Address;
@@ -110,11 +116,11 @@ test("challenge and compressed connect produce actual source admission fields", 
   });
   client.begin(serverAddress);
   const challenge = client.resend(100, "\\name\\Ranger"); if (challenge === null) throw new Error("Missing getchallenge");
-  server.receive(clientAddress, challenge.payload, 100);
+  await server.receive(clientAddress, challenge.payload, 100);
   const response = replies.shift(); if (response === undefined) throw new Error("Missing challengeResponse");
   client.receive(serverAddress, response.payload, 110);
   const connect = client.resend(110, "\\name\\Ranger"); if (connect === null) throw new Error("Missing connect");
-  server.receive(clientAddress, connect.payload, 120);
+  await server.receive(clientAddress, connect.payload, 120);
   const connected = replies.shift(); if (connected === undefined) throw new Error("Missing connectResponse");
   expect(client.receive(serverAddress, connected.payload, 125).kind).toBe("admitted");
   expect(admitted[0]?.qport).toBe(4711); expect(admitted[0]?.userinfo).toContain("\\ip\\127.0.0.1:31000");
@@ -137,7 +143,7 @@ test("download window transfers two data blocks and EOF through the actual messa
   }
   expect(Buffer.concat(received)).toEqual(Buffer.from(data)); expect(published && completed).toBe(true);
   expect(commands).toEqual(["download mods/example.pk3", "nextdl 0", "nextdl 1", "nextdl 2"]);
-  for (const block of [0, 1, 2]) server.acknowledge(block, 2100);
+  for (const block of [0, 1, 2]) await server.acknowledge(block, 2100);
   expect(server.name).toBe("");
 });
 
@@ -154,4 +160,136 @@ test.skipIf(!await Bun.file(retailPak).exists())("retail Q3 pak0 source checksum
   const archive = await openArchive(retailPak);
   try { expect(q3ArchiveChecksums(archive, 0x12345678)).toEqual({ checksum: 1566731103, pureChecksum: 3017657714 }); }
   finally { archive.close(); }
+});
+
+function orderedWireCommand(serverTime: number): WireUserCommand {
+  return { serverTime, angles: [0, 0, 0], buttons: 0, weapon: 2, forwardmove: 0, rightmove: 0, upmove: 0 };
+}
+
+function orderedConnection(bindings: import("../../../src/network/q3/server.ts").Q3ServerBindings): Q3ServerConnection {
+  const owner = createIdentityOwner("q3-await-wire");
+  return new Q3ServerConnection({ client: owner.client(0, 0), seat: null }, 0, 77,
+    new Q3ServerSnapshotHistory(new Q3SnapshotEntities(2048), "baseq3", () => new EntityStateRecord<number>(0)), bindings);
+}
+
+function orderedMessage(commands: readonly string[], times: readonly number[]): ClientMessageReader {
+  return new ClientMessageReader(encodeClientMessage({ header: { serverId: 42, messageAcknowledge: 0, reliableAcknowledge: 0 },
+    commands: commands.map((text, index) => ({ sequence: index + 1, text })),
+    movement: times.length === 0 ? null : { kind: "move-no-delta", commands: times.map(orderedWireCommand) },
+  }, { checksumFeed: 0, serverCommand: () => "" }));
+}
+
+test("Q3 server awaits reliable commands, begin and each think in wire order", async () => {
+  const commandGate = Promise.withResolvers<void>(), beginGate = Promise.withResolvers<void>(), thinkGate = Promise.withResolvers<void>();
+  const beginEntered = Promise.withResolvers<void>(), thinkEntered = Promise.withResolvers<void>();
+  const calls: string[] = [];
+  const server = orderedConnection({ assertCurrent() {}, serverId: () => 42, restartedServerId: () => 42, checksumFeed: () => 0,
+    pure: () => false, debugBuild: false, time: () => 0, clientRunning: () => true, floodProtect: () => false, downloadName: () => "",
+    async command(command) { calls.push(command.text); if (command.text === "one") await commandGate.promise; return true; },
+    async enterWorld(command) { calls.push(`begin:${command.serverTime}`); beginEntered.resolve(); await beginGate.promise; },
+    async think(command) { calls.push(`think:${command.serverTime}`); if (command.serverTime === 20) { thinkEntered.resolve(); await thinkGate.promise; } },
+    resendGamestate() {}, drop(reason) { throw new Error(reason); }, print() {},
+  });
+  server.phase = "primed";
+  const pending = server.executeMessage(orderedMessage(["one", "two"], [10, 20, 30]));
+  expect(calls).toEqual(["one"]); expect(server.lastClientCommand).toBe(0);
+  commandGate.resolve(); await beginEntered.promise;
+  expect(calls).toEqual(["one", "two", "begin:10"]); expect(server.lastClientCommand).toBe(2);
+  beginGate.resolve(); await thinkEntered.promise;
+  expect(calls).toEqual(["one", "two", "begin:10", "think:20"]);
+  thinkGate.resolve(); await pending;
+  expect(calls).toEqual(["one", "two", "begin:10", "think:20", "think:30"]);
+});
+
+test("Q3 server stops a suspended packet after peer drop or world replacement", async () => {
+  for (const retirement of ["peer", "world"]) {
+    const gate = Promise.withResolvers<void>(), calls: string[] = []; let serverId = 42;
+    const server = orderedConnection({ assertCurrent() {}, serverId: () => serverId, restartedServerId: () => serverId, checksumFeed: () => 0,
+      pure: () => false, debugBuild: false, time: () => 0, clientRunning: () => true, floodProtect: () => false, downloadName: () => "",
+      async command(command) { calls.push(command.text); await gate.promise; return true; }, enterWorld() {}, think() {}, resendGamestate() {}, drop() {}, print() {},
+    });
+    const pending = server.executeMessage(orderedMessage(["one", "two"], []));
+    if (retirement === "peer") server.phase = "zombie"; else serverId++;
+    gate.resolve();
+    if (retirement === "world") await expect(pending).rejects.toThrow("retired server world"); else await pending;
+    expect(calls).toEqual(["one"]); expect(server.lastClientCommand).toBe(0);
+  }
+});
+
+test("Q3 configstring overflow and broken download acknowledgement await peer drop", async () => {
+  const gate = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>(); let dropped = false;
+  const server = orderedConnection({ assertCurrent() {}, serverId: () => 42, restartedServerId: () => 42, checksumFeed: () => 0,
+    pure: () => false, debugBuild: false, time: () => 0, clientRunning: () => true, floodProtect: () => false, downloadName: () => "",
+    command: () => true, enterWorld() {}, think() {}, resendGamestate() {}, print() {},
+    async drop() { entered.resolve(); await gate.promise; server.phase = "zombie"; dropped = true; },
+  });
+  server.phase = "active";
+  for (let index = 0; index < 64; index++) server.reliable.add(`pending ${index}`);
+  const strings = new Q3ServerConfigStrings({ running: () => true, restarting: () => false, clients: () => [{ connection: server, noServerInfo: false }] });
+  const pending = strings.set(2, "x".repeat(3000)); await entered.promise;
+  expect(dropped).toBe(false); expect(server.reliable.sequence).toBe(65);
+  gate.resolve(); await pending; expect(dropped).toBe(true); expect(server.reliable.sequence).toBe(65);
+  const downloadGate = Promise.withResolvers<void>(); let finished = false;
+  const download = new Q3ServerDownload({ enabled: () => true, pure: () => false, open: () => null, print() {}, async drop() { await downloadGate.promise; finished = true; } });
+  const acknowledgement = download.acknowledge(1, 0);
+  expect(finished).toBe(false); downloadGate.resolve(); await acknowledgement; expect(finished).toBe(true);
+});
+
+test("Q3 network close waits for suspended think and retires later wire commands", async () => {
+  const hub = new LoopbackHub(), transport = hub.bind("await-server"), client = hub.bind("await-client");
+  const owner = createIdentityOwner("q3-await-network"), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
+  const gate = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>(), calls: string[] = [];
+  const host: Q3ApplicationServerHost = {
+    product: "baseq3", maxClients: 1, async prepare() {},
+    pure: () => ({ enabled: false, checksumFeed: 0, checksumFeedServerId: 1, cgameChecksum: undefined, uiChecksum: undefined, loadedPureChecksums: [] }),
+    downloadsEnabled: () => false, openDownload: () => null,
+    rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: false, lan: true }),
+    supportsSourceWire: () => ({ kind: "supported" }), time: () => 0, occupiedSlots: () => [],
+    admit: () => ({ kind: "accepted", player }), carriedPlayer: () => player,
+    disconnect() { calls.push("disconnect"); },
+    gameState: () => ({ kind: "gamestate", commandSequence: 0, entries: [], clientNumber: 0, checksumFeed: 0 }),
+    snapshot: () => ({ player: new PlayerStateRecord("baseq3", 0, 0, 0), areaMask: new Uint8Array(), entities: [] }),
+    async input(player, command, sequence) {
+      calls.push(`input:${command.serverTime}`);
+      if (command.serverTime === 20) { entered.resolve(); await gate.promise; }
+      return { actor: player.actor, source: { kind: "remote-client", client: player.client }, sequence,
+        command: { kind: "q3", serverTimeMilliseconds: command.serverTime, angleWords: command.angles, buttons: command.buttons,
+          weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } };
+    },
+    command() {}, userinfo() {}, status: () => "", print() {},
+  };
+  const network = new Q3ServerNetwork({ transport, host, random: () => 0 });
+  const channel = new Netchannel("client", 77);
+  function send(times: readonly number[]): void {
+    const bytes = encodeClientMessage({ header: { serverId: 1, messageAcknowledge: 0, reliableAcknowledge: 0 }, commands: [],
+      movement: times.length === 0 ? null : { kind: "move-no-delta", commands: times.map(orderedWireCommand) } }, { checksumFeed: 0, serverCommand: () => "" });
+    for (const packet of channel.transmit(xorClientMessage(bytes, 0, () => ""))) client.send(transport.address, packet);
+  }
+  try {
+    client.send(transport.address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0")); await network.poll(0);
+    expect(network.clients).toHaveLength(1); send([]); await network.poll(1);
+    send([10, 20, 30]); const polling = network.poll(2); await entered.promise;
+    const closing = network.close(); expect(network.close()).toBe(closing);
+    expect(network.phase).toBe("closed"); expect(transport.closed).toBe(false); expect(calls).toEqual(["input:10", "input:20"]);
+    gate.resolve(); expect(await polling).toEqual([]); await closing;
+    expect(calls).toEqual(["input:10", "input:20", "disconnect"]); expect(transport.closed).toBe(true);
+  } finally { gate.resolve(); await network.close(); hub.close(); }
+});
+
+test("Q3 admission awaits connect decision and suppresses replies after owner closes", async () => {
+  for (const closeWhileWaiting of [false, true]) {
+    const gate = Promise.withResolvers<string | null>(), entered = Promise.withResolvers<void>();
+    const replies: Q3OutgoingDatagram[] = []; let enabled = true;
+    const address = { kind: "loopback", id: "deferred-admission" } satisfies import("../../../src/network/q3/admission.ts").Q3Address;
+    const server = new Q3ServerAdmission({ enabled: () => enabled,
+      slots: () => [{ slot: 0, phase: "free", address: null, bot: false, qport: 0, lastConnectTime: 0 }], privateClients: () => 0, privatePassword: () => "",
+      reconnectLimitSeconds: () => 3, minimumPing: () => 0, maximumPing: () => 0, authorizeAddress: () => null, demoRestricted: () => false,
+      isLan: () => true, random: () => 0, authorize() {}, send(to, payload) { replies.push({ to, payload }); },
+      async admit() { entered.resolve(); return await gate.promise; }, dropBot() {}, print() {}, query() {},
+    });
+    const pending = server.receive(address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0"), 0);
+    await entered.promise; expect(replies).toEqual([]);
+    if (closeWhileWaiting) enabled = false;
+    gate.resolve(null); await pending; expect(replies).toHaveLength(closeWhileWaiting ? 0 : 1);
+  }
 });

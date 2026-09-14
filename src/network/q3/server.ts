@@ -26,11 +26,11 @@ export interface Q3ServerBindings {
   readonly clientRunning: () => boolean;
   readonly floodProtect: () => boolean;
   readonly downloadName: () => string;
-  command(command: ReliableCommand, clientOK: boolean): boolean;
-  enterWorld(command: WireUserCommand): void;
-  think(command: WireUserCommand): void;
-  resendGamestate(): void;
-  drop(reason: string): void;
+  command(command: ReliableCommand, clientOK: boolean): boolean | Promise<boolean>;
+  enterWorld(command: WireUserCommand): void | Promise<void>;
+  think(command: WireUserCommand): void | Promise<void>;
+  resendGamestate(): void | Promise<void>;
+  drop(reason: string): void | Promise<void>;
   print(text: string): void;
 }
 export interface Q3ServerRate {
@@ -67,27 +67,27 @@ export class Q3ServerConnection {
     this.channel = new Netchannel("server", qport);
     this.sourceState = new SourceMessageState(text => { bindings.print(text); });
   }
-  receiveDatagram(packet: Uint8Array): ChannelResult {
+  async receiveDatagram(packet: Uint8Array): Promise<ChannelResult> {
     this.bindings.assertCurrent();
     const result = this.channel.receive(packet);
     if (result.kind !== "accepted" || this.phase === "zombie") return result;
-    this.executeMessage(new ClientMessageReader(xorClientMessage(result.payload, this.challenge, sequence => this.reliable.lookupMasked(sequence))));
+    await this.executeMessage(new ClientMessageReader(xorClientMessage(result.payload, this.challenge, sequence => this.reliable.lookupMasked(sequence))));
     return result;
   }
-  executeMessage(reader: ClientMessageReader): void {
-    const host = this.bindings;
+  async executeMessage(reader: ClientMessageReader): Promise<void> {
+    const host = this.bindings, serverId = host.serverId();
     host.assertCurrent();
     this.messageAcknowledge = reader.prefix.messageAcknowledge;
-    if (this.messageAcknowledge < 0) { if (host.debugBuild) host.drop("DEBUG: illegible client message"); return; }
+    if (this.messageAcknowledge < 0) { if (host.debugBuild) await host.drop("DEBUG: illegible client message"); return; }
     const header = reader.readHeader();
     this.reliable.assignAcknowledgement(header.reliableAcknowledge);
     if (this.reliable.acknowledge < this.reliable.sequence - 64) {
-      if (host.debugBuild) host.drop("DEBUG: illegible client message");
+      if (host.debugBuild) await host.drop("DEBUG: illegible client message");
       this.reliable.assignAcknowledgement(this.reliable.sequence); return;
     }
     if (header.serverId !== host.serverId() && host.downloadName().length === 0 && !this.lastClientCommandString.includes("nextdl")) {
       if (header.serverId >= host.restartedServerId() && header.serverId < host.serverId()) return;
-      if (this.messageAcknowledge > this.gamestateMessageNumber) host.resendGamestate();
+      if (this.messageAcknowledge > this.gamestateMessageNumber) await host.resendGamestate();
       return;
     }
     while (true) {
@@ -98,38 +98,43 @@ export class Q3ServerConnection {
       if (part.kind === "eof") return;
       if (part.kind === "command") {
         if (this.lastClientCommand >= part.command.sequence) continue;
-        if (part.command.sequence > ((this.lastClientCommand + 1) | 0)) { host.drop("Lost reliable commands"); return; }
+        if (part.command.sequence > ((this.lastClientCommand + 1) | 0)) { await host.drop("Lost reliable commands"); return; }
         const clientOK = host.clientRunning() || this.phase !== "active" || !host.floodProtect() || host.time() >= this.nextReliableTime;
         this.nextReliableTime = (host.time() + 1000) | 0;
-        if (!host.command(part.command, clientOK)) return;
-        host.assertCurrent();
+        if (!await host.command(part.command, clientOK) || !this.current(serverId)) return;
         this.lastClientCommand = part.command.sequence; this.lastClientCommandString = part.command.text.slice(0, 1023);
         if (this.phase === "zombie") return;
       } else {
         this.deltaMessage = part.deltaMessage;
-        this.userMove(reader); return;
+        await this.userMove(reader); return;
       }
     }
   }
-  private userMove(reader: ClientMessageReader): void {
-    const host = this.bindings;
+  private current(serverId: number): boolean {
+    if (this.phase === "zombie") return false;
+    this.bindings.assertCurrent();
+    if (serverId !== this.bindings.serverId()) throw new Error("Q3 client callback belongs to a retired server world");
+    return true;
+  }
+  private async userMove(reader: ClientMessageReader): Promise<void> {
+    const host = this.bindings, serverId = host.serverId();
     let movement: UnfilteredClientMovement;
     try { movement = reader.readMovement({ checksumFeed: host.checksumFeed(), serverCommand: sequence => this.reliable.lookupMasked(sequence) }); }
     catch (error) { if (!(error instanceof InvalidClientCommandCountError)) throw error; host.print(error.count < 1 ? "cmdCount < 1\n" : "cmdCount > MAX_PACKET_USERCMDS\n"); return; }
     this.snapshots.frame(this.messageAcknowledge).messageAcked = host.time();
-    if (host.pure() && !this.pureAuthentic && !this.gotPureCommand) { if (this.phase === "active") host.resendGamestate(); return; }
+    if (host.pure() && !this.pureAuthentic && !this.gotPureCommand) { if (this.phase === "active") await host.resendGamestate(); return; }
     if (this.phase === "primed") {
       this.lastUserCommand = movement.commands[0]; this.phase = "active";
-      host.enterWorld(this.lastUserCommand); host.assertCurrent();
+      await host.enterWorld(this.lastUserCommand); if (!this.current(serverId)) return;
     }
-    if (host.pure() && !this.pureAuthentic) { host.drop("Cannot validate pure client!"); return; }
+    if (host.pure() && !this.pureAuthentic) { await host.drop("Cannot validate pure client!"); return; }
     if (this.phase !== "active") { this.deltaMessage = -1; return; }
     const latest = movement.commands.at(-1);
     if (latest === undefined) throw new RangeError("Missing decoded user command");
     for (const command of movement.commands) {
       if (command.serverTime > latest.serverTime || command.serverTime <= this.lastUserCommand.serverTime) continue;
       this.lastUserCommand = { ...command, angles: [...command.angles] };
-      host.think(command); host.assertCurrent();
+      await host.think(command); if (!this.current(serverId)) return;
     }
   }
   private transmit(writer: MessageWriter, rate: Q3ServerRate, delivery: ChannelDelivery): void {
@@ -182,12 +187,12 @@ export class Q3ServerConnection {
       if (next !== undefined) this.channel.beginTransmit(xorServerMessage(next, this.challenge, this.channel.outgoingSequence, this.lastClientCommandString), delivery);
     }
   }
-  verifyPure(server: Q3PureServer, argv: readonly string[], sendRejectedSnapshot: () => void): Q3PureResult {
+  async verifyPure(server: Q3PureServer, argv: readonly string[], sendRejectedSnapshot: () => void): Promise<Q3PureResult> {
     const result = verifyQ3PureCommand(server, argv);
     if (result.kind === "ignored") return result;
     this.gotPureCommand = true; this.pureAuthentic = result.kind === "authentic";
     if (result.kind === "rejected") {
-      this.nextSnapshotTime = -1; this.phase = "active"; sendRejectedSnapshot(); this.bindings.drop(result.reason);
+      this.nextSnapshotTime = -1; this.phase = "active"; sendRejectedSnapshot(); await this.bindings.drop(result.reason);
     }
     return result;
   }

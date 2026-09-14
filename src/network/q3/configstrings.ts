@@ -22,16 +22,17 @@ export class Q3ServerConfigStrings {
     if (!Number.isInteger(bufferSize) || bufferSize < 1) throw new CommonError("drop", `SV_GetConfigstring: bufferSize == ${bufferSize}`);
     return this.get(index).slice(0, bufferSize - 1);
   }
-  private command(client: Q3ServerConnection, command: string): void {
+  private async command(client: Q3ServerConnection, command: string): Promise<boolean> {
     const result = client.reliable.add(command);
-    if (result.kind === "queued") return;
+    if (result.kind === "queued") return true;
     client.bindings.print("===== pending server commands =====\n");
     let sequence = client.reliable.acknowledge + 1;
     for (; sequence <= client.reliable.sequence; sequence++) client.bindings.print(`cmd ${String(sequence).padStart(5)}: ${client.reliable.lookupMasked(sequence)}\n`);
     client.bindings.print(`cmd ${String(sequence).padStart(5)}: ${command}\n`);
-    client.bindings.drop("Server command overflow");
+    await client.bindings.drop("Server command overflow");
+    return false;
   }
-  set(index: number, value: string | null): void {
+  async set(index: number, value: string | null): Promise<void> {
     if (!Number.isInteger(index) || index < 0 || index >= 1024) throw new CommonError("drop", `SV_SetConfigstring: bad index ${index}\n`);
     const text = sourceCommandText(value ?? "");
     for (let cursor = 0; cursor < text.length; cursor++) if (text.charCodeAt(cursor) > 255) throw new RangeError("Server configstrings require source byte characters");
@@ -41,12 +42,13 @@ export class Q3ServerConfigStrings {
     for (const { connection, noServerInfo } of this.bindings.clients()) {
       if (connection.phase !== "primed" && connection.phase !== "active") continue;
       if (index === 0 && noServerInfo) continue;
-      if (text.length < 1000) this.command(connection, `cs ${index} "${text}"\n`);
+      if (text.length < 1000) await this.command(connection, `cs ${index} "${text}"\n`);
       else {
         let sent = 0, remaining = text.length;
         while (remaining > 0) {
           const command = sent === 0 ? "bcs0" : remaining < 1000 ? "bcs2" : "bcs1";
-          this.command(connection, `${command} ${index} "${text.slice(sent, sent + 999)}"\n`);
+          if (!await this.command(connection, `${command} ${index} "${text.slice(sent, sent + 999)}"\n`)) break;
+          connection.bindings.assertCurrent();
           sent += 999; remaining -= 999;
         }
       }

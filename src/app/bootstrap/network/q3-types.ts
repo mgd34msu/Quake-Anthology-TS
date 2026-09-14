@@ -11,6 +11,7 @@ import type { Product } from '../../../network/q3/state/product.ts';
 import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
 import type { PlayerStateFields } from '../../../network/q3/state/player.ts';
 export interface Q3ApplicationPlayer { readonly client: ClientId; readonly actor: ActorId; readonly sourceEntity: number; }
+export type Q3ApplicationAdmission = { readonly kind: 'accepted'; readonly player: Q3ApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
 export interface Q3ApplicationServerHost {
   readonly product: Product;
   readonly maxClients: number;
@@ -22,14 +23,14 @@ export interface Q3ApplicationServerHost {
   supportsSourceWire(): WireAdmission;
   time(): number;
   occupiedSlots(): readonly number[];
-  admit(request: Q3AcceptedConnect): { readonly kind: 'accepted'; readonly player: Q3ApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
+  admit(request: Q3AcceptedConnect): Q3ApplicationAdmission | Promise<Q3ApplicationAdmission>;
   carriedPlayer(client: ClientId): Q3ApplicationPlayer;
-  disconnect(player: Q3ApplicationPlayer, reason: string): void;
+  disconnect(player: Q3ApplicationPlayer, reason: string): void | Promise<void>;
   gameState(player: Q3ApplicationPlayer, serverId: number): Gamestate;
   snapshot(player: Q3ApplicationPlayer): { readonly player: PlayerStateFields; readonly areaMask: Uint8Array; readonly entities: readonly EntityStateFields[] };
-  input(player: Q3ApplicationPlayer, command: WireUserCommand, sequence: number): ActorCommand;
-  command(player: Q3ApplicationPlayer, name: string, args: readonly string[]): void;
-  userinfo(player: Q3ApplicationPlayer, value: string): void;
+  input(player: Q3ApplicationPlayer, command: WireUserCommand, sequence: number): ActorCommand | Promise<ActorCommand>;
+  command(player: Q3ApplicationPlayer, name: string, args: readonly string[]): void | Promise<void>;
+  userinfo(player: Q3ApplicationPlayer, value: string): void | Promise<void>;
   status(challenge: string, detailed: boolean): string;
   print(text: string): void;
 }

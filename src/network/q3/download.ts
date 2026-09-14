@@ -11,7 +11,7 @@ export interface Q3DownloadServerBindings {
   open(name: string): Q3DownloadReadFile | null;
   readonly enabled: () => boolean;
   readonly pure: () => boolean;
-  drop(reason: string): void;
+  drop(reason: string): void | Promise<void>;
   print(text: string): void;
 }
 export interface Q3DownloadRate { readonly rate: number; readonly maxRate: number; readonly snapshotMsec: number; }
@@ -34,8 +34,8 @@ export class Q3ServerDownload {
     this.name = name.slice(0, Math.min(63, nul < 0 ? name.length : nul));
   }
   close(): void { const file = this.file; this.file = null; this.name = ""; file?.close(); }
-  acknowledge(block: number, time: number): void {
-    if (block !== this.clientBlock) { this.bindings.drop("broken download"); return; }
+  async acknowledge(block: number, time: number): Promise<void> {
+    if (block !== this.clientBlock) { await this.bindings.drop("broken download"); return; }
     if (this.blockSizes[this.clientBlock % 8] === 0) { this.close(); return; }
     this.sendTime = time; this.clientBlock = (this.clientBlock + 1) | 0;
   }

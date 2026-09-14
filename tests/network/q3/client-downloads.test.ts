@@ -78,7 +78,7 @@ test('native Q3 block retry and EOF publish a checked package atomically before 
     expect(f.commands.filter(text => text === 'nextdl 0')).toHaveLength(1);
     expect(f.commands.at(-1)).toBe('donedl'); expect(f.events).toEqual(['packet', 'packet', 'reload']);
     expect(readdirSync(join(f.root, 'baseq3'))).toEqual(['custom.pk3']);
-    for (const text of f.commands) if (text.startsWith('nextdl ')) f.server.acknowledge(Number(text.slice(7)), 3200);
+    for (const text of f.commands) if (text.startsWith('nextdl ')) await f.server.acknowledge(Number(text.slice(7)), 3200);
     expect(f.server.name).toBe('');
   } finally { f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
 });

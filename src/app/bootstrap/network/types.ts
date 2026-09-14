@@ -20,8 +20,8 @@ export interface ApplicationNetwork {
     /** A remote client sends input; it does not apply input to a second server. */
     submit(commands: readonly ActorCommand[], nowMilliseconds: number): void;
     /** Called after that simulation step and after source presentation events are drained. */
-    publish(output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): void;
-    close(): void;
+    publish(output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): void | Promise<void>;
+    close(): void | Promise<void>;
 }
 export interface ApplicationNetworkPlayer {
     readonly client: ClientId;

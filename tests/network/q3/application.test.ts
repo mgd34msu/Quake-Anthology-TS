@@ -280,7 +280,7 @@ test('production protocol68 shared remote frontend draws retail q3dm1 and travel
     const capture = remote.captureNextFrame();
     await exchange();
     const pixels = await capture;
-    expect(pure.mock.results.some(result => result.type === "return" && result.value.kind === "authentic")).toBe(true);
+    expect((await Promise.all(pure.mock.results.map(result => result.type === "return" ? result.value : null))).some(result => result?.kind === "authentic")).toBe(true);
     expect(shaders.mock.calls.some(([name]) => name === "icons/iconw_gauntlet")).toBe(true);
     const gauntletDraw = pictures.mock.calls.find(([, , picture]) => (typeof picture === "function" ? picture() : picture).name === "icons/iconw_gauntlet");
     if (process.env["Q3_REMOTE_CAPTURE"] !== undefined) {
@@ -405,7 +405,7 @@ test('native Q3 downloads a referenced user package before guest init and pure a
     expect(await Bun.file(join(users, 'q3a/baseq3/zzz-wire-fixture.pk3')).bytes()).toEqual(bytes);
     expect(init.mock.calls.length).toBe(1);
     expect(remote.content.catalog.require('q3-baseq3-mod-remote-asset-proof').expectation.contentDirectory).toBe('q3a/remote-asset-proof');
-    expect(pure.mock.results.some(result => result.type === 'return' && result.value.kind === 'authentic')).toBe(true);
+    expect((await Promise.all(pure.mock.results.map(result => result.type === 'return' ? result.value : null))).some(result => result?.kind === 'authentic')).toBe(true);
     expect(remote.session.world).toBeNull();
     const resource = await remote.content.mounts.open('wire-probe.dat');
     if (resource?.reference.provenance.kind !== 'archive') throw new Error('Downloaded resource lacks archive provenance');
@@ -472,7 +472,7 @@ test('native Q3 retries an interrupted second referenced package before guest in
     if (client.networkPhase !== 'active') throw new Error(`Retry admission failed: ${messages.join('')}`);
     for (const pack of packages) expect(await Bun.file(join(destination, pack.name)).bytes()).toEqual(pack.bytes);
     expect(init.mock.calls.length).toBe(1);
-    expect(pure.mock.results.some(result => result.type === 'return' && result.value.kind === 'authentic')).toBe(true);
+    expect((await Promise.all(pure.mock.results.map(result => result.type === 'return' ? result.value : null))).some(result => result?.kind === 'authentic')).toBe(true);
     expect(client.session.world).toBeNull();
     expect(readdirSync(destination).filter(name => name.startsWith('.download-'))).toEqual([]);
   } finally { await client?.close(); await server.close(); init.mockRestore(); pure.mockRestore(); rmSync(root, { recursive: true, force: true }); }

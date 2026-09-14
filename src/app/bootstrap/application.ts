@@ -131,6 +131,8 @@ export class Application {
   private stopping = false;
   private closed = false;
   private stepping = false;
+  private stepCompletion: Promise<void> | null = null;
+  private closing: Promise<void> | null = null;
   private elapsed = 0;
   private frames = 0;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
@@ -376,7 +378,13 @@ export class Application {
       this.pendingMap = mapResourcePath(map); return undefined;
     });
     commands.register("map_restart", invocation => this.requestRestart(invocation.args));
-    commands.register("kick", invocation => this.kickClients(invocation.args));
+    commands.register("kick", invocation => {
+      for (const actor of this.kickTargets(invocation.args)) {
+        const player = this.simulation.movementPlayer(actor);
+        if (player !== null) game().host.engine.dropClient(player.client.slot, "was kicked");
+      }
+      return undefined;
+    });
     commands.register("removebot", invocation => this.queueCommand("removebot", invocation.args, null));
     commands.register("centerview", () => {
       for (const local of this.graphical?.input.locals ?? []) local.builder.setViewAngles({ ...local.builder.viewAngles, x: 0 });
@@ -387,7 +395,7 @@ export class Application {
     this.bindServerSettingCommand(commands);
   }
 
-  private kickClients(args: readonly string[]): undefined {
+  private kickTargets(args: readonly string[]): readonly ActorId[] {
     const source = this.simulation.q3Source(), target = args[0];
     if (target === undefined) throw new Error("Usage: kick <player name|slot|all|allbots>");
     const selected = this.simulation.players().filter(actor => {
@@ -400,11 +408,16 @@ export class Application {
       return String(player.client.slot) === target || name.replace(/\^[0-9]/g, "").toLowerCase() === target.toLowerCase();
     });
     if (selected.length === 0) throw new Error(`Player ${target} is not on the server`);
-    for (const actor of selected) {
+    return selected;
+  }
+
+  private async kickClients(args: readonly string[]): Promise<undefined> {
+    const source = this.simulation.q3Source();
+    for (const actor of this.kickTargets(args)) {
       const player = this.simulation.movementPlayer(actor);
       if (player === null) continue;
       if (source !== null) source.host.engine.dropClient(player.client.slot, "was kicked");
-      else if (!this.bots?.disconnect(player.client.slot) && !this.network?.server.disconnectClient(player.client, "was kicked")) {
+      else if (!this.bots?.disconnect(player.client.slot) && !await this.network?.server.disconnectClient(player.client, "was kicked")) {
         this.simulation.disconnectPlayer(actor); this.session.closeClient(player.client);
       }
     }
@@ -439,7 +452,7 @@ export class Application {
       if (source.kind === "q2-composition" && source.event.kind === "kick") {
         const player = this.simulation.movementPlayer(source.event.actor);
         if (player !== null) {
-          if (this.network?.server.disconnectClient(player.client, "was kicked")) continue;
+          if (await this.network?.server.disconnectClient(player.client, "was kicked")) continue;
           const local = this.localSeats.has(player.client);
           this.simulation.disconnectPlayer(source.event.actor);
           this.session.closeClient(player.client); this.localSeats.delete(player.client);
@@ -472,7 +485,7 @@ export class Application {
         if (actor === undefined) continue;
         const player = this.simulation.movementPlayer(actor);
         if (player === null) throw new Error("Source disconnect lost its client identity");
-        if (this.network?.server.disconnectClient(player.client, event.reason)) continue;
+        if (await this.network?.server.disconnectClient(player.client, event.reason)) continue;
         const local = this.localPlayers.some(local => local.actor.equals(actor));
         this.simulation.disconnectPlayer(actor);
         this.session.closeClient(player.client);
@@ -505,14 +518,14 @@ export class Application {
     if (supported.kind === "unsupported") throw new Error(`Native ${next.kind.toUpperCase()} wire is unavailable: ${supported.reasons.join("; ")}`);
   }
 
-  private changeNetworkWorld(next: NativeServerHost): void {
+  private async changeNetworkWorld(next: NativeServerHost): Promise<void> {
     const network = this.network;
     if (network === null) throw new Error("Native world replacement requires an open server");
     switch (next.kind) {
       case "q1": if (network.kind !== "q1") throw new Error("Native Q1 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
       case "qw": if (network.kind !== "qw") throw new Error("Native QW host cannot replace another wire family"); network.server.changeWorld(next.host); this.nativeWorldCount++; return;
       case "q2": if (network.kind !== "q2") throw new Error("Native Q2 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
-      case "q3": if (network.kind !== "q3") throw new Error("Native Q3 host cannot replace another wire family"); network.server.changeWorld(next.host); return;
+      case "q3": if (network.kind !== "q3") throw new Error("Native Q3 host cannot replace another wire family"); await network.server.changeWorld(next.host); return;
     }
   }
 
@@ -779,7 +792,7 @@ export class Application {
         this.graphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease };
         if (q3Clients.size === 0) await audio.startWorldMusic();
       }
-      if (nextNetworkHost !== null) this.changeNetworkWorld(nextNetworkHost);
+      if (nextNetworkHost !== null) await this.changeNetworkWorld(nextNetworkHost);
       this.elapsed = initialSourceMilliseconds;
       await this.bindSourceCommands();
       if (options.dedicated) { this.dedicatedConsole?.close(); this.openDedicatedConsole(); }
@@ -950,7 +963,7 @@ export class Application {
           if (this.bots === null) this.bots = await this.createBots(this.content, this.simulation, [], false, true);
           if (this.bots === null) throw new Error("Bot observations are unavailable for this world");
           this.bots.consoleCommand([command.name, ...command.arguments_]);
-        } else if (command.name === "kick") { this.kickClients(command.arguments_);
+        } else if (command.name === "kick") { await this.kickClients(command.arguments_);
         } else if (command.name === "removebot") {
           const argument = command.arguments_[0];
           const bot = this.botClients.find(bot => argument === undefined || String(bot.client.id.slot) === argument);
@@ -993,6 +1006,7 @@ export class Application {
     if (this.stepping) throw new Error("Application step is already in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Application step requires positive elapsed milliseconds");
     this.stepping = true;
+    const completion = Promise.withResolvers<void>(); this.stepCompletion = completion.promise;
     const frameStartedAt = performance.now();
     try {
       const operation = this.saveOperation; this.saveOperation = null;
@@ -1021,7 +1035,9 @@ export class Application {
         && this.simulation.players().length === this.localPlayers.length + this.botClients.length && this.graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) === true
         && retained !== null && retained.simulation === this.simulation;
       if (!paused) this.elapsed += elapsedMilliseconds;
+      if (this.closed) throw new Error("Application closed during step");
       const remote = await this.network?.server.poll(performance.now()) ?? [];
+      if (this.closed) throw new Error("Application closed during step");
       for (const [seat, source] of this.graphical?.q3 ?? []) {
         const selection = source.client.userCommandSelection;
         this.graphical?.input.setQ3CommandSelection(seat, selection);
@@ -1031,7 +1047,7 @@ export class Application {
       }
       if (paused && this.graphical !== null) for (const local of this.graphical.input.locals) local.input.sample(this.graphical.input.now(), elapsedMilliseconds);
       const localCommands = paused ? [] : this.graphical?.input.build(elapsedMilliseconds, this.elapsed, this.frames) ?? [];
-      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : this.session.step({ elapsedMilliseconds,
+      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : await this.session.stepAsync({ elapsedMilliseconds,
         commands: [...localCommands, ...remote] });
       this.lastOutput = { simulation: this.simulation, output };
       this.frames++;
@@ -1039,7 +1055,8 @@ export class Application {
       if (q1 !== null) this.appendQ1Commands(frameEvents);
       this.sourceEvents = [...beforeFrameEvents, ...frameEvents];
       if (!paused) this.bots?.receive(this.sourceEvents);
-      this.network?.server.publish(output, this.sourceEvents, performance.now());
+      if (this.closed) throw new Error("Application closed during step");
+      await this.network?.server.publish(output, this.sourceEvents, performance.now());
       const intents = paused ? [] : this.simulation.takeTransitions();
       if (intents.length !== 0) {
         const campaign = this.content.recipe.campaign;
@@ -1091,7 +1108,7 @@ export class Application {
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       return output;
     } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
-    finally { this.stepping = false; }
+    finally { this.stepping = false; this.stepCompletion = null; completion.resolve(); }
   }
 
   async run(): Promise<void> {
@@ -1116,9 +1133,13 @@ export class Application {
     return this.graphical.renderer.captureNextFrame();
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
+  close(): Promise<void> {
+    if (this.closing !== null) return this.closing;
+    this.closed = true; this.stopping = true;
+    this.closing = this.closeOwned(); return this.closing;
+  }
+  private async closeOwned(): Promise<void> {
+    await this.stepCompletion;
     this.saveOperation?.reject(new Error("Application closed before the save operation completed.")); this.saveOperation = null;
     this.stopping = true;
     const graphical = this.graphical;
@@ -1132,7 +1153,7 @@ export class Application {
     try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
-      try { close(); } catch (error) { errors.push(error); }
+      try { await close(); } catch (error) { errors.push(error); }
     }
     try { await this.content.close(); } catch (error) { errors.push(error); }
     this.localSeats.clear();

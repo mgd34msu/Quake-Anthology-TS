@@ -102,8 +102,8 @@ export interface Q3ServerAdmissionBindings {
   authorize(challenge: Readonly<Q3Challenge>): void;
   send(address: Q3Address, packet: Uint8Array): void;
   /** Shared session performs the real ClientConnect call and owns client/seat allocation. */
-  admit(connection: Q3AcceptedConnect): string | null;
-  dropBot(slot: number): void;
+  admit(connection: Q3AcceptedConnect): string | null | Promise<string | null>;
+  dropBot(slot: number): void | Promise<void>;
   print(text: string): void;
   query(from: Q3Address, packet: ConnectionlessPacket): void;
 }
@@ -141,7 +141,7 @@ export class Q3ServerAdmission {
       challenge.address = null; challenge.challenge = 0; challenge.time = 0; challenge.firstTime = 0; challenge.pingTime = 0; challenge.connected = false;
     }
   }
-  private connect(from: Q3Address, input: string, now: number): void {
+  private async connect(from: Q3Address, input: string, now: number): Promise<void> {
     const host = this.bindings;
     let userinfo = sourceCommandText(input).slice(0, 1023);
     if (nativeAtoi(q3InfoValue(userinfo, "protocol")) !== 68) { this.reply(from, "print\nServer uses protocol version 68.\n"); return; }
@@ -171,18 +171,20 @@ export class Q3ServerAdmission {
       if (candidates.some(slot => !slot.bot)) throw new CommonError("fatal", "server is full on local connect\n");
       selected = candidates.at(-1);
       if (selected === undefined) throw new CommonError("fatal", "server is full on local connect\n");
-      host.dropBot(selected.slot);
+      await host.dropBot(selected.slot);
+      if (!host.enabled()) return;
     }
-    const rejected = host.admit({ slot: selected.slot, address: copyAddress(from), qport, challenge: challengeNumber, userinfo });
+    const rejected = await host.admit({ slot: selected.slot, address: copyAddress(from), qport, challenge: challengeNumber, userinfo });
+    if (!host.enabled()) return;
     if (rejected !== null) { this.reply(from, `print\n${rejected}\n`); return; }
     this.reply(from, "connectResponse");
   }
-  receive(from: Q3Address, bytes: Uint8Array, now: number): void {
+  async receive(from: Q3Address, bytes: Uint8Array, now: number): Promise<void> {
     const packet = decodeConnectionless(bytes, "server");
     switch (packet.command.toLowerCase()) {
       case "getchallenge": this.challenge(from, now); break;
       case "ipauthorize": this.authorize(from, packet, now); break;
-      case "connect": this.connect(from, packet.arguments[0] ?? "", now); break;
+      case "connect": await this.connect(from, packet.arguments[0] ?? "", now); break;
       default: this.bindings.query(from, packet); break;
     }
   }
