@@ -228,7 +228,16 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const joints = entity.pose.kind === "skeleton" ? entity.pose.joints : elapsedFrame === null
         ? sampleMd5Pose(model, frame, previousFrame, backLerp) : sampleMd5Pose(model, elapsedFrame);
       for (const [index, mesh] of model.meshes.entries()) {
-        const vertices = skinMd5Mesh(mesh, joints).map(vertex => shell === null ? vertex : { ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) });
+        let poses = context.skinningFrame?.get(mesh);
+        let skinned = poses?.get(joints);
+        if (skinned === undefined) {
+          skinned = skinMd5Mesh(mesh, joints);
+          if (context.skinningFrame !== undefined) {
+            if (poses === undefined) { poses = new WeakMap(); context.skinningFrame.set(mesh, poses); }
+            poses.set(joints, skinned);
+          }
+        }
+        const vertices = skinned.map(vertex => shell === null ? vertex : { ...vertex, position: add3(vertex.position, scale3(vertex.normal, 4)) });
         let shaders: readonly string[];
         if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
         else if (selection.kind === "q1-mdl-replacement") {

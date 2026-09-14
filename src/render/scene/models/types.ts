@@ -5,6 +5,10 @@ import type { DrawBatch, RenderImage, RenderState, SceneCamera } from "../../../
 import type { IndexedModelSkin, ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
+import type { skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
+
+export type ModelSkinningFrame = WeakMap<Parameters<typeof skinMd5Mesh>[0],
+  WeakMap<Parameters<typeof skinMd5Mesh>[1], ReturnType<typeof skinMd5Mesh>>>;
 
 export type ModelImageSelection = { readonly kind: "external"; readonly name: string }
   | { readonly kind: "indexed"; readonly name: string; readonly width: number; readonly height: number;
@@ -35,6 +39,7 @@ export interface ModelSourceOptions {
 }
 
 export interface ModelPreparationContext {
+  readonly skinningFrame?: ModelSkinningFrame;
   readonly modelPolicy?: ModelReplacementPolicy;
   readonly purpose?: "view" | "shadow";
   readonly camera: SceneCamera;

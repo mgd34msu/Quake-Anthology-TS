@@ -27,7 +27,7 @@ import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
 import { attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldPoint } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
-import type { ModelImageSelection, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
+import type { ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
 
 export interface ModelRenderProvider {
   readonly modelPolicy?: ModelReplacementPolicy;
@@ -168,7 +168,7 @@ export class SceneModelRenderer {
     return texture;
   }
 
-  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({})): readonly DrawBatch[] {
+  prepare(entities: readonly SceneEntity[], input: WorldViewInput, sourceOptions: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly DrawBatch[] {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const lightCache = new Map<SceneEntity, Vec3>();
     const entityLights = new Map<SceneEntity, EntityLighting>();
@@ -252,13 +252,14 @@ export class SceneModelRenderer {
       return result;
     };
     return entities.flatMap(entity => preparedModelBatches(prepareSceneEntity(entity, { camera: input.camera, timeSeconds: time,
+      ...(skinningFrame === undefined ? {} : { skinningFrame }),
       ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
     { draw: surface => this.draw(surface, input, surface.options, lightCache.get(surface.entity)) }));
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
-  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({})): readonly ShadowCaster[] {
+  prepareShadowCasters(entities: readonly SceneEntity[], input: WorldViewInput, options: SourceOptions = () => ({}), skinningFrame?: ModelSkinningFrame): readonly ShadowCaster[] {
     const result: ShadowCaster[] = [], time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const visit = (entity: SceneEntity, original: SceneEntity): void => {
       const source = options(original);
@@ -267,6 +268,7 @@ export class SceneModelRenderer {
         flags: entity.flags.kind === "q2" ? { kind: "q2", bits: entity.flags.bits & ~Q2_SHELL_MASK } : entity.flags,
         pose: entity.pose.kind === "frame" ? { ...entity.pose, backLerp: Math.min(1, Math.max(0, entity.pose.backLerp)) } : entity.pose };
       const prepared = prepareSceneEntity(body, { camera: input.camera, timeSeconds: time, noCull: true, purpose: "shadow",
+        ...(skinningFrame === undefined ? {} : { skinningFrame }),
         ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }), options: () => source });
       const meshes: ShadowMesh[] = [];
       for (const surface of prepared.surfaces) {

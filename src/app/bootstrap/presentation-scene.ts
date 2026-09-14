@@ -14,7 +14,7 @@ import { anglesToAxis } from "../../core/math.ts";
 import type { WorldScene, WorldViewInput } from "../../render/scene/world.ts";
 import type { ModelTransform } from "../../render/scene/view.ts";
 import { SceneModelRenderer } from "../../render/scene/models/index.ts";
-import type { ModelSourceOptions } from "../../render/scene/models/types.ts";
+import type { ModelSkinningFrame, ModelSourceOptions } from "../../render/scene/models/types.ts";
 import { prepareFlare } from "../../render/scene/flare.ts";
 import type { SceneFlare } from "../../contracts/flare.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -171,9 +171,10 @@ export class ApplicationWorldScene {
 
   view(input: WorldViewInput, operations: readonly RenderOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
     input = { ...input, inlineModels: this.inlineModels, ...this.styles() };
+    const skinningFrame: ModelSkinningFrame = new WeakMap();
 
     if (shadowLights.length > 0) {
-      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => group.renderer.prepareShadowCasters([pass.entity], input, pass.options)));
+      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => group.renderer.prepareShadowCasters([pass.entity], input, pass.options, skinningFrame)));
       const shadows = this.assets.world.prepareShadows([...shadowLights, ...(input.lights ?? []).map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: true,
         profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
@@ -181,7 +182,7 @@ export class ApplicationWorldScene {
     const modelOperations: RenderOperation[] = [], emitted = new Set<PresentationObject>();
     const prepare = (group: ModelGroup, pass: ModelPass) => group.renderer.prepare([pass.entity],
       pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
-      current => ({ ...pass.options(current), infrared }));
+      current => ({ ...pass.options(current), infrared }), skinningFrame);
     let batches: import("../../contracts/render.ts").DrawBatch[] = [];
     const flush = (): void => { if (batches.length > 0) { modelOperations.push({ kind: "draw", batches }); batches = []; } };
     for (const group of this.groups.values()) for (const pass of group.passes) {

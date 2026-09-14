@@ -336,3 +336,33 @@ test("native alias bounds reject geometry before lighting while retaining replac
   const weapon = prepareSceneEntity({ ...q2, flags: { kind: "q2", bits: 4 } }, context);
   expect(weapon.cull).toBe("in"); expect(weapon.surfaces.length).toBeGreaterThan(0);
 });
+
+test("MD5 frame-local skinning reuses a pose without retaining animated monster poses across frames", async () => {
+  const meshAsset = await asset(rereleaseGunArchive, "progs/soldier.md5mesh", "q1");
+  const animation = await asset(rereleaseGunArchive, "progs/soldier.md5anim", "q1");
+  const model = createMd5Model(parseMd5Mesh(new TextDecoder().decode(meshAsset.bytes)), parseMd5Anim(new TextDecoder().decode(animation.bytes)));
+  const mesh = model.meshes[0], firstPose = model.frames[0]?.joints, nextPose = model.frames[1]?.joints;
+  if (mesh === undefined || firstPose === undefined || nextPose === undefined) throw new Error("Missing animated soldier fixture");
+  const skinningFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = new WeakMap();
+  const source: SceneEntity = { ...entity(model, meshAsset.resource, "q1"), pose: { kind: "skeleton", joints: firstPose } };
+  const context = { camera, timeSeconds: 0, skinningFrame };
+  const prepared = prepareSceneEntity(source, context), first = skinningFrame.get(mesh)?.get(firstPose);
+  expect(first).toBeDefined();
+  expect(prepareSceneEntity(source, context)).toEqual(prepared);
+  expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
+  expect(prepared).toEqual(prepareSceneEntity(source, { camera, timeSeconds: 0 }));
+  const animated = { ...source, pose: { kind: "skeleton", joints: nextPose } } satisfies SceneEntity;
+  const changed = prepareSceneEntity(animated, context), next = skinningFrame.get(mesh)?.get(nextPose);
+  expect(next).toBeDefined(); expect(next).not.toBe(first); expect(next).not.toEqual(first);
+  expect(changed).toEqual(prepareSceneEntity(animated, { camera, timeSeconds: 0 }));
+  const nextFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = new WeakMap();
+  expect(prepareSceneEntity(source, { ...context, skinningFrame: nextFrame })).toEqual(prepared);
+  expect(nextFrame.get(mesh)?.get(firstPose)).not.toBe(first);
+  for (const backLerp of [0, 0.25, 0.75, 1]) {
+    const interpolated = { ...source, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp } } satisfies SceneEntity;
+    expect(prepareSceneEntity(interpolated, context)).toEqual(prepareSceneEntity(interpolated, { camera, timeSeconds: 0 }));
+  }
+  const shell = { ...source, flags: { kind: "q2", bits: 1024 } } satisfies SceneEntity;
+  expect(prepareSceneEntity(shell, context)).toEqual(prepareSceneEntity(shell, { camera, timeSeconds: 0 }));
+  expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
+});
