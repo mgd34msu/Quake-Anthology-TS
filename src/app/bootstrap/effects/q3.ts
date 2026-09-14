@@ -81,6 +81,7 @@ export class Q3ApplicationEffects {
 
   static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean, preload = false): Promise<Q3ApplicationEffects> {
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
+    const renderer = new SceneModelRenderer(provider, assets.world);
     const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, CompiledMaterial>();
     const sound = async (path: string): Promise<PcmSound | null> => { const loaded = await bank.register(path, "q3"); if (loaded === null) return null; names.set(loaded.pcm, path); return loaded.pcm; };
     let preloading = preload;
@@ -88,7 +89,11 @@ export class Q3ApplicationEffects {
       if (preloading && provider.shaders.hasCinematic(name)) throw new Error(`Effect cinematic deferred until use: ${name}`);
       shaders.set(name, await provider.shaders.register(name)); return { name };
     };
-    const model = async (path: string): Promise<SceneModel> => { const loaded = await assets.model(content, path); return { kind: "model", path, model: loaded.model, resource: loaded.resource }; };
+    const model = async (path: string): Promise<SceneModel> => {
+      const loaded = await assets.model(content, path);
+      if (preloading) await renderer.preloadModel(loaded, {}, false);
+      return { kind: "model", path, model: loaded.model, resource: loaded.resource };
+    };
     const state = { time: 0, product, snap: null, predictedPlayerState: new PlayerStateRecord<number, number, number>(product, 0, 0, 0) };
     const sourceSound = (pcm: PcmSound | null, origin: Vec3, channel: number, volume: number): void => {
       if (pcm === null) return;
@@ -191,7 +196,7 @@ export class Q3ApplicationEffects {
           sounds.push({ content, path, origin, channel: 0, volume: 1, seconds: state.time / 1000, playback: { kind: "loop", actor, velocity } });
         } };
     };
-    const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, new SceneModelRenderer(provider, assets.world), sounds, loadWeapons, bloodOwners);
+    const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, renderer, sounds, loadWeapons, bloodOwners);
     if (preload) {
       try {
         result.weaponEffects = loadWeapons();

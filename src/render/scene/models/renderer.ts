@@ -37,6 +37,7 @@ export interface ModelRenderProvider {
   readonly shaders: SceneShaderRegistry;
 }
 type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
+type ModelResource = Pick<SceneEntity, "resource" | "model">;
 type Material = { readonly kind: "q3"; readonly name: string; readonly compiled: CompiledMaterial; readonly timeOffset: number }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
@@ -50,7 +51,7 @@ for (const [index, normal] of ALIAS_NORMALS.entries()) {
 }
 
 function frames<T>(value: TimedFrames<T>): readonly T[] { return value.kind === "single" ? [value.frame] : value.frames.map(item => item.frame); }
-function materialKey(entity: SceneEntity, image: ModelImageSelection, options: ModelSourceOptions): string {
+function materialKey(entity: ModelResource, image: ModelImageSelection, options: ModelSourceOptions): string {
   const translated = image.kind === "indexed" || entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement";
   const translation = translated && options.playerColors !== undefined ? `${options.playerColors.top}:${options.playerColors.bottom}` : "";
   return `${entity.resource.id}\0${image.kind}\0${"name" in image ? image.name : image.kind === "default" ? image.reason : ""}\0${translation}`;
@@ -99,7 +100,20 @@ export class SceneModelRenderer {
     await Promise.all(work);
   }
 
-  private selections(entity: SceneEntity, options: ModelSourceOptions): readonly ModelImageSelection[] {
+  async preloadModel(resource: ModelResource, options: ModelSourceOptions = {}, allowCinematics = true): Promise<void> {
+    if (this.textures !== this.provider.textures) {
+      this.materials.clear(); this.pending.clear(); this.textures = this.provider.textures;
+    }
+    const work = this.selections(resource, options).map(selection => this.load(resource, selection, options, allowCinematics));
+    const model = resource.model;
+    if ((model.kind === "q1-mdl" || model.kind === "q2-md2") && !(model.kind === "q1-mdl" && options.indexedSkin !== undefined)) {
+      const replacement = model.replacement;
+      if (replacement != null) for (const selection of this.selections(replacement, options)) work.push(this.load(replacement, selection, options, allowCinematics));
+    }
+    await Promise.all(work);
+  }
+
+  private selections(entity: ModelResource, options: ModelSourceOptions): readonly ModelImageSelection[] {
     const result: ModelImageSelection[] = [{ kind: "white" }, { kind: "default", reason: "missing-skin-surface" }, { kind: "default", reason: "no-skin" }];
     const external = (name: string): void => { result.push({ kind: "external", name }); };
     if (options.customShader != null) external(options.customShader);
@@ -132,7 +146,11 @@ export class SceneModelRenderer {
     return result;
   }
 
-  private load(entity: SceneEntity, selection: ModelImageSelection, options: ModelSourceOptions): Promise<void> {
+  private load(entity: ModelResource, selection: ModelImageSelection, options: ModelSourceOptions, allowCinematics = true): Promise<void> {
+    if (!allowCinematics && this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
+      const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
+      if (this.provider.shaders.hasCinematic(remap.name)) return Promise.reject(new Error(`Model cinematic deferred until use: ${remap.name}`));
+    }
     const key = materialKey(entity, selection, options), old = this.pending.get(key);
     if (old !== undefined) return old;
     const pending = (async (): Promise<void> => {
@@ -148,7 +166,7 @@ export class SceneModelRenderer {
     return pending;
   }
 
-  private indexedTexture(entity: SceneEntity, selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
+  private indexedTexture(entity: ModelResource, selection: Extract<ModelImageSelection, { readonly kind: "indexed" }>, options: ModelSourceOptions): SceneTexture {
     if (this.provider.palette === null) throw new Error(`Indexed model ${selection.name} has no content palette`);
     const colors = options.playerColors, translation = colors === undefined ? null : q1PlayerTranslation(colors.top, colors.bottom);
     const image = entity.model.kind === "q1-mdl" ? { ...selection, pixels: floodSkin(selection.pixels, selection.width, selection.height, this.provider.palette) } : selection;
@@ -156,7 +174,7 @@ export class SceneModelRenderer {
       { wrap: "repeat", filter: "linear" });
   }
 
-  private async externalTexture(entity: SceneEntity, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
+  private async externalTexture(entity: ModelResource, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
     const sprite = entity.model.kind === "q2-sp2";
     const texture = await this.provider.textures.load(name, { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite }) ?? this.provider.textures.missing;
     const colors = options.playerColors;

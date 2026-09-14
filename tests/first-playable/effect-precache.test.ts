@@ -14,6 +14,7 @@ import { anglesToAxis, identityMat4 } from "../../src/core/math.ts";
 import { createSceneQueries } from "../../src/world/collision/index.ts";
 import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
 import { Q3ApplicationEffects } from "../../src/app/bootstrap/effects/q3.ts";
+import { SceneModelRenderer } from "../../src/render/scene/models/renderer.ts";
 
 test("cinematic metadata preserves normalized first definitions and replacements", async () => {
   const identity = createIdentityOwner("effect-cinematic");
@@ -67,8 +68,30 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
         await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, true)).rejects.toThrow("cinematic deferred");
         expect(register).not.toHaveBeenCalled();
       } finally { guard.mockRestore(); register.mockRestore(); }
+      const flash = await assets.model(source, "models/weapons2/machinegun/machinegun_flash.md3");
+      if (flash.model.kind !== "q3-md3") throw Error("Expected source MD3 flash");
+      const flashShader = flash.model.surfaces[0]?.shaders[0];
+      if (flashShader === undefined) throw Error("Flash has no declared shader");
+      provider.shaders.addScript("effect-precache/video { { videoMap intro.roq } }");
+      provider.shaders.remap(flashShader, "effect-precache/video");
+      const registered = spyOn(provider.shaders, "register");
+      try {
+        await expect(new SceneModelRenderer(provider, assets.world).preloadModel(flash, {}, false)).rejects.toThrow("Model cinematic deferred");
+        expect(registered.mock.calls.some(call => call[0] === "effect-precache/video")).toBe(false);
+      } finally { registered.mockRestore(); provider.shaders.remap(flashShader, flashShader); }
+      const read = provider.textures.reader.read.bind(provider.textures.reader);
+      const failedRead = spyOn(provider.textures.reader, "read").mockImplementation(async (...args) => {
+        if (args[0] === "models/weapons2/machinegun/f_machinegun.tga") throw Error("temporary flash image read");
+        return read(...args);
+      });
+      try {
+        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, true)).rejects.toThrow("temporary flash image read");
+      } finally { failedRead.mockRestore(); }
+      const reads = spyOn(provider.textures.reader, "read");
       const effects = await Q3ApplicationEffects.create(assets, queries, source, () => false, true);
       try {
+        const flashReads = (): number => reads.mock.calls.filter(call => call[0] === "models/weapons2/machinegun/f_machinegun.tga").length;
+        expect(flashReads()).toBe(1);
         expect(effects.state.time).toBe(0);
         expect(effects.drainSounds()).toHaveLength(0);
         const warm = spyOn(effects, "loadWeapons");
@@ -79,8 +102,10 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
           expect(warm).not.toHaveBeenCalled();
           expect(effects.state.time).toBe(1000);
           expect(effects.drainSounds().length).toBeGreaterThan(0);
+          await effects.prepare(1000, 16);
+          expect(flashReads()).toBe(1);
         } finally { warm.mockRestore(); }
-      } finally { effects.close(); }
+      } finally { effects.close(); reads.mockRestore(); }
       const shared = new ApplicationEffects(assets, queries, () => false);
       const create = spyOn(Q3ApplicationEffects, "create");
       const frame = spyOn(Q3ApplicationEffects.prototype, "frame");
