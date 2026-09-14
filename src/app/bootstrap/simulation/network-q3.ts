@@ -12,7 +12,7 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { Q3ApplicationAdmission, Q3ApplicationPlayer, Q3ApplicationServerHost } from '../network/q3-types.ts';
 import type { SharedSimulation } from './runtime.ts';
-export interface Q3ApplicationServerBindingOptions { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; print(text: string): void; }
+export interface Q3ApplicationServerBindingOptions { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; readonly mode?: 'new' | 'restore'; print(text: string): void; }
 export interface Q3ApplicationServerAuthority extends Q3ApplicationServerHost {
   connect(client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission>;
 }
@@ -20,13 +20,15 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   const simulation = options.simulation, source = simulation.q3Guest() ?? simulation.q3Source();
   if (source === null) throw new Error('Q3 network requires a Q3 game provider');
   const guest = source instanceof Q3QvmServerGame;
+  const mode = options.mode ?? 'new';
+  if (mode === 'restore' && !guest) throw new Error('Restored Q3 client authority requires a saved QVM source');
   const state = guest ? source.state : source.host.serverState, cvars = state.cvars;
   const product = guest ? 'baseq3' : source.options.product;
   const maxClients = simulation.options.maxClients;
   const entityCount = () => guest ? source.game.data.numEntities : source.pool.numEntities;
   const sharedEntity = (number: number) => guest ? source.records.entity(number) : source.pool.at(number);
   const linked = (number: number) => guest ? source.records.entity(number).r.linked : source.pool.at(number).inuse && source.pool.at(number).r.linked;
-  for (const [name, value, flags] of [
+  if (mode === 'new') for (const [name, value, flags] of [
     ['protocol', String(Q3_PROTOCOL.version), CvarFlag.ServerInfo | CvarFlag.ReadOnly],
     ['sv_pure', '1', CvarFlag.SystemInfo], ['sv_allowDownload', '0', CvarFlag.ServerInfo],
     ['sv_maxRate', '0', CvarFlag.ServerInfo], ['sv_fps', '20', CvarFlag.None], ['sv_serverid', '0', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
@@ -37,6 +39,9 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   let packages: Q3ApplicationPackages | null = null, preparing: Promise<Q3ApplicationPackages> | null = null;
   let touchedCgame = false;
   const archiveState = (): Q3ApplicationPackages => { if (packages === null) throw new Error('Q3 package metadata has not been prepared'); return packages; };
+  const requireSavedServerId = (serverId: number): void => {
+    if (mode === 'restore' && serverId !== cvars.variableValue('sv_serverid')) throw new Error('Restored Q3 client authority must retain the saved server id');
+  };
   const playerFor = (client: ClientId): Q3ApplicationPlayer => {
     if (guest) { const player = source.player(client); if (player === null) throw new Error('Application has not admitted the Q3 guest client'); return player; }
     const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
@@ -64,11 +69,13 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   return {
     product, maxClients, connect,
     prepare: async (checksumFeed, serverId, configstring) => {
+      requireSavedServerId(serverId);
       preparing ??= Q3ApplicationPackages.open(options.content, checksumFeed);
       packages = await preparing;
       if (packages.references.references.checksumFeed !== (checksumFeed >>> 0)) throw new Error('Q3 world changed checksum feed without replacing content host');
       if (cvars.variableValue('sv_pure') !== 0 && !touchedCgame) { await options.content.mounts.resolve('vm/cgame.qvm'); touchedCgame = true; }
       packages.collect(options.content);
+      if (mode === 'restore') return;
       const refs = packages.references.references;
       cvars.set('sv_serverid', String(serverId), true);
       cvars.set('sv_paks', cvars.variableValue('sv_pure') !== 0 ? refs.loadedPakChecksums() : '', true);
@@ -82,7 +89,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
         }
       }
     },
-    pure: serverId => { const state = archiveState(); return { enabled: cvars.variableValue('sv_pure') !== 0,
+    pure: serverId => { requireSavedServerId(serverId); const state = archiveState(); return { enabled: cvars.variableValue('sv_pure') !== 0,
       checksumFeed: state.references.references.checksumFeed | 0, checksumFeedServerId: serverId,
       cgameChecksum: state.pureChecksum('vm/cgame.qvm'), uiChecksum: state.pureChecksum('vm/ui.qvm'),
       loadedPureChecksums: state.packs.map(pack => pack.pack.pureChecksum) }; },
@@ -114,10 +121,13 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       finally { options.session.closeClient(player.client); }
     },
     gameState: (player, serverId) => {
-      const entries = configEntries().filter(entry => entry.kind !== 'configstring' || (entry.index !== 0 && entry.index !== 1));
-      cvars.set('sv_serverid', String(serverId), true);
-      entries.unshift({ kind: 'configstring', index: 0, value: state.serverInfo() },
-        { kind: 'configstring', index: 1, value: cvars.infoString(CvarFlag.SystemInfo, 8192) });
+      requireSavedServerId(serverId);
+      const entries = configEntries().filter(entry => mode === 'restore' || entry.kind !== 'configstring' || (entry.index !== 0 && entry.index !== 1));
+      if (mode === 'new') {
+        cvars.set('sv_serverid', String(serverId), true);
+        entries.unshift({ kind: 'configstring', index: 0, value: state.serverInfo() },
+          { kind: 'configstring', index: 1, value: cvars.infoString(CvarFlag.SystemInfo, 8192) });
+      }
       for (let number = 1; number < entityCount(); number++) if (linked(number)) entries.push({ kind: 'baseline', number, entity: wireEntity(number) });
       return { kind: 'gamestate', commandSequence: 0, entries, clientNumber: player.sourceEntity, checksumFeed: archiveState().references.references.checksumFeed | 0 };
     },

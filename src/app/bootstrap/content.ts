@@ -209,7 +209,8 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
       throw new Error("Remote content context requires its matching remote client product");
   }
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && options.movement === "q3" && options.character === "q3",
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
+      || restoredRecipe?.execution.some(module => module.kind === "qvm" && module.role === "server-game") === true),
     ...(remote === undefined ? {} : { remoteContent: remote }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);

@@ -36,7 +36,7 @@ import type { StartupSelectionModel } from "./startup-selection.ts";
 import { FrontendPreferences } from "./frontend-preferences.ts";
 import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
-import { savedSimulationSettings } from "./simulation/index.ts";
+import { savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
 
@@ -195,8 +195,11 @@ export class StartupApplication {
         loading?.menu.setStatus("Loading map...", true);
         const selected = action.kind === "play" ? await this.model.resolve() : await (async () => {
           const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
+          const bots = savedBotCheckpoint(image);
+          const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
+          if (seats < 1 || seats > 4) throw new Error("This saved game requires between 1 and 4 local players.");
           return { recipe: image.recipe, options: { ...this.model.options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
-            seats: Math.min(this.model.options.seats, Math.max(1, settings.clientSlots.length)) } };
+            seats } };
         })();
         loading?.menu.setStatus("Preparing world...", true);
         const game = await Application.open(selected.options, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true,

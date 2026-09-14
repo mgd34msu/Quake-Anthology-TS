@@ -60,11 +60,8 @@ export class StartupSaves {
         map = image.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, "");
         const product = this.catalog.product(image.recipe.map.entities.content);
         game = `${product.expectation.title} (${product.expectation.edition})`;
-        if (product.expectation.family === "q3") unavailable = "Quake III saved games are not supported yet.";
-        else {
-          savedSimulationSettings(image);
-          if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
-        }
+        savedSimulationSettings(image);
+        if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
       } catch {
         unavailable = "This saved game is unreadable or uses an unsupported save version.";
       }

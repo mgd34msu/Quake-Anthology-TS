@@ -13,6 +13,7 @@ import { QvmCgame } from '../../../src/compat/qvm/cgame.ts';
 import { knownQvmArtifacts } from '../../../src/compat/qvm/artifacts.ts';
 import type { ModuleIdentity, Q3ApiIdentity } from '../../../src/contracts/execution.ts';
 import { StartupServerBrowser } from '../../../src/app/bootstrap/server-browser.ts';
+import { StartupSaves } from '../../../src/app/bootstrap/startup-saves.ts';
 import { ConfigStore } from '../../../src/settings/config.ts';
 import { expect, test, spyOn } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -384,9 +385,150 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         first: { before, after: guest.records.player(0).origin, initialAmmo: ammo, finalAmmo: guest.records.player(0).ammo[2], command: guest.state.getUserCommand(0), userinfo: guest.state.getUserinfo(0), viewport: firstView.viewport },
         second: { command: guest.state.getUserCommand(1), userinfo: guest.state.getUserinfo(1), viewport: secondView.viewport }, worldSounds }, null, 2));
     }
-    await expect(app.saveGame(join(root, 'local.sav'))).rejects.toThrow('Local guest save/load');
-    await expect(app.loadGame(join(root, 'local.sav'))).rejects.toThrow('Local guest save/load');
-    await app.close(); app = null;
+    app.input({ kind: 'key', seat: first.seat.id, code: 119, down: false, repeat: false, timeMilliseconds: performance.now() });
+    app.input({ kind: 'mouse-button', seat: first.seat.id, button: 1, down: false, timeMilliseconds: performance.now() });
+    let now = 100000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      await app.step(50);
+      const path = join(root, 'local.sav');
+      const saved = new Bun.CryptoHasher('sha256').update(guest.checkpoint().data).digest('hex'), savedServer = structuredClone(guest.state.captureSaveState());
+      await app.saveGame(path);
+      if (artifactDirectory !== undefined) await Bun.write(join(artifactDirectory, 'two-human-qvm.sav'), Bun.file(path));
+      const saves = new StartupSaves(app.content.catalog, root);
+      await saves.refresh();
+      const row = saves.list.rows.find(row => row.id === 'local.sav');
+      if (row === undefined) throw new Error('Missing saved local QVM menu row');
+      expect(row.unavailable).toBeNull(); expect(saves.path(row.id)).toBe(path);
+      async function suffix(application: Application) {
+        const source = application.simulation.q3Guest(); if (source === null) throw new Error('Missing suffix guest');
+        const seats = application.localPlayers;
+        const moving = seats[0], idle = seats[1]; if (moving === undefined || idle === undefined) throw new Error('Missing suffix seats');
+        now = 100000;
+        const trace: { readonly memory: string; readonly server: ReturnType<typeof source.state.captureSaveState> }[] = [];
+        for (let index = 0; index < 6; index++) {
+          now += 50;
+          if (index === 0 || index === 4) application.input({ kind: 'key', seat: moving.seat.id, code: 119,
+            down: index === 0, repeat: false, timeMilliseconds: now });
+          await application.step(50);
+          trace.push({ memory: new Bun.CryptoHasher('sha256').update(source.checkpoint().data).digest('hex'),
+            server: structuredClone(source.state.captureSaveState()) });
+        }
+        expect(source.state.getUserCommand(idle.seat.client.id.slot)?.forwardmove).toBe(0);
+        return trace;
+      }
+      const continuous = await suffix(app);
+      await app.close(); app = null;
+      expect(() => firstView.q3Client?.source.current()).toThrow('retired');
+      expect(() => secondView.q3Client?.source.current()).toThrow('retired');
+      app = await Application.open(parsed.options, { print: () => undefined });
+      for (const player of app.localPlayers) app.queueCommand('team', [player.seat.id.index === 0 ? 'red' : 'blue'], player.seat.id);
+      for (let index = 0; index < 4; index++) { now += 50; await app.step(50); }
+      for (const player of app.localPlayers) {
+        const presentation = player.seat.presentation;
+        if (presentation instanceof WorldSeatPresentation && presentation.q3Client?.capturesInput)
+          for (const down of [true, false]) app.input({ kind: 'key', seat: player.seat.id, code: 27, down, repeat: false, timeMilliseconds: now });
+      }
+      now += 50; await app.step(50);
+      const previous = app.simulation, previousPlayers = [...app.localPlayers], previousWindow = app.window;
+      const previousPresentations = previousPlayers.map(player => {
+        const presentation = player.seat.presentation;
+        if (!(presentation instanceof WorldSeatPresentation) || presentation.q3Client === null) throw new Error('Missing previous guest presentation');
+        return presentation;
+      });
+      for (const presentation of previousPresentations) expect(presentation.q3Client?.capturesInput).toBe(false);
+      const previousGuest = previous.q3Guest(); if (previousGuest === null) throw new Error('Missing previous guest');
+      const previousBytes = new Bun.CryptoHasher('sha256').update(previousGuest.checkpoint().data).digest('hex');
+      const initialize = spyOn(QvmGame.prototype, 'initializeAsync'), connect = spyOn(QvmGame.prototype, 'clientConnectAsync');
+      const begin = spyOn(QvmGame.prototype, 'clientBeginAsync'), userinfo = spyOn(QvmGame.prototype, 'clientUserinfoChangedAsync');
+      try {
+        const uiModules: QvmUi[] = [], originalUi = QvmUi.prototype.init;
+        const failure = spyOn(QvmUi.prototype, 'init').mockImplementation(async function(this: QvmUi, connecting) {
+          uiModules.push(this);
+          if (uiModules.length === 2) throw new Error('injected restore UI preparation failure');
+          return originalUi.call(this, connecting);
+        });
+        try { await expect(app.loadGame(path)).rejects.toThrow('injected restore UI preparation failure'); }
+        finally { failure.mockRestore(); }
+        expect(app.simulation).toBe(previous); expect(app.window).toBe(previousWindow);
+        expect(new Bun.CryptoHasher('sha256').update(previousGuest.checkpoint().data).digest('hex')).toBe(previousBytes);
+        expect(app.localPlayers.map(player => player.seat.client)).toEqual(previousPlayers.map(player => player.seat.client));
+        for (const presentation of previousPresentations) expect(() => presentation.q3Client?.source.current()).not.toThrow();
+        for (const module of uiModules) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
+        const preserved = previousPlayers[0]; if (preserved === undefined) throw new Error('Missing retained seat');
+        expect(previousPresentations[0]?.q3Client?.capturesInput).toBe(false);
+        app.input({ kind: 'key', seat: preserved.seat.id, code: 119, down: true, repeat: false, timeMilliseconds: now });
+        now += 50;
+        await app.step(50);
+        expect(previous.q3Guest()?.state.getUserCommand(preserved.seat.client.id.slot)?.forwardmove).toBe(127);
+        app.input({ kind: 'key', seat: preserved.seat.id, code: 119, down: false, repeat: false, timeMilliseconds: now });
+        userinfo.mockClear();
+        await app.loadGame(path);
+        expect(initialize).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); expect(begin).not.toHaveBeenCalled();
+        expect(userinfo).not.toHaveBeenCalled();
+        const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Missing restored guest');
+        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(restored.state.captureSaveState()).toEqual(savedServer);
+        expect(app.localPlayers.map(player => player.seat.client)).toEqual(previousPlayers.map(player => player.seat.client));
+        for (const player of app.localPlayers) expect(restored.player(player.seat.client.id)?.actor).toBe(player.actor);
+        for (const presentation of previousPresentations) expect(() => presentation.q3Client?.source.current()).toThrow('retired');
+        expect(await suffix(app)).toEqual(continuous);
+        expect(userinfo).not.toHaveBeenCalled();
+      } finally { initialize.mockRestore(); connect.mockRestore(); begin.mockRestore(); userinfo.mockRestore(); }
+      await app.close(); app = null;
+      const native = parseApplicationCommand(['--game', 'q3-baseq3', '--map', 'q3dm1', '--seats', '2', '--bot-skill', '3',
+        '--renderer', 'cpu', '--hidden', '--width', '320', '--height', '240', '--user-content-root', root]);
+      if (native.kind !== 'run') throw new Error('Missing native launch');
+      app = await Application.open(native.options, { print: () => undefined, saveDirectory: join(root, 'native-saves') });
+      await app.step(50);
+      expect(app.simulation.q3Source()).not.toBeNull(); expect(app.simulation.q3Guest()).toBeNull();
+      const nativeWorld = app.simulation, nativeClients = app.localPlayers.map(player => player.seat.client);
+      for (const player of app.localPlayers) {
+        const presentation = player.seat.presentation;
+        if (!(presentation instanceof WorldSeatPresentation)) throw new Error('Missing native presentation');
+        expect(presentation.local.builder.tuning.alwaysRun).toBe(false);
+      }
+      const browsers: StartupServerBrowser[] = [], openBrowser = StartupServerBrowser.open;
+      const browserOpen = spyOn(StartupServerBrowser, 'open').mockImplementation(async config => {
+        const browser = await openBrowser(config); browsers.push(browser); return browser;
+      });
+      const nativeInitialize = spyOn(QvmGame.prototype, 'initializeAsync'), nativeConnect = spyOn(QvmGame.prototype, 'clientConnectAsync');
+      const nativeBegin = spyOn(QvmGame.prototype, 'clientBeginAsync'), nativeUserinfo = spyOn(QvmGame.prototype, 'clientUserinfoChangedAsync');
+      try {
+        let preparedUis = 0;
+        const originalUi = QvmUi.prototype.init;
+        const failure = spyOn(QvmUi.prototype, 'init').mockImplementation(async function(this: QvmUi, connecting) {
+          if (++preparedUis === 2) throw new Error('injected native-to-guest UI failure');
+          return originalUi.call(this, connecting);
+        });
+        try { await expect(app.loadGame(saves.path(row.id))).rejects.toThrow('injected native-to-guest UI failure'); }
+        finally { failure.mockRestore(); }
+        expect(app.simulation).toBe(nativeWorld); expect(browsers).toHaveLength(1);
+        expect(() => browsers[0]?.assertOpen()).toThrow('closed');
+        expect(app.localPlayers.map(player => player.seat.client)).toEqual(nativeClients);
+        await app.step(50);
+        await app.loadGame(saves.path(row.id));
+        expect(browsers).toHaveLength(2); expect(() => browsers[1]?.assertOpen()).not.toThrow();
+        expect(app.localPlayers.map(player => player.seat.client)).toEqual(nativeClients);
+        const restored = app.simulation.q3Guest(); if (restored === null) throw new Error('Native entry did not restore QVM');
+        expect(app.options.mode).toBe('deathmatch'); expect(app.options.botSkill).toBeUndefined();
+        expect(new Bun.CryptoHasher('sha256').update(restored.checkpoint().data).digest('hex')).toBe(saved);
+        expect(restored.state.captureSaveState()).toEqual(savedServer);
+        for (const player of app.localPlayers) {
+          const presentation = player.seat.presentation;
+          if (!(presentation instanceof WorldSeatPresentation)) throw new Error('Missing restored presentation');
+          expect(presentation.local.builder.tuning.alwaysRun).toBe(false);
+        }
+        const beforeWalking = { ...restored.records.player(0).origin }, walking = await suffix(app);
+        const command = walking[1]?.server.commands.find(command => command.slot === 0)?.value;
+        expect(command?.forwardmove).toBe(64); expect((command?.buttons ?? 0) & 16).toBe(16);
+        expect(restored.records.player(0).origin).not.toEqual(beforeWalking);
+        expect(nativeInitialize).not.toHaveBeenCalled(); expect(nativeConnect).not.toHaveBeenCalled();
+        expect(nativeBegin).not.toHaveBeenCalled(); expect(nativeUserinfo).not.toHaveBeenCalled();
+        await app.close(); app = null;
+        expect(() => browsers[1]?.assertOpen()).toThrow('closed');
+      } finally { browserOpen.mockRestore(); nativeInitialize.mockRestore(); nativeConnect.mockRestore(); nativeBegin.mockRestore(); nativeUserinfo.mockRestore(); }
+    } finally { clock.mockRestore(); }
     expect(() => firstView.q3Client?.source.current()).toThrow('retired');
     expect(() => secondView.q3Client?.source.current()).toThrow('retired');
   } finally {

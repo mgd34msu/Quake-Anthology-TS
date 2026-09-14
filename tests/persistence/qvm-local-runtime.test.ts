@@ -9,6 +9,7 @@ import { createQ3ApplicationServerHost } from "../../src/app/bootstrap/simulatio
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ActorCommand } from "../../src/contracts/session.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
+import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { fromQ3PlayerState, toQ3UserCommand } from "../../src/network/q3/adapters.ts";
 import type { WireUserCommand } from "../../src/network/q3/message.ts";
 import { UserFileStore } from "../../src/platform/files/writable.ts";
@@ -78,6 +79,24 @@ test("actual local LRCTF uses shared admission and delivers each local command b
       await expect(session.stepAsync({ elapsedMilliseconds: 50, commands: [{ ...input(), source: { kind: "local-seat", seat: foreign.seat(0), client: client.id } }] })).rejects.toThrow("owned seat");
       expect(simulation.timeSeconds).toBe(time);
       expect(think).toHaveBeenCalledTimes(12);
+      guest.state.cvars.register("sv_fps", "37", CvarFlag.Latch);
+      guest.state.cvars.set("sv_fps", "45");
+      guest.state.configstrings.set(0, "\\sv_hostname\\Saved server publication");
+      guest.state.configstrings.set(1, "\\sv_serverid\\1\\sv_pure\\1");
+      const savedServer = guest.state.captureSaveState(), savedVm = guest.checkpoint();
+      const restoredAuthority = createQ3ApplicationServerHost({ session, simulation, content, mode: "restore", print: () => undefined });
+      expect(guest.state.captureSaveState()).toEqual(savedServer);
+      await restoredAuthority.prepare(7, 1, () => { throw new Error("Restored package setup published a configstring"); });
+      const restoredGamestate = restoredAuthority.gameState(player, 1);
+      expect(restoredGamestate.entries.filter(entry => entry.kind === "configstring" && (entry.index === 0 || entry.index === 1)))
+        .toEqual([{ kind: "configstring", index: 0, value: "\\sv_hostname\\Saved server publication" },
+          { kind: "configstring", index: 1, value: "\\sv_serverid\\1\\sv_pure\\1" }]);
+      expect(restoredAuthority.snapshot(player)).toEqual(authority.snapshot(player));
+      expect(guest.state.captureSaveState()).toEqual(savedServer);
+      expect(guest.checkpoint()).toEqual(savedVm);
+      await expect(restoredAuthority.prepare(7, 2)).rejects.toThrow("saved server id");
+      expect(() => restoredAuthority.gameState(player, 2)).toThrow("saved server id");
+      expect(guest.state.captureSaveState()).toEqual(savedServer);
       await authority.disconnect(player, "Local fixture complete");
       expect(guest.players()).toEqual([]);
       expect(client.isClosed).toBe(true);
