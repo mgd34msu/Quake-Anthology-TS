@@ -158,6 +158,7 @@ function isSpecialTeamDrop(product: Product, gameType: number, item: ItemDefinit
 
 /** Creates and links one dropped item with its source 30-second lifecycle. */
 export function launchItem(context: LaunchItemContext, item: ItemDefinition, origin: Vec3, velocity: Vec3): GameEntity {
+  bindLaunchSaveCallbacks(context);
   const time = gameTime(context.time);
   const index = itemIndex(context, item);
   const dropped = context.entities.spawn();
@@ -169,7 +170,7 @@ export function launchItem(context: LaunchItemContext, item: ItemDefinition, ori
   dropped.r.mins = vec3(-ITEM_RADIUS, -ITEM_RADIUS, -ITEM_RADIUS);
   dropped.r.maxs = vec3(ITEM_RADIUS, ITEM_RADIUS, ITEM_RADIUS);
   dropped.r.contents = CONTENTS_TRIGGER;
-  dropped.touch = context.touchItem;
+  dropped.touch = context.entities.callbacks.touch.resolve("q3.item.touch");
   setOrigin(dropped, origin);
   dropped.s.pos = {
     ...dropped.s.pos,
@@ -180,10 +181,10 @@ export function launchItem(context: LaunchItemContext, item: ItemDefinition, ori
   dropped.s.eFlags |= EF_BOUNCE_HALF;
   dropped.nextthink = (time + DROPPED_ITEM_LIFETIME) | 0;
   if (isSpecialTeamDrop(context.product, context.gameType, item)) {
-    dropped.think = context.droppedFlagThink;
+    dropped.think = context.entities.callbacks.think.resolve("q3.item.droppedFlag");
     context.checkDroppedTeamItem(dropped);
   } else {
-    dropped.think = self => { context.entities.free(self); };
+    dropped.think = context.entities.callbacks.think.resolve("q3.base.game.item-motion.launchItem.think");
   }
   dropped.flags = GameFlags.DROPPED_ITEM;
   context.entities.options.link(dropped);
@@ -203,4 +204,10 @@ export function dropItem(context: DropItemContext, entity: GameEntity, item: Ite
   const lift = Math.fround(200 + Math.fround(crandom * 50));
   const velocity = vec3(horizontal.x, horizontal.y, Math.fround(horizontal.z + lift));
   return launchItem(context, item, entity.s.pos.base, velocity);
+}
+
+export function bindLaunchSaveCallbacks(context: LaunchItemContext): void {
+  context.entities.callbacks.touch.intern("q3.item.touch", context.touchItem);
+  context.entities.callbacks.think.intern("q3.item.droppedFlag", context.droppedFlagThink);
+  context.entities.callbacks.think.intern("q3.base.game.item-motion.launchItem.think", self => { context.entities.free(self); });
 }

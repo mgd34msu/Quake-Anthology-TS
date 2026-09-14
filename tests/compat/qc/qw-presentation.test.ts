@@ -1,3 +1,4 @@
+import { encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { expect, test } from 'bun:test';
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { openMountPlan, digestFile } from '../../../src/content/mounts/index.ts';
@@ -59,6 +60,18 @@ test('actual QW QC prints, door sounds and multicast retain native destinations 
     write('WriteByte',4,6);write('WriteShort',4,10);write('WriteByte',4,1);for(const value of [7,8,9])write('WriteCoord',4,value);
     write('WriteByte',4,16);write('WriteShort',4,10);
     actors.release(player);const replacement=slots.bindExisting(1,'quakec:replacement');expect(replacement.id.equals(player.id)).toBe(false);
+    const savedMessages = decodeCheckpointValue(encodeCheckpointValue(messages.capture()));
+    const resumedMessages = new QcBroadcastMessages(world, () => { throw Error('Unexpected NQ event'); }, qw);
+    resumedMessages.restore(savedMessages, saved => actors.referenceSaved(saved, 'current'));
+    expect(resumedMessages.capture()).toEqual(messages.capture());
+    vm.globals.setVector(4, { x: 1, y: 2, z: 3 }); vm.globals.setFloat(7, 0);
+    const resumedMulticast = resumedMessages.host.get('multicast'); if (resumedMulticast === undefined) throw Error('Missing restored multicast');
+    resumedMulticast(vm);
+    const resumedRoute = routes.pop(); if (resumedRoute === undefined) throw Error("Missing restored route");
+    expect(resumedRoute?.entries.map(entry => entry.actor?.equals(player.id))).toEqual([true, true, true]);
+    const savedEntries = resumedMessages.captureEntries(resumedRoute?.entries ?? []);
+    expect(resumedMessages.restoreEntries(decodeCheckpointValue(encodeCheckpointValue(savedEntries)), saved => actors.referenceSaved(saved, 'current')))
+      .toEqual(resumedRoute.entries);
     vm.globals.setVector(4,{x:1,y:2,z:3});vm.globals.setFloat(7,0);vm.execute(program.functionNamed('multicast').index,2);
     expect(routes.pop()?.entries.map(entry=>({kind:entry.message.kind,actor:entry.actor}))).toEqual([{kind:'temporary-entity',actor:player.id},{kind:'sound',actor:player.id},{kind:'stop-sound',actor:player.id}]);
     loading=true;for(let index=0;index<938;index++)write('WriteByte',3,1);messages.flushSignon();expect(routes.pop()?.entries).toHaveLength(938);

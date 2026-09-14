@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_misc.c missionpack personal portals.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -36,6 +37,13 @@ export interface PersonalPortalHost {
 
 /** Owns level.portalSequence and the source/destination entity lifecycle. */
 export class PersonalPortalRuntime {
+  captureSaveState() { return { portalSequence: this.#portalSequence }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.portals").field("portalSequence"), sequence = reader.integer(-2147483648);
+    if (sequence > 2147483647) reader.fail("portal sequence exceeds source integer range");
+    this.#portalSequence = sequence;
+  }
+
   #portalSequence = 0;
 
   constructor(readonly host: PersonalPortalHost) {
@@ -45,6 +53,8 @@ export class PersonalPortalRuntime {
     if (!Object.is(host.combat.spatial, host.world)) {
       throw new Error("Personal portal combat and collision worlds must match");
     }
+
+    this.bindSaveCallbacks();
   }
 
   private get time(): number { return this.host.combat.time; }
@@ -122,8 +132,8 @@ export class PersonalPortalRuntime {
 
   private portalEnable(source: GameEntity): void {
     this.owned(source);
-    source.touch = (self, other) => { if (other instanceof GameEntity) this.portalTouch(self, other); };
-    source.think = self => { this.freePortal(self); };
+    source.touch = this.host.combat.entities.callbacks.touch.resolve("q3.base.game.personal-portal.portalEnable.touch");
+    source.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.personal-portal.portalEnable.think");
     source.nextthink = (this.time + PORTAL_LIFETIME) | 0;
   }
 
@@ -138,9 +148,9 @@ export class PersonalPortalRuntime {
     portal.r.contents = CONTENTS_CORPSE;
     portal.takedamage = true;
     portal.health = PORTAL_HEALTH;
-    portal.die = self => { this.portalDie(self); };
+    portal.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.personal-portal.dropPortalDestination.die");
     portal.s.angles = vec3(player.s.apos.base.x, player.s.apos.base.y, player.s.apos.base.z);
-    portal.think = self => { this.freePortal(self); };
+    portal.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.personal-portal.portalEnable.think");
     portal.nextthink = (this.time + PORTAL_LIFETIME) | 0;
     this.host.world.link(portal);
     this.#portalSequence = (this.#portalSequence + 1) | 0;
@@ -164,15 +174,22 @@ export class PersonalPortalRuntime {
     portal.r.contents = CONTENTS_CORPSE | CONTENTS_TRIGGER;
     portal.takedamage = true;
     portal.health = PORTAL_HEALTH;
-    portal.die = self => { this.portalDie(self); };
+    portal.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.personal-portal.dropPortalDestination.die");
     this.host.world.link(portal);
     portal.count = client.portalID;
     client.portalID = 0;
     portal.nextthink = (this.time + PORTAL_ENABLE_DELAY) | 0;
-    portal.think = self => { this.portalEnable(self); };
+    portal.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.personal-portal.dropPortalSource.think");
     const destination = this.destination(portal.count);
     if (destination !== null) {
       portal.pos1 = vec3(destination.s.pos.base.x, destination.s.pos.base.y, destination.s.pos.base.z);
     }
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.combat.entities.callbacks.touch.intern("q3.base.game.personal-portal.portalEnable.touch", (self, other) => { if (other instanceof GameEntity) this.portalTouch(self, other); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.portalEnable.think", self => { this.freePortal(self); });
+    this.host.combat.entities.callbacks.die.intern("q3.base.game.personal-portal.dropPortalDestination.die", self => { this.portalDie(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.personal-portal.dropPortalSource.think", self => { this.portalEnable(self); });
   }
 }

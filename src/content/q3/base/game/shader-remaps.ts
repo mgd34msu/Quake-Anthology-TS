@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 /*
  * Shader remap state translated from code/game/g_utils.c AddRemap and
  * BuildShaderStateConfig.
@@ -55,6 +56,14 @@ function storedTimeOffset(value: number): number {
 }
 
 export class ShaderRemapRegistry {
+  captureSaveState() { return this.remaps.map(remap => ({ oldName: remap.oldName, newName: remap.newName, timeOffset: remap.timeOffset })); }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.remaps");
+    const remaps = reader.list(entry => ({ oldName: quakePath(entry.field("oldName").string()), newName: quakePath(entry.field("newName").string()), timeOffset: storedTimeOffset(entry.field("timeOffset").number()) }));
+    if (remaps.length > MAX_SHADER_REMAPS || remaps.some((entry, index) => remaps.slice(0, index).some(previous => quakePathEqual(previous.oldName, entry.oldName)))) reader.fail("invalid shader remap table");
+    this.remaps.splice(0, this.remaps.length, ...remaps);
+  }
+
   private readonly remaps: ShaderRemap[] = [];
 
   constructor(private readonly print: (message: string) => void) {}

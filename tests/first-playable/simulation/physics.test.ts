@@ -13,9 +13,46 @@ import { SharedPhysics } from "../../../src/app/bootstrap/simulation/physics.ts"
 import type { PhysicsFamily } from "../../../src/app/bootstrap/simulation/physics.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../src/formats/q1-map/index.ts";
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
+import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persistence/world-state.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const unitBounds: Bounds = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } };
+
+test("exact Q3 collision metadata survives restore and the next source link", () => {
+  const source = setup("q3"), actor = source.actor("q3:saved-capsule", zero, "stationary");
+  source.physics.setCollision(actor, { family: "q3", shape: { kind: "capsule" }, contents: 33554432, owner: source.world.id,
+    q3Owner: { entityNumber: 17, ownerNumber: 8 }, role: "solid", monster: false, deadMonster: true });
+  const body = source.physics.bodies.read(actor.id);
+  if (body === null) throw new Error("Missing source body");
+  source.physics.bodies.write(actor, { ...body, origin: { ...zero, x: 42 } });
+  const bodies = captureSharedBodies(source.actors, source.physics.bodies);
+  const reader = new SaveReader(decodeCheckpointValue(encodeCheckpointValue(source.physics.capture())));
+  const actors = SessionActorRegistry.restore(createIdentityOwner("collision-restore"), source.actors.checkpoint(), source.actors.sourceCheckpoint());
+  const restored = actors.resolveSaved(actor.id), world = actors.resolveSaved(source.world.id);
+  if (restored === null || world === null) throw new Error("Missing restored collision actors");
+  source.actors.close();
+  const scene = createSceneQueries(emptyWorld()), physics = new SharedPhysics({ actors, callbacks: new ActorCallbackTable(actors), scene, numeric: Q2_DONOR_PROFILE,
+    sourceOrder: (a, b) => a.slot - b.slot, worldActor: () => world.id, onBlocked: () => undefined });
+  for (const entry of bodies) {
+    const owner = actors.resolveSaved(entry.actor);
+    if (owner === null) throw new Error("Missing saved body owner");
+    physics.bodies.create(owner, { ...entry.body, ground: entry.body.ground === null ? null : actors.referenceSaved(entry.body.ground) });
+  }
+  physics.restoreCheckpoint(reader, true);
+  restoreSharedBodyLinks({ bodies }, { actors, bodies: physics.bodies });
+  physics.restoreSpatial(reader);
+  expect(physics.bodies.read(restored.id)?.origin.x).toBe(42);
+  expect(scene.spatial.get(restored.id)?.body.state.origin.x).toBe(0);
+  expect(scene.spatial.get(restored.id)?.collision).toEqual({ family: "q3", shape: { kind: "capsule" }, contents: 33554432, owner: world.id,
+    q3Owner: { entityNumber: 17, ownerNumber: 8 }, role: "solid", monster: false, deadMonster: true });
+  physics.bodies.link(restored);
+  expect(scene.spatial.get(restored.id)?.body.state.origin.x).toBe(42);
+  expect(scene.spatial.get(restored.id)?.collision.shape.kind).toBe("capsule");
+  expect(scene.spatial.get(restored.id)?.collision.q3Owner).toEqual({ entityNumber: 17, ownerNumber: 8 });
+  expect(scene.spatial.get(restored.id)?.collision.owner?.equals(world.id)).toBe(true);
+  actors.close();
+});
 function emptyWorld(): Q1WorldGeometry {
   const bounds: Bounds = { min: { x: -256, y: -256, z: -256 }, max: { x: 256, y: 256, z: 256 } };
   return { kind: "q1-bsp", format: "bsp29", entities: "", planes: [], vertices: [], edges: [], surfaceEdges: [], nodes: [],

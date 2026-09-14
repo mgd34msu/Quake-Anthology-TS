@@ -140,3 +140,88 @@ test("explicit Hipnotic executes native weapons and authored travel through the 
     expect(next.machine.profiling[think]).toBeGreaterThan(before);
   } finally { await application?.close(); await rm(root, { recursive: true, force: true }); }
 }, 30000);
+
+for (const game of ["q1-classic-hipnotic", "q1-classic-id1", "q1-quakeworld"]) test(`${game} QC disk save survives closed application and resumes the same command suffix`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "qc-full-save-"));
+  let application: Application | null = null;
+  try {
+    const launch = parseApplicationCommand(["--game", game, ...(game === "q1-quakeworld" ? ["--mode", "deathmatch"] : ["--progs", "progs.dat"]),
+      "--map", game === "q1-quakeworld" ? "e1m1" : "start", "--dedicated", "--movement", "q1", "--character", "q1", "--user-content-root", root]);
+    if (launch.kind !== "run") throw new Error("Missing QC save launch");
+    let app = await Application.open(launch.options, { print: () => undefined }); application = app;
+    const original = app.simulation.quakecSource(); if (original === null) throw new Error("Missing QC source");
+    const client = app.session.createClient(0); client.connect("loopback");
+    original.setClientInfo(client.id, new Map([["name", "Saved QC client"], ["team", "red"], ["noaim", "1"]]));
+    if (original.kind === "quakeworld") {
+      original.prepareClientSpawn(client.id);
+      expect(() => original.checkpoint()).toThrow("pending client handshakes");
+    }
+    const admitted = app.simulation.admitPlayer(client.id), owned = app.simulation.actors.resolveOwned(admitted.actor);
+    if (owned === null) throw new Error("Missing QC player");
+    app.simulation.combat.setHealth(owned, 10000);
+    app.simulation.inventory.give(owned, "q1:weapon/grenadelauncher", 1); app.simulation.inventory.give(owned, "q1:ammo/rockets", 100);
+    const advance = (sequence: number, buttons: number, impulse = 0) => {
+      const actor = app.simulation.players()[0], source = app.simulation.quakecSource();
+      if (actor === undefined || source === null) throw new Error("Missing saved player/source");
+      const movement = app.simulation.movementPlayer(actor); if (movement === null) throw new Error("Missing client movement");
+      if (source.kind === "quakeworld") {
+        app.simulation.queueQuakeWorldCommands(movement.client, [{ kind: "q1-quakeworld", milliseconds: 100, angles: { x: -15, y: 90, z: 0 },
+          forwardMove: 0, sideMove: 0, upMove: 0, buttons, impulse }], sequence);
+        app.session.step({ elapsedMilliseconds: 100, commands: [] });
+      } else app.session.step({ elapsedMilliseconds: 100, commands: [{ actor, source: { kind: "remote-client", client: movement.client }, sequence,
+        command: { kind: "q1-netquake", acknowledgedServerTimeSeconds: source.timeSeconds, viewAngles: { x: -15, y: 90, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons, impulse } }] });
+    };
+    if (original.kind === "quakeworld") {
+      app.simulation.queueQuakeWorldCommands(client.id, [{ kind: "q1-quakeworld", milliseconds: 100, angles: { x: -15, y: 90, z: 0 },
+        forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }], 0);
+      expect(() => app.simulation.checkpoint()).toThrow("completed source commands");
+      app.session.step({ elapsedMilliseconds: 100, commands: [] });
+      expect(app.simulation.movementPlayer(admitted.actor)?.lastSequence).toBe(0);
+      const completedActions: string[] = [];
+      app.simulation.queueQuakeWorldAction(client.id, () => { original.cvars.set("sv_maxspeed", "312"); completedActions.push("speed"); });
+      expect(() => app.simulation.checkpoint()).toThrow("completed source commands");
+      expect(completedActions).toEqual([]);
+      app.session.step({ elapsedMilliseconds: 100, commands: [] });
+      expect(completedActions).toEqual(["speed"]);
+      expect(original.cvars.variableValue("sv_maxspeed")).toBe(312);
+    }
+    advance(1, 0, 6); advance(2, 1);
+    if (game === "q1-quakeworld") for (let frame = 0; frame < 12 && original.projectiles.capture().length === 0; frame++) advance(3 + frame, 1);
+    expect(original.entities.count).toBeGreaterThan(original.reservedClientSlots + 1);
+    if (game !== "q1-classic-hipnotic") expect(original.projectiles.capture().some(entry => app.simulation.actors.resolveSaved(entry.actor) !== null)).toBe(true);
+    if (game === "q1-quakeworld") expect(original.entities.at(1).int(original.machine.fieldOffset("netname"))).toBeLessThan(0);
+    if (game === "q1-classic-hipnotic") {
+      app.simulation.inventory.give(owned, "q1:weapon/hipnotic:proximity", 1);
+      expect(app.simulation.requestWeapon(admitted.actor, { provider: original.prepared.execution.owner.provider, item: "q1:weapon/hipnotic:proximity" })).toBe(true);
+      for (let frame = 0; frame < 8; frame++) advance(10 + frame, frame === 0 ? 0 : 1);
+      expect(original.machine.profiling[original.prepared.program.functionNamed("W_FireProximityGrenade").index]).toBeGreaterThan(0);
+      expect(app.simulation.actors.observations().some(actor => {
+        const slot = original.sourceSlot(actor.id); if (slot === null) return false;
+        const words = original.entities.at(slot);
+        return ["think", "touch"].some(field => /prox/i.test(original.prepared.program.functions[words.int(original.machine.fieldOffset(field))]?.name ?? ""));
+      })).toBe(true);
+      expect(app.simulation.requestWeapon(admitted.actor, { provider: original.prepared.execution.owner.provider, item: "q1:weapon/shotgun" })).toBe(true);
+      advance(20, 0);
+      expect(app.simulation.requestWeapon(admitted.actor, { provider: original.prepared.execution.owner.provider, item: "q1:weapon/hipnotic:proximity" })).toBe(true);
+    }
+    const path = join(root, "full.qtsave"), saved = original.machine.snapshot(), savedVisibility = original.clients.visibility.capture();
+    const savedCvars = original.cvars.captureQuakeCState(), savedPrecache = original.precacheNames("model");
+    await app.saveGame(path);
+    for (let frame = 0; frame < 24; frame++) advance(100 + frame, frame < 5 ? 1 : 0);
+    const expected = original.machine.snapshot(), expectedVisibility = original.clients.visibility.capture();
+    await app.close(); application = null;
+    app = await Application.open(launch.options, { print: () => undefined }); application = app;
+    const freshClient = app.session.createClient(0); freshClient.connect("loopback");
+    if (game === "q1-quakeworld") app.simulation.quakecSource()?.prepareClientSpawn(freshClient.id);
+    app.simulation.admitPlayer(freshClient.id);
+    await app.loadGame(path);
+    const restored = app.simulation.quakecSource(); if (restored === null) throw new Error("QC source lost after disk restore");
+    expect(restored.machine.snapshot()).toEqual(saved);
+    expect(restored.clients.visibility.capture()).toEqual(savedVisibility); expect(restored.cvars.captureQuakeCState()).toEqual(savedCvars);
+    expect(restored.precacheNames("model")).toEqual(savedPrecache);
+    expect(restored.clientInfo(freshClient.id)).toEqual(new Map([["name", "Saved QC client"], ["team", "red"], ["noaim", "1"]]));
+    expect(app.simulation.players()[0]?.equals(admitted.actor)).toBe(false);
+    for (let frame = 0; frame < 24; frame++) advance(100 + frame, frame < 5 ? 1 : 0);
+    expect(restored.machine.snapshot()).toEqual(expected); expect(restored.clients.visibility.capture()).toEqual(expectedVisibility);
+  } finally { await application?.close(); await rm(root, { recursive: true, force: true }); }
+}, 30000);

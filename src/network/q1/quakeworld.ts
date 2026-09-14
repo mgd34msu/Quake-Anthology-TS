@@ -1,3 +1,5 @@
+import { SaveReader } from "../../persistence/value.ts";
+import { captureQwWireEntity, readQwWireEntity } from "./decoder-checkpoint.ts";
 // QuakeWorld client/server packet entities and service messages. GPL-2.0-or-later.
 import type { Vec3 } from '../../contracts/math.ts';
 import type { QwPlayerState, QwUserCommand, Q1ExtendedEntityState } from '../../contracts/protocol.ts';
@@ -159,6 +161,24 @@ export class QuakeWorldDecoder {
     readonly baselines = new Map<number, Q.QwEntityStateT>();
     private readonly frames = new Map<number, readonly Q.QwEntityStateT[]>();
     private readonly deltaRequests = new Map<number, number | null>();
+    capture() { return { version: this.protocol.version, flags: protocolFlags(this.protocol), playerModelIndex: this.playerModelIndex,
+        baselines: [...this.baselines].map(([slot, state]) => ({ slot, state: captureQwWireEntity(state) })),
+        frames: [...this.frames].map(([sequence, states]) => ({ sequence, states: states.map(captureQwWireEntity) })),
+        deltaRequests: [...this.deltaRequests].map(([sequence, base]) => ({ sequence, base })) }; }
+    restore(value: unknown): void {
+        const reader = new SaveReader(value, "quakeworld.decoder");
+        this.protocol = quakeWorldProfile(reader.field("version").integer(0), reader.field("flags").integer(0));
+        this.playerModelIndex = reader.field("playerModelIndex").integer(0); this.baselines.clear(); this.frames.clear(); this.deltaRequests.clear();
+        for (const entry of reader.field("baselines").list(item => ({ slot: item.field("slot").integer(0), state: readQwWireEntity(item.field("state")) }))) {
+            if (this.baselines.has(entry.slot)) reader.fail("duplicate baseline"); this.baselines.set(entry.slot, entry.state);
+        }
+        for (const entry of reader.field("frames").list(item => ({ sequence: item.field("sequence").integer(), states: item.field("states").list(readQwWireEntity) }))) {
+            if (this.frames.has(entry.sequence)) reader.fail("duplicate frame"); this.frames.set(entry.sequence, entry.states);
+        }
+        for (const entry of reader.field("deltaRequests").list(item => ({ sequence: item.field("sequence").integer(), base: item.field("base").nullable(field => field.integer()) }))) {
+            if (this.deltaRequests.has(entry.sequence)) reader.fail("duplicate delta request"); this.deltaRequests.set(entry.sequence, entry.base);
+        }
+    }
     recordDeltaRequest(commandSequence: number, baseSequence: number | null): void {
         this.deltaRequests.set(commandSequence, baseSequence);
         for (const sequence of this.deltaRequests.keys())

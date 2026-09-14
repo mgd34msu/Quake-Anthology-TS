@@ -88,6 +88,7 @@ export function locateCamera(context: PortalContext, entity: GameEntity): void {
 }
 
 export function spawnPortalSurface(context: PortalContext, entity: GameEntity): void {
+  bindPortalSaveCallbacks(context);
   entity.r.mins = vec3(0, 0, 0);
   entity.r.maxs = vec3(0, 0, 0);
   context.world.link(entity);
@@ -95,7 +96,7 @@ export function spawnPortalSurface(context: PortalContext, entity: GameEntity): 
   entity.s.eType = EntityType.ET_PORTAL;
   if (entity.target === null) entity.s.origin2 = { ...entity.s.origin };
   else {
-    entity.think = self => locateCamera(context, self);
+    entity.think = context.pool.callbacks.think.resolve("q3.base.game.misc.spawnPortalSurface.think");
     entity.nextthink = (context.time + 100) | 0;
   }
 }
@@ -108,4 +109,8 @@ export function spawnPortalCamera(world: ServerWorld, entity: GameEntity, roll: 
   const packed = Math.fround(Math.fround(Math.fround(roll) / 360) * 256);
   // QVM CVFI4 produces the x86 indefinite integer outside the signed range.
   entity.s.clientNum = packed >= -2147483648 && packed < 2147483648 ? Math.trunc(packed) + 0 : -2147483648;
+}
+
+export function bindPortalSaveCallbacks(context: PortalContext): void {
+  context.pool.callbacks.think.intern("q3.base.game.misc.spawnPortalSurface.think", self => locateCamera(context, self));
 }

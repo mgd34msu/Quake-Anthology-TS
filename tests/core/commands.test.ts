@@ -288,3 +288,25 @@ test("failed awaited action leaves later commands pending and releases drain own
   expect(calls).toEqual(["first"]); expect(commands.pendingText).toBe("note second\n");
   expect(commands.execute()).toBe(1); expect(calls).toEqual(["first", "second"]);
 });
+
+test("replacement command buffers retain deferred source context, aliases and waits without consuming the old buffer", () => {
+  const before = new CommandBuffer({ dialect: "q2-classic", context: context(0) });
+  before.executeNow('alias saved "note alias"');
+  before.append("note deferred\n", context(1));
+  before.copyToDefer();
+  before.append("wait;note queued;saved\n", context(0));
+  before.execute();
+  const after = new CommandBuffer({ dialect: "q2-classic", context: context(0) });
+  const calls: { readonly text: string; readonly source: CommandContext }[] = [];
+  after.register("note", command => { calls.push({ text: command.args[0] ?? "", source: command.source }); });
+  after.copyPendingFrom(before);
+  expect(after.pendingText).toBe(before.pendingText);
+  expect(after.deferredText).toBe(before.deferredText);
+  after.insertFromDefer();
+  after.execute();
+  expect(calls.map(call => call.text)).toEqual(["deferred", "queued", "alias"]);
+  expect(calls[0]?.source).toEqual(context(1));
+  expect(calls[1]?.source).toEqual(context(0));
+  expect(before.pendingText).toContain("note queued");
+  expect(before.deferredText).toBe("note deferred\n");
+});

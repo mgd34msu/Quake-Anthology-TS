@@ -114,15 +114,16 @@ export class SharedPhysics {
     this.worldGravity = value; return undefined;
   }
   capture() {
-    if (this.collisions.size !== 0) throw new Error("Exact Q3 collision checkpoints require the Q3 world provider checkpoint");
+    if (this.pushTransaction !== null || this.events.length !== 0) throw new Error("Physics save requires a completed event boundary");
     return { gravity: this.worldGravity, rereleaseMovement: this.rereleaseMovement.capture(),
+      collisions: [...this.collisions].map(([actor, collision]) => ({ actor: savedActorId(actor.id), collision: { ...collision, owner: collision.owner === null ? null : savedActorId(collision.owner) } })),
       spatial: this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } }).map(value => ({
         actor: savedActorId(value.body.actor), collision: { ...value.collision, owner: value.collision.owner === null ? null : savedActorId(value.collision.owner) } })),
       solids: [...this.solids].map(([actor, solid]) => ({ actor: savedActorId(actor.id), ...solid, owner: solid.owner === null ? null : savedActorId(solid.owner) })),
       motions: [...this.motions].map(([actor, motion]) => ({ ...motion, actor: savedActorId(actor.id), owner: motion.owner === null ? null : savedActorId(motion.owner) })),
       flags: [...this.flags].map(([actor, flags]) => ({ actor: savedActorId(actor.id), ...flags, ...(flags.enemy === undefined ? {} : { enemy: flags.enemy === null ? null : savedActorId(flags.enemy) }) })) };
   }
-  restoreCheckpoint(reader: SaveReader): undefined {
+  restoreCheckpoint(reader: SaveReader, requireExactCollisions = false): undefined {
     this.setWorldGravity(reader.field("gravity").finite());
     this.rereleaseMovement.restore(readVector(reader.field("rereleaseMovement")));
     const reference = (value: SaveReader) => this.options.actors.referenceSaved(readSavedActor(value));
@@ -131,7 +132,13 @@ export class SharedPhysics {
       if (actor === null) return value.fail("Missing shared physics actor");
       return actor;
     };
-    this.solids.clear(); this.motions.clear(); this.flags.clear();
+    this.solids.clear(); this.motions.clear(); this.flags.clear(); this.collisions.clear();
+    const collisions = reader.field("collisions");
+    if (requireExactCollisions || collisions.value !== undefined) collisions.list(value => {
+      const actor = owner(value.field("actor"));
+      if (this.collisions.has(actor)) return value.fail("Duplicate saved collision actor");
+      this.collisions.set(actor, this.readCollision(value.field("collision")));
+    });
     reader.field("solids").list(value => {
       this.solids.set(owner(value.field("actor")), { solid: value.field("solid").choice("none", "trigger", "box", "brush"), model: value.field("model").nullable(v => v.integer(0)),
         family: value.field("family").choice("q1", "q2", "q3"), owner: value.field("owner").nullable(reference),
@@ -160,15 +167,19 @@ export class SharedPhysics {
   restoreSpatial(reader: SaveReader): undefined {
     this.options.scene.spatial.clear();
     reader.field("spatial").list(value => {
-      const actor = this.options.actors.resolveSaved(readSavedActor(value.field("actor"))), collision = value.field("collision"), shape = collision.field("shape");
-      const kind = shape.field("kind").choice("box", "capsule", "model");
+      const actor = this.options.actors.resolveSaved(readSavedActor(value.field("actor")));
       const body = actor === null ? null : this.bodies.linked(actor.id);
       if (body === null) return value.fail("Saved spatial actor has no retained body link");
-      this.options.scene.link(body, { family: collision.field("family").choice("q1", "q2", "q3"), shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
-        contents: collision.field("contents").number(), owner: collision.field("owner").nullable(v => this.options.actors.referenceSaved(readSavedActor(v))),
-        role: collision.field("role").choice("solid", "trigger"), monster: collision.field("monster").boolean(), deadMonster: collision.field("deadMonster").boolean() });
+      this.options.scene.link(body, this.readCollision(value.field("collision")));
     });
     return undefined;
+  }
+  private readCollision(collision: SaveReader): ActorCollision {
+    const shape = collision.field("shape"), kind = shape.field("kind").choice("box", "capsule", "model");
+    return { family: collision.field("family").choice("q1", "q2", "q3"), shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
+      contents: collision.field("contents").number(), owner: collision.field("owner").nullable(value => this.options.actors.referenceSaved(readSavedActor(value))),
+      ...(collision.field("q3Owner").value === undefined ? {} : { q3Owner: { entityNumber: collision.field("q3Owner").field("entityNumber").integer(), ownerNumber: collision.field("q3Owner").field("ownerNumber").integer() } }),
+      role: collision.field("role").choice("solid", "trigger"), monster: collision.field("monster").boolean(), deadMonster: collision.field("deadMonster").boolean() };
   }
   solidOf(actor: ActorId): SharedSolid | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.solid(owned); }
   motionOf(actor: ActorId): Q2Motion | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.motion(owned); }

@@ -16,6 +16,7 @@ export interface InputRouterOptions {
   readonly ticks: () => number;
   readonly subframe: boolean;
   readonly unhandled: (event: SdlEvent | ControllerEvent) => void;
+  readonly deferPlatform?: boolean;
   readonly controllerOperation?: (seat: SeatId, result: ControllerOperationResult) => void;
 }
 
@@ -29,11 +30,13 @@ export class InputRouter {
   private lease: SdlInputLease | null = null;
   private window: SdlWindow | null = null;
   private closed = false;
+  private platformActive: boolean;
   constructor(private readonly options: InputRouterOptions) {
+    this.platformActive = options.deferPlatform !== true;
     for (const [index, route] of options.seats.entries()) if (options.seats.slice(0, index).some(previous => previous.input.seat.equals(route.input.seat))) throw new Error("Duplicate input seat");
     this.routes = [...options.seats];
     this.setKeyboardSeat(options.keyboardSeat);
-    options.controllers?.setAssignments(this.routes.map(route => route.controller));
+    if (this.platformActive) options.controllers?.setAssignments(this.routes.map(route => route.controller));
   }
   keyboardSeat(): SeatId | null { return this.keyboard?.seat ?? null; }
   controllerSelection(id: SeatId): ControllerSelection { const route = this.routes.find(value => value.input.seat.equals(id)); if (route === undefined) throw new Error("Unknown input seat"); return route.controller; }
@@ -50,7 +53,7 @@ export class InputRouter {
   setGyroEnabled(id: SeatId, enabled: boolean): ControllerOperationResult {
     const seat = this.seat(id), instance = this.controllerFor(id);
     if (seat === null) throw new Error("Gyro route refers to an unregistered seat");
-    if (instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
+    if (!this.platformActive || instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
     const result = this.options.controllers.setSensorEnabled(instance, "gyro", enabled);
     if (result.kind === "accepted") {
       seat.gamepad.cancelGyroCalibration(); this.calibrationSensors.delete(instance);
@@ -66,7 +69,7 @@ export class InputRouter {
   gyroCalibration(id: SeatId): GyroCalibrationState { return this.gyroSeat(id).gamepad.gyroCalibration; }
   beginGyroCalibration(id: SeatId): ControllerOperationResult {
     const seat = this.gyroSeat(id), instance = this.controllerFor(id);
-    if (instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
+    if (!this.platformActive || instance === null || this.options.controllers === null) return { kind: "disconnected", reason: "Seat has no assigned controller" };
     if (!seat.focused) return { kind: "failed", reason: "Focus the game window before calibrating" };
     const result = this.options.controllers.setSensorEnabled(instance, "gyro", true);
     if (result.kind === "accepted") {
@@ -78,6 +81,7 @@ export class InputRouter {
   cancelGyroCalibration(id: SeatId): void { this.gyroSeat(id).gamepad.cancelGyroCalibration(); this.finishGyroCalibration(); }
   resetGyroCalibration(id: SeatId): void { this.gyroSeat(id).gamepad.resetGyroCalibration(); this.finishGyroCalibration(); }
   private finishGyroCalibration(): void {
+    if (!this.platformActive) return;
     for (const instance of this.calibrationSensors) {
       const seat = this.deviceSeats.get(instance);
       if (seat?.gamepad.gyroCalibration.kind === "calibrating") continue;
@@ -94,6 +98,16 @@ export class InputRouter {
   }
   attachWindow(window: SdlWindow): void {
     this.detachWindow(); this.window = window; this.lease = window.beginInput(); this.updateCapture();
+  }
+  transferWindowTo(next: InputRouter): void {
+    next.platformActive = this.platformActive;
+    this.platformActive = false;
+    for (const instance of this.calibrationSensors) next.calibrationSensors.add(instance);
+    this.calibrationSensors.clear();
+    next.window = this.window;
+    next.lease = this.lease;
+    this.window = null;
+    this.lease = null;
   }
   detachWindow(): void {
     for (const route of this.routes) route.input.release(this.options.now());
@@ -196,7 +210,7 @@ export class InputRouter {
     for (const route of this.routes) { route.input.release(this.options.now()); route.input.gamepad.resetGyroCalibration(); }
     this.finishGyroCalibration();
     this.deviceSeats.clear(); this.keyboardKeys.clear();
-    this.options.controllers?.setAssignments(this.routes.map(route => route.controller));
+    if (this.platformActive) this.options.controllers?.setAssignments(this.routes.map(route => route.controller));
     const assignments = this.options.controllers?.assignments ?? [];
     for (const [slot, instance] of assignments.entries()) {
       const input = this.routes[slot]?.input;

@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import type { AttackProvenance, CombatPolicy, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
@@ -44,6 +45,15 @@ export type Q3CombatBridgeHost = CombatBridgeServices & ({ readonly product: "ba
 
 /** Source combat context and feedback over the existing shared damage authority. */
 export class Q3CombatBridge {
+  captureSaveState() {
+    if (this.calls.length !== 0) throw new Error("Cannot save Q3 during a combat call");
+    return { sequence: this.sequence };
+  }
+  restoreSaveState(value: unknown): void {
+    if (this.calls.length !== 0) throw new Error("Cannot restore Q3 during a combat call");
+    this.sequence = new SaveReader(value, "q3.combatBridge").field("sequence").integer(0);
+  }
+
   readonly context: CombatContext;
   private readonly calls: Q3DamageCall[] = [];
   private sequence = 0;

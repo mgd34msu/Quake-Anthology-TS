@@ -87,7 +87,9 @@ export function logAccuracyHit(gameType: number, target: GameEntity, attacker: G
 type Attack = Q3BulletAttack;
 
 export class WeaponRuntime {
-  constructor(readonly host: WeaponHost) {}
+  constructor(readonly host: WeaponHost) {
+    host.missiles.host.combat.entities.callbacks.think.register("q3.weapon.kamikazeDamage", self => { this.kamikazeDamage(self); });
+  }
 
   private owned(entity: GameEntity): void {
     if (this.host.missiles.host.combat.entities.get(entity.slot) !== entity) throw new Error("Weapon entity does not belong to this pool");
@@ -266,7 +268,7 @@ export class WeaponRuntime {
     const source = entity.client !== null ? entity : entity.activator;
     if (source === null) throw new Error("Kamikaze timer requires its activator");
     const position = snapVector(source.s.pos.base); setOrigin(explosion, position); explosion.classname = "kamikaze";
-    explosion.kamikazeTime = combat.time; explosion.think = self => { this.kamikazeDamage(self); }; explosion.nextthink = (combat.time + 100) | 0;
+    explosion.kamikazeTime = combat.time; explosion.think = this.host.missiles.host.combat.entities.callbacks.think.resolve("q3.weapon.kamikazeDamage"); explosion.nextthink = (combat.time + 100) | 0;
     explosion.count = 0; explosion.movedir = vec3(0, 0, 0); this.host.missiles.host.world.link(explosion);
     if (entity.client !== null) {
       explosion.activator = entity; entity.s.eFlags &= ~0x200;

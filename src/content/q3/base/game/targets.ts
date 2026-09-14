@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import { readModuleEntity } from "./save-module-values.ts";
 import { requireUseParticipant, useClient, useActor } from "./use-participant.ts";
 import type { UseParticipantServices } from "./use-participant.ts";
 import type { UseParticipant } from "./state.ts";
@@ -30,6 +32,13 @@ const MOD_TELEFRAG = 18;
 const MOD_TARGET_LASER = 21;
 
 export class TargetLocationState {
+  captureSaveState() { return { linked: this.linked, head: this.head?.slot ?? null }; }
+  restoreSaveState(value: unknown, pool: EntityPool): void {
+    const reader = new SaveReader(value, "q3.locations"), linked = reader.field("linked").boolean();
+    const head = reader.field("head").nullable(entry => readModuleEntity(entry, pool));
+    this.linked = linked; this.head = head;
+  }
+
   linked = false;
   head: GameEntity | null = null;
 
@@ -105,8 +114,9 @@ function useTargetGive(entity: GameEntity, _other: UseParticipant | null, activa
 }
 
 function spawnTargetGive(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.use = (self, other, activator) => { useTargetGive(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetGive.use");
 }
 
 function useTargetRemovePowerups(_entity: GameEntity, _other: UseParticipant | null,
@@ -123,8 +133,9 @@ function useTargetRemovePowerups(_entity: GameEntity, _other: UseParticipant | n
 }
 
 function spawnTargetRemovePowerups(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.use = (self, other, activator) => { useTargetRemovePowerups(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetRemovePowerups.use");
 }
 
 function targetCrandom(runtime: TargetRuntime): number {
@@ -146,19 +157,21 @@ function thinkTargetDelay(entity: GameEntity, runtime: TargetRuntime): void {
 
 function useTargetDelay(entity: GameEntity, _other: UseParticipant | null, activator: UseParticipant | null,
   runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   const variance = Math.fround(Math.fround(entity.random) * targetCrandom(runtime));
   const seconds = Math.fround(Math.fround(entity.wait) + variance);
   entity.nextthink = sourceFloatSchedule(gameTime(runtime), seconds);
-  entity.think = self => { thinkTargetDelay(self, runtime); };
+  entity.think = runtime.entities.callbacks.think.resolve("q3.base.game.targets.useTargetDelay.think");
   entity.activation = activator;
 }
 
 function spawnTargetDelay(entity: GameEntity, variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
   const delay = variables.float("delay", "0");
   entity.wait = delay.present ? delay.value : variables.float("wait", "1").value;
   if (entity.wait === 0) entity.wait = 1;
-  entity.use = (self, other, activator) => { useTargetDelay(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetDelay.use");
 }
 
 function useTargetScore(entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
@@ -168,9 +181,10 @@ function useTargetScore(entity: GameEntity, _other: UseParticipant | null, activ
 }
 
 function spawnTargetScore(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
   if (entity.count === 0) entity.count = 1;
-  entity.use = (self, other, activator) => { useTargetScore(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetScore.use");
 }
 
 function centerPrint(message: string | null): string {
@@ -196,8 +210,9 @@ function useTargetPrint(entity: GameEntity, _other: UseParticipant | null, activ
 }
 
 function spawnTargetPrint(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.use = (self, other, activator) => { useTargetPrint(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetPrint.use");
 }
 
 function speakerSoundPath(noise: string): string {
@@ -221,6 +236,7 @@ function useTargetSpeaker(entity: GameEntity, _other: UseParticipant | null, act
 }
 
 function spawnTargetSpeaker(entity: GameEntity, variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
   entity.wait = variables.float("wait", "0").value;
   entity.random = variables.float("random", "0").value;
@@ -235,7 +251,7 @@ function spawnTargetSpeaker(entity: GameEntity, variables: SpawnVariables, runti
   entity.s.frame = qvmFloatToInt(Math.fround(entity.wait * 10));
   entity.s.clientNum = qvmFloatToInt(Math.fround(entity.random * 10));
   if ((entity.spawnflags & 1) !== 0) entity.s.loopSound = entity.noiseIndex;
-  entity.use = (self, other, activator) => { useTargetSpeaker(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetSpeaker.use");
   if ((entity.spawnflags & 4) !== 0) entity.r.svFlags |= ServerEntityFlags.BROADCAST;
   entity.s.pos = { ...entity.s.pos, base: vec3(entity.s.origin.x, entity.s.origin.y, entity.s.origin.z) };
   runtime.entities.options.link(entity);
@@ -262,6 +278,7 @@ function useTargetPush(entity: GameEntity, _other: UseParticipant | null, activa
 }
 
 function spawnTargetPush(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
   if (entity.speed === 0) entity.speed = 1_000;
   const moved = moveDirectionForTarget(entity);
@@ -272,13 +289,9 @@ function spawnTargetPush(entity: GameEntity, _variables: SpawnVariables, runtime
     entity.r.absmin = { ...entity.s.origin };
     entity.r.absmax = { ...entity.s.origin };
     entity.nextthink = (gameTime(runtime) + 100) | 0;
-    entity.think = self => {
-      const origin = scale3(add3(self.r.absmin, self.r.absmax), 0.5);
-      aimAtTarget({ pool: runtime.entities, randomInt: () => runtime.random.rand(),
-        gravity: () => runtime.gravity(), warn: message => { runtime.warn(message); } }, self, origin);
-    };
+    entity.think = runtime.entities.callbacks.think.resolve("q3.base.game.targets.spawnTargetPush.think");
   }
-  entity.use = (self, other, activator) => { useTargetPush(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetPush.use");
 }
 
 function moveDirectionForTarget(entity: GameEntity): Vec3 {
@@ -327,6 +340,7 @@ function useTargetLaser(entity: GameEntity, _other: UseParticipant | null, activ
 }
 
 function startTargetLaser(entity: GameEntity, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   entity.s.eType = EntityType.ET_BEAM;
   if (entity.target !== null) {
     const target = findEntity(runtime.entities, null, "targetname", entity.target);
@@ -336,16 +350,17 @@ function startTargetLaser(entity: GameEntity, runtime: TargetRuntime): void {
     }
     entity.enemy = target;
   } else entity.movedir = moveDirectionForTarget(entity);
-  entity.use = (self, other, activator) => { useTargetLaser(self, other, activator, runtime); };
-  entity.think = self => { laserThink(self, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.startTargetLaser.use");
+  entity.think = runtime.entities.callbacks.think.resolve("q3.base.game.targets.startTargetLaser.think");
   if (entity.damage === 0) entity.damage = 1;
   if ((entity.spawnflags & 1) !== 0) laserOn(entity, runtime);
   else laserOff(entity, runtime);
 }
 
 function spawnTargetLaser(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.think = self => { startTargetLaser(self, runtime); };
+  entity.think = runtime.entities.callbacks.think.resolve("q3.base.game.targets.spawnTargetLaser.think");
   entity.nextthink = (gameTime(runtime) + 100) | 0;
 }
 
@@ -364,11 +379,12 @@ function useTargetTeleporter(entity: GameEntity, _other: UseParticipant | null, 
 }
 
 function spawnTargetTeleporter(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
   if (entity.targetname === null) {
     runtime.warn(gameFormat("untargeted %s at %s\n", [entity.classname, runtime.entities.utilities.vtos(entity.s.origin).readString()]));
   }
-  entity.use = (self, other, activator) => { useTargetTeleporter(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetTeleporter.use");
 }
 
 function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activatorValue: UseParticipant | null,
@@ -378,8 +394,9 @@ function useTargetKill(_entity: GameEntity, _other: UseParticipant | null, activ
 }
 
 function spawnTargetKill(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.use = (self, other, activator) => { useTargetKill(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetKill.use");
 }
 
 function asciiFold(value: string): string {
@@ -405,8 +422,9 @@ function linkTargetLocations(runtime: TargetRuntime): void {
 }
 
 function spawnTargetLocation(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.think = () => { linkTargetLocations(runtime); };
+  entity.think = runtime.entities.callbacks.think.resolve("q3.base.game.targets.spawnTargetLocation.think");
   entity.nextthink = (gameTime(runtime) + 200) | 0;
   setOrigin(entity, entity.s.origin);
 }
@@ -435,8 +453,9 @@ function pickTargetForRuntime(runtime: TargetRuntime, targetName: string | null)
 }
 
 function spawnTargetRelay(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
+  bindTargetSaveCallbacks(runtime);
   requireOwned(runtime, entity);
-  entity.use = (self, other, activator) => { useTargetRelay(self, other, activator, runtime); };
+  entity.use = runtime.entities.callbacks.use.resolve("q3.base.game.targets.spawnTargetRelay.use");
 }
 
 function spawnTargetPosition(entity: GameEntity, _variables: SpawnVariables, runtime: TargetRuntime): void {
@@ -446,6 +465,7 @@ function spawnTargetPosition(entity: GameEntity, _variables: SpawnVariables, run
 
 /** Spawn table entries for the concrete target entities implemented in this module. */
 export function targetSpawnHandlers(runtime: TargetRuntime): ReadonlyMap<string, SpawnHandler> {
+  bindTargetSaveCallbacks(runtime);
   if (runtime.itemLifecycle.entities !== runtime.entities || runtime.itemLifecycle.world !== runtime.world) {
     throw new Error("Target item lifecycle context does not match its entity pool and world");
   }
@@ -464,4 +484,27 @@ export function targetSpawnHandlers(runtime: TargetRuntime): ReadonlyMap<string,
     ["target_kill", (entity, variables) => { spawnTargetKill(entity, variables, runtime); }],
     ["target_location", (entity, variables) => { spawnTargetLocation(entity, variables, runtime); }],
   ]);
+}
+
+export function bindTargetSaveCallbacks(runtime: TargetRuntime): void {
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetGive.use", (self, other, activator) => { useTargetGive(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRemovePowerups.use", (self, other, activator) => { useTargetRemovePowerups(self, other, activator, runtime); });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.useTargetDelay.think", self => { thinkTargetDelay(self, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetDelay.use", (self, other, activator) => { useTargetDelay(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetScore.use", (self, other, activator) => { useTargetScore(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPrint.use", (self, other, activator) => { useTargetPrint(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetSpeaker.use", (self, other, activator) => { useTargetSpeaker(self, other, activator, runtime); });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetPush.think", self => {
+      const origin = scale3(add3(self.r.absmin, self.r.absmax), 0.5);
+      aimAtTarget({ pool: runtime.entities, randomInt: () => runtime.random.rand(),
+        gravity: () => runtime.gravity(), warn: message => { runtime.warn(message); } }, self, origin);
+    });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetPush.use", (self, other, activator) => { useTargetPush(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.startTargetLaser.use", (self, other, activator) => { useTargetLaser(self, other, activator, runtime); });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.startTargetLaser.think", self => { laserThink(self, runtime); });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLaser.think", self => { startTargetLaser(self, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetTeleporter.use", (self, other, activator) => { useTargetTeleporter(self, other, activator, runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetKill.use", (self, other, activator) => { useTargetKill(self, other, activator, runtime); });
+  runtime.entities.callbacks.think.intern("q3.base.game.targets.spawnTargetLocation.think", () => { linkTargetLocations(runtime); });
+  runtime.entities.callbacks.use.intern("q3.base.game.targets.spawnTargetRelay.use", (self, other, activator) => { useTargetRelay(self, other, activator, runtime); });
 }

@@ -337,6 +337,25 @@ export class UnifiedAudio {
         this.device = SdlAudioDevice.open({ ...options, sampleRate: this.sampleRate, channels: 2, sampleBits: 16 });
         this.detachedOutput = null;
     }
+    prepareOutputTransfer(next: UnifiedAudio): () => void {
+        this.check(); next.check();
+        if (next.device !== null || next.detachedOutput !== null) throw new Error("Replacement audio already owns an output");
+        if (next.sampleRate !== this.sampleRate) throw new Error("Replacement audio requires the same device sample rate");
+        return () => {
+            next.device = this.device;
+            next.detachedOutput = this.detachedOutput;
+            next.queuedPcm = this.queuedPcm;
+            next.paused = this.paused;
+            next.outputStarted = this.outputStarted;
+            next.previousPumpFrame = this.previousPumpFrame;
+            next.pumpIntervals.splice(0, next.pumpIntervals.length, ...this.pumpIntervals);
+            this.device = null;
+            this.detachedOutput = null;
+            this.queuedPcm = new Int16Array(0);
+            this.previousPumpFrame = null;
+            this.pumpIntervals.length = 0;
+        };
+    }
     detachOutput(): void {
         this.check();
         const device = this.device;

@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { writeGround } from "../base/game/ground.ts";
 // Ported from id Software's code/game/g_arenas.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -36,11 +38,22 @@ export interface ArenaHost {
 
 /** Each game's source podium pointers borrow entities from its own match pool. */
 export class ArenaRuntime {
+  captureSaveState() { return { podium1: this.podium1?.slot ?? null, podium2: this.podium2?.slot ?? null, podium3: this.podium3?.slot ?? null }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.arenas");
+    const first = reader.field("podium1").nullable(entry => readModuleEntity(entry, this.pool));
+    const second = reader.field("podium2").nullable(entry => readModuleEntity(entry, this.pool));
+    const third = reader.field("podium3").nullable(entry => readModuleEntity(entry, this.pool));
+    this.podium1 = first; this.podium2 = second; this.podium3 = third;
+  }
+
   private podium1: GameEntity | null = null;
   private podium2: GameEntity | null = null;
   private podium3: GameEntity | null = null;
 
-  constructor(readonly host: ArenaHost) {}
+  constructor(readonly host: ArenaHost) {
+    this.bindSaveCallbacks();
+  }
 
   resetPodiumPlayers(): void {
     this.podium1 = this.podium2 = this.podium3 = null;
@@ -176,7 +189,7 @@ export class ArenaRuntime {
   private celebrateStart(player: GameEntity): void {
     player.s.torsoAnim = ((player.s.torsoAnim & ANIM_TOGGLEBIT) ^ ANIM_TOGGLEBIT) | PlayerAnimation.TORSO_GESTURE;
     player.nextthink = (this.level.time + TIMER_GESTURE) | 0;
-    player.think = entity => this.celebrateStop(entity);
+    player.think = this.pool.callbacks.think.resolve("q3.team-arena.arenas.celebrateStart.think");
     this.pool.addEvent(player, EntityEvent.EV_TAUNT, 0);
   }
   private podiumOrigin(): Vec3 {
@@ -210,7 +223,7 @@ export class ArenaRuntime {
     const yaw = vectorToAngles(sub3(this.level.intermissionOrigin, podium.r.currentOrigin)).y;
     podium.s.apos = { ...podium.s.apos, base: vec3(podium.s.apos.base.x, yaw, podium.s.apos.base.z) };
     this.host.world.link(podium);
-    podium.think = entity => this.podiumPlacementThink(entity);
+    podium.think = this.pool.callbacks.think.resolve("q3.team-arena.arenas.spawnPodium.think");
     podium.nextthink = (this.level.time + 100) | 0;
     return podium;
   }
@@ -222,7 +235,7 @@ export class ArenaRuntime {
     let player = this.spawnModelOnVictoryPad(podium, offsetFirst, this.pool.at(number),
       this.pool.clientAt(number).ps.persistant.get(PersistentIndex.PERS_RANK) & ~RANK_TIED_FLAG);
     player.nextthink = (this.level.time + 2000) | 0;
-    player.think = entity => this.celebrateStart(entity);
+    player.think = this.pool.callbacks.think.resolve("q3.team-arena.arenas.spawnModelsOnVictoryPads.think");
     this.podium1 = player;
     number = this.sorted(1);
     player = this.spawnModelOnVictoryPad(podium, offsetSecond, this.pool.at(number),
@@ -240,7 +253,13 @@ export class ArenaRuntime {
     if (this.host.match.host.settings().gameType !== GameType.GT_SINGLE_PLAYER) return;
     if (this.podium1 !== null) {
       this.podium1.nextthink = this.level.time;
-      this.podium1.think = entity => this.celebrateStop(entity);
+      this.podium1.think = this.pool.callbacks.think.resolve("q3.team-arena.arenas.celebrateStart.think");
     }
+  }
+
+  bindSaveCallbacks(): void {
+    this.pool.callbacks.think.intern("q3.team-arena.arenas.celebrateStart.think", entity => this.celebrateStop(entity));
+    this.pool.callbacks.think.intern("q3.team-arena.arenas.spawnPodium.think", entity => this.podiumPlacementThink(entity));
+    this.pool.callbacks.think.intern("q3.team-arena.arenas.spawnModelsOnVictoryPads.think", entity => this.celebrateStart(entity));
   }
 }

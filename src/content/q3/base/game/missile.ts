@@ -1,3 +1,7 @@
+import { SaveReader } from "../../../../persistence/value.ts";
+import { readSavedActor, savedActorId } from "../../../../persistence/save-image.ts";
+import type { SavedActorId } from "../../../../contracts/session.ts";
+import { readModuleEntity } from "./save-module-values.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { SessionActorRegistry } from "../../../../world/actors/registry.ts";
 import type { SharedBodyTable } from "../../../../world/actors/body.ts";
@@ -86,12 +90,50 @@ interface NativeProjectile extends Q3Projectile {
 }
 
 export class MissileRuntime {
+  captureSaveState() {
+    return [...this.projectiles].map(([entity, projectile]) => ({ entity: entity.slot, actor: savedActorId(projectile.actor.id), owner: savedActorId(projectile.owner),
+      pass: projectile.pass === null ? null : savedActorId(projectile.pass), trigger: projectile.trigger === null ? null : savedActorId(projectile.trigger),
+      attachment: projectile.attachment.kind === "none" ? { kind: "none" } : { kind: "player", actor: savedActorId(projectile.attachment.actor) } }));
+  }
+
+  restoreSaveState(value: unknown, resolveActor: (saved: SavedActorId) => ActorId): void {
+    const reader = new SaveReader(value, "q3.missiles");
+    const entries = reader.list(entry => {
+      const entity = readModuleEntity(entry.field("entity"), this.host.combat.entities);
+      const actor = resolveActor(readSavedActor(entry.field("actor")));
+      if (!entity.actor.id.equals(actor)) entry.fail("projectile actor differs from its source record");
+      const owner = resolveActor(readSavedActor(entry.field("owner")));
+      const pass = entry.field("pass").nullable(saved => resolveActor(readSavedActor(saved)));
+      const trigger = entry.field("trigger").nullable(saved => resolveActor(readSavedActor(saved)));
+      const attachmentReader = entry.field("attachment");
+      const attachment: NativeProjectile["attachment"] = attachmentReader.field("kind").choice("none", "player") === "none"
+        ? { kind: "none" } : { kind: "player", actor: resolveActor(readSavedActor(attachmentReader.field("actor"))) };
+      return { entity, projectile: this.bindProjectile(entity, owner, pass, attachment, trigger) };
+    });
+    if (new Set(entries.map(entry => entry.entity)).size !== entries.length) reader.fail("duplicate native projectile");
+    this.projectiles.clear();
+    for (const entry of entries) this.projectiles.set(entry.entity, entry.projectile);
+  }
+
+  private bindProjectile(bolt: GameEntity, owner: ActorId, pass: ActorId | null, attachment: NativeProjectile["attachment"], trigger: ActorId | null): NativeProjectile {
+    const actor = bolt.actor;
+    return {
+      actor, owner, attachment, trigger, get weapon() { return bolt.s.weapon; }, get direct() { return bolt.damage; }, get splash() { return bolt.splashDamage; },
+      get radius() { return bolt.splashRadius; }, get method() { return bolt.methodOfDeath; }, get splashMethod() { return bolt.splashMethodOfDeath; },
+      get damagePoint() { return bolt.s.origin; },
+      get trajectory() { return bolt.s.pos; }, set trajectory(value) { bolt.s.pos = value; },
+      get flags() { return bolt.s.eFlags; }, set flags(value) { bolt.s.eFlags = value; }, pass
+    };
+  }
+
   private readonly projectiles = new Map<GameEntity, NativeProjectile>();
   private readonly proximityTouch: EntityTouch = (self, other) => { if (other instanceof GameEntity) this.proximityTrigger(self, other); };
 
   constructor(readonly host: MissileHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Missile product does not match its entity pool");
     host.actors.onRelease(actor => { this.released(actor.id); return undefined; });
+
+    this.bindSaveCallbacks();
   }
 
   ownerOf(actor: ActorId): ActorId | null {
@@ -238,9 +280,9 @@ export class MissileRuntime {
       if (other !== null && other.s.eType === EntityType.ET_PLAYER && other.health > 0) { this.proximityPlayer(entity, other); return true; }
       setOrigin(entity, snapVectorTowards(trace.end, entity.s.pos.base));
       pool.addEvent(entity, EntityEvent.EV_PROXIMITY_MINE_STICK, trace.surfaceFlags);
-      entity.think = self => { this.proximityActivate(self); }; entity.nextthink = (combat.time + 2000) | 0;
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.specialImpact.think"); entity.nextthink = (combat.time + 2000) | 0;
       const angles = vectorToAngles(normal); entity.s.angles = vec3(angles.x + 90, angles.y, angles.z);
-      entity.enemy = other; entity.die = self => { this.proximityDie(self); }; entity.movedir = { ...normal };
+      entity.enemy = other; entity.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die"); entity.movedir = { ...normal };
       entity.r.mins = vec3(-4, -4, -4); entity.r.maxs = vec3(4, 4, 4);
       this.host.world.link(entity); return true;
     }
@@ -256,7 +298,7 @@ export class MissileRuntime {
       position = snapVectorTowards(position, entity.s.pos.base);
       event.freeAfterEvent = true; event.s.eType = EntityType.ET_GENERAL; entity.s.eType = EntityType.ET_GRAPPLE;
       setOrigin(entity, position); setOrigin(event, position);
-      entity.think = self => { this.hookThink(self); }; entity.nextthink = (combat.time + 100) | 0;
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.hookThink"); entity.nextthink = (combat.time + 100) | 0;
       const client = this.ownerClient(this.projectile(entity)); if (client === null) { pool.free(entity); pool.free(event); return true; } client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
       client.ps.grapplePoint = { ...entity.r.currentOrigin };
       this.host.world.link(entity); this.host.world.link(event); return true;
@@ -287,7 +329,7 @@ export class MissileRuntime {
   }
 
   private proximityDie(mine: GameEntity): void {
-    mine.think = self => { this.proximityExplode(self); }; mine.nextthink = (this.host.combat.time + 1) | 0;
+    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think"); mine.nextthink = (this.host.combat.time + 1) | 0;
   }
 
   private proximityTrigger(trigger: GameEntity, other: GameEntity): void {
@@ -302,13 +344,13 @@ export class MissileRuntime {
 
   private proximityActivate(mine: GameEntity): void {
     const services = this.missionpack(), combat = this.host.combat;
-    mine.think = self => { this.proximityExplode(self); }; mine.nextthink = (combat.time + services.proxMineTimeout) | 0;
-    mine.takedamage = true; mine.health = 1; mine.die = self => { this.proximityDie(self); };
+    mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityDie.think"); mine.nextthink = (combat.time + services.proxMineTimeout) | 0;
+    mine.takedamage = true; mine.health = 1; mine.die = this.host.combat.entities.callbacks.die.resolve("q3.base.game.missile.specialImpact.die");
     mine.s.loopSound = services.soundIndex("sound/weapons/proxmine/wstbtick.wav");
     const trigger = combat.entities.spawn(), radius = Math.fround(mine.splashRadius);
     trigger.classname = "proxmine_trigger"; trigger.r.mins = vec3(-radius, -radius, -radius); trigger.r.maxs = vec3(radius, radius, radius);
     setOrigin(trigger, mine.s.pos.base); trigger.parent = mine; trigger.r.contents = 0x40000000;
-    trigger.touch = this.proximityTouch;
+    trigger.touch = this.host.combat.entities.callbacks.touch.resolve("q3.base.game.missile.proximityActivate.touch");
     this.host.world.link(trigger); mine.activator = trigger; this.projectile(mine).trigger = trigger.actor.id;
   }
 
@@ -337,12 +379,12 @@ export class MissileRuntime {
       if (player.activator === null) throw new Error("Ticking player requires its proximity mine");
       player.activator.splashDamage = (player.activator.splashDamage + mine.splashDamage) | 0;
       player.activator.splashRadius = Math.fround(player.activator.splashRadius * Math.fround(1.5));
-      mine.think = self => { combat.entities.free(self); }; mine.nextthink = combat.time; return;
+      mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityPlayer.think"); mine.nextthink = combat.time; return;
     }
     const client = clientOf(player); client.ps.eFlags |= EF_TICKING; player.activator = mine;
     mine.s.eFlags |= EF_NODRAW; mine.r.svFlags |= ServerEntityFlags.NOCLIENT;
     mine.s.pos = { ...mine.s.pos, type: TrajectoryType.TR_LINEAR, delta: vec3(0, 0, 0) };
-    this.projectile(mine).attachment = { kind: "player", actor: player.actor.id }; mine.think = self => { this.proximityExplodeOnPlayer(self); };
+    this.projectile(mine).attachment = { kind: "player", actor: player.actor.id }; mine.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.proximityExplodeOnPlayer");
     mine.nextthink = (combat.time + (client.invulnerabilityTime > combat.time ? 2000 : 10000)) | 0;
   }
 
@@ -351,20 +393,13 @@ export class MissileRuntime {
     this.owned(self);
     const owner = self.actor.id, time = this.host.combat.time, bolt = this.host.combat.entities.spawn();
     const launch = q3LaunchProjectile(start, direction, speed, gravity, duration, time);
-    bolt.classname = classname; bolt.nextthink = launch.expires; bolt.think = entity => { this.explode(entity); };
+    bolt.classname = classname; bolt.nextthink = launch.expires; bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.launch.think");
     bolt.s.eType = EntityType.ET_MISSILE; bolt.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN; bolt.s.weapon = weapon;
     bolt.r.ownerNum = self.s.number; bolt.parent = weapon === Weapon.WP_GRAPPLING_HOOK || weapon === Weapon.WP_PROX_LAUNCHER ? self : null; bolt.damage = direct; bolt.splashDamage = splash; bolt.splashRadius = radius;
     bolt.methodOfDeath = method; bolt.splashMethodOfDeath = splashMethod; bolt.clipmask = MASK_SHOT; bolt.targetEnt = null;
     bolt.s.pos = launch.trajectory;
     bolt.r.currentOrigin = vec3(start.x, start.y, start.z);
-    const actor = bolt.actor;
-    this.projectiles.set(bolt, {
-      actor, owner, attachment: { kind: "none" }, trigger: null, get weapon() { return bolt.s.weapon; }, get direct() { return bolt.damage; }, get splash() { return bolt.splashDamage; },
-      get radius() { return bolt.splashRadius; }, get method() { return bolt.methodOfDeath; }, get splashMethod() { return bolt.splashMethodOfDeath; },
-      get damagePoint() { return bolt.s.origin; },
-      get trajectory() { return bolt.s.pos; }, set trajectory(value) { bolt.s.pos = value; },
-      get flags() { return bolt.s.eFlags; }, set flags(value) { bolt.s.eFlags = value; }, pass: owner
-    });
+    this.projectiles.set(bolt, this.bindProjectile(bolt, owner, owner, { kind: "none" }, null));
     return bolt;
   }
 
@@ -388,7 +423,7 @@ export class MissileRuntime {
   fireGrapple(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRAPPLING_HOOK, "hook", 800, 10000, false, 0, 0, 0,
       this.host.combat.product === "baseq3" ? 23 : 28, 0);
-    bolt.think = entity => { this.hookFree(entity); }; bolt.s.otherEntityNum = self.s.number; clientOf(self).hook = bolt; return bolt;
+    bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.fireGrapple.think"); bolt.s.otherEntityNum = self.s.number; clientOf(self).hook = bolt; return bolt;
   }
   fireProx(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
     this.missionpack();
@@ -401,5 +436,17 @@ export class MissileRuntime {
     const velocity = q3NailVelocity(start, forward, right, up, random);
     bolt.s.pos = { ...bolt.s.pos, time: this.host.combat.time, delta: snapVector(velocity) };
     return bolt;
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.specialImpact.think", self => { this.proximityActivate(self); });
+    this.host.combat.entities.callbacks.die.intern("q3.base.game.missile.specialImpact.die", self => { this.proximityDie(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.hookThink", self => { this.hookThink(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityDie.think", self => { this.proximityExplode(self); });
+    this.host.combat.entities.callbacks.touch.intern("q3.base.game.missile.proximityActivate.touch", this.proximityTouch);
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityPlayer.think", self => { this.host.combat.entities.free(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.proximityExplodeOnPlayer", self => { this.proximityExplodeOnPlayer(self); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.launch.think", entity => { this.explode(entity); });
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.missile.fireGrapple.think", entity => { this.hookFree(entity); });
   }
 }

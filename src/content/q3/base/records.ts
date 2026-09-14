@@ -44,6 +44,50 @@ interface SourceRecord {
 export class Q3EntityRecords {
   private readonly records: readonly SourceRecord[];
   private readonly clients: readonly GameClient[];
+  private readonly clientBacking = Array.from({ length: MAX_CLIENTS }, () => ({ sourceStats: new Int32Array(16), specialAmmo: new Int32Array(16) }));
+
+  captureOwnership() {
+    return this.records.map(record => ({ actor: record.actor, active: record.active, borrowed: record.borrowed }));
+  }
+
+  restoreOwnership(states: readonly { readonly actor: OwnedActor | null; readonly active: boolean; readonly borrowed: boolean }[]): void {
+    if (states.length !== MAX_GENTITIES) throw new Error("Restored Q3 ownership requires all retained slots");
+    const seen = new Set<OwnedActor>();
+    for (const state of states) {
+      if (state.actor === null) {
+        if (state.active) throw new Error("Active Q3 slot has no actor");
+      } else {
+        this.host.actors.assertOwned(state.actor);
+        if (seen.has(state.actor)) throw new Error("Duplicate restored Q3 actor");
+        seen.add(state.actor);
+        if (!state.borrowed && state.actor.owner !== this.provider) throw new Error("Q3 owned actor has a foreign provider");
+      }
+    }
+    states.forEach((state, slot) => {
+      const record = this.record(slot);
+      if (record.actor !== null) throw new Error("Q3 ownership hydration requires fresh records");
+      record.actor = state.actor; record.active = state.active; record.borrowed = state.borrowed;
+    });
+  }
+
+  restoreCallbacks(): void {
+    for (const record of this.records) if (record.actor !== null && !record.borrowed) {
+      this.host.combat.bindDamageAdmission(record.actor, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
+      this.bindCallbacks(record);
+    }
+  }
+
+  captureClientBacking(slot: number): { readonly sourceStats: readonly number[]; readonly specialAmmo: readonly number[] } {
+    const backing = this.clientBacking[slot];
+    if (backing === undefined) throw new RangeError("Q3 client backing slot outside 0..63");
+    return { sourceStats: Array.from(backing.sourceStats), specialAmmo: Array.from(backing.specialAmmo) };
+  }
+
+  restoreClientBacking(slot: number, state: { readonly sourceStats: readonly number[]; readonly specialAmmo: readonly number[] }): void {
+    const backing = this.clientBacking[slot];
+    if (backing === undefined || state.sourceStats.length !== 16 || state.specialAmmo.length !== 16) throw new Error("Invalid Q3 private client backing");
+    backing.sourceStats.set(state.sourceStats); backing.specialAmmo.set(state.specialAmmo);
+  }
 
   constructor(readonly host: Q3RecordHost, readonly provider: ProviderId, readonly product: Product) {
     this.records = Array.from({ length: MAX_GENTITIES }, (_, slot): SourceRecord => {
@@ -172,7 +216,9 @@ export class Q3EntityRecords {
   }
 
   private playerBinding(slot: number): PlayerAuthorityBinding {
-    const sourceStats = new Int32Array(16), specialAmmo = new Int32Array(16);
+    const backing = this.clientBacking[slot];
+    if (backing === undefined) throw new RangeError("Q3 client backing slot outside 0..63");
+    const { sourceStats, specialAmmo } = backing;
     const schema = statSchema(this.product);
     const body = (): BodyState => this.record(slot).entity.binding.body.read();
     const actor = (): OwnedActor => this.ensureActor(slot);

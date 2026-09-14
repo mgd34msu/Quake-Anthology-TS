@@ -82,10 +82,15 @@ export class SessionClient implements SessionResource {
   }
 
   clearWorld(): undefined {
+    const previous = this.replaceWorldResources();
+    return closeAll([{ close: () => this.clearSeatPresentations() }, previous], "Client world shutdown failed");
+  }
+
+  replaceWorldResources(): ResourceScope {
     this.resources.assertOpen();
     const previous = this.activeResources;
     this.activeResources = new ResourceScope("Client world resources");
-    return closeAll([{ close: () => this.clearSeatPresentations() }, previous], "Client world shutdown failed");
+    return previous;
   }
 
   close(): undefined { return this.resources.close(); }
@@ -110,17 +115,25 @@ export class SessionSeat implements SessionResource {
   get presentation(): SeatPresentation | null { return this.presentationLifetime?.presentation ?? null; }
 
   attachPresentation(presentation: SeatPresentation, cleanup: () => undefined): ResourceScope {
+    this.validatePresentation(presentation);
+    const resources = new ResourceScope(`Seat ${this.id.index} presentation`);
+    resources.defer(cleanup);
+    this.replacePresentation({ presentation, resources })?.close();
+    return resources;
+  }
+
+  validatePresentation(presentation: SeatPresentation): void {
     this.resources.assertOpen();
     if (this.client.isClosed) throw new Error("Seat client is closed");
     if (!presentation.state.seat.equals(this.id) || !presentation.state.client.equals(this.client.id)) {
       throw new RangeError("Presentation belongs to another seat or client");
     }
-    this.clearPresentation();
-    this.resources.assertOpen();
-    const resources = new ResourceScope(`Seat ${this.id.index} presentation`);
-    resources.defer(cleanup);
-    this.presentationLifetime = { presentation, resources };
-    return resources;
+  }
+
+  replacePresentation(lifetime: PresentationLifetime | null): ResourceScope | null {
+    const previous = this.presentationLifetime;
+    this.presentationLifetime = lifetime;
+    return previous?.resources ?? null;
   }
 
   clearPresentation(): undefined {
@@ -182,15 +195,42 @@ export class EngineSession implements SessionResource {
   get snapshot(): WorldSnapshot | null { return this.published; }
 
   attachWorld(simulation: Simulation): WorldLifetime {
+    const replacement = this.replaceWorld(simulation);
+    replacement.retired.close();
+    return replacement.world;
+  }
+
+  replaceWorld(simulation: Simulation, presentations: readonly {
+    readonly seat: SessionSeat;
+    readonly presentation: SeatPresentation;
+    readonly cleanup: () => undefined;
+  }[] = []): { readonly world: WorldLifetime; readonly retired: SessionResource } {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
     if (this.currentWorld?.simulation === simulation) throw new Error("Simulation is already attached");
-    this.closeWorld();
-    this.resources.assertOpen();
+    const nextPresentations = new Map<SessionSeat, PresentationLifetime>();
+    for (const entry of presentations) {
+      if (this.seats.get(entry.seat.id.index) !== entry.seat) throw new Error("Presentation seat is not owned by this session");
+      if (nextPresentations.has(entry.seat)) throw new Error("Duplicate replacement presentation");
+      entry.seat.validatePresentation(entry.presentation);
+      const resources = new ResourceScope(`Seat ${entry.seat.id.index} presentation`);
+      resources.defer(entry.cleanup);
+      nextPresentations.set(entry.seat, { presentation: entry.presentation, resources });
+    }
     const world = new WorldLifetime(simulation);
+    const retired: SessionResource[] = [];
+    if (this.currentWorld !== null) retired.push(this.currentWorld);
+    for (const seat of this.seats.values()) {
+      const previous = seat.replacePresentation(nextPresentations.get(seat) ?? null);
+      if (previous !== null) retired.push(previous);
+    }
+    for (const client of this.clients.values()) {
+      if (!client.isClosed) retired.push(client.replaceWorldResources());
+    }
     this.currentWorld = world;
-    return world;
+    this.published = null;
+    return { world, retired: { close: () => closeAll(retired, "Retired world shutdown failed") } };
   }
 
   closeWorld(): undefined {

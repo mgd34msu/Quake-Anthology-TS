@@ -1,3 +1,8 @@
+import { SaveReader, encodeCheckpointValue } from "../../../../persistence/value.ts";
+import { savedActorId } from "../../../../persistence/save-image.ts";
+import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../../../content/q3/base/game/save-state.ts";
+import { readQ3Graph, readQ3Actor } from "../../../../content/q3/base/game/save-reader.ts";
+import { captureQ3Level, restoreQ3Level } from "../../../../content/q3/base/game/save-level.ts";
 import { MoveFlags } from "../../../../movement/q3/constants.ts";
 import { stepQ3Holdable } from "../../../../movement/q3/weapon.ts";
 import { q3AdmitTargetDamage } from "../../../../content/q3/base/game/combat.ts";
@@ -33,9 +38,9 @@ import { GameCommandRuntime } from "../../../../content/q3/team-arena/commands.t
 import { DeathRuntime } from "../../../../content/q3/base/game/death.ts";
 import { EntityPool, runThink } from "../../../../content/q3/base/game/entities.ts";
 import { gameFormat } from "../../../../content/q3/base/game/format.ts";
-import { ItemRegistry, respawnItem, spawnItem, touchItem, observeQ3Supply } from "../../../../content/q3/base/game/item-lifecycle.ts";
+import { ItemRegistry, bindItemSaveCallbacks, respawnItem, spawnItem, touchItem, observeQ3Supply } from "../../../../content/q3/base/game/item-lifecycle.ts";
 import type { ItemLifecycleContext } from "../../../../content/q3/base/game/item-lifecycle.ts";
-import { runItem } from "../../../../content/q3/base/game/item-motion.ts";
+import { bindLaunchSaveCallbacks, runItem } from "../../../../content/q3/base/game/item-motion.ts";
 import type { DropItemContext } from "../../../../content/q3/base/game/item-motion.ts";
 import { MatchModuleState, MatchRuntime } from "../../../../content/q3/team-arena/match.ts";
 import { GameMemory } from "../../../../content/q3/base/game/memory.ts";
@@ -50,7 +55,7 @@ import { GameSessionManager } from "../../../../content/q3/team-arena/session.ts
 import { GameServerCommandRuntime, GameServerCommandState } from "../../../../content/q3/team-arena/server-commands.ts";
 import type { SessionWorldState } from "../../../../content/q3/team-arena/session.ts";
 import { ShaderRemapRegistry } from "../../../../content/q3/base/game/shader-remaps.ts";
-import { spawnEntities } from "../../../../content/q3/base/game/spawn.ts";
+import { SpawnVariables, spawnEntities } from "../../../../content/q3/base/game/spawn.ts";
 import type { SpawnHandler, SpawnReport } from "../../../../content/q3/base/game/spawn.ts";
 import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES } from "../../../../content/q3/base/game/state.ts";
 import type { GameEntity } from "../../../../content/q3/base/game/state.ts";
@@ -98,9 +103,10 @@ export class Q3SourceRuntime {
   private mapReport: SpawnReport | null = null;
   private readonly publishedEvents = new Map<OwnedActor, { readonly event: number; readonly time: number }>();
 
-  constructor(readonly options: Q3SourceOptions, readonly host: Q3SourceHost) {
+  constructor(readonly options: Q3SourceOptions, readonly host: Q3SourceHost,
+    private readonly mode: { readonly kind: "new" } | { readonly kind: "restore"; readonly state: unknown } = { kind: "new" }) {
     const runtime = this;
-    if (options.sessionCarry !== undefined) {
+    if (mode.kind === "new" && options.sessionCarry !== undefined) {
       host.cvars.set("session", options.sessionCarry.world, true);
       for (const client of options.sessionCarry.clients) {
         if (client.slot < 0 || client.slot >= options.maxClients) continue;
@@ -110,8 +116,14 @@ export class Q3SourceRuntime {
     }
     this.remaps = new ShaderRemapRegistry(text => host.engine.print(text));
     this.settings = new Q3GameSettings({ cvars: host.cvars, sendServerCommand: host.engine.sendServerCommand, remapTeams: () => this.remapTeams() }, options.product);
-    host.cvars.set("sv_maxclients", String(options.maxClients), true);
-    this.settings.register(options.buildDate);
+    if (mode.kind === "new") {
+      host.cvars.set("sv_maxclients", String(options.maxClients), true);
+      this.settings.register(options.buildDate);
+    } else {
+      const reader = this.nativeSaveReader(mode.state);
+      host.serverState.restoreSaveState(reader.field("server").value);
+      this.settings.restoreSaveState(reader.field("settings").value);
+    }
     this.random.reset(options.seed);
     host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
     this.records = new Q3EntityRecords({ actors: host.actors, bodies: host.bodies, callbacks: host.callbacks,
@@ -122,7 +134,7 @@ export class Q3SourceRuntime {
       damageCall: () => this.bridge.currentCall, foreign: host.foreign, isPlayer: host.isPlayer }, options.recipe.map.entities.provider, options.product);
     this.world = new Q3WorldAdapter({ queries: host.scene, bodies: host.bodies, collision: host.collision,
       curves: () => host.cvars.variableValue("cm_noCurves") === 0, playerCurveClip: () => host.cvars.variableValue("cm_playerCurveClip") !== 0 }, this.records);
-    host.cvars.register("cm_playerCurveClip", "1");
+    if (mode.kind === "new") host.cvars.register("cm_playerCurveClip", "1");
     this.pool = new EntityPool({ records: this.records, product: options.product, maxClients: options.maxClients,
       get mapStartTime() { return runtime.level.startTime; }, time: () => this.level.time,
       print: host.engine.print, link: entity => this.world.link(entity), unlink: entity => this.world.unlink(entity.slot) });
@@ -139,8 +151,8 @@ export class Q3SourceRuntime {
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });
     const itemCallbacks: NonNullable<ItemLifecycleContext["callbacks"]> = {
-      touch: (entity, other, contact) => { touchItem(entity, other, contact, this.itemLifecycle); },
-      respawn: entity => { respawnItem(entity, this.itemLifecycle); },
+      touch: this.pool.callbacks.touch.register("q3.item.touch", (entity, other, contact) => { touchItem(entity, other, contact, this.itemLifecycle); }),
+      respawn: this.pool.callbacks.think.register("q3.item.respawn", entity => { respawnItem(entity, this.itemLifecycle); }),
     };
     this.itemLifecycle = { callbacks: itemCallbacks, previewPickup: item => host.previewPickup?.(item) ?? { kind: "native" }, admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
       get gameType() { return runtime.gameType; }, get weaponRespawnSeconds() { return runtime.integer("g_weaponrespawn"); },
@@ -150,7 +162,9 @@ export class Q3SourceRuntime {
       log: text => this.log(text), warn: host.engine.print };
     this.drops = { entities: this.pool, product: options.product, get gameType() { return runtime.gameType; }, get time() { return runtime.level.time; },
       touchItem: itemCallbacks.touch,
-      droppedFlagThink: entity => this.team.droppedFlagThink(entity), checkDroppedTeamItem: entity => this.team.checkDroppedItem(entity), random: () => this.random.random() };
+      droppedFlagThink: this.pool.callbacks.think.register("q3.item.droppedFlag", entity => this.team.droppedFlagThink(entity)), checkDroppedTeamItem: entity => this.team.checkDroppedItem(entity), random: () => this.random.random() };
+    bindItemSaveCallbacks(this.itemLifecycle);
+    bindLaunchSaveCallbacks(this.drops);
     this.team = this.createTeam();
     this.death = this.createDeath();
     this.think = new ClientThinkRuntime({ pool: this.pool, world: this.world, spatial: this.world,
@@ -200,6 +214,70 @@ export class Q3SourceRuntime {
       memory: { kind: "available", run: () => this.memory.status() },
       podium: { kind: "available", run: () => this.arenas.abortPodium() },
     }, new GameServerCommandState());
+    if (mode.kind === "restore") {
+      const reader = this.nativeSaveReader(mode.state);
+      prepareQ3Graph(this.records, readQ3Graph(reader.field("graph").value), host.actors);
+      this.spawnHandlers();
+    }
+  }
+
+  private nativeSaveReader(value: unknown): SaveReader {
+    const reader = new SaveReader(value, "q3.native");
+    reader.field("schema").literal("q3:native"); reader.field("version").literal(1);
+    reader.field("product").literal(this.options.product);
+    reader.field("entityText").literal(this.options.entities);
+    return reader;
+  }
+
+  captureNativeState() {
+    if (!this.loaded || this.mapReport === null) throw new Error("Q3 native save requires a loaded source");
+    if (this.host.callbacks.current !== null) throw new Error("Cannot save Q3 during an actor callback");
+    return { schema: "q3:native", version: 1, product: this.options.product, entityText: this.options.entities,
+      server: this.host.serverState.captureSaveState(), graph: captureQ3Graph(this.records, this.pool), level: captureQ3Level(this.level), random: this.random.seed,
+      locations: this.locations.captureSaveState(), spawns: this.spawns.captureSaveState(), match: this.match.captureSaveState(),
+      remaps: this.remaps.captureSaveState(), settings: this.settings.captureSaveState(), memory: this.memory.captureSaveState(),
+      registeredItems: this.registeredItems.captureSaveState(), bridge: this.bridge.captureSaveState(), missiles: this.missiles.captureSaveState(),
+      team: this.team.captureSaveState(), arenas: this.arenas.captureSaveState(), personalPortal: this.personalPortal?.captureSaveState() ?? null,
+      serverCommands: this.serverCommands.captureSaveState(),
+      publishedEvents: [...this.publishedEvents].map(([actor, event]) => ({ actor: savedActorId(actor.id), event: event.event, time: event.time })),
+      report: { worldVariables: this.mapReport.worldVariables.entries.map(pair => ({ ...pair })),
+        outcomes: this.mapReport.outcomes.map(outcome => outcome.kind === "dispatched"
+          ? { kind: outcome.kind, route: outcome.route, slot: outcome.slot, classname: outcome.classname }
+          : { ...outcome }) } };
+  }
+
+  captureNativeBytes(): Uint8Array { return encodeCheckpointValue(this.captureNativeState()); }
+
+  finishNativeRestore(): void {
+    if (this.loaded || this.mode.kind !== "restore") throw new Error("Q3 native hydration requires a prepared restore source");
+    const reader = this.nativeSaveReader(this.mode.state);
+    restoreQ3Level(this.level, reader.field("level").value);
+    this.random.reset(reader.field("random").integer());
+    restoreQ3Graph(this.records, this.pool, readQ3Graph(reader.field("graph").value), this.host.actors);
+    this.locations.restoreSaveState(reader.field("locations").value, this.pool);
+    this.spawns.restoreSaveState(reader.field("spawns").value); this.match.restoreSaveState(reader.field("match").value);
+    this.remaps.restoreSaveState(reader.field("remaps").value); this.memory.restoreSaveState(reader.field("memory").value);
+    this.registeredItems.restoreSaveState(reader.field("registeredItems").value); this.bridge.restoreSaveState(reader.field("bridge").value);
+    this.missiles.restoreSaveState(reader.field("missiles").value, actor => this.host.actors.referenceSaved(actor));
+    this.team.restoreSaveState(reader.field("team").value); this.arenas.restoreSaveState(reader.field("arenas").value);
+    if (this.personalPortal === null) reader.field("personalPortal").nullable(entry => entry.fail("baseq3 has no personal portal state"));
+    else this.personalPortal.restoreSaveState(reader.field("personalPortal").value);
+    this.serverCommands.restoreSaveState(reader.field("serverCommands").value);
+    this.publishedEvents.clear();
+    for (const entry of reader.field("publishedEvents").list(entry => ({ actor: readQ3Actor(entry.field("actor")), event: entry.field("event").number(), time: entry.field("time").number() }))) {
+      const actor = this.host.actors.resolveSaved(entry.actor);
+      if (actor === null || this.publishedEvents.has(actor)) return reader.fail("Invalid published Q3 event actor");
+      this.publishedEvents.set(actor, { event: entry.event, time: entry.time });
+    }
+    const report = reader.field("report");
+    this.mapReport = { worldVariables: new SpawnVariables(report.field("worldVariables").list(pair => ({ key: pair.field("key").string(), value: pair.field("value").string() }))),
+      outcomes: report.field("outcomes").list(entry => {
+        const kind = entry.field("kind").choice("dispatched", "filtered", "unknown"), slot = entry.field("slot").integer(0);
+        if (kind === "dispatched") return { kind, route: entry.field("route").choice("item", "handler"), entity: this.pool.at(slot), slot, classname: entry.field("classname").string() };
+        if (kind === "filtered") return { kind, slot, reason: entry.field("reason").choice("notsingle", "notteam", "notfree", "notta", "notq3a", "gametype") };
+        return { kind, slot, classname: entry.field("classname").nullable(value => value.string()) };
+      }) };
+    this.loaded = true;
   }
 
   get gameType(): number { return this.integer("g_gametype"); }
@@ -436,7 +514,7 @@ export class Q3SourceRuntime {
   }
 
   load(): SpawnReport {
-    if (this.loaded) throw new Error("Q3 source map is already loaded");
+    if (this.loaded || this.mode.kind === "restore") throw new Error("Q3 source map cannot spawn in its current construction mode");
     this.level.time = this.host.now(); this.level.startTime = this.level.time;
     this.level.warmupModificationCount = this.snapshot("g_warmup").modificationCount;
     this.memory.initialize();

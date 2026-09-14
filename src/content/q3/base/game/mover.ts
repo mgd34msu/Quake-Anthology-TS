@@ -79,6 +79,8 @@ function pushRotation(origin: Vec3, pusherOrigin: Vec3, amove: Vec3): Vec3 {
 export class MoverRuntime {
   constructor(readonly host: MoverHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Mover product does not match its entity pool");
+
+    this.bindSaveCallbacks();
   }
 
   private owned(entity: GameEntity): void {
@@ -338,7 +340,7 @@ export class MoverRuntime {
     if (entity.moverState === MoverState.ONE_TO_TWO) {
       this.setState(entity, MoverState.POS2, time);
       if (entity.soundPos2 !== 0) this.host.combat.entities.addEvent(entity, EntityEvent.EV_GENERAL_SOUND, entity.soundPos2);
-      entity.think = self => { this.returnToPos1(self); };
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.mover.reachedBinary.think");
       entity.nextthink = qvmFloatToInt(f32(f32(time) + entity.wait));
       if (entity.activation === null) entity.activation = entity;
       this.host.useTargets(entity, entity.activation);
@@ -383,8 +385,8 @@ export class MoverRuntime {
       const intensity = Math.min(255, qvmFloatToInt(f32(light.value / 4)));
       entity.s.constantLight = component(color.value.x) | (component(color.value.y) << 8) | (component(color.value.z) << 16) | (intensity << 24);
     }
-    entity.use = (self, other, activator) => { this.useBinary(self, other, activator); };
-    entity.reached = self => { this.reachedBinary(self); };
+    entity.use = this.host.combat.entities.callbacks.use.resolve("q3.base.game.mover.initializeBinary.use");
+    entity.reached = this.host.combat.entities.callbacks.reached.resolve("q3.base.game.mover.initializeBinary.reached");
     entity.moverState = MoverState.POS1;
     entity.r.svFlags = ServerEntityFlags.USE_CURRENT_ORIGIN;
     entity.s.eType = EntityType.ET_MOVER;
@@ -423,5 +425,11 @@ export class MoverRuntime {
     if (entity.damage !== 0) damage(this.host.combat, other, entity, entity, null, null, entity.damage, 0, MOD_CRUSH);
     if ((entity.spawnflags & 4) !== 0) return;
     this.useBinary(entity, entity, other);
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.combat.entities.callbacks.think.intern("q3.base.game.mover.reachedBinary.think", self => { this.returnToPos1(self); });
+    this.host.combat.entities.callbacks.use.intern("q3.base.game.mover.initializeBinary.use", (self, other, activator) => { this.useBinary(self, other, activator); });
+    this.host.combat.entities.callbacks.reached.intern("q3.base.game.mover.initializeBinary.reached", self => { this.reachedBinary(self); });
   }
 }

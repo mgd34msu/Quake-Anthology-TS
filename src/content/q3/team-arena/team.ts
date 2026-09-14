@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { GameEntity } from "../base/game/state.ts";
 // Ported from id Software's code/game/g_team.c and g_team.h.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -108,12 +110,23 @@ function ctfStatus(status: FlagStatus | -1): string {
 }
 
 export class TeamRuntime {
+  captureSaveState() { return { state: { lastFlagCapture: this.state.lastFlagCapture, lastCaptureTeam: this.state.lastCaptureTeam, redStatus: this.state.redStatus, blueStatus: this.state.blueStatus, flagStatus: this.state.flagStatus, redTakenTime: this.state.redTakenTime, blueTakenTime: this.state.blueTakenTime, redObeliskAttackedTime: this.state.redObeliskAttackedTime, blueObeliskAttackedTime: this.state.blueObeliskAttackedTime }, neutralObelisk: this.neutralObelisk?.slot ?? null, lastTeamLocationTime: this.lastTeamLocationTime }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.team"), state = reader.field("state");
+    const restored = { lastFlagCapture: state.field("lastFlagCapture").integer(), lastCaptureTeam: state.field("lastCaptureTeam").integer(), redStatus: state.field("redStatus").choice(-1, 0, 1, 2, 3, 4), blueStatus: state.field("blueStatus").choice(-1, 0, 1, 2, 3, 4), flagStatus: state.field("flagStatus").choice(-1, 0, 1, 2, 3, 4), redTakenTime: state.field("redTakenTime").integer(), blueTakenTime: state.field("blueTakenTime").integer(), redObeliskAttackedTime: state.field("redObeliskAttackedTime").integer(), blueObeliskAttackedTime: state.field("blueObeliskAttackedTime").integer() };
+    const neutral = reader.field("neutralObelisk").nullable(entry => readModuleEntity(entry, this.host.pool));
+    const time = reader.field("lastTeamLocationTime").integer();
+    Object.assign(this.state, restored); this.neutralObelisk = neutral; this.lastTeamLocationTime = time;
+  }
+
   readonly state = new TeamGameState();
   neutralObelisk: GameEntity | null = null;
   lastTeamLocationTime = 0;
 
   constructor(readonly host: TeamHost) {
     if (host.teamScores.length !== 4) throw new RangeError("Team scores require four source team slots");
+
+    this.bindSaveCallbacks();
   }
 
   initGame(): void {
@@ -487,7 +500,7 @@ export class TeamRuntime {
     const settings = this.obeliskSettings();
     self.takedamage = true;
     self.health = settings.health;
-    self.think = this.obeliskRegen;
+    self.think = this.host.pool.callbacks.think.resolve("q3.team-arena.team.obeliskRespawn.think");
     self.nextthink = (this.host.time + Math.imul(settings.regenPeriodSeconds, 1000)) | 0;
     this.obeliskModel(self).s.frame = 0;
   };
@@ -499,7 +512,7 @@ export class TeamRuntime {
     this.forceGesture(opposing);
     this.host.calculateRanks();
     self.takedamage = false;
-    self.think = this.obeliskRespawn;
+    self.think = this.host.pool.callbacks.think.resolve("q3.team-arena.team.obeliskDie.think");
     self.nextthink = (this.host.time + Math.imul(this.obeliskSettings().respawnDelaySeconds, 1000)) | 0;
     const model = this.obeliskModel(self);
     model.s.modelindex2 = 255;
@@ -560,14 +573,14 @@ export class TeamRuntime {
       entity.r.contents = 1;
       entity.takedamage = true;
       entity.health = settings.health;
-      entity.die = this.obeliskDie;
-      entity.pain = this.obeliskPain;
-      entity.think = this.obeliskRegen;
+      entity.die = this.host.pool.callbacks.die.resolve("q3.team-arena.team.spawnObelisk.die");
+      entity.pain = this.host.pool.callbacks.pain.resolve("q3.team-arena.team.spawnObelisk.pain");
+      entity.think = this.host.pool.callbacks.think.resolve("q3.team-arena.team.obeliskRespawn.think");
       entity.nextthink = (this.host.time + Math.imul(settings.regenPeriodSeconds, 1000)) | 0;
     }
     if (this.host.gameType === GameType.GT_HARVESTER) {
       entity.r.contents = 0x40000000;
-      entity.touch = this.obeliskTouch;
+      entity.touch = this.host.pool.callbacks.touch.resolve("q3.team-arena.team.spawnObelisk.touch");
     }
     if ((spawnflags & 1) !== 0) setOrigin(entity, entity.s.origin);
     else {
@@ -624,5 +637,13 @@ export class TeamRuntime {
       else this.state.blueObeliskAttackedTime = this.host.time;
     }
     return false;
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.pool.callbacks.think.intern("q3.team-arena.team.obeliskRespawn.think", this.obeliskRegen);
+    this.host.pool.callbacks.think.intern("q3.team-arena.team.obeliskDie.think", this.obeliskRespawn);
+    this.host.pool.callbacks.die.intern("q3.team-arena.team.spawnObelisk.die", this.obeliskDie);
+    this.host.pool.callbacks.pain.intern("q3.team-arena.team.spawnObelisk.pain", this.obeliskPain);
+    this.host.pool.callbacks.touch.intern("q3.team-arena.team.spawnObelisk.touch", this.obeliskTouch);
   }
 }

@@ -137,6 +137,7 @@ function multiWait(entity: GameEntity): void {
 }
 
 function multiTrigger(host: TriggerHost, entity: GameEntity, activatorValue: UseParticipant | null): void {
+  bindTriggerSaveCallbacks(host);
   if (activatorValue !== null) requireUseParticipant(activatorValue);
   entity.activation = activatorValue;
   if (entity.nextthink !== 0) return;
@@ -148,16 +149,17 @@ function multiTrigger(host: TriggerHost, entity: GameEntity, activatorValue: Use
   }
   dispatchTargets(host, entity, activatorValue);
   if (entity.wait > 0) {
-    entity.think = multiWait;
+    entity.think = host.entities.callbacks.think.resolve("q3.base.game.triggers.multiTrigger.think");
     entity.nextthink = sourceSchedule(gameTime(host), entity.wait, entity.random, checkedCrandom(host));
   } else {
     entity.touch = null;
     entity.nextthink = (gameTime(host) + FRAMETIME) | 0;
-    entity.think = self => { host.entities.free(self); };
+    entity.think = host.entities.callbacks.think.resolve("q3.base.game.triggers.multiTrigger.free");
   }
 }
 
 function spawnTriggerMultiple(host: TriggerHost, entity: GameEntity, variables: SpawnVariables): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   entity.wait = variables.float("wait", "0.5").value;
   entity.random = variables.float("random", "0").value;
@@ -165,58 +167,41 @@ function spawnTriggerMultiple(host: TriggerHost, entity: GameEntity, variables: 
     entity.random = f32(entity.wait - FRAMETIME);
     host.warn("trigger_multiple has random >= wait\n");
   }
-  entity.touch = (self, other) => {
-    if (other instanceof GameEntity && other.client !== null) multiTrigger(host, self, other);
-  };
-  entity.use = (self, _other, activator) => { multiTrigger(host, self, activator); };
+  entity.touch = host.entities.callbacks.touch.resolve("q3.base.game.triggers.spawnTriggerMultiple.touch");
+  entity.use = host.entities.callbacks.use.resolve("q3.base.game.triggers.spawnTriggerMultiple.use");
   initTrigger(host, entity);
   host.entities.options.link(entity);
 }
 
 function spawnTriggerAlways(host: TriggerHost, entity: GameEntity): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   entity.nextthink = (gameTime(host) + 300) | 0;
-  entity.think = self => {
-    dispatchTargets(host, self, self);
-    host.entities.free(self);
-  };
+  entity.think = host.entities.callbacks.think.resolve("q3.base.game.triggers.spawnTriggerAlways.think");
 }
 
 function spawnTriggerPush(host: TriggerHost, entity: GameEntity): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   initTrigger(host, entity);
   entity.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
   host.soundIndex("sound/world/jumppad.wav");
   entity.s.eType = EntityType.ET_PUSH_TRIGGER;
-  entity.touch = (self, other) => { if (other instanceof GameEntity && other.client !== null) touchJumpPad(other.client.ps, self.s); };
-  entity.think = self => {
-    aimAtTarget({ pool: host.entities, randomInt: () => host.random.rand(), gravity: () => host.gravity(),
-      warn: message => { host.warn(message); } }, self, scale3(add3(self.r.absmin, self.r.absmax), 0.5));
-  };
+  entity.touch = host.entities.callbacks.touch.resolve("q3.base.game.triggers.spawnTriggerPush.touch");
+  entity.think = host.entities.callbacks.think.resolve("q3.base.game.triggers.spawnTriggerPush.think");
   entity.nextthink = (gameTime(host) + FRAMETIME) | 0;
   host.entities.options.link(entity);
 }
 
 function spawnTriggerTeleport(host: TriggerHost, entity: GameEntity): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   initTrigger(host, entity);
   if ((entity.spawnflags & 1) !== 0) entity.r.svFlags |= ServerEntityFlags.NOCLIENT;
   else entity.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
   host.soundIndex("sound/world/jumppad.wav");
   entity.s.eType = EntityType.ET_TELEPORT_TRIGGER;
-  entity.touch = (self, other) => {
-    if (!(other instanceof GameEntity)) return;
-    const client = other.client;
-    if (client === null || client.ps.pmType === MoveType.PM_DEAD) return;
-    if ((self.spawnflags & 1) !== 0 && client.sess.sessionTeam !== Team.TEAM_SPECTATOR) return;
-    const destination = pickTarget(targetSelection(host), self.target);
-    if (destination === null) {
-      host.warn("Couldn't find teleporter destination\n");
-      return;
-    }
-    teleportPlayer({ combat: combatContext(host), world: host.world }, other,
-      destination.s.origin, destination.s.angles);
-  };
+  entity.touch = host.entities.callbacks.touch.resolve("q3.base.game.triggers.spawnTriggerTeleport.touch");
   host.entities.options.link(entity);
 }
 
@@ -228,25 +213,15 @@ function soundAt(host: TriggerHost, entity: DamageParticipant, sound: number): v
 }
 
 function spawnTriggerHurt(host: TriggerHost, entity: GameEntity): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   initTrigger(host, entity);
   entity.noiseIndex = host.soundIndex("sound/world/electro.wav");
-  entity.touch = (self, other) => {
-    const damageable = other instanceof GameEntity ? other.takedamage : combatContext(host).authority.read(useActor(other))?.canTakeDamage === true;
-    if (!damageable || self.timestamp > gameTime(host)) return;
-    self.timestamp = (gameTime(host) + ((self.spawnflags & 16) !== 0 ? 1_000 : FRAMETIME)) | 0;
-    if ((self.spawnflags & 4) === 0) soundAt(host, other, self.noiseIndex);
-    const flags = (self.spawnflags & 8) !== 0 ? DamageFlags.NO_PROTECTION : 0;
-    damage(combatContext(host), other, self, self, null, null,
-      self.damage, flags, MOD_TRIGGER_HURT);
-  };
+  entity.touch = host.entities.callbacks.touch.resolve("q3.base.game.triggers.spawnTriggerHurt.touch");
   if (entity.damage === 0) entity.damage = 5;
   entity.r.contents = CONTENTS_TRIGGER;
   if ((entity.spawnflags & 2) !== 0) {
-    entity.use = self => {
-      if (self.r.linked) host.entities.options.unlink(self);
-      else host.entities.options.link(self);
-    };
+    entity.use = host.entities.callbacks.use.resolve("q3.base.game.triggers.spawnTriggerHurt.use");
   }
   if ((entity.spawnflags & 1) === 0) host.entities.options.link(entity);
 }
@@ -257,16 +232,12 @@ function timerThink(host: TriggerHost, entity: GameEntity): void {
 }
 
 function spawnFuncTimer(host: TriggerHost, entity: GameEntity, variables: SpawnVariables): void {
+  bindTriggerSaveCallbacks(host);
   requireOwned(host, entity);
   entity.random = variables.float("random", "1").value;
   entity.wait = variables.float("wait", "1").value;
-  entity.use = (self, _other, activator) => {
-    if (activator !== null) requireUseParticipant(activator);
-    self.activation = activator;
-    if (self.nextthink !== 0) self.nextthink = 0;
-    else timerThink(host, self);
-  };
-  entity.think = self => { timerThink(host, self); };
+  entity.use = host.entities.callbacks.use.resolve("q3.base.game.triggers.spawnFuncTimer.use");
+  entity.think = host.entities.callbacks.think.resolve("q3.base.game.triggers.spawnFuncTimer.think");
   if (entity.random >= entity.wait) {
     entity.random = f32(entity.wait - FRAMETIME);
     host.warn(gameFormat("func_timer at %s has random >= wait\n", [host.entities.utilities.vtos(entity.s.origin).readString()]));
@@ -280,6 +251,7 @@ function spawnFuncTimer(host: TriggerHost, entity: GameEntity, variables: SpawnV
 
 /** Spawn table entries for every concrete g_trigger.c entity except target_push. */
 export function triggerSpawnHandlers(host: TriggerHost): ReadonlyMap<string, SpawnHandler> {
+  bindTriggerSaveCallbacks(host);
   return new Map<string, SpawnHandler>([
     ["trigger_multiple", (entity, variables) => { spawnTriggerMultiple(host, entity, variables); }],
     ["trigger_always", entity => { spawnTriggerAlways(host, entity); }],
@@ -288,4 +260,55 @@ export function triggerSpawnHandlers(host: TriggerHost): ReadonlyMap<string, Spa
     ["trigger_hurt", entity => { spawnTriggerHurt(host, entity); }],
     ["func_timer", (entity, variables) => { spawnFuncTimer(host, entity, variables); }],
   ]);
+}
+
+export function bindTriggerSaveCallbacks(host: TriggerHost): void {
+  host.entities.callbacks.think.intern("q3.base.game.triggers.multiTrigger.think", multiWait);
+  host.entities.callbacks.think.intern("q3.base.game.triggers.multiTrigger.free", self => { host.entities.free(self); });
+  host.entities.callbacks.touch.intern("q3.base.game.triggers.spawnTriggerMultiple.touch", (self, other) => {
+    if (other instanceof GameEntity && other.client !== null) multiTrigger(host, self, other);
+  });
+  host.entities.callbacks.use.intern("q3.base.game.triggers.spawnTriggerMultiple.use", (self, _other, activator) => { multiTrigger(host, self, activator); });
+  host.entities.callbacks.think.intern("q3.base.game.triggers.spawnTriggerAlways.think", self => {
+    dispatchTargets(host, self, self);
+    host.entities.free(self);
+  });
+  host.entities.callbacks.touch.intern("q3.base.game.triggers.spawnTriggerPush.touch", (self, other) => { if (other instanceof GameEntity && other.client !== null) touchJumpPad(other.client.ps, self.s); });
+  host.entities.callbacks.think.intern("q3.base.game.triggers.spawnTriggerPush.think", self => {
+    aimAtTarget({ pool: host.entities, randomInt: () => host.random.rand(), gravity: () => host.gravity(),
+      warn: message => { host.warn(message); } }, self, scale3(add3(self.r.absmin, self.r.absmax), 0.5));
+  });
+  host.entities.callbacks.touch.intern("q3.base.game.triggers.spawnTriggerTeleport.touch", (self, other) => {
+    if (!(other instanceof GameEntity)) return;
+    const client = other.client;
+    if (client === null || client.ps.pmType === MoveType.PM_DEAD) return;
+    if ((self.spawnflags & 1) !== 0 && client.sess.sessionTeam !== Team.TEAM_SPECTATOR) return;
+    const destination = pickTarget(targetSelection(host), self.target);
+    if (destination === null) {
+      host.warn("Couldn't find teleporter destination\n");
+      return;
+    }
+    teleportPlayer({ combat: combatContext(host), world: host.world }, other,
+      destination.s.origin, destination.s.angles);
+  });
+  host.entities.callbacks.touch.intern("q3.base.game.triggers.spawnTriggerHurt.touch", (self, other) => {
+    const damageable = other instanceof GameEntity ? other.takedamage : combatContext(host).authority.read(useActor(other))?.canTakeDamage === true;
+    if (!damageable || self.timestamp > gameTime(host)) return;
+    self.timestamp = (gameTime(host) + ((self.spawnflags & 16) !== 0 ? 1_000 : FRAMETIME)) | 0;
+    if ((self.spawnflags & 4) === 0) soundAt(host, other, self.noiseIndex);
+    const flags = (self.spawnflags & 8) !== 0 ? DamageFlags.NO_PROTECTION : 0;
+    damage(combatContext(host), other, self, self, null, null,
+      self.damage, flags, MOD_TRIGGER_HURT);
+  });
+  host.entities.callbacks.use.intern("q3.base.game.triggers.spawnTriggerHurt.use", self => {
+      if (self.r.linked) host.entities.options.unlink(self);
+      else host.entities.options.link(self);
+    });
+  host.entities.callbacks.use.intern("q3.base.game.triggers.spawnFuncTimer.use", (self, _other, activator) => {
+    if (activator !== null) requireUseParticipant(activator);
+    self.activation = activator;
+    if (self.nextthink !== 0) self.nextthink = 0;
+    else timerThink(host, self);
+  });
+  host.entities.callbacks.think.intern("q3.base.game.triggers.spawnFuncTimer.think", self => { timerThink(host, self); });
 }

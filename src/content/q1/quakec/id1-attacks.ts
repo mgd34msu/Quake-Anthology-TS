@@ -33,6 +33,7 @@ export class Id1SynchronousAttacks {
     private readonly machine: () => QcMachine) {
     this.binding = id1ProgramBinding(source.program);
   }
+  assertIdle(): void { if (this.active.length !== 0) throw new QcProgramError("Cannot save during a synchronous attack"); }
   private vm(): QcMachine {
     const vm = this.machine();
     if (vm.program !== this.source.program || vm.entities !== this.source.entities) throw new QcProgramError("id1 attacks belong to another machine");

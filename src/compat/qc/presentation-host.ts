@@ -1,3 +1,6 @@
+import { SaveReader } from "../../persistence/value.ts";
+import type { SavedActorId } from "../../contracts/session.ts";
+import { quakeWorldProfile, protocolFlags } from "../../network/q1/profile.ts";
 import { MAX_DATAGRAM, MAX_MSGLEN } from "../../network/q1/wire-types.ts";
 import { QuakeWorldDecoder, writeQuakeWorldMessage } from "../../network/q1/quakeworld.ts";
 import type { QuakeWorldMessage } from "../../network/q1/quakeworld.ts";
@@ -257,6 +260,51 @@ export class QcBroadcastMessages {
     });
     this.host = host;
   }
+  capture() {
+    const owners = (values: ReadonlyMap<number, ActorId | null>) => [...values].map(([offset, actor]) => ({ offset, actor: savedQcActor(actor) }));
+    return { buffer: this.buffer.bytes(), overflowed: this.buffer.overflowed, owners: owners(this.owners), signonBuffers: this.signonBuffers,
+      decoder: this.decoder.capture(), qwDecoder: this.qwDecoder.capture(), routedBuffers: [...this.routedBuffers].map(([key, entry]) => ({
+        key: key.startsWith("client:") ? "client" : key, bytes: entry.buffer.bytes(), maxsize: entry.buffer.maxsize, allowoverflow: entry.buffer.allowoverflow,
+        overflowed: entry.buffer.overflowed, owners: owners(entry.owners), destination: entry.destination === null ? null : captureQcDestination(entry.destination) })) };
+  }
+  restore(value: unknown, resolve: (saved: SavedActorId) => ActorId): void {
+    const reader = new SaveReader(value, "qc.messages");
+    const buffer = (target: SizeBuf, bytes: Uint8Array, overflowed: boolean) => {
+      if (bytes.length > target.maxsize) reader.fail("saved message exceeds buffer capacity");
+      target.clear(); target.data.set(bytes); target.cursize = bytes.length; target.overflowed = overflowed;
+    };
+    const owners = (entry: SaveReader) => new Map(entry.list(item => [item.field("offset").integer(), readQcActor(item.field("actor"), resolve)] satisfies [number, ActorId | null]));
+    buffer(this.buffer, reader.field("buffer").bytes(), reader.field("overflowed").boolean());
+    this.owners.clear(); for (const [offset, actor] of owners(reader.field("owners"))) this.owners.set(offset, actor);
+    this.signonBuffers = reader.field("signonBuffers").integer(1); if (this.signonBuffers > 7) reader.fail("invalid signon buffer count");
+    this.decoder.restore(reader.field("decoder").value); this.qwDecoder.restore(reader.field("qwDecoder").value); this.routedBuffers.clear();
+    for (const entry of reader.field("routedBuffers").list(item => item)) {
+      const destination = entry.field("destination").nullable(item => readQcDestination(item, resolve));
+      const savedKey = entry.field("key").choice("client", "broadcast", "all", "signon", "multicast");
+      const key = destination?.kind === "client" ? `client:${destination.actor.slot}:${destination.actor.generation}` : savedKey;
+      const maxsize = entry.field("maxsize").integer(1); if (maxsize > MAX_MSGLEN * 5) reader.fail("invalid routed buffer capacity");
+      const restored = new SizeBuf(maxsize, entry.field("allowoverflow").boolean());
+      buffer(restored, entry.field("bytes").bytes(), entry.field("overflowed").boolean());
+      if (this.routedBuffers.has(key)) reader.fail("duplicate routed buffer");
+      this.routedBuffers.set(key, { buffer: restored, owners: owners(entry.field("owners")), destination });
+    }
+  }
+  captureEntries(entries: readonly QcRoutedMessage[]) {
+    return { version: this.qwDecoder.protocol.version, flags: protocolFlags(this.qwDecoder.protocol), entries: entries.map(entry => {
+      if (entry.message.kind === "packet-entities" || entry.message.kind === "invalid-delta") throw new Error("QC source messages cannot contain snapshot entity deltas");
+      const buffer = new SizeBuf(MAX_MSGLEN * 5); writeQuakeWorldMessage(buffer, this.qwDecoder.protocol, entry.message);
+      return { bytes: buffer.bytes(), actor: savedQcActor(entry.actor) };
+    }) };
+  }
+  restoreEntries(value: unknown, resolve: (saved: SavedActorId) => ActorId): readonly QcRoutedMessage[] {
+    const reader = new SaveReader(value, "qc.routed");
+    const decoder = new QuakeWorldDecoder(quakeWorldProfile(reader.field("version").integer(0), reader.field("flags").integer(0)));
+    return reader.field("entries").list(item => {
+      const messages = decoder.decode(item.field("bytes").bytes(), 0), message = messages[0];
+      if (messages.length !== 1 || message === undefined || message.kind === "packet-entities" || message.kind === "invalid-delta") return item.fail("invalid saved source message");
+      return { message, actor: readQcActor(item.field("actor"), resolve) };
+    });
+  }
   private routeBuffer(entry: { readonly buffer: SizeBuf; readonly owners: ReadonlyMap<number, ActorId | null> }, destination: QcMessageDestination): void {
     if (this.qw === undefined) throw new Error("Missing QuakeWorld routing service");
     const encoded = new SizeBuf(entry.buffer.maxsize);
@@ -326,5 +374,26 @@ export class QcBroadcastMessages {
     this.buffer.clear();
     this.owners.clear();
     return undefined;
+  }
+}
+
+export function savedQcActor(actor: ActorId | null): SavedActorId | null { return actor === null ? null : { slot: actor.slot, generation: actor.generation }; }
+function readQcActor(reader: SaveReader, resolve: (saved: SavedActorId) => ActorId): ActorId | null {
+  return reader.nullable(item => resolve({ slot: item.field("slot").integer(0), generation: item.field("generation").integer(0) }));
+}
+export function captureQcDestination(destination: QcMessageDestination) {
+  return destination.kind === "client" ? { ...destination, actor: savedQcActor(destination.actor) } : destination;
+}
+export function readQcDestination(reader: SaveReader, resolve: (saved: SavedActorId) => ActorId): QcMessageDestination {
+  const kind = reader.field("kind").choice("client", "broadcast", "signon", "multicast");
+  switch (kind) {
+    case "signon": return { kind };
+    case "broadcast": return { kind, reliable: reader.field("reliable").boolean() };
+    case "client": {
+      const actor = readQcActor(reader.field("actor"), resolve); if (actor === null) reader.fail("missing message recipient");
+      return { kind, actor, reliable: reader.field("reliable").literal(true) };
+    }
+    case "multicast": { const origin = reader.field("origin"); return { kind, origin: { x: origin.field("x").finite(), y: origin.field("y").finite(), z: origin.field("z").finite() },
+      visibility: reader.field("visibility").choice("all", "pvs", "phs"), reliable: reader.field("reliable").boolean() }; }
   }
 }

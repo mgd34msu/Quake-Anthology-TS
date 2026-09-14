@@ -21,8 +21,9 @@ import { MouseInput } from "../../input/mouse.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { UserCommandFrame } from "../../input/user-command.ts";
 import { SdlControllers } from "../../platform/controller.ts";
+import type { ControllerEvent } from "../../platform/controller.ts";
 import { readSdlClipboard } from "../../platform/sdl.ts";
-import type { SdlWindow } from "../../platform/sdl.ts";
+import type { SdlEvent, SdlWindow } from "../../platform/sdl.ts";
 import type { SessionSeat } from "../../world/session/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { SimulationPresentationAccess } from "./simulation/types.ts";
@@ -103,6 +104,9 @@ export class ApplicationInput {
   readonly router: InputRouter;
   readonly controllerSettings: ControllerSettings;
   private sequence = 0;
+  private ownsControllers = true;
+  private pendingWindowEvents: SdlEvent[] = [];
+  private pendingControllerEvents: ControllerEvent[] = [];
   private hapticLoad: (request: ResourceRequest) => Promise<Uint8Array | null> = async () => null;
   private readonly seatUi = new Map<SeatId, ApplicationInputUi>();
   private readonly mouseSettings = new Map<SeatId, MouseSettings>();
@@ -137,10 +141,10 @@ export class ApplicationInput {
 
   static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions, dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
-    now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner): Promise<ApplicationInput> {
+    now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput): Promise<ApplicationInput> {
     const saved = await Promise.all(players.map((_, index) => settings.loadSeat(`input/seat-${index + 1}.json`)));
     const routing = await settings.loadInputRouting("input/routing.json");
-    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, owner);
+    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, owner, previous);
     try { await input.controllerSettings.settle(); return input; }
     catch (error) { input.close(); throw error; }
   }
@@ -148,7 +152,8 @@ export class ApplicationInput {
   private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
     private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
-    routing: { readonly keyboardSeat: number | null } | null, owner?: ApplicationInputCommandOwner) {
+    routing: { readonly keyboardSeat: number | null } | null, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput) {
+    this.ownsControllers = previous === undefined;
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
     const context: CommandContext = { session: first.actor.session, origin: { kind: "local-console" } };
@@ -256,27 +261,38 @@ export class ApplicationInput {
         return actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);
       });
     }
-    this.controllers = SdlControllers.open();
+    this.controllers = previous?.controllers ?? SdlControllers.open();
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
       controller: saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),
-      keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
+      deferPlatform: previous !== undefined, keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
       unhandled: event => {
         if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
       } });
     this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, settings, actions.print);
-    try { this.router.attachWindow(window); this.router.restart(); this.controllerSettings.update(); }
-    catch (error) { this.controllers.close(); throw error; }
+    try {
+      if (previous === undefined) this.router.attachWindow(window);
+      this.router.restart();
+      if (previous === undefined) this.controllerSettings.update();
+      else this.controllerSettings.copySettledProfilesFrom(previous.controllerSettings);
+    } catch (error) { if (this.ownsControllers) this.controllers.close(); throw error; }
+  }
+
+  pollLoadingEvents(): void {
+    const events = this.window.pollEvents();
+    this.pendingWindowEvents.push(...events);
+    this.pendingControllerEvents.push(...this.controllers.pollEvents());
+    if (events.some(event => event.kind === "quit" || event.kind === "window" && event.event === 14)) this.actions.quit();
   }
 
   pump(): void {
     this.releaseOffhand(false);
     this.synchronizeClientFocus();
-    for (const event of this.window.pollEvents()) {
+    for (const event of [...this.pendingWindowEvents.splice(0), ...this.window.pollEvents()]) {
       if (event.kind === "window" && event.event === 13) this.stopHaptics();
       this.router.handlePlatform(event);
     }
-    for (const event of this.controllers.pollEvents()) this.router.handleController(event);
+    for (const event of [...this.pendingControllerEvents.splice(0), ...this.controllers.pollEvents()]) this.router.handleController(event);
     this.controllerSettings.update();
     this.commands.execute();
     this.router.updateCapture();
@@ -388,6 +404,14 @@ export class ApplicationInput {
     local?.builder.setViewAngles(this.simulation.playerView(actor).angles);
   }
 
+  transferPlatformTo(next: ApplicationInput): void {
+    next.pendingWindowEvents = this.pendingWindowEvents; this.pendingWindowEvents = [];
+    next.pendingControllerEvents = this.pendingControllerEvents; this.pendingControllerEvents = [];
+    this.router.transferWindowTo(next.router);
+    next.ownsControllers = this.ownsControllers;
+    this.ownsControllers = false;
+  }
+
   rebindPlayers(players: readonly LocalPlayer[], simulation: Pick<SimulationPresentationAccess, "playerView">): void {
     this.releaseOffhand(true);
     if (players.length !== this.locals.length) throw new Error("World travel changed the local seat count");
@@ -424,7 +448,7 @@ export class ApplicationInput {
     this.controllerSettings.close();
     for (const local of this.locals) local.haptics.close();
     this.router.close();
-    this.controllers.close();
+    if (this.ownsControllers) this.controllers.close();
     this.seatUi.clear();
     this.q3Selections.clear();
     this.arsenalSelections.clear();

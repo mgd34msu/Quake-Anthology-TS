@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_mem.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { CommonError } from "../../../../core/common-error.ts";
@@ -34,6 +35,15 @@ export class GameMemoryAllocation {
 
 /** Module-owned static storage. G_InitMemory rewinds it without clearing former bytes. */
 export class GameMemory {
+  captureSaveState() { return { pool: this.pool.slice(), allocPoint: this.allocPoint }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.memory"), bytes = reader.field("pool").bytes();
+    const point = reader.field("allocPoint").integer(0);
+    if (bytes.length !== GAME_MEMORY_BYTES || point > GAME_MEMORY_BYTES || point % 32 !== 0) reader.fail("invalid module memory extent");
+    this.pool.set(bytes); this.allocPoint = point;
+  }
+
+
   private readonly pool = new Uint8Array(GAME_MEMORY_BYTES);
   private allocPoint = 0;
 

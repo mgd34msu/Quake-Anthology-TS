@@ -163,6 +163,10 @@ export class GameEntity implements SharedEntity {
   }
   set classname(value: string | null) { this.classnameState = { kind: "value", value }; }
   bindClientName(client: GameClient): void { this.classnameState = { kind: "client-name", client }; }
+  captureClassname(): { readonly kind: "value"; readonly value: string | null } | { readonly kind: "client-name"; readonly client: GameClient } {
+    return this.classnameState.kind === "value" ? { ...this.classnameState } : { kind: "client-name", client: this.classnameState.client };
+  }
+  restoreNextThink(value: number): void { this.nextThinkValue = value; }
   spawnflags = 0;
   neverFree = false;
   flags = 0;

@@ -1,6 +1,7 @@
+import { ApplicationQ2Console } from "../../src/app/bootstrap/q2-console.ts";
 import { Q2Ctf } from "../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../src/content/q2/multiplayer/lmctf/runtime.ts";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -134,3 +135,37 @@ for (const [game, map, ctf] of [["q2-classic-baseq2", "base1", false], ["q2-clas
     } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
   }, 30000);
 }
+
+
+test("failed restore preparation retains commands and clients, while cleanup failure keeps the committed world", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "quake-restore-boundary-"));
+  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated", "--user-content-root", directory]);
+  if (parsed.kind !== "run") throw new Error("Expected source launch");
+  const messages: string[] = [];
+  const application = await Application.open(parsed.options, { print: text => { messages.push(text); return undefined; }, saveDirectory: join(directory, "saves") });
+  try {
+    const client = application.session.createClient(0);
+    const connection = client.connect("loopback");
+    application.simulation.admitPlayer(client.id);
+    await application.step(100);
+    const saved = join(directory, "restore.sav"), queued = join(directory, "queued.sav");
+    await application.saveGame(saved);
+    const original = application.simulation;
+    application.queueCommand("save", [queued], null);
+    const prepare = spyOn(ApplicationQ2Console.prototype, "initialize").mockRejectedValueOnce(new Error("injected console preparation failure"));
+    try { await expect(application.loadGame(saved)).rejects.toThrow("injected console preparation failure"); }
+    finally { prepare.mockRestore(); }
+    expect(application.simulation).toBe(original);
+    expect(client.connection).toBe(connection);
+    await application.step(100);
+    expect(await Bun.file(queued).exists()).toBe(true);
+    const close = spyOn(original, "close").mockImplementationOnce(() => { throw new Error("injected old world cleanup failure"); });
+    try { await application.loadGame(saved); }
+    finally { close.mockRestore(); original.close(); }
+    expect(application.simulation).not.toBe(original);
+    expect(application.session.world?.simulation).toBe(application.simulation);
+    expect(client.connection).toBe(connection);
+    expect(messages.some(message => message.includes("world retirement failed"))).toBe(true);
+    await application.step(100);
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+}, 30000);

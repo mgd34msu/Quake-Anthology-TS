@@ -1,3 +1,7 @@
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
+import { captureQcCheckpoint, restoreQcCheckpoint, type QcExecutorHost } from "../../../compat/qc/executor.ts";
+import type { QuakeCCheckpoint, ModuleIdentity } from "../../../contracts/execution.ts";
+import { savedQcActor, captureQcDestination, readQcDestination } from "../../../compat/qc/presentation-host.ts";
 import { Id1Environment, type Id1PhysicsCallback } from "../../../content/q1/quakec/id1-environment.ts";
 import { id1ProgramBinding } from "../../../content/q1/quakec/id1-program.ts";
 import { donorAngleVectors } from "../../../core/math.ts";
@@ -106,6 +110,7 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
 export type QuakeCPhysicsCallback = Id1PhysicsCallback;
 
 export interface QuakeCSourceOptions {
+  readonly restore?: { readonly checkpoint: QuakeCCheckpoint; readonly clients: readonly ClientId[] };
   readonly recipe: ExecutableRecipe;
   readonly world: Q1WorldGeometry;
   readonly scene: SharedSceneQueries;
@@ -173,7 +178,7 @@ export class QuakeCSource {
     this.slots = new SourceActorSlots(options.actors, { provider: prepared.execution.owner.provider, capacity: this.entities.capacity,
       lifetime: quakeEdictLifetime(this.reservedClientSlots + 1), storage: createQcSourceSlotStorage({ program: prepared.program, entities: this.entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: binding.kind === "quakeworld" ? 100 : 92 }),
       now: () => ({ kind: "seconds", value: this.currentTime }), unlink: actor => options.physics.bodies.unlink(actor), exhausted: () => { throw new Error("QC source edicts exhausted"); } });
-    for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.slots.bindExisting(slot, slot === 0 ? "quakec:worldspawn" : "quakec:reserved-client");
+    if (options.restore === undefined) for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.slots.bindExisting(slot, slot === 0 ? "quakec:worldspawn" : "quakec:reserved-client");
     this.modelCount = options.world.models.length + 1;
     this.models.set(options.recipe.map.geometry.requestedPath, { index: 1, bounds: options.scene.modelBounds(0) });
     for (let model = 1; model < options.world.models.length; model++) this.models.set(`*${model}`, { index: model + 1, bounds: options.scene.modelBounds(model) });
@@ -239,7 +244,114 @@ export class QuakeCSource {
       this.physicsCallback = { kind: "blocked", actor: actor.id, other, functionIndex: this.entities.at(slot).int(this.field("blocked")) };
       try { return pushers.blocked(actor, other); } finally { this.physicsCallback = prior; }
     } };
-    for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.worldHost.actor(slot);
+    if (options.restore === undefined) {
+      for (let slot = 0; slot <= this.reservedClientSlots; slot++) this.worldHost.actor(slot);
+    } else {
+      restoreQcCheckpoint(this.machine, this.module, this.checkpointHost(), options.restore.checkpoint);
+      for (let slot = 0; slot < this.entities.count; slot++) {
+        const actor = this.slots.at(slot);
+        if (actor === null) {
+          if (slot <= this.reservedClientSlots || !this.slots.options.storage.read(slot).free) throw new Error("Saved QC edict has no restored actor");
+          continue;
+        }
+        if (slot > this.reservedClientSlots && this.slots.options.storage.read(slot).free) throw new Error("Saved free QC edict has a live actor");
+        this.worldHost.actor(slot);
+        if (this.activeClients.has(actor.id)) this.bindClientInventory(actor, slot);
+      }
+    }
+  }
+  private get module(): ModuleIdentity {
+    const execution = this.prepared.execution;
+    return { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest };
+  }
+  checkpoint(): QuakeCCheckpoint {
+    if (this.spawning || this.physicsCallback !== null) throw new Error("QC save requires a completed source frame");
+    for (const slot of this.clientIdentities.keys()) {
+      const actor = this.slots.at(slot);
+      if (actor === null || !this.activeClients.has(actor.id)) throw new Error("QC save requires pending client handshakes to finish");
+    }
+    this.attacks.assertIdle();
+    return captureQcCheckpoint(this.machine, this.module, this.checkpointHost());
+  }
+  private checkpointHost(): QcExecutorHost {
+    return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
+      kind: this.kind, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
+      changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
+      pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
+      userInfo: [...this.userInfo].map(([slot, values]) => ({ slot, values: [...values].map(([key, value]) => ({ key, value })) })),
+      spawnParameters: [...this.spawnParameters].map(([slot, values]) => ({ slot, values })),
+      clientIdentities: [...this.clientIdentities].map(([slot, client]) => ({ slot, clientSlot: client.slot })), preparedClients: [...this.preparedClients],
+      fragRecords: this.fragRecords.map(entry => ({ killer: savedQcActor(entry.killer), victim: savedQcActor(entry.victim) })),
+      routed: this.routed.map(entry => ({ entries: this.messages.captureEntries(entry.entries), destination: captureQcDestination(entry.destination) })),
+      signon: this.messages.captureEntries(this.signon), models: [...this.models].map(([name, model]) => ({ name, ...model })),
+      precached: [...this.precached].map(([key, entry]) => ({ key, index: entry.index, id: entry.resource.id, digest: entry.resource.digest })),
+      modelCount: this.modelCount, soundCount: this.soundCount, cvars: this.cvars.captureQuakeCState(),
+      visibility: this.clients.visibility.capture(), messages: this.messages.capture(), projectiles: this.projectiles.capture(),
+    }) }, random: [], callbacks: [] }), restore: saved => {
+      if (saved.state.format !== "quakec:source-v1" || saved.random.length !== 0 || saved.callbacks.length !== 0) throw new Error("Unsupported QC source host checkpoint");
+      this.restoreHost(decodeCheckpointValue(saved.state.bytes)); return undefined;
+    } };
+  }
+  private restoreHost(value: unknown): void {
+    const reader = new SaveReader(value, "quakec.source"), restore = this.options.restore;
+    if (restore === undefined) return reader.fail("missing restore clients");
+    reader.field("kind").literal(this.kind); reader.field("maxClients").literal(this.options.maxClients);
+    reader.field("reservedClientSlots").literal(this.reservedClientSlots); reader.field("spawning").literal(false);
+    this.spawning = false; this.currentTime = reader.field("currentTime").finite();
+    if (this.currentTime < 0) reader.fail("negative source frame-entry time");
+    this.changeLevelIssued = reader.field("changeLevelIssued").boolean();
+    const reference = (entry: SaveReader) => this.options.actors.referenceSaved({ slot: entry.field("slot").integer(0), generation: entry.field("generation").integer(0) });
+    const live = (entry: SaveReader) => { const actor = reference(entry); if (this.sourceSlot(actor) === null) entry.fail("missing live QC actor"); return actor; };
+    const clientSlot = (entry: SaveReader) => { const slot = entry.integer(1); if (slot > this.reservedClientSlots) entry.fail("invalid reserved client slot"); return slot; };
+    this.activeClients.clear(); for (const actor of reader.field("activeClients").list(live)) {
+      if (!this.isReservedClient(actor) || this.activeClients.has(actor)) reader.fail("invalid active QC client"); this.activeClients.add(actor);
+    }
+    this.pendingWeapons.clear(); for (const entry of reader.field("pendingWeapons").list(item => item)) {
+      const actor = live(entry.field("actor")), weapon = this.weapons.find(weapon => weapon.item === namespaced(entry.field("weapon")));
+      if (weapon === undefined || !this.activeClients.has(actor) || this.pendingWeapons.has(actor)) return entry.fail("invalid pending weapon");
+      this.pendingWeapons.set(actor, { weapon, following: entry.field("following").boolean() });
+    }
+    this.userInfo.clear(); for (const entry of reader.field("userInfo").list(item => item)) {
+      const slot = clientSlot(entry.field("slot")); if (this.userInfo.has(slot)) entry.fail("duplicate userinfo slot");
+      this.userInfo.set(slot, new Map(entry.field("values").list(item => [item.field("key").string(), item.field("value").string()] satisfies [string, string])));
+    }
+    this.spawnParameters.clear(); for (const entry of reader.field("spawnParameters").list(item => item)) {
+      const slot = clientSlot(entry.field("slot")), values = entry.field("values").list(item => item.number());
+      if (values.length !== 16 || this.spawnParameters.has(slot)) entry.fail("invalid spawn parameters"); this.spawnParameters.set(slot, values);
+    }
+    this.clientIdentities.clear(); for (const entry of reader.field("clientIdentities").list(item => item)) {
+      const slot = clientSlot(entry.field("slot")), clientSlotValue = entry.field("clientSlot").integer(0);
+      const client = restore.clients.find(client => client.slot === clientSlotValue);
+      if (slot !== clientSlotValue + 1 || client === undefined || this.clientIdentities.has(slot)) return entry.fail("missing restored QC client identity");
+      this.clientIdentities.set(slot, client);
+    }
+    this.preparedClients.clear(); for (const slot of reader.field("preparedClients").list(clientSlot)) {
+      if (this.preparedClients.has(slot) || !this.clientIdentities.has(slot)) reader.fail("invalid prepared client phase"); this.preparedClients.add(slot);
+    }
+    if (this.activeClients.size !== this.clientIdentities.size) reader.fail("client phase identity mismatch");
+    for (const actor of this.activeClients) {
+      const slot = this.sourceSlot(actor);
+      if (slot === null || !this.clientIdentities.has(slot) || (this.kind === "quakeworld" && !this.preparedClients.has(slot))) reader.fail("incomplete saved client phase");
+    }
+    this.fragRecords.length = 0; this.fragRecords.push(...reader.field("fragRecords").list(item => ({ killer: reference(item.field("killer")), victim: reference(item.field("victim")) })));
+    const resolve = (saved: Parameters<SessionActorRegistry["referenceSaved"]>[0]) => this.options.actors.referenceSaved(saved);
+    this.routed.length = 0; this.routed.push(...reader.field("routed").list(item => ({ entries: this.messages.restoreEntries(item.field("entries").value, resolve), destination: readQcDestination(item.field("destination"), resolve) })));
+    this.signon.length = 0; this.signon.push(...this.messages.restoreEntries(reader.field("signon").value, resolve));
+    const vector = (item: SaveReader): Vec3 => ({ x: item.field("x").finite(), y: item.field("y").finite(), z: item.field("z").finite() });
+    this.models.clear(); for (const entry of reader.field("models").list(item => item)) {
+      const name = entry.field("name").string(), bounds = entry.field("bounds");
+      if (this.models.has(name)) entry.fail("duplicate model");
+      this.models.set(name, { index: entry.field("index").integer(1), bounds: { min: vector(bounds.field("min")), max: vector(bounds.field("max")) } });
+    }
+    this.precached.clear(); for (const entry of reader.field("precached").list(item => item)) {
+      const key = entry.field("key").string(), colon = key.indexOf(":"), name = key.slice(colon + 1);
+      const resource = this.prepared.resources.get(name)?.resource;
+      if (colon < 1 || resource === undefined || resource.id !== entry.field("id").string() || resource.digest !== entry.field("digest").string() || this.precached.has(key)) return entry.fail("saved precache resource differs from mounted content");
+      this.precached.set(key, { index: entry.field("index").integer(1), resource });
+    }
+    this.modelCount = reader.field("modelCount").integer(1); this.soundCount = reader.field("soundCount").integer(1);
+    this.cvars.restoreQuakeCState(reader.field("cvars").value); this.clients.visibility.restore(reader.field("visibility").value);
+    this.messages.restore(reader.field("messages").value, resolve); this.projectiles.restore(reader.field("projectiles").value);
   }
   get currentPhysicsCallback(): QuakeCPhysicsCallback | null { return this.physicsCallback; }
   get worldActor(): OwnedActor { return this.worldHost.actor(0); }

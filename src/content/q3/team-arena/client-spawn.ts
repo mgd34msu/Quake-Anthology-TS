@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readModuleEntity } from "../base/game/save-module-values.ts";
 import { writeGround } from "../base/game/ground.ts";
 /*
  * Ported from id Software's game/g_client.c and g_team.c spawn selectors.
@@ -101,10 +103,20 @@ export class ClientSpawnState {
 }
 
 export class ClientSpawnRuntime {
+  captureSaveState() { const queue = this.state.bodyQueue; return { bodyQueue: queue === null ? null : { entities: queue.entities.map(entity => entity.slot), index: queue.index } }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.clientSpawn");
+    const queue = reader.field("bodyQueue").nullable(entry => ({ entities: entry.field("entities").list(entity => readModuleEntity(entity, this.host.pool)), index: entry.field("index").integer(0) }));
+    if (queue !== null && (queue.entities.length !== BODY_QUEUE_SIZE || queue.index >= queue.entities.length || new Set(queue.entities).size !== queue.entities.length)) reader.fail("invalid body queue");
+    this.state.bodyQueue = queue;
+  }
+
   constructor(readonly host: ClientSpawnHost, private readonly state = new ClientSpawnState()) {
     if (host.think.host.pool !== host.pool || host.think.host.world !== host.world) {
       throw new Error("Client spawning and thinking must share entity storage and world");
     }
+
+    this.bindSaveCallbacks();
   }
 
   private ownedClient(entity: GameEntity): GameClient {
@@ -255,8 +267,8 @@ export class ClientSpawnRuntime {
     body.r.contents = CONTENTS_CORPSE;
     body.r.ownerNum = entity.s.number;
     body.nextthink = (time + 5000) | 0;
-    body.think = self => { this.bodySink(self); };
-    body.die = this.host.bodyDie;
+    body.think = this.host.pool.callbacks.think.resolve("q3.team-arena.client-spawn.copyToBodyQueue.think");
+    body.die = this.host.pool.callbacks.die.resolve("q3.death.body");
     body.takedamage = entity.health > GIB_HEALTH;
     body.r.currentOrigin = { ...body.s.pos.base };
     this.host.world.link(body);
@@ -314,7 +326,7 @@ export class ClientSpawnRuntime {
     entity.classname = "player";
     entity.r.contents = CONTENTS_BODY;
     entity.clipmask = 1 | 0x10000 | CONTENTS_BODY;
-    entity.die = this.host.playerDie;
+    entity.die = this.host.pool.callbacks.die.resolve("q3.death.player");
     entity.waterlevel = 0;
     entity.watertype = 0;
     entity.flags = 0;
@@ -376,5 +388,11 @@ export class ClientSpawnRuntime {
     this.clientSpawn(entity);
     const temporary = this.host.pool.tempEntity(clientOf(entity).ps.origin, EntityEvent.EV_PLAYER_TELEPORT_IN);
     temporary.s.clientNum = entity.s.clientNum;
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.pool.callbacks.think.intern("q3.team-arena.client-spawn.copyToBodyQueue.think", self => { this.bodySink(self); });
+    this.host.pool.callbacks.die.intern("q3.death.body", this.host.bodyDie);
+    this.host.pool.callbacks.die.intern("q3.death.player", this.host.playerDie);
   }
 }

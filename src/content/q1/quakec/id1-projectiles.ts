@@ -1,3 +1,4 @@
+import { SaveReader, namespaced } from "../../../persistence/value.ts";
 import { id1ProgramBinding } from "./id1-program.ts";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { ItemId } from '../../../contracts/gameplay.ts';
@@ -43,6 +44,23 @@ export class Id1ProjectileAttacks {
     this.sites = new Map(qw ? [[3256,147],[580,84],[3900,158],[3973,159],[3388,149],[3478,151],[3720,154]]
       : [[3783,183],[1623,118],[1629,118],[4330,193],[4392,194],[3910,185],[3943,185],[3968,185]]);
     const owner = p.fieldsByName.get('owner'); if (owner === undefined) throw new QcProgramError('Missing projectile owner field'); this.ownerField = owner.offset;
+  }
+  capture() {
+    if (this.firing.length !== 0) throw new QcProgramError("Cannot save during projectile emission");
+    return [...this.emissions].map(([actor, emission]) => ({ actor: { slot: actor.slot, generation: actor.generation },
+      owner: { slot: emission.owner.slot, generation: emission.owner.generation }, emittedAt: emission.emittedAt, weapon: emission.weapon }));
+  }
+  restore(value: unknown): void {
+    const entries = new SaveReader(value, "qc.projectiles").list(entry => {
+      const identity = (reader: SaveReader) => ({ slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) });
+      return { actor: this.source.actors.referenceSaved(identity(entry.field("actor"))),
+        owner: this.source.actors.referenceSaved(identity(entry.field("owner"))), emittedAt: entry.field("emittedAt").finite(), weapon: namespaced(entry.field("weapon")) };
+    });
+    this.emissions.clear();
+    for (const entry of entries) {
+      if (this.emissions.has(entry.actor)) throw new QcProgramError("Duplicate saved projectile emission");
+      this.emissions.set(entry.actor, { owner: entry.owner, emittedAt: entry.emittedAt, weapon: entry.weapon });
+    }
   }
   private vm(): QcMachine {
     const vm = this.machine(); if (vm.program !== this.source.program || vm.entities !== this.source.entities) throw new QcProgramError('Projectile observer belongs to another VM'); return vm;

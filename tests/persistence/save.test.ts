@@ -16,6 +16,7 @@ import { readRecipe } from "../../src/persistence/recipe.ts";
 import { decodeQ2ClassicLevel, encodeQ2ClassicLevel, restoreQ2ClassicRecord } from "../../src/persistence/q2-classic.ts";
 import type { Q2ClassicSaveLayout } from "../../src/persistence/q2-classic.ts";
 import { decodeQ3ClientSession, encodeQ3ClientSession } from "../../src/persistence/q3.ts";
+import { validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
 
 function recipe(): ExecutableRecipe {
   const content = "q1:classic:id1:fixture";
@@ -31,6 +32,75 @@ function recipe(): ExecutableRecipe {
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
 }
 
+test("prebound restore verifies exact source values and retains writable authority", () => {
+  const identity = createIdentityOwner("prebound-save"), original = new SessionActorRegistry(identity);
+  const actor = original.allocateAtSource("q1:game", 1, "q1:player"), ground = original.allocateAtSource("q1:game", 0, "q1:world");
+  const savedActor = { slot: actor.id.slot, generation: actor.id.generation }, savedGround = { slot: ground.id.slot, generation: ground.id.generation };
+  const zero = { x: 0, y: 0, z: 0 };
+  const body = { origin: { ...zero, x: -0 }, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: savedGround };
+  const state = { health: 73, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
+  const entry = { item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } } satisfies SaveImage["inventories"][number]["entries"][number];
+  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(),
+    bodies: [{ actor: savedActor, body, attachment: null, linked: null, linkCount: 0 }], combat: [{ actor: savedActor, state }],
+    inventories: [{ actor: savedActor, entries: [entry] }], configurations: [], thinks: [], providers: [], guests: [] };
+  const actors = SessionActorRegistry.restore(identity, image.actors, original.sourceCheckpoint());
+  original.close();
+  const restored = actors.resolveSaved(savedActor), restoredGround = actors.resolveSaved(savedGround);
+  if (restored === null || restoredGround === null) throw new Error("Missing restored actors");
+  const bytes = new ArrayBuffer(12), words = new DataView(bytes);
+  words.setFloat32(0, -0, true); words.setFloat32(4, 73, true); words.setFloat32(8, -3, true);
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  bodies.bind(restored, { read: () => ({ ...body, origin: { ...zero, x: words.getFloat32(0, true) }, ground: restoredGround.id }),
+    write: value => { words.setFloat32(0, value.origin.x, true); return undefined; } });
+  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  combat.bind(restored, { read: () => ({ ...state, health: words.getFloat32(4, true) }), writeHealth: value => { words.setFloat32(4, value, true); return undefined; }, writeArmor: () => undefined });
+  const inventory = new SharedInventoryTable(actors);
+  inventory.bind(restored, { read: () => [{ ...entry, count: words.getFloat32(8, true) }], write: value => { words.setFloat32(8, value.count, true); return undefined; } });
+  const host = { actors, bodies, combat, inventory, storage: () => "prebound" } satisfies Parameters<typeof restoreSharedWorldState>[1];
+  restoreSharedWorldState(decodeSaveImage(encodeSaveImage(image)), host);
+  expect(bodies.read(restored.id)?.ground?.equals(restoredGround.id)).toBe(true);
+  expect(() => restoreSharedWorldState({ ...image, bodies: [] }, host)).toThrow("coverage");
+  expect(() => restoreSharedWorldState({ ...image, bodies: image.bodies.map(record => ({ ...record, body: { ...body, origin: zero } })) }, host)).toThrow("source body disagrees");
+  expect(() => restoreSharedWorldState({ ...image, combat: [{ actor: savedActor, state: { ...state, health: 74 } }] }, host)).toThrow("source combat disagrees");
+  expect(() => restoreSharedWorldState({ ...image, inventories: [{ actor: savedActor, entries: [{ ...entry, countPolicy: { kind: "source-counter", arithmetic: "int32" } }] }] }, host)).toThrow("source inventory disagrees");
+  expect(Object.is(words.getFloat32(0, true), -0)).toBe(true);
+  expect(words.getFloat32(4, true)).toBe(73);
+  expect(inventory.adjustSourceCounter(restored, entry.item, -1)).toBe(-4);
+  expect(words.getFloat32(8, true)).toBe(-4);
+  bodies.write(restored, { ...body, ground: restoredGround.id, origin: { ...zero, x: 5 } });
+  expect(words.getFloat32(0, true)).toBe(5);
+  words.setFloat32(4, 21, true);
+  expect(combat.read(restored.id)?.health).toBe(21);
+  actors.close();
+});
+
+test("simulation restore rejects missing, duplicate and foreign source records before construction", () => {
+  const frame = { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" } satisfies SaveImage["frame"];
+  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame, nextEventSequence: 0,
+    clocks: [{ provider: "q1:game", time: frame.time }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1, draws: 0 } }],
+    actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], guests: [],
+    providers: [sourceActorsCheckpoint([]), { provider: "q1:game", schema: "world:simulation", version: 11, bytes: encodeCheckpointValue({}) },
+      { provider: "q1:game", schema: "q1:foundation", version: 1, bytes: encodeCheckpointValue([]) }] };
+  validateSimulationSave(image);
+  expect(() => validateSimulationSave({ ...image, providers: image.providers.filter(record => record.schema !== "q1:foundation") })).toThrow("q1:foundation");
+  expect(() => validateSimulationSave({ ...image, providers: [...image.providers, ...image.providers] })).toThrow("Duplicate");
+  expect(() => validateSimulationSave({ ...image, providers: image.providers.map(record => record.schema === "q1:foundation" ? { ...record, provider: "q2:game" } : record) })).toThrow("different owner");
+  expect(() => validateSimulationSave({ ...image, clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2 } }] })).toThrow("clock");
+  const execution = { kind: "quakec", owner: image.recipe.map.entities, role: "server-game", artifact: image.recipe.map.geometry,
+    api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } satisfies ExecutableRecipe["execution"][number];
+  const module = { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest };
+  const guest = { kind: "quakec", module, api: execution.api, random: [], callbacks: [], globals: new Uint8Array(), entities: new Uint8Array(),
+    entityStrideBytes: 4, entityCount: 0, strings: new Uint8Array(), statement: 0, functionIndex: 0, argumentCount: 0,
+    callStack: [], locals: new Uint8Array(), hostState: { module, format: "quakec:host-v1", bytes: new Uint8Array() } } satisfies SaveImage["guests"][number];
+  const qc: SaveImage = { ...image, recipe: { ...image.recipe, execution: [execution] }, guests: [guest], providers: image.providers.filter(record => record.schema !== "q1:foundation") };
+  validateSimulationSave(qc);
+  expect(() => validateSimulationSave({ ...qc, guests: [] })).toThrow("exactly one");
+  expect(() => validateSimulationSave({ ...qc, guests: [guest, guest] })).toThrow("exactly one");
+  expect(() => validateSimulationSave({ ...qc, guests: [{ ...guest, api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } }] })).toThrow("artifact and API");
+  expect(() => validateSimulationSave({ ...qc, guests: [{ ...guest, hostState: { ...guest.hostState, module: { ...module, revision: "wrong" } } }] })).toThrow("artifact and API");
+});
+
 test("saved body attachments remap anchor generations and preserve their follow rule", () => {
   const identity = createIdentityOwner("attached-save"), actors = new SessionActorRegistry(identity);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
@@ -45,7 +115,7 @@ test("saved body attachments remap anchor generations and preserve their follow 
   actors.close();
   const restored = SessionActorRegistry.restore(identity, saved.actors, []), callbacks = new ActorCallbackTable(restored);
   const restoredBodies = new SharedBodyTable(restored, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
-  restoreSharedWorldState(saved, { actors: restored, bodies: restoredBodies, combat: new GameplayAuthority(restored, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory: new SharedInventoryTable(restored), storage: () => "typescript" });
+  restoreSharedWorldState(saved, { actors: restored, bodies: restoredBodies, combat: new GameplayAuthority(restored, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }), inventory: new SharedInventoryTable(restored), storage: () => "copied" });
   restoreSharedBodyLinks(saved, { actors: restored, bodies: restoredBodies });
   const restoredAnchor = restored.resolveSaved(anchor.id), restoredChild = restored.resolveSaved(child.id);
   if (restoredAnchor === null || restoredChild === null) throw new Error("Missing restored attachment actors");
@@ -95,7 +165,7 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
       const bodies=new SharedBodyTable(registry,{absoluteBounds:translatedBodyBounds,onLink:()=>{},onUnlink:()=>{}});
       const combat=new GameplayAuthority(registry,new ActorCallbackTable(registry),{impulse:()=>{},beforeReaction:()=>{},confirmed:()=>{}});
       const inventory=new SharedInventoryTable(registry);
-      restoreSharedWorldState(save,{actors:registry,bodies,combat,inventory,storage:()=> 'typescript'});
+      restoreSharedWorldState(save,{actors:registry,bodies,combat,inventory,storage:()=> 'copied'});
       restoreSharedBodyLinks(save,{actors:registry,bodies});
       const actor=registry.atSource('q1:game',7);
       if(actor===null||combat.read(actor.id)?.health!==73||combat.read(actor.id)?.noKnockback!==true||bodies.read(actor.id)?.origin.x!==12||save.guests[0]?.kind!=='qvm'||save.guests[0].data[3]!==128) throw new Error('restore failed');

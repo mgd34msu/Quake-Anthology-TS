@@ -23,6 +23,10 @@ export class ControllerSettings {
     private readonly report: (message: string) => void = () => undefined) {
     for (const seat of seats) this.seatFallbacks.set(seat, { ...(router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) });
   }
+  copySettledProfilesFrom(previous: ControllerSettings): void {
+    if (previous.pending.size !== 0) throw new Error("Controller profiles are still loading");
+    for (const [seat, profile] of previous.profiles) this.profiles.set(seat, { ...profile });
+  }
   update(): void {
     if (this.closed) return;
     for (const [index, seat] of this.seats.entries()) {

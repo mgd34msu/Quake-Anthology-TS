@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 // Ported from id Software's code/game/g_items.c: item registration, Touch_Item,
 // RespawnItem, FinishSpawningItem, and G_SpawnItem.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -40,6 +41,13 @@ export type SetItemsConfigstring = (index: 27, value: string) => void;
 
 /** Per-level equivalent of itemRegistered[MAX_ITEMS]. */
 export class ItemRegistry {
+  captureSaveState() { return this.#registered.slice(); }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.items"), bytes = reader.bytes();
+    if (bytes.length !== this.#registered.length || bytes.some(byte => byte !== 0 && byte !== 1)) reader.fail("invalid registered item table");
+    this.#registered.set(bytes);
+  }
+
   readonly #registered: Uint8Array;
 
   constructor(readonly product: Product) {
@@ -291,6 +299,7 @@ export function observeQ3Supply(entity: GameEntity, recipient: GameEntity, conte
 
 /** Touch_Item validates eligibility, applies pickup rules, emits events, and hides or schedules the item. */
 export function touchItem(entity: GameEntity, other: DamageParticipant, _contact: TouchContact, context: ItemLifecycleContext): void {
+  bindItemSaveCallbacks(context);
   checkContext(context);
   requireOwned(context, entity);
   if (!(other instanceof GameEntity)) return;
@@ -357,7 +366,7 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     entity.think = null;
   } else {
     entity.nextthink = (now + Math.imul(respawn, 1_000)) | 0;
-    entity.think = context.callbacks?.respawn ?? (self => { respawnItem(self, context); });
+    entity.think = context.callbacks?.respawn ?? context.entities.callbacks.think.resolve("q3.base.game.item-lifecycle.touchItem.think");
   }
   context.entities.options.link(entity);
 }
@@ -369,6 +378,7 @@ function sourceFloatSchedule(time: number, seconds: number): number {
 
 /** FinishSpawningItem installs item callbacks and either suspends, plants, hides, delays, or links the item. */
 export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleContext): void {
+  bindItemSaveCallbacks(context);
   checkContext(context);
   requireOwned(context, entity);
   const item = requireItem(context, entity);
@@ -378,8 +388,8 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
   entity.s.modelindex = tableIndex(context, item);
   entity.s.modelindex2 = 0;
   entity.r.contents = CONTENTS_TRIGGER;
-  entity.touch = context.callbacks?.touch ?? ((self, other, trace) => { touchItem(self, other, trace, context); });
-  entity.use = self => { respawnItem(self, context); };
+  entity.touch = context.callbacks?.touch ?? context.entities.callbacks.touch.resolve("q3.base.game.item-lifecycle.finishSpawningItem.touch");
+  entity.use = context.entities.callbacks.use.resolve("q3.base.game.item-lifecycle.finishSpawningItem.use");
 
   if ((entity.spawnflags & 1) !== 0) {
     setOrigin(entity, entity.s.origin);
@@ -413,7 +423,7 @@ export function finishSpawningItem(entity: GameEntity, context: ItemLifecycleCon
     entity.s.eFlags |= EF_NODRAW;
     entity.r.contents = 0;
     entity.nextthink = sourceFloatSchedule(gameTime(context), delay);
-    entity.think = context.callbacks?.respawn ?? (self => { respawnItem(self, context); });
+    entity.think = context.callbacks?.respawn ?? context.entities.callbacks.think.resolve("q3.base.game.item-lifecycle.touchItem.think");
     return;
   }
   context.entities.options.link(entity);
@@ -427,6 +437,7 @@ export function spawnItem(
   isDisabled: () => boolean,
   context: ItemLifecycleContext,
 ): void {
+  bindItemSaveCallbacks(context);
   checkContext(context);
   requireOwned(context, entity);
   tableIndex(context, item);
@@ -437,7 +448,7 @@ export function spawnItem(
 
   entity.item = item;
   entity.nextthink = (gameTime(context) + FRAME_TIME * 2) | 0;
-  entity.think = self => { finishSpawningItem(self, context); };
+  entity.think = context.entities.callbacks.think.resolve("q3.base.game.item-lifecycle.spawnItem.think");
   entity.physicsBounce = Math.fround(0.5);
   if (item.type === ItemType.IT_POWERUP) {
     context.soundIndex("sound/items/poweruprespawn.wav");
@@ -446,4 +457,11 @@ export function spawnItem(
   if (context.product === "missionpack" && item.type === ItemType.IT_PERSISTANT_POWERUP) {
     entity.s.generic1 = entity.spawnflags;
   }
+}
+
+export function bindItemSaveCallbacks(context: ItemLifecycleContext): void {
+  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.touchItem.think", (self => { respawnItem(self, context); }));
+  context.entities.callbacks.touch.intern("q3.base.game.item-lifecycle.finishSpawningItem.touch", ((self, other, trace) => { touchItem(self, other, trace, context); }));
+  context.entities.callbacks.use.intern("q3.base.game.item-lifecycle.finishSpawningItem.use", self => { respawnItem(self, context); });
+  context.entities.callbacks.think.intern("q3.base.game.item-lifecycle.spawnItem.think", self => { finishSpawningItem(self, context); });
 }

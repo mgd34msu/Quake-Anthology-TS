@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 // Match rules translated from id Software's game/g_main.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { sub3, vec3, vectorToAngles } from "../../../core/math.ts";
@@ -160,6 +161,9 @@ export class MatchModuleState {
 }
 
 export class MatchRuntime {
+  captureSaveState() { return { passwordModificationCount: this.moduleState.passwordModificationCount }; }
+  restoreSaveState(value: unknown): void { this.moduleState.passwordModificationCount = new SaveReader(value, "q3.matchModule").field("passwordModificationCount").integer(); }
+
   constructor(readonly host: MatchHost, private readonly moduleState = new MatchModuleState()) {
     if (host.pool.options.product !== host.product) throw new Error("Match product differs from its entity pool");
     if (host.teamScores.length !== 4) throw new RangeError("Match needs the shared four-team score storage");

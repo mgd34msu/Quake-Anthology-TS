@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { captureModuleCvar, readModuleCvar } from "./game/save-module-values.ts";
 /* Source g_main.c registration defaults and source cvar update points. GPL-2.0-or-later. */
 import { CvarFlag } from "../../../core/cvars/index.ts";
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
@@ -53,6 +55,14 @@ export interface Q3SettingsHost {
 }
 /** Copies values at the source G_UpdateCvars point, independent of changes to the shared cvars. */
 export class Q3GameSettings {
+  captureSaveState() { return [...this.snapshots.values()].map(captureModuleCvar); }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.settings"), snapshots = reader.list(readModuleCvar);
+    const names = new Set(snapshots.map(snapshot => snapshot.name));
+    if (snapshots.length !== this.definitions.length || names.size !== snapshots.length || snapshots.some(snapshot => !this.definitions.some(definition => definition.name === snapshot.name))) reader.fail("invalid settings snapshot names");
+    this.snapshots.clear(); for (const snapshot of snapshots) this.snapshots.set(snapshot.name, snapshot);
+  }
+
   private readonly snapshots = new Map<string, CvarSnapshot>();
   readonly definitions: readonly CvarDefinition[];
   constructor(readonly host: Q3SettingsHost, readonly product: Product) { this.definitions = q3GameCvarDefinitions(product); }

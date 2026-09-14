@@ -40,7 +40,9 @@ function withComponent(value: Vec3, axis: number, amount: number): Vec3 {
 export class MoverSpawnRuntime {
   private readonly doorTriggerTouch = (entity: GameEntity, other: DamageParticipant): void => { this.doorTouch(entity, other); };
 
-  constructor(readonly host: MoverSpawnHost) {}
+  constructor(readonly host: MoverSpawnHost) {
+    this.bindSaveCallbacks();
+  }
 
   isDoorTrigger(entity: GameEntity): boolean { return entity.touch === this.doorTriggerTouch; }
 
@@ -87,7 +89,7 @@ export class MoverSpawnRuntime {
     trigger.r.mins = withComponent(bounds.min, axis, component(bounds.min, axis) - 120);
     trigger.r.maxs = withComponent(bounds.max, axis, component(bounds.max, axis) + 120);
     trigger.parent = entity; trigger.r.contents = CONTENTS_TRIGGER; trigger.count = axis;
-    trigger.touch = this.doorTriggerTouch;
+    trigger.touch = this.host.movers.host.combat.entities.callbacks.touch.resolve("q3.base.game.mover-spawn.spawnDoorTrigger.touch");
     this.core.host.world.link(trigger);
     this.core.matchTeam(entity, entity.moverState, this.time);
   }
@@ -95,7 +97,7 @@ export class MoverSpawnRuntime {
     const config = this.core.host.config;
     entity.sound1to2 = entity.sound2to1 = config.soundIndex("sound/movers/doors/dr1_strt.wav");
     entity.soundPos1 = entity.soundPos2 = config.soundIndex("sound/movers/doors/dr1_end.wav");
-    entity.blocked = (self, other) => { this.core.blockedDoor(self, other); };
+    entity.blocked = this.host.movers.host.combat.entities.callbacks.blocked.resolve("q3.base.game.mover-spawn.door.blocked");
     if (entity.speed === 0) entity.speed = 400;
     if (entity.wait === 0) entity.wait = 2;
     entity.wait = f32(entity.wait * 1000);
@@ -112,16 +114,13 @@ export class MoverSpawnRuntime {
       const health = variables.int("health", "0").value;
       if (health !== 0) entity.takedamage = true;
       entity.think = entity.targetname !== null || health !== 0
-        ? self => { this.core.matchTeam(self, self.moverState, this.time); }
-        : self => { this.spawnDoorTrigger(self); };
+      ? this.host.movers.host.combat.entities.callbacks.think.resolve("q3.base.game.mover-spawn.door.matchTeam")
+      : this.host.movers.host.combat.entities.callbacks.think.resolve("q3.base.game.mover-spawn.door.spawnTrigger");
     }
   }
   private spawnPlatTrigger(entity: GameEntity): void {
     const trigger = this.core.host.combat.entities.spawn(); trigger.classname = "plat_trigger";
-    trigger.touch = (self, other) => {
-      const parent = this.parent(self);
-      if (other instanceof GameEntity && other.client !== null && parent.moverState === MoverState.POS1) this.core.useBinary(parent, self, other);
-    };
+    trigger.touch = this.host.movers.host.combat.entities.callbacks.touch.resolve("q3.base.game.mover-spawn.spawnPlatTrigger.touch");
     trigger.r.contents = CONTENTS_TRIGGER; trigger.parent = entity;
     let min = add3(add3(entity.pos1, entity.r.mins), vec3(33, 33, 0));
     let max = add3(add3(entity.pos1, entity.r.maxs), vec3(-33, -33, 8));
@@ -145,10 +144,8 @@ export class MoverSpawnRuntime {
     const distance = height.present ? height.value : f32(f32(entity.r.maxs.z - entity.r.mins.z) - lip);
     entity.pos2 = { ...entity.s.origin }; entity.pos1 = vec3(entity.pos2.x, entity.pos2.y, entity.pos2.z - distance);
     this.core.initializeBinary(entity, variables);
-    entity.touch = (self, other) => {
-      if (other instanceof GameEntity && other.client !== null && other.client.ps.health > 0 && self.moverState === MoverState.POS2) self.nextthink = (this.time + 1000) | 0;
-    };
-    entity.blocked = (self, other) => { this.core.blockedDoor(self, other); }; entity.parent = entity;
+    entity.touch = this.host.movers.host.combat.entities.callbacks.touch.resolve("q3.base.game.mover-spawn.plat.touch");
+    entity.blocked = this.host.movers.host.combat.entities.callbacks.blocked.resolve("q3.base.game.mover-spawn.door.blocked"); entity.parent = entity;
     if (entity.targetname === null) this.spawnPlatTrigger(entity);
   }
   button(entity: GameEntity, variables: SpawnVariables): void {
@@ -161,9 +158,7 @@ export class MoverSpawnRuntime {
     const distance = f32(dot3(absolute, sub3(entity.r.maxs, entity.r.mins)) - variables.float("lip", "4").value);
     entity.pos2 = add3(entity.pos1, scale3(entity.movedir, distance));
     if (entity.health !== 0) entity.takedamage = true;
-    else entity.touch = (self, other) => {
-      if (other instanceof GameEntity && other.client !== null && self.moverState === MoverState.POS1) this.core.useBinary(self, other, other);
-    };
+    else entity.touch = this.host.movers.host.combat.entities.callbacks.touch.resolve("q3.base.game.mover-spawn.button.touch");
     this.core.initializeBinary(entity, variables);
   }
   private reachedTrain(entity: GameEntity): void {
@@ -181,7 +176,7 @@ export class MoverSpawnRuntime {
     this.core.setState(entity, MoverState.ONE_TO_TWO, this.time);
     if (next.wait !== 0) {
       entity.nextthink = floatInt(f32(f32(this.time) + f32(next.wait * 1000)));
-      entity.think = self => { self.s.pos = { ...self.s.pos, time: this.time, type: TrajectoryType.TR_LINEAR_STOP }; };
+      entity.think = this.host.movers.host.combat.entities.callbacks.think.resolve("q3.base.game.mover-spawn.reachedTrain.think");
       entity.s.pos = { ...entity.s.pos, type: TrajectoryType.TR_STATIONARY };
     }
   }
@@ -217,8 +212,8 @@ export class MoverSpawnRuntime {
       this.host.warn(`func_train without a target at ${this.core.host.combat.entities.utilities.vtos(entity.r.absmin).readString()}\n`); this.core.host.combat.entities.free(entity); return;
     }
     this.host.setBrushModel(entity, entity.model); this.core.initializeBinary(entity, variables);
-    entity.reached = self => { this.reachedTrain(self); };
-    entity.nextthink = (this.time + FRAMETIME) | 0; entity.think = self => { this.setupTrain(self); };
+    entity.reached = this.host.movers.host.combat.entities.callbacks.reached.resolve("q3.base.game.mover-spawn.train.reached");
+    entity.nextthink = (this.time + FRAMETIME) | 0; entity.think = this.host.movers.host.combat.entities.callbacks.think.resolve("q3.base.game.mover-spawn.train.think");
   }
   static(entity: GameEntity, variables: SpawnVariables): void {
     this.host.setBrushModel(entity, entity.model); this.core.initializeBinary(entity, variables);
@@ -269,6 +264,26 @@ export class MoverSpawnRuntime {
       ["func_bobbing", runtime.handler((entity, variables) => { runtime.bobbing(entity, variables); })],
       ["func_pendulum", runtime.handler((entity, variables) => { runtime.pendulum(entity, variables); })],
     ]);
+  }
+
+  bindSaveCallbacks(): void {
+    this.host.movers.host.combat.entities.callbacks.touch.intern("q3.base.game.mover-spawn.spawnDoorTrigger.touch", this.doorTriggerTouch);
+    this.host.movers.host.combat.entities.callbacks.blocked.intern("q3.base.game.mover-spawn.door.blocked", (self, other) => { this.core.blockedDoor(self, other); });
+    this.host.movers.host.combat.entities.callbacks.think.intern("q3.base.game.mover-spawn.door.matchTeam", self => { this.core.matchTeam(self, self.moverState, this.time); });
+    this.host.movers.host.combat.entities.callbacks.think.intern("q3.base.game.mover-spawn.door.spawnTrigger", self => { this.spawnDoorTrigger(self); });
+    this.host.movers.host.combat.entities.callbacks.touch.intern("q3.base.game.mover-spawn.spawnPlatTrigger.touch", (self, other) => {
+      const parent = this.parent(self);
+      if (other instanceof GameEntity && other.client !== null && parent.moverState === MoverState.POS1) this.core.useBinary(parent, self, other);
+    });
+    this.host.movers.host.combat.entities.callbacks.touch.intern("q3.base.game.mover-spawn.plat.touch", (self, other) => {
+      if (other instanceof GameEntity && other.client !== null && other.client.ps.health > 0 && self.moverState === MoverState.POS2) self.nextthink = (this.time + 1000) | 0;
+    });
+    this.host.movers.host.combat.entities.callbacks.touch.intern("q3.base.game.mover-spawn.button.touch", (self, other) => {
+      if (other instanceof GameEntity && other.client !== null && self.moverState === MoverState.POS1) this.core.useBinary(self, other, other);
+    });
+    this.host.movers.host.combat.entities.callbacks.think.intern("q3.base.game.mover-spawn.reachedTrain.think", self => { self.s.pos = { ...self.s.pos, time: this.time, type: TrajectoryType.TR_LINEAR_STOP }; });
+    this.host.movers.host.combat.entities.callbacks.reached.intern("q3.base.game.mover-spawn.train.reached", self => { this.reachedTrain(self); });
+    this.host.movers.host.combat.entities.callbacks.think.intern("q3.base.game.mover-spawn.train.think", self => { this.setupTrain(self); });
   }
 }
 

@@ -75,7 +75,7 @@ for (const preset of ["q2-q1-q3", "q1-q2"]) test(`fresh shared ${preset} restore
         restored.controlPlayer(actor, { kind: "cutscene", origin, angles, viewOffset: { x: 0, y: 0, z: 0 } });
         restored.step({ elapsedMilliseconds: 100, commands: [{ actor, sequence: 100, source: { kind: "bot", provider: content.recipe.map.entities.provider },
           command: { kind: "q2-classic", milliseconds: 100, angleShorts: [0, 0, 0], forwardMove: 300, sideMove: 0, upMove: 200, buttons: 1, impulse: 0, lightLevel: 0 } }] });
-        expect(restored.playerView(actor)).toEqual({ origin, angles, viewHeight: 0 });
+        expect(restored.playerView(actor)).toEqual({ origin, angles, viewHeight: 0, fieldOfView: 90 });
         expect(restored.scene.spatial.get(actor)).toBeNull();
         expect(restored.presentations().some(value => sameActor(value.actor, actor))).toBe(false);
       }

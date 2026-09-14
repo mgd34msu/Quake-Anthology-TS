@@ -1,3 +1,5 @@
+import { SaveReader } from "../../persistence/value.ts";
+import { captureWireEntity, readNqWireEntity } from "./decoder-checkpoint.ts";
 // NetQuake cl_parse.c/sv_main.c messages with FitzQuake and RMQ additions. GPL-2.0-or-later.
 import type { Q1ProtocolIdentity, Q1ExtendedEntityState, Q1ClientData, Q1UserCommand } from '../../contracts/protocol.ts';
 import type { Vec3 } from '../../contracts/math.ts';
@@ -158,6 +160,17 @@ export class NetQuakeDecoder {
     private flagsValue: number;
     get flags(): number { return this.flagsValue; }
     constructor(public protocol: Q1ProtocolIdentity = { kind: 'q1-netquake', version: 15 }, readonly rereleaseMessages: RereleaseMessages = 'known-retail', readonly standardQuake = true) { this.flagsValue = protocolFlags(protocol); }
+    capture() { return { version: this.protocol.version, flags: this.flagsValue, timeSeconds: this.timeSeconds,
+        baselines: [...this.baselines].map(([slot, state]) => ({ slot, state: captureWireEntity(state) })) }; }
+    restore(value: unknown): void {
+        const reader = new SaveReader(value, "netquake.decoder");
+        const flags = reader.field("flags").integer(0);
+        this.protocol = netQuakeProfile(reader.field("version").integer(0), flags); this.flagsValue = flags;
+        this.timeSeconds = reader.field("timeSeconds").number(); this.baselines.clear();
+        for (const entry of reader.field("baselines").list(item => ({ slot: item.field("slot").integer(0), state: readNqWireEntity(item.field("state")) }))) {
+            if (this.baselines.has(entry.slot)) reader.fail("duplicate baseline"); this.baselines.set(entry.slot, entry.state);
+        }
+    }
     decode(bytes: Uint8Array): readonly NetQuakeMessage[] {
         const r = new MessageReader(bytes), messages: NetQuakeMessage[] = [];
         let codec = createNetQuakeCodec(this.protocol, r), flags = this.flagsValue;

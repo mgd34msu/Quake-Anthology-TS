@@ -102,6 +102,18 @@ export class CommandBuffer {
     if (options.builtins !== false) this.registerBuiltins();
   }
 
+  copyPendingFrom(previous: CommandBuffer): void {
+    if (this.frame !== undefined || this.asyncDraining || previous.frame !== undefined || previous.asyncDraining)
+      throw new Error("Cannot copy commands during execution");
+    if (this.context.session !== previous.context.session) throw new Error("Commands belong to another session");
+    if (previous.pendingText.length + previous.deferredText.length >= this.maximumBuffer)
+      throw new Error("Replacement command buffer cannot hold pending commands");
+    this.chunks = [...previous.chunks];
+    this.deferred = [...previous.deferred];
+    this.waitFrames = previous.waitFrames;
+    this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
+  }
+
   get pendingText(): string { return this.chunks.map(chunk => chunk.text).join(""); }
   get deferredText(): string { return this.deferred.map(chunk => chunk.text).join(""); }
   get tokenizedArguments(): readonly string[] { return this.tokens; }

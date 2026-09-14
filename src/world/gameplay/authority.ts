@@ -99,6 +99,13 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
+  bindDamageAdmission(actor: OwnedActor, admitDamage: NonNullable<CombatStateBinding["admitDamage"]>): undefined {
+    const binding = this.binding(actor);
+    if (binding.admitDamage !== undefined) throw new Error("Actor already has source damage admission");
+    this.bindings.set(actor, { ...binding, admitDamage });
+    return undefined;
+  }
+
   /** A player's power armor and energy weapons consume the same source inventory field. */
   bindPowerArmorCells(actor: OwnedActor, cells: PowerArmorCellBinding): undefined {
     this.actors.assertOwned(actor);

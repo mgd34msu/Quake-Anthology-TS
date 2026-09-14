@@ -51,6 +51,7 @@ interface StaticAudio {
 }
 export type ApplicationEffectSound = SourceEffectSound;
 export interface ApplicationAudioOptions {
+  readonly deferOutput?: boolean;
   readonly deviceName?: string | null;
   readonly effectsVolume?: number;
   readonly musicVolume?: number;
@@ -87,6 +88,7 @@ export class ApplicationAudio {
     this.music = new ApplicationMusic(this.engine, print);
     this.effectsVolume = options.effectsVolume ?? this.volume;
     this.musicVolume = options.musicVolume ?? this.music.volume;
+    if (options.deferOutput === true) return;
     const outputDevice = options.deviceName ?? null;
     try { this.engine.openDevice({ deviceName: outputDevice }); }
     catch (error) {
@@ -95,6 +97,8 @@ export class ApplicationAudio {
       try { this.engine.openDevice(); } catch (fallbackError) { this.engine.close(); throw fallbackError; }
     }
   }
+
+  prepareOutputTransfer(next: ApplicationAudio): () => void { return this.engine.prepareOutputTransfer(next.engine); }
 
   get selectedOutput(): string | null { return this.engine.selectedOutput; }
   outputDeviceNames(): readonly string[] { return this.engine.outputDeviceNames(); }

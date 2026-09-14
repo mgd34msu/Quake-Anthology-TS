@@ -30,6 +30,20 @@ function attack(target: ActorId, attacker: ActorId, sequence = 1, amount = 40): 
 }
 
 describe("shared actor and gameplay authority", () => {
+  test("restored damage admission preserves the existing authoritative store", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("restored-admission"));
+    const target = actors.allocate("q3:game", "q3:obelisk"), attacker = actors.allocate("q1:game", "q1:player");
+    const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+    authority.register(createQ3CombatPolicy({ id: "q3:combat", context: () => q3Context, armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) }));
+    authority.create(target, state(73)); authority.create(attacker, state());
+    const requests: DamageRequest[] = [];
+    authority.bindDamageAdmission(target, request => { requests.push(request); authority.setHealth(target, 61); return "handled"; });
+    expect(() => authority.bindDamageAdmission(target, () => "continue")).toThrow("already has source damage admission");
+    expect(authority.apply(attack(target.id, attacker.id)).kind).toBe("committed");
+    expect(requests).toHaveLength(1);
+    expect(authority.read(target.id)?.health).toBe(61);
+    actors.close();
+  });
   test("level travel and same-session loading cannot alias prior actor generations", () => {
     const identity = createIdentityOwner("travel");
     const before = new SessionActorRegistry(identity);

@@ -33,6 +33,16 @@ export class EntityShared {
   set currentAngles(value: Vec3) { this.body.write({ ...this.body.read(), angles: value }); }
   private absMinOverride: Vec3 | null = null;
   private absMaxOverride: Vec3 | null = null;
+  capturePrivateState() {
+    if (this.currentOriginView !== null) throw new Error("Cannot save inside a Q3 temporary origin view");
+    return { previousLink: this.previousLink, absMinOverride: this.absMinOverride, absMaxOverride: this.absMaxOverride };
+  }
+  restorePrivateState(state: { readonly previousLink: LinkedBody | null; readonly absMinOverride: Vec3 | null; readonly absMaxOverride: Vec3 | null }): void {
+    if (this.currentOriginView !== null) throw new Error("Cannot restore inside a Q3 temporary origin view");
+    this.previousLink = state.previousLink;
+    this.absMinOverride = state.absMinOverride === null ? null : { ...state.absMinOverride };
+    this.absMaxOverride = state.absMaxOverride === null ? null : { ...state.absMaxOverride };
+  }
   clearBoundsOverrides(): void { this.absMinOverride = null; this.absMaxOverride = null; }
   set absmin(value: Vec3) { this.absMinOverride = value; }
   set absmax(value: Vec3) { this.absMaxOverride = value; }

@@ -37,6 +37,23 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     expect(attribution?.weapon).toBe('q1:weapon/rocketlauncher'); expect(attribution?.launch?.owner.equals(owner.id)).toBe(true);
     expect(attribution?.launch?.emittedAt).toBe(2); expect(attribution?.time).toBe(10);
     expect(() => observer.resolve({ ...call, attacker: owner.id })).toThrow();
+    const restoredActors = SessionActorRegistry.restore(createIdentityOwner(`projectiles-restored-${qw}`), actors.checkpoint(), actors.sourceCheckpoint());
+    const restoredEntities = new QcEntityMemory(classicQcEntityLayout(program), 8, 4);
+    const restoredVm = new QcMachine({ program, entities: restoredEntities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
+      builtins: createQcBuiltins({ kind: qw ? 'quakeworld' : 'netquake', host }), serverActive: () => true });
+    restoredVm.restore(vm.snapshot());
+    const restoredSlots = new SourceActorSlots(restoredActors, { ...slots.options,
+      storage: createQcSourceSlotStorage({ program, entities: restoredEntities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: qw ? 100 : 92 }) });
+    const restoredObserver = new Id1ProjectileAttacks({ program, entities: restoredEntities, actors: restoredActors, slots: restoredSlots }, () => restoredVm);
+    restoredObserver.restore(observer.capture());
+    const restoredTarget = restoredSlots.at(3), restoredMissile = restoredSlots.at(2), restoredAttacker = restoredSlots.at(1);
+    if (restoredTarget === null || restoredMissile === null || restoredAttacker === null) throw new Error('Missing restored projectile graph');
+    const restoredAttribution = restoredObserver.resolve({ ...call, target: restoredTarget.id, inflictor: restoredMissile.id, attacker: restoredAttacker.id });
+    expect(restoredAttribution?.launch?.owner.equals(owner.id)).toBe(false);
+    expect(restoredAttribution?.launch?.owner.equals(restoredActors.referenceSaved({ slot: owner.id.slot, generation: owner.id.generation }))).toBe(true);
+    expect(restoredAttribution?.launch?.owner.equals(restoredAttacker.id)).toBe(false);
+    expect(restoredAttribution?.launch?.emittedAt).toBe(2); expect(restoredAttribution?.weapon).toBe(attribution?.weapon);
+    restoredActors.close();
     entities.at(3).setFloat(field('health'), 100); entities.at(3).setFloat(field('takedamage'), 2);
     entities.at(3).setFloat(field('armorvalue'), 40); entities.at(3).setFloat(field('armortype'), 0.3);
     vm.execute(program.functionNamed('T_Damage').index, 4);

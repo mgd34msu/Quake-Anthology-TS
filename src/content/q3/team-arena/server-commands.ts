@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 // Ported from id Software's code/game/g_svcmds.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
@@ -75,6 +76,15 @@ export class GameServerCommandState {
 
 /** Source static filters belong to the loaded game module, not each INIT. */
 export class GameServerCommandRuntime {
+  captureSaveState() { return { filters: this.filters.map(filter => ({ mask: filter.mask, compare: filter.compare })), banVmString: this.banVmString === null ? null : { modificationCount: this.banVmString.modificationCount, value: this.banVmString.value } }; }
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.serverCommands");
+    const filters = reader.field("filters").list(entry => ({ mask: entry.field("mask").integer(0), compare: entry.field("compare").integer(0) }));
+    const ban = reader.field("banVmString").nullable(entry => ({ modificationCount: entry.field("modificationCount").integer(), value: entry.field("value").string() }));
+    if (filters.length > MAX_IP_FILTERS || filters.some(filter => filter.mask > 0xffffffff || filter.compare > 0xffffffff)) reader.fail("too many IP filters");
+    this.filters.splice(0, this.filters.length, ...filters); this.banVmString = ban;
+  }
+
   private banVmString: { modificationCount: number; value: string } | null = null;
 
   constructor(readonly pool: EntityPool, readonly cvars: CvarRegistry, readonly host: GameServerCommandHost,

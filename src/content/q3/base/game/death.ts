@@ -82,6 +82,8 @@ export class DeathRuntime {
     this.#modNames = [...COMMON_MOD_NAMES,
       ...(host.product === "missionpack" ? ["MOD_NAIL", "MOD_CHAINGUN", "MOD_PROXIMITY_MINE", "MOD_KAMIKAZE", "MOD_JUICED"] : []),
       "MOD_GRAPPLE"];
+
+    this.bindSaveCallbacks();
   }
 
   private dropContext(): DropItemContext {
@@ -149,7 +151,7 @@ export class DeathRuntime {
     const origin = obelisk === null ? vec3(0, 0, 0) : vec3(obelisk.s.pos.base.x, obelisk.s.pos.base.y, obelisk.s.pos.base.z + 44);
     const dropped = launchItem(this.dropContext(), item, origin, velocity);
     dropped.nextthink = (time + Math.imul(host.cubeTimeoutSeconds(), 1000)) | 0;
-    dropped.think = self => { host.pool.free(self); };
+    dropped.think = this.host.pool.callbacks.think.resolve("q3.base.game.death.tossClientCubes.think");
     dropped.spawnflags = client.sess.sessionTeam;
   }
 
@@ -203,7 +205,7 @@ export class DeathRuntime {
     timer.classname = "kamikaze timer";
     timer.s.pos = { ...timer.s.pos, base: { ...self.s.pos.base } };
     timer.r.svFlags |= ServerEntityFlags.NOCLIENT;
-    timer.think = entity => { host.startKamikaze(entity); host.pool.free(entity); };
+    timer.think = this.host.pool.callbacks.think.resolve("q3.base.game.death.kamikazeDeathTimer.think");
     timer.nextthink = (host.frame().time + 5000) | 0;
     timer.activator = self;
   }
@@ -256,7 +258,7 @@ export class DeathRuntime {
     if (client.hook !== null) this.host.missiles.hookFree(client.hook);
     if (this.host.product === "missionpack" && (client.ps.eFlags & EF_TICKING) && self.activator !== null) {
       client.ps.eFlags &= ~EF_TICKING;
-      self.activator.think = entity => { this.host.pool.free(entity); };
+      self.activator.think = this.host.pool.callbacks.think.resolve("q3.base.game.death.playerDie.think");
       self.activator.nextthink = frame.time;
     }
     client.ps.pmType = MoveType.PM_DEAD;
@@ -340,9 +342,17 @@ export class DeathRuntime {
       client.ps.legsAnim = ((client.ps.legsAnim & 128) ^ 128) | animation;
       client.ps.torsoAnim = ((client.ps.torsoAnim & 128) ^ 128) | animation;
       this.host.pool.addEvent(self, event, killer);
-      self.die = this.bodyDie;
+      self.die = this.host.pool.callbacks.die.resolve("q3.death.body");
       if (this.host.product === "missionpack" && (self.s.eFlags & EF_KAMIKAZE)) this.kamikazeDeathTimer(self);
     }
     this.host.world.link(self);
   };
+
+  bindSaveCallbacks(): void {
+    this.host.pool.callbacks.think.intern("q3.base.game.death.tossClientCubes.think", self => { this.host.pool.free(self); });
+    this.host.pool.callbacks.think.intern("q3.base.game.death.kamikazeDeathTimer.think", entity => { if (this.host.product !== "missionpack") throw new Error("Kamikaze callback requires missionpack"); this.host.startKamikaze(entity); this.host.pool.free(entity); });
+    this.host.pool.callbacks.think.intern("q3.base.game.death.playerDie.think", entity => { this.host.pool.free(entity); });
+    this.host.pool.callbacks.die.register("q3.death.body", this.bodyDie);
+    this.host.pool.callbacks.die.register("q3.death.player", this.playerDie);
+  }
 }

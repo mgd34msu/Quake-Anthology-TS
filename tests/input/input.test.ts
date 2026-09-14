@@ -361,3 +361,34 @@ test("Always run menu changes emitted commands and inverts the speed modifier fo
     expect(analog.forwardMove).toBe(frame.kind === "q2-rerelease" ? maximum * 0.25 : Math.trunc(maximum * 0.25));
   }
 });
+
+test("detached world input preserves controller assignments and performs no sensor operations before publication", () => {
+  const owner = createIdentityOwner("detached-router"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const operations: string[] = [];
+  const controllers: ConstructorParameters<typeof InputRouter>[0]["controllers"] = {
+    assignments: [7], setAssignments: () => { operations.push("assign"); }, pollEvents: () => [], snapshot: () => null,
+    setSensorEnabled: () => { operations.push("sensor"); return { kind: "accepted" }; },
+  };
+  const make = (deferPlatform: boolean): InputRouter => {
+    const commands = new CommandBuffer({ dialect: "q2-classic", context });
+    const input = new SeatInput({ seat, dialect: "q2-classic", context, commands, uiEvent: () => false });
+    const router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat,
+      controllers, deferPlatform, now: () => 1, ticks: () => 1, subframe: false, unhandled: () => {} });
+    router.restart(); return router;
+  };
+  const previous = make(false);
+  operations.length = 0;
+  const discarded = make(true);
+  expect(discarded.setGyroEnabled(seat, true).kind).toBe("disconnected");
+  discarded.close();
+  expect(operations).toEqual([]);
+  const next = make(true);
+  expect(next.controllerFor(seat)).toBe(7);
+  previous.transferWindowTo(next);
+  previous.close();
+  expect(operations).toEqual([]);
+  expect(next.setGyroEnabled(seat, true).kind).toBe("accepted");
+  expect(operations).toEqual(["sensor"]);
+  next.close();
+});

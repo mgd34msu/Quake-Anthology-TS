@@ -1,3 +1,4 @@
+import { SaveReader } from "../../persistence/value.ts";
 /* Instance-owned registries adapted from quake-3-ts/src/core/cvar.ts;
  * family behavior follows Quake/QW cvar.c and Quake II qcommon/cvar.c.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -136,6 +137,58 @@ export class CvarRegistry {
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
     this.context = options.context;
+  }
+
+  captureSaveState() { return { dialect: this.dialect, ...this.captureRegistryState() }; }
+  restoreSaveState(value: unknown): void {
+    new SaveReader(value, "cvars").field("dialect").literal(this.dialect);
+    this.restoreRegistryState(value);
+  }
+  captureQuakeCState() {
+    if (!isQ1(this.dialect)) throw new Error("QC cvar save requires a Q1 registry");
+    return this.captureRegistryState();
+  }
+  restoreQuakeCState(value: unknown): void {
+    if (!isQ1(this.dialect)) throw new Error("QC cvar restore requires a Q1 registry");
+    this.restoreRegistryState(value);
+  }
+  private captureRegistryState() {
+    if (this.effects.length !== 0) throw new Error("Cvar save requires drained effects");
+    return { variables: this.indexes.map(state => state === undefined ? null : { ...snapshot(state), latchedValue: state.latchedValue ?? null }),
+      order: this.snapshots().map(state => state.name), changedFlags: this.changedFlags, cheatsEnabled: this.cheatsEnabled,
+      serverActive: this.serverActive, clientConnected: this.clientConnected, highCharacters: this.highCharacters,
+      clientInfo: this.clientInfo, serverInfo: this.serverInfo, userinfoDirty: this.userinfoDirty, consoleVariables: [...this.consoleVariables] };
+  }
+  private restoreRegistryState(value: unknown): void {
+    const reader = new SaveReader(value, "cvars");
+    const states = reader.field("variables").list(entry => entry.nullable(item => ({ name: item.field("name").string(), value: item.field("value").string(),
+      resetValue: item.field("resetValue").string(), latchedValue: item.field("latchedValue").nullable(field => field.string()) ?? undefined,
+      flags: item.field("flags").integer(0), modified: item.field("modified").boolean(), modificationCount: item.field("modificationCount").integer(0),
+      numericValue: item.field("numericValue").number(), integerValue: item.field("integerValue").integer() })));
+    const variables = new Map<string, CvarState>(), indexes: (CvarState | undefined)[] = [];
+    for (const [index, saved] of states.entries()) {
+      if (saved === null) { indexes.push(undefined); continue; }
+      if (variables.has(this.key(saved.name))) reader.fail("duplicate cvar");
+      const state: CvarState = { ...saved, index, next: undefined };
+      indexes.push(state); variables.set(this.key(state.name), state);
+    }
+    const order = reader.field("order").list(item => item.string());
+    if (new Set(order.map(name => this.key(name))).size !== variables.size || order.length !== variables.size) reader.fail("invalid cvar order");
+    let first: CvarState | undefined;
+    for (const name of [...order].reverse()) {
+      const state = variables.get(this.key(name)); if (state === undefined) return reader.fail("unknown ordered cvar");
+      state.next = first; first = state;
+    }
+    const changedFlags = reader.field("changedFlags").integer(0), cheatsEnabled = reader.field("cheatsEnabled").boolean();
+    const serverActive = reader.field("serverActive").boolean(), clientConnected = reader.field("clientConnected").boolean();
+    const highCharacters = reader.field("highCharacters").boolean(), clientInfo = reader.field("clientInfo").string(), serverInfo = reader.field("serverInfo").string();
+    const userinfoDirty = reader.field("userinfoDirty").boolean(), consoleVariables = reader.field("consoleVariables").list(item => item.string());
+    if (new Set(consoleVariables).size !== consoleVariables.length) reader.fail("duplicate console variable");
+    this.variables.clear(); for (const [key, state] of variables) this.variables.set(key, state);
+    this.indexes.splice(0, this.indexes.length, ...indexes); this.first = first; this.effects = [];
+    this.changedFlags = changedFlags; this.cheatsEnabled = cheatsEnabled; this.serverActive = serverActive; this.clientConnected = clientConnected;
+    this.highCharacters = highCharacters; this.clientInfo = clientInfo; this.serverInfo = serverInfo; this.userinfoDirty = userinfoDirty;
+    this.consoleVariables.clear(); for (const name of consoleVariables) this.consoleVariables.add(name);
   }
 
   get modifiedFlags(): number { return this.changedFlags; }

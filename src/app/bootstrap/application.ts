@@ -1,3 +1,4 @@
+import { serviceLoading } from "./loading.ts";
 import { UserFileStore } from "../../platform/files/writable.ts";
 import { setImmediate } from "node:timers/promises";
 import type { LlmCommandRequester } from "../../console/llm.ts";
@@ -130,9 +131,12 @@ export class Application {
   private dedicatedCommands: CommandBuffer | null = null;
   private requestedCommands: ApplicationCommandRequest[] = [];
   private clientInputs: SeatInputEvent[] = [];
+  private deferredInput: SeatInputEvent[] = [];
   private stopping = false;
   private closed = false;
   private stepping = false;
+  private worldOperation: "idle" | "saving" | "loading" | "travel" = "idle";
+  private worldOperationCompletion: Promise<void> | null = null;
   private stepCompletion: Promise<void> | null = null;
   private closing: Promise<void> | null = null;
   private elapsed = 0;
@@ -178,7 +182,7 @@ export class Application {
     return { list: () => saves.list, refresh: () => saves.refresh(),
       ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
       unavailable: action => this.network !== null ? "Save/load unavailable while hosting a network game."
-        : action === "save" && (this.simulation.q3Source() !== null || this.simulation.quakecSource() !== null) ? "This source cannot save complete games yet."
+        : action === "save" && (this.simulation.q3Source() !== null || this.simulation.q3Guest() !== null) ? "This source cannot save complete games yet."
         : action === "save" && this.botClients.length !== 0 ? "Saving bot decision state is not supported yet." : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
       load: id => queue(() => this.restoreSavedGame(saves.path(id))) };
@@ -275,7 +279,7 @@ export class Application {
   }
 
   private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
-    clients: readonly ApplicationBotClient[] = [], restart = false, requested = false): Promise<ApplicationBots | null> {
+    clients: readonly ApplicationBotClient[] = [], restart = false, requested = false, commands = this.sourceCommands): Promise<ApplicationBots | null> {
     if (simulation.q3Source() === null && clients.length === 0 && !requested) return null;
     const unsupported = botAdmissionError(simulation);
     if (unsupported !== null) {
@@ -285,13 +289,13 @@ export class Application {
     const definitions = simulation.q3Source() === null ? content.catalog.product("q3-baseq3").id : content.recipe.map.entities.content;
     const files = await loadMountedBotAssetFiles(await content.forContent(definitions), content.catalog);
     const navigation = await createApplicationBotNavigation({ content, simulation });
-    const configuration = simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
+    const configuration = simulation.q1Source()?.cvars ?? simulation.q2ServerCvars() ?? undefined;
     return new ApplicationBots({ session: this.session, simulation, files, navigation, clients, restart, automaticFrame: true,
       ...(configuration === undefined ? {} : { configuration }),
       leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
       insertConsoleCommand: text => {
-        if (this.sourceCommands === null) throw new Error("Bot console has no source command buffer");
-        this.sourceCommands.insert(text);
+        if (commands === null) throw new Error("Bot console has no source command buffer");
+        commands.insert(text);
       }, openLog: openApplicationBotLog });
   }
 
@@ -317,7 +321,17 @@ export class Application {
 
   input(event: SeatInputEvent): boolean {
     if (this.closed) throw new Error("Application is closed");
+    if (this.worldOperation !== "idle") {
+      if (this.graphical === null) return false;
+      this.deferredInput.push(event); return true;
+    }
     return this.graphical?.input.input(event) ?? false;
+  }
+
+  private resumeInput(): void {
+    const events = this.deferredInput; this.deferredInput = [];
+    if (this.closed) return;
+    for (const event of events) this.graphical?.input.input(event);
   }
 
   private openDedicatedConsole(): void {
@@ -337,21 +351,21 @@ export class Application {
     this.dedicatedConsole = new DedicatedConsole();
   }
 
-  private sourceDialect(): CommandDialect {
-    const source = this.content.catalog.product(this.content.recipe.engineBehavior.content).expectation;
+  private sourceDialect(content = this.content): CommandDialect {
+    const source = content.catalog.product(content.recipe.engineBehavior.content).expectation;
     return source.family === "q1" ? source.edition === "quakeworld" ? "q1-quakeworld" : "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
   }
 
-  private inputActions(): ApplicationInputCommands {
+  private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console): ApplicationInputCommands {
     return { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
-      bindingCapabilities: () => ({ chat: this.simulation.q2Source() !== null || this.simulation.q3Source() !== null,
-        scoreCommand: this.simulation.q2Source() !== null ? "score" : this.simulation.q3Source() !== null ? "+scores" : null,
-        offhandGrapple: this.simulation.recipe.equipment.grapple.kind === "enabled" && this.simulation.recipe.equipment.grapple.binding === "offhand",
-        offhandGrenades: this.simulation.recipe.equipment.handGrenades.kind === "enabled" }),
+      bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null,
+        scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null ? "+scores" : null,
+        offhandGrapple: simulation.recipe.equipment.grapple.kind === "enabled" && simulation.recipe.equipment.grapple.binding === "offhand",
+        offhandGrenades: simulation.recipe.equipment.handGrenades.kind === "enabled" }),
       ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
-      console: { dialect: () => this.sourceDialect(), server: () => {
-        const source = this.simulation.q3Source();
-        return source === null ? this.q2Console === null ? null : { cvars: this.q2Console.cvars, sharedNames: this.q2Console.sharedNames } : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
+      console: { dialect: () => this.sourceDialect(content), server: () => {
+        const source = simulation.q3Source();
+        return source === null ? q2Console === null ? null : { cvars: q2Console.cvars, sharedNames: q2Console.sharedNames } : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
       }, seat: id => this.graphical?.q3.get(id)?.client.cvars ?? null },
       clientCapturesInput: seat => this.graphical?.q3.get(seat)?.client.capturesInput ?? false,
       clientInput: event => {
@@ -382,26 +396,34 @@ export class Application {
     });
   }
   private async bindSourceCommands(): Promise<void> {
-    if (this.simulation.q2Source() !== null) {
-      if (this.q2Console === null) {
-        this.q2Console = new ApplicationQ2Console({ simulation: () => this.simulation, content: () => this.content,
-          print: text => { this.host.print(text); return undefined; }, execute: (name, args) => this.queueCommand(name, args, null) });
-        for (const name of ["addbot", "removebot", "botlist", "kick"]) this.q2Console.commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-        await this.q2Console.initialize();
-      } else await this.q2Console.bindCurrent();
-      this.sourceCommands = this.q2Console.commands;
-      this.bindServerSettingCommand(this.sourceCommands);
-      return;
+    const prepared = await this.prepareSourceCommands(this.simulation, this.content);
+    this.sourceCommands = prepared.sourceCommands;
+    this.q2Console = prepared.q2Console;
+  }
+
+  private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent): Promise<{
+    readonly sourceCommands: CommandBuffer | null; readonly q2Console: ApplicationQ2Console | null;
+  }> {
+    let sourceCommands: CommandBuffer | null = null;
+    let q2Console: ApplicationQ2Console | null = null;
+    if (simulation.q2Source() !== null) {
+      q2Console = new ApplicationQ2Console({ simulation: () => simulation, content: () => content,
+        print: text => { this.host.print(text); return undefined; }, execute: (name, args) => this.queueCommand(name, args, null) });
+      for (const name of ["addbot", "removebot", "botlist", "kick"]) q2Console.commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      await q2Console.initialize();
+      sourceCommands = q2Console.commands;
+      this.bindServerSettingCommand(sourceCommands);
+      return { sourceCommands, q2Console };
     }
-    const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
+    const q1 = simulation.q1Source() ?? simulation.quakecSource();
     if (q1 !== null) {
       const commands = new CommandBuffer({ dialect: q1.cvars.dialect, cvars: q1.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
       commands.register("quit", () => this.requestQuit());
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-      q1.cvars.register("bot_minplayers", "0"); this.sourceCommands = commands; return;
+      q1.cvars.register("bot_minplayers", "0"); sourceCommands = commands; return { sourceCommands, q2Console };
     }
-    const guest = this.simulation.q3Guest();
+    const guest = simulation.q3Guest();
     if (guest !== null) {
       const commands = new CommandBuffer({ dialect: "q3", cvars: guest.state.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text),
@@ -419,14 +441,13 @@ export class Application {
       });
       for (const name of ["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist", "kick"])
         commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-      this.sourceCommands = commands; this.bindServerSettingCommand(commands); return;
+      sourceCommands = commands; this.bindServerSettingCommand(commands); return { sourceCommands, q2Console };
     }
-    const source = this.simulation.q3Source();
-    if (source === null) { this.sourceCommands = null; return; }
+    const source = simulation.q3Source();
+    if (source === null) return { sourceCommands, q2Console };
     source.host.cvars.set("dedicated", this.options.dedicated ? "1" : "0", true);
-    if (this.sourceCommands !== null) return;
     const game = () => {
-      const current = this.simulation.q3Source();
+      const current = simulation.q3Source();
       if (current === null) throw new Error("Source console no longer owns a Quake III game");
       return current;
     };
@@ -446,7 +467,7 @@ export class Application {
     commands.register("map_restart", invocation => this.requestRestart(invocation.args));
     commands.register("kick", invocation => {
       for (const actor of this.kickTargets(invocation.args)) {
-        const player = this.simulation.movementPlayer(actor);
+        const player = simulation.movementPlayer(actor);
         if (player !== null) game().host.engine.dropClient(player.client.slot, "was kicked");
       }
       return undefined;
@@ -457,8 +478,9 @@ export class Application {
       return undefined;
     });
     commands.register("quit", () => this.requestQuit());
-    this.sourceCommands = commands;
+    sourceCommands = commands;
     this.bindServerSettingCommand(commands);
+    return { sourceCommands, q2Console };
   }
 
   private kickTargets(args: readonly string[]): readonly ActorId[] {
@@ -705,15 +727,25 @@ export class Application {
   }
 
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+    if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
+    this.worldOperation = "travel";
+    const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
+    try { await serviceLoading(() => this.prepareAndReplaceWorld(map, carry, initialSourceMilliseconds, save), () => {
+      if (!this.closed) this.graphical?.input.pollLoadingEvents();
+    }); }
+    finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
+    if (save === undefined) await this.autosaveLevel();
+  }
+
+  private async prepareAndReplaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
     if (this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes, restart and restore are unsupported");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
-    await this.capture?.beforeWorldChange();
-    this.graphical?.input.stopHaptics();
     const settings = save === undefined ? null : savedSimulationSettings(save);
     let options = { ...this.options, map: mapResourcePath(map) };
     const recipe = save?.recipe ?? await resolveApplicationTravel(this.content, options.map);
     const content = await loadApplicationContent(options, recipe);
     const previousContent = this.content, previous = this.graphical;
+    const frontendOverrides = this.frontendSettings;
     const q3 = this.simulation.q3Source();
     const previousBotClients = this.bots?.clients() ?? [];
     const preserveBots = initialSourceMilliseconds !== 0 || q3?.gameType !== 2;
@@ -731,6 +763,10 @@ export class Application {
     let nextEffects: ApplicationEffects | null = null;
     let nextInput: ApplicationInput | null = null;
     let committed = false;
+    let nextGraphical: GraphicalApplication | null = null;
+    const stagedPresentations: WorldSeatPresentation[] = [];
+    const stagedClients: ApplicationQ3Client[] = [];
+    let stagedCapture: ApplicationCapture | null = null;
     try {
       if (settings !== null) {
         options = { ...applicationOptionsForRecipe(options, content), skill: settings.skill, mode: settings.mode, seed: settings.seed };
@@ -751,6 +787,7 @@ export class Application {
         ...(save === undefined ? { serverProfile, ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
+      if (save !== undefined && nextSimulation.q3Source() !== null) throw new Error("Q3 application restoration requires complete bot service state");
       const nextQ1 = nextSimulation.q1Source();
       if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
         nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
@@ -761,19 +798,15 @@ export class Application {
         if (actor === undefined) throw new Error(`Restore did not bind client ${client.slot}`);
         return [client.slot, actor];
       }));
-      nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0);
       const nextNetworkHost = this.network === null ? null : await this.networkHost(simulation, content, this.nativeWorldCount + 1);
       if (nextNetworkHost !== null) this.validateNetworkHost(nextNetworkHost);
-      if (previous === null) {
-        if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
-        previousBots?.close(initialSourceMilliseconds !== 0);
-        this.bots = nextBots;
-        this.session.attachWorld(simulation);
-        this.worldSimulation = simulation;
-        this.loadedContent = content;
-        this.launchOptions = options;
-        committed = true;
-      } else {
+      const preparedCommands = await this.prepareSourceCommands(nextSimulation, content);
+      if (preparedCommands.sourceCommands !== null && this.sourceCommands !== null)
+        preparedCommands.sourceCommands.copyPendingFrom(this.sourceCommands);
+      nextBots = await this.createBots(content, simulation, botClients, initialSourceMilliseconds !== 0, false, preparedCommands.sourceCommands);
+      if (options.dedicated && preparedCommands.sourceCommands !== null)
+        for (const name of ["save", "load"]) preparedCommands.sourceCommands.register(name, invocation => this.queueCommand(name, invocation.args, null));
+      if (previous !== null) {
         assets = new ApplicationAssets(content, previous.renderer.owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
         await assets.loadWorld();
         const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
@@ -786,36 +819,19 @@ export class Application {
           if (player === undefined) throw new Error("Travel admission is missing a connected local player");
           return { seat: local.player.seat, actor: player };
         });
-        const frontendOverrides = this.frontendSettings;
         const seatInputPreferences = new Map(previous.input.locals.map(local => [local.player.seat.id, readFrontendInput(local)]));
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
         const cgameSettings = new Map([...previous.q3].map(([seat, source]) => [seat, source.client.cvars.snapshots()]));
         await saveAudioSettings(this.inputConfig, previous.audio);
-        if (!preserveBots) for (const bot of previousBotClients) previousBots?.disconnect(bot.client.id.slot);
-        previousBots?.close(initialSourceMilliseconds !== 0);
-        this.bots = nextBots;
-        this.session.attachWorld(simulation);
-        this.worldSimulation = simulation;
-        this.loadedContent = content;
-        this.launchOptions = options;
-        committed = true;
-        previous.audio.close(); previous.effects.close(); previous.art.close(); previous.assets.close();
-        previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames,
-          commands: previous.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) });
-        let input = previous.input;
-        if (previous.input.dialect !== movementDialect(options, simulation.recipe) || previous.input.commands.dialect !== this.sourceDialect()) {
-          await this.capture?.close(); this.capture = null;
-          await previous.input.saveSettings();
-          previous.input.close();
-          input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
-            this.inputActions(), () => performance.now(), this.inputConfig);
-          nextInput = input;
-          this.capture = new ApplicationCapture(input, previous.renderer, applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));
-        } else input.rebindPlayers(players, simulation);
+        await previous.input.saveSettings();
+        const input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
+          this.inputActions(simulation, content, preparedCommands.q2Console), () => performance.now(), this.inputConfig, undefined, previous.input);
+        nextInput = input;
+        input.commands.copyPendingFrom(previous.input.commands);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text),
-          await loadAudioSettings(this.inputConfig));
+          { ...await loadAudioSettings(this.inputConfig), deferOutput: true });
         audio.bindHaptics(input);
         nextAudio = audio;
         await audio.prepareEnvironment(nextSimulation.scene);
@@ -831,49 +847,95 @@ export class Application {
             if (previousSettings !== undefined) applyFrontendInput(previousSettings, local);
           }
         }
-        this.frontendOverrides = frontendOverrides;
-        this.frontendBaseline = readFrontendPreferences(input, audio);
         const current = simulation, worldAssets = assets, menuArt = art;
         const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor, language: previous.rerelease.selectedLanguage(player.seat.id) })));
         const presentations: WorldSeatPresentation[] = [], q3Clients = new Map<SeatId, Q3SeatClient>();
         for (const [index, local] of input.locals.entries()) {
           const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id));
-          if (sourceClient !== null) q3Clients.set(local.player.seat.id, sourceClient);
+          if (sourceClient !== null) { stagedClients.push(sourceClient.client); q3Clients.set(local.player.seat.id, sourceClient); }
           if (this.viewSettings.override !== null) {
             current.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView, save === undefined ? "change" : "restore");
             sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
           }
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
-            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
+            (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
             await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm);
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView);
-          local.player.seat.attachPresentation(presentation, () => presentation.close());
+          stagedPresentations.push(presentation);
           presentations.push(presentation);
         }
-        this.graphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease };
-        if (q3Clients.size === 0) await audio.startWorldMusic();
+        nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease };
       }
-      if (nextNetworkHost !== null) await this.changeNetworkWorld(nextNetworkHost);
+      const previousCapture = this.capture;
+      const nextCapture = nextGraphical === null ? null : new ApplicationCapture(nextGraphical.input, nextGraphical.renderer,
+        applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));
+      stagedCapture = nextCapture;
+      await this.capture?.beforeWorldChange();
+      const publishAudio = previous !== null && nextGraphical !== null ? previous.audio.prepareOutputTransfer(nextGraphical.audio) : null;
+      if (this.closed) throw new Error("Application closed during world preparation");
+      const replacement = this.session.replaceWorld(nextSimulation, stagedPresentations.map(presentation => ({
+        seat: presentation.local.player.seat, presentation, cleanup: () => presentation.close(),
+      })));
+      if (previous !== null && nextGraphical !== null) previous.input.transferPlatformTo(nextGraphical.input);
+      publishAudio?.();
+      this.worldSimulation = nextSimulation;
+      this.loadedContent = content;
+      this.launchOptions = options;
+      this.bots = nextBots;
+      this.graphical = nextGraphical;
+      this.frontendOverrides = frontendOverrides;
+      this.capture = nextCapture;
+      this.sourceCommands = preparedCommands.sourceCommands;
+      this.q2Console = preparedCommands.q2Console;
+      if (options.dedicated) this.dedicatedCommands = this.sourceCommands;
       this.elapsed = initialSourceMilliseconds;
-      await this.bindSourceCommands();
-      if (options.dedicated) { this.dedicatedConsole?.close(); this.openDedicatedConsole(); }
       this.sourceEvents = [];
       this.clientInputs = [];
       this.unhandledEffects = [];
       this.reportedEffectGaps.clear();
-      await previousContent.close();
-      this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
-      if (save === undefined) await this.autosaveLevel();
-    } catch (error) {
-      if (!committed) { nextBots?.close(); simulation?.close(); art?.close(); assets?.close(); await content.close(); }
-      else {
-        if (nextAudio !== null && this.graphical?.audio !== nextAudio) nextAudio.close();
-        if (nextEffects !== null && this.graphical?.effects !== nextEffects) nextEffects.close();
-        if (nextInput !== null && this.graphical?.input !== nextInput) nextInput.close();
-        if (assets !== null && this.graphical?.assets !== assets) { art?.close(); assets.close(); }
-        await previousContent.close();
+      committed = true;
+      const retire = async (label: string, close: () => unknown): Promise<void> => {
+        try { await close(); } catch (error) { this.host.print(`Entered world; ${label} failed: ${String(error)}\n`); }
+      };
+      await retire("capture retirement", () => previousCapture?.close());
+      await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
+      await retire("world retirement", () => replacement.retired.close());
+      if (!preserveBots) for (const bot of previousBotClients)
+        await retire("bot disconnect", () => this.session.closeClient(bot.client.id));
+      if (previous !== null) {
+        await retire("audio retirement", () => previous.audio.close());
+        await retire("effects retirement", () => previous.effects.close());
+        await retire("art retirement", () => previous.art.close());
+        await retire("asset retirement", () => previous.assets.close());
+        await retire("input retirement", () => previous.input.close());
+        await retire("renderer resource retirement", () => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames,
+          commands: previous.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) }));
       }
+      await retire("content retirement", () => previousContent.close());
+      if (nextGraphical !== null) {
+        this.frontendBaseline = readFrontendPreferences(nextGraphical.input, nextGraphical.audio);
+        const graphical = nextGraphical;
+        if (graphical.q3.size === 0) await retire("world music", () => graphical.audio.startWorldMusic());
+      }
+      if (nextNetworkHost !== null) await retire("network publication", () => this.changeNetworkWorld(nextNetworkHost));
+      this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
+    } catch (error) {
+      if (committed) { this.host.print(`Entered world; finalization failed: ${String(error)}\n`); return; }
+      const errors: unknown[] = [error];
+      const discard = async (close: () => unknown): Promise<void> => { try { await close(); } catch (failure) { errors.push(failure); } };
+      await discard(() => stagedCapture?.close());
+      for (const client of stagedClients) await discard(() => client.close());
+      for (const presentation of stagedPresentations) await discard(() => presentation.close());
+      await discard(() => nextAudio?.close());
+      await discard(() => nextEffects?.close());
+      await discard(() => nextInput?.close());
+      await discard(() => nextBots?.close());
+      await discard(() => simulation?.close());
+      await discard(() => art?.close());
+      await discard(() => assets?.close());
+      await discard(() => content.close());
+      if (errors.length > 1) throw new AggregateError(errors, "World preparation failed");
       throw error;
     }
   }
@@ -886,7 +948,14 @@ export class Application {
   async saveGame(path: string): Promise<void> {
     if (this.closed) throw new Error("Application is closed");
     if (this.botClients.length !== 0 && this.simulation.q3Source() === null) throw new Error("Saving bot decision state is not yet supported");
-    await writeSaveImage(path, this.simulation.checkpoint());
+    if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
+    if (this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
+      throw new Error("Saving requires pending world travel or restoration to finish");
+    const image = this.simulation.checkpoint();
+    this.worldOperation = "saving";
+    const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
+    try { await writeSaveImage(path, image); }
+    finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
   }
 
   async loadGame(path: string): Promise<void> {
@@ -896,9 +965,16 @@ export class Application {
   }
 
   private async restoreSavedGame(path: string): Promise<void> {
-    const image = await readSaveImage(path);
-    await this.replaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
-    this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
+    if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
+    this.worldOperation = "loading";
+    const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
+    try {
+      await serviceLoading(async () => {
+        const image = await readSaveImage(path);
+        await this.prepareAndReplaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
+      }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
+      this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
+    } finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
   }
 
   private async applyTransition(): Promise<void> {
@@ -1093,6 +1169,7 @@ export class Application {
   async step(elapsedMilliseconds: number): Promise<SimulationOutput> {
     if (this.closed) throw new Error("Application is closed");
     if (this.stepping) throw new Error("Application step is already in progress");
+    if (this.worldOperation !== "idle") throw new Error("A world operation is in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Application step requires positive elapsed milliseconds");
     this.stepping = true;
     const completion = Promise.withResolvers<void>(); this.stepCompletion = completion.promise;
@@ -1230,6 +1307,7 @@ export class Application {
   }
   private async closeOwned(): Promise<void> {
     await this.stepCompletion;
+    await this.worldOperationCompletion;
     this.saveOperation?.reject(new Error("Application closed before the save operation completed.")); this.saveOperation = null;
     this.stopping = true;
     const graphical = this.graphical;

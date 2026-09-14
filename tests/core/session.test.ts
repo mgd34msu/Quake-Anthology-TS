@@ -204,3 +204,39 @@ for (const retirement of ["session", "world", "world-lifetime"]) {
     } finally { published.mockRestore(); session.close(); }
   });
 }
+
+test("world replacement publishes before fallible retirement and retains client identity", () => {
+  const { session, simulation, input, output } = stepFixture();
+  const client = session.createClient(0);
+  const connection = client.connect("loopback");
+  session.attachWorld(simulation({ close: () => { throw new Error("old world cleanup"); } }));
+  const oldResources = client.worldResources;
+  const next = simulation();
+  const replacement = session.replaceWorld(next);
+  expect(session.world?.simulation).toBe(next);
+  expect(client.connection).toBe(connection);
+  expect(client.worldResources).not.toBe(oldResources);
+  expect(oldResources.isClosed).toBe(false);
+  expect(() => replacement.retired.close()).toThrow("Retired world shutdown failed");
+  expect(oldResources.isClosed).toBe(true);
+  expect(connection.isClosed).toBe(false);
+  expect(session.step(input)).toBe(output);
+  session.close();
+});
+
+test("invalid replacement leaves the published world and its resources usable", () => {
+  const { session, simulation, input, output } = stepFixture();
+  const old = session.attachWorld(simulation());
+  const client = session.createClient(0);
+  const resources = client.worldResources;
+  session.step(input);
+  const foreign = stepFixture();
+  expect(() => session.replaceWorld(foreign.simulation())).toThrow("another session");
+  expect(session.world).toBe(old);
+  expect(session.snapshot).toBe(output.snapshot);
+  expect(client.worldResources).toBe(resources);
+  expect(old.isClosed).toBe(false);
+  expect(session.step(input)).toBe(output);
+  foreign.session.close();
+  session.close();
+});

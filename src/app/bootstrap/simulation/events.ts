@@ -84,6 +84,11 @@ export class SimulationEvents {
   take(): readonly SimulationEvent[] { return this.emitted.splice(0); }
   takePresentation(): readonly SimulationPresentationEvent[] { return this.source.splice(0); }
 
+  assertOutputConsumed(): undefined {
+    if (this.source.length !== 0 || this.emitted.length !== 0) throw new Error("Save requires consumed source output");
+    return undefined;
+  }
+
   capture() {
     return { sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
       persistent: [...this.persistent].map(([key, value]) => {

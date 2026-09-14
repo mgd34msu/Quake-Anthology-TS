@@ -7,7 +7,7 @@ import { findItemForWeapon } from "../shared/items.ts";
 import { setOrigin } from "./entities.ts";
 import type { EntityPool } from "./entities.ts";
 import type { ItemRegistry } from "./item-lifecycle.ts";
-import { spawnPortalCamera, spawnPortalSurface } from "./misc.ts";
+import { bindPortalSaveCallbacks, spawnPortalCamera, spawnPortalSurface } from "./misc.ts";
 import type { MissileDirection, MissileRuntime } from "./missile.ts";
 import type { GameRandom } from "./numeric.ts";
 import type { SpawnHandler, SpawnVariables } from "./spawn.ts";
@@ -30,6 +30,9 @@ class MiscSpawns {
     if (host.itemRegistry.product !== host.missiles.host.combat.product) {
       throw new Error("Misc spawn item registry does not match its missile product");
     }
+
+    this.bindSaveCallbacks();
+    bindPortalSaveCallbacks({ pool: this.pool, world: this.world, time: this.time, randomInt: () => this.host.random.rand(), warn: message => { this.host.warn(message); } });
   }
 
   private get pool(): EntityPool { return this.host.missiles.host.combat.entities; }
@@ -125,7 +128,7 @@ class MiscSpawns {
 
   shooter(entity: GameEntity, weapon: Weapon): void {
     this.owned(entity);
-    entity.use = self => { this.useShooter(self); };
+    entity.use = this.pool.callbacks.use.resolve("q3.base.game.misc-spawn.shooter.use");
     entity.s.weapon = weapon;
     this.host.itemRegistry.register(findItemForWeapon(this.pool.options.product, weapon));
     const moved = moveDirection(entity.s.angles);
@@ -135,10 +138,15 @@ class MiscSpawns {
     const radians = f32(f32(f32(Math.PI) * f32(entity.random)) / f32(180));
     entity.random = f32(Math.sin(radians));
     if (entity.target !== null) {
-      entity.think = self => { this.finishShooter(self); };
+      entity.think = this.pool.callbacks.think.resolve("q3.base.game.misc-spawn.shooter.think");
       entity.nextthink = (this.time + 500) | 0;
     }
     this.pool.options.link(entity);
+  }
+
+  bindSaveCallbacks(): void {
+    this.pool.callbacks.use.intern("q3.base.game.misc-spawn.shooter.use", self => { this.useShooter(self); });
+    this.pool.callbacks.think.intern("q3.base.game.misc-spawn.shooter.think", self => { this.finishShooter(self); });
   }
 }
 

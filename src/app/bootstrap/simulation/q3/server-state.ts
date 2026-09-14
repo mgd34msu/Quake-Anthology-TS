@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../../persistence/value.ts";
 import type { SessionId } from '../../../../contracts/identity.ts';
 import type { WireUserCommand } from '../../../../network/q3/message.ts';
 import { CvarFlag, CvarRegistry } from '../../../../core/cvars/index.ts';
@@ -10,8 +11,46 @@ export interface Q3ServerStateOptions {
   print(text: string): void;
 }
 
+function readCommand(reader: SaveReader): WireUserCommand {
+  const angles = reader.field("angles").list(value => value.integer());
+  const [pitch, yaw, roll] = angles;
+  if (angles.length !== 3 || pitch === undefined || yaw === undefined || roll === undefined) return reader.fail("command requires three angles");
+  return { serverTime: reader.field("serverTime").integer(), angles: [pitch, yaw, roll],
+    forwardmove: reader.field("forwardmove").integer(), rightmove: reader.field("rightmove").integer(), upmove: reader.field("upmove").integer(),
+    buttons: reader.field("buttons").integer(), weapon: reader.field("weapon").integer() };
+}
+
+function readSlots<T>(reader: SaveReader, maximum: number, read: (reader: SaveReader) => T): Map<number, T> {
+  const entries = reader.list(entry => ({ slot: entry.field("slot").integer(0), value: read(entry.field("value")) }));
+  const result = new Map<number, T>();
+  for (const entry of entries) {
+    if (entry.slot >= maximum || result.has(entry.slot)) reader.fail("invalid or duplicate source storage slot");
+    result.set(entry.slot, entry.value);
+  }
+  return result;
+}
+
 /** Engine-owned storage shared by the selected game and its network host. */
 export class Q3ServerState {
+  captureSaveState() {
+    return { cvars: this.cvars.captureSaveState(),
+      configstrings: [...this.values].map(([slot, value]) => ({ slot, value })),
+      userinfo: [...this.userinfo].map(([slot, value]) => ({ slot, value })),
+      commands: [...this.commands].map(([slot, value]) => ({ slot, value: { serverTime: value.serverTime, angles: [...value.angles],
+        forwardmove: value.forwardmove, rightmove: value.rightmove, upmove: value.upmove, buttons: value.buttons, weapon: value.weapon } })) };
+  }
+
+  restoreSaveState(value: unknown): void {
+    const reader = new SaveReader(value, "q3.server");
+    const configstrings = readSlots(reader.field("configstrings"), 1024, entry => entry.string());
+    const userinfo = readSlots(reader.field("userinfo"), 64, entry => entry.string());
+    const commands = readSlots(reader.field("commands"), 64, readCommand);
+    this.cvars.restoreSaveState(reader.field("cvars").value);
+    this.values.clear(); for (const [slot, value] of configstrings) this.values.set(slot, value);
+    this.userinfo.clear(); for (const [slot, value] of userinfo) this.userinfo.set(slot, value);
+    this.commands.clear(); for (const [slot, value] of commands) this.commands.set(slot, value);
+  }
+
   readonly cvars: CvarRegistry;
   private readonly values = new Map<number, string>();
   private readonly userinfo = new Map<number, string>();

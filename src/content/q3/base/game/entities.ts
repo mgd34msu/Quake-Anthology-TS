@@ -1,6 +1,7 @@
 // Ported from id Software's code/game/g_utils.c and g_main.c event/think timing.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
+import { Q3CallbackCatalog } from "./save-callbacks.ts";
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -69,6 +70,7 @@ export function runThink(entity: GameEntity, time: number): void {
 
 /** Loaded-module g_entities/g_clients storage. Construction has no link/unlink effects. */
 export class EntityPool {
+  readonly callbacks = new Q3CallbackCatalog();
   readonly clients: readonly GameClient[];
   readonly utilities: GameUtilityScratch;
     #numEntities = MAX_CLIENTS;
@@ -95,6 +97,15 @@ export class EntityPool {
   deactivateClient(slot: number): void { this.options.records.deactivateClient(slot); }
   get numEntities(): number { return this.#numEntities; }
   get maxClients(): number { return this.#maxClients; }
+
+  restoreCounts(state: { readonly numEntities: number; readonly maxClients: number }): void {
+    if (!Number.isInteger(state.numEntities) || state.numEntities < MAX_CLIENTS || state.numEntities > ENTITYNUM_WORLD
+      || !Number.isInteger(state.maxClients) || state.maxClients < 1 || state.maxClients > MAX_CLIENTS) {
+      throw new Error("Invalid restored Q3 pool counts");
+    }
+    this.#numEntities = state.numEntities;
+    this.#maxClients = state.maxClients;
+  }
 
   /** These counts live in level, separately from the retained entity/client arrays. */
   clearLevel(): void { this.#numEntities = 0; this.#maxClients = 0; }
