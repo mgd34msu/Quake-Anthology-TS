@@ -573,6 +573,7 @@ export class Application {
       art = await loadNativeUiArt(fontSource.resource.id, assets.images, loadMenuArtImage);
       const effectSimulation = this.simulation;
       effects = new ApplicationEffects(assets, effectSimulation.scene, actor => effectSimulation.players().some(player => player.equals(actor)), this.options.seed);
+      for (const failure of await effects.preloadTransientResources()) this.host.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
       const native = renderer;
       const inputOwner = input, audioOwner = audio, menuArt = art, worldEffects = effects;
       const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor })));
@@ -745,6 +746,7 @@ export class Application {
         await audio.prepareEnvironment(nextSimulation.scene);
         const effects = new ApplicationEffects(assets, nextSimulation.scene, actor => nextSimulation.players().some(player => player.equals(actor)), options.seed);
         nextEffects = effects;
+        for (const failure of await effects.preloadTransientResources()) this.host.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
         if (input !== previous.input) {

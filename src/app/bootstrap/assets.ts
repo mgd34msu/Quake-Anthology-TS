@@ -127,18 +127,25 @@ export class ApplicationAssets {
       const textures = new SceneTextureLoader(this.images, mountedImageReader(this.content.catalog, mounts), palette,
         this.imagePolicyValue === undefined ? {} : { policy: this.imagePolicyValue });
       this.activeTextures.add(textures);
-      const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
-      for (const path of await shaderPaths(this.content, mounts)) {
-        const asset = await mounts.open(path);
-        if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
+      try {
+        const shaders = new SceneShaderRegistry(textures, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
+        for (const path of await shaderPaths(this.content, mounts)) {
+          const asset = await mounts.open(path);
+          if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
+        }
+        if (this.closed) throw new Error("Scene provider loaded after assets closed");
+        const assets = this;
+        return { family, mounts, palette, get textures() { return shaders.textures; }, shaders,
+          get modelPolicy() { return assets.modelPolicyValue; } };
+      } catch (error) {
+        this.activeTextures.delete(textures);
+        textures.disposeImages();
+        throw error;
       }
-      if (this.closed) throw new Error("Scene provider loaded after assets closed");
-      const assets = this;
-      return { family, mounts, palette, get textures() { return shaders.textures; }, shaders,
-        get modelPolicy() { return assets.modelPolicyValue; } };
     })();
-    this.providers.set(content, pending);
-    return pending;
+    const cached = pending.catch((error: unknown) => { if (this.providers.get(content) === cached) this.providers.delete(content); throw error; });
+    this.providers.set(content, cached);
+    return cached;
   }
 
   private materialMovie(content: ContentId, mounts: MountedContent, argument: string): Promise<RegisteredShaderVideo | null> {
@@ -302,8 +309,9 @@ export class ApplicationAssets {
       if (loaded.variants !== undefined) this.modelVariants.set(loaded.variants, content);
       return { ...loaded, provider, brushScene: null };
     })();
-    this.models.set(key, pending);
-    return pending;
+    const cached = pending.catch((error: unknown) => { if (this.models.get(key) === cached) this.models.delete(key); throw error; });
+    this.models.set(key, cached);
+    return cached;
   }
 
   close(): undefined {

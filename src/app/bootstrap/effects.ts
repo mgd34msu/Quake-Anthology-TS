@@ -26,6 +26,7 @@ import { Q3ApplicationEffects } from "./effects/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
 import type { Q2MissionPackEntityEvent } from "../../content/q2/missionpacks/entities/types.ts";
 import { Q2EffectViews } from "./effects/q2-view.ts";
+import { Q2_TRANSIENT_MODELS } from "../../content/q2/foundation/effect-resources.ts";
 export type { SourceEffectSound } from "./effects/q3.ts";
 
 export interface ApplicationEffectFrame {
@@ -69,6 +70,7 @@ const q1BeamModels: Readonly<Record<Q1BeamStyle, string>> = {
 export class ApplicationEffects {
   private readonly random: SourceRandom;
   private readonly groups = new Map<ContentId, Group>();
+  private readonly preparedRenderers = new Map<ContentId, SceneModelRenderer>();
   private readonly images = new Map<"q1" | "q2", RendererImage>();
   private readonly q3 = new Map<ContentId, Q3ApplicationEffects>();
   private readonly q3Weapons = new Map<ContentId, Q3ApplicationEffects>();
@@ -108,11 +110,39 @@ export class ApplicationEffects {
   private async group(content: ContentId): Promise<Group> {
     const prior = this.groups.get(content); if (prior !== undefined) return prior;
     const provider = await this.assets.provider(content);
-    const group: Group = { provider, particles: new SourceParticles(this.random), renderer: new SceneModelRenderer(provider, this.assets.world), models: [], statics: [], beams: [], sampled: [] };
+    const renderer = this.preparedRenderers.get(content) ?? new SceneModelRenderer(provider, this.assets.world);
+    this.preparedRenderers.delete(content);
+    const group: Group = { provider, particles: new SourceParticles(this.random), renderer, models: [], statics: [], beams: [], sampled: [] };
     this.groups.set(content, group);
     if (provider.family !== "q3" && !this.images.has(provider.family)) this.images.set(provider.family,
       this.assets.images.register(`*${provider.family}-source-particles`, legacyParticleImage(provider.family), { wrap: "clamp", filter: "linear" }));
     return group;
+  }
+  async preloadTransientResources(): Promise<readonly { readonly content: ContentId; readonly path: string; readonly error: string }[]> {
+    const recipe = this.assets.content.recipe;
+    const contents = new Set<ContentId>([recipe.map.entities.content, ...recipe.weapons.map(weapon => weapon.content)]);
+    for (const equipment of [recipe.equipment.grapple, recipe.equipment.handGrenades]) if (equipment.kind === "enabled") contents.add(equipment.source.content);
+    if (recipe.enemies.kind === "replace") for (const target of [recipe.enemies.default, ...Object.values(recipe.enemies.byClassname)]) {
+      if ("source" in target) contents.add(target.source.content);
+    }
+    const failures: { content: ContentId; path: string; error: string }[] = [];
+    for (const content of contents) {
+      if (this.assets.content.catalog.product(content).expectation.family !== "q2") continue;
+      for (const path of Object.values(Q2_TRANSIENT_MODELS)) {
+        try {
+          const provider = await this.assets.provider(content);
+          if (await provider.mounts.resolve(path) === null) continue;
+          const asset = await this.assets.model(content, path);
+          let renderer = this.preparedRenderers.get(content);
+          if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.assets.world); this.preparedRenderers.set(content, renderer); }
+          await renderer.preload([{ actor: null, resource: asset.resource, model: asset.model,
+            transform: { origin: zero, axis: anglesToAxis(zero), scale: white }, previousOrigin: zero,
+            pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { ...white, w: 1 },
+            shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q2", bits: 0 }, lightingOrigin: zero, shadowPlane: 0, attachments: [] }]);
+        } catch (error) { this.preparedRenderers.delete(content); failures.push({ content, path, error: error instanceof Error ? error.message : String(error) }); }
+      }
+    }
+    return failures;
   }
   private light(origin: Vec3, time: number, radius: number, duration: number, color: Vec3, decay = 0, minimum = 0, actor: ActorId | null = null): void {
     const prior = actor === null ? -1 : this.lights.findIndex(light => light.actor?.equals(actor));
@@ -258,7 +288,7 @@ export class ApplicationEffects {
         if (effect.kind === "grapple-cable") {
           await this.group(source.content);
           this.beam({ content: source.content, actor: effect.actor, start: add3(effect.start, effect.offset), end: effect.end,
-            die: source.seconds + 0.2, width: 0, color: 0, model: "models/ctf/segment/tris.md2", family: "q2" });
+            die: source.seconds + 0.2, width: 0, color: 0, model: Q2_TRANSIENT_MODELS.cable, family: "q2" });
         }
       } else if (event.kind === "kick" || event.kind === "grapple-prediction") {
         this.reject(source, "Q2 session action reached the presentation owner");
@@ -350,7 +380,7 @@ export class ApplicationEffects {
       else if (event.effect === "bubble-trail") group.particles.q2Bubbles(event.start, event.end, source.seconds);
       else if (event.effect === "bfg-laser" || event.effect === "bfg-zap" || event.effect === "bfg-lightning") this.beams.push({ content: source.content, actor: event.actor, start: event.start, end: event.end,
         die: source.seconds + (event.duration > 0 ? event.duration : 0.1), width: 4, color: 0xd0 + (this.random.nextInteger() & 3),
-        model: event.effect === "bfg-lightning" ? "models/proj/lightning/tris.md2" : null, family: "q2" });
+        model: event.effect === "bfg-lightning" ? Q2_TRANSIENT_MODELS.lightning : null, family: "q2" });
       else this.reject(source, "Q2 heatbeam requires the source player-beam view and offset context");
       return;
     }
@@ -362,7 +392,7 @@ export class ApplicationEffects {
       this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end,
         die: event.kind === "beam" ? Number.POSITIVE_INFINITY : source.seconds + 0.2, width: event.kind === "beam" ? event.width : 0,
         color: event.kind === "beam" ? event.color & 255 : 0,
-        model: event.kind === "monster-beam" ? "models/monsters/parasite/segment/tris.md2" : null, family: "q2" });
+        model: event.kind === "monster-beam" ? Q2_TRANSIENT_MODELS.parasite : null, family: "q2" });
     } else if (event.kind === "monster-muzzleflash") await this.monsterMuzzle(source, event.origin, event.flash);
     else if (event.kind === "entity-event") {
       if (event.event === 1 || event.event === 6 || event.event === 7) {
@@ -394,9 +424,9 @@ export class ApplicationEffects {
     if (profile.particles) group.particles.q2Impact(origin, zero, 0, 40, source.seconds);
     if (profile.smoke) {
       this.explosions.push({ content: source.content, origin, angles: zero, start: source.seconds - 0.1, frames: 4, baseFrame: 0,
-        path: "models/objects/smoke/tris.md2", kind: "misc", flags: 32, skin: 0, light: null });
+        path: Q2_TRANSIENT_MODELS.smoke, kind: "misc", flags: 32, skin: 0, light: null });
       this.explosions.push({ content: source.content, origin, angles: zero, start: source.seconds - 0.1, frames: 2, baseFrame: 0,
-        path: "models/objects/flash/tris.md2", kind: "flash", flags: 8, skin: 0, light: null });
+        path: Q2_TRANSIENT_MODELS.flash, kind: "flash", flags: 8, skin: 0, light: null });
     }
   }
   private async q2Effect(source: SimulationPresentationEvent, event: Extract<Extract<SimulationPresentationEvent, { readonly kind: "q2" }>["event"], { readonly kind: "effect" }>): Promise<void> {
@@ -425,7 +455,7 @@ export class ApplicationEffects {
         p.q2Impact(event.origin, event.direction, name === "blaster" ? 0xe0 : name === "blaster2" ? 0xd0 : 0x6f, 40, time, "blaster");
         const direction = event.direction, yaw = direction.x !== 0 ? Math.atan2(direction.y, direction.x) * 180 / Math.PI : direction.y > 0 ? 90 : direction.y < 0 ? 270 : 0;
         this.explosions.push({ content: source.content, origin: event.origin, angles: { x: Math.acos(direction.z) * 180 / Math.PI, y: yaw, z: 0 },
-          start: time - 0.1, frames: 4, baseFrame: 0, path: "models/objects/explode/tris.md2", kind: "misc", flags: 8 | 32,
+          start: time - 0.1, frames: 4, baseFrame: 0, path: Q2_TRANSIENT_MODELS.explosion, kind: "misc", flags: 8 | 32,
           skin: name === "blaster" ? 0 : name === "blaster2" ? 1 : 2,
           light: { radius: 150, color: name === "blaster" ? { x: 1, y: 1, z: 0 } : name === "blaster2" ? { x: 0, y: 1, z: 0 } : { x: 0.19, y: 0.41, z: 0.75 } } });
         break;
@@ -441,7 +471,7 @@ export class ApplicationEffects {
       case "plain-explosion":
         this.explosions.push({ content: source.content, origin: event.origin, angles: { x: 0, y: this.random.nextInteger() % 360, z: 0 },
           start: time - 0.1, frames: 15, baseFrame: this.random.nextUnit() < 0.5 ? 15 : 0,
-          path: "models/objects/r_explode/tris.md2", kind: "poly", flags: 8, skin: 0, light: { radius: 350, color: orange } });
+          path: Q2_TRANSIENT_MODELS.rocketExplosion, kind: "poly", flags: 8, skin: 0, light: { radius: 350, color: orange } });
         this.sounds.push({ content: source.content, path: "weapons/rocklx1a.wav", origin: event.origin, channel: 0, volume: 1, seconds: time, playback: { kind: "once" } });
         break;
 
@@ -451,7 +481,7 @@ export class ApplicationEffects {
         const start = time - 0.1, frames = bfg ? 4 : grenade ? 19 : 15;
         this.explosions.push({ content: source.content, origin: event.origin, angles: { x: 0, y: this.random.nextInteger() % 360, z: 0 }, start,
           frames, baseFrame: bfg ? 0 : grenade ? 30 : this.random.nextUnit() < 0.5 ? 15 : 0,
-          path: bfg ? "sprites/s_bfg2.sp2" : "models/objects/r_explode/tris.md2", kind: "poly", flags: bfg ? 8 | 32 : 8, skin: 0,
+          path: bfg ? Q2_TRANSIENT_MODELS.bfgExplosion : Q2_TRANSIENT_MODELS.rocketExplosion, kind: "poly", flags: bfg ? 8 | 32 : 8, skin: 0,
           light: { radius: 350, color: bfg ? { x: 0, y: 1, z: 0 } : orange } });
         break;
       }
@@ -503,7 +533,7 @@ export class ApplicationEffects {
       const pitchAngle = horizontal === 0 ? delta.z > 0 ? 90 : 270 : Math.atan2(delta.z, horizontal) * (beam.family === "q1" ? 180 : -180) / Math.PI;
       const yaw = beam.family === "q1" ? Math.trunc(yawAngle) : yawAngle < 0 ? yawAngle + 360 : yawAngle;
       const pitch = beam.family === "q1" ? Math.trunc(pitchAngle) : pitchAngle < 0 ? pitchAngle + 360 : pitchAngle;
-      const lightning = beam.model === "models/proj/lightning/tris.md2", modelLength = lightning ? 35 : 30;
+      const lightning = beam.model === Q2_TRANSIENT_MODELS.lightning, modelLength = lightning ? 35 : 30;
       const beamLength = lightning ? length - 20 : length, shortLightning = lightning && beamLength <= modelLength;
       const steps = shortLightning ? 1 : Math.ceil(beamLength / modelLength), spacing = beam.family === "q1" ? 30 : steps > 1 ? (beamLength - modelLength) / (steps - 1) : 0;
       for (let segment = 0; segment < steps; segment++) {
@@ -539,7 +569,7 @@ export class ApplicationEffects {
     this.staticBrushes.length = 0; this.styles = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) effects.close();
     for (const image of this.images.values()) this.assets.images.release(image);
-    this.images.clear(); this.groups.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
+    this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
     this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

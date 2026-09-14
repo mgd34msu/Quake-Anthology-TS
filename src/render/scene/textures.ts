@@ -129,7 +129,10 @@ export class SceneTextureLoader {
     const existing = this.loaded.get(key);
     if (existing !== undefined) return existing;
     this.requests.set(key, { name, options: { ...options } });
-    const pending = this.loadUncached(name, options);
+    const pending = this.loadUncached(name, options).catch((error: unknown) => {
+      if (this.loaded.get(key) === pending) { this.loaded.delete(key); this.requests.delete(key); }
+      throw error;
+    });
     this.loaded.set(key, pending);
     return pending;
   }
