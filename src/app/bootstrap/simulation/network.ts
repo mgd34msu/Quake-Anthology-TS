@@ -117,7 +117,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                 }
             }
             wire.sound = sound(entity.sound);
-            wire.loop_volume = entity.volume;
+            wire.loop_volume = entity.classname === 'target_speaker' && (entity.spawnflags & 3) !== 0 ? 1 : entity.volume;
             wire.loop_attenuation = entity.attenuation;
             wire.scale = entity.scale === 1 ? 0 : entity.scale;
             if (entity.solid === 'brush')
@@ -141,6 +141,9 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             if (entity.owner?.equals(player.actor))
                 state.solid = 0;
             if (state.number === player.sourceEntity)
+                return true;
+            // Rerelease speaker ATTN_LOOP_NONE carries source SVF_NOCULL semantics.
+            if (source.game.options.edition === 'rerelease' && entity.classname === 'target_speaker' && (entity.spawnflags & 3) !== 0 && entity.attenuation === -1)
                 return true;
             const body = simulation.bodies.read(entity.actor.id);
             if (body === null)

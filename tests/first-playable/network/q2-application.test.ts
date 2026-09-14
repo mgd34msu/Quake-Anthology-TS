@@ -296,6 +296,90 @@ test('lower-level Q2 host preserves a synthetic unsupported RR model-beam endpoi
     } finally { simulation.close(); session.close(); await content.close(); }
 }, 30000);
 
+for (const protocol of [{ kind: 'q2-rerelease', version: 1038 }, { kind: 'q2-kex', version: 2023 }] satisfies readonly import('../../../src/contracts/protocol.ts').Q2ProtocolIdentity[]) {
+    for (const scenario of ['gain', 'no-cull']) {
+        test(`Q2 speaker wire ${protocol.kind} preserves source loop ${scenario}`, async () => {
+            const parsed = parseApplicationCommand(['--game', 'q2-rerelease-baseq2', '--map', 'base1', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'singleplayer']);
+            if (parsed.kind !== 'run') throw new Error('No RR launch');
+            const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner('Q2 speaker wire');
+            const session = new EngineSession(identity, { kind: 'headless' });
+            const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: 'singleplayer', seed: 1, maxClients: 1, playerIdentity: client => ({ seat: client.slot, socialId: '' }) });
+            try {
+                const client = session.createClient(0), admitted = simulation.admitPlayer(client.id), source = simulation.q2Source();
+                if (source === null) throw new Error('No RR source');
+                const host = await createQ2ApplicationServerHost({ session, simulation, content, protocol, print: () => undefined });
+                const player = host.carriedPlayer(client.id), body = simulation.bodies.read(admitted.actor);
+                if (body === null) throw new Error('No admitted body');
+                const codec = new Q2WireCodec(protocol), reader = new Q2ServerMessageReader(protocol, host.messageOptions);
+                const packet = () => {
+                    const output = simulation.step({ elapsedMilliseconds: 25, commands: [] });
+                    const frame = host.frame(player, output);
+                    const decoded = reader.read(encodeQ2Frame(codec, frame, null, new Map<number, EntityStateT>(), 4)).find(record => record.event.kind === 'frame')?.event;
+                    if (decoded?.kind !== 'frame') throw new Error('No decoded speaker frame');
+                    return decoded.frame.entities;
+                };
+                const speakers = source.game.load([
+                    '{ "classname" "target_speaker" "noise" "world/mach" "volume" "0.25" "spawnflags" "1" }',
+                    '{ "classname" "target_speaker" "noise" "world/mach" "volume" "0.25" "spawnflags" "2" "attenuation" "2" }',
+                    '{ "classname" "target_speaker" "noise" "world/mach" "volume" "0.25" "spawnflags" "1" "attenuation" "-1" }',
+                ].join(' ')).spawned;
+                const initial = speakers[0], toggled = speakers[1], global = speakers[2];
+                if (initial === undefined || toggled === undefined || global === undefined) throw new Error('Missing source speakers');
+                for (const speaker of speakers) source.game.move(speaker, { origin: body.origin });
+                const numberOf = (actor: typeof admitted.actor) => {
+                    const address = simulation.actors.sourceOf(actor);
+                    if (address === null) throw new Error('Missing speaker source address');
+                    return address.slot;
+                };
+                const initialNumber = numberOf(initial.actor.id), toggledNumber = numberOf(toggled.actor.id), globalNumber = numberOf(global.actor.id);
+                if (scenario === 'gain') {
+                    const ordinary = source.game.create('wire_other_loop_probe');
+                    ordinary.sound = initial.sound; ordinary.volume = 0.25; ordinary.attenuation = 2;
+                    source.game.move(ordinary, { origin: body.origin });
+                    const baseline = host.gameState(player).baselines;
+                    expect(baseline.get(numberOf(ordinary.actor.id))?.loop_volume).toBe(0.25);
+                    expect(baseline.get(initialNumber)?.loop_volume).toBe(1);
+                    const first = packet();
+                    // Both wire formats encode gain 1 and attenuation 3 with the default zero sentinel.
+                    expect(first.find(entity => entity.number === initialNumber)?.loop_volume).toBe(0);
+                    expect(first.find(entity => entity.number === initialNumber)?.loop_attenuation).toBe(0);
+                    expect(first.find(entity => entity.number === numberOf(ordinary.actor.id))?.loop_volume).toBeCloseTo(0.25, 2);
+                    expect(first.find(entity => entity.number === globalNumber)?.loop_attenuation).toBe(-1);
+                    expect(first.some(entity => entity.number === toggledNumber)).toBe(false);
+                    source.game.host.callbacks.use(toggled.actor, admitted.actor, admitted.actor);
+                    const started = packet().find(entity => entity.number === toggledNumber);
+                    expect(started?.loop_volume).toBe(0); expect(started?.loop_attenuation).toBe(2); expect(started?.sound).toBeGreaterThan(0);
+                    source.game.host.callbacks.use(toggled.actor, admitted.actor, admitted.actor);
+                    expect(packet().some(entity => entity.number === toggledNumber)).toBe(false);
+                    source.game.host.callbacks.use(toggled.actor, admitted.actor, admitted.actor);
+                    const restarted = packet().find(entity => entity.number === toggledNumber);
+                    expect(restarted?.loop_volume).toBe(0); expect(restarted?.loop_attenuation).toBe(2); expect(restarted?.sound).toBe(started?.sound);
+                } else {
+                    const far = { x: body.origin.x + 1000, y: body.origin.y, z: body.origin.z };
+                    source.game.move(initial, { origin: far }); source.game.move(global, { origin: far });
+                    simulation.scene.areasConnected = () => true;
+                    simulation.scene.clusterVisible = () => true;
+                    expect(packet().some(entity => entity.number === initialNumber)).toBe(false);
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(true);
+                    simulation.scene.clusterVisible = () => false;
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(true);
+                    simulation.scene.areasConnected = () => false;
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(true);
+                    global.serverFlags |= 1;
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(false);
+                    global.serverFlags &= ~1; global.visible = false;
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(false);
+                    global.visible = true;
+                    source.game.host.callbacks.use(global.actor, admitted.actor, admitted.actor);
+                    expect(packet().some(entity => entity.number === globalNumber)).toBe(false);
+                    source.game.host.callbacks.use(global.actor, admitted.actor, admitted.actor);
+                    expect(packet().find(entity => entity.number === globalNumber)?.loop_attenuation).toBe(-1);
+                }
+            } finally { simulation.close(); session.close(); await content.close(); }
+        }, 30000);
+    }
+}
+
 test('Q2 source movement settings follow Q64 travel and valid wire layouts', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
