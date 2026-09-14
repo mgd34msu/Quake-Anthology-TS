@@ -1,3 +1,4 @@
+import { decodePng } from "../../src/formats/images/png.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,7 +25,7 @@ async function openMenu(config: ConfigStore) {
   const model = new StartupSelectionModel(catalog, command.options), identity = createIdentityOwner("browser-persistence"), seat = identity.seat(0);
   const images = new SceneImageRegistry({ identity: Symbol("browser menu"), session: identity.session, generation: 0 });
   const font: TextFontSelection = { kind: "classic", classic: classicCharset(images.allocate(128, 128, { kind: "generated", name: "browser font" })), unicode: null };
-  const art = await loadNativeUiArt("resource:test:browser-font", images, async path => new Uint8Array(await Bun.file(resolve(import.meta.dir, "../..", path)).arrayBuffer()));
+  const art = await loadNativeUiArt("resource:test:browser-font", images, async path => decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path));
   const connections: BrowserConnection[] = [];
   const menu = new StartupMenu({ seat, model, art, font, titleFont: font, browser, now: () => 0, connect: connection => { connections.push(connection); },
     play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,

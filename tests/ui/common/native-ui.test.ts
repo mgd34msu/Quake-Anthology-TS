@@ -1,3 +1,4 @@
+import { decodePng } from "../../../src/formats/images/png.ts";
 import { drawWeaponHud } from "../../../src/ui/hud/weapon.ts";
 import type { CommonWeaponHud } from "../../../src/ui/hud/weapon.ts";
 import { expect, test } from "bun:test";
@@ -116,7 +117,7 @@ test.skipIf(!existsSync(archivePath))("real generated menu art and rerelease gly
   const images = new SceneImageRegistry(renderOwner), archive = await openArchive(archivePath);
   const fonts = new TextFontRegistry({ async read(path) { const entry = archive.findEntries(path)[0]; return entry === undefined ? null : archive.readEntry(entry); },
     async registerImage(name, content) { return images.register(name, content, { wrap: "clamp", filter: "linear" }); }, releaseImage(image) { images.release(image); } });
-  const art = await loadNativeUiArt(fontId, images, async path => new Uint8Array(await Bun.file(new URL(`../../../${path}`, import.meta.url)).arrayBuffer()));
+  const art = await loadNativeUiArt(fontId, images, async path => decodePng(await Bun.file(new URL(`../../../${path}`, import.meta.url)).bytes(), path));
   const window = process.env["QUAKE_UI_NATIVE_SMOKE"] === "1" ? SdlWindow.open({ title: "Native menu smoke", width: 1280, height: 480, backend: "cpu", hidden: true }) : null;
   const renderer = new SoftwareRenderer(1280, 480, renderOwner), target = new CpuRenderTarget(renderer, window);
   try {

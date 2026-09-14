@@ -28,7 +28,7 @@ import { Application } from "./application.ts";
 import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
 import { NativeRenderer } from "./renderer.ts";
-import { readMenuArt } from "./menu-art.ts";
+import { loadMenuArtImage } from "./menu-art.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import { StartupMenu } from "./startup-menu.ts";
 import { createStartupSelection } from "./startup-selection.ts";
@@ -120,7 +120,7 @@ export class StartupApplication {
       typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy);
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
-      art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);
+      art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
       renderer = NativeRenderer.open(options, owner);
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();

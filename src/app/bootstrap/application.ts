@@ -60,7 +60,7 @@ import { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import { createSimulationPredictionHost } from "./simulation/prediction.ts";
 import { NativeRenderer } from "./renderer.ts";
 import { ApplicationSeatUi } from "./ui.ts";
-import { readMenuArt } from "./menu-art.ts";
+import { loadMenuArtImage } from "./menu-art.ts";
 import { createSimulation, savedSimulationSettings } from "./simulation/index.ts";
 import { createQ2ApplicationServerHost } from "./simulation/network.ts";
 import { Q2ServerNetwork } from "./network/q2.ts";
@@ -570,7 +570,7 @@ export class Application {
       this.frontendBaseline = readFrontendPreferences(input, audio);
       const fontSource = font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
-      art = await loadNativeUiArt(fontSource.resource.id, assets.images, readMenuArt);
+      art = await loadNativeUiArt(fontSource.resource.id, assets.images, loadMenuArtImage);
       const effectSimulation = this.simulation;
       effects = new ApplicationEffects(assets, effectSimulation.scene, actor => effectSimulation.players().some(player => player.equals(actor)), this.options.seed);
       const native = renderer;
@@ -702,7 +702,7 @@ export class Application {
         await assets.loadWorld();
         const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
         if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
-        art = await loadNativeUiArt(fontSource.resource.id, assets.images, readMenuArt);
+        art = await loadNativeUiArt(fontSource.resource.id, assets.images, loadMenuArtImage);
         const characters = options.character === "q3" ? await loadQ3Character(await content.forContent(content.recipe.character.appearance.content),
           { model: options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
         const players = previous.input.locals.map(local => {

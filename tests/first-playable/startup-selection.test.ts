@@ -64,7 +64,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   const { SceneImageRegistry } = await import("../../src/render/scene/resources.ts");
   const { loadMenuFont } = await import("../../src/app/bootstrap/menu-font.ts");
   const { loadNativeUiArt } = await import("../../src/ui/common/index.ts");
-  const { readMenuArt } = await import("../../src/app/bootstrap/menu-art.ts");
+  const { loadMenuArtImage } = await import("../../src/app/bootstrap/menu-art.ts");
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--map", "e1m2"]);
   if (command.kind !== "run") throw new Error("Expected Q1 options");
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false }), model = new StartupSelectionModel(catalog, command.options);
@@ -74,7 +74,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   const font = await loadMenuFont({ catalog, mounts: mounted, family: "q1", rerelease: false, images });
   const fontSource = font.font.classic.picture.image.source;
   if (fontSource.kind !== "resource") throw new Error("Missing actual font resource");
-  const art = await loadNativeUiArt(fontSource.resource.id, images, readMenuArt);
+  const art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
   const menu = new StartupMenu({ seat, model, art, font: font.font, titleFont: font.font, now: () => 0, play: () => undefined, load: () => undefined,
     saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined, quit: () => undefined, applyDisplay: () => undefined });
   const click = (row: number) => {

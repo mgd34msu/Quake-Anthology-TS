@@ -46,7 +46,7 @@ import type { UnhandledApplicationEffect } from "./effects.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { ApplicationInputCommandOwner, LocalPlayer } from "./input.ts";
-import { readMenuArt } from "./menu-art.ts";
+import { loadMenuArtImage } from "./menu-art.ts";
 import { Q3ClientNetwork } from "./network/q3-client.ts";
 import { Q3RemotePresentation } from "./network/remote-q3.ts";
 import { ApplicationQ3Client } from "./q3-client.ts";
@@ -297,7 +297,7 @@ export class RemoteApplication {
       await assets.loadWorld();
       const font = await assets.loadConsoleFont(), source = font.classic.picture.image.source;
       if (source.kind !== "resource") throw new Error("Remote console font has no mounted resource identity");
-      art = await loadNativeUiArt(source.resource.id, assets.images, readMenuArt);
+      art = await loadNativeUiArt(source.resource.id, assets.images, loadMenuArtImage);
       audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => { this.print(text); return undefined; }, await loadAudioSettings(this.inputConfig));
       const scene: SceneQueries = {
         trace: query => this.remote.scene.trace(query), pointContents: query => this.remote.scene.pointContents(query),

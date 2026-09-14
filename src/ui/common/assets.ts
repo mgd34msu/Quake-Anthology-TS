@@ -2,8 +2,7 @@
 import { mainMenuBackground, menuBackground, menuFocus, menuPanel } from "./art-manifest.ts";
 import type { MenuArtFile, MenuArtFrame } from "./art-manifest.ts";
 import type { ResourceId } from "../../contracts/content.ts";
-import type { RendererImage } from "../../contracts/render.ts";
-import { decodePng } from "../../formats/images/png.ts";
+import type { ImageLevel, RendererImage } from "../../contracts/render.ts";
 import { rgbaImage } from "../../render/scene/resources.ts";
 import type { SceneImageRegistry } from "../../render/scene/resources.ts";
 import type { ImagePicture } from "../../text/draw2d.ts";
@@ -17,14 +16,14 @@ export interface NativeUiArt {
   close(): void;
 }
 /** The application supplies its installed-asset reader; the renderer owns all uploads. */
-export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<Uint8Array>): Promise<NativeUiArt> {
+export async function loadNativeUiArt(font: ResourceId, images: SceneImageRegistry, read: (path: string) => Promise<ImageLevel>): Promise<NativeUiArt> {
   const assets: readonly { readonly resource: ResourceId; readonly file: MenuArtFile }[] = [
     { resource: "resource:engine-menu:background", file: menuBackground },
     { resource: "resource:engine-menu:main-background", file: mainMenuBackground },
     { resource: "resource:engine-menu:panel", file: menuPanel },
     { resource: "resource:engine-menu:focus", file: menuFocus },
   ];
-  const decoded = await Promise.all(assets.map(async asset => ({ ...asset, image: decodePng(await read(asset.file.file), asset.file.file) })));
+  const decoded = await Promise.all(assets.map(async asset => ({ ...asset, image: await read(asset.file.file) })));
   const pictures = new Map<ResourceId, ImagePicture>(), owned: RendererImage[] = [];
   try {
     for (const asset of decoded) {

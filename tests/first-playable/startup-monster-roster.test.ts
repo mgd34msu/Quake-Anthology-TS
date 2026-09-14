@@ -1,3 +1,4 @@
+import { decodePng } from "../../src/formats/images/png.ts";
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -28,7 +29,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
   using mounted = await openMountPlan({ id: "mount-plan:full-roster:font", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
   const font = await loadMenuFont({ catalog, mounts: mounted, family: "q2", rerelease: false, images });
   const typography = await loadMenuTypography(catalog, images, font.font.classic);
-  const art = await loadNativeUiArt("resource:test:roster-font", images, async path => new Uint8Array(await Bun.file(resolve(import.meta.dir, "../..", path)).arrayBuffer()));
+  const art = await loadNativeUiArt("resource:test:roster-font", images, async path => decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path));
   const menu = new StartupMenu({ seat, model, art, font: typography.body, titleFont: typography.title, now: () => 0,
     play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,
     quit: () => undefined, applyDisplay: () => undefined });
