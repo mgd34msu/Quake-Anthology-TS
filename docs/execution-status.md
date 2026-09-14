@@ -2,17 +2,29 @@
 
 ## Installed executable and recent fixes
 
-Verified installation on 2026-09-13 at `21:22:05.971Z`: `/home/buzzkill/Projects/qfiles/quake-typescript`, source `c9a3a455079a04764dfc8413e26d3ab592274e13`, tree `656cb0004a6b0d3681863b7614bfbcec0699502f`. The executable is 121,419,904 bytes with mode `0755` and SHA-256 `2951f8fc9c731f4d880ddad6aba35845231e382466eb37e23a5e44f07213f7b4`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+Verified installation on 2026-09-14 at `00:03:39.651Z` (September 13 locally): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`, tree `b7929755aebc50ac8480e27fc3b1b5df61f9690b`. The executable is 121,448,576 bytes with mode `0755` and SHA-256 `467e501f0023919f23c383c5865c387c79104caffd81f7afb33c10915dddfaad`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
 
 ```sh
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
 ```
 
-This build includes run-loop yielding for actual HTTP and timers at `5795a79`, complete OAuth browser-response flushing at `a26b6b7`, quoted binding semicolons at `cee9970`, and the provider model picker and reasoning effort at `c9a3a45`. Q2 fix `df356aca` maps the `oldFrame=-1` sentinel to the current frame, avoiding a renderer reset to frame zero.
+Recent accepted fixes are included:
 
-Root checks exercised actual Q2 `base1`, Q1 movement, Q3 `sarge`, and Q2 arsenal/monsters, with 1 test and 38 assertions. A stationary GL infantry check visibly changed pose from frame 60 to 50 with a fixed camera. Combined LLM checks passed 52 tests and 227 assertions. Native CPU and GL menus selected and saved settings with fake providers. The compiled executable made two loopback HTTP requests under private Xvfb, answered a prompt, executed `sensitivity 4` and `echo`, and exited normally with code 0. Root inspected the image. Live ChatGPT account connectivity remains unverified.
+- `ef4da27` samples integer time at three Q3 presentation clocks without rounding gameplay time, correcting the exercised startup and firing failures.
+- `baa9f85` preserves Q2 catalogue command ownership during input setup, avoiding duplicate registration.
+- `ddc06c6` restores default FOV 90. `b7ce186` adds General Punctuation glyph coverage to mounted menu fonts.
+- `f5df800` packs shadow positions directly into one Float64Array. All packed bytes and digests matched across 130 actual geometry groups. Paired digest time fell about 24%, and one bounded fixed-step profile fell about 6%. Sustained gameplay FPS remains unqualified.
+- `e3ef2f0` restores shared menu sound cues and the global Q2 rerelease `music/track77.ogg` theme when installed. Saved gains and the selected device are preserved.
 
-The original main-menu “Working” state was not reproduced. Independent Save completed, existing credentials were preserved, and the new UI separates model-catalog loading. The explicit QuakeC loader and deferred monster-damage work are outside this installed build. The engine remains incomplete; this update does not re-audit the 477 requirements or change their counts.
+The tested Q2 classic and rerelease `base1` recipes used QW movement, a Q1 rerelease player, Q3 weapons, and Q1 monsters matching the map edition. LMCTF offhand grapple and Q2 classic grenades were selected but not exercised.
+
+Root inspected both actual compiled GL runs through menus, 500 ms of forward input, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,202.673 ms and the classic interval 30,447.138 ms. Both exited with code 0 and only the expected map-loaded log line. Proof: `.artifacts/resume-20260913/final-e3ef2f0/runtime-proof.json`.
+
+Separate native menu checks exercised real input events, decoded music and cue PCM, mute and unmute, saved gains, and device release before game initialization. Those checks and the compiled runs used dummy audio output; audibility through the user's speakers remains unverified. Classic captures remain dark; exact source visual fidelity is unqualified. Overall FPS is not resolved.
+
+This build also includes explicit dedicated offline id1 and Hipnotic QuakeC admission at `5f760f3`, native monster-damage accumulation across save and restore at `dcb4da6`, and supported Hipnotic QuakeC weapon inventory at `708417b`. These bounded paths do not establish general QuakeC or full native-mod compatibility.
+
+Earlier HTTP/timer yielding, OAuth response flushing, quoted binding semicolons, the provider model picker and reasoning effort, and the Q2 `oldFrame=-1` correction remain included. Prior loopback provider checks do not establish live ChatGPT account connectivity, which remains unverified. The engine remains incomplete; this update does not re-audit the 477 requirements or change their counts.
 
 ## Historical execution records
 
