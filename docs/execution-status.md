@@ -59,6 +59,8 @@ Accepted source `4477db29f195080cf73cbfceb66d1e543a30f9fc` projects each opaque 
 
 Accepted source `2662c66e64142c4d7a40c201d2cf17c877f55214` retains resolved uniform locations in program-owned records. Root passed the native uniform-state test with 154 assertions; frozen native checks passed eight tests with 442 assertions. All 32 captures and the actual final color and full shadow atlas matched. In one isolated pair based on `ec8fd30` plus the eight audio files, excluding later legacy projection reuse, program-use time fell from 7.400 to 4.049 ms and location lookups fell from 916,651 to 84 across 16 warmup frames. Whole-frame mean fell from 68.631 to 63.522 ms, but changes outside the edited span prevent attributing that entire difference to this unit. No sustained FPS gain is established. This source change is not in the installed `ec8fd30` executable.
 
+Accepted source `9683d9dc9a153f00515c27f6e370521f61527a7a` caches immutable local MD5 UVs, positions, and normals within the same view; shell extrusion remains separate. Root passed all 11 model tests with 1,087 assertions, including retail resources, cached-versus-uncached results, four interpolation values, shell isolation, bounds, and attachments. Retained-shadow tests also passed; opt-in CPU/GL checks were skipped. No FPS gain is claimed. This source change is not in the installed `ec8fd30` executable.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
