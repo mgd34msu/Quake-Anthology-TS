@@ -21,19 +21,37 @@ export interface BrowserEntry {
   readonly pingMilliseconds: number | null;
   readonly updatedAt: number;
 }
+export type DiscoveryRequestKind = "info" | "status";
+export type DiscoveryRequestHandle = symbol;
+interface DiscoveryRequestDetails {
+  readonly address: NetworkAddress;
+  readonly requestKind: DiscoveryRequestKind;
+  readonly sentAt: number;
+}
+export type DiscoveryRequestResult = DiscoveryRequestDetails & (
+  | { readonly kind: "pending" }
+  | { readonly kind: "completed"; readonly status: ServerStatus; readonly pingMilliseconds: number; readonly completedAt: number }
+  | { readonly kind: "expired" }
+  | { readonly kind: "cancelled" }
+);
 export interface DiscoveryWire {
-  query(kind: "info" | "status", challenge: string): Uint8Array;
+  query(kind: DiscoveryRequestKind, challenge: string): Uint8Array;
   masterQuery(): Uint8Array;
   heartbeat(active: boolean): Uint8Array;
 }
 export interface PacketSender { send(to: NetworkAddress, bytes: Uint8Array): boolean; }
-interface PendingQuery { readonly challenge: string; readonly sentAt: number; }
+interface PendingBroadcast { readonly challenge: string; readonly sentAt: number; }
+interface PendingQuery extends DiscoveryRequestDetails, PendingBroadcast {
+  readonly handle: DiscoveryRequestHandle;
+  readonly retainResult: boolean;
+}
 
 /** Codecs retain source text/opcodes. This table never guesses a game's protocol. */
 export class ServerBrowser {
   private readonly entries = new Map<string, BrowserEntry>();
-  private readonly queries = new Map<string, PendingQuery>();
-  private readonly broadcasts = new Map<string, PendingQuery>();
+  private readonly queries = new Map<DiscoveryRequestHandle, PendingQuery>();
+  private readonly results = new Map<DiscoveryRequestHandle, DiscoveryRequestResult>();
+  private readonly broadcasts = new Map<string, PendingBroadcast>();
   private querySequence = 0;
   constructor(readonly wire: DiscoveryWire, readonly transport: PacketSender) {}
   add(address: NetworkAddress, source: DiscoverySource, now = 0): BrowserEntry {
@@ -49,21 +67,62 @@ export class ServerBrowser {
     const sources = entry.sources.filter(source => source !== "favorite");
     if (sources.length === 0) this.entries.delete(key); else this.entries.set(key, { ...entry, sources });
   }
+  entry(address: NetworkAddress): BrowserEntry | null { return this.entries.get(addressKey(address)) ?? null; }
   list(): readonly BrowserEntry[] { return [...this.entries.values()]; }
-  query(address: NetworkAddress, now: number, kind: "info" | "status" = "info"): boolean {
-    const challenge = String(++this.querySequence), key = addressKey(address);
-    this.queries.set(key, { challenge, sentAt: now });
-    if (!this.transport.send(address, this.wire.query(kind, challenge))) { this.queries.delete(key); return false; }
+  query(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info"): boolean {
+    for (const pending of this.queries.values()) {
+      if (!pending.retainResult && pending.requestKind === kind && addressKey(pending.address) === addressKey(address)) {
+        this.releaseRequest(pending.handle);
+      }
+    }
+    return this.startRequest(address, now, kind, false) !== null;
+  }
+  request(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info"): DiscoveryRequestHandle | null {
+    return this.startRequest(address, now, kind, true);
+  }
+  requestResult(handle: DiscoveryRequestHandle): DiscoveryRequestResult | null { return this.results.get(handle) ?? null; }
+  cancelRequest(handle: DiscoveryRequestHandle): boolean {
+    const pending = this.queries.get(handle);
+    if (pending === undefined) return false;
+    this.finishRequest(pending, { kind: "cancelled", address: pending.address, requestKind: pending.requestKind, sentAt: pending.sentAt });
     return true;
   }
-  receive(address: NetworkAddress, status: ServerStatus, challenge: string | null, now: number): boolean {
-    const key = addressKey(address), direct = this.queries.get(key);
-    const broadcast = challenge === null ? [...this.broadcasts.values()].at(-1) : this.broadcasts.get(challenge);
+  releaseRequest(handle: DiscoveryRequestHandle): void {
+    this.queries.delete(handle);
+    this.results.delete(handle);
+  }
+  private startRequest(address: NetworkAddress, now: number, kind: DiscoveryRequestKind, retainResult: boolean): DiscoveryRequestHandle | null {
+    const handle = Symbol("discovery request"), challenge = String(++this.querySequence);
+    const pending: PendingQuery = { handle, challenge, address, requestKind: kind, sentAt: now, retainResult };
+    this.queries.set(handle, pending);
+    if (retainResult) this.results.set(handle, Object.freeze({ kind: "pending", address, requestKind: kind, sentAt: now }));
+    try {
+      if (this.transport.send(address, this.wire.query(kind, challenge))) return handle;
+    } catch (error) { this.releaseRequest(handle); throw error; }
+    this.releaseRequest(handle);
+    return null;
+  }
+  private finishRequest(pending: PendingQuery, result: DiscoveryRequestResult): void {
+    this.queries.delete(pending.handle);
+    if (pending.retainResult) this.results.set(pending.handle, Object.freeze(result));
+  }
+  receive(address: NetworkAddress, status: ServerStatus, challenge: string | null, now: number, kind?: DiscoveryRequestKind): boolean {
+    const key = addressKey(address);
+    const matches = [...this.queries.values()].filter(query => addressKey(query.address) === key
+      && (kind === undefined || query.requestKind === kind) && (challenge === null || query.challenge === challenge));
+    // A challenge-less protocol cannot distinguish two requests to the same endpoint.
+    if (matches.length > 1) return false;
+    const direct = matches[0];
+    const broadcast = kind === "status" ? undefined
+      : challenge === null ? [...this.broadcasts.values()].at(-1) : this.broadcasts.get(challenge);
     const pending = direct ?? broadcast;
-    if (pending === undefined || (challenge !== null && pending.challenge !== challenge)) return false;
-    const old = this.entries.get(key) ?? this.add(address, broadcast === undefined ? "direct" : "lan", now);
-    this.entries.set(key, { ...old, status, pingMilliseconds: Math.max(0, now - pending.sentAt), updatedAt: now });
-    this.queries.delete(key); return true;
+    if (pending === undefined) return false;
+    const pingMilliseconds = Math.max(0, now - pending.sentAt);
+    const old = this.entries.get(key) ?? this.add(address, direct === undefined ? "lan" : "direct", now);
+    this.entries.set(key, { ...old, status, pingMilliseconds, updatedAt: now });
+    if (direct !== undefined) this.finishRequest(direct, { kind: "completed", address: direct.address,
+      requestKind: direct.requestKind, sentAt: direct.sentAt, status, pingMilliseconds, completedAt: now });
+    return true;
   }
   queryMaster(address: NetworkAddress): boolean { return this.transport.send(address, this.wire.masterQuery()); }
   receiveMaster(addresses: readonly NetworkAddress[], now: number): void { for (const address of addresses) this.add(address, "master", now); }
@@ -78,11 +137,11 @@ export class ServerBrowser {
   expireQueries(now: number, timeoutMilliseconds: number): readonly NetworkAddress[] {
     const expired: NetworkAddress[] = [];
     for (const [key, query] of this.broadcasts) if (now - query.sentAt >= timeoutMilliseconds) this.broadcasts.delete(key);
-    for (const [key, query] of this.queries) {
+    for (const query of this.queries.values()) {
       if (now - query.sentAt < timeoutMilliseconds) continue;
-      const entry = this.entries.get(key);
-      if (entry !== undefined) expired.push(entry.address);
-      this.queries.delete(key);
+      const entry = this.entries.get(addressKey(query.address));
+      if (entry !== undefined && !expired.some(address => addressKey(address) === addressKey(entry.address))) expired.push(entry.address);
+      this.finishRequest(query, { kind: "expired", address: query.address, requestKind: query.requestKind, sentAt: query.sentAt });
     }
     return expired;
   }
