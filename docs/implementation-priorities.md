@@ -36,6 +36,8 @@ Image-replacement rendering must consume the common priority and format choices 
 
 Accepted `75d26d8` shares material-group finalization with authored primary sort across Q1/Q2/Q3 views on CPU and GL, preserving multipass state and legacy draw order. Actual LRCTF captures on both backends place sort-4 marks before sort-9 explosions and show the restored flash. Final strict and scoped policy checks passed; each actual capture passed 102 assertions. Exact native secondary registration/entity/fog/dlight keys, dark impact coverage, and the missing radar asset remain open. Different live submissions prevent pixel-parity or FPS claims. This source correction is included in installed `75d26d8`; evidence is in `.artifacts/resume-20260913/lrctf-visual-review/candidate-report.md`.
 
+Accepted `4a85967` adds scene-wide shader identities across providers/image reloads, original refentity/poly slots including retained RT_POLY, mixed-frame admission metadata, and expected image-replacement rejection cleanup. Full strict and scoped policy checks passed; local CPU/GL console/menu refresh passed four tests/92 assertions, actual remote Q3 refresh preserved its connection, and separate cross-game effects checks passed two tests/18 assertions. This preserves shader identities and original scene records; the remaining ordering work is still open. The primary comparator is unchanged; native RT_POLY error/view gates and complete shader/entity/fog/dlight source sorting remain open. Installed `75d26d8` does not include this source.
+
 ### 4. Common audio
 
 Complete timing, streamed PCM, spatial sound, reverb, Doppler, music and pause behavior through the common mixer.
