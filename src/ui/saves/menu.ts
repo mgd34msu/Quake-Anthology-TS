@@ -3,6 +3,7 @@ import { menuRow, NativeUiController } from "../common/index.ts";
 import type { StartupSaveList } from "../../app/bootstrap/startup-saves.ts";
 
 export interface SavedGameMenuService {
+  readonly recovery?: { restart(): Promise<void> };
   list(): StartupSaveList;
   refresh(): Promise<void>;
   unavailable(action: "save" | "load"): string | null;

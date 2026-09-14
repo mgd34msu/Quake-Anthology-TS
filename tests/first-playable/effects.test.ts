@@ -1,4 +1,4 @@
-import { finishSceneOperations } from "../../src/render/scene/submissions.ts";
+import { finishSceneOperations, createSourceSceneOrder } from "../../src/render/scene/submissions.ts";
 import type { ApplicationEffectFrame } from "../../src/app/bootstrap/effects.ts";
 import { q2MonsterMuzzle } from "../../src/app/bootstrap/effects/q2-muzzle.ts";
 import { SourceParticles } from "../../src/app/bootstrap/effects/particles.ts";
@@ -54,7 +54,7 @@ for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4"
       const camera: SceneCamera = { origin: bounds == null ? { x: first.event.origin.x - 48, y: first.event.origin.y, z: first.event.origin.z }
         : { x: bounds.min.x - 48, y: (bounds.min.y + bounds.max.y) / 2, z: (bounds.min.z + bounds.max.z) / 2 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
         viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
-      const frame = loweredFrame(effects.frame(camera));
+      const frame = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
       expect(frame.operations.some(operation => operation.kind === "draw" && operation.batches.some(batch => batch.indices.length > 0))).toBe(true);
       frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: output.snapshot.frame.time, viewport: camera.viewport,
         clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: frame.operations });
@@ -63,7 +63,7 @@ for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4"
       effects.receive([first]);
       effects.receive([{ ...first, sequence: first.sequence + 1, event: { ...first.event, path: "" } }]);
       await effects.prepare({ ...output.snapshot, frame: { ...output.snapshot.frame, time: { kind: "seconds", value: 10 } } }, []);
-      expect(loweredFrame(effects.frame(camera)).operations.filter(operation => operation.kind === "draw").flatMap(operation => operation.batches).length)
+      expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.filter(operation => operation.kind === "draw").flatMap(operation => operation.batches).length)
         .toBe(frame.operations.filter(operation => operation.kind === "draw").flatMap(operation => operation.batches).length);
       expect(effects.drainSounds()).toEqual([]);
       if (path.startsWith("*")) {
@@ -77,7 +77,7 @@ for (const [map, path, count] of [["e1m2", "progs/flame.mdl", 24], ["e2m1", "*4"
           const externalCamera = { ...camera, origin: { x: -48, y: 0, z: 8 } };
           const expected = finishSceneOperations(external.brushScene.prepareModel(external.model.model, { origin: first.event.origin, axis: anglesToAxis(first.event.angles) },
             { camera: externalCamera, time: output.snapshot.frame.time, target: { kind: "preview", id: "effects" }, animationFrame: first.event.frame }));
-          const actual = loweredFrame(externalEffects.frame(externalCamera)).operations;
+          const actual = loweredFrame(externalEffects.frame(externalCamera, createSourceSceneOrder(assets.materialRegistrations))).operations;
           const batches = (operations: readonly import("../../src/contracts/render.ts").RenderOperation[]) => operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
           expect(batches(actual).length).toBeGreaterThan(0);
           expect(batches(actual)).toEqual(batches(expected));
@@ -119,7 +119,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     expect(effects.drainSounds().map(sound => sound.path)).toContain("weapons/r_exp3.wav");
     const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
       viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
-    const first = loweredFrame(effects.frame(camera)), second = loweredFrame(effects.frame({ ...camera, viewport: { ...camera.viewport, x: 160 } }));
+    const first = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))), second = loweredFrame(effects.frame({ ...camera, viewport: { ...camera.viewport, x: 160 } }, createSourceSceneOrder(assets.materialRegistrations)));
     expect(first.lights.filter(light => light.origin.x === 80).map(light => light.radius)).toEqual([350, 328.125]);
     expect(first.lights[1]?.origin.x).toBeCloseTo(96, 4); expect(first.lights[1]?.origin.y).toBeCloseTo(18, 4);
     expect(first.lights.length).toBe(4);
@@ -143,7 +143,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     effects.receive([{ kind: "q2", content: q2, seconds: 1.1, sequence: 6, event: { kind: "effect", effect: "blaster",
       origin: { x: 80, y: 40, z: 0 }, direction: { x: -1, y: 0, z: 0 }, count: 0, color: 0 } }]);
     await effects.prepare(snapshot(1.1), [{ ...rocket, origin: { x: 55, y: 0, z: -10 } }], [character]);
-    const moving = loweredFrame(effects.frame(camera));
+    const moving = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
     expect(moving.lights.find(light => light.origin.x === 55)?.radius).toBe(200);
     expect(moving.lights.find(light => light.origin.y === 40)?.radius).toBeCloseTo(100, 5);
     frames.begin();
@@ -151,8 +151,8 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: moving.operations });
     target.execute(frames.finish(false));
     await effects.prepare(snapshot(7), []);
-    expect(loweredFrame(effects.frame(camera)).lights).toEqual([]);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.every(batch => batch.indices.length === 0))).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).lights).toEqual([]);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.every(batch => batch.indices.length === 0))).toBe(true);
     const rogue = content.catalog.require("q1-classic-rogue").id;
     const beams: readonly { readonly style: Q1BeamStyle; readonly path: string }[] = [
       { style: "lightning1", path: "progs/bolt.mdl" }, { style: "lightning2", path: "progs/bolt2.mdl" },
@@ -161,16 +161,16 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     for (const [index, beam] of beams.entries()) effects.receive([{ kind: "q1", content: rogue, seconds: 8, sequence: 7 + index,
       event: { kind: "beam", style: beam.style, actor: actor.id, start: { x: 80, y: -30, z: index * 10 - 15 }, end: { x: 80, y: 30, z: index * 10 - 15 } } }]);
     await effects.prepare(snapshot(8), []);
-    const beamFrame = loweredFrame(effects.frame(camera));
+    const beamFrame = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
     await effects.prepare(snapshot(8), [], [{ ...character, origin: { x: 80, y: 20, z: 0 } }]);
-    const remoteBeamFrame = loweredFrame(effects.frame(camera, rocketActor.id)), ownerBeamFrame = loweredFrame(effects.frame(camera, actor.id));
+    const remoteBeamFrame = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations), rocketActor.id)), ownerBeamFrame = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations), actor.id));
     const indexCount = (frame: typeof beamFrame): number => frame.operations.reduce((sum, operation) => sum +
       (operation.kind === "draw" ? operation.batches.reduce((count, batch) => count + batch.indices.length, 0) : 0), 0);
     expect(indexCount(ownerBeamFrame)).toBeLessThan(indexCount(remoteBeamFrame));
     expect(ownerBeamFrame.operations).not.toEqual(remoteBeamFrame.operations);
-    expect(loweredFrame(effects.frame(camera, rocketActor.id))).toEqual(remoteBeamFrame);
-    expect(loweredFrame(effects.frame(camera, actor.id))).toEqual(ownerBeamFrame);
-    expect(loweredFrame(effects.frame(camera))).toEqual(remoteBeamFrame);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations), rocketActor.id))).toEqual(remoteBeamFrame);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations), actor.id))).toEqual(ownerBeamFrame);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)))).toEqual(remoteBeamFrame);
     const beamImages = beamFrame.operations.flatMap(operation => operation.kind === "draw" ? operation.batches.flatMap(batch =>
       batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated" ? [batch.texture.image.source.name] : []) : []);
     for (const beam of beams) {
@@ -187,7 +187,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       if ((renderer.pixels[offset] ?? 0) + (renderer.pixels[offset + 1] ?? 0) + (renderer.pixels[offset + 2] ?? 0) > 0) beamPixels++;
     expect(beamPixels).toBeGreaterThan(0);
     await effects.prepare(snapshot(8.21), []);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     expect(effects.drainUnhandled()).toEqual([]);
     const q2Rogue = content.catalog.require("q2-classic-rogue").id;
     effects.receive([
@@ -204,7 +204,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
         origin: rocket.origin, radius: 180, color: { x: 0.2, y: 0.7, z: 1 }, visible: true } },
     ]);
     await effects.prepare(snapshot(9), [{ ...rocket, effects: 0 }], [character]);
-    const expansion = loweredFrame(effects.frame(camera)), playerView = effects.playerView(actor.id, camera);
+    const expansion = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))), playerView = effects.playerView(actor.id, camera);
     expect(playerView.camera.origin).toEqual(rocket.origin);
     expect(playerView.camera.axis).toEqual(anglesToAxis({ x: 0, y: 90, z: 0 }));
     expect(playerView.infrared).toBe(true); expect(playerView.blend).toEqual({ x: 1, y: 0, z: 0, w: 0.2 });
@@ -225,10 +225,10 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     ]);
     await effects.prepare(snapshot(9.1), []);
     expect(effects.playerView(actor.id, camera).camera).toBe(camera);
-    expect(loweredFrame(effects.frame(camera)).lights.some(light => light.radius === 180)).toBe(false);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).lights.some(light => light.radius === 180)).toBe(false);
     await effects.prepare(snapshot(14), []);
     expect(effects.playerView(actor.id, camera).infrared).toBe(false);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     expect(effects.drainUnhandled()).toEqual([]);
     const rerelease = content.catalog.require("q2-rerelease-baseq2").id;
     effects.receive([
@@ -238,7 +238,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     await effects.prepare(snapshot(15), []);
     expect(effects.drainUnhandled()).toEqual([]);
     expect(effects.drainSounds().map(sound => [sound.path, sound.channel, sound.volume])).toEqual([["weapons/rocklx1a.wav", 0, 1]]);
-    const slam = loweredFrame(effects.frame(camera));
+    const slam = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
     expect(slam.operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
     expect(slam.lights.some(light => light.radius > 0 && light.color.x === 1 && light.color.y === 0.5 && light.color.z === 0.5)).toBe(true);
     frames.begin(); frames.view({ target: { kind: "seat", seat: identity.seat(0) }, time: snapshot(15).frame.time, viewport: camera.viewport,
@@ -246,16 +246,16 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     target.execute(frames.finish(false));
     expect(new Set(renderer.pixels).size).toBeGreaterThan(16);
     await effects.prepare(snapshot(17), []);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     effects.receive([232, 233, 234, 235, 236, 237, 238, 239, 260, 251, 252, 253, 256, 257, 258, 259, 263, 74, 134].map((flash, index) => ({
       kind: "q2", content: rerelease, seconds: 18, sequence: 21 + index,
       event: { kind: "monster-muzzleflash", actor: actor.id, flash, origin: { x: 80, y: 0, z: 0 }, direction: { x: 1, y: 0, z: 0 } },
     })));
     await effects.prepare(snapshot(18), []);
     expect(effects.drainUnhandled()).toEqual([]);
-    expect(loweredFrame(effects.frame(camera)).operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.some(operation => operation.kind === "draw" && operation.batches.length > 0)).toBe(true);
     await effects.prepare(snapshot(20), []);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.length === 0)).toBe(true);
     effects.drainSounds();
     effects.receive([
       { kind: "q1", content: q1, seconds: 21, sequence: 100, event: { kind: "effect", effect: "wizard-spike", actor: null, origin: { x: 80, y: -24, z: 0 }, amount: 0 } },
@@ -263,7 +263,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       { kind: "q1", content: q1, seconds: 21, sequence: 102, event: { kind: "colored-explosion", origin: { x: 80, y: 0, z: 0 }, colorStart: 228, colorLength: 5 } },
     ]);
     await effects.prepare(snapshot(21), []);
-    const points = loweredFrame(effects.frame(camera));
+    const points = loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations)));
     expect(points.lights).toHaveLength(1);
     expect(points.lights[0]).toEqual({ origin: { x: 80, y: 0, z: 0 }, radius: 350, color: { x: 1, y: 1, z: 1 }, minimum: 0 });
     expect(points.operations.some(operation => operation.kind === "draw" && operation.batches.some(batch => batch.indices.length === 562 * 3))).toBe(true);
@@ -275,11 +275,11 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     target.execute(frames.finish(false));
     expect(new Set(renderer.pixels).size).toBeGreaterThan(16);
     await effects.prepare(snapshot(21.1), []);
-    expect(loweredFrame(effects.frame(camera)).lights[0]?.radius).toBeCloseTo(320, 5);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).lights[0]?.radius).toBeCloseTo(320, 5);
     expect(effects.drainSounds()).toEqual([]);
     await effects.prepare(snapshot(21.51), []);
-    expect(loweredFrame(effects.frame(camera)).lights).toEqual([]);
-    expect(loweredFrame(effects.frame(camera)).operations.every(operation => operation.kind !== "draw" || operation.batches.every(batch => batch.indices.length === 0))).toBe(true);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).lights).toEqual([]);
+    expect(loweredFrame(effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).operations.every(operation => operation.kind !== "draw" || operation.batches.every(batch => batch.indices.length === 0))).toBe(true);
     const spikes = new ApplicationEffects(assets, createSceneQueries(content.world), () => false, 1);
     const expectedRandom = new SourceRandom(1), expectedParticles = new SourceParticles(expectedRandom), expectedSounds: string[] = [];
     const spikeEvents: SimulationPresentationEvent[] = [];
@@ -298,7 +298,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
     spikes.receive([{ kind: "q1", content: q1, seconds: 23, sequence: 24, event: { kind: "effect", effect: "tar-explosion", actor: null, origin: { x: 80, y: 0, z: 0 }, amount: 0 } }]);
     await spikes.prepare(snapshot(23), []);
     expect(spikes.drainSounds().map(sound => sound.path)).toEqual(["weapons/r_exp3.wav"]);
-    expect(loweredFrame(spikes.frame(camera)).lights).toEqual([]);
+    expect(loweredFrame(spikes.frame(camera, createSourceSceneOrder(assets.materialRegistrations))).lights).toEqual([]);
     spikes.close();
     effects.close(); target.close();
   } finally { assets.close(); await content.close(); }
@@ -382,13 +382,15 @@ for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q2-classic-baseq2", "ba
     await effects.prepare(snapshot, [], [], { content: q3, timeMilliseconds: 1050 });
     const camera: SceneCamera = { origin: { ...end, z: end.z + 40 }, axis: anglesToAxis({ x: 90, y: 0, z: 0 }),
       viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
-    const prepared = effects.frame(camera);
-    const groups = prepared.operations.flatMap(operation => operation.kind === "scene-group" && operation.order.kind === "compiled" ? [operation] : []);
-    const mark = groups.find(group => group.order.kind === "compiled" && group.order.material.material.name === "gfx/damage/bullet_mrk");
-    const explosion = groups.find(group => group.order.kind === "compiled" && group.order.material.material.name.toLowerCase() === "bulletexplosion");
+    const prepared = effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations));
+    const groups = prepared.operations.flatMap(operation => operation.kind === "scene-group" && operation.order.kind === "source" ? [operation] : []);
+    const mark = groups.find(group => group.order.kind === "source" && group.order.material.material.name === "gfx/damage/bullet_mrk");
+    const explosion = groups.find(group => group.order.kind === "source" && group.order.material.material.name.toLowerCase() === "bulletexplosion");
     if (mark === undefined || explosion === undefined) throw new Error("Bullet impact must produce a mark and explosion");
-    expect(groups.indexOf(explosion)).toBeLessThan(groups.indexOf(mark));
-    if (mark.order.kind !== "compiled" || explosion.order.kind !== "compiled") throw new Error("Expected resolved materials");
+    expect(groups.indexOf(mark)).toBeLessThan(groups.indexOf(explosion));
+    if (mark.order.kind !== "source" || explosion.order.kind !== "source") throw new Error("Expected resolved materials");
+    expect(mark.order.source.entity).toEqual({ kind: "world" });
+    expect(explosion.order.source.entity.kind).toBe("refentity");
     expect(mark.order.material.finished.sort).toBe(4); expect(explosion.order.material.finished.sort).toBe(9);
     const markDraw = mark.operations[0], explosionDraw = explosion.operations[0];
     if (markDraw?.kind !== "draw" || explosionDraw?.kind !== "draw") throw new Error("Missing effect draw operations");

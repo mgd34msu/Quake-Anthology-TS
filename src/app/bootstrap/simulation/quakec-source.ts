@@ -527,6 +527,11 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     return { provider: this.options.recipe.character.definition.provider, state: { kind: "q1", frame: words.float(this.field("frame")), nextFrameSeconds: words.float(this.field("nextthink")) } };
   }
+  clientViewOffset(actor: ActorId): Vec3 {
+    const words = this.entities.fromReference(this.reference(actor));
+    if (this.kind === "quakeworld") return { x: 0, y: 0, z: words.vector(this.field("mins")).z !== -24 ? 8 : words.float(this.field("health")) <= 0 ? -16 : 22 };
+    return words.vector(this.field("view_ofs"));
+  }
   private reference(actor: ActorId): number { return this.worldHost.reference(actor); }
   private precache(kind: "model" | "sound", name: string): QcPrecachedResource {
     const key = `${kind}:${name}`, prior = this.precached.get(key); if (prior !== undefined) return prior;

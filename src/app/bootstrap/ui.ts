@@ -37,9 +37,13 @@ import { SeatGamePrompt, gamePromptMenu } from "./game-prompt.ts";
 import { Q2MatchUi } from "./q2-match-ui.ts";
 import { bindImageSettings, bindModelSettings } from "../../ui/settings/images.ts";
 
+import { SeatPlayerDeath, playerDeathMenu } from "./player-death.ts";
+
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
-  pauseMenuOpen = false;
+  private manualPause = false;
+  get pauseMenuOpen(): boolean { return this.manualPause || this.death.active && this.controller.activeMenu !== playerDeathMenu; }
+  private readonly death: SeatPlayerDeath;
   private readonly saves: ReturnType<typeof registerSavedGameMenus>;
   readonly preferences: SeatUiPreferences;
   readonly messages: SeatHudMessages;
@@ -73,6 +77,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   async prepare(assets: ApplicationAssets): Promise<void> {
+    this.death.observe(this.simulation.playerUi(this.local.player.actor).health);
+    if (this.death.active) this.weaponWheel.close(false);
     await this.prompt.prepare(assets, () => this.local.input.focus);
     this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
     const ui = this.simulation.playerUi(this.local.player.actor), assetsOwner = this.weaponAssets;
@@ -134,17 +140,19 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
     this.saves = registerSavedGameMenus(this.controller, saves);
+    this.death = new SeatPlayerDeath(this.controller, saves, this.saves.load, quit);
     this.disposeMenu = this.controller.register("menu:application:game", () => ({ id: "menu:application:game", title: "Paused", fullScreen: true,
       controls: [button("resume", "Resume game", 1, () => { this.controller.closeAll(); return undefined; }),
         button("save", "Save game", 2, () => this.controller.openMenu(this.saves.save)),
         button("load", "Load game", 3, () => this.controller.openMenu(this.saves.load)),
         button("settings", "Options", 4, () => this.controller.openMenu(this.settings.root)),
         button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
-        button("quit", "End game", 8, quit)], open: () => { this.pauseMenuOpen = true; return undefined; }, close: () => { this.pauseMenuOpen = false; return undefined; } }));
+        button("quit", "End game", 8, quit)], open: () => { this.manualPause = true; return undefined; }, close: () => { this.manualPause = false; return undefined; } }));
     this.disposeInput = input.attachUi(seat, this);
   }
 
   input(event: SeatInputEvent, focus: SeatInputFocus): boolean {
+    if (this.death.input(event)) return true;
     if (focus.kind === "console" || focus.kind === "chat") return false;
     if (this.prompt.input(event)) return true;
     if (this.controller.activeMenu === gamePromptMenu && (event.kind === "key" && event.code === KeyCode.Escape && event.down && !event.repeat
@@ -218,9 +226,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const commands = [...drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.font), measureText: this.measureHudText, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
       ];
     renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
-    renderUiCommands(context, this.controller.activeMenu === null ? [] : [menuPanel(context), ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
+    const panel = menuPanel(context);
+    const backdrop = this.controller.activeMenu === playerDeathMenu && panel.kind === "fill" ? { ...panel, color: { ...panel.color, w: 0.45 } } : panel;
+    renderUiCommands(context, this.controller.activeMenu === null ? [] : [backdrop, ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.death.close(); this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

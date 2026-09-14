@@ -4,14 +4,24 @@ import { cancelResponseBody, checkRequestAbort, responseBody, withRequestAbort }
 export interface SseEvent { readonly event: string; readonly data: string }
 const MAX_STREAM_BYTES = 1_048_576;
 
-export async function consumeSse(response: Response, signal: AbortSignal, onEvent: (event: SseEvent) => boolean | void): Promise<void> {
+function responseFormat(response: Response): string {
+  const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  const format = type === undefined ? "missing content type" : type === "text/event-stream" ? "event stream"
+    : type === "application/json" ? "JSON" : type === "text/html" ? "HTML"
+    : type === "text/plain" ? "plain text" : "other content type";
+  return `HTTP ${response.status}, ${format}`;
+}
+
+export async function consumeSse(response: Response, signal: AbortSignal, onEvent: (event: SseEvent) => boolean | void,
+  options: { readonly requireContentType: boolean } = { requireContentType: true }): Promise<void> {
   const body = responseBody(response);
-  if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") || body === null) {
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (options.requireContentType && contentType !== "text/event-stream" || body === null) {
     cancelResponseBody(response);
-    throw new LlmSettingsError("LLM service did not return an event stream.");
+    throw new LlmSettingsError(`LLM service did not return an event stream (${responseFormat(response)}${body === null ? ", no body" : ""}).`);
   }
   const reader = body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
-  let buffer = "", event = "message", data: string[] = [], bytes = 0, stopped = false;
+  let buffer = "", event = "message", data: string[] = [], bytes = 0, stopped = false, receivedEvent = false;
   const stop = (): void => { void reader.cancel().catch(() => {}); };
   signal.addEventListener("abort", stop, { once: true });
   function line(value: string): void {
@@ -19,6 +29,7 @@ export async function consumeSse(response: Response, signal: AbortSignal, onEven
     if (value === "") {
       if (data.length > 0) {
         checkRequestAbort(signal);
+        receivedEvent = true;
         stopped = onEvent({ event, data: data.join("\n") }) === true;
       }
       event = "message"; data = [];
@@ -52,6 +63,7 @@ export async function consumeSse(response: Response, signal: AbortSignal, onEven
       if (bytes > MAX_STREAM_BYTES) throw new LlmSettingsError("LLM response exceeded the size limit.");
       buffer += decoder.decode(chunk.value, { stream: true }); drain(false);
     }
+    if (!receivedEvent) throw new LlmSettingsError(`LLM service returned no event data (${responseFormat(response)}).`);
   } catch (error) {
     checkRequestAbort(signal);
     if (error instanceof LlmSettingsError) throw error;

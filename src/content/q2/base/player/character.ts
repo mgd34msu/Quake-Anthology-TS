@@ -189,6 +189,7 @@ export class Q2CharacterActor {
   endFrame(intermission = false): undefined {
     const context = this.context(), { state, host, actor } = this, movement = context.movement;
     if (intermission) return host.view(actor.id, q2BuildView(context, 0, true));
+    this.entity.viewHeight = state.gibbed ? 8 : state.dead || movement.ducked ? -2 : 22;
     if (this.options.environment) q2WorldEffects(context);
     const body = this.body(), vectors = angleVectors(movement.viewAngles), side = dot(body.velocity, vectors.right);
     const roll = (side < 0 ? -1 : 1) * Math.min(Math.abs(side) * this.rules.rollAngle / this.rules.rollSpeed, this.rules.rollAngle);

@@ -21,11 +21,12 @@ import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { CommonParseCursor, CommonParseState } from "../../../src/core/common-parse.ts";
 import { resolve } from "node:path";
 
-async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = async () => {}) {
+async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = async () => {},
+  fogSelections: ConstructorParameters<typeof Q3SceneRecorder>[0]["fogSelections"] = () => []) {
   const identity = createIdentityOwner("qvm-render"), seat = identity.seat(1), scenes: Q3PresentedScene[] = [], pictures: MaterialTextDraw[] = [];
   const target = { x: 0, y: 0, width: 640, height: 480 };
   const scene = new Q3SceneRecorder({ seat, viewport: target, nearClip: 4, farClip: 4096, rail: DEFAULT_RAIL_SETTINGS,
-    actor: () => null, publish: value => { scenes.push(value); } });
+    fogSelections, print: () => {}, actor: () => null, publish: value => { scenes.push(value); } });
   const registered: RegisteredImage = { frame: { image: { owner: { identity: Symbol("qvm"), session: identity.session, generation: 0 },
     ordinal: 0, source: { kind: "generated", name: "white" }, width: 1, height: 1 } }, tmu: 0 };
   const compiled = (await compileShaderScript("vm/picture { { map $whiteimage } }", { whiteImage: registered, defaultImage: registered, lightmapImage: registered,
@@ -62,7 +63,9 @@ test("guest handles register the same resource objects and submit through the sh
   for (const offset of [36, 52, 68]) refdef.setFloat32(offset, 1, true);
   qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_RENDERSCENE, [1536]), f.resources, f.draw);
   expect(f.scenes[0]?.effects[0]?.shader).toBe(f.picture);
-  expect(f.scenes[0]?.effects[0]?.geometry.vertices[0]?.position.x).toBe(12);
+  const effectSource = f.scenes[0]?.effects[0]?.source;
+  if (effectSource === undefined || !("kind" in effectSource) || effectSource.kind !== "sprite") throw new Error("Missing admitted guest sprite");
+  expect(effectSource.origin.x).toBe(12);
   const pictureCall = f.call(QvmCgameImport.CG_R_DRAWSTRETCHPIC, Array.from({ length: 9 }, () => 0));
   pictureCall.words.setFloat32(12, 32, true); pictureCall.words.setFloat32(16, 16, true); pictureCall.words.setInt32(36, 17, true);
   qvmClientRenderSyscall(pictureCall, f.resources, f.draw);
@@ -162,7 +165,10 @@ test("guest record marshalling preserves complete values and rejects truncated r
 });
 
 test("guest scene admission keeps refentity slots, polygon membership, and earlier snapshots", async () => {
-  const f = await fixture();
+  const fog = { index: 7, volume: { bounds: { min: { x: 20, y: 0, z: 0 }, max: { x: 21, y: 2, z: 1 } },
+    surface: null, color: { x: 0.2, y: 0.3, z: 0.4, w: 1 }, tcScale: 0.01 } };
+  let activeFogs: readonly (typeof fog)[] = [fog];
+  const f = await fixture(undefined, async () => {}, () => activeFogs);
   f.guest.writeString(512, "vm/picture", 32);
   await qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_REGISTERSHADER, [512]), f.resources, f.draw);
   const entity = f.guest.view(1024, 140);
@@ -178,6 +184,7 @@ test("guest scene admission keeps refentity slots, polygon membership, and earli
     vertices.setFloat32(index * 24 + 8, index % 2, true);
   }
   qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDPOLYTOSCENE, [17, 3, 2048]), f.resources, f.draw);
+  activeFogs = [];
   entity.setFloat32(68, 900, true); vertices.setFloat32(0, 900, true);
   const refdef = f.guest.view(1536, 368);
   refdef.setInt32(8, 640, true); refdef.setInt32(12, 480, true); refdef.setFloat32(16, 90, true); refdef.setFloat32(20, 75, true);
@@ -198,6 +205,7 @@ test("guest scene admission keeps refentity slots, polygon membership, and earli
   expect(first.portals.map(portal => portal.entityIndex)).toEqual([2]);
   expect(first.effects.map(effect => effect.admission)).toEqual([{ kind: "refentity", index: 4 }, { kind: "refentity", index: 5 }, { kind: "polygon", index: 0 }]);
   expect(first.admission.polygons[0]?.vertices[0]?.position.x).toBe(20);
+  expect(first.admission.polygons[0]?.fog).toEqual(fog);
   expect(first.admission.id.equals(repeated.admission.id)).toBe(false);
   expect(first.effects).toEqual(repeated.effects); expect(first.specialEntities).toEqual(repeated.specialEntities);
   expect(cleared.admission.entities).toHaveLength(0); expect(cleared.admission.polygons).toHaveLength(0);

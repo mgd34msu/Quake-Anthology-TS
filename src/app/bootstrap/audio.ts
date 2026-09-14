@@ -415,6 +415,7 @@ export class ApplicationAudio {
     for (const sound of this.effectSounds.splice(0)) {
       const family = this.content.catalog.product(sound.content).expectation.family;
       if (sound.playback.kind === "once") await this.play(sound.content, family, sound.path, null, sound.origin, sound.channel, sound.volume, 1);
+      else if (sound.playback.kind === "actor") await this.play(sound.content, family, sound.path, sound.playback.actor, null, sound.channel, sound.volume, 1);
       else {
         const asset = await this.sound(sound.content, sound.path, family, sound.playback.actor);
         if (asset !== null) this.engine.loop({ sound: asset, family, actor: sound.playback.actor, origin: { kind: "fixed", position: sound.origin },

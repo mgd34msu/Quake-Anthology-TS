@@ -54,6 +54,7 @@ export interface PlayerMovementHost {
   isBrush(actor: ActorId): boolean;
   worldActor(): ActorId | null;
   sourcePunch?(actor: ActorId): Vec3 | null;
+  gibbed?(): boolean;
   jump(actor: OwnedActor, action: "jump" | "swim"): undefined;
 }
 
@@ -179,8 +180,8 @@ export class MovementPlayer {
         const current = { ...state, origin: body.origin, velocity: body.velocity, angles: body.angles, ground: this.ground, dead: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 };
         return this.host.quakeWorld?.read(current) ?? current;
       }
-      case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 2 : state.type };
-      case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 4 : state.type };
+      case "q2-classic": return { ...state, originEighths: eighths(body.origin), velocityEighths: eighths(body.velocity), type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? this.host.gibbed?.() === true ? 3 : 2 : state.type };
+      case "q2-rerelease": return { ...state, origin: body.origin, velocity: body.velocity, type: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? this.host.gibbed?.() === true ? 5 : 4 : state.type };
       case "q3": return { ...state, origin: body.origin, velocity: body.velocity, ground: this.ground, movementType: (this.host.combat.read(this.actor.id)?.health ?? 0) <= 0 ? 3 : state.movementType };
     }
   }

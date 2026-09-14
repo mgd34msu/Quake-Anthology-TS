@@ -142,6 +142,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   const alpha = translucent ? entity.color.w : 1;
   const color = byteColor({ ...entity.color, w: alpha });
   let lod = 0;
+  let fogSphere: PreparedModelSurface["fogSphere"] = null;
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false): void {
     const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => {
@@ -156,7 +157,7 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
     const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({ ...vertex,
       position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal) })) };
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
-    surfaces.push({ name, entity, options, transform: entity.transform, image, localGeometry, geometry,
+    surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
       depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
       alphaTest: model.kind === "q1-spr" ? "gt0" : model.kind === "q2-sp2" && alpha === 1 ? "ge128" : "none",
       translucent, unlit: unlit || shell !== null, mirrorWeapon: flags.kind === "q2" && (bits & 4) !== 0 && options.leftHand === 1 });
@@ -204,6 +205,8 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       lod = lodIndex(entity, choices.length, radiusFromBounds(at(model.frames, frame, "MD3 frame").bounds), context, options);
       const selected = at(choices, lod, "MD3 LOD");
       if (selected === null) throw new RangeError(`Missing source MD3 LOD slot ${lod}`);
+      const fogFrame = at(selected.frames, frame, "MD3 fog frame");
+      fogSphere = { localOrigin: fogFrame.localOrigin, radius: fogFrame.radius };
       for (const surface of selected.surfaces) {
         const current = at(surface.frames, frame, "MD3 frame");
         const vertices = backLerp === 0 ? current : interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);

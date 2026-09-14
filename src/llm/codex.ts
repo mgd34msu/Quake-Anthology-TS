@@ -8,9 +8,23 @@ import { consumeSse } from "./sse.ts";
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function isArray(value: unknown): value is unknown[] { return Array.isArray(value); }
 function object(value: unknown): Record<string, unknown> {
   if (!isObject(value)) throw new LlmSettingsError("Invalid subscription response.");
   return value;
+}
+function outputItem(value: unknown): void {
+  const item = object(value);
+  if (item["type"] !== "message" && item["type"] !== "reasoning") throw new LlmSettingsError("Subscription returned an unsupported output item.");
+  if (item["type"] === "message" && item["content"] !== undefined) {
+    const content: unknown = item["content"];
+    if (!isArray(content)) throw new LlmSettingsError("Invalid subscription response.");
+    for (const part of content) {
+      const entry = object(part);
+      if (entry["type"] === "refusal") throw new LlmSettingsError("Subscription declined the request.");
+      if (entry["type"] !== "output_text") throw new LlmSettingsError("Subscription returned unsupported content.");
+    }
+  }
 }
 
 export function subscriptionAccountId(token: string): string {
@@ -54,6 +68,14 @@ export async function requestCodex(input: TransportRequest, credential: Subscrip
     catch { throw new LlmSettingsError("Invalid subscription response."); }
     const item = object(value), type = item["type"] ?? event.event;
     if (type === "response.failed" || type === "response.incomplete" || type === "error") throw new LlmSettingsError("Subscription response failed. Try again.");
+    if (typeof type === "string" && type.startsWith("response.refusal.")) throw new LlmSettingsError("Subscription declined the request.");
+    if (typeof type === "string" && type.startsWith("response.function_call_arguments.")) throw new LlmSettingsError("Subscription returned an unsupported tool call.");
+    if (type === "response.output_item.added" || type === "response.output_item.done") {
+      outputItem(item["item"]);
+    }
+    if (type === "response.content_part.added" || type === "response.content_part.done") {
+      if (object(item["part"])["type"] === "refusal") throw new LlmSettingsError("Subscription declined the request.");
+    }
     if (type === "response.output_text.delta") {
       if (completed || typeof item["delta"] !== "string") throw new LlmSettingsError("Invalid subscription response.");
       text += item["delta"];
@@ -61,11 +83,16 @@ export async function requestCodex(input: TransportRequest, credential: Subscrip
     } else if (type === "response.completed") {
       const result = object(item["response"]);
       if (result["status"] !== "completed") throw new LlmSettingsError("Subscription response did not complete. Try again.");
+      const output: unknown = result["output"];
+      if (output !== undefined) {
+        if (!isArray(output)) throw new LlmSettingsError("Invalid subscription response.");
+        for (const entry of output) outputItem(entry);
+      }
       completed = true;
       return true;
     }
     return undefined;
-  });
+  }, { requireContentType: false });
   if (!completed) throw new LlmSettingsError("Subscription response ended before completion. Try again.");
   if (text.trim() === "") throw new LlmSettingsError("Subscription returned no text. Try again.");
   return text;

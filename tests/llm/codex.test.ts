@@ -82,3 +82,45 @@ test("subscription completion closes a stream whose socket remains open", async 
   }), { headers: { "content-type": "text/event-stream" } }));
   expect(result).toBe("done"); expect(cancelled).toBe(true);
 });
+
+test("subscription validates SSE events even when the service omits or changes the MIME type", async () => {
+  const payload = event({ type: "response.output_text.delta", delta: "answer" })
+    + event({ type: "response.completed", response: { status: "completed" } });
+  for (const type of [undefined, "application/octet-stream", "text/plain", "application/json"]) {
+    const bytes = new TextEncoder().encode(payload);
+    expect(await requestCodex(input(), credential, async () => new Response(bytes, {
+      headers: type === undefined ? {} : { "content-type": type },
+    }))).toBe("answer");
+  }
+});
+
+test("subscription rejects non-SSE bodies with safe response metadata", async () => {
+  for (const [type, body, format] of [
+    ["application/json", '{"status":"completed","output_text":"secret-quit"}', "JSON"],
+    ["text/html", "<html>secret-provider-body</html>", "HTML"],
+    ["text/plain; private=secret-header", "secret-plain-body", "plain text"],
+    ["application/secret-header", "secret-other-body", "other content type"],
+  ]) {
+    const deltas: string[] = [];
+    await expect(requestCodex({ ...input(), onText: text => { deltas.push(text); } }, credential,
+      async () => new Response(body, { headers: { "content-type": type ?? "" } })))
+      .rejects.toThrow(`LLM service returned no event data (HTTP 200, ${format}).`);
+    expect(deltas).toEqual([]);
+  }
+});
+
+test("subscription rejects refusal and tool events before returning completed text", async () => {
+  for (const rejected of [
+    { type: "response.refusal.delta", delta: "secret-refusal" },
+    { type: "response.function_call_arguments.delta", delta: "secret-tool" },
+    { type: "response.output_item.added", item: { type: "function_call" } },
+    { type: "response.content_part.done", part: { type: "refusal" } },
+    { type: "response.completed", response: { status: "completed", output: [{ type: "function_call" }] } },
+    { type: "response.completed", response: { status: "completed", output: [{ type: "message", content: [{ type: "refusal" }] }] } },
+  ]) {
+    await expect(requestCodex(input(), credential, async () => response(
+      event({ type: "response.output_text.delta", delta: "quit" }) + event(rejected)
+      + event({ type: "response.completed", response: { status: "completed" } }),
+    ))).rejects.toThrow(/declined|unsupported/);
+  }
+});

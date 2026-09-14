@@ -1,3 +1,5 @@
+import { createSourceSceneOrder } from "../../render/scene/submissions.ts";
+import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { Q1MessageLocalization } from "./q1-localization.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { WorldText } from "../../text/world.ts";
@@ -25,7 +27,7 @@ import type { ApplicationEffects } from "./effects.ts";
 import { SourceFinale } from "./finale.ts";
 import type { LocalInput } from "./input.ts";
 import type { NativeRenderer } from "./renderer.ts";
-import type { SimulationPresentation, SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
+import type { PlayerView, SimulationPresentation, SimulationPresentationAccess, SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
@@ -46,6 +48,11 @@ export function cameraWithKick(camera: SceneCamera, kick: Vec3): SceneCamera {
   const rotate = (v: Vec3): Vec3 => ({ x: axis[0].x * v.x + axis[1].x * v.y + axis[2].x * v.z,
     y: axis[0].y * v.x + axis[1].y * v.y + axis[2].y * v.z, z: axis[0].z * v.x + axis[1].z * v.y + axis[2].z * v.z });
   return { ...camera, axis: [rotate(local[0]), rotate(local[1]), rotate(local[2])] };
+}
+
+export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView): SceneCamera {
+  return player.foreignCharacterDeath === true && camera.clip.kind === "none" ? { ...camera,
+    origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles) } : camera;
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
@@ -104,7 +111,8 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   camera(): SceneCamera {
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
-    if (this.q3Client !== null) return cameraWithKick(this.q3Client.camera(), player.kickAngles ?? { x: 0, y: 0, z: 0 });
+    if (this.q3Client !== null) return cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
+      : cameraWithCharacterDeath(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
     const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
@@ -180,17 +188,22 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
-    const time = snapshot.frame.time, camera = this.camera(), effects = this.effects.frame(camera, this.local.player.actor);
+    const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
+      effects = source === null ? null : this.effects.frame(camera, source, this.local.player.actor);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
-    const input: WorldViewInput = { camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+    const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
-      lights: effects.lights, q3Lights: effects.q3Lights,
+      lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
-    const nativeFrame = this.q3Client?.frame(camera => this.effects.frame(camera, this.local.player.actor), camera => cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
+    const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor), camera => {
+      const player = this.simulation.playerView(this.local.player.actor);
+      return cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
+    });
     this.frames.begin();
     if (nativeFrame === undefined) {
+      if (effects === null) throw new Error("Shared view lost its prepared effects");
       this.frames.world(this.scene.view(input, effects.operations,
         this.effects.shadowSceneLights(camera, index => style(index, 12) / 12), playerView.infrared,
         weaponViewCamera(camera, this.ui.weaponOcclusion({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, !this.finale.active))));

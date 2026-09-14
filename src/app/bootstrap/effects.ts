@@ -1,5 +1,5 @@
 import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
-import { sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
+import { sequenceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
 /* Application joins for Quake cl_tent/r_part and Quake II cl_tent/cl_fx.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -219,7 +219,7 @@ export class ApplicationEffects {
     }
     this.time = now;
   }
-  frame(camera: SceneCamera, viewer: ActorId | null = null): ApplicationEffectFrame {
+  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null): ApplicationEffectFrame {
     if (this.closed) throw new Error("Effect world is closed");
     const time = { kind: "seconds", value: this.time ?? 0 } satisfies WorldSnapshot["frame"]["time"];
     const project = createViewProjector(camera), prepared: SceneOperation[] = [], q3Lights: DynamicLight[] = [];
@@ -244,11 +244,12 @@ export class ApplicationEffects {
       { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), ...prepared];
     const sourceLights: SurfaceDynamicLight[] = [], q3Admissions: Q3SceneAdmission[] = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
-      const frame = effects.frame(camera, viewer); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
+      const frame = effects.frame(camera, source, viewer); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
       sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
     }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });
-    return { q3Admissions, operations, lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
+    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    return { q3Admissions, operations: [...operations.filter(polygon), ...operations.filter(operation => !polygon(operation))], lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
   }
   shadowSceneLights(camera: SceneCamera, style: (index: number) => number): readonly SceneLight[] {
     return [...this.shadowLights.values()].flatMap(light => {

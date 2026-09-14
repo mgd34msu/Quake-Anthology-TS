@@ -1,3 +1,6 @@
+import { CommonError } from "../../core/common-error.ts";
+import { q3ProceduralFog } from "../../content/q3/presentation/scene.ts";
+import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
@@ -38,9 +41,9 @@ import { prepareMaterialText } from "../../render/commands/material2d.ts";
 import { SceneModelRenderer } from "../../render/scene/models/renderer.ts";
 import { ModelLightSampler } from "../../render/scene/models/light-sampler.ts";
 import { lightForPoint } from "../../materials/q3-lighting.ts";
-import { compiledDrawGroup, finishSceneOperations, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
+import { createSourceSceneOrder, reserveSourceEntityRange, sourceDrawGroup, finishSceneOperations, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import { prepareMaterialBatches } from "../../materials/evaluate.ts";
-import { DEFAULT_RAIL_SETTINGS, beamBatch, defaultModelBatch, railGeometry, spriteGeometry } from "../../render/scene/particles/primitives.ts";
+import { DEFAULT_RAIL_SETTINGS, beamBatch, defaultModelBatch, polyGeometry, railGeometry, spriteGeometry } from "../../render/scene/particles/primitives.ts";
 import { visibleWorld } from "../../render/scene/visibility.ts";
 import { portalCamera, portalSurfaceOffscreen } from "../../render/scene/portal.ts";
 import { createViewProjector, perspectiveProjection } from "../../render/scene/view.ts";
@@ -300,32 +303,65 @@ export class ApplicationQ3Client {
     const sample = this.lightSampler.sample(point, { camera: this.latestCamera, time: { kind: "milliseconds", value: this.source.time }, target: { kind: "seat", seat: this.options.local.player.seat.id } });
     return { ambientLight: { x: sample.color.x * 255, y: sample.color.y * 255, z: sample.color.z * 255 }, directedLight: { x: 0, y: 0, z: 0 }, lightDir: { x: 0, y: 0, z: 1 } };
   }
-  private operations(scene: Q3PresentedScene, input: WorldViewInput): readonly SceneOperation[] {
-    const operations: SceneOperation[] = [], noWorldModel = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0;
+  private operations(scene: Q3PresentedScene, input: WorldViewInput, firstEntity: number, additions: readonly SceneOperation[] = []): readonly SceneOperation[] {
+    const source = input.source;
+    if (source === undefined) throw new Error("Q3 view has no source admission");
+    const operations: SceneOperation[] = [], world = this.options.assets.world;
+    const noWorldModel = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0;
     const weaponInput = { ...input, camera: q3WeaponCamera(input.camera, this.options.splitScreen === true && !noWorldModel) };
-    for (const model of scene.models) {
-      if (model.entity.model.kind === "brush-model") continue;
-      const provider = this.media.modelProviders.get(model.source.model);
-      if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
-      const selected = (model.source.renderFlags & 4) !== 0 ? weaponInput : input;
-      operations.push(...this.renderer(provider).prepare([model.entity], selected,
-        () => ({ ...model.options, noWorldModel, shaderTexCoord: model.source.shaderTexCoord })));
+    for (const [index, poly] of scene.admission.polygons.entries()) {
+      const compiled = this.options.assets.materialRegistrations.requireMaterial(this.requireServices().resources.picture(poly.shader).material.compiled);
+      operations.push(sourceDrawGroup(compiled, { view: source.view, entity: { kind: "world" }, surface: index, fog: poly.fog === null ? 0 : poly.fog.index + 1, dlight: 0 },
+        prepareMaterialBatches(compiled, polyGeometry(poly), world.materialContext(input, undefined, poly.fog?.volume ?? null))));
     }
-    if (this.requireBackend().kind === "typescript" && (scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) operations.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
+    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    operations.push(...additions.filter(polygon));
+    const models = new Map(scene.models.map(model => [model.entityIndex, model]));
+    const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
+    for (const [index, entity] of scene.admission.entities.entries()) {
+      const entityOrder = { kind: "refentity", index: firstEntity + index } satisfies import("../../render/scene/submissions.ts").SourceEntityOrder;
+      if (input.camera.clip.kind === "portal" && (entity.renderFlags & 4) !== 0) continue;
+      if (entity.kind === "poly") throw new CommonError("drop", "R_AddEntitySurfaces: Bad reType");
+      if (entity.kind === "portal-surface") continue;
+      if (entity.kind === "model") {
+        if (entity.model.kind === "default") {
+          if (input.camera.clip.kind === "none" && (entity.renderFlags & 2) !== 0) continue;
+          operations.push(sourceDrawGroup(this.media.provider.shaders.sourceMaterials.default,
+            { view: source.view, entity: entityOrder, surface: 0, fog: 0, dlight: 0 },
+            [defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white)]));
+          continue;
+        }
+        const model = models.get(index);
+        if (model === undefined) throw new Error("Admitted Q3 model lost its prepared descriptor");
+        const selected = (entity.renderFlags & 4) !== 0 ? weaponInput : input;
+        if (model.entity.model.kind === "brush-model") {
+          operations.push(...world.prepareModel(model.entity.model.model, { origin: entity.origin, axis: entity.axis },
+            { ...selected, animationFrame: entity.frame, materialContext: { ...selected.materialContext, entityRGBA: entity.shaderRGBA } }, entityOrder));
+        } else {
+          const provider = this.media.modelProviders.get(entity.model);
+          if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
+          operations.push(...this.renderer(provider).prepare([model.entity], selected,
+            () => ({ ...model.options, noWorldModel, shaderTexCoord: entity.shaderTexCoord, source: { view: source.view, entity: entityOrder } })));
+        }
+        continue;
+      }
+      if (input.camera.clip.kind === "none" && (entity.renderFlags & 2) !== 0) continue;
+      const compiled = entity.customShader === null ? this.media.provider.shaders.sourceMaterials.default
+        : this.options.assets.materialRegistrations.requireMaterial(this.requireServices().resources.picture(entity.customShader).material.compiled);
+      const fog = noWorldModel ? null : q3ProceduralFog(entity.origin, entity.radius, world.fogSelections);
+      const order = { view: source.view, entity: entityOrder, surface: 0, fog: fog === null ? 0 : fog.index + 1, dlight: 0 };
+      if (entity.kind === "beam") operations.push(sourceDrawGroup(compiled, order, [beamBatch(entity, project, state, white)]));
+      else {
+        const geometry = entity.kind === "sprite" ? spriteGeometry(entity, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
+          : railGeometry(entity, input.camera.origin, DEFAULT_RAIL_SETTINGS);
+        operations.push(sourceDrawGroup(compiled, order, prepareMaterialBatches(compiled, geometry,
+          { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime })));
+      }
+    }
+    if (this.requireBackend().kind === "typescript" && !noWorldModel) operations.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
       (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponViewCamera(weaponInput.camera,
         this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []))));
-    const context = this.options.assets.world.materialContext(input);
-    for (const effect of scene.effects) {
-      const picture = this.requireServices().resources.picture(effect.shader), source = effect.source;
-      const geometry = "kind" in source ? source.kind === "sprite"
-        ? spriteGeometry(source, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
-        : source.kind === "beam" ? effect.geometry : railGeometry(source, input.camera.origin, DEFAULT_RAIL_SETTINGS) : effect.geometry;
-      operations.push(compiledDrawGroup(picture.material.compiled, prepareMaterialBatches(picture.material.compiled, geometry, "shaderRGBA" in source
-        ? { ...context, entityRGBA: source.shaderRGBA, shaderTexCoord: source.shaderTexCoord, timeOffset: source.shaderTime } : context)));
-    }
-    const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
-    for (const { source: entity } of scene.specialEntities) operations.push(sequenceDrawGroup("opaque", [entity.kind === "beam" ? beamBatch(entity, project, state, white)
-      : defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white)]));
+    operations.push(...additions.filter(operation => !polygon(operation)));
     return operations;
   }
   private portal(scene: Q3PresentedScene, input: WorldViewInput): WorldViewInput | null {
@@ -340,7 +376,7 @@ export class ApplicationQ3Client {
     }
     return null;
   }
-  frame(additionalEffects?: (camera: SceneCamera) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera): RenderFrame {
+  frame(additionalEffects?: (camera: SceneCamera, source: SourceSceneOrder) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera): RenderFrame {
     this.requireBackend(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
@@ -357,16 +393,21 @@ export class ApplicationQ3Client {
         renderText: scene.source.text, visibleAreas: new Set(Array.from({ length: scene.source.areaMask.length * 8 }, (_, area) => area)
           .filter(area => ((scene.source.areaMask[area >> 3] ?? 0) & (1 << (area & 7))) === 0)),
         clear: (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? { depth: 1, color: null, stencil: false } : { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
-        inlineModels: scene.models.flatMap(model => model.entity.model.kind === "brush-model" ? [{ model: model.entity.model.model,
-          transform: { origin: model.entity.transform.origin, axis: model.entity.transform.axis }, animationFrame: model.entity.pose.kind === "frame" ? model.entity.pose.frame : 0 }] : []) };
-      if ((scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0) this.frames.view({ target: input.target, time, viewport: scene.viewport,
-        clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.operations(scene, input)) });
-      else {
+        };
+      if ((scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0) {
+        const source = createSourceSceneOrder(this.options.assets.materialRegistrations), selected = { ...input, source: createWorldSurfaceAdmission(source) };
+        const firstEntity = reserveSourceEntityRange(source, scene.admission.entities.length);
+        this.frames.view({ target: input.target, time, viewport: scene.viewport,
+          clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.operations(scene, selected, firstEntity)) });
+      } else {
         const publish = (view: WorldViewInput): void => {
-          const effects = additionalEffects?.(view.camera);
-          const combined = effects === undefined ? view : { ...view, lights: effects.lights,
-            q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) };
-          this.frames.world(world.prepareView({ ...combined, operations: [...this.operations(scene, combined), ...effects?.operations ?? []] }));
+          const source = createSourceSceneOrder(this.options.assets.materialRegistrations);
+          const firstEntity = reserveSourceEntityRange(source, scene.admission.entities.length);
+          const effects = additionalEffects?.(view.camera, source);
+          const combined: WorldViewInput = { ...view, source: createWorldSurfaceAdmission(source), ...(effects === undefined ? {} : { lights: effects.lights,
+            q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) }) };
+          world.prepareWorldOperations(combined);
+          this.frames.world(world.prepareView({ ...combined, operations: this.operations(scene, combined, firstEntity, effects?.operations) }));
         };
         const child = this.portal(scene, input);
         if (child !== null) publish(child);

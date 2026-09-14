@@ -11,6 +11,7 @@ import { parseBnvib, SeatHaptics } from "../../src/input/haptics.ts";
 import { openArchive } from "../../src/content/archive/index.ts";
 import { sourceKeyNumber } from "../../src/input/bindings.ts";
 import { KeyCode } from "../../src/input/key-codes.ts";
+import { bindInputSettings } from "../../src/ui/settings/index.ts";
 import { InputCommandBuilder } from "../../src/input/user-command.ts";
 import type { UserCommandFrame } from "../../src/input/user-command.ts";
 import { ApplicationConsoleRouting } from "../../src/app/bootstrap/console.ts";
@@ -329,4 +330,34 @@ test("seat vibration strength scales both motors without restarting the authored
   scheduler.stop(); scheduler.setStrength(0.5, 130);
   expect(outputs.at(-1)).toEqual({ low: 0, high: 0 });
   expect(() => scheduler.setStrength(NaN, 140)).toThrow();
+});
+
+
+test("Always run menu changes emitted commands and inverts the speed modifier for every source", () => {
+  const owner = createIdentityOwner("always-run"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const frames: readonly UserCommandFrame[] = [
+    { kind: "q1-netquake", acknowledgedServerTimeSeconds: 1 }, { kind: "q1-quakeworld" },
+    { kind: "q2-classic", deltaAngles: { x: 0, y: 0, z: 0 }, lightLevel: 128, attackAllowed: true },
+    { kind: "q2-rerelease", deltaAngles: { x: 0, y: 0, z: 0 }, serverFrame: 10, attackAllowed: true },
+    { kind: "q3", serverTimeMilliseconds: 110, weapon: 2, sensitivity: 1 },
+  ];
+  for (const frame of frames) for (const alwaysRun of [false, true]) for (const modifier of [false, true]) {
+    const commands = new CommandBuffer({ dialect: frame.kind, context });
+    const input = new SeatInput({ seat, dialect: frame.kind, context, commands, uiEvent: () => false });
+    const builder = new InputCommandBuilder(frame.kind);
+    expect(builder.tuning.alwaysRun).toBe(!frame.kind.startsWith("q1"));
+    const toggle = bindInputSettings(input, builder).find(binding => binding.id === "ui:input:always-run");
+    if (toggle?.kind !== "toggle") throw new Error("Missing Always run toggle");
+    toggle.write(alwaysRun);
+    input.commandButton("forward", "w", true, 10);
+    input.commandButton("walk", "shift", modifier, 10);
+    input.sample(110, 100);
+    const sample = input.sample(210, 100), command = builder.build(sample, frame);
+    const running = alwaysRun !== modifier, maximum = frame.kind === "q3" ? running ? 127 : 64 : running ? 400 : 200;
+    expect(command.forwardMove).toBe(maximum);
+    if (command.kind === "q3") expect(command.buttons & 16).toBe(running ? 0 : 16);
+    const analog = builder.build({ ...sample, buttons: sample.buttons.filter(button => button.action === "walk"), gamepadMove: { x: 0, y: 0.25 } }, frame);
+    expect(analog.forwardMove).toBe(frame.kind === "q2-rerelease" ? maximum * 0.25 : Math.trunc(maximum * 0.25));
+  }
 });

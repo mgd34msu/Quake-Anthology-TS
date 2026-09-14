@@ -1,4 +1,5 @@
-import { sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
+import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
+import { createSourceSceneOrder, sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import { weaponViewOrigin } from "./weapon-view.ts";
 import { SelectedQ3WeaponPresenter } from "./q3-selected-weapon.ts";
 import { ForeignHeldWeapons } from "./held-weapon.ts";
@@ -175,7 +176,7 @@ export class ApplicationWorldScene {
   }
 
   view(input: WorldViewInput, operations: readonly SceneOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
-    input = { ...input, inlineModels: this.inlineModels, ...this.styles() };
+    input = { ...input, source: input.source ?? createWorldSurfaceAdmission(createSourceSceneOrder(this.assets.materialRegistrations)), inlineModels: this.inlineModels, ...this.styles() };
     const skinningFrame: ModelSkinningFrame = new WeakMap();
 
     if (shadowLights.length > 0) {
@@ -185,6 +186,7 @@ export class ApplicationWorldScene {
         profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
     }
+    this.assets.world.prepareWorldOperations(input);
     const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
     const prepare = (group: ModelGroup, pass: ModelPass) => group.renderer.prepare([pass.entity],
       pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
@@ -201,7 +203,8 @@ export class ApplicationWorldScene {
     if (this.flares.length > 0) modelOperations.push(sequenceDrawGroup("translucent", this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath))));
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
       materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
-    return this.assets.world.prepareView({ ...input, operations: [...brushes, ...modelOperations, ...operations] });
+    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    return this.assets.world.prepareView({ ...input, operations: [...operations.filter(polygon), ...brushes, ...modelOperations, ...operations.filter(operation => !polygon(operation))] });
   }
 
   close(): undefined { this.ordered.length = 0; this.objects.clear(); this.groups.clear(); this.characters.clear(); this.selectedWeapons.clear(); return undefined; }

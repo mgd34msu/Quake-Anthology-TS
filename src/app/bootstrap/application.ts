@@ -154,6 +154,21 @@ export class Application {
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
+  private get levelRecoveryAvailable(): boolean {
+    return !this.options.dedicated && this.options.network.kind === "offline" && this.options.mode === "singleplayer";
+  }
+
+  private async autosaveLevel(): Promise<void> {
+    if (!this.levelRecoveryAvailable || this.network !== null || this.localPlayers.length === 0) return;
+    const directory = join(this.saveDirectory, this.content.catalog.product(this.content.recipe.map.entities.content).expectation.id);
+    try {
+      await mkdir(directory, { recursive: true });
+      const path = join(directory, "autosave.sav");
+      await this.saveGame(path);
+      this.host.print(`Autosaved ${path}.\n`);
+    } catch (error) { this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+  }
+
   private saveMenu(): SavedGameMenuService {
     const saves = this.savedGames ??= new StartupSaves(this.content.catalog, this.saveDirectory);
     const queue = (run: () => Promise<void>): Promise<void> => new Promise((resolve, reject) => {
@@ -161,6 +176,7 @@ export class Application {
       this.saveOperation = { run, resolve, reject };
     });
     return { list: () => saves.list, refresh: () => saves.refresh(),
+      ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
       unavailable: action => this.network !== null ? "Save/load unavailable while hosting a network game."
         : action === "save" && (this.simulation.q3Source() !== null || this.simulation.quakecSource() !== null) ? "This source cannot save complete games yet."
         : action === "save" && this.botClients.length !== 0 ? "Saving bot decision state is not supported yet." : null,
@@ -249,6 +265,7 @@ export class Application {
         await initialized.sourceCommands?.executeAsync(() => initialized.commands());
       }
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
+      await application.autosaveLevel();
       return application;
     } catch (error) {
       if (application !== null) await application.close();
@@ -512,12 +529,7 @@ export class Application {
       if (source.kind === "q2-rerelease") {
         if (source.event.kind === "restart-level") this.pendingMap = mapResourcePath(source.event.map);
         else if (source.event.kind === "autosave") {
-          const directory = join(this.saveDirectory, this.content.catalog.product(source.content).expectation.id);
-          try {
-            await mkdir(directory, { recursive: true });
-            const path = join(directory, "autosave.sav"); await this.saveGame(path);
-            this.host.print(`Autosaved ${path}.\n`);
-          } catch (error) { this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+          await this.autosaveLevel();
         }
         continue;
       }
@@ -852,6 +864,7 @@ export class Application {
       this.reportedEffectGaps.clear();
       await previousContent.close();
       this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
+      if (save === undefined) await this.autosaveLevel();
     } catch (error) {
       if (!committed) { nextBots?.close(); simulation?.close(); art?.close(); assets?.close(); await content.close(); }
       else {

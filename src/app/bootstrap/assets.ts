@@ -132,10 +132,14 @@ export class ApplicationAssets {
       this.activeTextures.add(textures);
       try {
         const shaders = new SceneShaderRegistry(textures, registrations, DEFAULT_SHADER_PROFILE, path => this.materialMovie(content, mounts, path), family);
-        for (const path of await shaderPaths(this.content, mounts)) {
-          const asset = await mounts.open(path);
-          if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
-        }
+        const loadScripts = async (): Promise<void> => {
+          for (const path of await shaderPaths(this.content, mounts)) {
+            const asset = await mounts.open(path);
+            if (asset !== null) shaders.addScript(new TextDecoder().decode(asset.bytes), path);
+          }
+        };
+        if (family === "q3") await shaders.initializeSourceMaterials(loadScripts);
+        else await loadScripts();
         if (this.closed) throw new Error("Scene provider loaded after assets closed");
         const assets = this;
         return { family, mounts, palette, get textures() { return shaders.textures; }, shaders,

@@ -82,3 +82,20 @@ test("gyro tuning profiles persist by seat and serial without calibration bias",
     expect(() => parseGyroProfile({ ...profile, tuning: { ...profile.tuning, yawSensitivity: Infinity } })).toThrow("finite");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("Always run seat config preserves false and true and leaves old profiles at source defaults", async () => {
+  const { parseSeatSettings } = await import("../../src/settings/config.ts");
+  const root = await mkdtemp(join(tmpdir(), "always-run-settings-"));
+  try {
+    const store = new ConfigStore(root);
+    const profile: SeatSettings = { version: 1, bindings: [], gamepad: defaultGamepadTuning, mouse: defaultMouseTuning,
+      history: [], rumble: true, controller: { kind: "automatic" } };
+    for (const alwaysRun of [false, true]) {
+      await store.saveSeat("input/seat-1.json", { ...profile, alwaysRun });
+      expect((await store.loadSeat("input/seat-1.json"))?.alwaysRun).toBe(alwaysRun);
+    }
+    expect(parseSeatSettings(profile).alwaysRun).toBeUndefined();
+    expect(() => parseSeatSettings({ ...profile, alwaysRun: "true" })).toThrow("Expected a settings boolean");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

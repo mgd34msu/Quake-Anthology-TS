@@ -47,6 +47,61 @@ test("scene shader registration follows admission across providers and deferred 
   } finally { firstTextures.close(); secondTextures.close(); images.close(); }
 });
 
+test("source bootstrap publishes real internal materials before scripts and preserves handles through reload", async () => {
+  const textures = loader(new Map<string, SceneAsset>()), replacementTextures = loader(new Map<string, SceneAsset>());
+  const registrations = new SceneMaterialRegistrations();
+  const shaders = new SceneShaderRegistry(textures, registrations.provider("q3:classic:retail:bootstrap"));
+  try {
+    let scriptLoads = 0;
+    await shaders.initializeSourceMaterials(async () => {
+      scriptLoads++;
+      expect(registrations.snapshot().map(material => material.registered.definition.name))
+        .toEqual(["*default", "<stencil shadow>"]);
+      shaders.addScript("projectionShadow { sort 9 { map $whiteimage blendFunc add } }\nflareShader { sort 9 { map $whiteimage blendFunc add } }\nsun { sort 9 { map $whiteimage blendFunc add } }");
+    });
+    const original = shaders.sourceMaterials;
+    expect((await shaders.register("")).registration).toBe(original.default.registration);
+    const builtins = [original.default, original.stencilShadow, original.projectionShadow, original.flare, original.sun];
+    expect(new Set(builtins.map(material => material.registration)).size).toBe(5);
+    expect(registrations.snapshot().filter(material => material.finished.sort === 9))
+      .toEqual([original.projectionShadow, original.flare, original.sun]);
+    await shaders.initializeSourceMaterials(async () => { scriptLoads++; });
+    expect(scriptLoads).toBe(1);
+    const before = registrations.snapshot();
+    const replacement = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(replacement);
+    expect(registrations.snapshot()).toEqual(before);
+    shaders.commitReplacement(replacement);
+    for (const key of ["default", "stencilShadow", "projectionShadow", "flare", "sun"] satisfies readonly (keyof typeof original)[])
+      expect(shaders.sourceMaterials[key]).toBe(original[key]);
+    expect((await shaders.register("")).registration).toBe(original.default.registration);
+    expect(registrations.snapshot()).toHaveLength(5);
+  } finally { textures.close(); replacementTextures.close(); }
+});
+
+test("source replacement rejects a live lookup still waiting for image resolution", async () => {
+  const started = Promise.withResolvers<void>(), held = Promise.withResolvers<SceneAsset | null>();
+  const images = new SceneImageRegistry({ identity: Symbol("pending-source"), session: createIdentityOwner("pending-source").session, generation: 0 });
+  const textures = new SceneTextureLoader(images, { read: async name => {
+    if (name.startsWith("pending-source")) { started.resolve(); return held.promise; }
+    return null;
+  } });
+  const replacementTextures = loader(new Map<string, SceneAsset>()), registrations = new SceneMaterialRegistrations();
+  const shaders = new SceneShaderRegistry(textures, registrations.provider("q3:classic:retail:pending"));
+  try {
+    await shaders.initializeSourceMaterials(async () => {});
+    const replacement = shaders.replacement(replacementTextures);
+    await shaders.prepareReplacement(replacement);
+    const before = registrations.snapshot(), pending = shaders.register("pending-source.bmp");
+    await started.promise;
+    try {
+      expect(() => shaders.validateReplacement(replacement)).toThrow("pending");
+      expect(registrations.snapshot()).toEqual(before);
+    } finally { held.resolve(asset(bmp(2, 2), "pending-source.bmp")); await pending; replacement.discardReplacement(); }
+    expect(registrations.snapshot()).toHaveLength(before.length + 1);
+  } finally { textures.close(); replacementTextures.close(); images.close(); }
+});
+
 test("scene shader registration keeps retained pictures isolated until replacement commit and discards failed stages", async () => {
   const registrations = new SceneMaterialRegistrations();
   const images = new SceneImageRegistry({ identity: Symbol("retained-registration"), session: createIdentityOwner("retained-registration").session, generation: 0 });

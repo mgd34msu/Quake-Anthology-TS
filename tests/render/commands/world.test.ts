@@ -1,6 +1,6 @@
 import { SceneMaterialRegistrations } from "../../../src/render/scene/material-registrations.ts";
 import { prepareMaterialBatches } from "../../../src/materials/evaluate.ts";
-import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches } from "../../../src/render/scene/submissions.ts";
+import { compiledDrawGroup, sequenceDrawGroup, finishSceneOperations, sceneModelBatches, createSourceSceneOrder, sourceDrawGroup } from "../../../src/render/scene/submissions.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -22,7 +22,7 @@ import { CpuRenderTarget } from "../../../src/render/cpu/commands.ts";
 import { encodePng } from "../../../src/formats/images/png.ts";
 import { parseMd2 } from "../../../src/formats/q12-model/index.ts";
 import { SceneModelRenderer } from "../../../src/render/scene/models/renderer.ts";
-import type { WorldViewInput } from "../../../src/render/scene/world.ts";
+import { createWorldSurfaceAdmission, type WorldViewInput } from "../../../src/render/scene/world.ts";
 
 test("HUD clipping keeps texture coordinates inside an independent seat", () => {
   expect(clipPicture({ x: -10, y: 0, width: 20, height: 10 }, { s1: 0, t1: 0, s2: 1, t2: 1 }, { x: 0, y: 0, width: 100, height: 100 }))
@@ -57,22 +57,99 @@ ordering/flash { cull none
       viewport: { x: 0, y: 0, width: 32, height: 32 }, projection: perspectiveProjection(90, 90, 4096), clip: { kind: "none" } };
     const input: WorldViewInput = { camera, target: { kind: "seat", seat: identity.seat(0) }, time: { kind: "seconds", value: 0 } };
     const context = scene.materialContext(input), geometry = { vertices: map.vertices, indices: map.indices };
+    const drawBatches = (operations: readonly RenderOperation[]) => operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
     const mark = await shaders.register("ordering/mark"), flash = await shaders.register("ordering/flash");
     expect(mark.finished.sort).toBe(4); expect(flash.finished.sort).toBe(9);
     const markBatches = prepareMaterialBatches(mark, geometry, context), flashBatches = prepareMaterialBatches(flash, geometry, context);
     expect(flashBatches).toHaveLength(2);
     const legacyBatches: readonly DrawBatch[] = flashBatches.map(batch => ({ ...batch, state: { ...batch.state, depthWrite: true } }));
     const markGroup = compiledDrawGroup(mark, markBatches), flashGroup = compiledDrawGroup(flash, flashBatches);
+    const sourceView = createSourceSceneOrder(shaders.registrations.owner);
+    const sourceOrder = { view: sourceView, entity: { kind: "world" }, surface: 0, fog: 0, dlight: 0 } satisfies Parameters<typeof sourceDrawGroup>[1];
+    const sourceA = sourceDrawGroup(flash, sourceOrder, flashBatches);
+    const sourceB = sourceDrawGroup(flash, { ...sourceOrder, surface: 1 }, markBatches);
+    const sourceC = sourceDrawGroup(flash, { ...sourceOrder, surface: 2 }, legacyBatches);
+    // Donor shortsort swaps the first maximum to the end, including equal words.
+    expect(finishSceneOperations([sourceA, sourceB, sourceC])).toEqual([...sourceB.operations, ...sourceC.operations, ...sourceA.operations]);
+    const empty = sourceDrawGroup(flash, { ...sourceOrder, surface: 3 }, []);
+    expect(empty.operations).toEqual([]);
+    expect(finishSceneOperations([empty, sourceA, sourceC])).toEqual([...sourceA.operations, ...sourceC.operations]);
+    expect(finishSceneOperations([sourceA, sourceC])).toEqual([...sourceC.operations, ...sourceA.operations]);
+    const sourceKeys = [
+      { entity: { kind: "world" }, fog: 0, dlight: 0 },
+      { entity: { kind: "refentity", index: 2 }, fog: 0, dlight: 0 },
+      { entity: { kind: "refentity", index: 1 }, fog: 2, dlight: 0 },
+      { entity: { kind: "refentity", index: 1 }, fog: 1, dlight: 1 },
+      { entity: { kind: "refentity", index: 1 }, fog: 1, dlight: 0 },
+    ] satisfies readonly Pick<Parameters<typeof sourceDrawGroup>[1], "entity" | "fog" | "dlight">[];
+    const keyed = sourceKeys.map((key, surface) => sourceDrawGroup(flash, { ...sourceOrder, ...key, surface }, flashBatches));
+    const keyedResult = finishSceneOperations(keyed), keyedExpected = [...keyed].reverse().flatMap(group => group.operations);
+    expect(keyedResult).toHaveLength(keyedExpected.length);
+    for (const [index, operation] of keyedResult.entries()) expect(operation === keyedExpected[index]).toBe(true);
+    // Fixed full-range donor qsortFast oracle, including its partition history for equal words.
+    const partitionKeys = [4, 1, 4, 2, 1, 4, 0, 2, 4, 1, 3, 2, 0, 4, 3, 1, 4];
+    const partitionOrder = [12, 6, 1, 4, 9, 15, 3, 7, 11, 10, 14, 2, 13, 5, 0, 8, 16];
+    const partitionGroups = partitionKeys.map((fog, surface) => sourceDrawGroup(flash, { ...sourceOrder, fog, surface }, flashBatches));
+    const partitionResult = finishSceneOperations(partitionGroups);
+    expect(partitionResult).toHaveLength(partitionOrder.length);
+    for (const [index, original] of partitionOrder.entries()) expect(partitionResult[index]).toBe(partitionGroups[original]?.operations[0]);
+    shaders.addScript("ordering/late { sort 2 { map $whiteimage } }");
+    const late = await shaders.register("ordering/late"), lateGroup = sourceDrawGroup(late, sourceOrder, markBatches);
+    expect(finishSceneOperations([sourceA, lateGroup])).toEqual([...lateGroup.operations, ...sourceA.operations]);
+    const sourceMark = sourceDrawGroup(mark, sourceOrder, markBatches);
+    expect(finishSceneOperations([sourceA, sourceMark])).toEqual([...sourceMark.operations, ...sourceA.operations]);
+    const otherView = sourceDrawGroup(mark, { ...sourceOrder, view: createSourceSceneOrder(shaders.registrations.owner) }, markBatches);
+    expect(() => finishSceneOperations([sourceA, otherView])).toThrow("Different source views");
+    const scaledTransform = { origin: { x: 0, y: 80, z: 0 }, axis: camera.axis, scale: 3 };
+    expect(drawBatches(finishSceneOperations(scene.prepareModel(0, { ...scaledTransform, scale: 1 }, input)))).toHaveLength(0);
+    expect(drawBatches(finishSceneOperations(scene.prepareModel(0, scaledTransform, input))).length).toBeGreaterThan(0);
+    const numberedMap: typeof map = { ...map, shaders: [{ name: "ordering/flash", surfaceFlags: 0, contentFlags: 0 }],
+      surfaces: map.surfaces.map(surface => ({ ...surface, fog: 7 })) };
+    const numberedScene = await WorldScene.load(numberedMap, shaders);
+    try {
+      const admitted = numberedScene.prepareModel(0, { origin: camera.origin, axis: camera.axis }, {
+        ...input, source: createWorldSurfaceAdmission(sourceView),
+        q3Lights: [{ origin: { x: 32, y: 0, z: 0 }, radius: 64, color: { x: 1, y: 1, z: 1 }, additive: false }],
+      }, { kind: "refentity", index: 5 });
+      expect(admitted).toHaveLength(1);
+      const first = admitted[0], order = first?.kind === "scene-group" ? first.order : undefined;
+      if (order?.kind !== "source") throw new Error("Missing source world admission");
+      expect(order.source.fog).toBe(8);
+      expect(order.source.dlight).toBe(1);
+      const admittedBatches = drawBatches(finishSceneOperations(admitted));
+      expect(admittedBatches).toHaveLength(2);
+      expect(admittedBatches.every(batch => batch.state.blend.source === "one" && batch.state.blend.destination === "one")).toBe(true);
+    } finally { numberedScene.close(); }
+    const nativeShaders = new SceneShaderRegistry(textures, shaders.registrations.owner.provider("q3:classic:retail:source-default"));
+    await nativeShaders.initializeSourceMaterials(async () => {});
+    const beforeMissing = shaders.registrations.owner.snapshot().length;
+    const missingScene = await WorldScene.load({ ...map, shaders: [{ name: "ordering/missing-image", surfaceFlags: 0, contentFlags: 0 }] }, nativeShaders);
+    try {
+      expect(shaders.registrations.owner.snapshot()).toHaveLength(beforeMissing + 1);
+      expect(missingScene.surfaces[0]?.shader).toBe(nativeShaders.sourceMaterials.default);
+    } finally { missingScene.close(); }
     const legacy = sequenceDrawGroup("opaque", legacyBatches);
-    const drawBatches = (operations: readonly RenderOperation[]) => operations.flatMap(operation => operation.kind === "draw" ? operation.batches : []);
     const before = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
     expect(before.slice(1)).toEqual([...legacyBatches, ...markBatches, ...flashBatches]);
     await scene.remapShader("ordering/world", "ordering/remap");
+    shaders.addScript("ordering/peer { sort 6 { map $whiteimage } }");
+    const peer = await shaders.register("ordering/peer"), peerGroup = sourceDrawGroup(peer, sourceOrder, markBatches);
+    const originalSortGroups = scene.prepareModel(0, { origin: camera.origin, axis: camera.axis },
+      { ...input, source: createWorldSurfaceAdmission(sourceView) }, { kind: "refentity", index: 0 });
+    const originalGroup = originalSortGroups[0];
+    if (originalGroup?.kind !== "scene-group" || originalGroup.order.kind !== "source") throw new Error("Missing remapped source world group");
+    expect(originalGroup.order.material.finished.sort).toBe(3);
+    expect(drawBatches(finishSceneOperations(originalSortGroups))[0]?.state.blend).toEqual({ source: "one", destination: "one" });
+    expect(finishSceneOperations([peerGroup, ...originalSortGroups])[0]).toBe(originalGroup.operations[0]);
+    const genericRemapped = scene.prepareModel(0, { origin: camera.origin, axis: camera.axis }, input);
+    expect(finishSceneOperations([...genericRemapped, compiledDrawGroup(peer, markBatches)])[0]?.kind).toBe("draw");
+    expect(drawBatches(finishSceneOperations([...genericRemapped, compiledDrawGroup(peer, markBatches)]))[0]).toBe(markBatches[0]);
     const remapped = drawBatches(scene.prepareView({ ...input, operations: [flashGroup, legacy, markGroup] }).view.operations);
     expect(remapped.slice(0, legacyBatches.length + markBatches.length)).toEqual([...legacyBatches, ...markBatches]);
     expect(remapped.at(legacyBatches.length + markBatches.length)?.vertices[0]?.color.x).toBeCloseTo(0.2, 2);
     expect(remapped.slice(-2)).toEqual([...flashBatches]);
     const barrier: RenderOperation = { kind: "depth-range", range: [0, 0.3] };
+    expect(finishSceneOperations([sourceA, barrier, otherView])).toEqual([...sourceA.operations, barrier, ...otherView.operations]);
     expect(finishSceneOperations([flashGroup, barrier, markGroup])).toEqual([...flashGroup.operations, barrier, ...markGroup.operations]);
     const translucent = sequenceDrawGroup("translucent", markBatches);
     expect(drawBatches(finishSceneOperations([translucent, legacy]))).toEqual([...markBatches, ...legacyBatches]);
@@ -239,6 +316,17 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
         const directed = { ...input, camera: { ...camera, origin: { x: surface.bounds.min.x, y: surface.bounds.min.y, z: surface.bounds.max.z + 32 } } };
         const preparedOverride = overridden.prepareModel(0, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }) }, directed);
         expect(finishSceneOperations(preparedOverride).some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
+        const near = { origin: { x: (surface.bounds.min.x + surface.bounds.max.x) / 2,
+          y: (surface.bounds.min.y + surface.bounds.max.y) / 2, z: (surface.bounds.min.z + surface.bounds.max.z) / 2 },
+          radius: 512, color: { x: 1, y: 0.25, z: 0.1 }, additive: false };
+        const far = { ...near, origin: { x: 100000, y: 100000, z: 100000 } };
+        const projected = (lights: typeof near[]) => finishSceneOperations(overridden.prepareModel(0,
+          { origin: { x: 0, y: 0, z: 0 }, axis: camera.axis }, { ...directed, q3Lights: lights }))
+          .flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+          .filter(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated" && batch.texture.image.source.name === "*dlight");
+        const firstLight = projected([near]), secondLight = projected([far, near]);
+        expect(firstLight.length).toBeGreaterThan(0);
+        expect(secondLight).toEqual(firstLight);
         expect(images.drainOperations().some(operation => operation.kind === "update-image" && operation.image === surface.lightmap?.image)).toBe(true);
         await overridden.remapShader(name, name);
         const shadowLight: SceneLight = { origin: directed.camera.origin, color: { x: 1, y: 1, z: 1 }, radius: 512, additive: false,

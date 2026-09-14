@@ -37,7 +37,7 @@ export interface ApplicationQ3ServiceOptions {
 export async function createApplicationQ3Services(options: ApplicationQ3ServiceOptions) {
   const { media, seat, output } = options;
   const scene = new Q3SceneRecorder({ seat, viewport: options.viewport, farClip: 16384, nearClip: 4, rail: DEFAULT_RAIL_SETTINGS,
-    actor: () => null, publish: value => output.scene(value) });
+    fogSelections: () => media.assets.world.fogSelections, print: text => media.print(text), actor: () => null, publish: value => output.scene(value) });
   const map = media.assets.content.world;
   const clip = options.queries instanceof SharedSceneQueries ? options.queries.nativeQ3ClipModels() : null;
   const resources = new Q3RendererResources(await media.resourceHost(scene), map.kind === 'q3-bsp' && clip !== null

@@ -98,9 +98,9 @@ describe("Q3 cgame presentation", () => {
     if (tag === null) throw new Error("Retail Sarge has no torso tag");
     positionEntityOnTag(child, parent, lower, "tag_torso");
     expect(child.origin.z).toBeCloseTo(30 + tag.origin.z, 4); expect(child.backLerp).toBe(0.25);
-    const identity = createIdentityOwner("q3-presentation"), seat = identity.seat(1), scenes: Q3PresentedScene[] = [];
+    const identity = createIdentityOwner("q3-presentation"), seat = identity.seat(1), scenes: Q3PresentedScene[] = [], warnings: string[] = [];
     const scene = new Q3SceneRecorder({ seat, viewport: { x: 640, y: 0, width: 640, height: 480 }, nearClip: 4, farClip: 4096,
-      rail: DEFAULT_RAIL_SETTINGS, actor: () => null, publish: value => { scenes.push(value); } });
+      rail: DEFAULT_RAIL_SETTINGS, fogSelections: () => [], print: text => { warnings.push(text); }, actor: () => null, publish: value => { scenes.push(value); } });
     scene.addRefEntity(parent);
     scene.addRefEntity(createPortalEntity());
     scene.addRefEntity(createBeamEntity());
@@ -109,6 +109,8 @@ describe("Q3 cgame presentation", () => {
     scene.addRefEntity(sprite);
     scene.addRefEntity(parent);
     scene.addPoly({ shader: null, vertices: [{ position: { x: 1, y: 2, z: 3 }, texCoord: { x: 0, y: 0 }, color: { x: 255, y: 255, z: 255, w: 255 } }] });
+    scene.addPoly({ shader: { name: "gfx/damage/bullet_mrk" }, vertices: [{ position: { x: 1, y: 2, z: 3 }, texCoord: { x: 0, y: 0 }, color: { x: 255, y: 255, z: 255, w: 255 } }] });
+    expect(warnings).toHaveLength(1);
     parent.origin = { x: 0, y: 0, z: 0 };
     const refdef = createRefdef(); refdef.width = 640; refdef.height = 480; refdef.fovX = 90; refdef.fovY = 73.7398; refdef.viewAxis = qvmAnglesToAxis({ x: 0, y: 0, z: 0 });
     scene.renderScene(refdef); scene.renderScene(refdef); scene.clearScene();
@@ -125,8 +127,8 @@ describe("Q3 cgame presentation", () => {
     expect(firstScene.admission.entities[0]).not.toBe(firstScene.admission.entities[5]);
     for (const model of firstScene.models) expect(firstScene.admission.entities[model.entityIndex]).toBe(model.source);
     for (const entity of [...firstScene.portals, ...firstScene.specialEntities]) expect(firstScene.admission.entities[entity.entityIndex]).toBe(entity.source);
-    for (const effect of firstScene.effects) expect(effect.admission.kind === "refentity"
-      ? firstScene.admission.entities[effect.admission.index] : firstScene.admission.polygons[effect.admission.index]).toBe(effect.source);
+    for (const effect of firstScene.effects) expect(effect.source === (effect.admission.kind === "refentity"
+      ? firstScene.admission.entities[effect.admission.index] : firstScene.admission.polygons[effect.admission.index])).toBe(true);
     expect(Object.isFrozen(firstScene.admission)).toBe(true); expect(Object.isFrozen(firstScene.admission.entities)).toBe(true);
     expect(Object.isFrozen(firstScene.admission.polygons)).toBe(true);
     expect(cleared.admission.entities).toHaveLength(1); expect(cleared.admission.polygons).toHaveLength(0);

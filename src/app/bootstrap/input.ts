@@ -202,6 +202,7 @@ export class ApplicationInput {
       const profile = saved[index]; if (profile === undefined || profile === null) continue;
       local.input.unbindAll(); for (const binding of profile.bindings) local.input.bind(binding);
       local.input.gamepad.tuning = structuredClone(profile.gamepad);
+      if (profile.alwaysRun !== undefined) local.builder.tuning = { ...local.builder.tuning, alwaysRun: profile.alwaysRun };
       if (owner?.inputSettings === undefined) local.builder.mouse.tuning = { ...profile.mouse };
       local.console.history.replace(profile.history); local.haptics.setEnabled(profile.rumble); local.haptics.setStrength(profile.rumbleStrength ?? 1);
     }
@@ -410,7 +411,7 @@ export class ApplicationInput {
       const bindings = local.input.bindings.map(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis"
         ? { ...binding, input: { ...binding.input, device: 0 } } : binding);
       await this.settings.saveSeat(`input/seat-${index + 1}.json`, { version: 1, bindings,
-        gamepad: structuredClone(local.input.gamepad.tuning), mouse: { ...local.builder.mouse.tuning }, history: local.console.history.lines,
+        alwaysRun: local.builder.tuning.alwaysRun, gamepad: structuredClone(local.input.gamepad.tuning), mouse: { ...local.builder.mouse.tuning }, history: local.console.history.lines,
         rumble: local.haptics.enabled, rumbleStrength: local.haptics.strength, controller: this.router.controllerSelection(local.player.seat.id) });
       await this.controllerSettings.save(local.player.seat.id);
     }

@@ -86,12 +86,12 @@ export class InputCommandBuilder {
       forward = add(forward, f((q3 ? moveSpeed : this.tuning.forwardSpeed) * fraction("forward")));
       forward = add(forward, -f((q3 ? moveSpeed : this.tuning.backSpeed) * fraction("back")));
     }
-    if (!q3 && (q1 ? speed : running)) { forward *= this.tuning.moveSpeedMultiplier; side *= this.tuning.moveSpeedMultiplier; up *= this.tuning.moveSpeedMultiplier; }
+    if (!q3 && running) { forward *= this.tuning.moveSpeedMultiplier; side *= this.tuning.moveSpeedMultiplier; up *= this.tuning.moveSpeedMultiplier; }
     const mouse = this.mouse.sample(sample.mouse, sample.frameMilliseconds, strafe, active("mlook"), frame.kind === "q3" ? frame.sensitivity : 1, q3);
     forward = add(forward, mouse.forward); side = add(side, mouse.side);
     yaw = f(yaw + mouse.yaw - sample.gamepadLookDegrees.x); pitch = f(pitch + mouse.pitch + sample.gamepadLookDegrees.y);
-    const padForward = q3 ? moveSpeed : this.tuning.forwardSpeed * (q1 ? speed ? this.tuning.moveSpeedMultiplier : 1 : running ? this.tuning.moveSpeedMultiplier : 1);
-    const padSide = q3 ? moveSpeed : this.tuning.sideSpeed * (q1 ? speed ? this.tuning.moveSpeedMultiplier : 1 : running ? this.tuning.moveSpeedMultiplier : 1);
+    const padForward = q3 ? moveSpeed : this.tuning.forwardSpeed * (running ? this.tuning.moveSpeedMultiplier : 1);
+    const padSide = q3 ? moveSpeed : this.tuning.sideSpeed * (running ? this.tuning.moveSpeedMultiplier : 1);
     forward = add(forward, sample.gamepadMove.y * padForward); side = add(side, sample.gamepadMove.x * padSide);
     let buttons = 0;
     const any = sample.anyKeyDown !== 0;

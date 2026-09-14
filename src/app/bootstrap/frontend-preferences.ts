@@ -68,6 +68,7 @@ export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
   audioBaseline: Partial<AudioPreferences> = {};
   get audioValues(): AudioSettings { return { effectsVolume: this.values.effectsVolume ?? this.audioBaseline.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? this.audioBaseline.musicVolume ?? 0.25 }; }
+  private alwaysRunBaseline: boolean | undefined;
   private mouseBaseline: MouseTuning = defaultMouseTuning;
   constructor(private readonly dialect: () => CommandDialect) {}
   async loadBaseline(settings: ConfigStore): Promise<void> {
@@ -77,6 +78,7 @@ export class FrontendPreferences {
       origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } } }));
     if (saved !== null) mouse.write(saved.mouse);
     this.mouseBaseline = mouse.read();
+    this.alwaysRunBaseline = saved?.alwaysRun;
   }
   async saveAudioBaseline(settings: ConfigStore): Promise<void> {
     if (this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
@@ -94,7 +96,7 @@ export class FrontendPreferences {
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,
       pitch: this.values.pitch ?? this.mouseBaseline.pitch, yaw: this.values.yaw ?? this.mouseBaseline.yaw,
       invertMouse: this.values.invertMouse ?? this.mouseBaseline.invertPitch,
-      alwaysRun: this.values.alwaysRun ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
+      alwaysRun: this.values.alwaysRun ?? this.alwaysRunBaseline ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindMouseMotionSettings({ read: () => ({ acceleration: this.values.acceleration ?? this.mouseBaseline.acceleration,
       filter: this.values.filter ?? this.mouseBaseline.filter, freeLook: this.values.freeLook ?? this.mouseBaseline.freeLook }),

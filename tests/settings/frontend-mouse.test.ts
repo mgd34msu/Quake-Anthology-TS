@@ -51,20 +51,20 @@ test("saved mouse baseline reloads read-only beneath selected overrides", async 
     const profile = { version: 1, bindings: [], gamepad: defaultGamepadTuning, mouse: { ...defaultMouseTuning,
       sensitivity: 7.5, yaw: -0.011, pitch: 0, invertPitch: true, acceleration: 0.75, filter: true, freeLook: false },
       history: [], rumble: true, controller: { kind: "automatic" } } satisfies import("../../src/settings/config.ts").SeatSettings;
-    await one.saveSeat("input/seat-1.json", profile);
+    await one.saveSeat("input/seat-1.json", { ...profile, alwaysRun: true });
     await one.saveSeat("input/seat-2.json", { ...profile, mouse: { ...profile.mouse, sensitivity: 14 } });
     await two.saveSeat("input/seat-1.json", { ...profile, mouse: { ...defaultMouseTuning, sensitivity: 9, acceleration: 1 } });
     const before = await one.loadText("input/seat-1.json"), beforeOther = await one.loadText("input/seat-2.json");
     const preferences = new FrontendPreferences(() => "q1-netquake"), bindings = preferences.bindings();
     const read = (id: string): number | boolean => { const binding = control(bindings, id); if (binding.kind !== "slider" && binding.kind !== "toggle") throw new Error("Expected mouse value"); return binding.read(); };
     await preferences.loadBaseline(one);
-    expect(preferences.values).toEqual({}); expect(read("sensitivity")).toBe(7.5);
+    expect(preferences.values).toEqual({}); expect(read("sensitivity")).toBe(7.5); expect(read("always-run")).toBe(true);
     expect(read("mouse-yaw")).toBeCloseTo(50); expect(read("mouse-pitch")).toBe(0); expect(read("invert-mouse")).toBe(true);
     expect(read("acceleration")).toBe(0.75); expect(read("filter")).toBe(true); expect(read("freelook")).toBe(false);
     const acceleration = control(bindings, "acceleration"); if (acceleration.kind !== "slider") throw new Error("Expected acceleration");
     acceleration.write(0.5); expect(preferences.values).toEqual({ acceleration: 0.5 });
     await preferences.loadBaseline(two);
-    expect(read("sensitivity")).toBe(9); expect(read("mouse-pitch")).toBeCloseTo(100); expect(read("invert-mouse")).toBe(false);
+    expect(read("sensitivity")).toBe(9); expect(read("always-run")).toBe(false); expect(read("mouse-pitch")).toBeCloseTo(100); expect(read("invert-mouse")).toBe(false);
     expect(read("filter")).toBe(false); expect(read("freelook")).toBe(true); expect(read("acceleration")).toBe(0.5);
     await preferences.loadBaseline(new ConfigStore(join(root, "missing")));
     expect(read("sensitivity")).toBe(3); expect(preferences.values).toEqual({ acceleration: 0.5 });

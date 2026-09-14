@@ -115,7 +115,7 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
         expect(await shared.preloadTransientResources()).toHaveLength(0);
         expect(create).not.toHaveBeenCalled();
         shared.frame({ origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
-          projection: identityMat4(), viewport: { x: 0, y: 0, width: 64, height: 64 }, clip: { kind: "none" } });
+          projection: identityMat4(), viewport: { x: 0, y: 0, width: 64, height: 64 }, clip: { kind: "none" } }, createSourceSceneOrder(assets.materialRegistrations));
         expect(frame).not.toHaveBeenCalled();
         expect(shared.drainSounds()).toHaveLength(0);
         shared.close();
@@ -203,7 +203,7 @@ for (const mode of ["provider", "model", "texture"] satisfies readonly string[])
           await effects.prepare(snapshot, []);
           expect(effects.drainUnhandled()).toHaveLength(0);
           const output = effects.frame({ origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
-            projection: identityMat4(), viewport: { x: 0, y: 0, width: 640, height: 480 }, clip: { kind: "none" } });
+            projection: identityMat4(), viewport: { x: 0, y: 0, width: 640, height: 480 }, clip: { kind: "none" } }, createSourceSceneOrder(assets.materialRegistrations));
           expect(output.lights.some(light => light.radius > 0)).toBe(true);
         } finally { effects.close(); }
       } finally { assets.close(); await content.close(); }
@@ -252,3 +252,4 @@ test("late provider failure releases only its new texture loader before retry", 
     } finally { assets.close(); closeSpy.mockRestore(); await content.close(); }
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }, 60000);
+import { createSourceSceneOrder } from "../../src/render/scene/submissions.ts";

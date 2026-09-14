@@ -220,3 +220,14 @@ test("API completion closes hanging streams and cancellation within a delta bloc
     async () => new Response(body, { headers: { "content-type": "text/event-stream" } }))).rejects.toThrow("cancelled");
   expect(deltas).toEqual(["first"]);
 });
+
+test("API keeps the SSE media requirement and cancels rejected response bodies", async () => {
+  let cancelled = false;
+  await expect(requestChatCompletions(input(), { apiKey: "test-key", baseUrl: "https://example.test/v1" }, async () =>
+    new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(completion())); },
+      cancel() { cancelled = true; },
+    }), { headers: { "content-type": "application/json; secret=do-not-reflect" } })))
+    .rejects.toThrow("LLM service did not return an event stream (HTTP 200, JSON).");
+  expect(cancelled).toBe(true);
+});

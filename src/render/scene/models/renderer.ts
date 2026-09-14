@@ -1,4 +1,4 @@
-import { compiledDrawGroup, sequenceDrawGroup } from "../submissions.ts";
+import { compiledDrawGroup, sequenceDrawGroup, sourceDrawGroup } from "../submissions.ts";
 import type { SceneModelGroup } from "../submissions.ts";
 import type { GameFamily } from "../../../contracts/content.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -7,10 +7,9 @@ import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
 import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { q1PlayerTranslation } from "../../../formats/images/index.ts";
 import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/index.ts";
-import type { CompiledMaterial } from "../../../materials/compile.ts";
+import type { RegisteredSceneMaterial } from "../material-registrations.ts";
 import { diffuseColor } from "../../../materials/color.ts";
 import type { EntityLighting } from "../../../materials/q3-lighting.ts";
-import type { FogVolume } from "../../../materials/fog.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from "../../../materials/legacy.ts";
 import type { SceneShaderRegistry } from "../shaders.ts";
@@ -40,7 +39,7 @@ export interface ModelRenderProvider {
 }
 type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
 type ModelResource = Pick<SceneEntity, "resource" | "model">;
-type Material = { readonly kind: "q3"; readonly name: string; readonly compiled: CompiledMaterial; readonly timeOffset: number }
+type Material = { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial; readonly compiled: RegisteredSceneMaterial; readonly timeOffset: number }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
 const normalIndices = new Map<number, Map<number, Map<number, number>>>();
@@ -64,18 +63,11 @@ export class SceneModelRenderer {
   readonly lighting: ModelLightSampler;
   private readonly materials = new Map<string, Material>();
   private readonly pending = new Map<string, Promise<void>>();
-  private readonly fogs: readonly FogVolume[];
   private textures: SceneTextureLoader;
 
   constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
     this.textures = provider.textures;
     this.lighting = new ModelLightSampler(world);
-    const volumes = new Map<number, FogVolume>();
-    if (world.map.kind === "q3-bsp") for (const surface of world.surfaces) {
-      const source = world.map.surfaces[surface.index];
-      if (surface.kind === "q3" && surface.fog !== null && source !== undefined) volumes.set(source.fog, surface.fog);
-    }
-    this.fogs = [...volumes].sort(([a], [b]) => a - b).map(([, volume]) => volume);
   }
 
   async refreshShaderRemaps(): Promise<void> {
@@ -158,7 +150,8 @@ export class SceneModelRenderer {
     const pending = (async (): Promise<void> => {
       if (this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
         const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
-        this.materials.set(key, { kind: "q3", name, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
+        const original = await this.provider.shaders.register(name);
+        this.materials.set(key, { kind: "q3", name, original, compiled: remap.name === name ? original : await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
       }
       const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
         : selection.kind === "indexed" ? this.indexedTexture(entity, selection, options) : await this.externalTexture(entity, selection.name, options);
@@ -337,19 +330,32 @@ export class SceneModelRenderer {
     return { x: palette.colors[index * 3] ?? 0, y: palette.colors[index * 3 + 1] ?? 0, z: palette.colors[index * 3 + 2] ?? 0 };
   }
 
-  private fogFor(entity: SceneEntity): FogVolume | null {
-    const model = entity.model, frame = entity.pose.kind === "frame" ? entity.pose.frame : 0;
+  private fogFor(surface: PreparedModelSurface): WorldScene["fogSelections"][number] | null {
+    const entity = surface.entity, model = entity.model, frame = entity.pose.kind === "frame" ? entity.pose.frame : 0;
+    if (surface.options.noWorldModel === true) return null;
     let center = entity.transform.origin, radius = 0;
-    if (model.kind === "q3-md3" || model.kind === "q3-md4") {
+    if (surface.fogSphere !== null) {
+      const sphere = surface.fogSphere;
+      center = { x: Math.fround(center.x + sphere.localOrigin.x), y: Math.fround(center.y + sphere.localOrigin.y),
+        z: Math.fround(center.z + sphere.localOrigin.z) };
+      radius = sphere.radius;
+      return this.world.fogSelections.find(({ volume }) => Math.fround(center.x - radius) < volume.bounds.max.x
+        && Math.fround(center.x + radius) > volume.bounds.min.x && Math.fround(center.y - radius) < volume.bounds.max.y
+        && Math.fround(center.y + radius) > volume.bounds.min.y && Math.fround(center.z - radius) < volume.bounds.max.z
+        && Math.fround(center.z + radius) > volume.bounds.min.z) ?? null;
+    }
+    if (model.kind === "q3-md3") throw new Error("Prepared MD3 surface lost its selected-frame fog sphere");
+    if (surface.options.source !== undefined && model.kind === "q3-md4") return null;
+    if (model.kind === "q3-md4") {
       const pose = model.frames[frame] ?? model.frames[0];
       if (pose !== undefined) { center = add3(center, pose.localOrigin); radius = pose.radius; }
     } else if (model.kind === "md5") {
       const pose = model.frames[frame] ?? model.frames[0];
       if (pose !== undefined) radius = radiusFromBounds(pose.bounds);
     } else if (model.kind !== "brush-model") radius = radiusFromBounds(model.bounds);
-    return this.fogs.find(fog => center.x - radius < fog.bounds.max.x && center.x + radius > fog.bounds.min.x
-      && center.y - radius < fog.bounds.max.y && center.y + radius > fog.bounds.min.y
-      && center.z - radius < fog.bounds.max.z && center.z + radius > fog.bounds.min.z) ?? null;
+    return this.world.fogSelections.find(({ volume }) => center.x - radius < volume.bounds.max.x && center.x + radius > volume.bounds.min.x
+      && center.y - radius < volume.bounds.max.y && center.y + radius > volume.bounds.min.y
+      && center.z - radius < volume.bounds.max.z && center.z + radius > volume.bounds.min.z) ?? null;
   }
 
   private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, shade?: Vec3): readonly SceneModelGroup[] {
@@ -359,7 +365,8 @@ export class SceneModelRenderer {
     if (material.kind === "q3") {
       const axis = surface.transform.axis;
       const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
-      const base = this.world.materialContext(input, transform, options.noWorldModel === true ? null : this.fogFor(surface.entity));
+      const fog = this.fogFor(surface);
+      const base = this.world.materialContext(input, transform, fog?.volume ?? null);
       const project = createViewProjector(input.camera);
       const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
         shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
@@ -367,7 +374,10 @@ export class SceneModelRenderer {
         timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
         project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
-      return [compiledDrawGroup(material.compiled, prepareMaterialBatches(material.compiled, surface.localGeometry, context))];
+      const batches = prepareMaterialBatches(material.compiled, surface.localGeometry, context);
+      // R_AddMD3Surfaces and R_AddAnimSurfaces submit no frontend dlight bits.
+      return [options.source === undefined ? compiledDrawGroup(material.compiled, batches)
+        : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches)];
     }
     const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;
     const lighting = { kind: "vertex" } satisfies Parameters<typeof createQ1Material>[2];

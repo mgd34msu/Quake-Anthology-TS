@@ -18,6 +18,7 @@ export interface RegisteredSceneMaterial extends CompiledMaterial {
 export interface ShaderLogicalKey {
   readonly name: string;
   readonly binding: { readonly kind: "unlit"; readonly lightmapIndex: -1 | -2 | -3 | -4 }
+    | { readonly kind: "source"; readonly request: number }
     | { readonly kind: "world"; readonly world: ShaderWorldIdentity; readonly lightmapIndex: number; readonly baseTextureName: string | null };
 }
 
@@ -61,6 +62,14 @@ export class SceneMaterialRegistrations {
     if (material === undefined || material === null) throw new Error("Shader registration is not published");
     return material;
   }
+  requireMaterial(material: CompiledMaterial): RegisteredSceneMaterial {
+    if (!(material instanceof MaterialHandle) || material.registration.provider.owner !== this) throw new Error("Material is not registered in this scene");
+    return material;
+  }
+  cancel(registration: ShaderRegistration): void {
+    if (this.admitted.get(registration) !== null) throw new Error("Only an unpublished shader admission can be cancelled");
+    this.admitted.delete(registration);
+  }
   snapshot(): readonly RegisteredSceneMaterial[] {
     return [...this.admitted.values()].flatMap(material => material === null ? [] : [material])
       .sort((a, b) => a.finished.sort - b.finished.sort);
@@ -73,6 +82,7 @@ export class ProviderShaderRegistrations {
   key(key: ShaderLogicalKey): string {
     const binding = key.binding;
     if (binding.kind === "unlit") return `${key.name}\0unlit\0${binding.lightmapIndex}`;
+    if (binding.kind === "source") return `${key.name}\0source\0${binding.request}`;
     if (binding.world.owner !== this.owner) throw new Error("Shader world belongs to another scene");
     return `${key.name}\0world\0${binding.world.ordinal}\0${binding.lightmapIndex}\0${binding.baseTextureName ?? ""}`;
   }
@@ -90,6 +100,11 @@ export class ProviderShaderRegistrations {
     return this.owner.publish(registration, compiled);
   }
   beginReplacement(): ShaderReplacementStage { return new ShaderReplacementStage(this); }
+  cancel(key: ShaderLogicalKey, registration: ShaderRegistration): void {
+    const cacheKey = this.key(key);
+    if (this.registrations.get(cacheKey) !== registration) throw new Error("Shader admission does not match its request");
+    this.owner.cancel(registration); this.registrations.delete(cacheKey);
+  }
   commit(key: ShaderLogicalKey, registration: ShaderRegistration, compiled: CompiledMaterial): RegisteredSceneMaterial {
     const cacheKey = this.key(key), previous = this.registrations.get(cacheKey);
     if (previous !== undefined && previous !== registration) throw new Error("Shader registration changed during replacement");
@@ -118,6 +133,12 @@ export class ShaderReplacementStage {
     if (entry.material === null) entry.material = new MaterialHandle(registration, compiled);
     else entry.material.replace(compiled);
     return entry.material;
+  }
+  cancel(key: ShaderLogicalKey, registration: ShaderRegistration): void {
+    this.requirePreparing();
+    const cacheKey = this.provider.key(key), entry = this.entries.get(cacheKey);
+    if (entry?.registration !== registration || entry.material !== null) throw new Error("Only an unpublished staged shader admission can be cancelled");
+    this.entries.delete(cacheKey);
   }
   validate(): void {
     this.requirePreparing();

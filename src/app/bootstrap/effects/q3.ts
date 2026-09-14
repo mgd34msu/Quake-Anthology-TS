@@ -1,5 +1,6 @@
-import { snapshotQ3SceneAdmission, type Q3SceneAdmission } from "../../../content/q3/presentation/scene.ts";
-import { compiledDrawGroup, type SceneOperation } from "../../../render/scene/submissions.ts";
+import { createViewProjector } from "../../../render/scene/view.ts";
+import { admitQ3Poly, q3ProceduralFog, snapshotQ3SceneAdmission, type Q3SceneAdmission } from "../../../content/q3/presentation/scene.ts";
+import { reserveSourceEntityRange, sourceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../../render/scene/submissions.ts";
 import { byteToDirection, directionToByte } from "../../../content/q3/base/shared/direction-byte.ts";
 import type { Q3ShotgunEvent } from "../../../content/q3/base/game/hitscan.ts";
 /* Source cgame effect producers joined to shared assets, collision and drawing. */
@@ -8,10 +9,10 @@ import type { Axis, Vec3 } from "../../../contracts/math.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { NumericProfile } from "../../../contracts/numeric.ts";
 import type { SceneEntity, SceneQueries } from "../../../contracts/scene.ts";
-import type { SceneCamera } from "../../../contracts/render.ts";
+import type { RenderState, SceneCamera } from "../../../contracts/render.ts";
 import { SoundBank } from "../../../audio/bank.ts";
 import type { PcmSound } from "../../../audio/wav.ts";
-import type { CompiledMaterial } from "../../../materials/compile.ts";
+import type { RegisteredSceneMaterial } from "../../../render/scene/material-registrations.ts";
 import { prepareMaterialBatches } from "../../../materials/evaluate.ts";
 import type { DynamicLight } from "../../../materials/q3-lighting.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
@@ -33,7 +34,7 @@ import type { Q3CharacterEvent } from "../../../content/q3/foundation/character.
 import { EntityEvent } from "../../../movement/q3/constants.ts";
 import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
-import { polyGeometry, spriteGeometry, railGeometry } from "../../../render/scene/particles/primitives.ts";
+import { beamBatch, defaultModelBatch, polyGeometry, spriteGeometry, railGeometry } from "../../../render/scene/particles/primitives.ts";
 import { ParticleSystem, loadParticleAnimations } from "../../../render/scene/particles/q3-system.ts";
 import { qvmRotatePointAroundVector } from "../../../core/qvm-math.ts";
 import type { Q3SharedBallisticEvent } from "../simulation/q3-ballistics.ts";
@@ -41,7 +42,7 @@ import type { ApplicationAssets } from "../assets.ts";
 
 export interface SourceEffectSound {
   readonly content: ContentId; readonly path: string; readonly origin: Vec3; readonly channel: number; readonly volume: number; readonly seconds: number;
-  readonly playback: { readonly kind: "once" } | { readonly kind: "loop"; readonly actor: ActorId; readonly velocity: Vec3 };
+  readonly playback: { readonly kind: "once" } | { readonly kind: "actor"; readonly actor: ActorId } | { readonly kind: "loop"; readonly actor: ActorId; readonly velocity: Vec3 };
 }
 type ImpactHost = Parameters<typeof emitWeaponImpact>[2];
 interface WeaponEffects {
@@ -54,12 +55,14 @@ interface WeaponEffects {
   readonly nailSmoke: SceneShader | null;
   readonly quad: PcmSound | null;
   readonly bounce: readonly [PcmSound | null, PcmSound | null];
-  sound(pcm: PcmSound | null, origin: Vec3, channel: number, volume: number): void;
+  sound(pcm: PcmSound | null, origin: Vec3, channel: number, volume: number, actor?: ActorId): void;
   loop(pcm: PcmSound | null, actor: ActorId, origin: Vec3, velocity: Vec3): void;
   contents(point: Vec3): number;
   shotgun(shot: Q3ShotgunEvent, shooter: ActorId): void;
 }
 const numeric: NumericProfile = { id: "q3:effect", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32" };
+const primitiveState: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal", depthWrite: true,
+  alphaTest: "none", cull: "back", depthRange: [0, 1], polygonOffset: null };
 interface CapturedRef { readonly entityIndex: number; readonly ref: RefEntity; readonly cullRadius: number; readonly hiddenFor?: ActorId; }
 
 export class Q3ApplicationEffects {
@@ -68,7 +71,6 @@ export class Q3ApplicationEffects {
   private lights: DynamicLight[] = [];
   private readonly models: { readonly entityIndex: number; readonly entity: SceneEntity }[] = [];
   private readonly options = new Map<SceneEntity, ModelSourceOptions>();
-  private readonly hiddenModels = new Map<SceneEntity, ActorId>();
   private readonly bloodOwners: WeakMap<RefEntity, ActorId>;
   private weaponEffects: Promise<WeaponEffects> | null = null;
   private readyWeapons: WeaponEffects | null = null;
@@ -78,13 +80,13 @@ export class Q3ApplicationEffects {
   private readonly bolts = new Map<ActorId, { readonly event: Q3SharedBallisticEvent; readonly time: number }>();
   private constructor(readonly content: ContentId, readonly assets: ApplicationAssets,
     readonly state: { time: number; readonly product: Product }, readonly effects: ClientEffects,
-    readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, CompiledMaterial>,
+    readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, RegisteredSceneMaterial>,
     readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
 
   static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean, preload = false): Promise<Q3ApplicationEffects> {
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
     const renderer = new SceneModelRenderer(provider, assets.world);
-    const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, CompiledMaterial>();
+    const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, RegisteredSceneMaterial>();
     const sound = async (path: string): Promise<PcmSound | null> => { const loaded = await bank.register(path, "q3"); if (loaded === null) return null; names.set(loaded.pcm, path); return loaded.pcm; };
     let preloading = preload;
     const shader = async (name: string): Promise<SceneShader> => {
@@ -97,10 +99,11 @@ export class Q3ApplicationEffects {
       return { kind: "model", path, model: loaded.model, resource: loaded.resource };
     };
     const state = { time: 0, product, snap: null, predictedPlayerState: new PlayerStateRecord<number, number, number>(product, 0, 0, 0) };
-    const sourceSound = (pcm: PcmSound | null, origin: Vec3, channel: number, volume: number): void => {
+    const sourceSound = (pcm: PcmSound | null, origin: Vec3, channel: number, volume: number, actor?: ActorId): void => {
       if (pcm === null) return;
       const path = names.get(pcm); if (path === undefined) throw new Error("Q3 local sound lacks source registration");
-      sounds.push({ content, path, origin, channel, volume, seconds: state.time / 1000, playback: { kind: "once" } });
+      sounds.push({ content, path, origin, channel, volume, seconds: state.time / 1000,
+        playback: actor === undefined ? { kind: "once" } : { kind: "actor", actor } });
     };
     const common = {
       waterBubbleShader: await shader("waterBubble"), smokePuffRageProShader: await shader("smokePuffRagePro"), bloodExplosionShader: await shader("bloodExplosion"),
@@ -222,7 +225,7 @@ export class Q3ApplicationEffects {
         this.flashes.set(event.actor, { event, time });
         if (event.weapon === Weapon.WP_LIGHTNING && previous?.weapon === event.weapon && time - previous.time <= 50) return;
         const available = weapon.flashSounds.filter(pcm => pcm !== null);
-        if (available.length > 0) media.sound(available[media.host.random.rand() % available.length] ?? null, event.origin, 2, event.volume);
+        if (available.length > 0) media.sound(available[media.host.random.rand() % available.length] ?? null, event.origin, 2, event.volume, event.actor);
         return;
       }
       case "projectile": {
@@ -305,7 +308,7 @@ export class Q3ApplicationEffects {
     }
   }
   async prepare(timeMilliseconds: number, elapsedMilliseconds: number): Promise<void> {
-    this.state.time = timeMilliseconds; this.refs = []; this.lights = []; this.models.length = 0; this.options.clear(); this.hiddenModels.clear();
+    this.state.time = timeMilliseconds; this.refs = []; this.lights = []; this.models.length = 0; this.options.clear();
     for (const [actor, fired] of this.lastFires) if (this.state.time - fired.time > 50) this.lastFires.delete(actor);
     const media = this.readyWeapons;
     if (media !== null) {
@@ -350,7 +353,7 @@ export class Q3ApplicationEffects {
       },
       addLight: light => { this.lights.push(light); },
     });
-    this.admission = snapshotQ3SceneAdmission("mixed", this.refs.map(captured => captured.ref), this.marks.addMarks());
+    this.admission = snapshotQ3SceneAdmission("mixed", this.refs.map(captured => captured.ref), this.marks.addMarks().map(poly => admitQ3Poly(poly, this.assets.world.fogSelections)));
     for (const captured of this.refs) {
       const ref = captured.ref; if (ref.kind !== "model" || ref.model.kind !== "model") continue;
       const entity: SceneEntity = { actor: null, resource: ref.model.resource, model: ref.model.model,
@@ -359,30 +362,62 @@ export class Q3ApplicationEffects {
         color: { x: ref.shaderRGBA.x / 255, y: ref.shaderRGBA.y / 255, z: ref.shaderRGBA.z / 255, w: ref.shaderRGBA.w / 255 },
         shaderTime: { kind: "seconds", value: ref.shaderTime }, flags: { kind: "q3", bits: ref.renderFlags }, lightingOrigin: ref.lightingOrigin, shadowPlane: ref.shadowPlane, attachments: [] };
       this.models.push({ entityIndex: captured.entityIndex, entity }); this.options.set(entity, { customShader: ref.customShader?.name ?? null });
-      if (captured.hiddenFor !== undefined) this.hiddenModels.set(entity, captured.hiddenFor);
     }
     await this.renderer.preload(this.models.map(model => model.entity), entity => this.options.get(entity) ?? {});
   }
-  frame(camera: SceneCamera, viewer: ActorId | null = null): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
+  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
     const input = { camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
-    const visible = viewer === null ? this.models : this.models.filter(model => !this.hiddenModels.get(model.entity)?.equals(viewer));
-    const context = this.assets.world.materialContext(input), operations: SceneOperation[] = [...this.renderer.prepare(visible.map(model => model.entity), input, entity => this.options.get(entity) ?? {})];
-    for (const captured of this.refs) {
-      if (viewer !== null && captured.hiddenFor?.equals(viewer)) continue;
-      const ref = captured.ref;
-      if ((ref.kind !== "sprite" && ref.kind !== "rail-core" && ref.kind !== "rail-rings" && ref.kind !== "lightning")
-        || ref.customShader === null || length3(sub3(ref.origin, camera.origin)) < captured.cullRadius) continue;
-      const shader = this.shaders.get(ref.customShader.name); if (shader === undefined) throw new Error(`Unregistered effect shader ${ref.customShader.name}`);
-      const geometry = ref.kind === "sprite" ? spriteGeometry(ref, camera.axis, camera.clip.kind === "portal" && camera.clip.mirror) : railGeometry(ref, camera.origin);
-      operations.push(compiledDrawGroup(shader, prepareMaterialBatches(shader, geometry, { ...context, entityRGBA: ref.shaderRGBA, shaderTexCoord: ref.shaderTexCoord, timeOffset: ref.shaderTime })));
-    }
+    const world = this.assets.world, operations: SceneOperation[] = [];
     const media = this.readyWeapons;
     if (media !== null) media.view.viewAxis = camera.axis;
-    const admission = snapshotQ3SceneAdmission("mixed", this.admission.entities, [...this.admission.polygons, ...media?.particles.addParticles(camera.origin) ?? []]);
-    for (const poly of admission.polygons) {
+    const admission = snapshotQ3SceneAdmission("mixed", this.admission.entities, [...this.admission.polygons,
+      ...(media?.particles.addParticles(camera.origin) ?? []).map(poly => admitQ3Poly(poly, world.fogSelections))]);
+    const firstEntity = reserveSourceEntityRange(source, admission.entities.length);
+    for (const [index, poly] of admission.polygons.entries()) {
       if (poly.shader === null) continue;
-      const shader = this.shaders.get(poly.shader.name); if (shader === undefined) throw new Error(`Unregistered mark shader ${poly.shader.name}`);
-      operations.push(compiledDrawGroup(shader, prepareMaterialBatches(shader, polyGeometry(poly), context)));
+      const shader = this.shaders.get(poly.shader.name);
+      if (shader === undefined) throw new Error(`Unregistered mark shader ${poly.shader.name}`);
+      operations.push(sourceDrawGroup(shader, { view: source, entity: { kind: "world" }, surface: index, fog: poly.fog === null ? 0 : poly.fog.index + 1, dlight: 0 },
+        prepareMaterialBatches(shader, polyGeometry(poly), world.materialContext(input, undefined, poly.fog?.volume ?? null))));
+    }
+    const models = new Map(this.models.map(model => [model.entityIndex, model.entity]));
+    const project = createViewProjector(camera), white = this.renderer.provider.textures.white.image;
+    for (const captured of this.refs) {
+      const ref = captured.ref;
+      if (camera.clip.kind === "portal" && (ref.renderFlags & 4) !== 0) continue;
+      if (viewer !== null && captured.hiddenFor?.equals(viewer)) continue;
+      if (ref.kind === "portal-surface") continue;
+      const entity = { kind: "refentity", index: firstEntity + captured.entityIndex } satisfies import("../../../render/scene/submissions.ts").SourceEntityOrder;
+      if (ref.kind === "model") {
+        if (ref.model.kind === "default") {
+          if (camera.clip.kind === "none" && (ref.renderFlags & 2) !== 0) continue;
+          operations.push(sourceDrawGroup(this.renderer.provider.shaders.sourceMaterials.default,
+            { view: source, entity, surface: 0, fog: 0, dlight: 0 },
+            [defaultModelBatch({ origin: ref.origin, axis: ref.axis, scale: { x: 1, y: 1, z: 1 } }, project, primitiveState, white)]));
+          continue;
+        }
+        const model = models.get(captured.entityIndex);
+        if (model === undefined) throw new Error("Admitted Q3 effect model lost its prepared descriptor");
+        operations.push(...this.renderer.prepare([model], input, () => ({ ...this.options.get(model),
+          shaderTexCoord: ref.shaderTexCoord, source: { view: source, entity } })));
+        continue;
+      }
+      if (camera.clip.kind === "none" && (ref.renderFlags & 2) !== 0) continue;
+      if (length3(sub3(ref.origin, camera.origin)) < captured.cullRadius) continue;
+      const shader = ref.customShader === null ? this.renderer.provider.shaders.sourceMaterials.default : this.shaders.get(ref.customShader.name);
+      if (shader === undefined) throw new Error(`Unregistered effect shader ${ref.customShader?.name}`);
+      const fog = q3ProceduralFog(ref.origin, ref.radius, world.fogSelections);
+      const geometry = ref.kind === "sprite" ? spriteGeometry(ref, camera.axis, camera.clip.kind === "portal" && camera.clip.mirror)
+        : ref.kind === "beam" ? null : railGeometry(ref, camera.origin);
+      if (geometry === null) {
+        if (ref.kind !== "beam") throw new Error("Missing procedural geometry");
+        operations.push(sourceDrawGroup(shader, { view: source, entity, surface: 0, fog: fog === null ? 0 : fog.index + 1, dlight: 0 },
+          [beamBatch(ref, project, primitiveState, white)]));
+        continue;
+      }
+      operations.push(sourceDrawGroup(shader, { view: source, entity, surface: 0, fog: fog === null ? 0 : fog.index + 1, dlight: 0 },
+        prepareMaterialBatches(shader, geometry, { ...world.materialContext(input, undefined, fog?.volume ?? null),
+          entityRGBA: ref.shaderRGBA, shaderTexCoord: ref.shaderTexCoord, timeOffset: ref.shaderTime })));
     }
     return { admission, operations, q3Lights: this.lights };
   }

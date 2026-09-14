@@ -108,6 +108,8 @@ import { Q1Foundation } from "../../../content/q1/foundation/runtime.ts";
 import { WEAPONS as Q1_WEAPONS, isQ1BaseWeapon, q1WeaponBit } from "../../../content/q1/foundation/types.ts";
 import type { Q1PlayerState } from "../../../content/q1/foundation/types.ts";
 import { Q1CampaignState, Q1CharacterActor } from "../../../content/q1/base/index.ts";
+import { registerCharacterCallbacks } from "../../../content/q1/base/player.ts";
+import { registerMapCallbacks } from "../../../content/q1/base/map-entities.ts";
 import type { Q1TravelState } from "../../../content/q1/base/index.ts";
 import { q2Userinfo, Q2CharacterActor } from "../../../content/q2/base/player/index.ts";
 import type { Q2PlayerHooks } from "../../../content/q2/base/player/index.ts";
@@ -194,6 +196,8 @@ export class SharedSimulation implements Simulation {
   private readonly entryCarry = new Map<OwnedActor, Q1TravelState>();
   private readonly detachedModels = new Map<OwnedActor, { readonly content: ContentId; readonly path: string }>();
   private readonly q1Characters = new Map<OwnedActor, Q1CharacterActor>();
+  private q1CharacterFoundation: Q1EntityServices | null = null;
+  private readonly q1CharacterAdjuncts = new Set<Q1EntityServices>();
   private readonly q2Views = new Map<ActorId, Q2PlayerView>();
   private readonly q1Campaign: Q1CampaignState;
   private readonly characters = new Map<OwnedActor, Q3CharacterActor>();
@@ -308,7 +312,8 @@ export class SharedSimulation implements Simulation {
         const body = this.physics.bodies.read(actor.id); if (body === null) return null;
         const player = this.playerStates.get(actor);
         if (player !== undefined) return { actor, velocity: body.velocity, angularVelocity: zero,
-          kind: this.q2Characters.get(actor)?.state.dead ? this.q2Characters.get(actor)?.state.gibbed ? "bounce" : "toss" : "step", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null };
+          kind: this.q1Characters.get(actor)?.presentation.movement === "bounce" ? "bounce" : this.q1Characters.get(actor)?.presentation.movement === "toss" ? "toss"
+            : this.q2Characters.get(actor)?.state.dead ? this.q2Characters.get(actor)?.state.gibbed ? "bounce" : "toss" : "step", gravity: 1, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 0x6000003, owner: null };
         const entry = this.actorExecutions.get(actor.id);
         const motion = entry === undefined ? null : actorMotion(entry, body);
         return motion === null || this.selectedMonsters?.active(actor.id) !== false ? motion : { ...motion, kind: "stationary", velocity: zero, angularVelocity: zero };
@@ -1491,6 +1496,7 @@ export class SharedSimulation implements Simulation {
       playerSpawned: entity => {
         if (this.selectedArsenal !== null) { weapons.resetSilencer(entity.actor.id); this.q2ItemWeaponSource()?.weapons.resetSilencer(entity.actor.id); }
         const player = this.requirePlayer(entity.actor.id);
+        this.q1Characters.get(player.actor)?.respawn();
         if (this.selectedArsenal?.has(entity.actor.id)) {
           this.selectedArsenal.remove(entity.actor.id); player.arsenal = this.selectedArsenal.admit(entity.actor, 100, false);
         }
@@ -1701,6 +1707,7 @@ export class SharedSimulation implements Simulation {
     const player = this.playerStates.get(actor);
     if (player !== undefined && (player.intermission || player.cutscene !== null)) return { family: providerFamily(player.profile.id), solid: "none", model: null, owner: null };
     if (player !== undefined && this.q2Characters.get(actor)?.state.gibbed) return { family: "q2", solid: "none", model: null, owner: null };
+    if (player !== undefined && this.q1Characters.get(actor)?.presentation.solid === "none") return { family: "q1", solid: "none", model: null, owner: null };
     if (player !== undefined) return { family: providerFamily(player.profile.id), solid: "box", model: null, owner: null };
     const entry = this.actorExecutions.get(actor.id);
     return entry === undefined ? null : actorCollision(entry);
@@ -1783,6 +1790,7 @@ export class SharedSimulation implements Simulation {
         profile: (profile: import("../../../contracts/movement.ts").QwMovementProfile) => source.game.quakeWorldProfile(actor.id, profile),
       } }), actors: this.actors, bodies: this.bodies, combat: this.combat, scene: this.scene, rereleaseMovement: this.physics.rereleaseMovement,
       q2MovementConfig: () => this.q2MovementConfig(),
+      gibbed: () => this.q2Characters.get(actor)?.state.gibbed ?? (this.source.kind === "q2" && this.source.players.states.get(actor.id)?.gibbed === true),
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
       sourcePunch: actor => this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? null,
       worldActor: () => this.worldActor(), touchTriggers: owned => this.source.kind === "q3" ? undefined : this.physics.touchTriggers(owned), isBrush: id => this.physics.isBrush(id), jump: (owned, action) => this.jump(owned, action),
@@ -1863,7 +1871,10 @@ export class SharedSimulation implements Simulation {
       for (const entry of player.arsenal.ammo) this.inventory.configure(player.actor, entry);
       if (player.character === "q2") {
         const character = this.q2Characters.get(player.actor); if (character === undefined) this.attachQ2Character(player); else character.respawned();
-      } else throw new Error("Q1 character lifecycle requires its foundation adjunct on Q3 maps");
+      } else {
+        const character = this.q1Characters.get(player.actor);
+        if (character === undefined) this.attachQ1Character(player); else character.respawn();
+      }
     }
     if (this.selectedArsenal !== null) {
       this.selectedArsenal.remove(player.actor.id);
@@ -1999,11 +2010,7 @@ export class SharedSimulation implements Simulation {
     else { source.items.configurePlayer(actor, source.game, true); if (entity !== null) {
       source.product.admit(actor, { slot: client.slot, userinfo: `\\name\\Player ${client.slot + 1}\\skin\\male/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.selectedArsenal === null }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
     } }
-    if (player.character === "q1" && source.kind === "q1") {
-      const character = new Q1CharacterActor(source.game, actor, { requestRespawn: () => this.respawnPlayer(player), dropInventory: () => this.dropPlayerInventory(player), sourcePose: () => this.q1CharacterPose(actor.id), fallDamageAllowed: () => source.composition.fallDamageAllowed(actor.id) });
-      this.q1Characters.set(actor, character);
-      this.callbacks.bind(actor, { think: null, touch: null, use: null, pain: reaction => character.pain(reaction.attacker, reaction.damage), die: reaction => character.die(reaction.attacker) });
-    }
+    if (player.character === "q1") this.attachQ1Character(player);
     if (player.character === "q2" && source.kind === "q1") this.attachQ2Character(player);
     const carriedPlayer = travel?.players.find(record => record.client.slot === client.slot && record.client.generation === client.generation);
     const carried = carriedPlayer?.state;
@@ -2073,6 +2080,41 @@ export class SharedSimulation implements Simulation {
     } return undefined;
   }
 
+  private q1CharacterSource(): Q1EntityServices {
+    if (this.source.kind === "q1") return this.source.game;
+    const selected = this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource.game : null;
+    if (selected !== null) {
+      if (!this.q1CharacterAdjuncts.has(selected)) {
+        registerMapCallbacks(selected); registerCharacterCallbacks(selected); this.q1CharacterAdjuncts.add(selected);
+      }
+      return selected;
+    }
+    if (this.q1CharacterFoundation !== null) return this.q1CharacterFoundation;
+    const reference = this.recipe.character.definition, timing = providerTiming(this.recipe, reference.provider);
+    const game = new Q1EntityServices(this.q1ActorHost(reference, { numeric: timing.numeric, random: this.random,
+      now: () => this.timeSeconds, frameSeconds: () => seconds(this.sourceFrame.elapsed),
+      schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) }), {
+      provider: reference.provider, edition: reference.content.includes(":rerelease:") ? "rerelease" : "classic", skill: this.options.skill,
+      deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", maxClients: this.options.maxClients,
+      campaign: this.recipe.map.entities.provider, combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider,
+      movementProvider: this.recipe.movement.provider, gravity: this.physics.gravity });
+    registerMapCallbacks(game); registerCharacterCallbacks(game); this.q1CharacterFoundation = game;
+    return game;
+  }
+
+  private attachQ1Character(player: MovementPlayer): Q1CharacterActor {
+    const game = this.q1CharacterSource(), actor = player.actor;
+    const character = new Q1CharacterActor(game, actor, { requestRespawn: () => this.respawnPlayer(player),
+      dropInventory: () => this.dropPlayerInventory(player), sourcePose: () => this.q1CharacterPose(actor.id),
+      fallDamageAllowed: () => this.source.kind !== "q1" || this.source.composition.fallDamageAllowed(actor.id) });
+    this.q1Characters.set(actor, character);
+    this.callbacks.bind(actor, { think: null, touch: null, use: null, pain: reaction => character.pain(reaction.attacker, reaction.damage),
+      die: reaction => { game.time = this.timeSeconds; character.die(reaction.attacker);
+        if (player.state.kind === "q1-netquake") player.state = { ...player.state, moveType: character.presentation.movement === "bounce" ? 10 : 6 };
+        return undefined; } });
+    return character;
+  }
+
   private attachQ2Character(player: MovementPlayer): undefined {
     const content = this.recipe.character.definition.content;
     const character = new Q2CharacterActor(player.actor, { bodies: this.bodies, combat: this.combat, inventory: this.inventory,
@@ -2120,6 +2162,8 @@ export class SharedSimulation implements Simulation {
   }
 
   private respawnPlayer(player: MovementPlayer): undefined {
+    if (this.options.mode === "singleplayer") return undefined;
+    if (this.source.kind === "q3") { const entity = this.source.game.records.nativeByActor(player.actor.id); if (entity !== null) this.source.game.spawns.respawn(entity); return undefined; }
     if (this.source.kind === "q2") { const entity = this.source.game.entity(player.actor.id); return entity === null ? undefined : this.source.players.respawn(entity, this.source.game); }
     if (this.source.kind !== "q1") throw new Error("Respawn before source entry");
     return this.source.composition.requestRespawn(player.actor.id, this.entryCarry.get(player.actor) ?? null);
@@ -2267,7 +2311,7 @@ export class SharedSimulation implements Simulation {
       return undefined;
     }
     player.viewAngles = change.angles;
-    if (change.kind === "spawn") player.cutscene = null;
+    if (change.kind === "spawn") { player.cutscene = null; player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22; }
     player.intermission = change.kind === "freeze";
     if (change.kind === "freeze") this.combat.setTraits(player.actor, { canTakeDamage: false });
     const velocity = change.kind === "freeze" ? zero : change.velocity;
@@ -2611,7 +2655,8 @@ export class SharedSimulation implements Simulation {
         }
         if (this.source.kind === "q1" && this.actors.isLive(player.actor.id)) { this.source.game.playerAfterPhysics(player.actor, this.timeSeconds); this.source.composition.playerPostThink(player.actor.id); }
         if (!paused && this.source.kind === "q2" && this.actors.isLive(player.actor.id)) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
-          if (!player.intermission) entity.viewHeight = player.viewHeight;
+          if (!player.intermission) entity.viewHeight = player.character === "q2" && (this.combat.read(player.actor.id)?.health ?? 0) <= 0
+            ? this.source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2 : player.viewHeight;
           this.source.players.afterClientThink(entity, this.source.game);
         } }
         this.q2Characters.get(player.actor)?.afterClientThink();
@@ -2715,7 +2760,15 @@ export class SharedSimulation implements Simulation {
       if (mapRun) for (const source of this.monsterSources.values()) if (source.kind === "q2" && source.clock.advanced) source.monsters.endFrame(source.game);
       if (run) for (const slot of this.weaponSlots.values()) slot.reconcile();
       if (run || paused) {
-        if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) this.source.players.endFrame(entity, this.source.game); }
+        if (this.source.kind === "q2") for (const player of this.playerStates.values()) { const entity = this.source.game.entity(player.actor.id); if (entity !== null) {
+          if (!player.intermission && player.character === "q2" && (this.combat.read(player.actor.id)?.health ?? 0) <= 0) {
+            entity.viewHeight = this.source.players.states.get(player.actor.id)?.gibbed === true ? 8 : -2; player.viewHeight = entity.viewHeight;
+          }
+          this.source.players.endFrame(entity, this.source.game);
+          const state = this.source.players.states.get(player.actor.id);
+          if (player.character === "q2" && state !== undefined) player.animation = { provider: this.recipe.character.definition.provider,
+            state: { kind: "q2", frame: entity.frame, endFrame: state.animationEnd, priority: state.animationPriority, duck: state.animationDuck, run: state.animationRun } };
+        } }
         if (run && this.source.kind === "q2") {
           const match = this.source.product.match.source;
           if (match instanceof Q2Lmctf && match.match.phase === "countdown" && !match.match.paused && match.match.remaining <= 0 && this.source.game.host.now() >= match.match.nextThink)
@@ -2725,7 +2778,15 @@ export class SharedSimulation implements Simulation {
           this.checkingQ2Rules = true;
           try { this.source.product.checkRules(); } finally { this.checkingQ2Rules = false; }
         }
-        if (this.source.kind === "q3") this.source.game.endFrame();
+        if (this.source.kind === "q3") {
+          for (const player of this.playerStates.values()) {
+            const entity = this.source.game.records.nativeByActor(player.actor.id);
+            if (entity?.client !== null && entity?.client !== undefined && !player.intermission && player.character === "q3" && (this.combat.read(player.actor.id)?.health ?? 0) <= 0)
+              entity.client.ps.viewheight = -16;
+          }
+          this.source.game.endFrame();
+        }
+        for (const [actor, character] of this.characters) { const player = this.playerStates.get(actor); if (player !== undefined) player.animation = character.animation; }
         for (const [actor, character] of this.q2Characters) if (paused || this.timeSeconds + 0.001 >= (this.characterTicks.get(actor) ?? 0)) {
           this.characterTicks.set(actor, this.timeSeconds + 0.1); character.endFrame();
           const player = this.playerStates.get(actor); if (player !== undefined) player.animation = { provider: this.recipe.character.definition.provider,
@@ -2858,10 +2919,27 @@ export class SharedSimulation implements Simulation {
   playerView(actor: ActorId): PlayerView {
     const player = this.requirePlayer(actor), view = player.view(), source = this.q2Views.get(actor);
     if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z, fieldOfView: this.source.kind === "q2" ? source?.fov ?? 90 : 90 };
+    if (this.source.kind === "quakec" && !player.intermission) {
+      const offset = this.source.game.clientViewOffset(actor);
+      return { ...view, origin: add(view.origin, { ...offset, z: 0 }), viewHeight: offset.z,
+        angles: (this.combat.read(actor)?.health ?? 0) <= 0 ? { ...view.angles, z: 80 } : view.angles };
+    }
+    if (!player.intermission && (this.combat.read(actor)?.health ?? 0) <= 0) {
+      const q1 = this.q1Characters.get(player.actor)?.lifecycle;
+      if (q1 !== undefined && q1.life !== "alive") return { ...view, origin: add(view.origin, { ...q1.viewOffset, z: 0 }),
+        viewHeight: q1.viewOffset.z, angles: { ...view.angles, z: 80 }, fieldOfView: source?.fov ?? 90,
+        ...(this.source.kind === "q3" ? { foreignCharacterDeath: true } : {}) };
+      if (player.character === "q3" && this.characters.has(player.actor)) {
+        const attack = this.lastAttack.get(player.actor), killer = attack?.attacker == null ? null : this.bodies.read(attack.attacker);
+        const yaw = killer === null || attack?.attacker?.equals(actor) === true ? view.angles.y : Math.atan2(killer.origin.y - view.origin.y, killer.origin.x - view.origin.x) * 180 / Math.PI;
+        return { ...view, viewHeight: -16, angles: { x: -15, y: yaw, z: 40 }, fieldOfView: source?.fov ?? 90 };
+      }
+    }
     const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
     // Classic viewoffset includes eye height; rerelease sends it separately in pmove.viewheight.
     return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch, ...(source === undefined ? {} : { fieldOfView: source.fov }) }
       : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch,
+        ...(this.source.kind === "q3" && this.q2Characters.get(player.actor)?.state.dead === true && !player.intermission ? { foreignCharacterDeath: true } : {}),
         fieldOfView: source.fov, viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
   }
   get sourceEntityText(): string { return this.options.world.entities; }
@@ -3012,13 +3090,15 @@ export class SharedSimulation implements Simulation {
       if (player.character === "q3" || player.intermission || player.cutscene !== null) continue;
       const body = this.bodies.read(player.actor.id); if (body === null) continue;
       const model = this.recipe.character.appearance.provider.split("/").at(-1) ?? "male";
+      const q2Entity = this.q2Characters.get(player.actor)?.entity ?? (player.character === "q2" && this.source.kind === "q2" ? this.source.game.entity(player.actor.id) : null);
+      const q2Gibbed = this.q2Characters.get(player.actor)?.state.gibbed ?? (player.character === "q2" && this.source.kind === "q2" && this.source.players.states.get(player.actor.id)?.gibbed === true);
       const q1Player = this.source.kind === "q1" ? this.source.game.player(player.actor.id) : null;
       const colors = player.character === "q1" && this.source.kind === "q1" ? this.source.composition.clients.get(player.actor.id) : null;
       const visual = q1Player === null ? { alpha: 1, scale: 1 } : this.q1VisualFields(q1Player.alpha, q1Player.scale);
       result.push({ actor: player.actor.id, content: this.recipe.character.appearance.content, family: player.character,
-        path: this.q2Characters.get(player.actor)?.entity.model ?? (this.q1Characters.get(player.actor)?.presentation.model ?? (player.character === "q1" ? "progs/player.mdl" : `players/${model}/tris.md2`)), skinPath: player.character === "q2" ? `players/${model}/grunt.pcx` : null,
-        frame: this.q2Characters.get(player.actor)?.entity.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: 0,
-        skin: 0, effects: 0, renderFlags: 0, origin: body.origin, angles: body.angles, ...visual,
+        path: q2Entity?.model || this.q1Characters.get(player.actor)?.presentation.model || (player.character === "q1" ? "progs/player.mdl" : `players/${model}/tris.md2`), skinPath: player.character === "q2" && !q2Gibbed ? `players/${model}/grunt.pcx` : null,
+        frame: q2Entity?.frame ?? (player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0), oldFrame: q2Entity?.oldFrame ?? 0,
+        skin: q2Entity?.skin ?? 0, effects: q2Entity?.effects ?? 0, renderFlags: q2Entity?.renderFlags ?? 0, origin: body.origin, angles: body.angles, ...visual,
         ...(colors === null ? {} : { playerColors: { top: colors.shirt, bottom: colors.pants } }), visible: true, viewWeapon: false });
     }
     for (const [actor, model] of this.detachedModels) { const body = this.bodies.read(actor.id); if (body !== null) result.push({ actor: actor.id, content: model.content, family: "q2", path: model.path,
@@ -3161,6 +3241,7 @@ export class SharedSimulation implements Simulation {
           return { actor: savedActorId(actor), state: this.selectedArsenal.captureTurn(actor) };
         }) },
       selectedArsenals: this.selectedArsenal?.family !== "q3" ? null : this.players().map(actor => ({ actor: savedActorId(actor), state: this.selectedArsenal?.family === "q3" ? this.selectedArsenal.capture(actor) : null })),
+      q1CharacterFoundation: this.q1CharacterFoundation?.capture() ?? null,
       q1Characters: [...this.q1Characters].map(([actor, character]) => ({ actor: savedActorId(actor.id), bytes: character.capture() })),
       q2Characters: [...this.q2Characters].map(([actor, character]) => ({ actor: savedActorId(actor.id), state: character.capture() })),
       q3Characters: [...this.characters].map(([actor, character]) => ({ actor: savedActorId(actor.id), state: character.capture() })),
@@ -3224,7 +3305,10 @@ export class SharedSimulation implements Simulation {
       const random = readRandom(selectedSource.field("random"));
       if (random.kind !== "glibc-random" && random.kind !== "q2-rerelease-mt19937") selectedSource.field("random").fail("Selected source requires its native random stream");
       else weaponSource.random.restore(random);
-      if (weaponSource.kind === "q1") weaponSource.game.restore(readQ1FoundationCheckpoint(selectedSource.field("entities")), { scheduleThinks: false });
+      if (weaponSource.kind === "q1") {
+        if (providerFamily(this.recipe.character.definition.provider) === "q1") this.q1CharacterSource();
+        weaponSource.game.restore(readQ1FoundationCheckpoint(selectedSource.field("entities")), { scheduleThinks: false });
+      }
       else {
         const savedFrame = selectedSource.field("frame"), time = savedFrame.field("time"), elapsed = savedFrame.field("elapsed");
         const timeKind = time.field("kind").literal(weaponSource.frame.time.kind);
@@ -3271,12 +3355,12 @@ export class SharedSimulation implements Simulation {
     if (this.handGrenades !== null) this.handGrenades.restore(readHandGrenadeRuntimeCheckpoint(equipment));
     else if (equipment.value !== undefined && equipment.value !== null) equipment.fail("Saved equipment has no selected controller");
 
+    const characterFoundation = reader.field("q1CharacterFoundation");
+    if (characterFoundation.value !== undefined && characterFoundation.value !== null) this.q1CharacterSource().restore(readQ1FoundationCheckpoint(characterFoundation), { scheduleThinks: false });
     reader.field("q1Characters").list(value => {
-      if (source.kind !== "q1") return value.fail("Q1 character needs its saved source foundation");
       const actor = owner(value.field("actor")), player = this.requirePlayer(actor.id);
-      const character = new Q1CharacterActor(source.game, actor, { requestRespawn: () => this.respawnPlayer(player), dropInventory: () => this.dropPlayerInventory(player), sourcePose: () => this.q1CharacterPose(actor.id), fallDamageAllowed: () => source.composition.fallDamageAllowed(actor.id) });
-      character.restore(value.field("bytes").bytes()); this.q1Characters.set(actor, character);
-      this.callbacks.bind(actor, { think: null, touch: null, use: null, pain: reaction => character.pain(reaction.attacker, reaction.damage), die: reaction => character.die(reaction.attacker) });
+      const character = this.attachQ1Character(player);
+      character.restore(value.field("bytes").bytes());
     });
     reader.field("q2Characters").list(value => {
       const actor = owner(value.field("actor")); this.attachQ2Character(this.requirePlayer(actor.id));

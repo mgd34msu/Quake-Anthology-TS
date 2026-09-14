@@ -1,4 +1,4 @@
-import type { SceneModelGroup } from "../submissions.ts";
+import type { SceneModelGroup, SourceEntityOrder, SourceSceneOrder } from "../submissions.ts";
 /* Model submission adapted from Q1 r_alias/r_sprite, Q2 gl_mesh and Q3 tr_mesh.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Bounds, Plane, Vec2, Vec3, Vec4 } from "../../../contracts/math.ts";
@@ -20,6 +20,7 @@ export type ModelImageSelection = { readonly kind: "external"; readonly name: st
 
 /** Source renderer fields supplement the family-independent SceneEntity. */
 export interface ModelSourceOptions {
+  readonly source?: { readonly view: SourceSceneOrder; readonly entity: Extract<SourceEntityOrder, { readonly kind: "refentity" }> };
   readonly indexedSkin?: IndexedModelSkin;
   readonly modelBeam?: { readonly segmentLength: number };
   readonly syncBase?: number;
@@ -60,6 +61,8 @@ export interface ModelPreparationContext {
 }
 
 export interface PreparedModelSurface {
+  readonly surfaceIndex: number;
+  readonly fogSphere: { readonly localOrigin: Vec3; readonly radius: number } | null;
   readonly options: ModelSourceOptions;
   readonly name: string;
   readonly entity: SceneEntity;

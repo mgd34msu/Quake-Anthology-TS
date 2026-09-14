@@ -1,5 +1,5 @@
 import { SceneMaterialRegistrations } from "../../../../src/render/scene/material-registrations.ts";
-import { sceneModelBatches, finishSceneOperations } from "../../../../src/render/scene/submissions.ts";
+import { sceneModelBatches, finishSceneOperations, createSourceSceneOrder } from "../../../../src/render/scene/submissions.ts";
 import { resolve } from "node:path";
 import { weaponViewCamera } from "../../../../src/app/bootstrap/weapon-view.ts";
 import { createMd5Model, parseMd5Anim, parseMd5Mesh, q1ReplacementSkinSelection } from "../../../../src/formats/q3-model/index.ts";
@@ -24,6 +24,7 @@ import { parseSkin } from "../../../../src/formats/q3-model/md3.ts";
 import { decodePcx } from "../../../../src/formats/images/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene, perspectiveProjection } from "../../../../src/render/scene/index.ts";
 import { SceneModelRenderer } from "../../../../src/render/scene/models/index.ts";
+import type { ModelSourceOptions } from "../../../../src/render/scene/models/types.ts";
 
 const identityAxis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }] satisfies SceneCamera["axis"];
 const camera: SceneCamera = { origin: { x: -100, y: 0, z: 0 }, axis: identityAxis, projection: identityMat4(),
@@ -194,6 +195,30 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     const ordered = finishSceneOperations(groups).flatMap(operation => operation.kind === "draw" ? operation.batches : []);
     expect(ordered.map(batch => batch.state.blend.source)).toEqual(["zero", "one", "one"]);
     expect(ordered.every(batch => batch.indices.length > 0)).toBe(true);
+    const sourceView = createSourceSceneOrder(registrations);
+    const sourceGroups = cache3.prepare([layered], input, () => ({ ...layeredOptions(),
+      source: { view: sourceView, entity: { kind: "refentity", index: 7 } } }));
+    expect(sourceGroups).toHaveLength(2);
+    expect(sourceGroups.map(group => group.order.kind === "source" ? {
+      entity: group.order.source.entity, surface: group.order.source.surface, dlight: group.order.source.dlight,
+    } : null)).toEqual([
+      { entity: { kind: "refentity", index: 7 }, surface: 0, dlight: 0 },
+      { entity: { kind: "refentity", index: 7 }, surface: 1, dlight: 0 },
+    ]);
+    expect(finishSceneOperations(sourceGroups).flatMap(operation => operation.kind === "draw" ? operation.batches : [])
+      .map(batch => batch.state.blend.source)).toEqual(["zero", "one", "one"]);
+    const originalFogs = world.fogSelections;
+    world.fogSelections = [{ index: 6, volume: { bounds: {
+      min: { x: origin.x - 1000, y: origin.y - 1000, z: origin.z - 1000 },
+      max: { x: origin.x + 1000, y: origin.y + 1000, z: origin.z + 1000 },
+    }, surface: null, color: { x: 0.1, y: 0.2, z: 0.3, w: 1 }, tcScale: 0.01 } }];
+    try {
+      const fogOptions = { ...layeredOptions(), source: { view: sourceView, entity: { kind: "refentity", index: 7 } } } satisfies ModelSourceOptions;
+      const fogged = cache3.prepare([layered], input, () => fogOptions);
+      expect(fogged.map(group => group.order.kind === "source" ? group.order.source.fog : null)).toEqual([7, 7]);
+      const noWorld = cache3.prepare([layered], input, () => ({ ...fogOptions, noWorldModel: true }));
+      expect(noWorld.map(group => group.order.kind === "source" ? group.order.source.fog : null)).toEqual([0, 0]);
+    } finally { world.fogSelections = originalFogs; }
     expect(cache2.lighting.sample(origin, input).floor).not.toBeNull();
     expect(batches3.flatMap(batch => batch.vertices).some(vertex => vertex.color.x > 0)).toBe(true);
     const q1Asset = await asset("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK", "progs/v_shot.mdl", "q1");

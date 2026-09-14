@@ -14,6 +14,7 @@ export interface SeatSettings {
   readonly bindings: readonly InputBinding[];
   readonly gamepad: GamepadTuning;
   readonly mouse: MouseTuning;
+  readonly alwaysRun?: boolean;
   readonly history: readonly string[];
   readonly rumble: boolean;
   readonly rumbleStrength?: number;
@@ -94,6 +95,7 @@ export function parseSeatSettings(value: unknown): SeatSettings {
   const input = record(value), bindings = input["bindings"];
   if (input["version"] !== 1 || !Array.isArray(bindings)) throw new Error("Unsupported seat settings document");
   return { version: 1, bindings: bindings.map((item: unknown) => { const binding = record(item); return { input: physical(binding["input"]), target: target(binding["target"]) }; }),
+    ...(input["alwaysRun"] === undefined ? {} : { alwaysRun: boolean(input["alwaysRun"]) }),
     gamepad: gamepad(input["gamepad"]), mouse: mouse(input["mouse"]), history: strings(input["history"]), rumble: boolean(input["rumble"]), rumbleStrength: rumbleStrength(input["rumbleStrength"]), controller: controller(input["controller"]) };
 }
 export function settingsPath(root: string, name: string): string {
