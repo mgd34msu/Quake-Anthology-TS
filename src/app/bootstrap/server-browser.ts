@@ -39,6 +39,7 @@ export class StartupServerBrowser {
   private closeResult: Promise<void> | null = null;
   private generation = 0;
   private readonly listGenerations = new Map<Q3BrowserSource, number>();
+  private readonly listSnapshots = new Map<Q3BrowserSource, { readonly generation: number; readonly addresses: readonly NetworkAddress[] }>();
   private readonly listResets = new Map<Q3BrowserSource, number>();
   private masterEpoch = 0;
   private master: { readonly source: 1 | 2; readonly address: NetworkAddress | null; readonly startedAt: number; readonly received: boolean } | null = null;
@@ -87,9 +88,15 @@ export class StartupServerBrowser {
   get q3Core(): ServerBrowser { this.assertOpen(); return this.browser("q3"); }
   q3List(source: Q3BrowserSource): { readonly addresses: readonly NetworkAddress[]; readonly pending: boolean; readonly generation: number; readonly resetGeneration: number } {
     this.assertOpen();
-    return { addresses: this.browser("q3").list().filter(entry => entry.sources.includes(q3Sources[source])).map(entry => entry.address),
+    const generation = this.listGenerations.get(source) ?? 0;
+    let snapshot = this.listSnapshots.get(source);
+    if (snapshot === undefined || snapshot.generation !== generation) {
+      snapshot = { generation, addresses: this.browser("q3").list().filter(entry => entry.sources.includes(q3Sources[source])).map(entry => entry.address) };
+      this.listSnapshots.set(source, snapshot);
+    }
+    return { addresses: snapshot.addresses,
       pending: this.master?.source === source && !this.master.received,
-      generation: this.listGenerations.get(source) ?? 0, resetGeneration: this.listResets.get(source) ?? 0 };
+      generation, resetGeneration: this.listResets.get(source) ?? 0 };
   }
   private clearQ3(source: Q3BrowserSource): void {
     const core = this.browser("q3");
@@ -238,11 +245,16 @@ export class StartupServerBrowser {
       const before = browser.saveFavorites(), existing = browser.list().find(entry => addressKey(entry.address) === addressKey(address));
       const removing = existing?.sources.includes("favorite") === true;
       if (removing) browser.removeFavorite(address); else browser.add(address, "favorite");
+      if (protocol === "q3") this.listGenerations.set(3, (this.listGenerations.get(3) ?? 0) + 1);
       const view = protocol === "q3" ? this.currentCacheView() : null;
       try { await this.config.dump(protocol === "q3" ? "servers-cache-q3" : `servers-${protocol}`,
         protocol === "q3" ? writeQ3BrowserCache(browser.list(), view) : browser.saveFavorites()); this.assertGeneration(generation, true); }
-      catch (error) { browser.restoreFavorites(before); throw error; }
-      if (protocol === "q3") { this.cachedView = view; this.listGenerations.set(3, (this.listGenerations.get(3) ?? 0) + 1); }
+      catch (error) {
+        browser.restoreFavorites(before);
+        if (protocol === "q3") this.listGenerations.set(3, (this.listGenerations.get(3) ?? 0) + 1);
+        throw error;
+      }
+      if (protocol === "q3") this.cachedView = view;
       this.status = removing ? "Favorite removed" : "Favorite added";
     });
   }

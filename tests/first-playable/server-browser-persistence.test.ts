@@ -21,7 +21,7 @@ import { UdpTransport } from "../../src/network/common/transport.ts";
 import { ipv4Address, addressKey } from "../../src/network/common/endpoint.ts";
 import type { Ipv4Address } from "../../src/network/common/endpoint.ts";
 import { decodeConnectionless } from "../../src/network/q3/connectionless.ts";
-import { decodeQ3MasterPacket, encodeQ3Status } from "../../src/network/q3/discovery.ts";
+import { decodeQ3MasterPacket, decodeQ3ServerStatus, encodeQ3Status } from "../../src/network/q3/discovery.ts";
 import { writeQ3BrowserCache, readQ3BrowserCache } from "../../src/app/bootstrap/server-browser-cache.ts";
 import type { Q3BrowserCacheView } from "../../src/network/q3/browser-view.ts";
 
@@ -29,6 +29,52 @@ function masterPacket(addresses: readonly Ipv4Address[], complete: boolean): Uin
   return Uint8Array.from([255, 255, 255, 255, ...new TextEncoder().encode("getserversResponse"),
     ...addresses.flatMap(address => [92, ...address.host, address.port >>> 8, address.port & 255]), 92, ...complete ? [69, 79, 84] : []]);
 }
+
+test("Q3 browser source reads reuse one scan until membership changes", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "quake-browser-read-reuse-")), browser = await StartupServerBrowser.open(new ConfigStore(root));
+  const core = browser.q3Core, endpoint = ipv4Address([127, 0, 0, 1], 27960), extra = ipv4Address([127, 0, 0, 1], 27961);
+  browser.addQ3(2, endpoint);
+  const scans = spyOn(core, "list"), packets: Uint8Array[] = [];
+  const send = spyOn(core.transport, "send").mockImplementation((_to, bytes) => { packets.push(bytes); return true; });
+  try {
+    const first = browser.q3List(2).addresses;
+    let shared = true;
+    for (let index = 0; index < 1024; index++) shared = browser.q3List(2).addresses === first && shared;
+    expect(shared).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(1);
+    const handle = core.request(endpoint, 0, "status"), packet = packets[0];
+    if (handle === null || packet === undefined) throw new Error("No counted browser query");
+    const challenge = decodeConnectionless(packet, "server").arguments[0]; if (challenge === undefined) throw new Error("No browser challenge");
+    const reply = decodeQ3ServerStatus(encodeQ3Status(`\\challenge\\${challenge}\\sv_hostname\\Updated status\\mapname\\q3dm1\\sv_maxclients\\8`, []));
+    expect(core.receive(endpoint, reply.status, reply.challenge, 10)).toBe(true); core.releaseRequest(handle);
+    expect(browser.q3List(2).addresses).toBe(first); expect(scans).toHaveBeenCalledTimes(1);
+    expect(core.entry(endpoint)?.status?.name).toBe("Updated status");
+    browser.addQ3(2, extra); scans.mockClear();
+    const second = browser.q3List(2).addresses; expect(second).toEqual([endpoint, extra]); expect(second).not.toBe(first);
+    for (let index = 0; index < 1024; index++) browser.q3List(2);
+    expect(scans).toHaveBeenCalledTimes(1);
+    browser.addQ3(3, endpoint); scans.mockClear(); expect(browser.q3List(2).addresses).toBe(second); expect(scans).not.toHaveBeenCalled();
+    browser.removeQ3(2, extra); scans.mockClear(); expect(browser.q3List(2).addresses).toEqual([endpoint]); expect(scans).toHaveBeenCalledTimes(1);
+  } finally { scans.mockRestore(); send.mockRestore(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Q3 browser snapshot invalidates an optimistic favorite when a deferred write rolls back", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "quake-browser-read-rollback-")), config = new ConfigStore(root), browser = await StartupServerBrowser.open(config);
+  let release = (): void => { throw new Error("Missing write gate"); }, writing = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const dump = spyOn(config, "dump").mockImplementation(async () => { writing = true; await gate; throw new Error("Deferred favorite failure"); });
+  browser.choose("q3"); browser.address = "127.0.0.1:27960";
+  expect(browser.q3List(3).addresses).toEqual([]);
+  const pending = browser.favorite();
+  try {
+    for (let attempt = 0; attempt < 100 && !writing; attempt++) await Bun.sleep(1);
+    expect(writing).toBe(true);
+    const optimistic = browser.q3List(3).addresses; expect(optimistic).toHaveLength(1);
+    release(); await expect(pending).rejects.toThrow("Deferred favorite failure");
+    const rolledBack = browser.q3List(3).addresses; expect(rolledBack).toEqual([]); expect(rolledBack).not.toBe(optimistic);
+    expect(browser.q3List(3).addresses).toBe(rolledBack);
+  } finally { release(); await pending.catch(() => undefined); dump.mockRestore(); await browser.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("Q3 browser facade retains final EOT at the 256-record packet boundary", () => {
   const addresses = Array.from({ length: 256 }, (_, index) => ipv4Address([127, 0, 0, 1], 20000 + index));

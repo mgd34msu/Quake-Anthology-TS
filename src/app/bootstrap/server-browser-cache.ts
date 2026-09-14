@@ -52,16 +52,18 @@ export function readQ3BrowserCache(serialized: string): Q3BrowserCache {
   if (root["version"] !== 1 || root["protocol"] !== "q3") throw new Error("Unsupported browser cache version or protocol");
   const values = array(root["entries"]);
   if (values.length > 16384) throw new Error("Too many browser cache entries");
-  const keys = new Set<string>();
+  const byAddress = new Map<string, BrowserEntry>();
   const entries = values.map(value => {
     const entry = record(value), endpoint = address(entry["address"]), key = addressKey(endpoint);
-    if (keys.has(key)) throw new Error("Duplicate browser cache endpoint"); keys.add(key);
+    if (byAddress.has(key)) throw new Error("Duplicate browser cache endpoint");
     const sources: DiscoverySource[] = array(entry["sources"]).map(value => {
       if (value !== "master" && value !== "secondary-master" && value !== "favorite") throw new Error("Invalid cached browser source");
       return value;
     });
     if (sources.length === 0 || new Set(sources).size !== sources.length) throw new Error("Invalid cached browser memberships");
-    return { address: endpoint, sources, status: status(entry["status"]), pingMilliseconds: entry["pingMilliseconds"] === null ? null : finite(entry["pingMilliseconds"]), updatedAt: finite(entry["updatedAt"]) };
+    const parsed = { address: endpoint, sources, status: status(entry["status"]), pingMilliseconds: entry["pingMilliseconds"] === null ? null : finite(entry["pingMilliseconds"]), updatedAt: finite(entry["updatedAt"]) };
+    byAddress.set(key, parsed);
+    return parsed;
   });
   const viewValue = root["view"];
   if (entries.filter(entry => entry.sources.includes("master")).length > 8192
@@ -80,7 +82,7 @@ export function readQ3BrowserCache(serialized: string): Q3BrowserCache {
       if ([...name].some(character => character.charCodeAt(0) > 255)) throw new Error("Browser cache UI name must contain source bytes");
       const endpoint = address(row["address"]);
       const key = addressKey(endpoint);
-      if (rowKeys.has(key) || !entries.some(entry => addressKey(entry.address) === key && entry.sources.includes(membership)))
+      if (rowKeys.has(key) || byAddress.get(key)?.sources.includes(membership) !== true)
         throw new Error("Browser cache UI row has duplicate or mismatched membership");
       rowKeys.add(key);
       return { address: endpoint, name, visible: integer(row["visible"], -0x80000000, 0x7fffffff), ping: integer(row["ping"], -0x80000000, 0x7fffffff) };
