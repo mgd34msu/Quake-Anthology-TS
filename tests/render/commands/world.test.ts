@@ -160,6 +160,36 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
         expect(preparedOverride.some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
         expect(images.drainOperations().some(operation => operation.kind === "update-image" && operation.image === surface.lightmap?.image)).toBe(true);
         await overridden.remapShader(name, name);
+        const shadowLight: SceneLight = { origin: directed.camera.origin, color: { x: 1, y: 1, z: 1 }, radius: 512, additive: false,
+          profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+        overridden.prepareShadows([shadowLight], directed);
+        const staticWorld = overridden["staticShadowWorld"];
+        expect(staticWorld).not.toBeNull();
+        overridden.prepareShadows([shadowLight], { ...directed, time: { kind: "seconds", value: 1 } });
+        expect(overridden["staticShadowWorld"]).toBe(staticWorld);
+        shaders.addScript(`shadow-cache-moving { deformVertexes move 0 0 16 sin 0 1 0 1 { map $whiteimage } }
+shadow-cache-hidden { surfaceparm nodraw { map $whiteimage } }`, "<shadow cache remap>");
+        await overridden.remapShader(name, "shadow-cache-moving");
+        expect(overridden["staticShadowWorld"]).toBeNull();
+        const moving = overridden.prepareShadows([shadowLight], directed);
+        const moved = overridden.prepareShadows([shadowLight], { ...directed, time: { kind: "seconds", value: 0.25 } });
+        expect(overridden["staticShadowWorld"]).toBeNull();
+        expect(moving.operations).not.toEqual(moved.operations);
+        await overridden.remapShader(name, "shadow-cache-hidden");
+        overridden.prepareShadows([shadowLight], directed);
+        expect(overridden["staticShadowWorld"]?.world.meshes.length).toBeLessThan(staticWorld?.world.meshes.length ?? 0);
+        await overridden.remapShader(name, name);
+        overridden.prepareShadows([shadowLight], directed);
+        expect(overridden["staticShadowWorld"]?.world.digest).toBe(staticWorld?.world.digest);
+        const previous = overridden["staticShadowWorld"];
+        overridden.surfaces = [...overridden.surfaces];
+        overridden.prepareShadows([shadowLight], directed);
+        expect(overridden["staticShadowWorld"]).not.toBe(previous);
+        const refreshed = await overridden.prepareImages(shaders);
+        overridden.commitImages(refreshed);
+        expect(overridden["staticShadowWorld"]).toBeNull();
+        overridden.prepareShadows([shadowLight], directed);
+        expect(overridden["staticShadowWorld"]?.world.digest).toBe(staticWorld?.world.digest);
         const nativeTexture = surface.material.kind === "q1" ? surface.material.texture : surface.material.frames[0];
         if (nativeTexture === undefined) throw new Error("Missing native source texture");
         const sampled = textures.register("fixture-native-sampling", { kind: "rgba8", levels: [

@@ -5,7 +5,7 @@ import type { SceneLight } from "../../../src/contracts/scene.ts";
 import { q2FogColor } from "../../../src/materials/legacy-fog.ts";
 import { SoftwareRenderer, CPU_OPAQUE_STATE } from "../../../src/render/cpu/rasterizer.ts";
 import { SceneImageRegistry, rgbaImage } from "../../../src/render/scene/resources.ts";
-import { Q2ShadowScene, shadowCaster } from "../../../src/render/scene/shadows.ts";
+import { Q2ShadowScene, StaticShadowWorld, shadowCaster } from "../../../src/render/scene/shadows.ts";
 import { aliasShadeDivisor, aliasShadowLightFractions } from "../../../src/render/scene/models/lighting.ts";
 import { SdlWindow } from "../../../src/platform/sdl.ts";
 import { GlRenderer } from "../../../src/render/gl/renderer.ts";
@@ -162,4 +162,28 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL retains growing cone-axis
   using renderer = new GlRenderer(window, owner);
   const images = new SceneImageRegistry(owner);
   try { checkAxisSpanningCaster(renderer, images); } finally { images.close(); }
+});
+
+test("static world snapshots preserve digest signatures and isolate mutable source meshes", () => {
+  const owner = { identity: Symbol("static-world"), session: createIdentityOwner("static-world").session, generation: 0 };
+  const images = new SceneImageRegistry(owner), shadows = new Q2ShadowScene(images);
+  const mesh = { positions: [{ x: 0, y: 0, z: 32 }, { x: 16, y: 0, z: 32 }, { x: 0, y: 16, z: 32 }], indices: [0, 1, 2] };
+  const snapshot = new StaticShadowWorld([mesh]);
+  const light: SceneLight = { origin: { x: 0, y: 0, z: 64 }, color: { x: 1, y: 1, z: 1 }, radius: 192, additive: false,
+    profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+  try {
+    expect(shadows.prepare([light], [mesh], []).stats.rebuiltLights).toBe(1);
+    expect(shadows.prepare([light], snapshot, []).stats.cachedLights).toBe(1);
+    const digest = snapshot.digest;
+    mesh.positions[0] = { x: 80, y: 0, z: 32 }; mesh.indices.reverse();
+    expect(snapshot.digest).toBe(digest);
+    expect(snapshot.meshes[0]?.indices).toEqual([0, 1, 2]);
+    expect(Object.isFrozen(snapshot.meshes[0]?.positions[0])).toBe(true);
+    expect(shadows.prepare([light], snapshot, []).stats.cachedLights).toBe(1);
+    expect(shadows.prepare([light], [mesh], []).stats.rebuiltLights).toBe(1);
+    shadows.prepare([light], snapshot, [], { enabled: false });
+    expect(shadows.prepare([light], snapshot, []).stats.rebuiltLights).toBe(1);
+    expect(shadows.prepare([light], [], []).stats.rebuiltLights).toBe(1);
+    expect(shadows.prepare([light], new StaticShadowWorld([]), []).stats.cachedLights).toBe(1);
+  } finally { shadows.close(); images.close(); }
 });

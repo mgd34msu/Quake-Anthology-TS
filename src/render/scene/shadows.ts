@@ -187,13 +187,28 @@ function geometryDigest(meshes: readonly ShadowMesh[]): string {
   return hash.digest("hex");
 }
 
+export class StaticShadowWorld {
+  readonly #meshes: readonly ShadowMesh[];
+  #digest: string | null = null;
+
+  constructor(meshes: readonly ShadowMesh[]) {
+    this.#meshes = Object.freeze(meshes.map(mesh => Object.freeze({
+      positions: Object.freeze(mesh.positions.map(position => Object.freeze({ ...position }))),
+      indices: Object.freeze([...mesh.indices]),
+    })));
+  }
+
+  get meshes(): readonly ShadowMesh[] { return this.#meshes; }
+  get digest(): string { return this.#digest ??= geometryDigest(this.#meshes); }
+}
+
 /** An atlas belongs to one prepared scene, including every seat using that scene. */
 export class Q2ShadowScene {
   private image: RendererImage | null = null;
   private cached = new Map<number, string>();
   constructor(readonly images: SceneImageRegistry) {}
 
-  prepare(source: readonly SceneLight[], world: readonly ShadowMesh[], casters: readonly ShadowCaster[], options: ShadowAtlasOptions = {}): PreparedShadows {
+  prepare(source: readonly SceneLight[], worldInput: readonly ShadowMesh[] | StaticShadowWorld, casters: readonly ShadowCaster[], options: ShadowAtlasOptions = {}): PreparedShadows {
     const lights: Q2FragmentLight[] = source.filter(light => light.profile.kind === "q2").slice(0, maximumLights).map(light => ({ origin: light.origin, radius: light.radius,
       color: light.color, scale: light.profile.kind === "q2" ? light.profile.scale : 1, cone: light.profile.kind === "q2" ? light.profile.cone : null, shadow: { kind: "none" } }));
     const q2Source = source.filter(light => light.profile.kind === "q2"), candidates: Candidate[] = [];
@@ -207,7 +222,8 @@ export class Q2ShadowScene {
     if (this.image === null) this.image = this.images.register("*q2-shadow-atlas", { kind: "depth32f",
       levels: [{ width: Q2_SHADOW_ATLAS_SIZE, height: Q2_SHADOW_ATLAS_SIZE, pixels: new Float32Array(Q2_SHADOW_ATLAS_SIZE ** 2).fill(1) }] }, { wrap: "clamp", filter: "nearest" });
     const slots = fit(candidates), passes: DepthAtlasPass[] = [], signatures = new Map<number, string>();
-    const worldKey = geometryDigest(world), casterKeys = new Map<ShadowCaster, string>();
+    const world = worldInput instanceof StaticShadowWorld ? worldInput.meshes : worldInput;
+    const worldKey = worldInput instanceof StaticShadowWorld ? worldInput.digest : geometryDigest(world), casterKeys = new Map<ShadowCaster, string>();
     let cachedLights = 0, rebuiltLights = 0, entityCasters = 0;
     for (const [index, candidate] of candidates.entries()) {
       const slot = slots[index]; if (slot === null || slot === undefined) continue;

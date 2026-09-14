@@ -31,7 +31,7 @@ import { portalCamera, portalSurfaceOffscreen } from "./portal.ts";
 import type { PortalEntity } from "./portal.ts";
 import { faceDlightMask, gridDlightMask, projectDlightTexture, receivesProjectedDlights } from "../../materials/dlight.ts";
 import type { DynamicLight } from "../../materials/q3-lighting.ts";
-import { Q2ShadowScene, shadowCaster, shadowMesh } from "./shadows.ts";
+import { Q2ShadowScene, StaticShadowWorld, shadowCaster, shadowMesh } from "./shadows.ts";
 import type { PreparedShadows, ShadowAtlasOptions, ShadowCaster, ShadowMesh } from "./shadows.ts";
 import { shadowMaterialGeometry } from "./shadow-geometry.ts";
 import { q2SkySides } from "./q2-sky.ts";
@@ -121,6 +121,7 @@ export class WorldScene {
   private q2Sky: readonly RendererImage[] = [];
   private readonly remapped = new Map<CompiledMaterial, { readonly shader: CompiledMaterial; readonly timeOffset: number }>();
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
+  private staticShadowWorld: { readonly surfaces: readonly WorldSurface[]; readonly first: number; readonly count: number; readonly world: StaticShadowWorld } | null = null;
 
   private constructor(readonly map: DecodedWorld, readonly shaders: SceneShaderRegistry,
     surfaces: readonly WorldSurface[], readonly options: WorldSceneOptions) {
@@ -291,14 +292,26 @@ export class WorldScene {
   /** Prepare once before color/model submission; beforeView executes atlas work first. */
   prepareShadows(lights: readonly SceneLight[], input: WorldViewInput, casters: readonly ShadowCaster[] = [], options: ShadowAtlasOptions = {}): PreparedShadows {
     const source = this.map.models[0], range = source === undefined ? { first: 0, count: this.surfaces.length } : "surfaces" in source ? source.surfaces : source.faces;
-    const context = this.materialContext(input), meshes: ShadowMesh[] = [];
+    let world: readonly ShadowMesh[] | StaticShadowWorld = [];
     if (options.enabled !== false && lights.some(light => light.profile.kind === "q2" && light.radius > 0 && (light.profile.cone !== null || light.profile.shadow.kind === "cast"))) {
-      for (let index = range.first; index < range.first + range.count; index++) {
-        const geometry = this.shadowGeometry(at(this.surfaces, index), context, false);
-        if (geometry !== null) meshes.push(shadowMesh(geometry));
+      const cached = this.staticShadowWorld;
+      if (cached !== null && cached.surfaces === this.surfaces && cached.first === range.first && cached.count === range.count) world = cached.world;
+      else {
+        this.staticShadowWorld = null;
+        const context = this.materialContext(input), meshes: ShadowMesh[] = [];
+        let staticWorld = true;
+        for (let index = range.first; index < range.first + range.count; index++) {
+          const surface = at(this.surfaces, index);
+          const shader = surface.shader === null ? null : this.remapped.get(surface.shader)?.shader ?? surface.shader;
+          if (shader !== null && shader.registered.definition.deforms.length !== 0) staticWorld = false;
+          const geometry = this.shadowGeometry(surface, context, false);
+          if (geometry !== null) meshes.push(shadowMesh(geometry));
+        }
+        world = staticWorld ? new StaticShadowWorld(meshes) : meshes;
+        if (world instanceof StaticShadowWorld) this.staticShadowWorld = { surfaces: this.surfaces, first: range.first, count: range.count, world };
       }
     }
-    return this.shadowScene.prepare(lights, meshes, [...casters, ...(input.inlineModels ?? []).filter(model => model.castsShadow !== false)
+    return this.shadowScene.prepare(lights, world, [...casters, ...(input.inlineModels ?? []).filter(model => model.castsShadow !== false)
       .map(model => this.shadowModel(model.model, model.transform, input))], options);
   }
 
@@ -457,7 +470,7 @@ export class WorldScene {
     return [{ kind: "depth-range", range: [1, 1] }, ...q2SkySides(geometry, input.camera.origin, sky, seconds, context.project), { kind: "depth-range", range: context.depthRange }];
   }
 
-  close(): void { this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+  close(): void { this.staticShadowWorld = null; this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
 
   /** Replace only renderer data; BSP identity and source light/style owners remain live. */
   async prepareImages(shaders: SceneShaderRegistry): Promise<WorldScene> {
@@ -486,6 +499,7 @@ export class WorldScene {
       if (surface.shader === null || surface.shader.material.name.toLowerCase() !== original.toLowerCase()) continue;
       if (original.toLowerCase() === replacement.toLowerCase()) this.remapped.delete(surface.shader);
       else this.remapped.set(surface.shader, { shader: await this.shaders.register(replacement, surface.kind === "q3" ? surface.lightmap : surface.lightmap?.image ?? null, surface.shader.finished.lightmapIndex), timeOffset });
+      this.staticShadowWorld = null;
     }
   }
 
