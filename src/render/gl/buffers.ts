@@ -104,7 +104,10 @@ function pack(batch: DrawBatch, allocate: AllocateGeometry): GeometryArrays {
       }
     }
   }
-  for (const values of [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]) {
+  const attributes = batch.texturing === "pair"
+    ? [arrays.positions, arrays.colors, arrays.coordinates, arrays.coordinates2, arrays.worldPositions, arrays.normals]
+    : [arrays.positions, arrays.colors, arrays.coordinates, arrays.worldPositions, arrays.normals];
+  for (const values of attributes) {
     for (let index = 0; index < values.length; index++) {
       if (!Number.isFinite(values[index])) throw new RangeError("OpenGL attributes must be finite float32 values");
     }

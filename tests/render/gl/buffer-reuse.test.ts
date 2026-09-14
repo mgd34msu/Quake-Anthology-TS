@@ -38,8 +38,20 @@ test("owned GL buffer reuse preserves fresh bytes through growth, shape changes 
   const input: Extract<DrawBatch, { readonly texturing: "single" }> = { ...batch(3, false, "vertex"), texturing: "single" };
   const first = buffer.pack(input), second = buffer.pack(input);
   expect(second).toBe(first);
+  const paired = batch(3, true, "vertex");
+  if (paired.texturing !== "pair") throw new Error("Expected paired batch");
+  for (const value of [NaN, Infinity, 1e40]) {
+    const invalid = { ...paired, vertices: paired.vertices.map(vertex => ({ ...vertex, texCoord2: { x: value, y: 0 } })) };
+    expect(() => buffer.pack(invalid)).toThrow("finite float32");
+    const cleared = buffer.pack(input);
+    expect(bytes(cleared.coordinates2)).toEqual(new Uint8Array(input.vertices.length * 8));
+    equalArrays(cleared, packGeometry(input));
+    equalArrays(buffer.pack(paired), packGeometry(paired));
+  }
   for (const invalid of [{ ...input, indices: [0, 1, 9] }, { ...input, indices: [0, 1] },
     { ...input, vertices: input.vertices.map(vertex => ({ ...vertex, position: { ...vertex.position, x: Infinity } })) },
+    { ...input, vertices: input.vertices.map(vertex => ({ ...vertex, color: { ...vertex.color, x: NaN } })) },
+    { ...input, vertices: input.vertices.map(vertex => ({ ...vertex, texCoord: { x: 1e40, y: 0 } })) },
     { ...input, lighting: { kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [], atlas: null } },
     { ...input, primitive: "lines", lineWidth: 0, indices: [0, 1] }] satisfies readonly DrawBatch[]) {
     let message = "";
