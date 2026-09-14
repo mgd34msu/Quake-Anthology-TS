@@ -97,7 +97,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf"
 }, 60000);
 
 
-test("Q2 geometry edition selects world lighting independently of external brush content", async () => {
+test("Q2 world and external brush lighting use the required donor default across editions", async () => {
   for (const game of ["q2-classic-baseq2", "q2-rerelease-baseq2"]) {
     const command = parseApplicationCommand(["--game", game, "--map", "base1", "--dedicated"]);
     if (command.kind !== "run") throw new Error("Missing Q2 launch");
@@ -105,11 +105,11 @@ test("Q2 geometry edition selects world lighting independently of external brush
     const assets = new ApplicationAssets(content, { identity: Symbol("q2-modulation"), session: identity.session, generation: 0 });
     try {
       const world = await assets.loadWorld();
-      expect(world.options.q2LightModulate).toBe(game === "q2-rerelease-baseq2" ? 2 : 1);
+      expect(world.options.q2LightModulate).toBe(2);
       const other = content.catalog.require(game === "q2-rerelease-baseq2" ? "q2-classic-baseq2" : "q2-rerelease-baseq2");
       const brush = await assets.model(other.id, "maps/base1.bsp");
       const resolved = content.catalog.product(brush.resource.provenance.mount.identity.content).expectation;
-      expect(brush.brushScene?.options.q2LightModulate).toBe(resolved.family === "q2" && resolved.edition === "rerelease" ? 2 : 1);
+      expect(brush.brushScene?.options.q2LightModulate).toBe(resolved.family === "q2" ? 2 : 1);
     } finally { assets.close(); await content.close(); }
   }
 }, 60_000);

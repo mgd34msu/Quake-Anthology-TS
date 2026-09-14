@@ -170,7 +170,7 @@ export class ApplicationAssets {
 
   private q2LightModulate(content: ContentId): number {
     const product = this.content.catalog.product(content).expectation;
-    return product.family === "q2" && product.edition === "rerelease" ? 2 : 1;
+    return product.family === "q2" ? 2 : 1;
   }
 
   async loadWorld(): Promise<WorldScene> {
