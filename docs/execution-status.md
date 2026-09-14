@@ -34,6 +34,8 @@ This build also includes explicit dedicated offline id1 and Hipnotic QuakeC admi
 
 Earlier HTTP/timer yielding, OAuth response flushing, quoted binding semicolons, the provider model picker and reasoning effort, and the Q2 `oldFrame=-1` correction remain included. Prior loopback provider checks do not establish live ChatGPT account connectivity, which remains unverified. The engine remains incomplete; this update does not re-audit the 477 requirements or change their counts.
 
+Accepted after this installation, `7807426623c8c61ac28ab84a7a7181187bde4b51` culls irrelevant MD5 shadow bodies before skinning. Root passed seven focused tests with 100 assertions and a separate actual GL test with four assertions. Complete shadow and color buffers matched, and one bounded profile reduced mean fixed-step time from 84.230 to 79.041 ms, about 6.16%. Accepted `22137b6b93f00d50dfd6014cd2eb073bbd154139` reuses unchanged brush-model lightmaps; five retail cases matched the forced-rebuild image and frame results. No brush timing gain or overall FPS improvement is claimed. These source changes are not installed: the executable remains `dd6d06203f931924148122aeedb6e8655595b139` with the receipt above. Cone-light gathering and donor lighting parity remain work in progress.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
