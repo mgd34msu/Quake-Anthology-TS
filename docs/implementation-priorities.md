@@ -36,7 +36,7 @@ Image-replacement rendering must consume the common priority and format choices 
 
 Accepted `75d26d8` shares material-group finalization with authored primary sort across Q1/Q2/Q3 views on CPU and GL, preserving multipass state and legacy draw order. Actual LRCTF captures on both backends place sort-4 marks before sort-9 explosions and show the restored flash. Final strict and scoped policy checks passed; each actual capture passed 102 assertions. Exact native secondary registration/entity/fog/dlight keys, dark impact coverage, and the missing radar asset remain open. Different live submissions prevent pixel-parity or FPS claims. This source correction is included in installed `75d26d8`; evidence is in `.artifacts/resume-20260913/lrctf-visual-review/candidate-report.md`.
 
-Accepted `4a85967` adds scene-wide shader identities across providers/image reloads, original refentity/poly slots including retained RT_POLY, mixed-frame admission metadata, and expected image-replacement rejection cleanup. Full strict and scoped policy checks passed; local CPU/GL console/menu refresh passed four tests/92 assertions, actual remote Q3 refresh preserved its connection, and separate cross-game effects checks passed two tests/18 assertions. This preserves shader identities and original scene records; the remaining ordering work is still open. The primary comparator is unchanged; native RT_POLY error/view gates and complete shader/entity/fog/dlight source sorting remain open. Installed `75d26d8` does not include this source.
+Accepted `4a85967` established material identities and original scene slots. Installed `5dc48dc` adds the accepted shared source-ordering and transactional image-refresh work. Full strict/scoped policy checks and actual CPU/GL ordering and refresh cases passed. This is bounded source-behavior evidence, not full vanilla rendering parity; lighting, dark impact coverage, and broader fidelity remain open.
 
 ### 4. Common audio
 
@@ -91,6 +91,8 @@ Complete map entities, mission trigger graphs, campaign transitions, hubs, backt
 ### 9. Complete saves and recovery
 
 Complete mixed-world saves, source save formats, autosaves, recovery and the save/load UI.
+
+Installed `5dc48dc` joins death presentation, recovery UI, and supported level autosaves, verified with actual CPU/GL death/load/restored captures. Complete Q3/QuakeC checkpoints and autosaves remain unsupported; this does not close the priority.
 
 **Done when:** All required mixed-world and player state survives actual save, close and reload, including campaign revisits and required QC state. Required source save formats and QC save support remain unfinished until implemented; version guards and explicit rejection do not complete them.
 

@@ -2,13 +2,15 @@
 
 ## Installed executable and recent fixes
 
-Verified installation on 2026-09-14 at `11:44:40.469Z` (06:44 CDT): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `75d26d87ae4d1aca2a123354f9c47fcbc49ee37e`, tree `a0b528c9510f443b3f20587a56309c7bfe7da064`. The executable is 121,747,584 bytes with mode `0755` and SHA-256 `d0de60dd23a4eb01d930c15e40b3400507d6e767dbc3d8d6096b911f8fb595ae`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+Verified installation on 2026-09-14 at `13:24:13.610Z` (08:24 CDT): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `5dc48dccd7a2fa0050c702f9f8eda15a92022108`, tree `d9bd5886f48d893e2767c037182d19fd657ecda4`. The executable is 121,845,888 bytes with mode `0755` and SHA-256 `8c654f5db4c4f5e4b6065f736ee6286ecb3ca6b8183498c0996041dff12bb2b1`. Receipt: `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
 
 ```sh
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
 ```
 
 This installation also includes Q3 model-material preload `003521b`, redundant packing-zero removal `b2aeb48`, reproducible monster-table generation `8e53aef`, and scalar model transforms `46d1468`. The transform pair retained bit-exact native color and shadow-atlas output; mean time changed from 59.589 to 59.049 ms while p95 worsened from 88.707 to 92.538 ms, so no reliable speed gain is established. The later QW, Q2, shared remote-content, and indexed shadow-atlas updates recorded below are included in this installation.
+
+The installed `5dc48dc` batch completes the accepted shared source-ordering and transactional image-refresh changes, fixes subscription SSE parsing when MIME metadata is absent, preserves Always run preferences, and joins firing/actor-death behavior with death presentation, recovery UI, and supported level autosaves. Full repository TypeScript passed across 1,893 files and policy passed for all 50 changed files, with 1,897 input hashes stable. Native death checks passed 17 assertions on each backend, image-refresh checks passed five tests/111 assertions, and actual Q3 ordering checks passed 102 assertions on each backend. Quiet explosion volume was not reproduced or fixed. Complete Q3/QuakeC checkpoints and autosaves remain unsupported.
 
 Recent accepted fixes are included:
 
@@ -28,9 +30,9 @@ These measurements used separate bounded comparisons. Their percentages cannot b
 
 The tested Q2 classic and rerelease `base1` recipes used QW movement, a Q1 rerelease player, Q3 weapons, and Q1 monsters matching the map edition. LMCTF offhand grapple and Q2 classic grenades were selected but not exercised.
 
-Root inspected both actual compiled GL runs through menus, forward movement, Q3 machinegun firing through 100 rounds, return to the menu, and ordinary exit. The rerelease firing interval lasted 30,208.597 ms and the classic interval 30,391.207 ms; both consumed ammunition from 100 to 0 and exited with code 0. The compiled selected-LRCTF dedicated server also completed Init, 10 frames, and awaited Shutdown with exit 0. That dedicated check did not run a remote client or guest UI/cgame and does not qualify compiled Q3 gameplay. Proof: `.artifacts/resume-20260913/final-75d26d8/runtime-proof.json`; build identity: `.artifacts/resume-20260913/final-75d26d8/build.json`. Root independently matched the installed hash, mode, and receipt. The earlier `18bedc4` compiled evidence remains historical in `.artifacts/resume-20260913/final-18bedc4/`.
+Root inspected five fresh compiled images and the actual CPU/GL death and recovery captures. The rerelease firing run lasted 30.211062 seconds and classic 30.390678 seconds; both consumed ammunition from 100 to 0, returned to the menu, and quit normally with exit 0. Each used an isolated autosave. Proof and build receipt: `.artifacts/resume-20260913/final-5dc48dc/`. Earlier compiled evidence, including the bounded selected-LRCTF dedicated Init/frame/Shutdown check, remains dated evidence under `final-75d26d8/`.
 
-Lighting, HUD, dark impact coverage, the rerelease beam patch, and full fidelity remain open. Snapshot identity/admission work is in progress and is not included in this installed build.
+Lighting, HUD, dark impact coverage, the rerelease beam patch, and full fidelity remain open. The current build includes the accepted material identity/admission and source-ordering work; it does not establish full vanilla rendering parity.
 
 The historical menu-audio proof remains bounded to its tested source. The installed engine now uses the 200 ms startup queue correction described below. Separate native menu checks exercised real input events, decoded music and cue PCM, mute and unmute, saved gains, and device release before game initialization. Those checks and the compiled runs used dummy audio output; audibility through the user's speakers remains unverified. An earlier 30-second trace of the `379086a` source covered 320 frames with dummy audio; this is not a measurement of the latest installed executable. A rare 192 ms pump interval exceeded roughly 137 ms of queued coverage, leaving an approximately 53 ms gap. A cold frame queued two seconds of audio; this is queued audio duration, not two seconds spent mixing. Audible fidelity and overall FPS remain unqualified. The compiled checks do not establish universal renderer parity or HUD fidelity; the bounded classic-lighting comparison below retains its seam difference.
 
