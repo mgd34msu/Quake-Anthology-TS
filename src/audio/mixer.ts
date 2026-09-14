@@ -67,6 +67,7 @@ interface VoicePolicy {
     readonly stereoScale: number;
     readonly unattenuatedMono: boolean;
     readonly loopStart: number | null;
+    readonly synchronizedGainLimit: number | null;
     readonly role: "effect" | "static" | "ambient" | "entity-loop";
     readonly key: number;
 }
@@ -443,7 +444,7 @@ export class AudioMixer {
     }
     startQ1Sound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
         command: SoundChannelCommand, random: () => number): boolean {
-        return this.admitSourceSound(sound, options, command, { attenuation: options.attenuation / 1000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, role: "effect", key: 0 }, random);
+        return this.admitSourceSound(sound, options, command, { attenuation: options.attenuation / 1000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, synchronizedGainLimit: null, role: "effect", key: 0 }, random);
     }
     private admitSourceSound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number },
         command: SoundChannelCommand, policy: VoicePolicy, random: (() => number) | null, scheduled: { readonly sample: number; readonly order: number } | null = null): boolean {
@@ -475,7 +476,7 @@ export class AudioMixer {
     addStaticSound(sound: PcmSound, origin: Vec3, volume: number, attenuation: number): boolean {
         if (sound.loopStart === null) throw new Error("Static sound requires a WAV loop marker");
         return this.admitSourceSound(sound, { entity: -1, origin: { kind: "fixed", position: origin }, volume: volume / 255, attenuation }, { kind: "auto" },
-            { attenuation: attenuation / 64000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, role: "static", key: 0 }, null);
+            { attenuation: attenuation / 64000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, synchronizedGainLimit: null, role: "static", key: 0 }, null);
     }
     updateAmbient(sounds: readonly PcmSound[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
         if (!this.enabled) return;
@@ -485,7 +486,7 @@ export class AudioMixer {
             if (sound === undefined || amount === undefined || level === 0) { if (index >= 0) this.freeChannel(index); continue; }
             if (index < 0 || this.voices[index]?.prepared.sound !== sound) {
                 if (index >= 0) this.freeChannel(index);
-                this.admitSourceSound(sound, { entity: -1, origin: { kind: "local" }, volume: 0, attenuation: 0 }, { kind: "auto" }, { attenuation: 0, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: 0, role: "ambient", key }, null);
+                this.admitSourceSound(sound, { entity: -1, origin: { kind: "local" }, volume: 0, attenuation: 0 }, { kind: "auto" }, { attenuation: 0, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: 0, synchronizedGainLimit: null, role: "ambient", key }, null);
                 index = this.voices.findIndex(voice => voice?.policy?.role === "ambient" && voice.policy.key === key);
             }
             const voice = this.voices[index];
@@ -499,7 +500,7 @@ export class AudioMixer {
         for (const [index, voice] of this.voices.entries()) if (voice?.policy?.role === "entity-loop") this.freeChannel(index);
         for (const entry of entries) this.admitSourceSound(entry.sound, { ...entry, origin: { kind: "fixed", position: entry.origin }, attenuation: entry.attenuation ?? 1 }, { kind: "auto" },
             { attenuation: (entry.attenuation ?? 1) * (entry.family === "q1" ? 0.001 : 0.003), distanceOffset: entry.family === "q1" ? 0 : 80,
-                stereoScale: entry.family === "q1" ? 1 : 0.5, unattenuatedMono: entry.family === "q2", loopStart: 0, role: "entity-loop", key: entry.entity }, null);
+                stereoScale: entry.family === "q1" ? 1 : 0.5, unattenuatedMono: entry.family === "q2", loopStart: 0, synchronizedGainLimit: entry.family === "q2" ? 255 : null, role: "entity-loop", key: entry.entity }, null);
     }
     startQ2Sound(sound: PcmSound, options: { readonly entity: number; readonly origin: VoiceOrigin; readonly volume: number; readonly attenuation: number; readonly delaySeconds?: number; readonly serverMilliseconds?: number }, command: SoundChannelCommand): boolean {
         if (!this.enabled) return false;
@@ -512,7 +513,7 @@ export class AudioMixer {
         begin = delay === 0 ? this.paintedTime : Math.trunc(begin + delay * this.outputRate);
         if (!Number.isSafeInteger(begin)) throw new RangeError("Sound deadline is outside the shared clock");
         const accepted = this.admitSourceSound(sound, options, command,
-            { attenuation: options.attenuation * (options.attenuation === 3 ? 0.001 : 0.0005), distanceOffset: 80, stereoScale: 0.5, unattenuatedMono: true, loopStart: null, role: "effect", key: 0 }, null,
+            { attenuation: options.attenuation * (options.attenuation === 3 ? 0.001 : 0.0005), distanceOffset: 80, stereoScale: 0.5, unattenuatedMono: true, loopStart: null, synchronizedGainLimit: null, role: "effect", key: 0 }, null,
             { sample: begin, order: this.sourceScheduleOrder });
         if (accepted) { this.sourceBeginOffset = offset; this.sourceScheduleOrder++; }
         return accepted;
@@ -783,12 +784,26 @@ export class AudioMixer {
             for (const voice of this.voices) if (voice?.start.kind === "scheduled") count = Math.min(count, voice.start.sample - this.paintedTime);
             const paint = new Float64Array(count * 2);
             this.paintRaw(paint, count);
+            const mergedVoices = new Set<OneShotVoice>();
             for (const voice of this.voices) {
-                if (voice === null || voice.start.kind === "scheduled")
+                if (voice === null || voice.start.kind === "scheduled" || mergedVoices.has(voice))
                     continue;
                 if (voice.start.kind === "pending")
                     throw new Error("Channel scan left a pending sound");
-                const stereoVolume = voice.stereoVolume;
+                let stereoVolume = voice.stereoVolume;
+                const gainLimit = voice.policy?.synchronizedGainLimit ?? null;
+                if (gainLimit !== null) {
+                    let left = stereoVolume.left, right = stereoVolume.right;
+                    mergedVoices.add(voice);
+                    for (const candidate of this.voices) {
+                        if (candidate === null || mergedVoices.has(candidate) || candidate.start.kind !== "started"
+                            || candidate.policy?.synchronizedGainLimit !== gainLimit || candidate.prepared.sound !== voice.prepared.sound)
+                            continue;
+                        mergedVoices.add(candidate);
+                        left += candidate.stereoVolume.left; right += candidate.stereoVolume.right;
+                    }
+                    stereoVolume = { left: Math.min(gainLimit, left), right: Math.min(gainLimit, right) };
+                }
                 if (stereoVolume.left === 0 && stereoVolume.right === 0)
                     continue;
                 const firstOffset = this.paintedTime - voice.start.sample;
