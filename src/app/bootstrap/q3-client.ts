@@ -7,7 +7,7 @@ import { infoValueForKey } from "../../core/info-string.ts";
 import { ApplicationQvmClient } from "./q3-client/qvm.ts";
 import { QvmApplicationScalars } from "./q3-client/qvm-scalars.ts";
 import type { QvmApplicationScalarOptions } from "./q3-client/qvm-scalars.ts";
-import type { Q3ClientConnection } from "../../network/q3/client.ts";
+import type { Q3ClientState } from "../../compat/qvm/client-state.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 import type { NativeRenderer } from "./renderer.ts";
 import type { Q3PresentationSession } from "../../content/q3/presentation/client.ts";
@@ -97,7 +97,7 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
     linkBounds(number: number): Bounds | null; sourceActor(number: number): ActorId | null;
     predictionCommand?(command: ActorCommand, sourceTimeMilliseconds: number): UserCommand; }
   | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
-  | { readonly kind: "qvm"; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientConnection;
+  | { readonly kind: "qvm"; readonly localServer?: boolean; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientState;
       readonly browser: Q3BrowserView;
       readonly queries: SharedSceneQueries; readonly commandBuffer: CommandBuffer; readonly renderer: NativeRenderer;
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
@@ -155,11 +155,13 @@ export class ApplicationQ3Client {
     for (const setting of options.settings ?? []) this.cvars.set(setting.name, setting.value, true);
     this.sharedCvarNames = new Set(cvarTable(this.product).map(definition => definition.name.toLowerCase()));
     for (const setting of options.serverSettings?.() ?? []) if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);
-    this.applySystemInfo();
-    this.cvars.set("sv_running", (options.kind === "remote" || options.kind === "qvm") ? "0" : "1", true);
+    this.refreshSystemInfo();
+    this.cvars.set("sv_running", options.kind === "remote" || options.kind === "qvm" && options.localServer !== true ? "0" : "1", true);
     this.frames = new SceneFrameBuilder(options.assets.images); this.lightSampler = new ModelLightSampler(options.assets.world);
   }
-  private applySystemInfo(): void {
+  refreshSystemInfo(): void {
+    if (this.closed) throw new Error("Q3 presentation is closed");
+    this.options.assertCurrent?.();
     const info = this.source.systemInfo?.(); if (info === undefined) return;
     const fields = info.split("\\");
     for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
@@ -196,7 +198,7 @@ export class ApplicationQ3Client {
         setUserCommandValue: (weapon, sensitivity) => { this.selection = { weapon, sensitivity }; },
         assertCurrent: () => { o.assertCurrent?.(); if (this.closed) throw new Error("Q3 cgame belongs to a retired world"); }, print: o.commands.print };
     if (o.kind === "qvm") {
-      const scalar = new QvmApplicationScalars({ renderer: o.renderer, local: o.local, media, services, now: o.now,
+      const scalar = new QvmApplicationScalars({ renderer: o.renderer, viewport: o.viewport, local: o.local, media, services, now: o.now,
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ seat, services, media, session, connection: o.connection, queries: o.queries,
@@ -250,7 +252,7 @@ export class ApplicationQ3Client {
   camera(): SceneCamera { return this.latestCamera; }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
   async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = []): Promise<void> {
-    this.applySystemInfo();
+    this.refreshSystemInfo();
     const backend = this.requireBackend(); this.frameNumber = frameNumber; Object.assign(this.viewportValue, viewport); this.submissions.length = 0;
     for (const setting of this.options.serverSettings?.() ?? []) {
       if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);

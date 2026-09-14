@@ -1,3 +1,4 @@
+import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
 import { remoteContentSelection, remoteContentProduct } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
 import type { CommandContext } from "../../contracts/common.ts";
@@ -143,23 +144,8 @@ export class RemoteApplication {
       const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
         cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
       this.downloadPermission = family === "qw" || family === "nq" ? null : createClientDownloadPermission(cvars, family);
-      if (family === "q3" || family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
-      if (family === "q3") {
-        cvars.register("cl_maxpackets", "30", CvarFlag.Archive);
-        cvars.register("cl_packetdup", "1", CvarFlag.Archive);
-        cvars.register("snaps", "20", CvarFlag.Archive | CvarFlag.UserInfo);
-        cvars.register("name", "Player", CvarFlag.Archive | CvarFlag.UserInfo);
-        for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
-          cvars.register(name, `${launchOptions.characterModel}/default`, CvarFlag.Archive | CvarFlag.UserInfo);
-        for (const [name, value] of [["color1", "4"], ["color2", "5"], ["sex", "male"], ["cl_anonymous", "0"], ["cg_predictItems", "1"]] satisfies readonly (readonly [string, string])[])
-          cvars.register(name, value, CvarFlag.Archive | CvarFlag.UserInfo);
-        cvars.register("teamtask", "0", CvarFlag.UserInfo);
-        cvars.register("password", "", CvarFlag.UserInfo);
-        cvars.register("handicap", "100", CvarFlag.Archive | CvarFlag.UserInfo);
-        cvars.register("cl_maxPing", "800", CvarFlag.Archive);
-        cvars.register("cl_serverStatusResendTime", "750", 0);
-        cvars.register("sv_master1", "master.quake3arena.com", 0);
-      }
+      if (family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
+      if (family === "q3") initializeQ3ClientCvars(cvars, { name: "Player", model: launchOptions.characterModel });
       if (family === "qw") {
         cvars.register("noskins", "0", CvarFlag.Archive); cvars.register("baseskin", "base", CvarFlag.Archive);
         for (const variable of [{ name: "name", value: "unnamed" }, { name: "team", value: "" }, { name: "skin", value: "" },

@@ -7,7 +7,7 @@ import { qvmClientMarkSyscall } from '../../../compat/qvm/client-mark-syscalls.t
 import type { SeatId } from '../../../contracts/identity.ts';
 import type { Q3PresentationSession } from '../../../content/q3/presentation/client.ts';
 import type { Q3CgameEventHandling } from '../../../contracts/ui.ts';
-import type { Q3ClientConnection } from '../../../network/q3/client.ts';
+import type { Q3ClientState } from '../../../compat/qvm/client-state.ts';
 import type { CommandBuffer } from '../../../core/commands/index.ts';
 import { QvmCgame } from '../../../compat/qvm/cgame.ts';
 import { QvmUi } from '../../../compat/qvm/ui.ts';
@@ -34,7 +34,7 @@ export interface ApplicationQvmClientOptions {
   readonly services: ApplicationQ3Services;
   readonly media: ApplicationQ3Assets;
   readonly session: Q3PresentationSession;
-  readonly connection: Q3ClientConnection;
+  readonly connection: Q3ClientState;
   readonly queries: SharedSceneQueries;
   readonly commands: CommandBuffer;
   readonly browser: Q3BrowserView;

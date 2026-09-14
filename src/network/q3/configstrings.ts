@@ -3,6 +3,11 @@ import { CommonError } from "../../core/common-error.ts";
 import { sourceCommandText } from "../../core/commands/text.ts";
 import type { Q3ServerConnection } from "./server.ts";
 
+export function q3ConfigstringCommands(index: number, value: string): readonly string[] {
+  const chunks = value.match(/[\s\S]{1,999}/g) ?? [""];
+  return chunks.map((chunk, part) => `${chunks.length === 1 ? "cs" : part === 0 ? "bcs0" : part === chunks.length - 1 ? "bcs2" : "bcs1"} ${index} "${chunk}"`);
+}
+
 export interface Q3ConfigStringClient { readonly connection: Q3ServerConnection; readonly noServerInfo: boolean; }
 export interface Q3ConfigStringBindings {
   readonly running: () => boolean;
@@ -42,15 +47,9 @@ export class Q3ServerConfigStrings {
     for (const { connection, noServerInfo } of this.bindings.clients()) {
       if (connection.phase !== "primed" && connection.phase !== "active") continue;
       if (index === 0 && noServerInfo) continue;
-      if (text.length < 1000) await this.command(connection, `cs ${index} "${text}"\n`);
-      else {
-        let sent = 0, remaining = text.length;
-        while (remaining > 0) {
-          const command = sent === 0 ? "bcs0" : remaining < 1000 ? "bcs2" : "bcs1";
-          if (!await this.command(connection, `${command} ${index} "${text.slice(sent, sent + 999)}"\n`)) break;
-          connection.bindings.assertCurrent();
-          sent += 999; remaining -= 999;
-        }
+      for (const command of q3ConfigstringCommands(index, text)) {
+        if (!await this.command(connection, `${command}\n`)) break;
+        if (text.length >= 1000) connection.bindings.assertCurrent();
       }
     }
   }

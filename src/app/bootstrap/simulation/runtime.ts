@@ -1,3 +1,4 @@
+import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
 import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
 import { Q3ServerState } from "./q3/server-state.ts";
@@ -251,11 +252,11 @@ export class SharedSimulation implements Simulation {
     const qvm = options.recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     if (qvm !== undefined) {
       assertQ3GuestRecipe(options.recipe, qvm);
-      if (options.dedicated !== true || options.mode !== "deathmatch" || options.world.kind !== "q3-bsp"
+      if (options.mode !== "deathmatch" || options.world.kind !== "q3-bsp"
         || options.q3Guest === undefined || !isDeepStrictEqual(qvm, options.q3Guest.prepared.execution)
         || options.travel !== undefined || options.q3Session !== undefined
         || options.restore === undefined && (options.restoredClients?.length ?? 0) !== 0 || options.initialSourceMilliseconds !== undefined)
-        throw new Error("Q3 bytecode requires a prepared dedicated native map without local or travel state");
+        throw new Error("Q3 bytecode requires a prepared native map without travel state");
     } else if (options.q3Guest !== undefined || options.recipe.execution.some(module => module.kind === "qvm")) {
       throw new Error("Prepared Q3 guest does not match the selected server execution");
     }
@@ -1331,7 +1332,7 @@ export class SharedSimulation implements Simulation {
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
           collision: (actor, collision) => this.physics.setCollision(actor, collision) },
         mounts: this.options.mounts, writable: guest.writable, common: guest.common,
-        maxClients: this.options.maxClients, seed: this.options.seed, entityText: this.options.world.entities,
+        maxClients: this.options.maxClients, seed: this.options.seed, dedicated: this.options.dedicated === true, entityText: this.options.world.entities,
         now, assertCurrent: () => { this.assertOpen(); } });
       if (this.options.restore !== undefined) {
         const checkpoint = simulationQvmCheckpoint(this.options.restore);
@@ -2511,12 +2512,24 @@ export class SharedSimulation implements Simulation {
     this.assertOpen();
     if (this.stepping) throw new Error("Simulation step is already running");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
-    if (input.commands.length !== 0) throw new Error("Q3 guest commands must enter through its native network lifecycle");
+    const guest = this.source.game;
+    const seen = new Set<ActorId>();
+    const commands = input.commands.map(command => {
+      if (command.source.kind !== "local-seat" || command.command.kind !== "q3" || command.arsenal !== undefined
+        || !this.options.identity.owns(command.source.seat) || !this.options.identity.owns(command.source.client))
+        throw new Error("Q3 guest local input requires an owned seat and native Q3 command");
+      const player = guest.player(command.source.client);
+      if (player === null || !player.actor.equals(command.actor) || seen.has(player.actor))
+        throw new Error("Q3 guest local input must target its admitted player once per frame");
+      seen.add(player.actor);
+      return { player, command: fromQ3UserCommand(command.command) };
+    });
     const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
     if (profile.kind !== "q3") throw new Error("Q3 guest lost its native frame clock");
     this.stepping = true;
     try {
       this.hostMilliseconds += input.elapsedMilliseconds;
+      for (const entry of commands) await guest.think(entry.player, entry.command);
       this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       if (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000) {
         this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
@@ -2959,6 +2972,12 @@ export class SharedSimulation implements Simulation {
     updateView(previous, state.fov);
   }
   playerView(actor: ActorId): PlayerView {
+    if (this.source.kind === "q3-qvm") {
+      const player = this.source.game.players().find(player => player.actor.equals(actor));
+      if (player === undefined) throw new Error("Actor has no Q3 guest client view");
+      const state = this.source.game.records.player(player.sourceEntity);
+      return { origin: state.origin, angles: state.viewAngles, viewHeight: state.viewHeight };
+    }
     const player = this.requirePlayer(actor), view = player.view(), source = this.q2Views.get(actor);
     if (player.cutscene !== null) return { origin: add(player.cutscene.origin, { ...player.cutscene.viewOffset, z: 0 }), angles: player.cutscene.angles, viewHeight: player.cutscene.viewOffset.z, fieldOfView: this.source.kind === "q2" ? source?.fov ?? 90 : 90 };
     if (this.source.kind === "quakec" && !player.intermission) {

@@ -1,12 +1,12 @@
 // Q3 cl_cgame.c client-state traps. GPL-2.0-or-later.
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
-import type { Q3ClientConnection } from "../../network/q3/client.ts";
+import type { Q3ClientState } from "./client-state.ts";
 import { QvmCgameImport, QvmUiImport } from "./abi.ts";
 import { QVM_GAME_STATE_BYTES, QVM_SNAPSHOT_BYTES, QVM_USER_COMMAND_BYTES, writeQvmGameState, writeQvmSnapshot, writeQvmUserCommand } from "./client-state-record.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 
 export interface QvmClientStateServices {
-  readonly connection: Q3ClientConnection;
+  readonly connection: Q3ClientState;
   readonly snapshots: SnapshotSource;
   snapshotPing(number: number): number | null;
   /** Execute only on this trap, installing returned argv in the common command owner before resolving. */

@@ -2,7 +2,7 @@
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ClientId, SeatId } from "../../contracts/identity.ts";
 import { CommonError } from "../../core/common-error.ts";
-import { tokenizeCommand } from "../../core/commands/text.ts";
+import { Q3ServerCommandExecutor } from "./client-server-command.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { beginClientMessage, finishClientMessage, writeClientMovement } from "./client-message.ts";
 import type { DemoMessageReader, DemoEnd } from "./demo.ts";
@@ -80,7 +80,7 @@ export class Q3ClientConnection {
   private readonly serverCommands = Array.from({ length: 64 }, () => "");
   private readonly outPackets: SentPacket[] = Array.from({ length: 32 }, () => ({ commandNumber: 0, serverTime: 0, realTime: 0 }));
   private readonly snapshotPings = new Map<number, number>();
-  private bigConfigString = "";
+  private readonly serverCommandExecutor = new Q3ServerCommandExecutor();
   serverMessageSequence = 0;
   serverCommandSequence = 0;
   lastExecutedServerCommand = 0;
@@ -218,24 +218,11 @@ export class Q3ClientConnection {
     }
     if (sequence > this.serverCommandSequence) throw new CommonError("drop", "CL_GetServerCommand: requested a command not received");
     this.lastExecutedServerCommand = sequence;
-    let text = this.serverCommand(sequence), argv = tokenizeCommand(text, "q3").argv, name = argv[0] ?? "";
-    if (name === "disconnect") throw new CommonError("server-disconnect", argv.length >= 2 ? `Server Disconnected - ${argv[1] ?? ""}` : "Server disconnected\n");
-    if (name === "bcs0") { this.bigConfigString = `cs ${argv[1] ?? ""} "${argv[2] ?? ""}`.slice(0, 8191); return null; }
-    if (name === "bcs1" || name === "bcs2") {
-      const suffix = argv[2] ?? "", last = name === "bcs2";
-      if (this.bigConfigString.length + suffix.length + (last ? 1 : 0) >= 8192) throw new CommonError("drop", "bcs exceeded BIG_INFO_STRING");
-      this.bigConfigString += suffix;
-      if (!last) return null;
-      this.bigConfigString += '"'; text = this.bigConfigString;
-      argv = tokenizeCommand(text, "q3").argv; name = argv[0] ?? "";
-    }
-    if (name === "cs") {
-      const index = nativeAtoi(argv[1] ?? "");
-      if (this.gameState.modify(index, argv.slice(2).join(" ")) && index === 1) { await this.applySystemInfo(); this.bindings.assertCurrent(); }
-      argv = tokenizeCommand(text, "q3").argv;
-    } else if (name === "map_restart") { this.commands.restart(); this.bindings.mapRestart(); }
-    else if (name === "clientLevelShot") { if (!this.bindings.localServerRunning()) return null; this.bindings.levelShot(); }
-    return argv;
+    return this.serverCommandExecutor.execute(this.serverCommand(sequence), this.gameState, {
+      assertCurrent: () => this.bindings.assertCurrent(), systemInfo: () => this.applySystemInfo(),
+      mapRestart: () => { this.commands.restart(); this.bindings.mapRestart(); },
+      localServerRunning: () => this.bindings.localServerRunning(), levelShot: () => this.bindings.levelShot(),
+    });
   }
   transmit(options: Q3ClientSendOptions, delivery: ChannelDelivery): void {
     this.bindings.assertCurrent();

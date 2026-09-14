@@ -1,3 +1,5 @@
+import { Q3PresentationAudio } from "../../../src/content/q3/presentation/audio.ts";
+import { ApplicationAudio } from "../../../src/app/bootstrap/audio.ts";
 import { Q3ServerConnection } from '../../../src/network/q3/server.ts';
 import type { ClientMessageReader } from '../../../src/network/q3/client-message.ts';
 import { QvmGame } from '../../../src/compat/qvm/game.ts';
@@ -291,4 +293,121 @@ test('dedicated offline LRCTF Application restores guest bytes and human identit
     expect(app.simulation.movementPlayer(restoredPlayer.actor)).toBeNull();
     expect(await frames(app, 12, 12)).toEqual(continuous);
   } finally { await active?.app.close(); clock.mockRestore(); await rm(root, { recursive: true, force: true }); }
+}, 120000);
+
+test('local LRCTF QVM seats render separate ABI viewports and isolate movement and firing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'q3-local-guest-'));
+  const parsed = parseApplicationCommand(['--game', 'q3-classic-lrctf', '--map', 'q3ctf1', '--movement', 'q3', '--character', 'q3',
+    '--mode', 'deathmatch', '--seats', '2', '--renderer', 'cpu', '--hidden', '--width', '320', '--height', '240', '--user-content-root', root]);
+  if (parsed.kind !== 'run') throw new Error('Missing local QVM launch');
+  const presentations = new Map<number, WorldSeatPresentation>(), render = WorldSeatPresentation.prototype.frame;
+  const frame = spyOn(WorldSeatPresentation.prototype, 'frame').mockImplementation(function(this: WorldSeatPresentation, snapshot) {
+    presentations.set(this.local.player.seat.id.index, this); return render.call(this, snapshot);
+  });
+  const cgInit = spyOn(QvmCgame.prototype, 'init'), uiInit = spyOn(QvmUi.prototype, 'init');
+  const audioCommand = spyOn(ApplicationAudio.prototype, 'command');
+  const originalSound = Q3PresentationAudio.prototype.startSound;
+  const worldSounds: { readonly fixedOrigin: boolean; readonly channel: number }[] = [];
+  const sounds = spyOn(Q3PresentationAudio.prototype, 'startSound').mockImplementation(function(this: Q3PresentationAudio, origin, entity, channel, sound) {
+    if (entity === 1022) worldSounds.push({ fixedOrigin: origin !== null, channel });
+    return originalSound.call(this, origin, entity, channel, sound);
+  });
+  let app: Application | null = null;
+  try {
+    app = await Application.open(parsed.options, { print: () => undefined });
+    expect(cgInit).toHaveBeenCalledTimes(2); expect(uiInit).toHaveBeenCalledTimes(2);
+    const guest = app.simulation.q3Guest(); if (guest === null) throw new Error('Missing local guest authority');
+    const first = app.localPlayers[0], second = app.localPlayers[1];
+    if (first === undefined || second === undefined) throw new Error('Missing local seats');
+    expect(guest.players().map(player => player.client)).toEqual([first.seat.client.id, second.seat.client.id]);
+    app.queueCommand('team', ['red'], first.seat.id); app.queueCommand('team', ['blue'], second.seat.id);
+    for (let index = 0; index < 4; index++) await app.step(50);
+    for (const local of [first, second]) if (presentations.get(local.seat.id.index)?.q3Client?.capturesInput) {
+      for (const down of [true, false]) app.input({ kind: 'key', seat: local.seat.id, code: 27, down, repeat: false, timeMilliseconds: performance.now() });
+    }
+    await app.step(50);
+    const firstView = presentations.get(0), secondView = presentations.get(1);
+    if (firstView?.q3Client === null || firstView === undefined || secondView?.q3Client === null || secondView === undefined) throw new Error('Missing QVM presentations');
+    expect(firstView.q3Client.options.kind).toBe('qvm'); expect(secondView.q3Client.options.kind).toBe('qvm');
+    for (const role of ['cgame', 'ui']) {
+      const module = await firstView.q3Client.media.provider.mounts.open(`vm/${role}.qvm`);
+      if (module === null || module.reference.provenance.kind !== 'archive') throw new Error('Missing mounted local guest module');
+      expect(module.reference.provenance.mount.archivePath.endsWith('/lrctf/pak02.pk3')).toBe(true);
+    }
+    expect(firstView.q3Client.capturesInput).toBe(false); expect(secondView.q3Client.capturesInput).toBe(false);
+    firstView.q3Client.cvars.set('name', 'Local Red'); secondView.q3Client.cvars.set('name', 'Local Blue');
+    for (const name of ['model', 'headmodel', 'team_model', 'team_headmodel']) secondView.q3Client.cvars.set(name, 'visor/default');
+    await app.step(50);
+    const firstUserinfo = guest.state.getUserinfo(0), secondUserinfo = guest.state.getUserinfo(1);
+    if (firstUserinfo === undefined || secondUserinfo === undefined) throw new Error('Missing local guest userinfo');
+    expect(q3InfoValue(firstUserinfo, 'name')).toBe('Local Red');
+    expect(q3InfoValue(secondUserinfo, 'name')).toBe('Local Blue');
+    expect(q3InfoValue(firstUserinfo, 'headmodel')).toBe('sarge/default');
+    expect(q3InfoValue(secondUserinfo, 'headmodel')).toBe('visor/default');
+    app.queueCommand('soundinfo', [], first.seat.id); await app.step(50);
+    expect(audioCommand.mock.calls.some(([command]) => command.name === 'soundinfo' && command.seat === first.seat.id)).toBe(true);
+    const forwarded = spyOn(guest, 'command'), applicationAudioCount = audioCommand.mock.calls.length;
+    try {
+      firstView.q3Client.options.commands.reliable('soundinfo'); await app.step(50);
+      expect(forwarded.mock.calls.some(([, argv]) => argv[0] === 'soundinfo')).toBe(true);
+      expect(audioCommand.mock.calls).toHaveLength(applicationAudioCount);
+    } finally { forwarded.mockRestore(); }
+    expect(firstView.camera()).toEqual(firstView.q3Client.camera()); expect(secondView.camera()).toEqual(secondView.q3Client.camera());
+    expect(firstView.camera().viewport).toEqual(firstView.viewport); expect(secondView.camera().viewport).toEqual(secondView.viewport);
+    for (const down of [true, false]) app.input({ kind: 'key', seat: second.seat.id, code: 27, down, repeat: false, timeMilliseconds: performance.now() });
+    await app.step(50);
+    expect(secondView.ui.pauseMenuOpen).toBe(true); expect(firstView.ui.pauseMenuOpen).toBe(false);
+    for (const down of [true, false]) app.input({ kind: 'key', seat: second.seat.id, code: 27, down, repeat: false, timeMilliseconds: performance.now() });
+    await app.step(50); expect(secondView.ui.pauseMenuOpen).toBe(false);
+    const before = { ...guest.records.player(0).origin }, ammo = guest.records.player(0).ammo[2] ?? 0;
+    app.input({ kind: 'key', seat: first.seat.id, code: 119, down: true, repeat: false, timeMilliseconds: performance.now() });
+    app.input({ kind: 'mouse-button', seat: first.seat.id, button: 1, down: true, timeMilliseconds: performance.now() });
+    for (let index = 0; index < 12; index++) await app.step(50);
+    expect(guest.state.getUserCommand(0)?.forwardmove).toBe(127); expect(guest.state.getUserCommand(1)?.forwardmove).toBe(0);
+    expect((guest.state.getUserCommand(0)?.buttons ?? 0) & 1).toBe(1); expect((guest.state.getUserCommand(1)?.buttons ?? 0) & 1).toBe(0);
+    expect(guest.records.player(0).origin).not.toEqual(before); expect(guest.records.player(0).ammo[2]).toBeLessThan(ammo);
+    expect(guest.records.player(0).persistent[3]).toBe(1); expect(guest.records.player(1).persistent[3]).toBe(2);
+    expect(worldSounds.some(sound => sound.fixedOrigin && sound.channel === 0)).toBe(true);
+    expect(firstView.q3Client.source.actorAt(1022)).toBe(secondView.q3Client.source.actorAt(1022));
+    expect(firstView.q3Client.source.actorAt(1022).session).not.toBe(first.seat.client.id.session);
+    const capture = app.captureNextFrame(); await app.step(50); const pixels = await capture;
+    expect(pixels.length).toBe(320 * 240 * 4);
+    expect(new Set(pixels).size).toBeGreaterThan(32);
+    const artifactDirectory = process.env['QVM_LOCAL_ARTIFACT_DIR'];
+    if (artifactDirectory !== undefined) {
+      const { encodePng } = await import('../../../src/formats/images/png-encoder.ts');
+      mkdirSync(artifactDirectory, { recursive: true });
+      await Bun.write(join(artifactDirectory, 'two-seats.png'), encodePng(320, 240, pixels));
+      await Bun.write(join(artifactDirectory, 'seat-0.png'), encodePng(320, 120, pixels.slice(0, 320 * 120 * 4)));
+      await Bun.write(join(artifactDirectory, 'seat-1.png'), encodePng(320, 120, pixels.slice(320 * 120 * 4)));
+      writeFileSync(join(artifactDirectory, 'result.json'), JSON.stringify({ simulatedMilliseconds: app.simulation.timeSeconds * 1000, heldInputMilliseconds: 650,
+        first: { before, after: guest.records.player(0).origin, initialAmmo: ammo, finalAmmo: guest.records.player(0).ammo[2], command: guest.state.getUserCommand(0), userinfo: guest.state.getUserinfo(0), viewport: firstView.viewport },
+        second: { command: guest.state.getUserCommand(1), userinfo: guest.state.getUserinfo(1), viewport: secondView.viewport }, worldSounds }, null, 2));
+    }
+    await expect(app.saveGame(join(root, 'local.sav'))).rejects.toThrow('Local guest save/load');
+    await expect(app.loadGame(join(root, 'local.sav'))).rejects.toThrow('Local guest save/load');
+    await app.close(); app = null;
+    expect(() => firstView.q3Client?.source.current()).toThrow('retired');
+    expect(() => secondView.q3Client?.source.current()).toThrow('retired');
+  } finally {
+    await app?.close(); frame.mockRestore(); cgInit.mockRestore(); uiInit.mockRestore(); audioCommand.mockRestore(); sounds.mockRestore(); await rm(root, { recursive: true, force: true });
+  }
+}, 120000);
+
+test('failed second local guest client preparation retires both guest module owners', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'q3-local-guest-failure-'));
+  const parsed = parseApplicationCommand(['--game', 'q3-classic-lrctf', '--map', 'q3ctf1', '--movement', 'q3', '--character', 'q3',
+    '--mode', 'deathmatch', '--seats', '2', '--renderer', 'cpu', '--hidden', '--width', '320', '--height', '240', '--user-content-root', root]);
+  if (parsed.kind !== 'run') throw new Error('Missing local QVM launch');
+  const modules: QvmUi[] = [], original = QvmUi.prototype.init;
+  const initialize = spyOn(QvmUi.prototype, 'init').mockImplementation(async function(this: QvmUi, connecting) {
+    modules.push(this);
+    if (modules.length === 2) throw new Error('injected second guest UI failure');
+    return original.call(this, connecting);
+  });
+  try {
+    await expect(Application.open(parsed.options, { print: () => undefined })).rejects.toThrow('injected second guest UI failure');
+    expect(modules).toHaveLength(2);
+    for (const module of modules) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
+  } finally { initialize.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 120000);

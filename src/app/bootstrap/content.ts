@@ -82,9 +82,9 @@ function execution(provider: ProviderReference, family: GameFamily, rerelease: b
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
-  if (q3Guest && (!options.dedicated || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
+  if (q3Guest && (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
     || options.movement !== "q3" || options.character !== "q3" || options.botSkill !== undefined))
-    throw new Error("Selected Q3 mods require a dedicated server with native Q3 movement and character, deathmatch and bots disabled");
+    throw new Error("Selected Q3 mods require an offline local or dedicated server with native Q3 movement and character, deathmatch and bots disabled");
   const quakeworld = product.expectation.id === "q1-quakeworld" && options.network.kind !== "qw-client";
   const nativeProgram = options.quakeCProgram;
   if (nativeProgram !== undefined && (!(product.expectation.id === "q1-classic-id1" || product.expectation.id === "q1-classic-hipnotic")
@@ -209,7 +209,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
       throw new Error("Remote content context requires its matching remote client product");
   }
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated,
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && options.movement === "q3" && options.character === "q3",
     ...(remote === undefined ? {} : { remoteContent: remote }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
     const preset = applicationPreset(catalog, options);
@@ -218,9 +218,9 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   let recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
     if (module.kind === "qvm" && module.role === "server-game") {
-      if (!options.dedicated || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch" || options.botSkill !== undefined
+      if (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch" || options.botSkill !== undefined
         || catalog.product(recipe.map.geometryContent).expectation.family !== "q3")
-        throw new Error("Q3 bytecode requires dedicated Q3 server operation with bots disabled");
+        throw new Error("Q3 bytecode requires offline local or dedicated Q3 server operation with bots disabled");
       assertQ3GuestRecipe(recipe, module);
       continue;
     }

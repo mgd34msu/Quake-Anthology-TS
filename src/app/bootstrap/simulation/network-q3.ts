@@ -10,10 +10,13 @@ import type { GamestateEntry } from '../../../network/q3/server-message.ts';
 import { selectQ3SnapshotEntities } from '../../../network/q3/visibility.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
-import type { Q3ApplicationPlayer, Q3ApplicationServerHost } from '../network/q3-types.ts';
+import type { Q3ApplicationAdmission, Q3ApplicationPlayer, Q3ApplicationServerHost } from '../network/q3-types.ts';
 import type { SharedSimulation } from './runtime.ts';
 export interface Q3ApplicationServerBindingOptions { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; print(text: string): void; }
-export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindingOptions): Q3ApplicationServerHost {
+export interface Q3ApplicationServerAuthority extends Q3ApplicationServerHost {
+  connect(client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission>;
+}
+export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindingOptions): Q3ApplicationServerAuthority {
   const simulation = options.simulation, source = simulation.q3Guest() ?? simulation.q3Source();
   if (source === null) throw new Error('Q3 network requires a Q3 game provider');
   const guest = source instanceof Q3QvmServerGame;
@@ -41,6 +44,16 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     const entity = source.records.byActor(actor); if (entity === null) throw new Error('Q3 player has no source entity');
     return { client, actor, sourceEntity: entity.slot };
   };
+  const connect = async (client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission> => {
+    if (guest) return source.connect(client, userinfo);
+    state.setUserinfo(client.slot, userinfo);
+    try { simulation.admitPlayer(client); return { kind: 'accepted', player: playerFor(client) }; }
+    catch (error) {
+      const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
+      if (actor !== undefined) simulation.disconnectPlayer(actor);
+      return { kind: 'rejected', reason: error instanceof Error ? error.message : String(error) };
+    }
+  };
   const wireEntity = (number: number) => { const state = new EntityStateRecord<number>(0); state.copyFrom(sharedEntity(number).s); return state; };
   const slots = (value: { readonly length: number; get(index: number): number }): PlayerStateSlots => { const result = new PlayerStateSlots(value.length); for (let index = 0; index < value.length; index++) result.set(index, value.get(index)); return result; };
   const configEntries = (): GamestateEntry[] => {
@@ -49,7 +62,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     return entries;
   };
   return {
-    product, maxClients,
+    product, maxClients, connect,
     prepare: async (checksumFeed, serverId, configstring) => {
       preparing ??= Q3ApplicationPackages.open(options.content, checksumFeed);
       packages = await preparing;
@@ -89,16 +102,11 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     occupiedSlots: () => guest ? source.players().map(player => player.sourceEntity) : simulation.players().map(actor => source.records.byActor(actor)?.slot ?? -1),
     admit: async request => {
       const client = options.session.createClient(request.slot); client.connect(request.address.kind === 'loopback' ? 'loopback' : 'remote');
-      if (guest) {
-        try {
-          const admitted = await source.connect(client.id, request.userinfo);
-          if (admitted.kind === 'rejected') options.session.closeClient(client.id);
-          return admitted;
-        } catch (error) { options.session.closeClient(client.id); throw error; }
-      }
-      state.setUserinfo(request.slot, request.userinfo);
-      try { simulation.admitPlayer(client.id); return { kind: 'accepted', player: playerFor(client.id) }; }
-      catch (error) { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client.id)); if (actor !== undefined) simulation.disconnectPlayer(actor); options.session.closeClient(client.id); return { kind: 'rejected', reason: error instanceof Error ? error.message : String(error) }; }
+      try {
+        const admitted = await connect(client.id, request.userinfo);
+        if (admitted.kind === 'rejected') options.session.closeClient(client.id);
+        return admitted;
+      } catch (error) { options.session.closeClient(client.id); throw error; }
     },
     carriedPlayer: playerFor,
     disconnect: async player => {

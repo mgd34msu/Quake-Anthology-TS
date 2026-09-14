@@ -38,6 +38,7 @@ export interface Q3GuestRuntimeOptions {
   readonly mounts: MountedContent;
   readonly writable: UserFileStore;
   readonly maxClients: number;
+  readonly dedicated?: boolean;
   readonly seed: number;
   readonly entityText: string;
   readonly common: Pick<Extract<QvmCommonServices, { readonly role: 'qagame' }>, 'milliseconds' | 'realTime' | 'commands'>;
@@ -97,7 +98,7 @@ export class Q3QvmServerGame {
       this.state.cvars.set(name, '0', true); this.state.cvars.register(name, '0', CvarFlag.ReadOnly);
     }
     this.state.cvars.set('sv_maxclients', String(options.maxClients), true);
-    this.state.cvars.set('dedicated', '1', true);
+    this.state.cvars.set('dedicated', options.dedicated === false ? '0' : '1', true);
     this.files = new QvmFiles({ mounts: options.mounts, writable: options.writable, print: text => this.state.print(text), assertCurrent: () => this.current() });
     this.game = new QvmGame({ artifact: options.artifact, host: call => this.host(call), hostState: {
       checkpoint: () => this.captureHost(), restore: state => { this.restoreHost(state); return undefined; },

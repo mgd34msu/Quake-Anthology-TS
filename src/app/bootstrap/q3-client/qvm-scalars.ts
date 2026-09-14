@@ -14,7 +14,8 @@ import type { ApplicationQ3Assets } from './assets.ts';
 import type { ApplicationQ3Services } from './services.ts';
 
 export interface QvmApplicationScalarOptions {
-  readonly renderer: NativeRenderer;
+  readonly renderer: Pick<NativeRenderer, "backend">;
+  viewport(): { readonly width: number; readonly height: number };
   readonly local: LocalInput;
   readonly media: ApplicationQ3Assets;
   readonly services: ApplicationQ3Services;
@@ -43,7 +44,7 @@ export class QvmApplicationScalars {
     if (call.kind !== 'engine' || call.role !== 'ui' && call.role !== 'cgame') return null;
     const o = this.options, { guest, words } = call, ui = call.role === 'ui', code = call.code;
     if (code === (ui ? QvmUiImport.UI_GETGLCONFIG : QvmCgameImport.CG_GETGLCONFIG)) {
-      const pointer = words.getInt32(4, true), record = guest.view(pointer, 11332), renderer = o.renderer.backend;
+      const pointer = words.getInt32(4, true), record = guest.view(pointer, 11332), renderer = o.renderer.backend, viewport = o.viewport();
       guest.span(pointer, 11332).fill(0);
       const gl = renderer instanceof GlRenderer ? renderer : null;
       guest.writeString(pointer, gl?.driver.renderer ?? 'Quake Anthology software renderer', 1024);
@@ -51,8 +52,8 @@ export class QvmApplicationScalars {
       guest.writeString(pointer + 2048, gl?.driver.version ?? 'software', 1024);
       record.setInt32(11264, gl?.maxTextureSize ?? 0, true); record.setInt32(11268, gl?.textureUnits ?? 0, true);
       record.setInt32(11272, gl?.colorBits ?? 24, true); record.setInt32(11276, gl?.depthBits ?? 64, true); record.setInt32(11280, renderer.stencilBits, true);
-      record.setInt32(11304, renderer.width, true); record.setInt32(11308, renderer.height, true);
-      record.setFloat32(11312, renderer.width / renderer.height, true); record.setInt32(11324, Number(gl?.stereoEnabled ?? false), true);
+      record.setInt32(11304, viewport.width, true); record.setInt32(11308, viewport.height, true);
+      record.setFloat32(11312, viewport.width / viewport.height, true); record.setInt32(11324, Number(gl?.stereoEnabled ?? false), true);
       return 0;
     }
     if (ui && code === QvmUiImport.UI_GETCLIENTSTATE) {

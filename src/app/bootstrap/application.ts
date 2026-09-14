@@ -1,3 +1,9 @@
+import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
+import { q3ConfigstringCommands } from "../../network/q3/configstrings.ts";
+import { LocalQ3ClientState } from "./q3-client/client-state.ts";
+import { StartupServerBrowser } from "./server-browser.ts";
+import { Q3BrowserView } from "../../network/q3/browser-view.ts";
+import { fromQ3UserCommand } from "../../network/q3/adapters.ts";
 import type { Q3GuestOutput } from "./simulation/q3/guest-runtime.ts";
 import { serviceLoading } from "./loading.ts";
 import { UserFileStore } from "../../platform/files/writable.ts";
@@ -37,6 +43,7 @@ import type { IpAddress } from "../../network/common/endpoint.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { UdpTransport, Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
 import { CommandBuffer, tokenizeCommand } from "../../core/commands/index.ts";
+import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
@@ -101,8 +108,9 @@ interface SavedApplicationClients {
   resolveBotClient(saved: SavedBotClientId): SessionClient | null;
 }
 
-interface ApplicationCommandRequest { readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; }
-interface Q3SeatClient { readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost>; }
+interface ApplicationCommandRequest { readonly target: "application" | "guest"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; }
+type Q3SeatClient = { readonly kind: "native"; readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost> }
+  | { readonly kind: "qvm"; readonly client: ApplicationQ3Client; readonly state: LocalQ3ClientState };
 interface GraphicalApplication {
   readonly renderer: NativeRenderer;
   readonly assets: ApplicationAssets;
@@ -123,10 +131,12 @@ export interface ApplicationHost {
 }
 
 /** A single authoritative simulation owns every local and remote player's game state. */
+type LocalQ3GuestSeat = { readonly state: LocalQ3ClientState; readonly cvars: CvarRegistry; userinfo: string };
+
 export class Application {
   readonly viewSettings = new ApplicationViewSettings(value => {
     for (const presentation of this.graphical?.presentations ?? []) {
-      this.simulation.setPlayerFieldOfView(presentation.local.player.actor, value);
+      if (presentation.q3Client?.options.kind !== "qvm") this.simulation.setPlayerFieldOfView(presentation.local.player.actor, value);
       presentation.q3Client?.cvars.set("cg_fov", String(value));
     }
   });
@@ -165,6 +175,8 @@ export class Application {
   private pendingSave: SaveImage | null = null;
   private savedGames: StartupSaves | null = null;
   private pendingLevelAutosave = false;
+  private localGuest: { readonly worldSound: ActorId; readonly authority: ReturnType<typeof createQ3ApplicationServerHost>; readonly seats: Map<SeatId, LocalQ3GuestSeat> } | null = null;
+  private guestBrowser: { readonly host: StartupServerBrowser; readonly view: Q3BrowserView } | null = null;
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
@@ -192,7 +204,8 @@ export class Application {
     });
     return { list: () => saves.list, refresh: () => saves.refresh(),
       ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
-      unavailable: () => this.network !== null ? "Save/load unavailable while hosting a network game." : null,
+      unavailable: () => this.network !== null ? "Save/load unavailable while hosting a network game."
+        : this.localGuest !== null ? "Local guest save/load is unsupported." : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
       load: id => queue(() => this.restoreSavedGame(saves.path(id))) };
   }
@@ -208,7 +221,7 @@ export class Application {
   private static guestOptions(content: LoadedApplicationContent, options: ApplicationOptions, host: ApplicationHost,
     commands: () => CommandBuffer): Pick<SimulationOptions, "q3Guest"> {
     if (content.preparedQ3Game === null) return {};
-    if (!options.dedicated) throw new Error("Q3 guest local seats are unsupported");
+    if (!options.dedicated && options.network.kind !== "offline") throw new Error("Local Q3 guests require offline operation");
     const product = content.catalog.product(content.recipe.map.entities.content);
     return { q3Guest: {
       prepared: content.preparedQ3Game,
@@ -227,8 +240,18 @@ export class Application {
 
   private guestOutput(): Q3GuestOutput {
     if (this.network?.kind === "q3") return this.network.server.gameOutput();
-    if (!this.options.dedicated || this.options.network.kind !== "offline") throw new Error("Q3 guest requires a dedicated server");
-    return { configstring: () => undefined, sendServerCommand: () => undefined, dropClient: async () => undefined };
+    if (this.options.network.kind !== "offline") throw new Error("Q3 guest has no server output owner");
+    const send = (slot: number, text: string): void => {
+      for (const { state } of this.localGuest?.seats.values() ?? []) if (slot === -1 || state.clientNumber === slot)
+        state.receiveServerCommand(state.serverCommandSequence + 1, text);
+    };
+    return { configstring: (index, value) => {
+      for (const command of q3ConfigstringCommands(index, value)) send(-1, command);
+    }, sendServerCommand: send, dropClient: async (slot, reason) => {
+      if ([...this.localGuest?.seats.values() ?? []].some(({ state }) => state.clientNumber === slot)) {
+        this.host.print(`Local guest client dropped: ${reason}\n`); this.requestQuit();
+      }
+    } };
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides): Promise<Application> {
@@ -271,6 +294,14 @@ export class Application {
       application.frontendOverrides = preferences ?? {};
       await application.bindSourceCommands();
       guestConsole = application.sourceCommands;
+      if (!options.dedicated && simulation.q3Guest() !== null) {
+        const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text) });
+        application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>() };
+        await authority.prepare(0, 1);
+        await simulation.q3Guest()?.initialize(application.guestOutput());
+        const initialized = application;
+        await initialized.sourceCommands?.executeAsync(() => initialized.commands());
+      }
       if (options.dedicated) application.openDedicatedConsole();
       else {
         await application.viewSettings.load(application.inputConfig);
@@ -285,7 +316,7 @@ export class Application {
       application.bots = await application.createBots(content, simulation);
       await application.openNetwork();
       const guest = simulation.q3Guest();
-      if (guest !== null) {
+      if (guest !== null && options.dedicated) {
         await guest.initialize(application.guestOutput());
         const initialized = application;
         await initialized.sourceCommands?.executeAsync(() => initialized.commands());
@@ -383,8 +414,8 @@ export class Application {
 
   private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console): ApplicationInputCommands {
     return { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => this.requestQuit(), execute: (name, arguments_, seat) => this.queueCommand(name, arguments_, seat), print: text => this.host.print(text),
-      bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null,
-        scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null ? "+scores" : null,
+      bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null || simulation.q3Guest() !== null,
+        scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null || simulation.q3Guest() !== null ? "+scores" : null,
         offhandGrapple: simulation.recipe.equipment.grapple.kind === "enabled" && simulation.recipe.equipment.grapple.binding === "offhand",
         offhandGrenades: simulation.recipe.equipment.handGrenades.kind === "enabled" }),
       ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
@@ -664,6 +695,7 @@ export class Application {
     let renderer: NativeRenderer | null = null, input: ApplicationInput | null = null, audio: ApplicationAudio | null = null;
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
+    const sourceClients: ApplicationQ3Client[] = [];
     try {
       this.host.loading?.stage("Loading textures...");
       await assets.loadWorld();
@@ -679,12 +711,39 @@ export class Application {
         client.connect("loopback");
         const seat = this.session.createSeat(index, client);
         this.localSeats.set(client.id, seat);
-        const player = this.simulation.admitPlayer(client.id);
-        players.push({ seat, actor: player.actor });
+        if (this.localGuest !== null) {
+          const authority = this.localGuest.authority, worldSound = this.localGuest.worldSound;
+          const cvars = new CvarRegistry({ dialect: "q3", context: { session: this.session.session, origin: { kind: "local-seat", seat: seat.id, client: client.id } }, print: text => this.host.print(text),
+            cheatsAllowed: () => this.simulation.q3Guest()?.state.cvars.variableValue("sv_cheats") === 1 });
+          initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: this.options.characterModel });
+          const userinfo = `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`;
+          const admission = await authority.connect(client.id, userinfo);
+          if (admission.kind === "rejected") throw new Error(admission.reason);
+          const simulation = this.simulation;
+          const state = new LocalQ3ClientState(authority.gameState(admission.player, 1), {
+            assertCurrent: () => { if (client.isClosed || simulation !== this.simulation) throw new Error("Guest client world is retired"); },
+            actorAt: number => { if (number === 1022) return worldSound; const actor = simulation.actors.atSource(simulation.recipe.map.entities.provider, number); if (actor === null) throw new Error(`Guest entity ${number} is not published`); return actor.id; },
+            systemInfo: () => { this.graphical?.q3.get(seat.id)?.client.refreshSystemInfo(); },
+            mapRestart: () => { throw new Error("Local guest map restart is unsupported"); }, levelShot: () => this.queueCommand("levelshot", [], seat.id), print: text => this.host.print(text),
+          });
+          this.localGuest.seats.set(seat.id, { state, cvars, userinfo });
+          await authority.begin?.(admission.player, { serverTime: 0, angles: [0, 0, 0], forwardmove: 0, rightmove: 0, upmove: 0, buttons: 0, weapon: 2 });
+          players.push({ seat, actor: admission.player.actor });
+        } else {
+          const player = this.simulation.admitPlayer(client.id);
+          players.push({ seat, actor: player.actor });
+        }
       }
       this.host.loading?.stage("Loading sounds...");
       input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig);
+      if (this.localGuest !== null) {
+        const host = await StartupServerBrowser.open(this.inputConfig);
+        this.guestBrowser = { host, view: new Q3BrowserView({ browser: host, now: () => performance.now(),
+          maxPing: () => this.localGuest?.seats.values().next().value?.cvars.variableValue("cl_maxPing") ?? 800, statusResendTime: () => this.localGuest?.seats.values().next().value?.cvars.variableValue("cl_serverStatusResendTime") ?? 750,
+          print: text => this.host.print(text) }) };
+        this.publishLocalGuestSnapshots();
+      }
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));
       audio.bindHaptics(input);
       await audio.prepareEnvironment(this.simulation.scene);
@@ -702,14 +761,14 @@ export class Application {
       const presentations: WorldSeatPresentation[] = [], q3 = new Map<SeatId, Q3SeatClient>();
       for (const local of input.locals) {
         const sourceClient = await this.createQ3SeatClient(local, assets, audioOwner, inputOwner, native, this.simulation);
-        if (sourceClient !== null) q3.set(local.player.seat.id, sourceClient);
+        if (sourceClient !== null) { sourceClients.push(sourceClient.client); q3.set(local.player.seat.id, sourceClient); }
         if (this.viewSettings.override !== null) {
-          this.simulation.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView);
+          if (sourceClient?.kind !== "qvm") this.simulation.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView);
           sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
         }
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm);
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -718,14 +777,50 @@ export class Application {
       this.capture = new ApplicationCapture(input, renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text));
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
+      for (const client of sourceClients) client.close();
+      await this.simulation.shutdownQ3Guest();
+      for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();
+      this.localGuest?.seats.clear(); this.localGuest = null;
       this.session.close(); audio?.close(); effects?.close(); input?.close(); renderer?.close(); art?.close(); assets.close();
       this.graphical = null;
       throw error;
     }
   }
 
+  private publishLocalGuestSnapshots(): void {
+    const local = this.localGuest, guest = this.simulation.q3Guest();
+    if (local === null || guest === null) return;
+    for (const { state } of local.seats.values()) {
+      const player = guest.players().find(player => player.sourceEntity === state.clientNumber);
+      if (player === undefined) continue;
+      const snapshot = local.authority.snapshot(player);
+      state.receiveSnapshot({ messageNumber: state.serverMessageSequence + 1, serverTime: local.authority.time(), deltaNumber: -1, flags: 0,
+        serverCommandNumber: state.serverCommandSequence, parseEntitiesNumber: 0, playerState: snapshot.player,
+        entities: snapshot.entities, areaMask: snapshot.areaMask });
+    }
+  }
+
   private async createQ3SeatClient(local: LocalInput, assets: ApplicationAssets, audio: ApplicationAudio, input: ApplicationInput,
     renderer: NativeRenderer, simulation: SharedSimulation, settings?: readonly CvarSnapshot[]): Promise<Q3SeatClient | null> {
+    if (simulation.q3Guest() !== null) {
+      const seat = this.localGuest?.seats.get(local.player.seat.id), browser = this.guestBrowser;
+      if (seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
+      const { state, cvars } = seat;
+      const client = await ApplicationQ3Client.create({ kind: "qvm", localServer: true, source: state.source, connection: state, cvars,
+        assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.commands,
+        splitScreen: this.options.seats > 1,
+        assertCurrent: () => { if (simulation !== this.simulation || local.player.seat.client.isClosed) throw new Error("Guest presentation world is retired"); },
+        clientState: () => ({ phase: 8, connectPacketCount: 0, clientNumber: state.clientNumber, serverName: "localhost", message: "" }),
+        viewport: () => { const size = renderer.window.drawableSize; return seatViewport(local.player.seat.id.index, this.options.seats, size.width, size.height); },
+        now: () => performance.now(), commands: {
+          reliable: text => { const [name, ...args] = tokenizeCommand(text, "q3").argv; if (name !== undefined)
+            this.requestedCommands.push({ target: "guest", name, arguments_: args, seat: local.player.seat.id }); },
+          console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }),
+          print: text => { this.host.print(text); local.console.print(text); },
+        } });
+      input.registerClientCommands([...client.commandNames]);
+      return { kind: "qvm", client, state };
+    }
     const source = simulation.q3Source(); if (source === null) return null;
     const prediction = createSimulationPredictionHost(simulation, local.player.actor, local.player.seat.id);
     const initial = source.sourceState(); prediction.captureSource(initial);
@@ -742,13 +837,13 @@ export class Application {
         print: text => { this.host.print(text); local.console.print(text); },
       } });
     input.registerClientCommands([...client.commandNames]);
-    return { client, prediction };
+    return { kind: "native", client, prediction };
   }
 
   requestQuit(): undefined { this.stopping = true; return undefined; }
 
   queueCommand(name: string, arguments_: readonly string[], seat: SeatId | null, source?: CommandContext): undefined {
-    this.requestedCommands.push({ name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) });
+    this.requestedCommands.push({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) });
     return undefined;
   }
 
@@ -800,6 +895,7 @@ export class Application {
 
   private async prepareAndReplaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
     if (save === undefined && this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes and restart are unsupported");
+    if (save !== undefined && (this.localGuest !== null || !this.options.dedicated && save.recipe.execution.some(module => module.kind === "qvm"))) throw new Error("Local guest save/load is unsupported.");
     if (save !== undefined && this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     const settings = save === undefined ? null : savedSimulationSettings(save);
@@ -928,7 +1024,7 @@ export class Application {
           }
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
-            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm);
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView);
           stagedPresentations.push(presentation);
@@ -1019,6 +1115,7 @@ export class Application {
   }
 
   async saveGame(path: string): Promise<void> {
+    if (this.localGuest !== null) throw new Error("Local guest save/load is unsupported.");
     if (this.closed) throw new Error("Application is closed");
     if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
@@ -1032,6 +1129,7 @@ export class Application {
   }
 
   async loadGame(path: string): Promise<void> {
+    if (this.localGuest !== null) throw new Error("Local guest save/load is unsupported.");
     if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.closed || this.stepping) throw new Error("Save restoration requires an idle open application");
     await this.restoreSavedGame(path);
@@ -1130,7 +1228,27 @@ export class Application {
         }
       };
       try {
+        if (command.target === "application" && applicationAudioCommands.includes(command.name)) {
+          const graphical = this.graphical;
+          if (graphical === null) throw new Error("Sound system is not started");
+          await graphical.audio.command({ name: command.name, args: command.arguments_, seat: command.seat,
+            registrations: [...graphical.q3.values()].flatMap(value => value.client.media.bank.registrations()),
+            print });
+          continue;
+        }
         const guest = this.simulation.q3Guest();
+        if (guest !== null && command.seat !== null) {
+          const source = this.graphical?.q3.get(command.seat);
+          if (source?.kind !== "qvm") throw new Error("Guest command has no local client");
+          if (["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist"].includes(command.name)) throw new Error(`Q3 guest command ${command.name} is unsupported`);
+          if (command.name === "save" || command.name === "load") throw new Error("Local guest save/load is unsupported.");
+          if (command.target === "guest" || !await source.client.command([command.name, ...command.arguments_])) {
+            const player = guest.player(source.client.options.local.player.seat.client.id);
+            if (player === null) throw new Error("Guest local client is disconnected");
+            await guest.command(player, [command.name, ...command.arguments_]);
+          }
+          continue;
+        }
         if (guest !== null && command.name !== "save" && command.name !== "load") {
           if (command.seat !== null) throw new Error("Q3 guest local seats are unsupported");
           if (["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist"].includes(command.name))
@@ -1163,14 +1281,6 @@ export class Application {
           if (!available) { if (held) throw new Error("No selected offhand action is available"); continue; }
           if (command.name.endsWith("grapple")) this.simulation.setGrappleInput(actor, held);
           else this.simulation.setHandGrenadeInput(actor, held);
-          continue;
-        }
-        if (applicationAudioCommands.includes(command.name)) {
-          const graphical = this.graphical;
-          if (graphical === null) throw new Error("Sound system is not started");
-          await graphical.audio.command({ name: command.name, args: command.arguments_, seat: command.seat,
-            registrations: [...graphical.q3.values()].flatMap(value => value.client.media.bank.registrations()),
-            print });
           continue;
         }
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
@@ -1219,6 +1329,7 @@ export class Application {
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
+          if (this.localGuest !== null) throw new Error("Local guest save/load is unsupported.");
           if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
           this.pendingSave = await readSaveImage(path);
         }
@@ -1271,6 +1382,11 @@ export class Application {
         if (unsupported === null) this.bots = await this.createBots(this.content, this.simulation, { requested: true });
         else { this.host.print(`${unsupported}\n`); botConfiguration?.set("bot_minplayers", "0", true); }
       }
+      if (this.localGuest !== null) for (const seat of this.localGuest.seats.values()) {
+        const player = this.simulation.q3Guest()?.players().find(player => player.sourceEntity === seat.state.clientNumber);
+        const userinfo = `${seat.cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`;
+        if (player !== undefined && userinfo !== seat.userinfo) { await this.localGuest.authority.userinfo(player, userinfo); seat.userinfo = userinfo; }
+      }
       const retained = this.lastOutput;
       const paused = this.options.mode === "singleplayer" && this.network === null
         && this.simulation.players().length === this.localPlayers.length + this.botClients.length && this.graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) === true
@@ -1288,9 +1404,18 @@ export class Application {
       }
       if (paused && this.graphical !== null) for (const local of this.graphical.input.locals) local.input.sample(this.graphical.input.now(), elapsedMilliseconds);
       const localCommands = paused ? [] : this.graphical?.input.build(elapsedMilliseconds, this.elapsed, this.frames) ?? [];
+      for (const command of localCommands) if (command.source.kind === "local-seat") {
+        const state = this.localGuest?.seats.get(command.source.seat)?.state;
+        if (state !== undefined) {
+          if (command.command.kind !== "q3") throw new Error("Guest local input must use Q3 commands");
+          state.commands.append(fromQ3UserCommand(command.command));
+        }
+      }
       const output = paused ? { snapshot: retained.output.snapshot, events: [] } : await this.session.stepAsync({ elapsedMilliseconds,
         commands: [...localCommands, ...remote] });
       this.lastOutput = { simulation: this.simulation, output };
+      this.publishLocalGuestSnapshots();
+      this.guestBrowser?.host.poll(); this.guestBrowser?.view.poll();
       this.frames++;
       const frameEvents = this.simulation.drainPresentationEvents();
       if (q1 !== null) this.appendQ1Commands(frameEvents);
@@ -1313,6 +1438,7 @@ export class Application {
         const presentationEvents = [...this.sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
         const nativeQ3 = this.simulation.q3Source()?.sourceState();
         for (const source of graphical.q3.values()) {
+          if (source.kind === "qvm") continue;
           if (nativeQ3 === undefined) throw new Error("Cgame has no authoritative source state");
           source.prediction.captureSource(nativeQ3);
           source.client.receive(nativeQ3, this.sourceEvents, localCommands);
@@ -1397,6 +1523,12 @@ export class Application {
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
+    for (const source of graphical?.q3.values() ?? []) { try { await source.client.shutdown(); } catch (error) { errors.push(error); } }
+    for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();
+    this.localGuest?.seats.clear(); this.localGuest = null;
+    this.guestBrowser?.view.close();
+    try { await this.guestBrowser?.host.close(); } catch (error) { errors.push(error); }
+    this.guestBrowser = null;
     for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.simulation.shutdownQ3Guest(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
       try { await close(); } catch (error) { errors.push(error); }

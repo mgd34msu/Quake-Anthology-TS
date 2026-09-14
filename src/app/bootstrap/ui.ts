@@ -77,6 +77,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   async prepare(assets: ApplicationAssets): Promise<void> {
+    if (this.guestUi) return;
     this.death.observe(this.simulation.playerUi(this.local.player.actor).health);
     if (this.death.active) this.weaponWheel.close(false);
     await this.prompt.prepare(assets, () => this.local.input.focus);
@@ -94,7 +95,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false) {
     const seat = local.player.seat.id;
     this.font = font; this.typography = typography;
     this.now = input.now;
@@ -116,12 +117,12 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.prompt = new SeatGamePrompt(seat, () => local.player.actor, this.controller, value => local.input.setImpulse(value));
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
-      items: mode => simulation.playerUi(local.player.actor).items.filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
+      items: mode => (this.guestUi ? [] : simulation.playerUi(local.player.actor).items).filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
         .map(item => ({ ...item, sortOrder: item.sourceOrdinal, icon: this.wheelIcons.get(item.id) ?? null, selectedIcon: this.wheelIcons.get(item.id) ?? null })),
-      activeItem: () => simulation.playerUi(local.player.actor).activeWeapon,
+      activeItem: () => this.guestUi ? null : simulation.playerUi(local.player.actor).activeWeapon,
       select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
     this.bindings = registerBindingMenus(this.controller, local.input,
-      () => sharedBindingActions(local.builder.dialect, simulation.playerUi(local.player.actor).items, input.bindingCapabilities));
+      () => sharedBindingActions(local.builder.dialect, this.guestUi ? [] : simulation.playerUi(local.player.actor).items, input.bindingCapabilities));
     const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
@@ -206,26 +207,28 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   weaponOcclusion(context: UiDrawContext, gameVisible: boolean): readonly Rect[] {
-    if (!gameVisible || this.local.input.focus.kind !== "game") return [];
+    if (this.guestUi || !gameVisible || this.local.input.focus.kind !== "game") return [];
     const player = this.simulation.playerUi(this.local.player.actor);
     return hudVitalOccupiedRects(context, player.weaponStatus === null ? 2 : 3, this.preferences.values.hudScale, this.art.skin.fontScale * this.preferences.values.textScale, hudSkinFont(this.art.skin, this.font).capInk?.height);
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
     material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true): void {
-    const player = this.simulation.playerUi(this.local.player.actor);
-    const armor = player.armor.kind === "none" ? 0 : player.armor.points;
-    const base = emptyHudData(this.local.player.seat.id);
-    const hud: CommonHudData = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
-      crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeStatus },
-      ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
-        weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
-        iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
-        measureText: this.measureHudText, nativeStatus } }),
-      vitals: nativeStatus ? [] : [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false }] };
-    const commands = [...drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.font), measureText: this.measureHudText, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
-      ];
-    renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
+    if (!this.guestUi) {
+      const player = this.simulation.playerUi(this.local.player.actor);
+      const armor = player.armor.kind === "none" ? 0 : player.armor.points;
+      const base = emptyHudData(this.local.player.seat.id);
+      const hud: CommonHudData = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+        crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeStatus },
+        ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
+          weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
+          iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
+          measureText: this.measureHudText, nativeStatus } }),
+        vitals: nativeStatus ? [] : [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false }] };
+      const commands = [...drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.font), measureText: this.measureHudText, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
+        ];
+      renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
+    }
     const panel = menuPanel(context);
     const backdrop = this.controller.activeMenu === playerDeathMenu && panel.kind === "fill" ? { ...panel, color: { ...panel.color, w: 0.45 } } : panel;
     renderUiCommands(context, this.controller.activeMenu === null ? [] : [backdrop, ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],

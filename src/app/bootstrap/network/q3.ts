@@ -1,3 +1,4 @@
+import { q3ConfigstringCommands } from "../../../network/q3/configstrings.ts";
 import type { Q3GuestOutput } from '../simulation/q3/guest-runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
@@ -193,10 +194,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     }
   }
   private async configstring(peer: Peer, configIndex: number, value: string): Promise<void> {
-    const chunks = value.match(/[\s\S]{1,999}/g) ?? [''];
-    for (const [index, chunk] of chunks.entries()) {
+    for (const command of q3ConfigstringCommands(configIndex, value)) {
       if (this.ended || this.peers.get(peer.slot) !== peer) break;
-      await this.queue(peer, `${chunks.length === 1 ? 'cs' : index === 0 ? 'bcs0' : index === chunks.length - 1 ? 'bcs2' : 'bcs1'} ${configIndex} "${chunk}"`);
+      await this.queue(peer, command);
     }
   }
   private async queue(peer: Peer, text: string): Promise<void> { if (peer.connection.reliable.add(text).kind === 'overflow') await this.disconnectClient(peer.player.client, 'Server command overflow'); }

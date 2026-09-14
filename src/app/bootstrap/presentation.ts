@@ -110,6 +110,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   camera(): SceneCamera {
+    if (this.q3Client?.options.kind === "qvm") return this.q3Client.camera();
     const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
     if (this.q3Client !== null) return cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
       : cameraWithCharacterDeath(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
@@ -198,6 +199,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
     const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor), camera => {
+      if (this.q3Client?.options.kind === "qvm") return camera;
       const player = this.simulation.playerView(this.local.player.actor);
       return cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
     });
