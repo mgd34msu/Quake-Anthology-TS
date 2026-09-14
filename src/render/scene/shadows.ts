@@ -121,7 +121,7 @@ export function shadowConeMatrix(light: Q2FragmentLight): Mat4 {
 }
 const depthBias: Mat4 = [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0.5, 0.5, 0.5, 1];
 
-function lightContainsSphere(light: Pick<Q2FragmentLight, "origin" | "radius" | "cone">, conservative = false): (caster: ShadowSphere) => boolean {
+function lightContainsSphere(light: Pick<Q2FragmentLight, "origin" | "radius" | "cone">): (caster: ShadowSphere) => boolean {
   const cone = light.cone;
   const diagonal = cone === null ? Math.PI : Math.atan(Math.SQRT2 * Math.tan(Math.min(shadowConeFov(cone.cosHalfAngle) * Math.PI / 360, 87 * Math.PI / 180)));
   const limit = Math.cos(diagonal);
@@ -131,8 +131,7 @@ function lightContainsSphere(light: Pick<Q2FragmentLight, "origin" | "radius" | 
     if (cone !== null && distance > caster.radius) {
       const angle = Math.acos(Math.min(1, Math.max(-1, dot(delta, cone.direction) / distance)));
       const separation = angle - Math.asin(Math.min(1, caster.radius / distance));
-      // An envelope spanning the cone axis must remain; exact gather keeps its source predicate.
-      if (Math.cos(Math.min(Math.PI, conservative ? Math.max(0, separation) : separation)) < limit) return false;
+      if (Math.cos(Math.min(Math.PI, Math.max(0, separation))) < limit) return false;
     }
     return true;
   };
@@ -145,7 +144,7 @@ function eligibleShadowLight(light: SceneLight): boolean {
 /** The atlas selects the first eight Q2 lights before testing shadow eligibility. */
 export function shadowBodyFilter(source: readonly SceneLight[]): (sphere: ShadowSphere) => boolean {
   const tests = source.filter(light => light.profile.kind === "q2").slice(0, maximumLights).filter(eligibleShadowLight)
-    .map(light => lightContainsSphere({ ...light, cone: light.profile.kind === "q2" ? light.profile.cone : null }, true));
+    .map(light => lightContainsSphere({ ...light, cone: light.profile.kind === "q2" ? light.profile.cone : null }));
   return sphere => tests.some(test => test(sphere));
 }
 function worldMeshVisible(mesh: ShadowMesh, light: Q2FragmentLight, forward: Vec3 | null): boolean {
