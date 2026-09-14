@@ -28,6 +28,8 @@ Earlier HTTP/timer yielding, OAuth response flushing, quoted binding semicolons,
 
 Accepted source `23702ce16b67aa46714bc7c3c81508a7ad6c8883` reuses MD5 skinning across color and shadow passes within each view. Root passed 11 tests with 498 assertions, and an actual-geometry comparison matched 2,864 color and shadow calls. One bounded profile reduced mean fixed-step time from 95.658 to 91.730 ms, about 4.1%; p95 did not improve. This does not establish sustained gameplay FPS. The installed executable remains `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`; this source change has not been rebuilt or installed.
 
+Accepted source `c607ded5f607865555ee1dc685861a2a7ae4c73b` hashes only casters used by fitted shadow lights. Eight complete actual-scene comparisons, including cached replays, remained equivalent. The exercised scene avoids 65 caster digests covering 33,071 vertices and 1,769,944 SHA input bytes per preparation; no timing gain is claimed. The installed executable remains `e3ef2f04fb52f8ff7cd069c34c3c45849e56c21f`, without a rebuild or installation of this change.
+
 ## Historical execution records
 
 All entries below retain their original source cutoffs, counts, and installation claims. Their references to the installed binary describe those historical checkpoints, not the installation above.
