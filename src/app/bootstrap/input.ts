@@ -1,3 +1,5 @@
+import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
+import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import type { SeatSettings } from "../../settings/config.ts";
 import { ControllerSettings } from "./controller-settings.ts";
@@ -5,7 +7,7 @@ import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ContentId, ExecutableRecipe, ResourceRequest } from "../../contracts/content.ts";
 import type { AudioAudience } from "../../audio/types.ts";
 import { SeatHaptics } from "../../input/haptics.ts";
-import type { ActorId, SeatId } from "../../contracts/identity.ts";
+import type { ActorId, ProviderId, SeatId } from "../../contracts/identity.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ArsenalIntent } from "../../contracts/gameplay.ts";
 import type { SeatInputEvent, SeatInputFocus } from "../../contracts/ui.ts";
@@ -13,6 +15,7 @@ import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { defaultBindings, registerBindingCommands } from "../../input/bindings.ts";
+import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
@@ -54,6 +57,8 @@ export interface ApplicationInputCommands {
   readScript?(name: string): Promise<Uint8Array | undefined>;
   readonly llm?: LlmCommandRequester;
   bindingCapabilities?(): BindingCapabilities;
+  bindingItems?(seat: SeatId): readonly WeaponBindingItem[];
+  arsenalImpulseProvider?(seat: SeatId): ProviderId | null;
   readonly sharedCvars?: CvarRegistry;
   quit(): undefined;
   execute(name: string, arguments_: readonly string[], seat: SeatId | null): undefined;
@@ -119,6 +124,10 @@ export class ApplicationInput {
   private readonly offhandButtons = new Map<SeatId, { readonly grapple: InputButton; readonly grenade: InputButton }>();
   private readonly unregister: readonly (() => void)[];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
+  private readonly consoleCvars: CvarRegistry;
+  private archivePersistence = false;
+  enableArchivePersistence(): void { this.archivePersistence = true; }
+
 
   print(text: string, source?: CommandContext): void {
     const context = source ?? this.commands?.executionContext;
@@ -148,7 +157,13 @@ export class ApplicationInput {
     now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput): Promise<ApplicationInput> {
     const saved = await Promise.all(players.map((_, index) => settings.loadSeat(`input/seat-${index + 1}.json`)));
     const routing = await settings.loadInputRouting("input/routing.json");
-    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, owner, previous);
+    const sourceDialect = actions.console?.dialect() ?? dialect;
+    const archives = owner !== undefined || previous !== undefined ? null : {
+      movement: await loadCvarArchive(settings, ["movement", dialect], dialect),
+      fallback: await loadCvarArchive(settings, ["fallback", sourceDialect], sourceDialect),
+      input: await Promise.all(players.map(player => loadCvarArchive(settings, ["input", sourceDialect, String(player.seat.id.index)], sourceDialect))),
+    };
+    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, archives, owner, previous);
     try { await input.controllerSettings.settle(); return input; }
     catch (error) { input.close(); throw error; }
   }
@@ -156,7 +171,9 @@ export class ApplicationInput {
   private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
     private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
-    routing: { readonly keyboardSeat: number | null } | null, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput) {
+    routing: { readonly keyboardSeat: number | null } | null,
+    archives: { readonly movement: readonly CvarArchiveEntry[]; readonly fallback: readonly CvarArchiveEntry[]; readonly input: readonly (readonly CvarArchiveEntry[])[] } | null,
+    owner?: ApplicationInputCommandOwner, previous?: ApplicationInput) {
     this.ownsControllers = previous === undefined;
     const first = players[0];
     if (first === undefined) throw new Error("Native input requires at least one local player");
@@ -166,6 +183,15 @@ export class ApplicationInput {
     this.cvars = owner?.cvars ?? new CvarRegistry({ dialect, context, print });
     const sourceDialect = actions.console?.dialect() ?? dialect;
     const consoleCvars = sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print });
+    this.consoleCvars = consoleCvars;
+    if (owner === undefined) {
+      if (previous?.cvars.dialect === dialect) this.cvars.restoreSaveState(previous.cvars.captureSaveState());
+      else this.cvars.applyArchive(archives?.movement ?? []);
+      if (consoleCvars !== this.cvars) {
+        if (previous?.consoleCvars.dialect === sourceDialect) consoleCvars.restoreSaveState(previous.consoleCvars.captureSaveState());
+        else consoleCvars.applyArchive(archives?.fallback ?? []);
+      } else consoleCvars.applyArchive(archives?.fallback ?? []);
+    }
     this.consoleRouting = owner === undefined ? new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
       seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => actions.sharedCvars ?? null }) : null;
@@ -201,10 +227,14 @@ export class ApplicationInput {
         throw new Error("Mouse settings belong to another seat or source dialect");
       }
       this.mouseSettings.set(player.seat.id, mouseSettings);
+      if (owner?.inputSettings === undefined) {
+        const previousMouse = previous?.inputCvars(player.seat.id);
+        if (previousMouse?.dialect === sourceDialect) mouseSettings.cvars.restoreSaveState(previousMouse.captureSaveState());
+        else mouseSettings.cvars.applyArchive(archives?.input[locals.length] ?? []);
+      }
       const builder = new InputCommandBuilder(dialect, new MouseInput(mouseSettings));
       builder.setViewAngles(simulation.playerView(player.actor).angles);
-      for (const binding of defaultBindings(0, dialect)) input.bind(binding);
-      input.bind({ input: { kind: "key", code: 113 }, target: { kind: "command", text: "+weaponwheel" } });
+      for (const binding of defaultBindings(0, dialect, actions.bindingItems?.(player.seat.id) ?? [])) input.bind(binding);
       locals.push({ player, input, console, builder, haptics: new SeatHaptics({ seat: player.seat.id,
         controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
         controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now }) });
@@ -259,7 +289,7 @@ export class ApplicationInput {
       else button.up(key, time);
       return active === button.active ? undefined : actions.execute(name, [], origin.seat);
     });
-    for (const name of ["weapnext", "weapprev", "use", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) {
+    for (const name of ["weapnext", "weapprev", "use", "weapon", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) {
       if ((sourceDialect === "q2-classic" || sourceDialect === "q2-rerelease") && this.commands.exists(name)) continue;
       this.commands.register(name, invocation => {
         let origin = invocation.source.origin;
@@ -348,11 +378,12 @@ export class ApplicationInput {
       const selectedSample = this.seatUi.get(local.player.seat.id)?.sample(sample) ?? sample;
       const selection = this.q3Selections.get(local.player.seat.id);
       const selectedFrame = frame.kind === "q3" && selection !== undefined ? { ...frame, ...selection } : frame;
-      const arsenal = this.arsenalSelections.get(local.player.seat.id);
+      const impulseProvider = dialect === "q3" ? this.actions.arsenalImpulseProvider?.(local.player.seat.id) : null;
+      const arsenal = impulseProvider == null ? this.arsenalSelections.get(local.player.seat.id) : { provider: impulseProvider, weapon: null };
       return { actor: local.player.actor,
         source: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id }, sequence: this.sequence++,
         command: local.builder.build(selectedSample, selectedFrame),
-        ...(arsenal === undefined ? {} : { arsenal: { ...arsenal, useHoldable: selectedSample.focus.kind === "game"
+        ...(arsenal === undefined ? {} : { arsenal: { ...arsenal, ...(impulseProvider == null || selectedSample.impulse === 0 ? {} : { impulse: selectedSample.impulse }), useHoldable: selectedSample.focus.kind === "game"
           && selectedSample.buttons.some(button => (button.action === "use" || button.action === "button2") && (button.active || button.pressed)) } }) };
     });
   }
@@ -447,6 +478,12 @@ export class ApplicationInput {
     }
     const keyboard = this.router.keyboardSeat(), index = keyboard === null ? -1 : this.locals.findIndex(local => local.player.seat.id.equals(keyboard));
     await this.settings.saveInputRouting("input/routing.json", index < 0 ? null : index);
+    if (this.archivePersistence) {
+      await saveCvarArchive(this.settings, ["movement", this.cvars.dialect], this.cvars);
+      if (this.consoleCvars !== this.cvars) await saveCvarArchive(this.settings, ["fallback", this.consoleCvars.dialect], this.consoleCvars);
+      for (const [seat, mouse] of this.mouseSettings)
+        await saveCvarArchive(this.settings, ["input", mouse.cvars.dialect, String(seat.index)], mouse.cvars);
+    }
   }
 
   close(): undefined {

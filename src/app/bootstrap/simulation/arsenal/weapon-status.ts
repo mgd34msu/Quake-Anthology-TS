@@ -1,8 +1,8 @@
 import { q2BaseWeaponDisplayName } from "../../../../content/q2/foundation/items.ts";
 import { itemList } from "../../../../content/q3/base/shared/items.ts";
 import { ItemType } from "../../../../content/q3/base/shared/definitions.ts";
-import { isQ1BaseWeapon } from "../../../../content/q1/foundation/types.ts";
-import type { Q1BaseWeapon, Q1Weapon } from "../../../../content/q1/foundation/types.ts";
+import { q1WeaponDisplayName } from "../../../../content/q1/foundation/weapon-names.ts";
+export { q1WeaponDisplayName } from "../../../../content/q1/foundation/weapon-names.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { ArsenalAmmoWarning, WeaponHudStatus } from "../../../../contracts/ui.ts";
@@ -12,20 +12,8 @@ import type { Q2WeaponDefinition } from "../../../../content/q2/foundation/weapo
 import { Q3_WEAPON_ITEMS } from "../../../../content/q3/foundation/arsenal.ts";
 import { Weapon } from "../../../../movement/q3/constants.ts";
 
-const q1DisplayNames: Readonly<Record<Q1BaseWeapon, string>> = {
-  axe: "Axe", shotgun: "Shotgun", supershotgun: "Double-barrelled Shotgun", nailgun: "Nailgun",
-  supernailgun: "Super Nailgun", grenadelauncher: "Grenade Launcher", rocketlauncher: "Rocket Launcher", lightning: "Thunderbolt",
-};
 function displayName(value: string): string {
   return value.replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, character => character.toUpperCase());
-}
-
-export function q1WeaponDisplayName(weapon: Q1Weapon): string {
-  if (isQ1BaseWeapon(weapon)) return q1DisplayNames[weapon];
-  if (weapon === "hipnotic:laser") return "Laser Cannon";
-  if (weapon === "hipnotic:mjolnir") return "Mjolnir";
-  if (weapon === "hipnotic:proximity") return "Proximity Gun";
-  return displayName(weapon);
 }
 
 export function q1WeaponStatus(game: Q1EntityServices, player: Q1PlayerState, source: ProviderReference): WeaponHudStatus {

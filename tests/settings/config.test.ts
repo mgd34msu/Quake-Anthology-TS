@@ -99,3 +99,22 @@ test("Always run seat config preserves false and true and leaves old profiles at
     expect(() => parseSeatSettings({ ...profile, alwaysRun: "true" })).toThrow("Expected a settings boolean");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("typed archives preserve local owners and do not execute stored values", async () => {
+  const { loadCvarArchive, saveCvarArchive } = await import("../../src/app/bootstrap/cvar-archives.ts");
+  const root = await mkdtemp(join(tmpdir(), "quake-cvar-archive-"));
+  try {
+    const store = new ConfigStore(root), identity = createIdentityOwner("archive-test");
+    const registry = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "local-console" } }, print: () => undefined });
+    registry.applyArchive([{ name: "custom", value: "a; quit\nset stolen 1" }]);
+    await saveCvarArchive(store, ["client", "q3", "base", "0"], registry);
+    expect(await loadCvarArchive(store, ["client", "q3", "base", "1"], "q3")).toEqual([]);
+    const entries = await loadCvarArchive(store, ["client", "q3", "base", "0"], "q3");
+    const restored = new CvarRegistry({ dialect: "q3", context: registry.context, print: () => undefined });
+    restored.applyArchive(entries);
+    expect(restored.variableString("custom")).toBe("a; quit\nset stolen 1");
+    expect(restored.find("stolen")).toBeUndefined();
+    expect(restored.archiveEntries()).toEqual(entries);
+    await expect(loadCvarArchive(store, ["client", "q3", "base", "0"], "q2-classic")).rejects.toThrow("dialect");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

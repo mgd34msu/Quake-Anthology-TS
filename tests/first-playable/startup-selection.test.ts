@@ -35,6 +35,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   expect(selected.recipe.campaign.kind).toBe("none");
   expect(selected.recipe.equipment.grapple).toMatchObject({ kind: "enabled", mechanic: "q2-ctf", binding: "offhand" });
   expect(selected.recipe.equipment.handGrenades).toMatchObject({ kind: "enabled", edition: "classic", binding: "offhand" });
+  expect(model.bindingCapabilities()).toEqual({ chat: false, scoreCommand: null, offhandGrapple: true, offhandGrenades: true });
   expect(selected.options).toMatchObject({ width: 1280, height: 720, gamma: 1.3, mode: "deathmatch", movement: "q2", character: "q3", characterModel: "sarge" });
   expect(model.summary().some(line => line.includes("Independent pickup replacement is not implemented"))).toBe(true);
   expect(() => model.select("map", "maps/not-installed.bsp")).toThrow("Unknown map");
@@ -95,7 +96,28 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     click(index % 7);
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
   };
+  const { SeatInput } = await import("../../src/input/seat.ts");
+  const { CommandBuffer } = await import("../../src/core/commands/index.ts");
+  const { sharedBindingActions } = await import("../../src/ui/settings/action-catalog.ts");
+  const { defaultBindings } = await import("../../src/input/bindings.ts");
+  const context = { session: identity.session, origin: { kind: "local-seat", seat, client: identity.client(0, 0) } } satisfies ConstructorParameters<typeof CommandBuffer>[0]["context"];
+  const input = new SeatInput({ seat, dialect: "q1-netquake", context, commands: new CommandBuffer({ dialect: "q1-netquake", context }), uiEvent: event => menu.input(event) });
+  for (const binding of defaultBindings(0, "q1-netquake", model.bindingItems())) input.bind(binding);
+  menu.bindInput(input, () => sharedBindingActions("q1-netquake", model.bindingItems(), model.bindingCapabilities()));
   try {
+    click(3); click(2);
+    expect(menu.controller.activeMenu).toBe("menu:settings:input:0");
+    menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: true, repeat: false });
+    menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: false, repeat: false });
+    expect(menu.controller.activeMenu).toBe("menu:bindings:0");
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 398 }, delta: { x: 0, y: 0 } });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });
+    menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: false });
+    expect(menu.controller.bindingCapture).toBe(true);
+    menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 102, down: true, repeat: false });
+    menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 102, down: false, repeat: false });
+    expect(input.binding({ kind: "key", code: 102 })).toEqual({ kind: "command", text: "+forward" });
+    menu.controller.closeAll(); menu.controller.openMenu("menu:startup:main");
     click(3); click(1);
     expect(menu.controller.activeMenu).toBe("menu:startup:sound");
     click(0); click(2);

@@ -1,3 +1,6 @@
+import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
+import { baseWeaponBindingItems } from "../../input/weapon-bindings.ts";
+import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
@@ -425,6 +428,39 @@ export class StartupSelectionModel {
     return [...this.rows().filter(row => row.id !== "renderer").map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),
       "Pickups: authored map items supply the selected arsenal through its admitted mappings. Independent pickup replacement is not implemented."];
   }
+  bindingItems(): readonly WeaponBindingItem[] {
+    const product = this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons);
+    return baseWeaponBindingItems(product.expectation.family, product.expectation.campaign);
+  }
+  bindingCapabilities(): BindingCapabilities {
+    const base = applicationPreset(this.catalog, this.options), equipment = this.selectedEquipment(base.equipment);
+    const family = this.catalog.require(base.engineBehavior.content).expectation.family;
+    return { chat: family !== "q1", scoreCommand: family === "q2" ? "score" : family === "q3" ? "+scores" : null,
+      offhandGrapple: equipment.grapple.kind === "enabled" && equipment.grapple.binding === "offhand",
+      offhandGrenades: equipment.handGrenades.kind === "enabled" };
+  }
+  private selectedEquipment(baseline: EquipmentSelection): EquipmentSelection {
+    let equipment = baseline;
+    if (this.values.grapple === "disabled") equipment = { ...equipment, grapple: disabledEquipment().grapple };
+    else if (this.values.grapple !== "native") {
+      const [id, binding] = this.values.grapple.split("/");
+      if (id === undefined || binding !== "slot" && binding !== "offhand") throw new Error("Invalid grapple selection");
+      const product = this.catalog.require(id), edition = product.expectation.edition;
+      if (product.expectation.family === "q1") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.threewave, content: product.id }, mechanic: "q1-threewave", edition: "rerelease", binding } };
+      else if (product.expectation.campaign === "lmctf") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.lmctf, content: product.id }, mechanic: "q2-lmctf", edition: "classic", binding } };
+      else {
+        if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grapple edition");
+        equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.ctf, content: product.id }, mechanic: "q2-ctf", edition, binding } };
+      }
+    }
+    if (this.values.grenades === "disabled") equipment = { ...equipment, handGrenades: disabledEquipment().handGrenades };
+    else if (this.values.grenades !== "native") {
+      const product = this.catalog.require(this.values.grenades), edition = product.expectation.edition;
+      if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grenade edition");
+      equipment = { ...equipment, handGrenades: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: product.id }, edition, binding: "offhand", initialAmmo: 5, capacity: 50 } };
+    }
+    return equipment;
+  }
   async resolve(): Promise<StartupLaunch> {
     for (const row of this.rows()) {
       const selected = row.choices.find(choice => choice.id === row.value);
@@ -459,26 +495,7 @@ export class StartupSelectionModel {
     if (this.values.enemies === "custom") {
       selections = { ...selections, enemies: { kind: "selected", value: this.effectiveMonsterRoster() } };
     }
-    let equipment: EquipmentSelection = base.equipment;
-    if (this.values.grapple === "disabled") equipment = { ...equipment, grapple: disabledEquipment().grapple };
-    else if (this.values.grapple !== "native") {
-      const [id, binding] = this.values.grapple.split("/");
-      if (id === undefined || binding !== "slot" && binding !== "offhand") throw new Error("Invalid grapple selection");
-      const product = this.catalog.require(id), edition = product.expectation.edition;
-      if (product.expectation.family === "q1") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.threewave, content: product.id }, mechanic: "q1-threewave", edition: "rerelease", binding } };
-      else if (product.expectation.campaign === "lmctf") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.lmctf, content: product.id }, mechanic: "q2-lmctf", edition: "classic", binding } };
-      else {
-        if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grapple edition");
-        equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.ctf, content: product.id }, mechanic: "q2-ctf", edition, binding } };
-      }
-    }
-    if (this.values.grenades === "disabled") equipment = { ...equipment, handGrenades: disabledEquipment().handGrenades };
-    else if (this.values.grenades !== "native") {
-      const product = this.catalog.require(this.values.grenades), edition = product.expectation.edition;
-      if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grenade edition");
-      equipment = { ...equipment, handGrenades: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: product.id }, edition, binding: "offhand", initialAmmo: 5, capacity: 50 } };
-    }
-    selections = { ...selections, equipment: { kind: "selected", value: equipment } };
+    selections = { ...selections, equipment: { kind: "selected", value: this.selectedEquipment(base.equipment) } };
     return { options, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: selections }) };
   }
 }

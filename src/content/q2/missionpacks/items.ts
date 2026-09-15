@@ -38,6 +38,10 @@ const names: ReadonlyMap<string, { readonly name: string; readonly icon: string 
   ["proxlauncher", { name: "Prox Launcher", icon: "w_proxlaunch" }],
 ]);
 
+export function q2MissionWeaponDisplayName(name: string): string | null {
+  return names.get(name)?.name ?? [...xatrixAmmo, ...rogueAmmo].find(item => item.classname === `ammo_${name}`)?.name ?? null;
+}
+
 export class Q2MissionPackItems implements Q2SpawnModule {
   private powers = new Map<ActorId, Q2MissionPackPowerups>();
   constructor(readonly hooks: Q2MissionPackItemHooks, readonly pack: Q2MissionPack, readonly sharedItems: Q2ItemModule) {}

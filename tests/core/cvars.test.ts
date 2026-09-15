@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { CommandContext } from "../../src/contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarFlag, CvarRegistry, Q2CvarFlag } from "../../src/core/cvars/index.ts";
 
@@ -74,4 +74,53 @@ test("Q3 protection, binary32 set formatting, and normal versus big info orderin
   expect(cvars.infoString(CvarFlag.UserInfo, 8192)).toBe("\\b\\2\\a\\3");
   cvars.setValue("fraction", 0.1); expect(cvars.variableString("fraction")).toBe("0.100000");
   expect(cvars.variableValue("fraction")).toBe(Math.fround(0.1));
+});
+
+test("archive entries preserve console provenance and later declaration defaults", () => {
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const source = new CvarRegistry({ dialect, context });
+    source.setCommandFlags("custom", "saved", "archive");
+    expect(source.archiveEntries()).toEqual([{ name: "custom", value: "saved" }]);
+    const restored = new CvarRegistry({ dialect, context });
+    restored.applyArchive(source.archiveEntries());
+    expect(restored.archiveCommands()).toEqual(['seta custom "saved"']);
+    if (dialect === "q3") expect(restored.get("custom")?.flags).toBe(CvarFlag.Archive | CvarFlag.UserCreated);
+    if (dialect === "q2-classic" || dialect === "q2-rerelease") expect(restored.get("custom")?.flags).toBe(Q2CvarFlag.Archive | Q2CvarFlag.Custom);
+    restored.register("custom", "source-default", CvarFlag.Archive);
+    expect(restored.variableString("custom")).toBe("saved");
+    expect(restored.get("custom")?.resetValue).toBe("source-default");
+    expect(restored.get("custom")?.flags).toBe(CvarFlag.Archive);
+    restored.reset("custom");
+    expect(restored.variableString("custom")).toBe("source-default");
+  }
+});
+
+test("archive application respects registered protected values and defaults", () => {
+  for (const dialect of ["q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const cvars = new CvarRegistry({ dialect, context });
+    cvars.register("protected", "source", dialect === "q3" ? CvarFlag.ReadOnly : Q2CvarFlag.ReadOnly);
+    cvars.register("setting", "default", CvarFlag.Archive);
+    cvars.applyArchive([{ name: "protected", value: "override" }, { name: "setting", value: "saved" }]);
+    expect(cvars.variableString("protected")).toBe("source");
+    expect(cvars.variableString("setting")).toBe("saved");
+    expect(cvars.get("setting")?.resetValue).toBe("default");
+  }
+});
+
+test("archive entries share exclusions and dialect latch selection with commands", () => {
+  const q3 = new CvarRegistry({ dialect: "q3", context });
+  q3.register("cl_CDkey", "secret", CvarFlag.Archive);
+  q3.register("ordinary", "ignored");
+  q3.register("pending", "old", CvarFlag.Archive | CvarFlag.Latch);
+  q3.set("pending", "next");
+  expect(q3.archiveEntries()).toEqual([{ name: "pending", value: "next" }]);
+  expect(q3.archiveEntries(name => name !== "pending")).toEqual([]);
+  expect(q3.archiveCommands(name => name !== "pending")).toEqual([]);
+  const q2 = new CvarRegistry({ dialect: "q2-classic", context });
+  for (const flag of [Q2CvarFlag.NoSet, Q2CvarFlag.Cheat, Q2CvarFlag.Private, Q2CvarFlag.ReadOnly, Q2CvarFlag.NoArchive]) q2.register(`hidden${flag}`, "secret", flag | Q2CvarFlag.Archive);
+  q2.register("pending", "old", Q2CvarFlag.Archive | Q2CvarFlag.Latch);
+  q2.setServerActive(true);
+  q2.set("pending", "next");
+  expect(q2.archiveEntries()).toEqual([{ name: "pending", value: "old" }]);
+  expect(q2.archiveCommands()).toEqual(['set pending "old"']);
 });

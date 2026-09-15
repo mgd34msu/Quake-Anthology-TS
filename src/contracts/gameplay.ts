@@ -11,6 +11,7 @@ export interface ArsenalIntent {
   /** Null retains the current selection; the arsenal owner validates named weapons. */
   readonly weapon: ItemId | null;
   readonly useHoldable: boolean;
+  readonly impulse?: number;
 }
 
 /** Original mod encodings differ between classic game DLLs and the rerelease mod_t. */

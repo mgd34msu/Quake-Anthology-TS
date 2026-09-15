@@ -1,3 +1,4 @@
+import type { CvarArchiveEntry } from "../../../core/cvars/index.ts";
 import type { DebugLine } from "../../../debug/shapes.ts";
 import type { PreparedQ3Game } from "./q3/guest-artifact.ts";
 import type { Q3GuestRuntimeOptions } from "./q3/guest-runtime.ts";
@@ -58,6 +59,8 @@ export interface SimulationOptions {
   readonly playerIdentity?: (client: ClientId) => { readonly seat: number; readonly socialId: string };
   readonly q3Session?: Q3SourceSessionCarry;
   readonly serverProfile?: import("../../../settings/server/types.ts").ServerProfile;
+  readonly sourceArchive?: readonly CvarArchiveEntry[];
+  readonly q1Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly q2Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly q3Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialSourceMilliseconds?: number;

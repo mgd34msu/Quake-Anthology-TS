@@ -1,5 +1,6 @@
 import type { CommandDialect } from "../../contracts/common.ts";
 import type { BindingAction } from "./bindings.ts";
+import { weaponBindingItem } from "../../input/weapon-bindings.ts";
 
 export interface BindingCapabilities {
   readonly chat: boolean;
@@ -29,6 +30,7 @@ export function sharedBindingActions(dialect: CommandDialect, items: readonly Bi
   if (capabilities.chat) { append("chat", "Chat", "messagemode"); append("team-chat", "Team chat", "messagemode2"); }
   if (capabilities.offhandGrapple) append("grapple", "Offhand grapple (hold)", "+grapple");
   if (capabilities.offhandGrenades) append("grenade", "Cook / throw offhand grenade", "+grenade");
-  for (const item of items) append(`item:${item.id}`, `${item.kind === "weapon" ? "Select" : "Use"} ${item.label}`, `use ${item.id}`);
+  for (const item of items) actions.push({ id: `item:${item.id}`, label: `${item.kind === "weapon" ? "Select" : "Use"} ${item.label}`,
+    target: { kind: "command", text: `use ${item.id}` }, matches: target => target.kind === "command" && weaponBindingItem(target.text, items) === item.id });
   return actions;
 }

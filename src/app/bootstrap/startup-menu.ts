@@ -1,4 +1,7 @@
 import type { UiSound } from "../../ui/common/controller.ts";
+import { registerBindingMenus } from "../../ui/settings/bindings.ts";
+import type { BindingAction } from "../../ui/settings/bindings.ts";
+import type { SeatInput } from "../../input/seat.ts";
 import { registerLlmSettingsMenu, type LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { registerGyroSettingsMenu } from "../../ui/settings/gyro.ts";
 import type { GyroSettingsUi } from "../../ui/settings/gyro.ts";
@@ -69,6 +72,7 @@ export class StartupMenu {
   readonly controller: NativeUiController;
   private readonly text: UiTextRenderer;
   private gyroMenu: UiMenuId | null = null;
+  private bindingMenu: UiMenuId | null = null;
   private readonly disposers: (() => void)[] = [];
   private status = "";
   private busy = false;
@@ -144,7 +148,10 @@ export class StartupMenu {
       this.button("controls", "Controls", 2, () => this.controller.openMenu(controlsMenu), true),
       ...(llm === null ? [] : [this.button("llm", "LLM options", 3, () => this.controller.openMenu(llm.root), true)]), this.back(),
     ]);
-    const settings = registerSettingsMenus(this.controller, [...(options.settings ?? []).filter(binding => binding.category === "display" || binding.category === "input"),
+    const settings = registerSettingsMenus(this.controller, [
+      { id: "ui:startup:bindings", category: "input", kind: "button", label: "Bindings (Player 1)", enabled: () => this.bindingMenu !== null,
+        activate: () => { if (this.bindingMenu !== null) this.controller.openMenu(this.bindingMenu); } },
+      ...(options.settings ?? []).filter(binding => binding.category === "display" || binding.category === "input"),
       { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (requires Apply)", enabled: () => !this.busy,
         read: () => options.model.options.renderer, choices: () => [{ id: "gl", label: "OpenGL" }, { id: "cpu", label: "Software" }],
         write: value => options.model.select("renderer", value) },
@@ -328,7 +335,8 @@ export class StartupMenu {
       : active === nativeDifficultyMenu ? "Difficulty"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (!active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (!active?.startsWith("menu:bindings:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, 1.4), 64, 458, 1.4);
 
     if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, 1.6), 64, 86, 1.6);
     if (active === nativeCampaignMenu) {
@@ -376,6 +384,9 @@ export class StartupMenu {
   }
   bindGyro(settings: GyroSettingsUi): void {
     const menu = registerGyroSettingsMenu(this.controller, settings, ""); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);
+  }
+  bindInput(input: SeatInput, actions: () => readonly BindingAction[]): void {
+    const menu = registerBindingMenus(this.controller, input, actions); this.bindingMenu = menu.root; this.disposers.push(menu.dispose);
   }
   close(): void { this.controller.closeAll(); for (const dispose of this.disposers) dispose(); this.text.clear(); }
 }

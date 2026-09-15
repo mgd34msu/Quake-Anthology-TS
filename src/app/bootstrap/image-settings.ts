@@ -14,6 +14,7 @@ import type { NativeRenderer } from "./renderer.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 interface ImageSettingsOptions {
+  readonly deferPersistence?: boolean;
   readonly context: CommandContext;
   readonly dialect: CommandDialect;
   readonly userContentRoot?: string;
@@ -28,11 +29,14 @@ export class ApplicationImageSettings {
   private readonly store: ConfigStore;
   private applied = "";
   private saved = "";
+  private persistenceEnabled: boolean;
+  enablePersistence(): void { this.persistenceEnabled = true; }
   private appliedDebugLineWidth = 2;
   private displayApplied = "";
   private restoredSize: { readonly width: number; readonly height: number } | null = null;
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
   private constructor(private readonly options: ImageSettingsOptions) {
+    this.persistenceEnabled = !options.deferPersistence;
     this.store = new ConfigStore(join(options.userContentRoot ?? defaultUserContentRoot(), "settings"));
     this.cvars = new CvarRegistry(options);
     this.cvars.register("r_gamma", String(options.gamma ?? 1), CvarFlag.Archive);
@@ -202,6 +206,7 @@ export class ApplicationImageSettings {
     await this.save();
   }
   private async save(): Promise<void> {
+    if (!this.persistenceEnabled) return;
     const selected = this.signature();
     if (selected === this.saved) return;
     await this.store.saveCvars("images.cfg", this.cvars); this.saved = selected;

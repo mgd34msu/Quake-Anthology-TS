@@ -39,6 +39,8 @@ import { StartupSaves } from "./startup-saves.ts";
 import { savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
+import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
+import { StartupInputProfile } from "./startup-input-profile.ts";
 
 type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "play" } | { readonly kind: "preset"; readonly id: string; readonly skill: number } | { readonly kind: "load"; readonly path: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
@@ -51,6 +53,7 @@ interface StartupGraphics {
   readonly router: InputRouter;
   readonly controllers: SdlControllers;
   readonly controllerSettings: ControllerSettings;
+  inputProfile: StartupInputProfile;
   draw(): void;
   close(): void;
 }
@@ -71,6 +74,7 @@ export class StartupApplication {
   readonly preferences: FrontendPreferences;
   private applyDisplay = false;
   private baselineProduct: string | null = null;
+  private baselineInput = "";
   private preferenceStore: ConfigStore | null = null;
 
   private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost, saveDirectory: string) {
@@ -86,7 +90,9 @@ export class StartupApplication {
 
   private async refreshPreferenceBaseline(force = false): Promise<void> {
     const options = this.model.options;
-    if (!force && this.baselineProduct === options.product) return;
+    const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
+    if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
+    await this.graphics?.inputProfile.save();
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
@@ -94,6 +100,8 @@ export class StartupApplication {
     await this.preferences.loadBaseline(settings);
     this.preferenceStore = settings;
     this.baselineProduct = options.product;
+    this.baselineInput = inputKey;
+    if (this.graphics !== null) this.graphics.inputProfile = await StartupInputProfile.open(settings, this.graphics.inputProfile.input, movementDialect(options), this.model.bindingItems());
   }
 
   private async openGraphics(display: StartupDisplay = this.model.options): Promise<StartupGraphics> {
@@ -147,6 +155,10 @@ export class StartupApplication {
       menu.setStatus(this.status);
       const activeMenu = menu;
       const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: event => activeMenu.input(event) });
+      const settings = this.preferenceStore;
+      if (settings === null) throw new Error("Startup input settings have no product");
+      const inputProfile = await StartupInputProfile.open(settings, input, movementDialect(options), this.model.bindingItems());
+      activeMenu.bindInput(input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
       input.setFocus({ kind: "menu", menu: activeMenu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
       const native = renderer;
       router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat, controllers,
@@ -158,7 +170,7 @@ export class StartupApplication {
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
       const provider: ProviderReference = { provider: `${product.expectation.family}:official`, content: product.id };
       const presentation: PresentationSelection = { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: product.id, hud: provider, effects: provider, audio: provider };
-      this.graphics = { audio: activeAudio, imageSettings, display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
+      this.graphics = { audio: activeAudio, imageSettings, inputProfile, display: { renderer: options.renderer, gamma: options.gamma, width: options.width, height: options.height, hidden: options.hidden }, renderer: native, menu: activeMenu, router: activeRouter, controllers: pads, controllerSettings,
         draw: () => {
           const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.pump();
           const viewport = { x: 0, y: 0, ...native.window.drawableSize };
@@ -183,6 +195,7 @@ export class StartupApplication {
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame(); }
 
   private async launch(action: StartupAction): Promise<void> {
+    await this.graphics?.inputProfile.save();
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     this.preferenceStore = null;
     this.graphics?.audio.close();
@@ -272,6 +285,7 @@ export class StartupApplication {
     this.model.setDisplay({ ...graphics.renderer.window.logicalSize, gamma: graphics.renderer.outputGamma });
     let frameGraphics = graphics;
     if (this.applyDisplay) {
+      await graphics.inputProfile.save();
       this.applyDisplay = false; graphics.close(); this.graphics = null;
       let reopened: StartupGraphics;
       try { reopened = await this.openGraphics(); this.status = ""; }
@@ -294,6 +308,8 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
+    try { await this.graphics?.inputProfile.save(); }
+    catch (error) { this.host.print(`Could not save bindings: ${error instanceof Error ? error.message : String(error)}\n`); }
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.host.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     this.game?.requestQuit(); this.remote?.requestQuit(); await this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;

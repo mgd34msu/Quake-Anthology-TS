@@ -206,11 +206,19 @@ export class MovementPlayer {
     return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
   }
 
+  private acceptArsenalIntent(intent: ArsenalIntent | undefined): void {
+    const pending = this.arsenalIntent;
+    if (pending !== undefined && (pending.impulse ?? 0) !== 0 && (intent === undefined || intent.provider === pending.provider)) {
+      this.arsenalIntent = intent === undefined ? { ...pending, weapon: null, useHoldable: false }
+        : { ...intent, impulse: intent.impulse || pending.impulse || 0 };
+    } else this.arsenalIntent = intent;
+  }
+
   receiveNetQuake(input: ActorCommand): undefined {
     if (input.command.kind !== "q1-netquake") throw new Error("NetQuake client requires a NetQuake command");
     if (input.sequence <= this.lastSequence) return undefined;
     this.netQuakeCommand = { ...input.command, impulse: input.command.impulse || this.netQuakeCommand?.impulse || 0 };
-    this.arsenalIntent = input.arsenal;
+    this.acceptArsenalIntent(input.arsenal);
     this.previousButtons = this.buttons; this.buttons = input.command.buttons;
     this.commandAngles = input.command.viewAngles; this.viewAngles = input.command.viewAngles; this.lastSequence = input.sequence;
     return undefined;
@@ -273,7 +281,7 @@ export class MovementPlayer {
   }
 
   move(input: ActorCommand, frame: FrameContext): MovementResult {
-    this.arsenalIntent = input.arsenal;
+    this.acceptArsenalIntent(input.arsenal);
     this.state = this.readState();
     this.previousButtons = this.buttons;
     this.buttons = input.command.buttons;

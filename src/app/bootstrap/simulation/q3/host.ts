@@ -1,3 +1,4 @@
+import type { CvarArchiveEntry } from "../../../../core/cvars/index.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import { Q3ServerState } from "./server-state.ts";
 import type { Q3SourceHost, Q3SourceBots, Q3SourceEntityEvent } from "./types.ts";
@@ -21,6 +22,7 @@ export interface Q3HostSettings {
   readonly singlePlayer: boolean;
   readonly maxClients: number;
   readonly mapName: string;
+  readonly sourceArchive?: readonly CvarArchiveEntry[];
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
 }
 

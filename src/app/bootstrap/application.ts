@@ -1,3 +1,6 @@
+import { resolveWeaponSelection } from "../../input/weapon-bindings.ts";
+import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
+import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
 import { q3ConfigstringCommands } from "../../network/q3/configstrings.ts";
 import { LocalQ3ClientState } from "./q3-client/client-state.ts";
@@ -149,6 +152,8 @@ export class Application {
   private imageSettings: ApplicationImageSettings | null = null;
   private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBots | null = null;
+  private clientCvars = new Map<SeatId, CvarRegistry>();
+  private archivePersistence = false;
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
   private requestedCommands: ApplicationCommandRequest[] = [];
@@ -216,9 +221,33 @@ export class Application {
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
-    private readonly localSeats: Map<ClientId, SessionSeat>) {
-    const product = loadedContent.catalog.require(launchOptions.product);
-    this.inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+    private readonly localSeats: Map<ClientId, SessionSeat>, inputConfig: ConfigStore) { this.inputConfig = inputConfig; }
+
+  private static sourceConfig(options: ApplicationOptions, content: LoadedApplicationContent): ConfigStore {
+    const product = content.catalog.product(content.recipe.map.entities.content);
+    return new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  }
+
+  private static clientConfig(options: ApplicationOptions, content: LoadedApplicationContent): ConfigStore {
+    const product = content.catalog.product(content.recipe.engineBehavior.content);
+    return new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  }
+
+  private async saveSourceArchive(options: ApplicationOptions, content: LoadedApplicationContent, simulation: SharedSimulation): Promise<void> {
+    const cvars = this.sourceCvars(simulation);
+    if (cvars !== null) await saveCvarArchive(Application.sourceConfig(options, content),
+      ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider], cvars);
+  }
+
+  private async saveClientArchives(options: ApplicationOptions, content: LoadedApplicationContent, clients: ReadonlyMap<SeatId, CvarRegistry>): Promise<void> {
+    const store = Application.clientConfig(options, content);
+    for (const [seat, cvars] of clients) await saveCvarArchive(store,
+      ["client", content.recipe.engineBehavior.content, content.recipe.engineBehavior.provider, String(seat.index)], cvars);
+  }
+
+  private sourceCvars(simulation = this.simulation): CvarRegistry | null {
+    return simulation.q3Guest()?.state.cvars ?? simulation.q3Source()?.host.cvars ?? simulation.q2ServerCvars()
+      ?? simulation.q1Source()?.cvars ?? simulation.quakecSource()?.cvars ?? null;
   }
 
   private static guestOptions(content: LoadedApplicationContent, options: ApplicationOptions, host: ApplicationHost,
@@ -280,6 +309,8 @@ export class Application {
         options = { ...options, serverProfile: parseServerProfile(value, serverDefinitionsForRecipe(content.recipe)) };
       } else if (options.serverProfile !== undefined) options = { ...options, serverProfile: parseServerProfile(options.serverProfile, serverDefinitionsForRecipe(content.recipe)) };
     } catch (error) { await content.close(); throw error; }
+    const product = content.catalog.require(options.product);
+    const inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
     const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
     const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
     const localSeats = new Map<ClientId, SessionSeat>();
@@ -289,6 +320,8 @@ export class Application {
     try {
       host.loading?.stage("Preparing world...");
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+      const sourceArchive = initialSave !== undefined || options.dedicated ? [] : await loadCvarArchive(Application.sourceConfig(options, content),
+        ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider], Application.contentDialect(content));
       const guestCommands = () => {
         const commands = guestConsole;
         if (commands === null) throw new Error("Q3 guest console is unavailable");
@@ -302,7 +335,7 @@ export class Application {
           localSeats.set(client.id, session.createSeat(localSeats.size, client));
         }
       }
-      const simulation = createSimulation({ dedicated: options.dedicated,
+      const simulation = createSimulation({ dedicated: options.dedicated, sourceArchive,
         ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
         ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
@@ -315,7 +348,7 @@ export class Application {
         if (source === null) throw new Error("--bot-skill requires the Quake III game provider");
         source.host.cvars.set("g_spSkill", String(options.botSkill), true);
       }
-      application = new Application(options, content, session, simulation, host, identity, localSeats);
+      application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig);
       application.frontendOverrides = preferences ?? {};
       application.elapsed = savedSettings?.hostMilliseconds ?? 0;
       if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
@@ -336,7 +369,7 @@ export class Application {
       else {
         await application.viewSettings.load(application.inputConfig);
         const frontend = application;
-        application.imageSettings = await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
+        application.imageSettings = await ApplicationImageSettings.open({ deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
           dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
             host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
           } });
@@ -356,6 +389,9 @@ export class Application {
         await initialized.sourceCommands?.executeAsync(() => initialized.commands());
       }
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
+      application.archivePersistence = !options.dedicated;
+      application.graphical?.input.enableArchivePersistence();
+      application.imageSettings?.enablePersistence();
       if (initialSave === undefined) await application.autosaveLevel();
       else application.requestRestoredScores();
       return application;
@@ -442,16 +478,28 @@ export class Application {
     this.dedicatedConsole = new DedicatedConsole();
   }
 
-  private sourceDialect(content = this.content): CommandDialect {
+  private sourceDialect(content = this.content): CommandDialect { return Application.contentDialect(content); }
+  private static contentDialect(content: LoadedApplicationContent): CommandDialect {
     const source = content.catalog.product(content.recipe.engineBehavior.content).expectation;
     return source.family === "q1" ? source.edition === "quakeworld" ? "q1-quakeworld" : "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
   }
 
-  private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest): ApplicationInputCommands {
+  private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest, clientCvars = this.clientCvars): ApplicationInputCommands {
     return { readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
       execute: (name, arguments_, seat) => localGuest === null ? this.queueCommand(name, arguments_, seat)
         : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat }), print: text => this.host.print(text),
+      arsenalImpulseProvider: seat => {
+        const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
+        const actor = client === undefined ? undefined : simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
+        const player = actor === undefined ? null : simulation.movementPlayer(actor);
+        return player?.arsenal.state.kind === "q1" ? player.arsenal.provider : null;
+      },
+      bindingItems: seat => {
+        const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
+        const player = client === undefined ? undefined : simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
+        return player === undefined ? [] : simulation.playerUi(player).items;
+      },
       bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null || simulation.q3Guest() !== null,
         scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null || simulation.q3Guest() !== null ? "+scores" : null,
         offhandGrapple: simulation.recipe.equipment.grapple.kind === "enabled" && simulation.recipe.equipment.grapple.binding === "offhand",
@@ -459,8 +507,13 @@ export class Application {
       ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
       console: { dialect: () => this.sourceDialect(content), server: () => {
         const source = simulation.q3Source();
-        return source === null ? q2Console === null ? null : { cvars: q2Console.cvars, sharedNames: q2Console.sharedNames } : { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
-      }, seat: id => localGuest?.seats.get(id)?.cvars ?? this.graphical?.q3.get(id)?.client.cvars ?? null },
+        if (source !== null) return { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
+        if (q2Console !== null) return { cvars: q2Console.cvars, sharedNames: q2Console.sharedNames };
+        const guest = simulation.q3Guest();
+        if (guest !== null) return { cvars: guest.state.cvars, sharedNames: serverDefinitionsForRecipe(content.recipe).map(definition => definition.target.name) };
+        const q1 = simulation.q1Source();
+        return q1 === null ? null : { cvars: q1.cvars, sharedNames: [] };
+      }, seat: id => localGuest?.seats.get(id)?.cvars ?? clientCvars.get(id) ?? null },
       clientCapturesInput: seat => this.graphical?.q3.get(seat)?.client.capturesInput ?? false,
       clientInput: event => {
         const source = this.graphical?.q3.get(event.seat);
@@ -745,8 +798,15 @@ export class Application {
       await this.imageSettings?.refreshDisplay(renderer);
       const players: LocalPlayer[] = [];
       if (restoring) for (const seat of this.localSeats.values()) {
-        if (this.localGuest !== null) players.push({ seat, actor: this.prepareRestoredGuestSeat(this.localGuest, this.simulation, seat, this.options) });
-        else {
+        const archive = await this.loadClientArchive(seat, this.content);
+        if (this.localGuest !== null) {
+          players.push({ seat, actor: this.prepareRestoredGuestSeat(this.localGuest, this.simulation, seat, this.content, this.options, undefined, archive) });
+          const cvars = this.localGuest.seats.get(seat.id)?.cvars;
+          if (cvars === undefined) throw new Error("Restored guest seat cvars are missing");
+          this.clientCvars.set(seat.id, cvars);
+        } else {
+          this.clientCvars.set(seat.id, this.createClientCvars(this.simulation, this.content, this.options, seat,
+            this.simulation.q3Source()?.host.engine.getUserinfo(seat.client.id.slot) ?? null, undefined, archive));
           const actor = this.simulation.players().find(actor => this.simulation.movementPlayer(actor)?.client.equals(seat.client.id));
           if (actor === undefined) throw new Error("Restored world is missing a local player");
           players.push({ seat, actor });
@@ -757,11 +817,11 @@ export class Application {
         client.connect("loopback");
         const seat = this.session.createSeat(index, client);
         this.localSeats.set(client.id, seat);
+        const cvars = this.createClientCvars(this.simulation, this.content, this.options, seat, null, undefined,
+          await this.loadClientArchive(seat, this.content), true);
+        this.clientCvars.set(seat.id, cvars);
         if (this.localGuest !== null) {
           const authority = this.localGuest.authority;
-          const cvars = new CvarRegistry({ dialect: "q3", context: { session: this.session.session, origin: { kind: "local-seat", seat: seat.id, client: client.id } }, print: text => this.host.print(text),
-            cheatsAllowed: () => this.simulation.q3Guest()?.state.cvars.variableValue("sv_cheats") === 1 });
-          initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: this.options.characterModel });
           const userinfo = `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`;
           const admission = await authority.connect(client.id, userinfo);
           if (admission.kind === "rejected") throw new Error(admission.reason);
@@ -769,6 +829,7 @@ export class Application {
           await authority.begin?.(admission.player, { serverTime: 0, angles: [0, 0, 0], forwardmove: 0, rightmove: 0, upmove: 0, buttons: 0, weapon: 2 });
           players.push({ seat, actor: admission.player.actor });
         } else {
+          this.simulation.q3Source()?.host.engine.setUserinfo(client.id.slot, `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`);
           const player = this.simulation.admitPlayer(client.id);
           players.push({ seat, actor: player.actor });
         }
@@ -860,23 +921,43 @@ export class Application {
     world.seats.set(seat.id, { state, cvars, userinfo, client: null });
   }
 
+  private loadClientArchive(seat: SessionSeat, content: LoadedApplicationContent, options = this.options): Promise<readonly CvarArchiveEntry[]> {
+    return loadCvarArchive(Application.clientConfig(options, content), ["client", content.recipe.engineBehavior.content, content.recipe.engineBehavior.provider, String(seat.id.index)], this.sourceDialect(content));
+  }
+
+  private createClientCvars(simulation: SharedSimulation, content: LoadedApplicationContent, options: ApplicationOptions, seat: SessionSeat,
+    userinfo: string | null, previous?: CvarRegistry, archive: readonly CvarArchiveEntry[] = [], selectedIdentity = false): CvarRegistry {
+    const cvars = new CvarRegistry({ dialect: this.sourceDialect(content), context: { session: this.session.session,
+      origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } }, print: text => this.host.print(text),
+      cheatsAllowed: () => this.sourceCvars(simulation)?.variableValue("sv_cheats") === 1 });
+    if (userinfo === null && previous?.dialect === cvars.dialect) cvars.restoreSaveState(previous.captureSaveState());
+    else {
+      if (userinfo !== null) {
+        const fields = userinfo.split("\\");
+        for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
+          const name = fields[index], value = fields[index + 1];
+          if (name !== undefined && value !== undefined && name !== "ip") cvars.register(name, value, CvarFlag.UserInfo);
+        }
+      }
+      const available = (name: string) => ((cvars.find(name)?.flags ?? 0) & CvarFlag.UserInfo) === 0;
+      cvars.applyArchive((previous?.archiveEntries() ?? archive).filter(entry => available(entry.name)));
+      for (const value of previous?.snapshots() ?? []) if ((value.flags & CvarFlag.UserInfo) === 0) cvars.set(value.name, value.value, true);
+    }
+    if (cvars.dialect === "q3") {
+      initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
+      if (selectedIdentity) for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
+        cvars.set(name, `${options.characterModel}/default`, true);
+    }
+    return cvars;
+  }
+
   private prepareRestoredGuestSeat(world: LocalQ3GuestWorld, simulation: SharedSimulation, seat: SessionSeat,
-    options: ApplicationOptions, previous?: CvarRegistry): ActorId {
+    content: LoadedApplicationContent, options: ApplicationOptions, previous?: CvarRegistry, archive: readonly CvarArchiveEntry[] = []): ActorId {
     const guest = simulation.q3Guest(), player = guest?.player(seat.client.id);
     if (guest === null || player === undefined || player === null) throw new Error("Restored guest is missing a connected local player");
     const userinfo = guest.state.getUserinfo(player.sourceEntity);
     if (userinfo === undefined) throw new Error("Restored guest is missing local userinfo");
-    const cvars = new CvarRegistry({ dialect: "q3", context: { session: this.session.session,
-      origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } }, print: text => this.host.print(text),
-      cheatsAllowed: () => guest.state.cvars.variableValue("sv_cheats") === 1 });
-    const fields = userinfo.split("\\");
-    for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
-      const name = fields[index], value = fields[index + 1];
-      if (name !== undefined && value !== undefined && name !== "ip") cvars.register(name, value, CvarFlag.UserInfo);
-    }
-    initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
-    for (const setting of previous?.snapshots() ?? [])
-      if ((setting.flags & CvarFlag.UserInfo) === 0) cvars.set(setting.name, setting.value, true);
+    const cvars = this.createClientCvars(simulation, content, options, seat, userinfo, previous, archive);
     this.prepareLocalGuestSeat(world, simulation, seat, cvars, userinfo,
       world.authority.gameState(player, guest.state.cvars.variableValue("sv_serverid")));
     const command = guest.state.getUserCommand(player.sourceEntity);
@@ -908,7 +989,8 @@ export class Application {
   }
 
   private async createQ3SeatClient(local: LocalInput, assets: ApplicationAssets, audio: ApplicationAudio, input: ApplicationInput,
-    renderer: NativeRenderer, simulation: SharedSimulation, settings?: readonly CvarSnapshot[], localGuest = this.localGuest, browser = this.guestBrowser): Promise<Q3SeatClient | null> {
+    renderer: NativeRenderer, simulation: SharedSimulation, settings?: readonly CvarSnapshot[], localGuest = this.localGuest, browser = this.guestBrowser,
+    cvars = this.clientCvars.get(local.player.seat.id)): Promise<Q3SeatClient | null> {
     if (simulation.q3Guest() !== null) {
       const seat = localGuest?.seats.get(local.player.seat.id);
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
@@ -934,6 +1016,7 @@ export class Application {
     const initial = source.sourceState(); prediction.captureSource(initial);
     const client = await ApplicationQ3Client.create({ weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, queries: simulation.scene, initial, local, audio, movement: prediction,
       splitScreen: this.options.seats > 1,
+      ...(cvars === undefined ? {} : { cvars }),
       ...(settings === undefined ? {} : { settings }), predictionCommand: (command, time) => prediction.submit(command, time),
       linkBounds: number => source.world.linkState(number)?.absbounds ?? null,
       sourceActor: number => { const record = source.records.get(number); return record?.inuse ? record.actor.id : null; },
@@ -1021,6 +1104,11 @@ export class Application {
     }
     const content = await loadApplicationContent(options, recipe);
     const previousContent = this.content, previous = this.graphical, previousSimulation = this.simulation, previousLocalGuest = this.localGuest;
+    const previousOptions = this.options, previousClientCvars = this.clientCvars;
+    const sameClientOwner = content.recipe.engineBehavior.content === previousContent.recipe.engineBehavior.content
+      && content.recipe.engineBehavior.provider === previousContent.recipe.engineBehavior.provider;
+    const sameSourceOwner = content.recipe.map.entities.content === previousContent.recipe.map.entities.content
+      && content.recipe.map.entities.provider === previousContent.recipe.map.entities.provider;
     const frontendOverrides = this.frontendSettings;
     const q3 = this.simulation.q3Source();
     const previousBotClients = this.bots?.clients() ?? [];
@@ -1030,6 +1118,8 @@ export class Application {
     const q1BotCvars = this.simulation.q1Source()?.cvars.snapshots().filter(variable => variable.name.startsWith("bot_") || variable.name === "g_spSkill");
     const q3Session = q3?.captureSession();
     const serverProfile = this.simulation.serverProfile();
+    const q1Cvars = this.simulation.q1Source()?.cvars.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
+    const sourceArchive = this.sourceCvars()?.archiveEntries() ?? [];
     const q2Cvars = this.simulation.q2ServerCvars()?.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname" && variable.name !== "mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
@@ -1044,6 +1134,7 @@ export class Application {
     let nextInput: ApplicationInput | null = null;
     let committed = false;
     let nextGraphical: GraphicalApplication | null = null;
+    const nextClientCvars = new Map<SeatId, CvarRegistry>();
     const stagedPresentations: WorldSeatPresentation[] = [];
     const stagedClients: ApplicationQ3Client[] = [];
     let stagedCapture: ApplicationCapture | null = null;
@@ -1064,13 +1155,21 @@ export class Application {
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
-        ...(save === undefined ? { serverProfile, ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
+        ...(save === undefined ? { serverProfile, sourceArchive, ...(q1Cvars === undefined ? {} : { q1Cvars }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
       if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
       const nextQ1 = nextSimulation.q1Source();
       if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
         nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
+      }
+      if (previous !== null && nextSimulation.q3Guest() === null) for (const local of previous.input.locals) {
+        const seat = local.player.seat;
+        const cvars = this.createClientCvars(nextSimulation, content, options, seat,
+          save === undefined ? null : nextSimulation.q3Source()?.host.engine.getUserinfo(seat.client.id.slot) ?? null,
+          sameClientOwner ? previousClientCvars.get(seat.id) : undefined, sameClientOwner ? [] : await this.loadClientArchive(seat, content, options));
+        nextClientCvars.set(seat.id, cvars);
+        if (save === undefined) nextSimulation.q3Source()?.host.engine.setUserinfo(seat.client.id.slot, `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`);
       }
       const admissions = nextSimulation.q3Guest() !== null || nextSimulation.quakecSource()?.kind === "quakeworld" ? new Map<number, ActorId>() : new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
@@ -1095,9 +1194,10 @@ export class Application {
           await authority.prepare(0, serverId);
           for (const local of previous.input.locals) {
             const seat = local.player.seat;
-            admissions.set(seat.client.id.slot, this.prepareRestoredGuestSeat(nextLocalGuest, nextSimulation, seat, options,
-              previous.q3.get(seat.id)?.client.cvars));
+            admissions.set(seat.client.id.slot, this.prepareRestoredGuestSeat(nextLocalGuest, nextSimulation, seat, content, options,
+              sameClientOwner ? previousClientCvars.get(seat.id) : undefined, sameClientOwner ? [] : await this.loadClientArchive(seat, content, options)));
           }
+          for (const [seat, local] of nextLocalGuest.seats) nextClientCvars.set(seat, local.cvars);
           this.publishLocalGuestSnapshots(nextLocalGuest, nextSimulation);
           nextGuestBrowser ??= await this.openGuestBrowser();
         }
@@ -1124,11 +1224,10 @@ export class Application {
         });
         const seatInputPreferences = new Map(previous.input.locals.map(local => [local.player.seat.id, readFrontendInput(local)]));
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
-        const cgameSettings = new Map([...previous.q3].map(([seat, source]) => [seat, source.client.cvars.snapshots()]));
         await saveAudioSettings(this.inputConfig, previous.audio);
         await previous.input.saveSettings();
         const input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
-          this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest), () => performance.now(), this.inputConfig, undefined, previous.input);
+          this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars), () => performance.now(), this.inputConfig, undefined, previous.input);
         nextInput = input;
         if (nextLocalGuest !== null) this.restoreGuestInputAngles(input, nextSimulation);
         input.commands.copyPendingFrom(previous.input.commands);
@@ -1155,7 +1254,7 @@ export class Application {
         const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor, language: previous.rerelease.selectedLanguage(player.seat.id) })));
         const presentations: WorldSeatPresentation[] = [], q3Clients = new Map<SeatId, Q3SeatClient>();
         for (const [index, local] of input.locals.entries()) {
-          const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, cgameSettings.get(local.player.seat.id), nextLocalGuest, nextGuestBrowser);
+          const sourceClient = await this.createQ3SeatClient(local, worldAssets, audio, input, previous.renderer, current, undefined, nextLocalGuest, nextGuestBrowser, nextClientCvars.get(local.player.seat.id));
           if (sourceClient !== null) { stagedClients.push(sourceClient.client); q3Clients.set(local.player.seat.id, sourceClient); }
           if (this.viewSettings.override !== null) {
             if (sourceClient?.kind !== "qvm") current.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView, save === undefined ? "change" : "restore");
@@ -1190,6 +1289,8 @@ export class Application {
       this.launchOptions = options;
       this.bots = nextBots;
       this.graphical = nextGraphical;
+      this.clientCvars = nextClientCvars;
+      nextGraphical?.input.enableArchivePersistence();
       this.localGuest = nextLocalGuest;
       this.guestBrowser = nextGuestBrowser;
       if (nextLocalGuest !== null) this.requestedCommands.push(...nextLocalGuest.pendingCommands.splice(0));
@@ -1208,6 +1309,8 @@ export class Application {
       const retire = async (label: string, close: () => unknown): Promise<void> => {
         try { await close(); } catch (error) { this.host.print(`Entered world; ${label} failed: ${String(error)}\n`); }
       };
+      if (this.archivePersistence && !sameSourceOwner) await retire("previous source archive", () => this.saveSourceArchive(previousOptions, previousContent, previousSimulation));
+      if (this.archivePersistence && !sameClientOwner) await retire("previous client archives", () => this.saveClientArchives(previousOptions, previousContent, previousClientCvars));
       await retire("capture retirement", () => previousCapture?.close());
       await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
       for (const { state } of previousLocalGuest?.seats.values() ?? []) state.retire();
@@ -1369,7 +1472,8 @@ export class Application {
   private async commands(): Promise<void> {
     const pending = this.requestedCommands;
     this.requestedCommands = [];
-    for (const command of pending) {
+    for (const request of pending) {
+      let command = request;
       const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
       const source: CommandContext | undefined = command.source ?? (local === undefined ? undefined : { session: this.session.session,
         origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } });
@@ -1439,6 +1543,10 @@ export class Application {
           if (command.name.endsWith("grapple")) this.simulation.setGrappleInput(actor, held);
           else this.simulation.setHandGrenadeInput(actor, held);
           continue;
+        }
+        if (command.name === "use" || command.name === "weapon") {
+          const selected = resolveWeaponSelection(command.name, command.arguments_, this.simulation.playerUi(this.commandActor(command.seat)).items);
+          if (selected !== null) command = { ...command, name: "use", arguments_: [selected.item] };
         }
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
         if (sourceClient !== undefined && (command.name === "use" || command.name === "weapnext" || command.name === "weapprev")) {
@@ -1676,6 +1784,10 @@ export class Application {
     const errors: unknown[] = [];
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
+    if (this.archivePersistence) {
+      try { await this.saveSourceArchive(this.options, this.content, this.simulation); } catch (error) { errors.push(error); }
+      try { await this.saveClientArchives(this.options, this.content, this.clientCvars); } catch (error) { errors.push(error); }
+    }
     try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }

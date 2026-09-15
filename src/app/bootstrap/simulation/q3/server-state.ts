@@ -66,6 +66,10 @@ export class Q3ServerState {
     this.cvars.register('sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
     this.cvars.set('sv_mapname', settings.mapName, true);
     this.cvars.register('mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
+    this.cvars.applyArchive(settings.sourceArchive ?? []);
+    this.cvars.set('sv_maxclients', String(settings.maxClients), true);
+    this.cvars.set('sv_mapname', settings.mapName, true);
+    this.cvars.set('mapname', settings.mapName, true);
     for (const variable of settings.cvars ?? []) this.cvars.set(variable.name, variable.value, true);
     this.refreshServerInfo();
   }

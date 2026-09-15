@@ -6,6 +6,7 @@ import { keynumToString, stringToKeynum } from "./keys.ts";
 import { physicalMouseButton, quakeMouseButton } from "./mouse-buttons.ts";
 import { KeyCode } from "./key-codes.ts";
 import type { SeatInput } from "./seat.ts";
+import { defaultWeaponBindings, type WeaponBindingItem } from "./weapon-bindings.ts";
 
 const controllerButtons: readonly (readonly [command: string, button: number, label: string])[] = [
   ["gamepad_a_button", 0, "A"], ["gamepad_b_button", 1, "B"], ["gamepad_x_button", 2, "X"], ["gamepad_y_button", 3, "Y"],
@@ -47,14 +48,15 @@ export function physicalInputName(input: PhysicalInput): string {
     }
   }
 }
-export function defaultBindings(device = 0, dialect: CommandDialect = "q3"): readonly InputBinding[] {
+export function defaultBindings(device = 0, dialect: CommandDialect = "q3", items: readonly WeaponBindingItem[] = []): readonly InputBinding[] {
   const bindings: InputBinding[] = [];
   const defaults: readonly (readonly [string, string])[] = [
     ["w", "+forward"], ["s", "+back"], ["a", "+moveleft"], ["d", "+moveright"], ["SPACE", dialect.startsWith("q1") ? "+jump" : "+moveup"],
     ["CTRL", "+movedown"], ["SHIFT", "+speed"], ["MOUSE1", "+attack"], ["TAB", "+scores"],
-    ["MWHEELUP", "weapnext"], ["MWHEELDOWN", "weapprev"], ["GAMEPAD_RIGHT_TRIGGER", "+attack"],
+    ["MWHEELUP", "weapprev"], ["MWHEELDOWN", "weapnext"], ["q", "+weaponwheel"], ["GAMEPAD_RIGHT_TRIGGER", "+attack"],
     ["GAMEPAD_A_BUTTON", dialect.startsWith("q1") ? "+jump" : "+moveup"], ["GAMEPAD_B_BUTTON", "+movedown"], ["GAMEPAD_X_BUTTON", "+use"],
     ["GAMEPAD_LEFT_SHOULDER", "weapprev"], ["GAMEPAD_RIGHT_SHOULDER", "weapnext"], ["GAMEPAD_BACK", "+scores"],
+    ...defaultWeaponBindings(items),
   ];
   for (const [name, text] of defaults) {
     const input = namedPhysicalInput(name, device);

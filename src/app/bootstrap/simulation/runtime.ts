@@ -1330,6 +1330,7 @@ export class SharedSimulation implements Simulation {
       const state = new Q3ServerState({ session: this.session, now, print: guest.print,
         settings: { gameType: 0, singlePlayer: false, maxClients: this.options.maxClients,
           mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+          ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
           ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) } });
       state.cvars.set("fs_game", guest.gameDirectory, true);
       this.initializeServerSettings(state.cvars);
@@ -1449,6 +1450,7 @@ export class SharedSimulation implements Simulation {
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
       }, { gameType: this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
         mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+        ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
         ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) });
       const saved = this.options.restore;
       if (saved === undefined) {
@@ -1464,8 +1466,14 @@ export class SharedSimulation implements Simulation {
       const host = this.q1ActorHost(recipe.map.entities, actorRuntime);
       const cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: this.session, origin: { kind: "server-console" } },
         print: text => { this.events.message({ kind: "print", level: 2, text }); } });
+      if (this.options.restore === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
       for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
         teamplay: "0", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", sv_cheats: "0", footsteps: "1" })) cvars.register(name, value);
+      for (const variable of this.options.q1Cvars ?? []) cvars.set(variable.name, variable.value, true);
+      cvars.set("skill", String(this.q1Campaign.skill), true);
+      cvars.set("deathmatch", this.options.mode === "deathmatch" ? "1" : "0", true);
+      cvars.set("coop", this.options.mode === "coop" ? "1" : "0", true);
+      this.initializeServerSettings(cvars);
       const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
       if (savedCvars !== undefined) cvars.restoreSaveState(savedCvars);
       const services: Q1CompositionServices = { sharedGrapple: this.sharedGrapple(),
@@ -1555,7 +1563,11 @@ export class SharedSimulation implements Simulation {
     this.q2ServerRegistry = serverCvars;
     registerQ2ServerCvars(serverCvars, recipe.match.provider);
     serverCvars.register("sv_airaccelerate", "0", 0);
+    if (this.options.restore === undefined) serverCvars.applyArchive(this.options.sourceArchive ?? []);
     for (const variable of this.options.q2Cvars ?? []) serverCvars.set(variable.name, variable.value, true);
+    serverCvars.set("skill", String(this.options.skill), true);
+    serverCvars.set("deathmatch", this.options.mode === "deathmatch" ? "1" : "0", true);
+    serverCvars.set("coop", this.options.mode === "coop" ? "1" : "0", true);
     this.initializeServerSettings(serverCvars);
     const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
     if (savedCvars !== undefined) serverCvars.restoreSaveState(savedCvars);
@@ -2267,9 +2279,14 @@ export class SharedSimulation implements Simulation {
     if (this.selectedArsenal !== null) {
       if (this.selectedArsenal.family === "q1") {
         const client = this.source.kind === "q1" ? this.source.composition.clients.require(player.actor.id) : null;
-        const impulse = client?.impulse ?? ("impulse" in input.command ? input.command.impulse : 0);
-        if (this.selectedArsenal.impulse(player.actor.id, impulse)) { if (client !== null) client.impulse = 0; }
+        const intent = player.arsenalIntent;
+        const impulse = client?.impulse || intent?.impulse || ("impulse" in input.command ? input.command.impulse : 0);
+        const handled = this.selectedArsenal.impulse(player.actor.id, impulse);
+        if (handled) { if (client !== null) client.impulse = 0; }
         else if (this.source.kind === "q1") this.source.composition.impulse(player.actor.id);
+        const weaponPlayer = this.selectedArsenal.game.player(player.actor.id);
+        if (intent?.impulse !== undefined && (handled || client !== null || weaponPlayer !== null && this.selectedArsenal.game.time >= weaponPlayer.attackFinished))
+          player.arsenalIntent = { ...intent, impulse: 0 };
       }
       if (this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf && this.source.product.match.source.match.paused)
         return { arsenal: this.selectedArsenal.read(player.actor.id), animation: input.animation, effects: [] };
@@ -2438,18 +2455,22 @@ export class SharedSimulation implements Simulation {
 
   private prepareArsenalCommand(player: MovementPlayer, received: ActorCommand, paused: boolean): ActorCommand {
     let command = received;
+    if (command.arsenal?.impulse !== undefined && (!Number.isInteger(command.arsenal.impulse) || command.arsenal.impulse < 0 || command.arsenal.impulse > 255))
+      throw new RangeError("Source impulse must fit one byte");
+    if (this.source.kind === "q1" && command.arsenal?.impulse !== undefined)
+      command = { ...command, arsenal: { ...command.arsenal, impulse: 0 } };
     const slot = this.weaponSlots.get(player.actor.id);
     if (!paused && slot !== undefined && command.arsenal !== undefined) {
       const intent = command.arsenal;
       if (intent.weapon !== null && !this.requestWeapon(player.actor.id, { provider: intent.provider, item: intent.weapon })) throw new Error("Weapon request is unavailable to this actor");
-      command = { ...command, arsenal: { provider: this.weaponProvider.provider, weapon: null, useHoldable: intent.useHoldable } };
+      command = { ...command, arsenal: { ...intent, provider: this.weaponProvider.provider, weapon: null } };
     } else if (!paused && slot === undefined && this.selectedArsenal === null && command.arsenal !== undefined
       && (this.source.kind === "q1" || this.source.kind === "q2" || this.source.kind === "quakec")) {
       const intent = command.arsenal;
       if (intent.provider !== this.weaponProvider.provider) throw new Error("Arsenal command belongs to a different provider");
       if (intent.weapon !== null && (this.source.kind === "q2" || intent.weapon !== this.arsenal(player).activeWeapon)
         && !this.requestWeapon(player.actor.id, { provider: intent.provider, item: intent.weapon })) throw new Error("Weapon request is unavailable to this actor");
-      command = { ...command, arsenal: { provider: this.weaponProvider.provider, weapon: null, useHoldable: intent.useHoldable } };
+      command = { ...command, arsenal: { ...intent, provider: this.weaponProvider.provider, weapon: null } };
     }
     if (!paused && this.grapple?.selection.binding === "slot") this.grapple.input(player.actor.id, (command.command.buttons & 1) !== 0);
     return command;
@@ -2651,11 +2672,12 @@ export class SharedSimulation implements Simulation {
           this.source.composition.preFrame(elapsed);
           for (const player of this.playerStates.values()) {
             if (player.profile.kind === "q1-netquake") continue;
-            const command = [...input.commands].reverse().find(value => sameActor(value.actor, player.actor.id) && value.sequence > player.lastSequence)?.command;
+            const received = [...input.commands].reverse().find(value => sameActor(value.actor, player.actor.id) && value.sequence > player.lastSequence);
+            const command = received?.command;
             const jump = command === undefined ? (player.buttons & 2) !== 0 : command.kind === "q1-netquake" ? (command.buttons & 2) !== 0
               : command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 : command.upMove > 0;
             this.source.composition.input(player.actor.id, { attack: player.cutscene === null && ((command?.buttons ?? player.buttons) & 1) !== 0, jump: player.cutscene === null && jump,
-              use: ((command?.buttons ?? player.buttons) & 4) !== 0, impulse: command !== undefined && "impulse" in command ? command.impulse : 0 });
+              use: ((command?.buttons ?? player.buttons) & 4) !== 0, impulse: command !== undefined && "impulse" in command ? command.impulse : received?.arsenal?.impulse ?? 0 });
             this.source.composition.playerPreThink(player.actor.id);
             this.source.game.playerFrame(player.actor, this.timeSeconds, player.waterLevel);
           }

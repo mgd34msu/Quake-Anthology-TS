@@ -35,6 +35,11 @@ export interface CvarRead {
 }
 export type CvarSnapshot = CvarRead;
 
+export interface CvarArchiveEntry {
+  readonly name: string;
+  readonly value: string;
+}
+
 interface CvarState {
   readonly index: number;
   readonly name: string;
@@ -348,7 +353,7 @@ export class CvarRegistry {
       this.print("invalid info cvar name or value\n"); return;
     }
     if (state === undefined) {
-      const created = this.register(name, value, flag | (q2 ? Q2CvarFlag.Custom : 0));
+      const created = this.register(name, value, flag | (q2 ? Q2CvarFlag.Custom : this.dialect === "q3" ? CvarFlag.UserCreated : 0));
       if (created === undefined) return;
       state = this.variables.get(this.key(created.name));
       if (state === undefined) return;
@@ -481,14 +486,28 @@ export class CvarRegistry {
     return info;
   }
   propagatedInfo(target: CvarInfoTarget): string { return target === "client-userinfo" ? this.clientInfo : this.serverInfo; }
-  archiveCommands(include: (name: string) => boolean = () => true): readonly string[] {
-    const commands: string[] = [];
+  private *archiveStates(include: (name: string) => boolean): Generator<CvarState, void, undefined> {
     for (let state = this.first; state !== undefined; state = state.next) {
       if (!include(state.name)) continue;
       if (isQ2(this.dialect) && (state.flags & q2NoArchive) !== 0) continue;
       if ((state.flags & CvarFlag.Archive) === 0 || this.dialect === "q3" && asciiFold(state.name) === "cl_cdkey") continue;
+      yield state;
+    }
+  }
+  private archiveValue(state: CvarState): string {
+    return this.dialect === "q3" ? state.latchedValue ?? state.value : state.value;
+  }
+  archiveEntries(include: (name: string) => boolean = () => true): readonly CvarArchiveEntry[] {
+    return Object.freeze(Array.from(this.archiveStates(include), state => Object.freeze({ name: state.name, value: this.archiveValue(state) })));
+  }
+  applyArchive(entries: readonly CvarArchiveEntry[]): void {
+    for (const entry of entries) this.setCommandFlags(entry.name, entry.value, "archive");
+  }
+  archiveCommands(include: (name: string) => boolean = () => true): readonly string[] {
+    const commands: string[] = [];
+    for (const state of this.archiveStates(include)) {
       const prefix = this.dialect === "q3" || this.consoleVariables.has(this.key(state.name)) || isQ2(this.dialect) && (state.flags & Q2CvarFlag.Custom) !== 0 ? "seta " : isQ2(this.dialect) ? "set " : "";
-      commands.push(`${prefix}${state.name} "${this.dialect === "q3" ? state.latchedValue ?? state.value : state.value}"`);
+      commands.push(`${prefix}${state.name} "${this.archiveValue(state)}"`);
     }
     return Object.freeze(commands);
   }
