@@ -133,7 +133,7 @@ export class StartupMenu {
     });
     this.register(browserMenu, () => this.browserControls());
     this.register(browserOptionsMenu, () => this.browserOptionsControls());
-    this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu), true)] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
+    this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu))] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("play", "Play", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
     this.register(categoryMenu, () => [
