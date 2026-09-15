@@ -66,6 +66,19 @@ test("nested disconnect starts inside current trap scope while unrelated entry i
   expect(order).toEqual(["command", "disconnect", "command resumed"]);
 });
 
+test("guest-defined fly reaches the VM with its original command arguments", async () => {
+  const commands: string[][] = [];
+  const vm = game(call => {
+    expect(call.words.getInt32(4, true)).toBe(QvmGameExport.GAME_CLIENT_COMMAND);
+    const arguments_ = call.commandArguments;
+    if (arguments_ === null) throw new Error("Guest command arguments are missing");
+    commands.push([...arguments_]);
+    return 0;
+  });
+  await vm.clientCommandAsync(2, ["fly", "mod-option"]);
+  expect(commands).toEqual([["fly", "mod-option"]]);
+});
+
 test("connect accepts zero and retirement prevents post-await denial pointer reads", async () => {
   const accepted = game(() => Promise.resolve(0));
   expect(await accepted.clientConnectAsync(0, true, false)).toBeNull();

@@ -567,6 +567,7 @@ export class Application {
       for (const name of ["addbot", "removebot", "botlist", "kick"]) q2Console.commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
       if (!restoring) await q2Console.initialize();
       sourceCommands = q2Console.commands;
+      sourceCommands.register("fly", invocation => this.queueCommand("fly", invocation.args, null, invocation.source));
       this.bindServerSettingCommand(sourceCommands);
       return { sourceCommands, q2Console };
     }
@@ -617,6 +618,7 @@ export class Application {
         this.queueCommand(name, command.args, local.local.player.seat.id); return true;
       }, serverGame: command => game().serverCommands.consoleCommand(command.argv),
       forwardToServer: command => { this.host.print(`Unbound source engine command: ${command.raw}\n`); return undefined; } });
+    commands.register("fly", invocation => this.queueCommand("fly", invocation.args, null, invocation.source));
     commands.register("map", invocation => {
       const map = invocation.args[0]; if (map === undefined) throw new Error("Usage: map <name>");
       this.pendingMap = mapResourcePath(map); return undefined;

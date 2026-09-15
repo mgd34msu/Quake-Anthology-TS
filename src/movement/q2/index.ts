@@ -111,7 +111,7 @@ export function moveQ2Classic(input: Q2MovementInput, services: MovementServices
     mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body,
     trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, MASK_CLASSIC_PLAYERSOLID), pointcontents: scene.pointcontents,
   };
-  pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false);
+  pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0);
   const state: Q2MovementState = { kind: "q2-classic", type: pm.s.pm_type, originEighths: [...pm.s.origin], velocityEighths: [...pm.s.velocity],
     flags: pm.s.pm_flags, timeEightMilliseconds: pm.s.pm_time, gravity: pm.s.gravity, deltaAngleShorts: [...pm.s.delta_angles] };
   const contacts = movementContacts(pm.touchtraces.slice(0, pm.numtouch));
@@ -139,7 +139,7 @@ export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: Movem
     clip: (start, mins, maxs, end, mask) => scene.trace(start, mins, maxs, end, mask, true), pointcontents: scene.pointcontents,
     viewoffset: sourceVector(input.viewOffset), screen_blend: [0, 0, 0, 0], rdflags: 0, jump_sound: false, step_clip: false, impact_delta: 0,
   };
-  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics }, context);
+  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics }, context, input.environment.flight && input.environment.health > 0);
   const presentation: Q2RereleaseMovementPresentation = { screenBlend: { x: pm.screen_blend[0], y: pm.screen_blend[1], z: pm.screen_blend[2], w: pm.screen_blend[3] },
     renderFlags: pm.rdflags, jumpSound: pm.jump_sound, stepClip: pm.step_clip, impactDelta: pm.impact_delta };
   const state: Q2RereleaseMovementState = { kind: "q2-rerelease", type: pm.s.pm_type, origin: vector(pm.s.origin), velocity: vector(pm.s.velocity),

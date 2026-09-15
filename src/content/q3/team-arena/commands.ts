@@ -184,7 +184,7 @@ export class GameCommandRuntime {
       this.host.teamScores.get(Team.TEAM_RED), this.host.teamScores.get(Team.TEAM_BLUE), text]));
   }
 
-  private cheatsOk(entity: GameEntity): boolean {
+  cheatsOk(entity: GameEntity): boolean {
     if (!this.host.settings.cheats) { this.print(entity, "Cheats are not enabled on this server.\n"); return false; }
     if (entity.health <= 0) { this.print(entity, "You must be alive to use this command.\n"); return false; }
     return true;

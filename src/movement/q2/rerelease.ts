@@ -17,7 +17,7 @@ export class Q2RereleaseMovementContext {
     }
 }
 
-export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext) {
+export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext, flight = false) {
     const sourceFloat = (value: number): number => numericOps.profile.arithmetic.kind === "donor-binary64" ? value : numericOps.store(value);
     const { vec3, VectorCopy, clamp, G_AddBlend, vec3_add, vec3_sub, vec3_muls, vec3_mulEqs, vec3_addEq, vec3_dot, vec3_cross, vec3_normalize, vec3_length, vec3_lengthSquared, SlideClipVelocity, AngleVectors } = createMovementMath(numericOps, "rerelease");
     const pm_stopspeed = 100;
@@ -873,6 +873,13 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
             }
         }
         PM_ClampAngles();
+        if (flight && pm.s.pm_type === KexPmTypeT.PM_NORMAL) {
+            pm.s.pm_flags &= ~(PmflagsT.PMF_ON_GROUND | PmflagsT.PMF_DUCKED | PmflagsT.PMF_TIME_WATERJUMP);
+            pm.s.pm_time = 0;
+            PM_FlyMove(true);
+            PM_SnapPosition();
+            return;
+        }
         if (pm.s.pm_type === KexPmTypeT.PM_SPECTATOR || pm.s.pm_type === KexPmTypeT.PM_NOCLIP) {
             pm.s.pm_flags = PmflagsT.PMF_NONE;
             if (pm.s.pm_type === KexPmTypeT.PM_SPECTATOR) {
@@ -945,6 +952,6 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     }
     return { Pmove, PM_StepSlideMove_Generic, G_FixStuckObject_Generic };
 }
-export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext): void {
-    createRereleaseMovement(numericOps, context).Pmove(pm, config);
+export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext, flight = false): void {
+    createRereleaseMovement(numericOps, context, flight).Pmove(pm, config);
 }

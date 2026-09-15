@@ -236,3 +236,41 @@ test("Q2 shared sweep clips rejected candidates sequentially and only writes z o
     }
   }
 });
+
+for (const edition of ["classic", "rerelease"]) test.skipIf(!installed)(`Q2 ${edition} flight uses the player hull and collides without gravity`, async () => {
+  const map = await level(), scene = createSceneQueries(map.world);
+  const host: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: input => ({ arsenal: input.arsenal, animation: input.animation, effects: [] }), animationStep: input => ({ animation: input.animation, effects: [] }) };
+  const initial = { ...map.origin, z: map.origin.z + 24 };
+  let current: Q2MovementInput | Q2RereleaseMovementInput = edition === "classic" ? classic(initial) : rerelease(initial);
+  current = { ...current, environment: { ...current.environment, flight: true } };
+  const classicProvider = createQ2ClassicMovementProvider("q2:classic"), rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
+  const step = (forward: number, up: number) => {
+    if (current.kind === "q2-classic") {
+      const result = classicProvider.move({ ...current, command: { ...current.command, forwardMove: forward, upMove: up } }, host);
+      if (result.status !== "active") throw new Error("Flight removed player");
+      current = { ...current, state: result.state };
+      return { origin: { x: result.state.originEighths[0] / 8, y: result.state.originEighths[1] / 8, z: result.state.originEighths[2] / 8 }, bounds: result.bounds };
+    }
+    const result = rereleaseProvider.move({ ...current, command: { ...current.command, forwardMove: forward, buttons: up > 0 ? ButtonT.BUTTON_JUMP : up < 0 ? ButtonT.BUTTON_CROUCH : 0 } }, host);
+    if (result.status !== "active") throw new Error("Flight removed player");
+    current = { ...current, state: result.state }; return { origin: result.state.origin, bounds: result.bounds };
+  };
+  let position = initial;
+  for (let index = 0; index < 10; index++) position = step(0, 300).origin;
+  expect(position.z).toBeGreaterThan(initial.z);
+  const peak = position.z;
+  for (let index = 0; index < 15; index++) position = step(0, -300).origin;
+  if (base.shape.kind !== "box") throw new Error("Q2 flight fixture requires a box collision hull");
+  expect(step(0, 0).bounds).toEqual(base.shape.bounds);
+  expect(position.z).toBeLessThan(peak);
+  const wallOrigin = { ...position, x: position.x + 100 }, wallBounds = { min: { x: -8, y: -2048, z: -2048 }, max: { x: 8, y: 2048, z: 2048 } };
+  scene.link({ actor: identities.actor(999, 1), state: { origin: wallOrigin, angles: zero, velocity: zero, bounds: wallBounds, ground: null }, linkCount: 1,
+    absoluteBounds: { min: { x: wallOrigin.x - 8, y: wallOrigin.y - 2048, z: wallOrigin.z - 2048 }, max: { x: wallOrigin.x + 8, y: wallOrigin.y + 2048, z: wallOrigin.z + 2048 } } },
+    { family: "q2", shape: { kind: "box" }, contents: 1, owner: null, role: "solid", monster: false, deadMonster: false });
+  const wall = scene.trace({ start: position, end: { ...position, x: position.x + 1024 }, shape: base.shape, target: { kind: "world" }, policy: { kind: "q2", contentsMask: 0x02010003, leafContents: "merged" }, numeric: numericProfile, passActor: actor.id });
+  expect(wall.fraction).toBeLessThan(1);
+  for (let index = 0; index < 250; index++) position = step(300, 0).origin;
+  expect(position.x).toBeLessThanOrEqual(wallOrigin.x - 8 - base.shape.bounds.max.x + 0.2);
+  expect(current.state.type).toBe(0);
+});

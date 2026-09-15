@@ -25,6 +25,7 @@ class NetQuakeMove {
     if (input.profile.edition === "quake64") throw new Error("Quake64 movement requires a qualified source physics profile");
     if (input.profile.clock.kind !== "q1-netquake") throw new Error("NetQuake movement requires a NetQuake frame clock");
     this.state = { ...input.state };
+    if (input.environment.flight && input.environment.health > 0 && this.state.moveType === Q1_MOVE_WALK) this.state.moveType = Q1_MOVE_FLY;
     this.context = new MovementContext(input, services, options);
     // The shared frame owner already applies host minimum/maximum/fixed frame rules.
     this.frameSeconds = seconds(input.frame.elapsed);
@@ -34,6 +35,7 @@ class NetQuakeMove {
   private setState(state: MovementState): void {
     if (state.kind !== "q1-netquake") throw new Error("NetQuake callback changed the movement provider during a frame");
     Object.assign(this.state, state);
+    if (this.input.environment.flight && this.input.environment.health > 0 && this.state.moveType === Q1_MOVE_WALK) this.state.moveType = Q1_MOVE_FLY;
   }
   private link(touchTriggers: boolean): void { this.setState(this.context.link(this.state, touchTriggers)); }
   private impact(trace: TraceResult): void { this.setState(this.context.touch(trace, this.state)); }

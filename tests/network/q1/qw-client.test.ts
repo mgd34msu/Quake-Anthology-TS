@@ -53,6 +53,17 @@ test('QW UDP joins through lists, downloads, checksum prespawn, spawn and begin'
         expect(commands).toEqual(['new', 'soundlist 7 0', 'modellist 7 0', 'modellist 7 1', 'prespawn 7 0 -123', 'spawn 7 0', 'begin 7']);
         expect(downloads).toEqual(['sound/misc/menu1.wav', 'maps/test.bsp', 'progs/player.mdl']);
         expect(messages.some(message => message.kind === 'packet-entities')).toBe(true);
+        client.command('fly "mod-option"');
+        for (let tick = 0; tick < 10 && !commands.includes('fly "mod-option"'); tick++) {
+            now += 1000; await client.poll(now); await Bun.sleep(1);
+            for (;;) {
+                const packet = server.poll(); if (packet === null) break; if (packet.kind !== 'packet') continue;
+                const delivery = channel.receive(packet.payload, now); if (delivery === null) continue;
+                for (const record of decodeQuakeWorldClient(delivery.payload, profile, delivery.sequence))
+                    if (record.kind === 'string-command') commands.push(record.text);
+            }
+        }
+        expect(commands).toContain('fly "mod-option"');
     } finally { client.close(); server.close(); }
 });
 test('QW checksum2 ignores only source entities, visibility, nodes and leaves lumps', () => {

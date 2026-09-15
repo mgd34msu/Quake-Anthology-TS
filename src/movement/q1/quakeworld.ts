@@ -204,7 +204,7 @@ class QuakeWorldMove {
     }
     s.origin = base;
   }
-  private spectatorMove(): void {
+  private spectatorMove(collide = false): void {
     const m = this.context.math, n = m.n, s = this.state, p = this.input.profile.parameters;
     const speed = m.length(s.velocity);
     if (speed < 1) s.velocity = ZERO;
@@ -216,13 +216,13 @@ class QuakeWorldMove {
     this.forward = m.normalize(this.forward).direction; this.right = m.normalize(this.right).direction;
     let wish = this.wishVelocity();
     wish = m.vec(wish.x, wish.y, n.add(wish.z, this.command.upMove));
-    const normalized = m.normalize(wish), wishSpeed = Math.min(normalized.length, p.spectatorMaxSpeed);
+    const normalized = m.normalize(wish), wishSpeed = Math.min(normalized.length, collide ? p.maxSpeed : p.spectatorMaxSpeed);
     const add = n.subtract(wishSpeed, m.dot(s.velocity, normalized.direction));
     // This early return also skips origin integration in original SpectatorMove.
-    if (add <= 0) return;
-    const acceleration = Math.min(add, n.multiply(n.multiply(p.accelerate, this.frameSeconds), wishSpeed));
+    if (add <= 0 && !collide) return;
+    const acceleration = Math.max(0, Math.min(add, n.multiply(n.multiply(p.accelerate, this.frameSeconds), wishSpeed)));
     s.velocity = m.ma(s.velocity, acceleration, normalized.direction);
-    s.origin = m.ma(s.origin, this.frameSeconds, s.velocity);
+    if (collide) this.flyMove(); else s.origin = m.ma(s.origin, this.frameSeconds, s.velocity);
   }
   private alreadyTouched(hit: TraceHit): boolean {
     return this.touched.some(prior => prior.kind === "world" && hit.kind === "world" ? prior.model === hit.model
@@ -244,11 +244,15 @@ class QuakeWorldMove {
     this.nudge();
     this.state.angles = c.math.vec(command.angles.x, command.angles.y, command.angles.z);
     this.categorize();
+    if (this.input.environment.flight && this.input.environment.health > 0) {
+      this.state.ground = NONE; this.state.waterJumpTimeSeconds = 0; this.spectatorMove(true);
+    } else {
     if (this.waterLevel === 2) this.checkWaterJump();
     if (this.state.velocity.z < 0) this.state.waterJumpTimeSeconds = 0;
     if ((command.buttons & 2) !== 0) this.jump(); else this.state.oldButtons &= ~2;
     this.friction();
     if (this.waterLevel >= 2) this.waterMove(); else this.airMove();
+    }
     this.categorize();
     c.options.hooks?.qwState?.(this.waterLevel, this.waterType);
     this.setState(c.link(this.state, true));

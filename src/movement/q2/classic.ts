@@ -5,7 +5,7 @@ import type { NumericOperations } from "../../contracts/numeric.ts";
 import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
 import { type Vec3, type TraceT, type CsurfaceT, type CplaneT, type ClassicPmove, plane, PmTypeT, PMF_DUCKED, PMF_JUMP_HELD, PMF_ON_GROUND, PMF_TIME_WATERJUMP, PMF_TIME_LAND, PMF_TIME_TELEPORT, MAXTOUCH, PITCH, YAW, ROLL, CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_SLIME, CONTENTS_LADDER, MASK_WATER, MASK_CURRENT, CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270, CONTENTS_CURRENT_UP, CONTENTS_CURRENT_DOWN, SURF_SLICK, axes, element } from "./types.ts";
-export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0, strafejumpHack = false): void {
+export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0, strafejumpHack = false, flight = false): void {
     const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, AngleVectors, SHORT2ANGLE } = createMovementMath(numericOps);
     const STEPSIZE = 18;
     class PmlT {
@@ -438,19 +438,14 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
         }
         const currentspeed = DotProduct(pml.velocity, wishdir);
         const addspeed = numericOps.subtract(wishspeed, currentspeed);
-        if (addspeed <= 0)
+        if (addspeed <= 0 && !doclip)
             return;
         let accelspeed = numericOps.multiply(numericOps.multiply(pm_accelerate, pml.frametime), wishspeed);
-        if (accelspeed > addspeed)
-            accelspeed = addspeed;
+        accelspeed = Math.max(0, Math.min(accelspeed, addspeed));
         for (const i of axes)
             pml.velocity[i] = numericOps.store(numericOps.add(element(pml.velocity, i), numericOps.multiply(accelspeed, element(wishdir, i))));
         if (doclip) {
-            const end = vec3();
-            for (const i of axes)
-                end[i] = numericOps.store(numericOps.add(element(pml.origin, i), numericOps.multiply(pml.frametime, element(pml.velocity, i))));
-            const trace = pm.trace(pml.origin, pm.mins, pm.maxs, end);
-            VectorCopy(trace.endpos, pml.origin);
+            PM_StepSlideMove();
         }
         else {
             VectorMA(pml.origin, pml.frametime, pml.velocity, pml.origin);
@@ -600,6 +595,13 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
             pml.previous_origin[i] = numericOps.store(element(pm.s.origin, i));
         pml.frametime = numericOps.multiply(pm.cmd.msec, 0.001);
         PM_ClampAngles();
+        if (flight && pm.s.pm_type === PmTypeT.PM_NORMAL) {
+            pm.s.pm_flags &= ~(PMF_ON_GROUND | PMF_DUCKED | PMF_TIME_WATERJUMP);
+            pm.s.pm_time = 0;
+            PM_FlyMove(true);
+            PM_SnapPosition();
+            return;
+        }
         if (pm.s.pm_type === PmTypeT.PM_SPECTATOR) {
             PM_FlyMove(false);
             PM_SnapPosition();

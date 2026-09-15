@@ -194,9 +194,15 @@ const gesture: Q2CommandHandler = (_players, context, args) => {
   if (animation !== undefined) { state.animationPriority = 1; entity.frame = animation[1] - 1; state.animationEnd = animation[2]; print(context, animation[0] + "\n"); }
 };
 
+export function q2CheatsAllowed(context: Q2PlayerContext): boolean {
+  const { game } = context;
+  if ((game.options.edition === "rerelease" ? game.options.maxClients > 1 : game.options.mode === "deathmatch") && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); return false; }
+  return true;
+}
+
 const cheat: Q2CommandHandler = (_players, context, args, command) => {
   const { entity, game, state, hooks } = context;
-  if ((game.options.edition === "rerelease" ? game.options.maxClients > 1 : game.options.mode === "deathmatch") && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); return; }
+  if (!q2CheatsAllowed(context)) return;
   if (command === "god") { state.god = !state.god; entity.flags ^= 16; game.host.combat.setTraits(entity.actor, { invulnerable: state.god }); print(context, `godmode ${state.god ? "ON" : "OFF"}\n`); }
   else if (command === "notarget") { state.notarget = !state.notarget; entity.flags ^= 32; print(context, `notarget ${state.notarget ? "ON" : "OFF"}\n`); }
   else if (command === "noclip") { state.noclip = !state.noclip; hooks.setMovement(entity.actor.id, { kind: "noclip", enabled: state.noclip }); print(context, `noclip ${state.noclip ? "ON" : "OFF"}\n`); }

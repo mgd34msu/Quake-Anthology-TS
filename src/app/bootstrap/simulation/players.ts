@@ -116,6 +116,7 @@ export class MovementPlayer {
   intermission = false;
   cutscene: { readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 } | null = null;
   gravityMultiplier = 1;
+  flight = false;
   worldGravity = 800;
   buttons = 0;
   previousButtons = 0;
@@ -125,6 +126,20 @@ export class MovementPlayer {
   arsenalIntent: ArsenalIntent | undefined;
   sourceMovement: ClientMovementOptions | null = null;
   sourceEnvironment: MovementInput["environment"] | null = null;
+
+  setFlight(enabled: boolean): boolean {
+    this.flight = enabled && (this.host.combat.read(this.actor.id)?.health ?? 0) > 0;
+    const state = this.readState();
+    if (state.kind === "q1-netquake") this.state = { ...state, moveType: this.flight ? 5 : state.moveType === 5 ? 3 : state.moveType,
+      flags: this.flight ? state.flags & ~512 : state.flags, ground: this.flight ? { kind: "none" } : state.ground };
+    else if (this.flight) {
+      if (state.kind === "q1-quakeworld") this.state = { ...state, spectator: 0, ground: { kind: "none" }, waterJumpTimeSeconds: 0 };
+      else if (state.kind === "q2-classic" || state.kind === "q2-rerelease") this.state = { ...state, type: 0, flags: state.flags & ~4 };
+      else this.state = { ...state, movementType: 0, ground: { kind: "none" } };
+    }
+    if (this.flight) { this.ground = { kind: "none" }; const body = this.host.bodies.read(this.actor.id); if (body !== null) this.host.bodies.write(this.actor, { ...body, ground: null }); }
+    return this.flight;
+  }
 
   constructor(readonly actor: OwnedActor, readonly client: ClientId, readonly recipe: ExecutableRecipe,
     private readonly host: PlayerMovementHost, origin: Vec3, angles: Vec3, arsenal: ArsenalState) {

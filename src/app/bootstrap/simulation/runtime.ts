@@ -11,6 +11,7 @@ import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServer
 import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../../../settings/server/index.ts";
 import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
 import { giveQ1 } from "../../../content/composition/q1/give.ts";
+import { q2CheatsAllowed } from "../../../content/q2/base/player/commands.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
 import { QuakeCSource } from "./quakec-source.ts";
 import type { QwUserCommand } from "../../../contracts/protocol.ts";
@@ -382,7 +383,7 @@ export class SharedSimulation implements Simulation {
       beforeReaction: (actor, decision) => {
         this.lastAttack.set(actor, decision.request.attack);
         if (this.source.kind === "q3") this.source.game.beforeReaction(actor, decision);
-        if (decision.reaction === "death") { const player = this.playerStates.get(actor); if (player !== undefined) { this.grapple?.release(actor.id); this.stepHandGrenade(player, "dead"); } }
+        if (decision.reaction === "death") { const player = this.playerStates.get(actor); if (player !== undefined) { player.setFlight(false); this.grapple?.release(actor.id); this.stepHandGrenade(player, "dead"); } }
         if (this.source.kind === "q1") this.source.composition.beforeReaction(actor, decision);
         if (this.source.kind === "q2") { const entity = this.source.game.entity(actor.id); if (entity !== null) { entity.lastAttack = decision.request.attack; if (this.playerStates.has(actor)) this.source.product.beforeReaction(actor.id, decision.request.attack); } }
         if (decision.reaction === "death" && this.source.kind === "q2" && this.playerStates.has(actor) && this.playerStates.get(actor)?.character !== "q2") {
@@ -2384,13 +2385,14 @@ export class SharedSimulation implements Simulation {
     const state = player.readState();
     if (change.kind === "teleport") this.grapple?.release(actor);
     if (change.kind === "noclip") {
+      player.setFlight(false);
       player.state = state.kind === "q1-netquake" ? { ...state, moveType: change.enabled ? 8 : 3 }
         : state.kind === "q2-classic" || state.kind === "q2-rerelease" ? { ...state, type: change.enabled ? 1 : 0 }
           : state.kind === "q3" ? { ...state, movementType: change.enabled ? 1 : 0 } : { ...state, spectator: change.enabled ? 1 : 0 };
       return undefined;
     }
     player.viewAngles = change.angles;
-    if (change.kind === "spawn") { player.cutscene = null; player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22; }
+    if (change.kind === "spawn") { player.setFlight(false); player.cutscene = null; player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22; }
     player.intermission = change.kind === "freeze";
     if (change.kind === "freeze") this.combat.setTraits(player.actor, { canTakeDamage: false });
     const velocity = change.kind === "freeze" ? zero : change.velocity;
@@ -3315,9 +3317,33 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "quakec" && name === "kill") {
       this.source.game.clientKill(actor); return undefined;
     }
-    if (this.source.kind === "quakec" && (name === "god" || name === "notarget" || name === "noclip" || name === "fly" || name === "give"))
-      return this.source.game.hostCheat(actor, name, args);
+    if (this.source.kind === "quakec" && (name === "god" || name === "notarget" || name === "noclip" || name === "fly" || name === "give")) {
+      this.source.game.hostCheat(actor, name, args);
+      if (name === "fly" || name === "noclip") this.requirePlayer(actor).setFlight(this.source.game.readMoveType(actor) === 5);
+      return undefined;
+    }
     const player = this.requirePlayer(actor);
+    if (name === "fly" && this.source.kind === "q2") {
+      const source = this.source, entity = source.game.entity(actor);
+      if (entity === null) throw new Error("Q2 player entity missing");
+      if (source.players.intermission.kind !== "playing") return undefined;
+      const context = source.players.context(entity, source.game);
+      if (!q2CheatsAllowed(context)) return undefined;
+      const enabled = player.setFlight(!player.flight);
+      if (enabled) context.state.noclip = false;
+      context.hooks.emit({ kind: "print", target: actor, level: "high", text: `fly ${enabled ? "ON" : "OFF"}\n` });
+      return undefined;
+    }
+    if (name === "fly" && this.source.kind === "q3") {
+      const source = this.source, entity = source.game.records.byActor(actor);
+      if (entity === null || entity.client === null) throw new Error("Q3 player entity missing");
+      if (source.game.level.intermissionTime !== 0) { source.game.playerCommand(actor, name, args); return undefined; }
+      if (!source.game.commands.cheatsOk(entity)) return undefined;
+      const enabled = player.setFlight(!player.flight);
+      if (enabled) entity.client.noclip = false;
+      this.events.message({ kind: "print", level: 2, text: `fly ${enabled ? "ON" : "OFF"}\n` }, actor);
+      return undefined;
+    }
     if (this.source.kind === "q1" && name === "kill") {
       if (this.source.game.health(actor) <= 0) return this.source.game.message(actor, "Can't suicide -- already dead!\n", false);
       return this.source.composition.suicide(actor);
@@ -3340,9 +3366,7 @@ export class SharedSimulation implements Simulation {
       } else if (name === "notarget") {
         enabled = !source.composition.noTarget(actor); source.composition.setNoTarget(actor, enabled);
       } else if (name === "fly") {
-        const state = player.readState();
-        if (state.kind !== "q1-netquake") throw new Error("Fly requires movement with collision-preserving flight support");
-        enabled = state.moveType !== 5; player.state = { ...state, moveType: enabled ? 5 : 3 };
+        enabled = player.setFlight(!player.flight);
       } else {
         const state = player.readState();
         enabled = !(state.kind === "q1-netquake" ? state.moveType === 8 : state.kind === "q1-quakeworld" ? state.spectator !== 0
@@ -3366,7 +3390,11 @@ export class SharedSimulation implements Simulation {
       if (weapon !== undefined) { this.selectedArsenal.select(actor, weapon.id); return undefined; }
       if (name !== "use") return undefined;
     }
-    if (this.source.kind === "q3") { this.source.game.playerCommand(actor, name, args); return undefined; }
+    if (this.source.kind === "q3") {
+      this.source.game.playerCommand(actor, name, args);
+      if (name === "noclip" && this.source.game.records.byActor(actor)?.client?.noclip === true) player.setFlight(false);
+      return undefined;
+    }
     if (this.source.kind === "q1") {
       const active = this.source.game.player(actor)?.weapon, owned = Q1_WEAPONS.filter(weapon => this.inventory.count(actor, `q1:weapon/${weapon}`) > 0);
       const requested = args.join("").toLowerCase().replaceAll(" ", "");

@@ -11,7 +11,7 @@ export function createSharedQuakeWorldMovement(id: ProviderId, options: Q1Moveme
   publishPosture?: (bounds: Bounds, viewHeight: number) => void): Extract<MovementProvider, { readonly kind: "q1-quakeworld" }> {
   return { kind: "q1-quakeworld", id, move(input, services) {
     if (input.state.dead || input.state.spectator !== 0) return createQwMovementProvider(id, options).move(input, services);
-    let crouched = input.command.upMove < 0;
+    let crouched = !input.environment.flight && input.command.upMove < 0;
     if (!crouched && input.shape.kind === "box" && input.shape.bounds.max.z < standingBounds.max.z) {
       const clearance = services.scene.trace({ start: input.state.origin, end: input.state.origin,
         shape: { kind: "box", bounds: standingBounds }, target: { kind: "world" },

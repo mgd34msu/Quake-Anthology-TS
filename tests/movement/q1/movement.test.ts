@@ -315,3 +315,30 @@ test("QuakeWorld sweep keeps initial clip velocity across progress and stops on 
     expect(velocity).toEqual(startSolid ? zero : { x: 2, y: 0, z: 2 });
   }
 });
+
+for (const fixture of fixtures) test.skipIf(!existsSync(resolve(root, fixture.path)))(`QW flight rises, descends and collides in ${fixture.map}`, async () => {
+  const loaded = await fixtureScene(fixture), host = services(loaded.scene), provider = createQwMovementProvider("q1:qw");
+  let current = qwInput(input(loaded.origin));
+  current = { ...current, environment: { ...current.environment, flight: true } };
+  const step = (forwardMove: number, upMove: number) => {
+    const result = provider.move({ ...current, command: { ...current.command, forwardMove, upMove } }, host);
+    if (result.status !== "active") throw new Error("Flight removed player");
+    current = { ...current, state: result.state }; return result;
+  };
+  for (let index = 0; index < 10; index++) step(0, 320);
+  const peak = current.state.origin.z;
+  expect(peak).toBeGreaterThan(loaded.origin.z);
+  for (let index = 0; index < 10; index++) step(0, -320);
+  expect(current.state.origin.z).toBeLessThan(peak);
+  expect(step(0, 0).bounds).toEqual(shape.bounds);
+  const start = current.state.origin;
+  const wallOrigin = { ...start, x: start.x + 100 }, wallBounds = { min: { x: -8, y: -2048, z: -2048 }, max: { x: 8, y: 2048, z: 2048 } };
+  loaded.scene.link({ actor: owner.actor(999, 1), state: { origin: wallOrigin, angles: zero, velocity: zero, bounds: wallBounds, ground: null }, linkCount: 1,
+    absoluteBounds: { min: { x: wallOrigin.x - 8, y: wallOrigin.y - 2048, z: wallOrigin.z - 2048 }, max: { x: wallOrigin.x + 8, y: wallOrigin.y + 2048, z: wallOrigin.z + 2048 } } },
+    { family: "q1", shape: { kind: "box" }, contents: -2, owner: null, role: "solid", monster: false, deadMonster: false });
+  const wall = loaded.scene.trace({ start, end: { ...start, x: start.x + 1024 }, shape, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: actor.id });
+  expect(wall.fraction).toBeLessThan(1);
+  for (let index = 0; index < 200; index++) step(320, 0);
+  expect(current.state.origin.x).toBeLessThanOrEqual(wallOrigin.x - 8 - shape.bounds.max.x + 0.1);
+  expect(current.state.spectator).toBe(0);
+});

@@ -31,7 +31,7 @@ for (const game of ["q1-classic-hipnotic", "q1-quakeworld"]) test(`${game} host 
       resolveQ1HostCommandActor(name, args, context, players, () => { throw new Error("No local player in dedicated fixture"); }), name, []));
     const run = (text: string) => { commands.append(`${text}\n`); commands.execute(); };
     const flags = words.float(field("flags")), move = words.float(field("movetype"));
-    run("god; notarget; noclip");
+    run("god; notarget; noclip; fly");
     expect(words.float(field("flags"))).toBe(flags); expect(words.float(field("movetype"))).toBe(move);
     if (source.kind === "quakeworld") source.cvars.set("sv_cheats", "1");
     else vm.globals.setFloat(vm.globalOffset("deathmatch"), 0);
@@ -58,22 +58,28 @@ for (const game of ["q1-classic-hipnotic", "q1-quakeworld"]) test(`${game} host 
     }
     expect(otherWords.float(field("flags"))).toBe(otherFlags);
     expect(words.float(field("movetype"))).toBe(8);
+    run("fly");
+    expect(simulation.movementPlayer(actor)?.flight).toBe(true);
+    expect(words.float(field("movetype"))).toBe(5);
     const origin = words.vector(field("origin"));
     simulation.step({ elapsedMilliseconds: 50, commands: [{ actor, source: { kind: "remote-client", client }, sequence: 0,
       command: source.kind === "quakeworld" ? { kind: "q1-quakeworld", milliseconds: 50, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 320, buttons: 0, impulse: 0 }
         : { kind: "q1-netquake", acknowledgedServerTimeSeconds: source.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 320, buttons: 0, impulse: 0 } }] });
     expect(words.vector(field("origin")).z).toBeGreaterThan(origin.z);
-    expect(words.float(field("movetype"))).toBe(8);
+    expect(words.float(field("movetype"))).toBe(5);
     const image = decodeSaveImage(encodeSaveImage(simulation.checkpoint()));
     const restored = createSimulation({ ...options, restore: image, restoredClients: [client, otherClient] });
     try {
       const next = restored.quakecSource(); if (next === null) throw new Error("Lost saved VM");
       const savedWords = next.entities.at(slot);
       expect(Math.trunc(savedWords.float(next.machine.fieldOffset("flags"))) & (64 | 128)).toBe(64 | 128);
-      expect(savedWords.float(next.machine.fieldOffset("movetype"))).toBe(8);
+      expect(savedWords.float(next.machine.fieldOffset("movetype"))).toBe(5);
+      const restoredActor = restored.players()[0];
+      if (restoredActor === undefined) throw new Error("Missing restored flying player");
+      expect(restored.movementPlayer(restoredActor)?.flight).toBe(true);
       expect(next.cvars.variableValue("sv_cheats")).toBe(source.cvars.variableValue("sv_cheats"));
     } finally { restored.close(); }
-    run("noclip; notarget; god");
+    run("fly; notarget; god");
     expect(words.float(field("movetype"))).toBe(3);
     expect(Math.trunc(words.float(field("flags"))) & (64 | 128)).toBe(0);
     expect(source.clients.visibility.services.client(slot).notarget).toBe(false);

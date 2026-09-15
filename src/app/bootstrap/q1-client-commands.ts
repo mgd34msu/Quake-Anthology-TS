@@ -3,7 +3,7 @@ import type { ActorId, ClientId, SeatId } from "../../contracts/identity.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 
 /** Quake host_cmd.c registers these client names before forwarding them to authority. */
-export function registerQ1ClientCommands(commands: CommandBuffer, dialect: CommandDialect,
+export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: CommandDialect,
   execute: (name: string, args: readonly string[], seat: SeatId | null, source: CommandContext) => undefined): () => void {
   const registered: string[] = [];
   for (const { name, summary } of [
@@ -14,7 +14,7 @@ export function registerQ1ClientCommands(commands: CommandBuffer, dialect: Comma
     { name: "giveall", summary: "Give the source all grant, including the currently selected arsenal." },
     { name: "kill", summary: "Suicide through the source game's player lifecycle." },
     { name: "suicide", summary: "Alias for kill." },
-    ...(dialect === "q1-netquake" ? [{ name: "fly", summary: "Toggle flying with collision using NetQuake movement." }] : []),
+    { name: "fly", summary: "Toggle flying with collision; source authority controls cheat access." },
   ]) {
     if (commands.exists(name)) continue;
     if (commands.register(name, invocation => {

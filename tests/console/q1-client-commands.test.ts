@@ -18,8 +18,8 @@ test("Q1 local and remote consoles forward real host cheat names with the invoki
     });
     const console = new SeatConsole({ seat, context, dialect, commands, cvars, now: () => 0, connected: () => true,
       clipboard: () => null, focus: () => undefined, chat: () => { throw new Error("Host command entered chat"); } });
-    for (const command of ["god", "/god", "notarget", "/noclip"]) { console.field.setText(command); console.submit(); commands.execute(); }
-    expect(forwarded).toEqual(["god", "god", "notarget", "noclip"]);
+    for (const command of ["god", "/god", "notarget", "/noclip", "fly"]) { console.field.setText(command); console.submit(); commands.execute(); }
+    expect(forwarded).toEqual(["god", "god", "notarget", "noclip", "fly"]);
     expect(findConsoleEntries(commands, "god").map(entry => entry.name)).toEqual(["god"]);
     remove(); expect(commands.exists("god")).toBe(false);
   }
