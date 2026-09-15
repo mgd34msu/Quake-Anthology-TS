@@ -103,10 +103,15 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
     browser = await StartupServerBrowser.open(new ConfigStore(join(root, 'browser-settings')));
     const retainedBrowser = browser;
     const host = { saveDirectory: join(root, 'saves'), serverBrowser: browser, print: (text: string): undefined => { prints.push(text); return undefined; } };
-    server = await Application.open({ ...selected.options, userContentRoot: join(root, 'server-content') }, host);
+    const serverContentRoot = join(root, 'server-content');
+    const modDirectory = userProductDirectory(serverContentRoot, 'q3a/lrctf');
+    mkdirSync(modDirectory, { recursive: true });
+    writeFileSync(join(modDirectory, 'autoexec.cfg'), 'set g_gametype 4\n');
+    server = await Application.open({ ...selected.options, userContentRoot: serverContentRoot }, host);
     const source = server.simulation.q3Guest(); if (source === null) throw new Error('Missing actual LRCTF qagame');
     expect(server.simulation.q3Source()).toBeNull(); expect(source.state.cvars.variableString('fs_game')).toBe('lrctf');
     expect(source.state.cvars.variableValue('sv_pure')).toBe(1);
+    expect(source.state.cvars.variableValue('g_gametype')).toBe(4);
     const address = server.networkAddress; if (address === null) throw new Error('No listener');
     const parsed = parseApplicationCommand([...common, '--game', 'q3-baseq3', '--connect-q3', `127.0.0.1:${address.port}`, '--renderer', 'cpu', '--width', '320', '--height', '240', '--hidden']);
     if (parsed.kind !== 'run') throw new Error('Missing client options');
@@ -162,6 +167,7 @@ test('actual LRCTF server and UI/cgame sustain thirty wall seconds with guest mo
     const before = { ...initialPosition }, initialAmmo = source.records.player(peer.sourceEntity).ammo[2] ?? 0;
     let minimumAmmo = initialAmmo, maximumDistance = 0, ticks = 0;
     expect(source.state.cvars.variableValue('sv_pure')).toBe(1);
+    expect(source.state.cvars.variableValue('g_gametype')).toBe(4);
     const started = performance.now(), startedFrame = remote.frameCount, startedSimulation = authority.simulation.timeSeconds * 1000;
     const sample = () => ({ time: authority.simulation.timeSeconds * 1000,
       command: source.state.getUserCommand(peer.sourceEntity), player: source.records.player(peer.sourceEntity), capturesInput: presentation.q3Client?.capturesInput });

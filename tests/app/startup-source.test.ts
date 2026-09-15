@@ -4,7 +4,7 @@ import { createContentDigest } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarFlag } from "../../src/core/cvars/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
-import { createStartupSource } from "../../src/app/bootstrap/startup-source.ts";
+import { createStartupSource, resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 
 function recipe(source: ProviderReference): ExecutableRecipe {
   const geometry: ResolvedResourceReference = { id: "resource:startup:map", requestedPath: "maps/test.bsp", digest: createContentDigest("0".repeat(64)), byteLength: 0,
@@ -35,3 +35,20 @@ test("ordinary Q3 startup selects game cvars from map source content rather than
   expect(base.get("g_speed")).toEqual(missionpack.get("g_speed"));
   expect(base.get("g_speed")).toMatchObject({ value: "320", resetValue: "320", flags: 0 });
 });
+
+for (const [configured, competitive] of [["0", "0"], ["1", "1"], ["2", "0"], ["2.5", "0"], ["3", "3"], ["4", "4"],
+  ["4.5", "4.5"], ["5", "5"], ["6", "6"], ["7", "7"], ["9", "9"]] satisfies readonly (readonly [string, string])[]) {
+  for (const mode of ["deathmatch", "singleplayer"] satisfies readonly ("deathmatch" | "singleplayer")[]) test(`explicit Q3 ${mode} resolves configured game type ${configured} using native map semantics`, () => {
+    const command = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpq3ctf4", "--mode", mode]);
+    if (command.kind !== "run") throw new Error("Expected ordinary launch");
+    const context = { session: createIdentityOwner(`startup-q3-mode-${mode}-${configured}`).session,
+      origin: { kind: "server-console" } } satisfies Parameters<typeof createStartupSource>[3];
+    const cvars = createStartupSource(command.options, recipe({ provider: "q3:official", content: "q3:classic:missionpack:installed" }), "q3", context, 8, () => {});
+    cvars.set("g_gametype", configured);
+    const resolved = resolveStartupRules(command.options, cvars, 8, []);
+    expect(cvars.variableString("g_gametype")).toBe(mode === "singleplayer" ? "2" : competitive);
+    expect(cvars.get("g_gametype")?.latchedValue).toBeUndefined();
+    expect(resolved.options.mode).toBe(mode);
+    expect(resolved.maxClients).toBe(8);
+  });
+}

@@ -37,7 +37,10 @@ export function resolveStartupRules(options: ApplicationOptions, cvars: CvarRegi
   if (applyExplicit && options.explicitRules?.mode) {
     cvars.set("deathmatch", options.mode === "deathmatch" ? "1" : "0", true);
     cvars.set("coop", options.mode === "coop" ? "1" : "0", true);
-    if (cvars.dialect === "q3") cvars.set("g_gametype", options.mode === "singleplayer" ? "2" : "0", true);
+    if (cvars.dialect === "q3") {
+      if (options.mode === "singleplayer") cvars.set("g_gametype", "2", true);
+      else if (options.mode !== "deathmatch" || cvars.get("g_gametype")?.integerValue === 2) cvars.set("g_gametype", "0", true);
+    }
   }
   if (applyExplicit && options.serverProfile !== undefined) applyServerProfile(options.serverProfile,
     definitions.map(definition => ({ definition, owner: cvarServerSettingsOwner(cvars, true) })));
