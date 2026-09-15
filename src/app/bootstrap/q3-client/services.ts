@@ -1,3 +1,4 @@
+import type { CollisionMapSettings } from "../../../world/collision/q3/settings.ts";
 import type { ActorId, SeatId } from '../../../contracts/identity.ts';
 import type { Axis, Vec3 } from '../../../contracts/math.ts';
 import type { Rect, RenderCommand } from '../../../contracts/render.ts';
@@ -18,6 +19,7 @@ import { q3ClientCollision } from './collision.ts';
 import { SharedSceneQueries } from '../../../world/collision/index.ts';
 
 export interface ApplicationQ3ServiceOptions {
+  readonly collisionSettings: CollisionMapSettings;
   readonly media: ApplicationQ3Assets;
   readonly audio: ApplicationAudio;
   readonly seat: SeatId;
@@ -60,7 +62,7 @@ export async function createApplicationQ3Services(options: ApplicationQ3ServiceO
     if (command.kind === 'swap-buffers') throw new Error('Cgame cannot present the shared framebuffer');
     output.command(command);
   }, value => output.text(value)), 'stretch-640');
-  return { scene, resources, sound, draw, collision: q3ClientCollision(options.queries),
+  return { scene, resources, sound, draw, collision: q3ClientCollision(options.queries, options.collisionSettings),
     cinematics: new ApplicationQ3Cinematics(media, options.audio, seat, options.clock.now) };
 }
 export type ApplicationQ3Services = Awaited<ReturnType<typeof createApplicationQ3Services>>;

@@ -1,3 +1,8 @@
+import { SharedCvarMirror } from "../../src/core/cvars/mirror.ts";
+import { q3ClientCollision } from "../../src/app/bootstrap/q3-client/collision.ts";
+import type { SceneQueries, TracePolicy } from "../../src/contracts/scene.ts";
+import { registerQ3ServerCvars } from "../../src/app/bootstrap/simulation/q3/server-state.ts";
+import { CollisionMapSettings, collisionMapCvarDefinitions } from "../../src/world/collision/q3/world.ts";
 import { q3GameCvarDefinitions } from "../../src/content/q3/base/settings.ts";
 import { cvarTable } from "../../src/content/q3/presentation/config.ts";
 import { expect, test } from "bun:test";
@@ -318,8 +323,11 @@ test("local Q3 console keeps source globals and SystemInfo mirrors under server 
   const first = new CvarRegistry({ dialect: "q3", context: context(0) }), second = new CvarRegistry({ dialect: "q3", context: context(1) });
   const fallback = new CvarRegistry({ dialect: "q3", context: context() });
   for (const definition of q3GameCvarDefinitions("missionpack")) server.register(definition.name, definition.value, definition.flags);
+  registerQ3ServerCvars(server, { maxClients: 8, mapName: "test" });
   for (const client of [first, second]) {
     for (const definition of cvarTable("missionpack")) client.register(definition.name, definition.defaultValue, definition.flags);
+    new CollisionMapSettings(client).registerMap();
+    client.register("sv_allowDownload", "0");
     client.register("mod_movement_scale", "1");
     client.register("local_only", "1", CvarFlag.Archive);
   }
@@ -332,6 +340,26 @@ test("local Q3 console keeps source globals and SystemInfo mirrors under server 
   for (const name of ["pmove_msec", "pmove_fixed", "g_synchronousClients", "com_blood", "g_redteam", "g_blueteam", "mod_movement_scale"])
     expect(snapshots.filter(value => value.name === name)).toHaveLength(1);
   expect(routing.owner("MOD_MOVEMENT_SCALE", context(1))).toBe(server);
+  for (const definition of collisionMapCvarDefinitions) {
+    expect(routing.owner(definition.name.toUpperCase(), context(1))).toBe(server);
+    expect(server.find(definition.name)?.flags).toBe(definition.flags);
+    expect(snapshots.filter(value => value.name.toLowerCase() === definition.name.toLowerCase())).toHaveLength(1);
+  }
+  expect(routing.owner("sv_allowDownload", context(1))).toBe(server);
+  server.set("sv_cheats", "1", true);
+  for (const text of ["set cm_playerCurveClip 0", "set cm_noCurves 1", "set sv_allowDownload 1"]) commands.executeNow(text, context(1));
+  expect(server.variableString("cm_playerCurveClip")).toBe("0");
+  expect(server.variableString("cm_noCurves")).toBe("1");
+  expect(server.variableString("sv_allowDownload")).toBe("1");
+  expect(first.variableString("cm_playerCurveClip")).toBe("1");
+  expect(second.variableString("cm_playerCurveClip")).toBe("1");
+  expect(commands.archiveCommands().filter(value => value.startsWith("seta cm_playerCurveClip "))).toEqual(['seta cm_playerCurveClip "0"']);
+  server.set("sv_cheats", "0", true);
+  commands.executeNow("set cm_playerCurveClip 1");
+  expect(server.variableString("cm_playerCurveClip")).toBe("0");
+  registerQ3ServerCvars(server, { maxClients: 8, mapName: "test" });
+  expect(server.variableString("cm_playerCurveClip")).toBe("0");
+
   commands.append("seta pmove_msec 16; set mod_movement_scale 3; set com_blood 0; set local_only first"); commands.execute();
   commands.executeNow("set local_only second", context(1));
   expect(server.variableString("pmove_msec")).toBe("16");
@@ -353,4 +381,51 @@ test("Q2 NoSet flag does not claim Q3 SystemInfo mirror ownership", () => {
   const routing = new ApplicationConsoleRouting({ fallback: seat, sourceDialect: () => "q2-classic",
     server: () => ({ cvars: server, sharedNames: [] }), seat: () => seat });
   expect(() => routing.owner("duplicate", context())).toThrow("conflicting server and seat declarations");
+});
+
+
+test("shared collision cvars reach server settings and both cgame trace consumers without merging seat preferences", () => {
+  const server = new CvarRegistry({ dialect: "q3", context: { session: owner.session, origin: { kind: "server-console" } } });
+  registerQ3ServerCvars(server, { maxClients: 8, mapName: "test" });
+  server.register("sv_cheats", "1");
+  const seats = [0, 1].map(index => new CvarRegistry({ dialect: "q3", context: context(index) }));
+  const names = collisionMapCvarDefinitions.map(definition => definition.name);
+  const mirrors = seats.map(seat => new SharedCvarMirror(server, seat, names, () => {}));
+  const policies: TracePolicy[] = [];
+  const queries: SceneQueries = {
+    trace: query => { policies.push(query.policy); return { kind: "q3", fraction: 1, end: query.end, startSolid: false, allSolid: false,
+      contact: { kind: "none" }, hit: { kind: "none" }, contents: 0, surfaceFlags: 0,
+      sourcePlane: { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 } }; },
+    pointContents: query => { policies.push(query.policy); return { kind: "q3", contents: 0 }; },
+    boxLeaves: () => ({ leaves: [], topnode: null, overflow: false }), areasConnected: () => true, clusterVisible: () => true,
+  };
+  const routing = new ApplicationConsoleRouting({ fallback: server, sourceDialect: () => "q3", server: () => ({ cvars: server, sharedNames: [] }),
+    seat: id => seats[id.index] ?? null });
+  const commands = new CommandBuffer({ dialect: "q3", context: context(), cvarRouting: routing });
+  try {
+    for (const [index, seat] of seats.entries()) seat.register("cg_fov", String(90 + index * 10));
+    commands.append("set cm_noCurves 1; set cm_playerCurveClip 0; set cm_noAreas 1"); commands.execute();
+    const authoritative = new CollisionMapSettings(server);
+    expect([authoritative.noCurves, authoritative.playerCurveClip, authoritative.noAreas]).toEqual([true, false, true]);
+    for (const seat of seats) {
+      const settings = new CollisionMapSettings(seat);
+      expect([settings.noCurves, settings.playerCurveClip, settings.noAreas]).toEqual([true, false, true]);
+      const collision = q3ClientCollision(queries, settings), point = { x: 0, y: 0, z: 0 };
+      collision.trace({ start: point, end: point, shape: { kind: "point" }, mask: 1 }); collision.pointContents(point);
+    }
+    expect(policies).toHaveLength(4);
+    for (const policy of policies) expect(policy).toMatchObject({ kind: "q3", curves: false, playerCurveClip: false });
+    expect(seats.map(seat => seat.variableString("cg_fov"))).toEqual(["90", "100"]);
+    seats[0]?.set("cm_noCurves", "0");
+    expect(server.variableString("cm_noCurves")).toBe("0");
+    expect(seats[1]?.variableString("cm_noCurves")).toBe("0");
+    server.set("sv_cheats", "0", true);
+    commands.executeNow("set cm_playerCurveClip 1");
+    expect(seats.map(seat => seat.variableString("cm_playerCurveClip"))).toEqual(["0", "0"]);
+    const foreign = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("foreign").session, origin: { kind: "server-console" } } });
+    expect(() => new SharedCvarMirror(server, foreign, names, () => {})).toThrow("same session and dialect");
+    expect(() => new SharedCvarMirror(server, seats[0] ?? server, ["not_declared"], () => {})).toThrow("not declared");
+  } finally { for (const mirror of mirrors) mirror.close(); }
+  server.set("cm_noCurves", "1", true);
+  expect(seats.map(seat => seat.variableString("cm_noCurves"))).toEqual(["0", "0"]);
 });

@@ -2,8 +2,8 @@
  * Copyright (C) 1999-2005 Id Software, Inc. SPDX-License-Identifier: GPL-2.0-or-later */
 import { add3, sub3, scale3, dot3, lerp3, vec3, anglesToAxis } from "../../../core/math.ts";
 import type { Vec3, Plane, Bounds } from "../../../core/math.ts";
-import { CvarFlag } from "../../../core/cvars/index.ts";
-import type { CvarRegistry } from "../../../core/cvars/index.ts";
+import type { CollisionMapSettings } from "./settings.ts";
+export { CollisionMapSettings, collisionMapCvarDefinitions } from "./settings.ts";
 import { tracePatch, positionInPatch } from "./patch.ts";
 import type { CollisionDebugSurface, PatchShape } from "./patch.ts";
 import { CollisionTopology } from "./topology.ts";
@@ -16,27 +16,6 @@ import { traceBrushMedia } from "../media.ts";
 import type { MediumBrush, TraceMedia } from "../media.ts";
 import { convertContents } from "../contents.ts";
 export type { BoxLeafList } from "./topology.ts";
-
-/** CM_LoadMap registers these common-lived controls before reading or reusing a map. */
-export class CollisionMapSettings {
-  constructor(private readonly cvars: CvarRegistry) {}
-
-  registerMap(): undefined {
-    this.cvars.register("cm_noAreas", "0", CvarFlag.Cheat);
-    this.cvars.register("cm_noCurves", "0", CvarFlag.Cheat);
-    this.cvars.register("cm_playerCurveClip", "1", CvarFlag.Archive | CvarFlag.Cheat);
-  }
-
-  get noAreas(): boolean { return this.enabled("cm_noAreas"); }
-  get noCurves(): boolean { return this.enabled("cm_noCurves"); }
-  get playerCurveClip(): boolean { return this.enabled("cm_playerCurveClip"); }
-
-  private enabled(name: string): boolean {
-    const value = this.cvars.get(name);
-    if (value === undefined) throw new Error(`Collision map cvar ${name} is not registered`);
-    return value.integerValue !== 0;
-  }
-}
 
 export type CollisionWorldProfile = {
   readonly kind: "shared";

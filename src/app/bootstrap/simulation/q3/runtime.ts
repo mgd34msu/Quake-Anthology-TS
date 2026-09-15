@@ -134,7 +134,6 @@ export class Q3SourceRuntime {
       damageCall: () => this.bridge.currentCall, foreign: host.foreign, isPlayer: host.isPlayer }, options.recipe.map.entities.provider, options.product);
     this.world = new Q3WorldAdapter({ queries: host.scene, bodies: host.bodies, collision: host.collision,
       curves: () => host.cvars.variableValue("cm_noCurves") === 0, playerCurveClip: () => host.cvars.variableValue("cm_playerCurveClip") !== 0 }, this.records);
-    if (mode.kind === "new") host.cvars.register("cm_playerCurveClip", "1");
     this.pool = new EntityPool({ records: this.records, product: options.product, maxClients: options.maxClients,
       get mapStartTime() { return runtime.level.startTime; }, time: () => this.level.time,
       print: host.engine.print, link: entity => this.world.link(entity), unlink: entity => this.world.unlink(entity.slot) });

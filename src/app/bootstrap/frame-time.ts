@@ -1,3 +1,4 @@
+import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import { CvarFlag, Q2CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 
@@ -20,50 +21,10 @@ export function refreshFrameTimeCvars(owner: CvarRegistry, mirror: CvarRegistry)
   }
 }
 
-const frameTimeMirrors = new WeakMap<CvarRegistry, { clients: Set<FrameTimeCvarMirror>; releases: (() => void)[] }>();
-
 /** Cgame accesses a seat registry while engine time remains owned by its source world. */
-export class FrameTimeCvarMirror {
-  private readonly releases: (() => void)[] = [];
-  private refreshing = false;
-  constructor(private readonly owner: CvarRegistry, private readonly mirror: CvarRegistry, assertCurrent: () => void) {
-    for (const name of frameTimeCvarNames(owner.dialect)) {
-      const value = owner.find(name);
-      if (value !== undefined) mirror.register(name, value.resetValue, value.flags);
-    }
-    this.refresh();
-    try {
-      for (const name of frameTimeCvarNames(owner.dialect)) if (owner.find(name) !== undefined) {
-        this.releases.push(mirror.bindValue(name, { validate: () => null, changed: value => {
-          if (!this.refreshing) { assertCurrent(); owner.set(name, value, true); }
-        } }));
-      }
-      let shared = frameTimeMirrors.get(owner);
-      if (shared === undefined) {
-        shared = { clients: new Set(), releases: [] };
-        frameTimeMirrors.set(owner, shared);
-        for (const name of frameTimeCvarNames(owner.dialect)) if (owner.find(name) !== undefined) {
-          shared.releases.push(owner.bindValue(name, { validate: () => null, changed: () => {
-            for (const client of frameTimeMirrors.get(owner)?.clients ?? []) client.refresh();
-          } }));
-        }
-      }
-      shared.clients.add(this);
-    } catch (error) { this.close(); throw error; }
-  }
-  refresh(): void {
-    this.refreshing = true;
-    try { refreshFrameTimeCvars(this.owner, this.mirror); } finally { this.refreshing = false; }
-  }
-  close(): void {
-    for (const release of this.releases.splice(0)) release();
-    const shared = frameTimeMirrors.get(this.owner);
-    if (shared === undefined) return;
-    shared.clients.delete(this);
-    if (shared.clients.size === 0) {
-      for (const release of shared.releases) release();
-      frameTimeMirrors.delete(this.owner);
-    }
+export class FrameTimeCvarMirror extends SharedCvarMirror {
+  constructor(owner: CvarRegistry, mirror: CvarRegistry, assertCurrent: () => void) {
+    super(owner, mirror, frameTimeCvarNames(owner.dialect).filter(name => owner.find(name) !== undefined), assertCurrent);
   }
 }
 

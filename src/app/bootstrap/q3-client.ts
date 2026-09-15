@@ -1,3 +1,5 @@
+import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
+import { CollisionMapSettings, collisionMapCvarDefinitions } from "../../world/collision/q3/settings.ts";
 import { quakeMouseButton } from "../../input/mouse-buttons.ts";
 import { CommonError } from "../../core/common-error.ts";
 import { q3ProceduralFog } from "../../content/q3/presentation/scene.ts";
@@ -62,7 +64,7 @@ import { ApplicationQ3Assets } from "./q3-client/assets.ts";
 import { createApplicationQ3Services } from "./q3-client/services.ts";
 import type { ApplicationQ3Services } from "./q3-client/services.ts";
 import { ApplicationQ3Cinematics } from "./q3-client/cinematics.ts";
-import { FrameTimeCvarMirror, frameTimeCvarNames, refreshFrameTimeCvars } from "./frame-time.ts";
+import { frameTimeCvarNames, refreshFrameTimeCvars } from "./frame-time.ts";
 import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
 import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
 import { q3WeaponCamera } from "./q3-client/view.ts";
@@ -128,7 +130,7 @@ export class ApplicationQ3Client {
   private latestCamera: SceneCamera;
   private frameNumber = 0;
   private closed = false;
-  private timeMirror: FrameTimeCvarMirror | null = null;
+  private timeMirror: SharedCvarMirror | null = null;
   private appliedTimeSystemInfo: string | undefined;
   private keyCatcher = 0;
   private selection = { weapon: 2, sensitivity: 1 };
@@ -191,7 +193,7 @@ export class ApplicationQ3Client {
     const owner = this.options.timeCvars;
     if (owner === undefined || owner === this.cvars) return;
     this.refreshSystemInfo();
-    this.timeMirror = new FrameTimeCvarMirror(owner, this.cvars, () => {
+    this.timeMirror = new SharedCvarMirror(owner, this.cvars, [...frameTimeCvarNames(owner.dialect), ...collisionMapCvarDefinitions.map(definition => definition.name)].filter(name => owner.find(name) !== undefined), () => {
       if (this.closed) throw new Error("Q3 presentation is closed");
       this.options.assertCurrent?.();
     });
@@ -203,7 +205,9 @@ export class ApplicationQ3Client {
   private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
     const o = this.options, seat = o.local.player.seat.id, source = this.source, media = this.media;
-    const services = await createApplicationQ3Services({ media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
+    const collisionSettings = new CollisionMapSettings(o.timeCvars ?? this.cvars);
+    collisionSettings.registerMap();
+    const services = await createApplicationQ3Services({ collisionSettings, media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
       actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
         scene: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; },
         command: command => { this.submissions.push({ kind: "command", command }); }, text: draw => { this.submissions.push({ kind: "text", draw }); },

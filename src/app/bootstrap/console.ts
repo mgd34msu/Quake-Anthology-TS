@@ -1,3 +1,4 @@
+import { q3ServerCvarNames } from "./q3-common-cvars.ts";
 import { frameTimeCvarNames } from "./frame-time.ts";
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
@@ -97,7 +98,8 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     if (server !== null && serverHas && ((seatHas && server.cvars !== seat) || (movementHas && server.cvars !== movement))) {
       const key = server.cvars.dialect === "q3" ? asciiFold(name) : name;
       const systemInfoMirror = server.cvars.dialect === "q3" && ((serverVariable?.flags ?? 0) & CvarFlag.SystemInfo) !== 0;
-      if (!systemInfoMirror && !server.sharedNames.some(shared => (server.cvars.dialect === "q3" ? asciiFold(shared) : shared) === key)) {
+      const commonMirror = server.cvars.dialect === "q3" && [...q3ServerCvarNames, ...frameTimeCvarNames("q3")].some(shared => asciiFold(shared) === key);
+      if (!systemInfoMirror && !commonMirror && !server.sharedNames.some(shared => (server.cvars.dialect === "q3" ? asciiFold(shared) : shared) === key)) {
         throw new Error(`Console cvar ${name} has conflicting server and seat declarations`);
       }
       return server.cvars;
