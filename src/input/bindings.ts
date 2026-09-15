@@ -100,12 +100,14 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
         : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`); return;
     }
     seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
-  }, { summary: "Read or set a key binding for the invoking seat.", usage: "bind <key> [command]", examples: ['bind SPACE "+jump"'] });
+  }, { summary: "Read or set a binding for the invoking local seat. Quote multiple commands to keep them on one key.",
+    usage: "bind <key> [command]", examples: ["bind Q", 'bind SPACE "+jump"', 'bind F1 "echo ready; echo done"'] });
   add("unbind", invocation => {
     const name = invocation.argv[1], seat = local(invocation);
-    if (name === undefined || seat === null) return;
+    if (invocation.argv.length !== 2 || name === undefined) { print("unbind <key> : remove commands from a key\n"); return; }
+    if (seat === null) { print("unbind requires a local seat.\n"); return; }
     const input = namedPhysicalInput(name);
-    if (input === null) return;
+    if (input === null) { print(`Unknown key ${name}\n`); return; }
     if (input.kind === "controller-button" || input.kind === "controller-axis") {
       for (const binding of seat.bindings) {
         const candidate = binding.input;
@@ -113,9 +115,12 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
           || input.kind === "controller-axis" && candidate.kind === "controller-axis" && input.axis === candidate.axis && input.direction === candidate.direction) seat.unbind(candidate);
       }
     } else seat.unbind(input);
-  });
-  add("unbindall", invocation => { local(invocation)?.unbindAll(); });
-  add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); });
+  }, { summary: "Remove a key or mouse binding from the invoking local seat. Named controller buttons are cleared on that seat's devices.",
+    usage: "unbind <key>", examples: ["unbind Q", "unbind MOUSE2"] });
+  add("unbindall", invocation => { local(invocation)?.unbindAll(); },
+    { summary: "Clear all bindings for the invoking local seat, including controller bindings.", usage: "unbindall", examples: ["unbindall"] });
+  add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); },
+    { summary: "List the invoking local seat's current key, mouse and controller bindings.", usage: "bindlist", examples: ["bindlist"] });
   return () => { for (const name of registered) commands.unregister(name); };
 }
 

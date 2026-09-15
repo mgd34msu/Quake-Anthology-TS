@@ -63,6 +63,7 @@ export class UnifiedAudio {
     private effectsGain = 0.7;
     private frame = 0;
     private outputStarted = false;
+    private outputHandoffPending = false;
     private previousPumpFrame: number | null = null;
     private readonly pumpIntervals: number[] = [];
     constructor(private readonly options: UnifiedAudioOptions) {
@@ -347,8 +348,9 @@ export class UnifiedAudio {
             next.queuedPcm = this.queuedPcm;
             next.paused = this.paused;
             next.outputStarted = this.outputStarted;
-            next.previousPumpFrame = this.previousPumpFrame;
-            next.pumpIntervals.splice(0, next.pumpIntervals.length, ...this.pumpIntervals);
+            next.previousPumpFrame = null;
+            next.pumpIntervals.length = 0;
+            next.outputHandoffPending = true;
             this.device = null;
             this.detachedOutput = null;
             this.queuedPcm = new Int16Array(0);
@@ -424,7 +426,7 @@ export class UnifiedAudio {
             return 0;
         if (!Number.isFinite(measuredWorkMilliseconds) || measuredWorkMilliseconds < 0) throw new RangeError("Invalid measured audio frame work");
         const workFrames = Math.ceil(measuredWorkMilliseconds * this.sampleRate / 1000);
-        const initialFill = !this.outputStarted && device.state === "paused" && device.queuedFrames === 0;
+        const initialFill = this.outputHandoffPending || !this.outputStarted && device.state === "paused" && device.queuedFrames === 0;
         const playbackFrame = device.playbackFrames;
         const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
         if (!initialFill) {
@@ -449,6 +451,7 @@ export class UnifiedAudio {
         }
         device.resume();
         this.outputStarted = true;
+        this.outputHandoffPending = false;
         return frames;
     }
     pause(paused: boolean): void { this.check(); this.paused = paused; this.previousPumpFrame = null; this.pumpIntervals.length = 0; if (paused)
