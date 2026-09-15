@@ -5,6 +5,23 @@ export class SaveFormatError extends Error {
 type JsonValue = null | boolean | string | number | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 function unknownArray(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
 
+function canonicalBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const end = value.length - padding;
+  let lastDigit = 0;
+  for (let index = 0; index < end; index++) {
+    const code = value.charCodeAt(index);
+    if (code >= 65 && code <= 90) lastDigit = code - 65;
+    else if (code >= 97 && code <= 122) lastDigit = code - 71;
+    else if (code >= 48 && code <= 57) lastDigit = code + 4;
+    else if (code === 43) lastDigit = 62;
+    else if (code === 47) lastDigit = 63;
+    else return false;
+  }
+  return padding === 2 ? (lastDigit & 15) === 0 : padding === 1 ? (lastDigit & 3) === 0 : true;
+}
+
 /** The envelope accepts plain checkpoint records only. Live classes, Maps and functions require their owner's codec. */
 function pack(value: unknown, path: string): JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
@@ -40,7 +57,7 @@ function unpack(value: unknown, path: string): unknown {
     const encoded: unknown = Reflect.get(value, "value");
     if (typeof encoded !== "string" || Object.keys(value).length !== 2) throw new SaveFormatError(path, "invalid tagged checkpoint value");
     if (tag === "bigint" && /^-?(0|[1-9][0-9]*)$/.test(encoded)) return BigInt(encoded);
-    if (tag === "bytes" && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) return new Uint8Array(Buffer.from(encoded, "base64"));
+    if (tag === "bytes" && canonicalBase64(encoded)) return new Uint8Array(Buffer.from(encoded, "base64"));
     if (tag === "number") {
       if (encoded === "-0") return -0;
       if (encoded === "NaN") return NaN;
