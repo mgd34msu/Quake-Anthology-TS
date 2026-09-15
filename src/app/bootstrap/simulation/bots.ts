@@ -310,7 +310,7 @@ export class ApplicationBots {
     this.gameValue = game;
     this.director.bindRestartedRound(this.directorHost(game), library => q3BotNavigation(game, library, navigation));
     this.options.simulation.botServices.attach(this.director, this);
-    this.restartPhase = { kind: "bound", clients: phase.clients, pending: new Set(phase.clients.map(client => client.client.id.slot)) };
+    this.restartPhase = { kind: "bound", clients: phase.clients, pending: new Set(phase.clients.filter(client => !client.client.isClosed).map(client => client.client.id.slot)) };
   }
   /** Call once for each preserved slot after the three source settle frames; humans return false. */
   reconnectRestartedClient(client: ClientId): boolean {
@@ -318,7 +318,9 @@ export class ApplicationBots {
     if (this.closed || phase.kind !== "bound") throw new Error("Bind the new bot round before reconnecting clients");
     const saved = phase.clients.find(entry => entry.client.id.equals(client));
     if (saved === undefined) return false;
+    if (saved.client.isClosed) { phase.pending.delete(client.slot); return true; }
     if (!phase.pending.has(client.slot)) throw new Error("Bot restart client was already reconnected");
+    if (!this.appendReliable(saved, "map_restart\n")) return true;
     this.restoreClient(saved);
     phase.pending.delete(client.slot);
     return true;
@@ -435,11 +437,17 @@ export class ApplicationBots {
     for (const event of events) {
       if (event.kind === "view-reset" && this.shared !== null) { this.resetView(event.actor, event.angles); if (event.reason === "spawn") this.resetWeapon(event.actor); continue; }
       if (event.kind !== "q3-source" || event.event.kind !== "server-command") continue;
-      for (const [slot, connection] of this.connections) {
-        if (event.event.client !== -1 && event.event.client !== slot) continue;
-        if (connection.reliable.add(event.event.text).kind === "overflow") this.game.options.engine.dropClient(slot, "Server command overflow");
+      for (const client of this.clients()) {
+        if (event.event.client !== -1 && event.event.client !== client.client.id.slot) continue;
+        this.appendReliable(client, event.event.text);
       }
     }
+  }
+  private appendReliable(client: ApplicationBotClient, text: string): boolean {
+    if (client.reliable.add(text).kind !== "overflow") return true;
+    this.game.options.engine.dropClient(client.client.id.slot, "Server command overflow");
+    this.disconnect(client.client.id.slot);
+    return false;
   }
   frame(timeMilliseconds: number, elapsedMilliseconds: number): readonly ActorCommand[] {
     if (this.closed) throw new Error("Bot transport is closed");
@@ -452,7 +460,7 @@ export class ApplicationBots {
     return this.population.frame({ timeMilliseconds: sourceTime, elapsedMilliseconds });
   }
   clients(): readonly ApplicationBotClient[] {
-    if (this.restartPhase.kind !== "active") return this.restartPhase.clients;
+    if (this.restartPhase.kind !== "active") return this.restartPhase.clients.filter(client => !client.client.isClosed);
     return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable, userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot) }));
   }
   checkpointOrchestration(): ApplicationBotTransportCheckpoint {
@@ -497,11 +505,16 @@ export class ApplicationBots {
   consoleCommand(argv: readonly string[]): void { this.director.consoleCommand(argv); }
   disconnect(client: number): boolean {
     const connection = this.connections.get(client);
-    if (connection === undefined) return false;
-    if (this.source === null) this.director.shutdownClient(client, false);
-    this.options.simulation.disconnectPlayer(connection.actor.id);
+    const phase = this.restartPhase;
+    const sessionClient = connection?.client ?? (phase.kind === "active" ? undefined : phase.clients.find(entry => entry.client.id.slot === client)?.client);
+    if (sessionClient === undefined || sessionClient.isClosed) return false;
+    if (connection !== undefined) {
+      if (this.source === null) this.director.shutdownClient(client, false);
+      this.options.simulation.disconnectPlayer(connection.actor.id);
+    }
     this.connections.delete(client); this.snapshots.delete(client);
-    this.options.session.closeClient(connection.client.id);
+    if (phase.kind === "bound") phase.pending.delete(client);
+    this.options.session.closeClient(sessionClient.id);
     return true;
   }
   close(restart = false): void {
