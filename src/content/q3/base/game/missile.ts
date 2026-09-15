@@ -126,15 +126,18 @@ export class MissileRuntime {
     };
   }
 
+  private readonly unobserve: () => undefined;
   private readonly projectiles = new Map<GameEntity, NativeProjectile>();
   private readonly proximityTouch: EntityTouch = (self, other) => { if (other instanceof GameEntity) this.proximityTrigger(self, other); };
 
   constructor(readonly host: MissileHost) {
     if (host.combat.entities.options.product !== host.combat.product) throw new Error("Missile product does not match its entity pool");
-    host.actors.onRelease(actor => { this.released(actor.id); return undefined; });
+    this.unobserve = host.actors.onRelease(actor => { this.released(actor.id); return undefined; });
 
     this.bindSaveCallbacks();
   }
+
+  close(): void { this.unobserve(); this.projectiles.clear(); }
 
   ownerOf(actor: ActorId): ActorId | null {
     const entity = this.host.combat.entities.options.records.nativeByActor(actor);

@@ -79,10 +79,10 @@ export class GameplayAuthority implements DamageAuthority {
     actors.onRelease(actor => { this.bindings.delete(actor); this.powerArmorCells.delete(actor); return undefined; });
   }
 
-  register(policy: CombatPolicy): undefined {
+  register(policy: CombatPolicy): () => undefined {
     if (this.policies.has(policy.id)) throw new Error(`Combat policy already registered: ${policy.id}`);
     this.policies.set(policy.id, policy);
-    return undefined;
+    return () => { if (this.policies.get(policy.id) === policy) this.policies.delete(policy.id); return undefined; };
   }
 
   bind(actor: OwnedActor, binding: CombatStateBinding): undefined {

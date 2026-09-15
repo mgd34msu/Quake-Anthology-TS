@@ -43,6 +43,7 @@ interface SourceRecord {
 /** gentity_t private records with lifetime, body, combat and inventory supplied by the session owners. */
 export class Q3EntityRecords {
   private readonly records: readonly SourceRecord[];
+  private readonly unobserve: () => undefined;
   private readonly clients: readonly GameClient[];
   private readonly clientBacking = Array.from({ length: MAX_CLIENTS }, () => ({ sourceStats: new Int32Array(16), specialAmmo: new Int32Array(16) }));
 
@@ -109,11 +110,13 @@ export class Q3EntityRecords {
       return { entity, actor: null, active: false, borrowed: false };
     });
     this.clients = Array.from({ length: MAX_CLIENTS }, (_, slot) => new GameClient(product, this.playerBinding(slot)));
-    host.actors.onRelease(actor => {
+    this.unobserve = host.actors.onRelease(actor => {
       for (const record of this.records) if (record.actor === actor) { record.actor = null; record.active = false; }
       return undefined;
     });
   }
+
+  close(): void { this.unobserve(); }
 
   get(slot: number): GameEntity | undefined { return this.records[slot]?.entity; }
   client(slot: number): GameClient { const client = this.clients[slot]; if (client === undefined) throw new RangeError(`Q3 client ${slot} outside 0..63`); return client; }

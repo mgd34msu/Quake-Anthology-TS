@@ -100,6 +100,9 @@ export class Q3SourceRuntime {
   readonly commands;
   readonly serverCommands;
   private loaded = false;
+  private readonly unobserve: () => undefined;
+  private retired = false;
+  private loadedGameType: number | null = null;
   private mapReport: SpawnReport | null = null;
   private readonly publishedEvents = new Map<OwnedActor, { readonly event: number; readonly time: number }>();
 
@@ -125,7 +128,7 @@ export class Q3SourceRuntime {
       this.settings.restoreSaveState(reader.field("settings").value);
     }
     this.random.reset(options.seed);
-    host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
+    this.unobserve = host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
     this.records = new Q3EntityRecords({ actors: host.actors, bodies: host.bodies, callbacks: host.callbacks,
       combat: host.combat, inventory: host.inventory, schedule: host.schedule, runThink: host.runThink,
       admitDamage: (entity, request): "continue" | "handled" => q3AdmitTargetDamage(this.combat, entity,
@@ -276,7 +279,7 @@ export class Q3SourceRuntime {
         if (kind === "filtered") return { kind, slot, reason: entry.field("reason").choice("notsingle", "notteam", "notfree", "notta", "notq3a", "gametype") };
         return { kind, slot, classname: entry.field("classname").nullable(value => value.string()) };
       }) };
-    this.loaded = true;
+    this.loaded = true; this.loadedGameType = this.gameType;
   }
 
   get gameType(): number { return this.integer("g_gametype"); }
@@ -514,8 +517,21 @@ export class Q3SourceRuntime {
     this.host.configstrings.set(24, this.remaps.buildShaderStateConfig());
   }
 
+  restartCompatibility(): "compatible" | "game-type-changed" | "client-capacity-changed" {
+    if (!this.loaded || this.retired) throw new Error("Q3 round is not active");
+    if (this.host.cvars.find("sv_maxclients")?.modified || this.host.cvars.variableValue("sv_maxclients") !== this.options.maxClients) return "client-capacity-changed";
+    if (this.host.cvars.find("g_gametype")?.modified || this.host.cvars.variableValue("g_gametype") !== this.loadedGameType) return "game-type-changed";
+    return "compatible";
+  }
+
+  close(): void {
+    if (this.retired) return;
+    this.retired = true; this.loaded = false;
+    this.missiles.close(); this.records.close(); this.unobserve(); this.publishedEvents.clear();
+  }
+
   load(): SpawnReport {
-    if (this.loaded || this.mode.kind === "restore") throw new Error("Q3 source map cannot spawn in its current construction mode");
+    if (this.retired || this.loaded || this.mode.kind === "restore") throw new Error("Q3 source map cannot spawn in its current construction mode");
     this.level.time = this.host.now(); this.level.startTime = this.level.time;
     this.level.warmupModificationCount = this.snapshot("g_warmup").modificationCount;
     this.memory.initialize();
@@ -539,7 +555,7 @@ export class Q3SourceRuntime {
       this.config.modelIndex("models/mapobjects/podium/podium4.md3");
       this.config.soundIndex("sound/player/gurp1.wav"); this.config.soundIndex("sound/player/gurp2.wav");
     }
-    this.remapTeams(); this.settings.update(); this.loaded = true;
+    this.remapTeams(); this.settings.update(); this.loaded = true; this.loadedGameType = this.gameType;
     const unknown = this.mapReport.outcomes.filter(outcome => outcome.kind === "unknown");
     if (unknown.length !== 0) throw new Error("Unimplemented authored Q3 spawns: " + unknown.map(outcome => outcome.classname).join(", "));
     this.host.configstrings.set(0, this.host.serverState.serverInfo());

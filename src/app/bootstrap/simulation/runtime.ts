@@ -244,6 +244,7 @@ export class SharedSimulation implements Simulation {
   private worldTextFrame = -1;
   private worldTextSnapshot: readonly WorldText[] = [];
   private source: SourceRuntime = { kind: "loading" };
+  private disposeSourceCombat: (() => undefined) | null = null;
   private sourceFrame: FrameContext;
   private hostMilliseconds = 0;
   private sourceSchedulingMilliseconds = 0;
@@ -521,7 +522,12 @@ export class SharedSimulation implements Simulation {
       }
       this.source.game.spawnMap();
     }
-    else if (this.source.kind === "q3") { if (providerFamily(this.recipe.combat.provider) === "q3") this.combat.register(this.source.game.bridge.policy()); this.source.game.load(); }
+    else if (this.source.kind === "q3") {
+      this.source.game.host.cvars.clearModified("sv_maxclients");
+      if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(this.source.game.bridge.policy());
+      this.source.game.load();
+      this.source.game.host.cvars.clearModified("g_gametype");
+    }
     else if (this.source.kind === "q2") {
       if (options.travel?.source.kind === "q2") this.source.game.counters.serverFlags = options.travel.source.serverFlags;
       const worldspawn = parseQ2Entities(options.world.entities, this.source.game.options.edition).find(entity => entity.classname === "worldspawn");
@@ -3118,6 +3124,45 @@ export class SharedSimulation implements Simulation {
   q1Source() { return this.source.kind === "q1" ? this.source : null; }
   q3Guest(): Q3QvmServerGame | null { return this.source.kind === "q3-qvm" ? this.source.game : null; }
   async shutdownQ3Guest(): Promise<void> { await this.q3Guest()?.shutdown(); }
+  sourceRestartPlan(): { readonly kind: "source-reset" } | { readonly kind: "replace-world"; readonly reason: string } {
+    this.assertOpen();
+    if (this.source.kind !== "q3") return { kind: "replace-world", reason: "Selected provider has no same-map source reset" };
+    if (this.selectedArsenal !== null || this.selectedBallistics !== null || this.selectedWeaponSource !== null
+      || this.monsterSources.size !== 0 || this.grapple !== null || this.handGrenades !== null)
+      return { kind: "replace-world", reason: "Selected adjunct providers require full world replacement" };
+    const compatibility = this.source.game.restartCompatibility();
+    return compatibility === "compatible" ? { kind: "source-reset" } : { kind: "replace-world", reason: compatibility };
+  }
+
+  restartSourceRound(): readonly ClientId[] {
+    const plan = this.sourceRestartPlan();
+    if (plan.kind === "replace-world") throw new Error("Source restart requires full world replacement: " + plan.reason);
+    if (this.stepping) throw new Error("Source restart requires a completed simulation frame");
+    const previous = this.source;
+    if (previous.kind !== "q3") throw new Error("Source restart owner changed");
+    if (this.botServices.configuration !== null) throw new Error("Detach bot round services before source restart");
+    const clients = this.clientIdentities();
+    const carry = previous.game.captureSession();
+    try {
+      for (const actor of this.actors.observations()) {
+        const owned = this.actors.resolveOwned(actor.id);
+        if (owned !== null) this.actors.release(owned);
+      }
+      this.disposeSourceCombat?.(); this.disposeSourceCombat = null;
+      previous.game.close();
+      this.events.take(); this.events.takePresentation(); this.transitions.length = 0; this.levelChange = null;
+      this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
+      const game = new Q3SourceRuntime({ ...previous.game.options, sessionCarry: carry }, previous.game.host);
+      this.source = { kind: "q3", game };
+      if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(game.bridge.policy());
+      game.load();
+      return clients;
+    } catch (error) {
+      this.close();
+      throw error;
+    }
+  }
+
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }
   movementPlayer(actor: ActorId): Readonly<MovementPlayer> | null { return this.player(actor); }
   weaponPresentationClock(): { readonly content: ContentId; readonly timeMilliseconds: number } | null {
@@ -3595,7 +3640,7 @@ export class SharedSimulation implements Simulation {
         if (actor === null || this.lastAttack.has(actor)) throw new Error("Saved Q3 attack has no unique matching actor");
         this.lastAttack.set(actor, restoreQ2Attack(entry.attack, saved => this.actors.referenceSaved(saved)));
       }
-      if (providerFamily(this.recipe.combat.provider) === "q3") this.combat.register(source.game.bridge.policy());
+      if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(source.game.bridge.policy());
       source.game.finishNativeRestore();
     }
     const selectedBallistics = reader.field("selectedBallistics");
@@ -3734,7 +3779,7 @@ export class SharedSimulation implements Simulation {
   close(): undefined { if (this.closed) return undefined;
     const guest = this.q3Guest();
     if (guest !== null && !guest.isRetired) throw new Error("Q3 guest shutdown must be awaited before closing its shared world");
-    this.closed = true; this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.scheduler.close(); return undefined; }
+    this.closed = true; this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = []; this.actors.close(); this.q3Source()?.close(); this.disposeSourceCombat?.(); this.disposeSourceCombat = null; this.scheduler.close(); return undefined; }
   private assertOpen(): undefined { if (this.closed) throw new Error("Simulation is closed"); return undefined; }
 }
 
