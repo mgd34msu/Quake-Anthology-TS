@@ -1,4 +1,5 @@
 import { SaveReader } from "../../../persistence/value.ts";
+import { asciiFold } from "../../../core/commands/text.ts";
 import { captureModuleCvar, readModuleCvar } from "./game/save-module-values.ts";
 /* Source g_main.c registration defaults and source cvar update points. GPL-2.0-or-later. */
 import { CvarFlag } from "../../../core/cvars/index.ts";
@@ -58,9 +59,15 @@ export class Q3GameSettings {
   captureSaveState() { return [...this.snapshots.values()].map(captureModuleCvar); }
   restoreSaveState(value: unknown): void {
     const reader = new SaveReader(value, "q3.settings"), snapshots = reader.list(readModuleCvar);
-    const names = new Set(snapshots.map(snapshot => snapshot.name));
-    if (snapshots.length !== this.definitions.length || names.size !== snapshots.length || snapshots.some(snapshot => !this.definitions.some(definition => definition.name === snapshot.name))) reader.fail("invalid settings snapshot names");
-    this.snapshots.clear(); for (const snapshot of snapshots) this.snapshots.set(snapshot.name, snapshot);
+    const definitions = new Map(this.definitions.map(definition => [asciiFold(definition.name), definition.name]));
+    const restored = new Map<string, CvarSnapshot>();
+    for (const snapshot of snapshots) {
+      const name = definitions.get(asciiFold(snapshot.name));
+      if (name === undefined || restored.has(name)) return reader.fail("invalid settings snapshot names");
+      restored.set(name, snapshot);
+    }
+    if (restored.size !== this.definitions.length) reader.fail("invalid settings snapshot names");
+    this.snapshots.clear(); for (const [name, snapshot] of restored) this.snapshots.set(name, snapshot);
   }
 
   private readonly snapshots = new Map<string, CvarSnapshot>();

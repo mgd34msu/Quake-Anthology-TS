@@ -54,3 +54,32 @@ test("cached game settings retain their source update boundary", () => {
   restored.update();
   expect(restored.integer("g_speed")).toBe(777);
 });
+
+test("missionpack settings restore cvar identities first registered by the skirmish UI", () => {
+  const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("missionpack-settings-save").session, origin: { kind: "server-console" } } });
+  cvars.set("g_redTeam", "Pagans", true);
+  cvars.set("g_blueTeam", "Stroggs", true);
+  const host = { cvars, sendServerCommand: () => {}, remapTeams: () => {} };
+  const settings = new Q3GameSettings(host, "missionpack");
+  settings.register("test");
+  const captured = settings.captureSaveState();
+  expect(captured.find(snapshot => snapshot.name === "g_redTeam")?.value).toBe("Pagans");
+  cvars.set("g_redTeam", "Changed after capture", true);
+  const restored = new Q3GameSettings(host, "missionpack");
+  restored.restoreSaveState(persisted(captured));
+  expect(restored.captureSaveState()).toEqual(captured);
+  expect(restored.string("g_redteam")).toBe("Pagans");
+  expect(restored.string("g_blueteam")).toBe("Stroggs");
+  for (const invalid of [
+    captured.slice(1),
+    captured.map(snapshot => snapshot.name === "g_blueTeam" ? { ...snapshot, name: "G_REDTEAM" } : snapshot),
+    captured.map(snapshot => snapshot.name === "g_blueTeam" ? { ...snapshot, name: "unknown_setting" } : snapshot),
+  ]) {
+    expect(() => restored.restoreSaveState(persisted(invalid))).toThrow("invalid settings snapshot names");
+    expect(restored.captureSaveState()).toEqual(captured);
+  }
+  const base = new Q3GameSettings(host, "baseq3");
+  expect(() => base.restoreSaveState(persisted(captured))).toThrow("invalid settings snapshot names");
+  restored.update();
+  expect(restored.string("g_redteam")).toBe("Changed after capture");
+});
