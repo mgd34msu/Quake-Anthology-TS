@@ -1,4 +1,5 @@
 import { CollisionMapSettings } from "../../world/collision/q3/settings.ts";
+import { nextActorGeneration } from '../../world/actors/registry.ts';
 import { PresentationTime } from "./frame-clock.ts";
 import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
 import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
@@ -182,8 +183,10 @@ export class RemoteApplication {
       this.clientCommands = { cvars, commands, scripts };
       this.clientConfig = this.inputConfig;
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
+    const client = session.createClient(0);
+    const nextGeneration = (slot: number): number => nextActorGeneration(session.session, slot);
     if (launchOptions.network.kind === "qw-client") {
-      const remote = new QwRemotePresentation({ identity, session, content: null,
+      const remote = new QwRemotePresentation({ identity, session, client, nextGeneration, content: null,
         presentationTime: () => this.presentationTime.milliseconds,
         skinOptions: { read: async path => (await this.mounts.open(path))?.bytes ?? null,
           noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
@@ -200,7 +203,7 @@ export class RemoteApplication {
       this.remote = remote;
       this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" });
     } else if (launchOptions.network.kind === "q1-client") {
-      const remote = new Q1RemotePresentation({ identity, session, content: null,
+      const remote = new Q1RemotePresentation({ identity, session, client, nextGeneration, content: null,
         presentationTime: () => this.presentationTime.milliseconds,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: world => this.loadServerWorld(world) });
@@ -209,7 +212,7 @@ export class RemoteApplication {
         seat: { name: "Player", color: 0, spawnParameters: "", extensionFlags: null } });
     } else if (launchOptions.network.kind === "q3-client") {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
-      const remote = new Q3RemotePresentation({ identity, session, content: null,
+      const remote = new Q3RemotePresentation({ identity, session, client, nextGeneration, content: null,
         presentationTime: () => this.presentationTime.milliseconds,
         timescale: () => this.clientCommands?.cvars.variableValue("timescale") ?? 1,
         timeNudge: () => this.clientCommands?.cvars.get("cl_timeNudge")?.integerValue ?? 0,
@@ -233,7 +236,7 @@ export class RemoteApplication {
       this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, cvars: this.clientCommands.cvars, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
-      const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: null, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
+      const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, client, nextGeneration, content: null, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
         presentationTime: () => this.presentationTime.milliseconds,
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}\\fov\\${this.viewSettings.fieldOfView}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),

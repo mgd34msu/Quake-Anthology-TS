@@ -17,7 +17,7 @@ import type { Download, Gamestate, Snapshot } from '../../../network/q3/server-m
 import { HistorySnapshotSource } from '../../../content/q3/presentation/snapshots.ts';
 import { retailSnapshot } from '../../../content/q3/presentation/retail-snapshot.ts';
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from '../../../content/q3/foundation/arsenal.ts';
-import type { EngineSession } from '../../../world/session/session.ts';
+import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
 import { q3ArsenalWarning, q3WeaponStatus } from '../simulation/arsenal/weapon-status.ts';
@@ -35,6 +35,8 @@ export interface Q3RemoteWorld { readonly map: string; readonly models: readonly
 export interface Q3RemotePresentationOptions {
   readonly identity: IdentityOwner;
   readonly session: EngineSession;
+  readonly client: SessionClient;
+  nextGeneration(slot: number): number;
   readonly content: LoadedApplicationContent | null;
   readonly userinfo: () => string;
   readonly timeNudge?: () => number;
@@ -62,8 +64,6 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private connection: Q3ClientConnection | null = null;
   private readonly world: RemoteWorldContent;
   private readonly actors = new Map<number, ActorId>();
-  private generation = 0;
-  private ordinal = 0;
   private current: Snapshot | null = null;
   private loadingDownloads = false;
   get downloading(): boolean { return this.loadingDownloads; }
@@ -74,7 +74,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private source: ApplicationQ3ClientSource | null = null;
   constructor(readonly options: Q3RemotePresentationOptions) {
     this.world = new RemoteWorldContent(options.content);
-    this.client = options.session.createClient(0); this.client.connect('remote');
+    this.client = options.client; this.client.connect('remote');
     this.identity = { client: this.client.id, seat: null }; this.userinfo = options.userinfo;
   }
   get scene() { return this.world.scene; }
@@ -88,7 +88,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   actorAt(number: number): ActorId {
     if (!Number.isInteger(number) || number < 0 || number >= 1024) throw new Error('Invalid Q3 source entity');
     const old = this.actors.get(number); if (old !== undefined) return old;
-    const actor = this.options.identity.actor(this.ordinal++, this.generation); this.actors.set(number, actor); return actor;
+    const actor = this.options.identity.actor(number, this.options.nextGeneration(number)); this.actors.set(number, actor); return actor;
   }
   numberOf(actor: ActorId): number | null { for (const [number, value] of this.actors) if (value.equals(actor)) return number; return null; }
   isPlayer(actor: ActorId): boolean { const number = this.numberOf(actor); return number !== null && number < 64; }
@@ -106,7 +106,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
       } },
     };
   }
-  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.options.downloads?.close(); this.loadingDownloads = false; this.generation++; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
+  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.options.downloads?.close(); this.loadingDownloads = false; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
   async systemInfo(info: string): Promise<void> {
     if (Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
     remoteContentSelection('q3-baseq3', q3InfoValue(info, 'fs_game'));

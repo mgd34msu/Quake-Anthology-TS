@@ -97,6 +97,22 @@ function execution(provider: ProviderReference, family: GameFamily, rerelease: b
   }
 }
 
+export interface ApplicationSourceSelection {
+  readonly source: ProviderReference;
+  readonly match: ProviderReference;
+  readonly rules: NonNullable<ApplicationOptions["rules"]>;
+}
+
+export function applicationSourceSelection(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "product" | "rules">): ApplicationSourceSelection {
+  const product = catalog.require(options.product), family = product.expectation.family;
+  const source: ProviderReference = { provider: `${family}:official`, content: product.id };
+  const rerelease = product.expectation.edition === "rerelease";
+  const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
+  if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
+  const match: ProviderReference = rules === "standard" ? source : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
+  return { source, match, rules };
+}
+
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
@@ -111,7 +127,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
   if (quakeworld && (!options.dedicated || options.mode !== "deathmatch" || options.movement !== "q1" || options.character !== "q1"
     || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
     throw new Error("Native QuakeWorld currently requires dedicated deathmatch with Q1 movement and character; NetQuake protocol overrides and mixed roles are unsupported");
-  const provider: ProviderReference = { provider: `${family}:official`, content: product.id };
+  const { source: provider, match, rules } = applicationSourceSelection(catalog, options);
   const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.movement)).id };
   const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: quakeworld || q3Guest ? product.id : catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
@@ -121,9 +137,6 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     return quakeworld ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } satisfies typeof native.clock } : native;
   };
   const providerTiming = timing(provider, family, rerelease);
-  const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
-  if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
-  const match: ProviderReference = rules === "standard" ? provider : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
   return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
     map: { geometry: { content: product.id, path: options.map }, entities: provider },
     campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,

@@ -9,7 +9,7 @@ import type { ActorCommand, SimulationOutput, SimulationEvent } from '../../../c
 import type { Q1ClientData, Q1ExtendedEntityState, Q1UserCommand } from '../../../contracts/protocol.ts';
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
 import { ENTALPHA_DECODE, ENTSCALE_DECODE } from '../../../network/q1/constants.ts';
-import type { EngineSession } from '../../../world/session/session.ts';
+import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q1Event, Q1SoundChannel } from '../../../content/q1/foundation/types.ts';
@@ -24,6 +24,8 @@ export interface Q1RemotePresentationOptions {
     presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
+    readonly client: SessionClient;
+    nextGeneration(slot: number): number;
     readonly content: LoadedApplicationContent | null;
     loadContent(world: Q1RemoteWorld): Promise<LoadedApplicationContent>;
     sendCommand(text: string): void;
@@ -50,7 +52,6 @@ function angles(a: Vec3, b: Vec3, f: number): Vec3 {
 export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePresentationAccess {
     readonly client;
     private readonly world: RemoteWorldContent;
-    private generation = 0;
     private ordinal = 0;
     private sequence = 0;
     private frameNumber = 0;
@@ -84,7 +85,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     constructor(readonly options: Q1RemotePresentationOptions) {
         this.world = new RemoteWorldContent(options.content);
 
-        this.client = options.session.createClient(0);
+        this.client = options.client;
         this.client.connect('remote');
     }
     get scene() { return this.world.scene; }
@@ -95,7 +96,9 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const found = this.actors.get(number);
         if (found !== undefined)
             return found;
-        const value = this.options.identity.actor(this.ordinal++, this.generation);
+        if (this.ordinal >= 65536) throw new RangeError('Remote actor registry is full');
+        const slot = this.ordinal++;
+        const value = this.options.identity.actor(slot, this.options.nextGeneration(slot));
         this.actors.set(number, value);
         return value;
     }
@@ -115,8 +118,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     if (map === undefined || !map.startsWith('maps/') || !map.endsWith('.bsp'))
                         throw new Error('NetQuake server has no world model');
                     this.world.content = await this.options.loadContent({ map, models: message.models, sounds: message.sounds });
-                    this.generation++;
                     this.actors.clear();
+                    this.ordinal = 0;
                     this.current.clear();
                     this.previous.clear();
                     this.statics.length = 0;

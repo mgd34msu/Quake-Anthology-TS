@@ -1,3 +1,4 @@
+import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { knownQvmArtifacts } from "../../../src/compat/qvm/artifacts.ts";
 import type { ModuleIdentity, Q3ApiIdentity } from "../../../src/contracts/execution.ts";
 import { Q3RemotePresentation } from "../../../src/app/bootstrap/network/remote-q3.ts";
@@ -170,7 +171,7 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
   const identity = createIdentityOwner('production-q3-remote'), session = new EngineSession(identity, { kind: 'local' });
   const messages: string[] = [], maps: string[] = [];
   let network: InstanceType<typeof Q3ClientNetwork> | null = null;
-  const remote = new Q3RemotePresentation({ identity, session, content: app.content,
+  const remote = new Q3RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content: app.content,
     userinfo: () => '\\name\\Production Ranger\\model\\sarge/default\\handicap\\100\\rate\\25000\\snaps\\20',
     loadContent: async world => { maps.push(world.map); return app.content; },
     sendCommand: text => { if (network === null) throw new Error('No connection'); network.command(text); }, print: text => { messages.push(text); } });

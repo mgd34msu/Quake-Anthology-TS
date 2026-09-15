@@ -80,10 +80,16 @@ test('native QuakeWorld Application hosts real source players, movement, weapons
         expect(damage.some(outcome => outcome.kind === 'committed' && outcome.decision.request.attack.weapon === 'q1:weapon/rocketlauncher')).toBe(true);
         if (rocket !== undefined) expect(source.sourceSlot(rocket.id)).toBeNull();
         expect(records[0]?.some(record => record.kind === 'stat' && record.index === 8 && record.value === 9)).toBe(true);
+        const idleDownloadCommand = input({ ...command, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 });
         firstClient.command('download skins/host-fixture.pcx');
-        for (let tick = 0; tick < 200 && downloads.length < skin.length; tick++) await exchange(); expect(new Uint8Array(downloads)).toEqual(skin);
+        for (let tick = 0; tick < 200 && downloads.length < skin.length; tick++) {
+            firstClient.submit([idleDownloadCommand], performance.now()); await exchange();
+        }
+        expect(new Uint8Array(downloads)).toEqual(skin);
         firstClient.command('download maps/e1m1.bsp');
-        for (let tick = 0; tick < 100 && !records[0]?.some(record => record.kind === 'download' && record.result.kind === 'missing'); tick++) await exchange();
+        for (let tick = 0; tick < 100 && !records[0]?.some(record => record.kind === 'download' && record.result.kind === 'missing'); tick++) {
+            firstClient.submit([idleDownloadCommand], performance.now()); await exchange();
+        }
         expect(records[0]?.some(record => record.kind === 'download' && record.result.kind === 'missing')).toBe(true);
         const oldPlayers = app.networkClients, firstRecordCount = records[0]?.length ?? 0;
         holdPending = false; await app.changeLevel('dm2');

@@ -30,6 +30,8 @@ export interface Q2RemotePresentationOptions {
     presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
+    readonly client: SessionClient;
+    nextGeneration(slot: number): number;
     readonly content: LoadedApplicationContent | null;
     readonly protocol: Q2ProtocolIdentity;
     readonly userinfo: () => string;
@@ -74,8 +76,6 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     private fraction = 1;
     private currentPlayer: Q2ApplicationPlayer | null = null;
     private published: SimulationOutput | null = null;
-    private generation = 0;
-    private nextActor = 0;
     private eventSequence = 0;
     private frameMilliseconds = 100;
     private inventory: readonly number[] = [];
@@ -110,7 +110,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 this.downloadContent = fresh;
             }, options.downloadPermission);
 
-        this.client = options.session.createClient(0);
+        this.client = options.client;
         this.client.connect('remote');
     }
     get player(): Q2ApplicationPlayer | null { return this.currentPlayer; }
@@ -130,7 +130,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const current = this.actors.get(number);
         if (current !== undefined)
             return current;
-        const actor = this.options.identity.actor(this.nextActor++, this.generation);
+        const actor = this.options.identity.actor(number, this.options.nextGeneration(number));
         this.actors.set(number, actor);
         return actor;
     }
@@ -160,7 +160,6 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.world.content = content;
         const owner = this.downloadContent;
         if (owner !== null) this.downloadContent = { ...owner, catalog: content.catalog, product: content.catalog.product(owner.product.id), mounts: content.mounts };
-        this.generation++;
         this.actors.clear();
         this.configs.clear();
         this.current = null;

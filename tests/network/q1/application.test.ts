@@ -1,3 +1,4 @@
+import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { expect, test } from 'bun:test';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
@@ -388,7 +389,7 @@ test("NetQuake U_NOLERP snaps and dropped-packet interpolation retains the clamp
 const launch=parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1']);
 if(launch.kind!=='run')throw Error('launch');
 const content=await loadApplicationContent(launch.options),identity=createIdentityOwner('native-review'),session=new EngineSession(identity,{kind:'local'});
-const remote=new Q1RemotePresentation({identity,session,content,loadContent:async()=>content,sendCommand:()=>{},print:()=>{}});
+const remote=new Q1RemotePresentation({identity,session,client:session.createClient(0),nextGeneration:slot=>nextActorGeneration(session.session,slot),content,loadContent:async()=>content,sendCommand:()=>{},print:()=>{}});
 const zero={x:0,y:0,z:0};
 const state=(x:number,step:boolean):Q1ExtendedEntityState=>({number:1,origin:{x,y:0,z:0},angles:zero,modelIndex:2,frame:0,colorMap:0,skin:0,effects:0,alpha:0,scale:16,lerpFinishSeconds:0,step});
 try {
@@ -405,5 +406,15 @@ expect(sampled.snapshot.frame.time.value).toBeCloseTo(1.45,12);
 expect(remote.presentations()[0]?.origin.x).toBeCloseTo(30,12);
 expect(remote.samplePresentation(1500)?.snapshot.frame.time).toEqual({kind:'seconds',value:1.4});
 expect(remote.samplePresentation(1600)?.snapshot.frame.time).toEqual({kind:'seconds',value:1.5});
+await remote.receive([{kind:'static',state:state(60,true)}],1600);
+const beforeReset=remote.presentations().map(value=>value.actor);
+expect(beforeReset).toHaveLength(2);
+expect(new Set(beforeReset.map(actor=>actor.slot)).size).toBe(2);
+expect(beforeReset.every(actor=>actor.slot<65536)).toBe(true);
+await remote.receive([{kind:'server-info',protocol:{kind:'q1-netquake',version:15},maxClients:1,gameType:0,level:'replacement',models:['maps/e1m1.bsp','progs/player.mdl'],sounds:[]},{kind:'entity',state:state(0,true)},{kind:'static',state:state(60,true)}],1700);
+const afterReset=remote.presentations().map(value=>value.actor);
+expect(afterReset.map(actor=>actor.slot)).toEqual(beforeReset.map(actor=>actor.slot));
+expect(afterReset.every(actor=>beforeReset.every(old=>!actor.equals(old)))).toBe(true);
+expect(afterReset.every(actor=>actor.slot<65536)).toBe(true);
 } finally {session.close();await content.close();}
 });

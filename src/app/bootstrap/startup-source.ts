@@ -1,5 +1,5 @@
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
-import type { ExecutableRecipe } from "../../contracts/content.ts";
+import type { ApplicationSourceSelection } from "./content.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { registerQ2ServerCvars, applyServerProfile, cvarServerSettingsOwner, serverDefinitionsForRecipe } from "../../settings/server/index.ts";
 import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
@@ -8,12 +8,12 @@ import { registerQ3ServerCvars } from "./simulation/q3/server-state.ts";
 import { registerFrameTimeCvars } from "./frame-time.ts";
 import type { ApplicationOptions } from "./options.ts";
 
-export function createStartupSource(options: ApplicationOptions, recipe: ExecutableRecipe, dialect: CommandDialect,
+export function createStartupSource(options: ApplicationOptions, selection: Pick<ApplicationSourceSelection, "source" | "match">, dialect: CommandDialect,
   context: CommandContext, maxClients: number, print: (text: string) => void): CvarRegistry {
   const cvars = new CvarRegistry({ dialect, context, print });
-  if (dialect === "q2-classic" || dialect === "q2-rerelease") registerQ2ServerCvars(cvars, recipe.match.provider);
+  if (dialect === "q2-classic" || dialect === "q2-rerelease") registerQ2ServerCvars(cvars, selection.match.provider);
   else if (dialect === "q3") {
-    for (const definition of q3GameCvarDefinitions(recipe.map.entities.content.includes("missionpack") ? "missionpack" : "baseq3"))
+    for (const definition of q3GameCvarDefinitions(selection.source.content.includes("missionpack") ? "missionpack" : "baseq3"))
       cvars.register(definition.name, definition.value, definition.flags);
   } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: "0.93",
     sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);

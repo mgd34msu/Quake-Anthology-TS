@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { openRemoteApplicationContent } from '../../../src/app/bootstrap/content.ts';
 import { RemoteApplication } from '../../../src/app/bootstrap/remote-application.ts';
 import { QwRemotePresentation } from '../../../src/app/bootstrap/network/remote-qw.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
@@ -27,8 +28,15 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
         const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--connect-qw', addressKey(server.address), '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden', '--user-content-root', root]);
         if (launch.kind !== 'run') throw new Error('Expected QW run');
         app = await RemoteApplication.open(launch.options, { print: text => { prints.push(text); return undefined; } });
-        const remote = app;
-        const sound = await remote.content.mounts.read('sound/misc/menu1.wav');
+        let remote = app;
+        const session = remote.session;
+        expect(session.world).toBeNull(); expect(remote.localPlayers).toHaveLength(0);
+        expect(() => remote.content).toThrow('Remote server has not supplied a world');
+        if (!(remote.remote instanceof QwRemotePresentation)) throw new Error('Expected mapless QW presentation');
+        const suppliedClient = remote.remote.shared.client;
+        const fixtureContent = await openRemoteApplicationContent(launch.options);
+        let sound: Uint8Array;
+        try { sound = await fixtureContent.mounts.read('sound/misc/menu1.wav'); } finally { await fixtureContent.close(); }
         let channel: QuakeWorldChannel | null = null, downloadOffset = 0, begun = false;
         let servedDirectory = gameDirectory, servedMap = 'e1m1', serverCount = 3;
         const commands: string[] = [], moves: QwUserCommand[] = [];
@@ -77,6 +85,8 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
         expect(remote.options.product).toBe(gameDirectory === 'mod-alpha' ? 'q1-quakeworld-mod-mod-alpha' : 'q1-quakeworld');
         expect(remote.networkPhase).toBe('active'); expect(remote.session.world).toBeNull(); expect(remote.remote).toBeInstanceOf(QwRemotePresentation);
         if (!(remote.remote instanceof QwRemotePresentation)) throw new Error('Expected QW presentation');
+        expect(remote.session).toBe(session); expect(remote.remote.shared.client).toBe(suppliedClient);
+        expect(remote.content.recipe.map.geometry.requestedPath).toBe('maps/e1m1.bsp');
         const player = remote.localPlayers[0]; if (player === undefined) throw new Error(`QW seat missing: ${prints.join('')}`);
         expect(remote.remote.player?.sourceEntity).toBe(4); expect(remote.remote.playerUi(player.actor).health).toBe(100);
         expect(new Set(remote.readPixels()).size).toBeGreaterThan(16);
@@ -101,6 +111,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
                 serverCount++; downloadOffset = 0; begun = false;
                 send([serverData()]);
                 for (let tick = 0; tick < 200 && (!begun || remote.networkPhase !== 'active'); tick++) await exchange();
+                expect(remote.session).toBe(session); expect(remote.remote.shared.client).toBe(suppliedClient);
                 expect(begun).toBe(true); expect(remote.networkPhase).toBe('active');
                 expect(remote.options.product).toBe(directory === 'qw' ? 'q1-quakeworld' : `q1-quakeworld-mod-${directory}`);
                 expect(remote.content.recipe.map.geometry.requestedPath).toBe(`maps/${servedMap}.bsp`);
@@ -131,6 +142,14 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
             expect(remote.options.product).toBe('q1-quakeworld-mod-current-mod');
             const reopened = await RemoteApplication.open(reconnectOptions, { print: text => { prints.push(text); } });
             try {
+                expect(reopened.session.world).toBeNull(); expect(reopened.localPlayers).toHaveLength(0);
+                expect(() => reopened.content).toThrow('Remote server has not supplied a world');
+                if (!(reopened.remote instanceof QwRemotePresentation)) throw new Error('Expected reopened mapless QW presentation');
+                const reopenedSession = reopened.session, reopenedClient = reopened.remote.shared.client;
+                remote = reopened; channel = null; begun = false; downloadOffset = 0; servedDirectory = 'mod-alpha'; servedMap = 'dm2'; serverCount++;
+                for (let tick = 0; tick < 200 && remote.localPlayers.length === 0; tick++) await exchange();
+                expect(reopened.networkPhase).toBe('active'); expect(reopened.session).toBe(reopenedSession);
+                expect(reopened.remote.shared.client).toBe(reopenedClient);
                 expect(reopened.options.remoteContent).toEqual({ base: 'q1-quakeworld', directory: 'mod-alpha' });
                 expect(reopened.content.recipe.map.geometry.requestedPath).toBe('maps/dm2.bsp');
                 const retained = await reopened.content.mounts.open('sound/misc/qw-join-test.wav');

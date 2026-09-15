@@ -19,6 +19,17 @@ interface Slot {
 // Level registries come and go while seats and clients retain the same session identity.
 const sessionGenerations = new WeakMap<SessionId, Map<number, number>>();
 
+export function nextActorGeneration(session: SessionId, slot: number, minimum = 0): number {
+  if (!Number.isSafeInteger(slot) || slot < 0) throw new RangeError("Actor slot must be a nonnegative safe integer");
+  if (!Number.isSafeInteger(minimum) || minimum < 0) throw new RangeError("Actor generation must be a nonnegative safe integer");
+  let generations = sessionGenerations.get(session);
+  if (generations === undefined) { generations = new Map<number, number>(); sessionGenerations.set(session, generations); }
+  const generation = Math.max(minimum, generations.get(slot) ?? 0);
+  if (!Number.isSafeInteger(generation) || generation >= Number.MAX_SAFE_INTEGER) throw new RangeError("Actor generation is exhausted");
+  generations.set(slot, generation + 1);
+  return generation;
+}
+
 /** Host generations invalidate observations; a source slot deliberately resolves its current occupant. */
 export class SessionActorRegistry implements ActorRegistry {
   readonly session: SessionId;
@@ -234,9 +245,6 @@ export class SessionActorRegistry implements ActorRegistry {
   }
 
   private reserveGeneration(slot: number, minimum: number): number {
-    const generation = Math.max(minimum, this.generations.get(slot) ?? 0);
-    if (!Number.isSafeInteger(generation) || generation >= Number.MAX_SAFE_INTEGER) throw new RangeError("Actor generation is exhausted");
-    this.generations.set(slot, generation + 1);
-    return generation;
+    return nextActorGeneration(this.session, slot, minimum);
   }
 }

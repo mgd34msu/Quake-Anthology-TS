@@ -1,3 +1,4 @@
+import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,7 +41,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         const owner = await openRemoteContent(parsed.options, remoteContentSelection('q2-classic-baseq2', data.gamedir), assertCurrent);
         downloadOwners.push(owner); return owner;
     };
-    const remote = new Q2RemotePresentation({ identity, session, content, prepareServerData, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
+    const remote = new Q2RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
             throw new Error('Client transport unavailable'); client.command(text); }, loadContent: async (state) => {
             const map = state.configStrings.get(33);
             if (map === undefined)
@@ -154,7 +155,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);
         expect(remote.isPlayer(player.actor)).toBe(true);
-        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, content, prepareServerData,
+        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, client: otherSession.createClient(0), nextGeneration: slot => nextActorGeneration(otherSession.session, slot), content, prepareServerData,
             protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Second Peer\\skin\\male/grunt', print: () => undefined,
             sendCommand: text => otherClient?.command(text), loadContent: async () => content });
         otherClient = new Q2ClientNetwork({ transport: await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), remote: address, host: otherRemote, qport: 4219 });

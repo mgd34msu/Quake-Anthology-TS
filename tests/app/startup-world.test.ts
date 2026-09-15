@@ -10,7 +10,7 @@ test.skipIf(process.env["QUAKE_STARTUP_RETAIL_TEST"] !== "1")("prepared skill co
   if (command.kind !== "run") throw new Error("Expected launch");
   const content = await loadApplicationContent(command.options), identity = createIdentityOwner("startup-first-spawn");
   try {
-    const source = createStartupSource(command.options, content.recipe, "q2-rerelease", { session: identity.session, origin: { kind: "server-console" } }, 1, () => {});
+    const source = createStartupSource(command.options, { source: content.recipe.map.entities, match: content.recipe.match }, "q2-rerelease", { session: identity.session, origin: { kind: "server-console" } }, 1, () => {});
     expect(source.find("timescale")?.value).toBe("1");
     expect(source.find("fixedtime")?.value).toBe("0");
     expect(source.find("sv_airaccelerate")?.value).toBe("0");

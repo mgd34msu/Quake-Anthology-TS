@@ -1017,7 +1017,7 @@ export class Application {
     }> {
     const dialect = Application.contentDialect(content), movement = movementDialect(options, content.recipe);
     const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
-    const source = createStartupSource(options, content.recipe, dialect, context, defaultCapacity, text => host.print(text));
+    const source = createStartupSource(options, { source: content.recipe.map.entities, match: content.recipe.match }, dialect, context, defaultCapacity, text => host.print(text));
     const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
     const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
       ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });

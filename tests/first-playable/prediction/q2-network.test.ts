@@ -1,3 +1,4 @@
+import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ test("native Q2 predicts sent moves before server execution and reconciles using
       const owner = await openRemoteContent(launch.options, remoteContentSelection('q2-classic-baseq2', data.gamedir), assertCurrent);
       downloadOwners.push(owner); return owner;
   };
-  const remote = new Q2RemotePresentation({ identity, session, content, prepareServerData, protocol: { kind: "q2-classic", version: 34 },
+  const remote = new Q2RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData, protocol: { kind: "q2-classic", version: 34 },
     userinfo: () => "\\name\\Prediction Player\\skin\\male/grunt", print: () => undefined,
     sendCommand: text => { if (client === null) throw new Error("No client"); client.command(text); } });
   client = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: 4319 });
