@@ -83,12 +83,12 @@ export class Q3ApplicationEffects {
     readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, RegisteredSceneMaterial>,
     readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
 
-  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean, preload = false): Promise<Q3ApplicationEffects> {
+  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean, preload?: "character" | "weapons"): Promise<Q3ApplicationEffects> {
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
     const renderer = new SceneModelRenderer(provider, assets.world);
     const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, RegisteredSceneMaterial>();
     const sound = async (path: string): Promise<PcmSound | null> => { const loaded = await bank.register(path, "q3"); if (loaded === null) return null; names.set(loaded.pcm, path); return loaded.pcm; };
-    let preloading = preload;
+    let preloading = preload !== undefined;
     const shader = async (name: string): Promise<SceneShader> => {
       if (preloading && provider.shaders.hasCinematic(name)) throw new Error(`Effect cinematic deferred until use: ${name}`);
       shaders.set(name, await provider.shaders.register(name)); return { name };
@@ -202,10 +202,12 @@ export class Q3ApplicationEffects {
         } };
     };
     const result = new Q3ApplicationEffects(content, assets, state, effects, system, marks, shaders, renderer, sounds, loadWeapons, bloodOwners);
-    if (preload) {
+    if (preload !== undefined) {
       try {
-        result.weaponEffects = loadWeapons();
-        result.readyWeapons = await result.weaponEffects;
+        if (preload === "weapons") {
+          result.weaponEffects = loadWeapons();
+          result.readyWeapons = await result.weaponEffects;
+        }
       } catch (error: unknown) { result.close(); throw error; }
       finally { preloading = false; }
     }

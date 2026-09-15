@@ -1,4 +1,5 @@
 import { menuSoundPath } from "./audio/menu.ts";
+import { Q3_FOOTSTEP_PATHS } from "../../content/q3/presentation/character-resources.ts";
 import type { ApplicationInput } from "./input.ts";
 import type { ContentId, GameFamily } from "../../contracts/content.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
@@ -221,9 +222,9 @@ export class ApplicationAudio {
     return state;
   }
 
-  private sound(content: ContentId, path: string, family: GameFamily, actor: ActorId | null = null): Promise<SoundAsset | null> {
+  private sound(content: ContentId, path: string, family: GameFamily, actor: ActorId | null = null, selectedModel?: string): Promise<SoundAsset | null> {
     if (path.startsWith("sound/")) path = path.slice(6);
-    const model = family === "q2" ? actor === null ? "male" : this.actor(actor).model : this.characterModel;
+    const model = selectedModel ?? (family === "q2" ? actor === null ? "male" : this.actor(actor).model : this.characterModel);
     const key = `${content}/${family}/${path}/${path.startsWith("*") ? model : ""}`;
     const prior = this.sounds.get(key);
     if (prior !== undefined) return prior;
@@ -232,8 +233,17 @@ export class ApplicationAudio {
     return pending;
   }
 
-  async preloadSound(content: ContentId, path: string): Promise<void> {
-    await this.sound(content, path, this.content.catalog.product(content).expectation.family);
+  async preloadSound(content: ContentId, path: string, selectedModel?: string): Promise<void> {
+    await this.sound(content, path, this.content.catalog.product(content).expectation.family, null, selectedModel);
+  }
+
+  async preloadCharacterFootsteps(): Promise<void> {
+    const content = this.content.recipe.character.definition.content;
+    if (this.content.catalog.product(content).expectation.family !== "q3") return;
+    const selected = await this.q3Footsteps(content);
+    for (const [kind, path] of Q3_FOOTSTEP_PATHS) if (kind === selected || kind === "metal" || kind === "splash") {
+      for (let index = 1; index <= 4; index++) await this.sound(content, `player/footsteps/${path}${index}.wav`, "q3");
+    }
   }
 
   private async loadSound(content: ContentId, path: string, family: GameFamily, model: string): Promise<SoundAsset | null> {

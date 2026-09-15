@@ -124,17 +124,22 @@ export class ApplicationEffects {
   }
   async preloadTransientResources(): Promise<readonly { readonly content: ContentId; readonly path: string; readonly error: string }[]> {
     const recipe = this.assets.content.recipe;
-    const contents = new Set<ContentId>([recipe.map.entities.content, ...recipe.weapons.map(weapon => weapon.content)]);
+    const character = recipe.character.definition.content;
+    const contents = new Set<ContentId>([recipe.map.entities.content, character, ...recipe.weapons.map(weapon => weapon.content)]);
     for (const equipment of [recipe.equipment.grapple, recipe.equipment.handGrenades]) if (equipment.kind === "enabled") contents.add(equipment.source.content);
     if (recipe.enemies.kind === "replace") for (const target of [recipe.enemies.default, ...Object.values(recipe.enemies.byClassname)]) {
       if ("source" in target) contents.add(target.source.content);
     }
     const failures: { content: ContentId; path: string; error: string }[] = [];
+    if (character !== recipe.map.entities.content && this.assets.content.catalog.product(character).expectation.family === "q3" && !this.q3.has(character)) {
+      try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, this.isPlayer, "character")); }
+      catch (error: unknown) { failures.push({ content: character, path: "Q3 character effect media", error: error instanceof Error ? error.message : String(error) }); }
+    }
     for (const content of new Set(recipe.weapons.map(weapon => weapon.content))) {
       if (content === recipe.map.entities.content || this.assets.content.catalog.product(content).expectation.family !== "q3"
         || this.preparedQ3Weapons.has(content) || this.q3Weapons.has(content)) continue;
       try {
-        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, true);
+        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, "weapons");
         this.preparedQ3Weapons.set(content, effects);
       } catch (error: unknown) {
         failures.push({ content, path: "Q3 effect media", error: error instanceof Error ? error.message : String(error) });

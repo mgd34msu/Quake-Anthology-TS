@@ -1,6 +1,7 @@
 // Registration from id Software's code/cgame/cg_main.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { PcmSound } from "../../../audio/wav.ts";
+import { Q3_CHARACTER_SOUNDS, Q3_FOOTSTEP_PATHS } from "./character-resources.ts";
 import { vec3 } from "../../../core/math.ts";
 import { modelBounds } from "./model-access.ts";
 import type { Vec3 } from "../../../core/math.ts";
@@ -477,10 +478,10 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
     }
   }
   media.sounds.tracerSound = await media.soundBank.registerSound("sound/weapons/machinegun/buletby1.wav", false);
-  media.sounds.selectSound = await media.soundBank.registerSound("sound/weapons/change.wav", false);
+  media.sounds.selectSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.selectSound, false);
   media.sounds.wearOffSound = await media.soundBank.registerSound("sound/items/wearoff.wav", false);
   media.sounds.useNothingSound = await media.soundBank.registerSound("sound/items/use_nothing.wav", false);
-  media.sounds.gibSound = await media.soundBank.registerSound("sound/player/gibsplt1.wav", false);
+  media.sounds.gibSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.gibSound, false);
   media.sounds.gibBounce1Sound = await media.soundBank.registerSound("sound/player/gibimp1.wav", false);
   media.sounds.gibBounce2Sound = await media.soundBank.registerSound("sound/player/gibimp2.wav", false);
   media.sounds.gibBounce3Sound = await media.soundBank.registerSound("sound/player/gibimp3.wav", false);
@@ -499,12 +500,12 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
     media.sounds.guardSound = await media.soundBank.registerSound("sound/items/cl_guard.wav", false);
     media.sounds.scoutSound = await media.soundBank.registerSound("sound/items/cl_scout.wav", false);
   }
-  media.sounds.teleInSound = await media.soundBank.registerSound("sound/world/telein.wav", false);
-  media.sounds.teleOutSound = await media.soundBank.registerSound("sound/world/teleout.wav", false);
-  media.sounds.respawnSound = await media.soundBank.registerSound("sound/items/respawn1.wav", false);
+  media.sounds.teleInSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.teleInSound, false);
+  media.sounds.teleOutSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.teleOutSound, false);
+  media.sounds.respawnSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.respawnSound, false);
   media.sounds.noAmmoSound = await media.soundBank.registerSound("sound/weapons/noammo.wav", false);
   media.sounds.talkSound = await media.soundBank.registerSound("sound/player/talk.wav", false);
-  media.sounds.landSound = await media.soundBank.registerSound("sound/player/land1.wav", false);
+  media.sounds.landSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.landSound, false);
   media.sounds.hitSound = await media.soundBank.registerSound("sound/feedback/hit.wav", false);
   if (mission) {
     media.sounds.hitSoundHighArmor = await media.soundBank.registerSound("sound/feedback/hithi.wav", false);
@@ -529,15 +530,12 @@ export async function registerClientSounds(media: ClientMedia, host: ClientMedia
     media.sounds.votePassed = await media.soundBank.registerSound("sound/feedback/vote_passed.wav", true);
     media.sounds.voteFailed = await media.soundBank.registerSound("sound/feedback/vote_failed.wav", true);
   }
-  media.sounds.watrInSound = await media.soundBank.registerSound("sound/player/watr_in.wav", false);
-  media.sounds.watrOutSound = await media.soundBank.registerSound("sound/player/watr_out.wav", false);
-  media.sounds.watrUnSound = await media.soundBank.registerSound("sound/player/watr_un.wav", false);
-  media.sounds.jumpPadSound = await media.soundBank.registerSound("sound/world/jumppad.wav", false);
+  media.sounds.watrInSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.watrInSound, false);
+  media.sounds.watrOutSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.watrOutSound, false);
+  media.sounds.watrUnSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.watrUnSound, false);
+  media.sounds.jumpPadSound = await media.soundBank.registerSound(Q3_CHARACTER_SOUNDS.jumpPadSound, false);
 
-  const footstepPaths: readonly (readonly [Footsteps, string])[] = [
-    ["normal", "step"], ["boot", "boot"], ["flesh", "flesh"], ["mech", "mech"], ["energy", "energy"], ["splash", "splash"], ["metal", "clank"],
-  ];
-  for (let i = 0; i < 4; i++) for (const [footstep, name] of footstepPaths) {
+  for (let i = 0; i < 4; i++) for (const [footstep, name] of Q3_FOOTSTEP_PATHS) {
     media.footsteps[footstep][i] = await media.soundBank.registerSound(`sound/player/footsteps/${name}${i + 1}.wav`, false);
   }
 

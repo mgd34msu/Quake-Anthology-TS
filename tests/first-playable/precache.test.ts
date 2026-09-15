@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { applicationResourceRequests, nativeQ2MonsterResources, prepareApplicationResources } from "../../src/app/bootstrap/precache.ts";
+import { applicationResourceRequests, characterResourceRequests, nativeQ2MonsterResources, prepareApplicationResources } from "../../src/app/bootstrap/precache.ts";
 import { InstalledCatalog, expectedProducts } from "../../src/content/catalog/index.ts";
 import type { CatalogProduct } from "../../src/content/catalog/index.ts";
 import { createContentId } from "../../src/contracts/content.ts";
@@ -9,7 +9,7 @@ import { rogueWeaponDefinitions, xatrixWeaponDefinitions } from "../../src/conte
 import { monsterSources } from "../../src/content/monsters/definitions.ts";
 import { rereleaseMedicReinforcements } from "../../src/content/q2/rerelease/monsters/base-variants/medic.ts";
 
-const catalog = new InstalledCatalog("/unused", expectedProducts.filter(product => ["q1-classic-id1", "q2-rerelease-baseq2"].includes(product.id)).map(expectation => ({
+const catalog = new InstalledCatalog("/unused", expectedProducts.filter(product => ["q1-classic-id1", "q2-rerelease-baseq2", "q3-baseq3"].includes(product.id)).map(expectation => ({
   id: createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "precache-test" }),
   expectation, availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [],
 } satisfies CatalogProduct)), [], 0);
@@ -19,7 +19,7 @@ const gunner = { source: { provider: "q2:monsters/rerelease/baseq2", content: ca
 const simulation = { q1Source: () => null, quakecSource: () => null, q2Source: () => null, q1WeaponSource: () => null };
 
 test("shared precache keeps selected source identity and deduplicates overlapping monster, weapon and equipment declarations", () => {
-  const content = { catalog, recipe: { map: { entities: native }, weapons: [native],
+  const content = { catalog, recipe: { map: { entities: native }, weapons: [native], character: { definition: native, appearance: native },
     enemies: { kind: "replace", default: gunner, byClassname: { monster_ogre: gunner } },
     equipment: { ...disabledEquipment(), handGrenades: { kind: "enabled", edition: "rerelease", binding: "offhand", initialAmmo: 2, capacity: 50,
       source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: gunner.source.content } } },
@@ -73,15 +73,28 @@ test("native medic precache reads the same custom reinforcement fields as live s
 });
 
 test("preparation advances loading progress and reports a failed optional resource while finishing the list", async () => {
-  const content = { catalog, recipe: { map: { entities: native }, weapons: [], equipment: disabledEquipment(),
+  const content = { catalog, recipe: { map: { entities: native }, weapons: [], equipment: disabledEquipment(), character: { definition: native, appearance: native },
     enemies: { kind: "replace", default: gunner, byClassname: {} } } } satisfies Parameters<typeof applicationResourceRequests>[0];
   const requests = applicationResourceRequests(content, simulation), visited: string[] = [], messages: string[] = [], progress: string[] = [];
   await prepareApplicationResources({ content, simulation, progress: message => { progress.push(message); }, print: message => { messages.push(message); },
-    audio: { preloadSound: async (_content, path) => { visited.push(path); } },
+    audio: { preloadSound: async (_content, path) => { visited.push(path); }, preloadCharacterFootsteps: async () => {} },
     effects: { preloadModel: async (_content, path) => { visited.push(path); if (path === "models/objects/grenade/tris.md2") throw new Error("test missing model"); } },
   });
   expect(visited).toEqual(requests.map(request => request.path));
   expect(progress).toHaveLength(requests.length);
   expect(messages).toHaveLength(1);
   expect(messages[0]).toContain(`${gunner.source.content}/models/objects/grenade/tris.md2: test missing model`);
+});
+
+test("selected character resources include native voices and gibs without pulling other character families", () => {
+  for (const product of ["q1-classic-id1", "q2-rerelease-baseq2", "q3-baseq3"]) {
+    const character = { ...native, content: catalog.product(product).id };
+    const requests = characterResourceRequests({ catalog, recipe: { map: { entities: native }, weapons: [], enemies: { kind: "map-defined" },
+      equipment: disabledEquipment(), character: { definition: character, appearance: character } } });
+    expect(requests.every(request => request.content === character.content)).toBe(true);
+    const paths = requests.map(request => request.path);
+    if (product.startsWith("q1")) { expect(paths).toContain("sound/player/pain1.wav"); expect(paths).toContain("progs/gib1.mdl"); expect(paths).not.toContain("progs/v_rock.mdl"); }
+    else if (product.startsWith("q2")) { expect(paths).toContain("*pain100_1.wav"); expect(paths).toContain("models/objects/gibs/head2/tris.md2"); }
+    else { expect(paths).toContain("*pain100_1.wav"); expect(paths).toContain("sound/world/telein.wav"); expect(paths).not.toContain("sound/player/sarge/pain100_1.wav"); }
+  }
 });

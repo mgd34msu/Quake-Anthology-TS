@@ -17,6 +17,34 @@ import { SceneShaderRegistry } from "../../src/render/scene/shaders.ts";
 import { Q3ApplicationEffects } from "../../src/app/bootstrap/effects/q3.ts";
 import { SceneModelRenderer } from "../../src/render/scene/models/renderer.ts";
 
+test("Q3 character preparation registers common effects while deferring unselected weapon media", async () => {
+  const temporary = await mkdtemp("/tmp/quake-q3-character-precache-");
+  try {
+    const command = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--dedicated", "--user-content-root", temporary]);
+    if (command.kind !== "run") throw Error("Expected game");
+    const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q3-character-precache");
+    const assets = new ApplicationAssets(content, { identity: Symbol("q3-character-precache"), session: identity.session, generation: 0 });
+    try {
+      await assets.loadWorld();
+      const models = spyOn(assets, "model"), source = content.recipe.map.entities.content;
+      const effects = await Q3ApplicationEffects.create(assets, createSceneQueries(content.world), source, () => false, "character");
+      try {
+        expect(models.mock.calls.some(call => call[1] === "models/gibs/skull.md3")).toBe(true);
+        expect(models.mock.calls.some(call => call[1].startsWith("models/weapons2/") && !call[1].startsWith("models/weapons2/shells/"))).toBe(false);
+        expect(effects.drainSounds()).toHaveLength(0);
+        const weapons = spyOn(effects, "loadWeapons");
+        try {
+          const origin = { x: 0, y: 0, z: 0 };
+          await effects.ballistic({ kind: "fire", actor: identity.actor(1, 0), weapon: 2, origin, end: origin,
+            normal: origin, target: null, surfaceFlags: 0, timeMilliseconds: 1000, volume: 1 });
+          expect(weapons).toHaveBeenCalledTimes(1);
+          expect(models.mock.calls.some(call => call[1] === "models/weapons2/machinegun/machinegun_flash.md3")).toBe(true);
+        } finally { weapons.mockRestore(); }
+      } finally { effects.close(); models.mockRestore(); }
+    } finally { assets.close(); await content.close(); }
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+}, 60000);
+
 test("cinematic metadata preserves normalized first definitions and replacements", async () => {
   const identity = createIdentityOwner("effect-cinematic");
   const images = new SceneImageRegistry({ identity: Symbol("effect-cinematic"), session: identity.session, generation: 0 });
@@ -66,7 +94,7 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
       const guard = spyOn(provider.shaders, "hasCinematic").mockImplementation(name => name === "waterBubble");
       const register = spyOn(provider.shaders, "register");
       try {
-        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, true)).rejects.toThrow("cinematic deferred");
+        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons")).rejects.toThrow("cinematic deferred");
         expect(register).not.toHaveBeenCalled();
       } finally { guard.mockRestore(); register.mockRestore(); }
       const flash = await assets.model(source, "models/weapons2/machinegun/machinegun_flash.md3");
@@ -86,10 +114,10 @@ test("Q3 loading media stays empty and retries a deferred cinematic at actual us
         return read(...args);
       });
       try {
-        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, true)).rejects.toThrow("temporary flash image read");
+        await expect(Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons")).rejects.toThrow("temporary flash image read");
       } finally { failedRead.mockRestore(); }
       const reads = spyOn(provider.textures.reader, "read");
-      const effects = await Q3ApplicationEffects.create(assets, queries, source, () => false, true);
+      const effects = await Q3ApplicationEffects.create(assets, queries, source, () => false, "weapons");
       try {
         const flashReads = (): number => reads.mock.calls.filter(call => call[0] === "models/weapons2/machinegun/f_machinegun.tga").length;
         expect(flashReads()).toBe(1);
