@@ -448,7 +448,8 @@ export class Application {
   }
 
   private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest): ApplicationInputCommands {
-    return { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
+    return { readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
+      ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
       execute: (name, arguments_, seat) => localGuest === null ? this.queueCommand(name, arguments_, seat)
         : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat }), print: text => this.host.print(text),
       bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null || simulation.q3Guest() !== null,

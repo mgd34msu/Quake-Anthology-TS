@@ -35,6 +35,7 @@ import { applicationAudioCommands } from "./audio/commands.ts";
 import type { ApplicationConsoleServer } from "./console.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
 import { InputButton } from "../../input/buttons.ts";
+import { consoleConfigRoot, ConsoleScriptFiles } from "./config-scripts.ts";
 
 export interface LocalPlayer {
   readonly seat: SessionSeat;
@@ -50,6 +51,7 @@ export interface LocalInput {
 }
 
 export interface ApplicationInputCommands {
+  readScript?(name: string): Promise<Uint8Array | undefined>;
   readonly llm?: LlmCommandRequester;
   bindingCapabilities?(): BindingCapabilities;
   readonly sharedCvars?: CvarRegistry;
@@ -85,12 +87,14 @@ export function movementDialect(options: Pick<ApplicationOptions, "movement"> & 
 }
 
 export interface ApplicationInputCommandOwner {
+  readonly scripts?: ConsoleScriptFiles;
   readonly cvars: CvarRegistry;
   readonly commands: CommandBuffer;
   readonly inputSettings?: MouseSettings;
 }
 
 export class ApplicationInput {
+  readonly scripts: ConsoleScriptFiles;
   get bindingCapabilities(): BindingCapabilities {
     return this.actions.bindingCapabilities?.() ?? { chat: this.options.network.kind.endsWith("-client"),
       scoreCommand: this.options.network.kind === "q2-client" ? "score" : this.options.network.kind === "q3-client" ? "+scores" : null,
@@ -165,7 +169,9 @@ export class ApplicationInput {
     this.consoleRouting = owner === undefined ? new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
       seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => actions.sharedCvars ?? null }) : null;
+    this.scripts = owner?.scripts ?? new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings, mounted: actions.readScript });
     this.commands = owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
+      readScript: (name, source) => this.scripts.read(name, source),
       ...(this.consoleRouting === null ? {} : { cvarRouting: this.consoleRouting }), print, forwardToServer: invocation => {
       const name = invocation.argv[0]; if (name === undefined) return undefined;
       let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;

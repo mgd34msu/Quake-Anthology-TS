@@ -41,7 +41,7 @@ export interface CommandBufferOptions {
   readonly cvars?: CvarRegistry;
   readonly cvarRouting?: CommandCvarRouting;
   readonly print?: (text: string, source?: CommandContext) => void;
-  readonly readScript?: (name: string, source: CommandContext) => string | undefined;
+  readonly readScript?: (name: string, source: CommandContext) => string | undefined | Promise<string | undefined>;
   readonly commandLine?: readonly string[];
   readonly clientGame?: CommandFallback;
   readonly serverGame?: CommandFallback;
@@ -56,6 +56,11 @@ interface RegisteredEntry { readonly name: string; readonly handler: CommandHand
 interface AliasEntry { readonly name: string; value: string; }
 interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; }
 interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly parent: ExecutionFrame | undefined; active: boolean; }
+interface ScriptRead {
+  readonly name: string;
+  readonly source: CommandContext;
+  result: { readonly kind: "pending" } | { readonly kind: "ready"; readonly text: string | undefined } | { readonly kind: "failed"; readonly error: unknown };
+}
 
 function copyOrigin(origin: CommandOrigin, context: CommandContext): CommandOrigin {
   switch (origin.kind) {
@@ -85,6 +90,7 @@ export class CommandBuffer {
   private waitFrames = 0;
   private aliasCount = 0;
   private asyncDraining = false;
+  private scriptRead: ScriptRead | undefined;
   private frame: ExecutionFrame | undefined;
   private tokens: readonly string[] = [];
   private batchBudget: { remaining: number; readonly signal: AbortSignal | undefined } | undefined;
@@ -111,6 +117,7 @@ export class CommandBuffer {
     this.chunks = [...previous.chunks];
     this.deferred = [...previous.deferred];
     this.waitFrames = previous.waitFrames;
+    this.scriptRead = previous.scriptRead;
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
   }
 
@@ -273,7 +280,15 @@ export class CommandBuffer {
 
   private *drain(): Generator<number, void, void> {
     if (isQ2(this.dialect)) this.aliasCount = 0;
-    while (this.chunks.length > 0) {
+    while (this.chunks.length > 0 || this.scriptRead !== undefined) {
+      const script = this.scriptRead;
+      if (script !== undefined) {
+        if (script.result.kind === "pending") return;
+        this.scriptRead = undefined;
+        if (script.result.kind === "failed") this.options.print?.(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
+        else this.insertScript(script.name, script.result.text, script.source);
+        continue;
+      }
       if (this.dialect === "q3" && this.waitFrames !== 0) { this.waitFrames = (this.waitFrames - 1) | 0; break; }
       const first = this.chunks[0];
       if (first === undefined) break;
@@ -306,17 +321,19 @@ export class CommandBuffer {
       else if (++length >= this.maximumCommand) throw new RangeError("Command batch line exceeds the engine line limit.");
     }
     if (this.batchBudget !== undefined) throw new Error("Nested command batches are not supported.");
-    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, aliasCount: this.aliasCount, tokens: this.tokens };
+    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, aliasCount: this.aliasCount, tokens: this.tokens, scriptRead: this.scriptRead };
+    this.scriptRead = undefined;
     this.chunks = []; this.deferred = []; this.waitFrames = 0; this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
     try {
       this.appendFor(value, context, false);
       const count = this.execute();
-      if (this.chunks.length > 0 || this.deferred.length > 0) throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
+      if (this.chunks.length > 0 || this.deferred.length > 0 || this.scriptRead !== undefined) throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
       return count;
     } finally {
       this.chunks = saved.chunks; this.deferred = saved.deferred; this.waitFrames = saved.waitFrames;
       this.aliasCount = saved.aliasCount; this.tokens = saved.tokens; this.batchBudget = undefined;
+      this.scriptRead = saved.scriptRead;
     }
   }
 
@@ -395,6 +412,17 @@ export class CommandBuffer {
     if (this.dialect !== "q1-quakeworld" || this.findCvar("cl_warncmd", command.source)?.numericValue || this.findCvar("developer", command.source)?.numericValue) this.print(`Unknown command "${name}"\n`);
   }
 
+  private insertScript(filename: string, file: string | undefined, caller: CommandContext): void {
+    if (file === undefined) { this.options.print?.(`couldn't exec ${filename}\n`, caller); return; }
+    this.options.print?.(`execing ${filename}\n`, caller);
+    let text = sourceCommandText(file);
+    // Preserve the Q1 donor repair without changing NQ Cbuf_InsertText semantics.
+    if (isQ1(this.dialect) && !text.endsWith("\n")) text += "\n";
+    const source: CommandContext = Object.freeze({ session: caller.session,
+      origin: Object.freeze({ kind: "script", name: filename, caller: caller.origin }) });
+    this.insertFor(text, source);
+  }
+
   private registerBuiltins(): void {
     const handlers = new Map<string, CommandHandler>();
     const documents = new Map<string, CommandDocumentation>();
@@ -414,17 +442,15 @@ export class CommandBuffer {
     register("cmd", command => { this.options.forwardToServer?.(command); });
     register("exec", command => {
       if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
+      if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }
       const requested = command.argv[1] ?? "";
       const filename = this.dialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
       const file = this.options.readScript?.(filename, command.source);
-      if (file === undefined) { this.print(`couldn't exec ${filename}\n`); return; }
-      this.print(`execing ${filename}\n`);
-      let text = sourceCommandText(file);
-      // Preserve the Q1 donor repair without changing NQ Cbuf_InsertText semantics.
-      if (isQ1(this.dialect) && !text.endsWith("\n")) text += "\n";
-      const source: CommandContext = Object.freeze({ session: command.source.session,
-        origin: Object.freeze({ kind: "script", name: filename, caller: command.source.origin }) });
-      this.insertFor(text, source);
+      if (file instanceof Promise) {
+        const read: ScriptRead = { name: filename, source: command.source, result: { kind: "pending" } };
+        this.scriptRead = read;
+        void file.then(text => { read.result = { kind: "ready", text }; }, (error: unknown) => { read.result = { kind: "failed", error }; });
+      } else this.insertScript(filename, file, command.source);
     });
     if (this.dialect !== "q3") register("alias", command => {
       const name = command.argv[1];

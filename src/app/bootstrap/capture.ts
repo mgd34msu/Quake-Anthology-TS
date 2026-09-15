@@ -1,15 +1,13 @@
-import { join } from "node:path";
 import type { ImageLevel } from "../../contracts/render.ts";
 import { FrameCapture } from "../../capture/index.ts";
 import { registerConsoleCommands } from "../../console/commands.ts";
 import { archivedBindings } from "../../input/bindings.ts";
-import { ConfigStore } from "../../settings/config.ts";
-import { defaultUserContentRoot } from "../../content/user-data.ts";
+import { consoleConfigRoot, seatConsoleConfig } from "./config-scripts.ts";
 import type { ApplicationInput } from "./input.ts";
 import type { NativeRenderer } from "./renderer.ts";
 
 export function applicationCaptureRoot(userContentRoot: string | undefined): string {
-  return join(userContentRoot ?? defaultUserContentRoot(), "console");
+  return consoleConfigRoot(userContentRoot);
 }
 
 /** Arms readback during command dispatch; the host drains writes after presentation. */
@@ -18,13 +16,12 @@ export class ApplicationCapture {
   private readonly reads = new Set<AbortController>();
   private readonly unregister: () => void;
   private closed = false;
-  private writes: Promise<void> = Promise.resolve();
 
-  constructor(input: ApplicationInput, private readonly renderer: NativeRenderer,
+  constructor(private readonly input: ApplicationInput, private readonly renderer: NativeRenderer,
     readonly root: string, mapName: () => string, private readonly print: (text: string) => void) {
     const capture = new FrameCapture(root, { readRgba: () => this.readFrame() });
     this.unregister = registerConsoleCommands({ commands: input.commands,
-      config: seat => new ConfigStore(join(root, "settings", `seat-${seat.index}`)),
+      config: seat => seatConsoleConfig(root, seat),
       configuration: invocation => {
         let origin = invocation.source.origin;
         while (origin.kind === "script") origin = origin.caller;
@@ -50,8 +47,7 @@ export class ApplicationCapture {
   private queue(operation: () => Promise<void>, frameReadback = false): void {
     if (this.closed) { this.print("Console output owner is closed\n"); return; }
     let result: Promise<void>;
-    try { result = frameReadback ? operation() : this.writes.then(operation); } catch (error) { result = Promise.reject(error); }
-    if (!frameReadback) this.writes = result.catch(() => undefined);
+    try { result = frameReadback ? operation() : this.input.scripts.write(operation); } catch (error) { result = Promise.reject(error); }
     const pending = result.catch((error: unknown) => { this.print(`Console output failed: ${error instanceof Error ? error.message : String(error)}\n`); });
     this.operations.add(pending);
     void pending.then(() => { this.operations.delete(pending); });

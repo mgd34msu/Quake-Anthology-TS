@@ -52,6 +52,11 @@ for (const renderer of ["cpu", "gl"]) test.skipIf(process.env["SDL_VIDEODRIVER"]
     expect(cfg).toContain('bind "x" "+jump"');
     expect(await Bun.file(join(root, "console/settings/seat-0/ordered.cfg")).text()).toContain('capture_setting "final"');
     expect(await Bun.file(join(root, "console/settings/seat-0/capture.txt")).text()).toContain("capture_setting");
+    submit(application, player.seat.id, "exec capture.cfg; writeconfig reread; seta capture_setting altered; exec reread.cfg; writeconfig replayed");
+    const replayed = join(root, "console/settings/seat-0/replayed.cfg");
+    for (let attempts = 0; attempts < 20 && !await Bun.file(replayed).exists(); attempts++) { await application.step(100); await Bun.sleep(1); }
+    expect(await Bun.file(replayed).text()).toContain('seta capture_setting "before"');
+    expect(await Bun.file(replayed).text()).toContain('bind "x" "+jump"');
     expect(output.some(text => text.includes("Console output failed"))).toBe(false);
     submit(application, player.seat.id, "screenshotPNG before-travel; map base1");
     await application.step(100);
@@ -80,6 +85,10 @@ for (const renderer of ["cpu", "gl"]) test.skipIf(process.env["SDL_VIDEODRIVER"]
     submit(remote, player.seat.id, "screenshotPNG remote");
     await server.step(100); await remote.step(100);
     nonblank(decodePng(new Uint8Array(await Bun.file(join(root, "console/screenshots/remote.png")).arrayBuffer())));
+    submit(remote, player.seat.id, "seta remote_config original; writeconfig remote-roundtrip; seta remote_config changed; exec remote-roundtrip.cfg; writeconfig remote-replayed");
+    const replayed = join(root, "console/settings/seat-0/remote-replayed.cfg");
+    for (let attempts = 0; attempts < 20 && !await Bun.file(replayed).exists(); attempts++) { await server.step(100); await remote.step(100); await Bun.sleep(1); }
+    expect(await Bun.file(replayed).text()).toContain('seta remote_config "original"');
   } finally { await remote?.close(); await server.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
 

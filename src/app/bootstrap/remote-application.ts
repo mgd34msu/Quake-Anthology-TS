@@ -9,6 +9,7 @@ import { createClientDownloadPermission } from "./network/client-download-policy
 import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
+import { consoleConfigRoot, ConsoleScriptFiles } from "./config-scripts.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
@@ -157,11 +158,13 @@ export class RemoteApplication {
           const settings = this.clientCommands?.inputSettings, origin = settings?.cvars.context.origin;
           return origin?.kind === "local-seat" && (id === null || origin.seat.equals(id)) ? settings?.cvars ?? null : null;
         }, shared: () => this.imageSettings.cvars });
+      const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
+        mounted: path => this.content.mounts.open(path).then(resource => resource?.bytes) });
       const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: (text, source) => this.print(text, source), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
-      } });
+      }, readScript: (name, source) => scripts.read(name, source) });
       if (family === "qw") {
         for (const name of ["skins", "allskins"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
         commands.register("color", invocation => {
@@ -170,7 +173,7 @@ export class RemoteApplication {
           cvars.set("topcolor", String(top)); cvars.set("bottomcolor", String(bottom));
         });
       }
-      this.clientCommands = { cvars, commands };
+      this.clientCommands = { cvars, commands, scripts };
       this.clientConfig = this.inputConfig;
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "qw-client") {
