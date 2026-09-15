@@ -42,6 +42,8 @@ export class NativeUiController implements SeatUiController {
   private readonly stack: MenuCursor[] = [];
   private readonly fields = new Map<UiControlId, FieldCursor>();
   private readonly listTops = new Map<UiControlId, number>();
+  private readonly listRows = new Map<UiControlId, readonly string[]>();
+  private listDragOffset = 0;
   private readonly heldAxes = new Map<string, HeldDirection>();
   private cursor: Vec2 = { x: 320, y: 240 };
   private pointerPosition: Vec2 | null = null;
@@ -139,7 +141,7 @@ export class NativeUiController implements SeatUiController {
       case "button": control.activate(this.seat); this.options.sound("change", this.seat); break;
       case "toggle": case "slider": case "choice": this.change(control, 1); break;
       case "text-entry": control.submit(this.seat, control.text); break;
-      case "list": if (control.selected !== null) control.select(this.seat, control.selected); break;
+      case "list": if (control.selected !== null) (control.activate ?? control.select)(this.seat, control.selected); break;
       case "owner-draw": control.key(this.seat, KeyCode.Enter, true); break;
     }
   }
@@ -172,9 +174,33 @@ export class NativeUiController implements SeatUiController {
     else return false;
     return true;
   }
+  private listLayout(control: Extract<UiControl, { readonly kind: "list" }>): { readonly top: number; readonly page: number; readonly height: number; readonly maximum: number; readonly thumb: number } {
+    const height = Math.max(1, control.rowHeight ?? this.options.skin().lineHeight);
+    const page = Math.max(1, Math.floor(control.rect.height / height));
+    const maximum = Math.max(0, control.rows.length - page);
+    const previous = this.listRows.get(control.id);
+    const changed = previous === undefined || previous.length !== control.rows.length || previous.some((id, index) => id !== control.rows[index]?.id);
+    if (changed) {
+      this.listRows.set(control.id, control.rows.map(row => row.id));
+      this.listTops.set(control.id, Math.max(0, control.rows.findIndex(row => row.id === control.selected) - page + 1));
+    }
+    const top = Math.max(0, Math.min(maximum, this.listTops.get(control.id) ?? 0));
+    this.listTops.set(control.id, top);
+    return { top, page, height, maximum, thumb: Math.min(control.rect.height, Math.max(24, control.rect.height * page / Math.max(1, control.rows.length))) };
+  }
+  private listPointer(control: Extract<UiControl, { readonly kind: "list" }>): void {
+    const layout = this.listLayout(control), travel = control.rect.height - layout.thumb;
+    this.listTops.set(control.id, travel <= 0 ? 0 : Math.max(0, Math.min(layout.maximum,
+      Math.round((this.cursor.y - control.rect.y - this.listDragOffset) / travel * layout.maximum))));
+  }
   private listKey(control: Extract<UiControl, { readonly kind: "list" }>, key: number): boolean {
+    if (key === KeyCode.Delete) {
+      const row = control.rows.find(row => row.id === control.selected);
+      if (row?.enabled) row.action?.activate(this.seat);
+      return true;
+    }
     const rows = control.rows.filter(row => row.enabled), current = rows.findIndex(row => row.id === control.selected);
-    const page = Math.max(1, Math.floor(control.rect.height / this.options.skin().lineHeight));
+    const { page } = this.listLayout(control);
     let index = current;
     if (key === KeyCode.Up) index--; else if (key === KeyCode.Down) index++;
     else if (key === KeyCode.PageUp) index -= page; else if (key === KeyCode.PageDown) index += page;
@@ -211,6 +237,7 @@ export class NativeUiController implements SeatUiController {
     const active = this.active(); if (active === null) return;
     const drag = active.menu.controls.find(control => control.id === this.dragging);
     if (drag?.kind === "slider") { this.sliderPointer(drag); return; }
+    if (drag?.kind === "list") { this.listPointer(drag); return; }
     const hovered = [...active.menu.controls].reverse().find(control => enabled(control) && contains(control.rect, this.cursor));
     if (hovered !== undefined && hovered.id !== active.cursor.focus) {
       active.cursor.focus = hovered.id; this.focusChanged(); this.options.sound("move", this.seat);
@@ -226,6 +253,7 @@ export class NativeUiController implements SeatUiController {
     let input: PhysicalInput | null = null;
     if (event.kind === "key" && event.down && !event.repeat) input = { kind: "key", code: event.code };
     else if (event.kind === "mouse-button" && event.down) input = { kind: "mouse-button", button: event.button };
+    else if (event.kind === "mouse-wheel" && event.delta.y !== 0) input = { kind: "key", code: event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown };
     else if (event.kind === "controller-button" && event.down) input = { kind: "controller-button", device: event.device, button: event.button };
     else if (event.kind === "controller-axis" && Math.abs(event.value) > 0.65) input = { kind: "controller-axis", device: event.device, axis: event.axis, direction: event.value < 0 ? "negative" : "positive" };
     if (input !== null) { this.capture = null; capture.accept(input); }
@@ -260,12 +288,31 @@ export class NativeUiController implements SeatUiController {
           while (field.cursor < text.length && measure(text.slice(field.start, field.cursor + 1).join("")) < x) field.cursor++;
         }
         else if (control.kind === "list") {
-          const row = control.rows[(this.listTops.get(control.id) ?? 0) + Math.floor((this.cursor.y - control.rect.y) / this.options.skin().lineHeight)];
-          if (row?.enabled) control.select(this.seat, row.id);
+          const layout = this.listLayout(control);
+          if (layout.maximum > 0 && this.cursor.x >= control.rect.x + control.rect.width - 16) {
+            const thumbY = control.rect.y + (control.rect.height - layout.thumb) * layout.top / layout.maximum;
+            this.listDragOffset = this.cursor.y >= thumbY && this.cursor.y < thumbY + layout.thumb ? this.cursor.y - thumbY : layout.thumb / 2;
+            this.dragging = control.id; this.listPointer(control);
+          } else {
+            const row = control.rows[layout.top + Math.floor((this.cursor.y - control.rect.y) / layout.height)];
+            if (row?.enabled) {
+              control.select(this.seat, row.id);
+              if (row.action !== undefined && this.cursor.x >= control.rect.x + control.rect.width - (layout.maximum > 0 ? 16 : 0) - 28) row.action.activate(this.seat);
+              else control.activate?.(this.seat, row.id);
+            }
+          }
         } else this.activate(control);
         break;
       }
-      case "mouse-wheel": if (event.delta.y !== 0) this.key(event.delta.y > 0 ? KeyCode.Up : KeyCode.Down, true); break;
+      case "mouse-wheel": {
+        const hovered = active.menu.controls.find(control => enabled(control) && control.kind === "list" && contains(control.rect, this.cursor));
+        const control = hovered ?? active.menu.controls.find(control => control.id === active.cursor.focus);
+        if (control?.kind === "list") {
+          const layout = this.listLayout(control);
+          this.listTops.set(control.id, Math.max(0, Math.min(layout.maximum, layout.top - Math.sign(event.delta.y) * 3)));
+        } else if (event.delta.y !== 0) this.key(event.delta.y > 0 ? KeyCode.Up : KeyCode.Down, true);
+        break;
+      }
       case "controller-button": {
         const codes = new Map([[0, KeyCode.Enter], [1, KeyCode.Escape], [6, KeyCode.Escape], [11, KeyCode.Up], [12, KeyCode.Down], [13, KeyCode.Left], [14, KeyCode.Right]]);
         const code = codes.get(event.button); if (code !== undefined) this.key(code, event.down); break;
@@ -319,14 +366,34 @@ export class NativeUiController implements SeatUiController {
       commands.push({ kind: "fill", rect: { ...control.rect, height: control.rect.height - 2 }, color: focused ? skin.colors.focused : skin.colors.control });
       if (decoration !== null) commands.push(...nineSlice(decoration, control.rect, white));
       if (control.kind === "list") {
-        commands.push({ kind: "clip", rect: control.rect });
-        const top = this.listTops.get(control.id) ?? 0, count = Math.ceil(control.rect.height / skin.lineHeight);
-        for (const [index, row] of control.rows.slice(top, top + count).entries()) {
-          const y = control.rect.y + index * skin.lineHeight;
-          if (row.id === control.selected) commands.push({ kind: "fill", rect: { x: control.rect.x, y, width: control.rect.width, height: skin.lineHeight }, color: skin.colors.focused });
-          text(row.cells.join("  "), control.rect.x + 8, y, row.enabled ? color : skin.colors.disabled);
+        const layout = this.listLayout(control), contentWidth = control.rect.width - (layout.maximum > 0 ? 16 : 0);
+        const clip = { ...control.rect, width: contentWidth };
+        commands.push({ kind: "clip", rect: clip });
+        for (const [index, row] of control.rows.slice(layout.top, layout.top + layout.page).entries()) {
+          const y = control.rect.y + index * layout.height;
+          if (row.id === control.selected) commands.push({ kind: "fill", rect: { x: control.rect.x, y, width: contentWidth, height: layout.height }, color: skin.colors.focused });
+          const rowColor = !row.enabled ? skin.colors.disabled : row.id === control.selected ? skin.colors.accent : skin.colors.text;
+          if (control.columnWidths === undefined) text(row.cells.join("  "), control.rect.x + 8, y, rowColor);
+          else {
+            let x = control.rect.x;
+            for (const [column, value] of row.cells.entries()) {
+              const width = Math.min(control.columnWidths[column] ?? contentWidth, control.rect.x + contentWidth - (row.action === undefined ? 0 : 28) - x);
+              const measured = this.options.measureText?.(value, skin.fontScale) ?? Array.from(value).length * 8 * skin.fontScale;
+              const scale = skin.fontScale * Math.min(1, Math.max(1, width - 16) / Math.max(1, measured));
+              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: value,
+                font: skin.font, scale, color: rowColor, align: "left", shadow: true });
+              x += width;
+            }
+          }
+          if (row.action !== undefined) text(row.action.label, control.rect.x + contentWidth - 14, y + (layout.height - 8 * skin.fontScale) / 2, rowColor, "center");
         }
-        commands.push({ kind: "clip", rect: null }); continue;
+        commands.push({ kind: "clip", rect: null });
+        if (layout.maximum > 0) {
+          const x = control.rect.x + control.rect.width - 14;
+          commands.push({ kind: "fill", rect: { x, y: control.rect.y, width: 12, height: control.rect.height }, color: skin.colors.control });
+          commands.push({ kind: "fill", rect: { x, y: control.rect.y + (control.rect.height - layout.thumb) * layout.top / layout.maximum, width: 12, height: layout.thumb }, color: focused ? skin.colors.accent : skin.colors.disabled });
+        }
+        continue;
       }
       text(control.label, control.rect.x + 10, control.rect.y + 6, color);
       const right = control.rect.x + control.rect.width - 10, y = control.rect.y + 6;
@@ -355,7 +422,7 @@ export class NativeUiController implements SeatUiController {
         }
       }
     }
-    if (this.capture !== null) text("Press a key or button. Escape cancels.", 320, 432, skin.colors.accent, "center");
+    if (this.capture !== null) text("Press key/button. Esc cancels.", 380, 432, skin.colors.accent, "center");
     const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];
     for (const command of commands) {
       const transformed = transformUi(command, this.transform);

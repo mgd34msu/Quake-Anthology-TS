@@ -111,7 +111,7 @@ test('Q3 remote bindings wait for decoded player state and capture input after a
       expect(ui.controller.activeMenu).toBe('menu:bindings:0');
       expect(playerReads).toBeGreaterThan(0);
       await Bun.write('/tmp/quake-q3-binding-lifecycle.png', encodePng(640, 480, remote.readPixels()));
-      click(200, 106); click(200, 106);
+      click(400, 148);
       expect(ui.controller.bindingCapture).toBe(true);
       key(107);
       expect(ui.controller.bindingCapture).toBe(false);

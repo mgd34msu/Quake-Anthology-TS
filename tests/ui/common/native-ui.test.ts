@@ -299,3 +299,97 @@ test("gyro menu calibrates the assigned controller and restores only its seat tu
     expect(otherInput.gamepad.tuning).toEqual(otherTuning);
   } finally { ui.closeAll(); menu.dispose(); settings.close(); router.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test("bindings show keys, replace one assignment, add another, cancel conflicts and remove directly", async () => {
+  const { registerBindingMenus } = await import("../../../src/ui/settings/bindings.ts");
+  const owner = createIdentityOwner("binding-table"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q3", context });
+  const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
+  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin(fontId), bindings: () => input.bindings,
+    focus: focus => input.setFocus(focus, 0), sound: () => undefined, executeScript: () => undefined });
+  input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: "+forward" } });
+  input.bind({ input: { kind: "key", code: 115 }, target: { kind: "command", text: "+back" } });
+  const menus = registerBindingMenus(ui, input, [
+    { id: "forward", label: "Move forward", target: { kind: "command", text: "+forward" } },
+    { id: "back", label: "Move back", target: { kind: "command", text: "+back" } },
+  ]);
+  const key = (code: number): void => { ui.input({ kind: "key", seat, code, down: true, repeat: false, timeMilliseconds: 0 }); };
+  const click = (x: number, y: number): void => {
+    ui.input({ kind: "mouse-motion", seat, timeMilliseconds: 0, position: { x, y }, delta: { x: 0, y: 0 } });
+    ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down: true });
+    ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down: false });
+  };
+  const labels = (): string[] => ui.draw(drawContext(owner, seat)).flatMap(command => command.kind === "text" ? [command.text] : []);
+  ui.openMenu(menus.root);
+  expect(labels()).toContain("w"); expect(labels()).toContain("s");
+  click(400, 148); expect(ui.bindingCapture).toBe(true); key(122);
+  expect(input.binding({ kind: "key", code: 119 })).toBeNull();
+  expect(input.binding({ kind: "key", code: 122 })).toEqual({ kind: "command", text: "+forward" });
+  click(100, 398); key(120);
+  expect(labels()).toContain("z"); expect(labels()).toContain("x");
+  click(400, 148); key(115);
+  expect(ui.activeMenu).toBe("menu:bindings:conflict");
+  expect(input.binding({ kind: "key", code: 122 })).not.toBeNull();
+  key(KeyCode.Enter);
+  expect(ui.activeMenu).toBe(menus.root);
+  expect(input.binding({ kind: "key", code: 115 })).toEqual({ kind: "command", text: "+back" });
+  click(400, 148); key(115); click(200, 246);
+  expect(input.binding({ kind: "key", code: 122 })).toBeNull();
+  expect(input.binding({ kind: "key", code: 115 })).toEqual({ kind: "command", text: "+forward" });
+  click(578, 148);
+  expect(input.binding({ kind: "key", code: 115 })).toBeNull();
+  expect(input.binding({ kind: "key", code: 120 })).toEqual({ kind: "command", text: "+forward" });
+  expect(ui.bindingCapture).toBe(false);
+  click(100, 398);
+  ui.input({ kind: "mouse-wheel", seat, timeMilliseconds: 0, delta: { x: 0, y: 1 } });
+  expect(input.binding({ kind: "key", code: KeyCode.MouseWheelUp })).toEqual({ kind: "command", text: "+forward" });
+  expect(labels()).toContain("MWHEELUP");
+  click(100, 398);
+  ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 3, down: true });
+  expect(input.binding({ kind: "mouse-button", button: 3 })).toEqual({ kind: "command", text: "+forward" });
+  expect(labels()).toContain("MOUSE2");
+  click(100, 398);
+  ui.input({ kind: "controller-axis", seat, timeMilliseconds: 0, device: 2, axis: "right-trigger", value: 0.9 });
+  expect(input.binding({ kind: "controller-axis", device: 2, axis: "right-trigger", direction: "positive" })).toEqual({ kind: "command", text: "+forward" });
+  click(100, 398);
+  ui.input({ kind: "controller-button", seat, timeMilliseconds: 0, device: 2, button: 4, down: true });
+  expect(input.binding({ kind: "controller-button", device: 2, button: 4 })).toEqual({ kind: "command", text: "+forward" });
+  const otherSeat = owner.seat(1);
+  const otherInput = new SeatInput({ seat: otherSeat, dialect: "q3", context: { session: owner.session,
+    origin: { kind: "local-seat", seat: otherSeat, client: owner.client(1, 0) } }, commands, uiEvent: () => false });
+  expect(otherInput.bindings).toHaveLength(0);
+  expect(() => registerBindingMenus(ui, otherInput, [])).toThrow("another input seat");
+  menus.dispose();
+});
+
+test("binding table search, wheel, scrollbar and keyboard reach every row without capture", async () => {
+  const { registerBindingMenus } = await import("../../../src/ui/settings/bindings.ts");
+  const owner = createIdentityOwner("binding-table-scroll"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const input = new SeatInput({ seat, dialect: "q3", context, commands: new CommandBuffer({ dialect: "q3", context }), uiEvent: () => false });
+  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin(fontId), bindings: () => input.bindings,
+    focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  const menus = registerBindingMenus(ui, input, Array.from({ length: 50 }, (_, i) => ({ id: `action-${i}`, label: `Action ${i}`,
+    target: { kind: "command", text: `action${i}` } })));
+  const key = (code: number): void => { ui.input({ kind: "key", seat, code, down: true, repeat: false, timeMilliseconds: 0 }); };
+  const pointer = (x: number, y: number): void => { ui.input({ kind: "mouse-motion", seat, timeMilliseconds: 0, position: { x, y }, delta: { x: 0, y: 0 } }); };
+  const button = (down: boolean): void => { ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down }); };
+  const labels = (): string[] => ui.draw(drawContext(owner, seat)).flatMap(command => command.kind === "text" ? [command.text] : []);
+  ui.openMenu(menus.root); labels();
+  pointer(400, 150); ui.input({ kind: "mouse-wheel", seat, timeMilliseconds: 0, delta: { x: 0, y: -1 } });
+  expect(labels()).toContain("Action 3"); expect(labels()).not.toContain("Action 0"); expect(ui.bindingCapture).toBe(false);
+  pointer(582, 170); button(true); pointer(582, 374); button(false);
+  expect(labels()).toContain("Action 49"); expect(ui.bindingCapture).toBe(false);
+  key(KeyCode.Home); expect(labels()).toContain("Action 0"); key(KeyCode.End); expect(labels()).toContain("Action 49");
+  expect(ui.bindingCapture).toBe(false);
+  pointer(400, 92); button(true); button(false);
+  ui.input({ kind: "text", seat, timeMilliseconds: 0, text: "Action 49" });
+  expect(labels()).toContain("Action 49"); expect(labels()).not.toContain("Action 48");
+  key(KeyCode.Tab); key(KeyCode.Enter); expect(ui.bindingCapture).toBe(true); key(KeyCode.Escape);
+  expect(ui.activeMenu).toBe(menus.root);
+  pointer(400, 92); button(true); button(false); key(KeyCode.End);
+  ui.input({ kind: "text", seat, timeMilliseconds: 0, text: " missing" });
+  expect(labels()).toContain("No matching actions");
+  menus.dispose();
+});

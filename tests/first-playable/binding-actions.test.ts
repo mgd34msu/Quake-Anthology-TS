@@ -11,6 +11,7 @@ import { discoverInstalledContent } from '../../src/content/catalog/index.ts';
 import { sharedBindingActions } from '../../src/ui/settings/action-catalog.ts';
 import { Q2Ballistics } from "../../src/content/q2/foundation/weapons/ballistics.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
+import { KeyCode } from "../../src/input/key-codes.ts";
 import { fitUi } from "../../src/ui/common/layout.ts";
 import type { PhysicalInput, SeatInputEvent } from '../../src/contracts/ui.ts';
 
@@ -48,14 +49,14 @@ test('binding editor captures shared offhand and primary actions and restores th
       event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: 1, down: false });
     };
     const actions = () => sharedBindingActions(local.builder.dialect, application?.simulation.playerUi(local.player.actor).items ?? [], input.bindingCapabilities);
-    const row = (id: string): number => {
-      const index = actions().findIndex(action => action.id === id); if (index < 0) throw new Error(`Unavailable action ${id}`);
+    const row = (id: string): void => {
+      const action = actions().find(action => action.id === id); if (action === undefined) throw new Error(`Unavailable action ${id}`);
       ui.controller.closeAll(); ui.controller.openMenu('menu:bindings:0');
-      for (let page = 0; page < Math.floor(index / 9); page++) click(400, 386);
-      return index % 9;
+      click(400, 94); key(KeyCode.Control, true); key(117, true); key(117, false); key(KeyCode.Control, false);
+      event({ kind: 'text', seat, timeMilliseconds: input.now(), text: action.label });
     };
     const capture = (id: string, physical: PhysicalInput, resolve: boolean = true): void => {
-      click(200, 106 + row(id) * 28); click(200, 106); expect(ui.controller.bindingCapture).toBe(true);
+      row(id); click(100, 398); expect(ui.controller.bindingCapture).toBe(true);
       if (physical.kind === 'key') { key(physical.code, true); key(physical.code, false); }
       else if (physical.kind === 'mouse-button') {
         event({ kind: 'mouse-button', seat, timeMilliseconds: input.now(), button: physical.button, down: true });
@@ -74,7 +75,7 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(local.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
     expect(local.input.binding({ kind: 'controller-button', device: 0, button: 3 })).toEqual({ kind: 'command', text: '+grapple' });
     capture('forward', { kind: 'key', code: 122 });
-    click(550, 106 + row('forward') * 28);
+    row('forward'); click(500, 398);
     expect(local.input.binding({ kind: 'key', code: 122 })).toBeNull();
     capture('forward', { kind: 'key', code: 119 });
     const beforeConflict = local.input.binding({ kind: 'key', code: 119 });
@@ -92,9 +93,13 @@ test('binding editor captures shared offhand and primary actions and restores th
     expect(local.input.binding({ kind: 'key', code: 119 })).toEqual({ kind: 'command', text: '+back' });
     capture('forward', { kind: 'key', code: 119 });
     capture('grenade', { kind: 'key', code: 106 });
-    click(200, 106 + row('grenade') * 28);
+    row('grenade');
     const removable = local.input.bindings.filter(binding => binding.target.kind === 'command' && binding.target.text === '+grenade').findIndex(binding => binding.input.kind === 'key' && binding.input.code === 106);
-    expect(removable).toBeGreaterThanOrEqual(0); click(200, 106 + (removable + 2) * 28);
+    expect(removable).toBeGreaterThanOrEqual(0);
+    event({ kind: 'mouse-motion', seat, timeMilliseconds: input.now(), position: { x: transform.x + 300 * transform.scale, y: transform.y + 148 * transform.scale }, delta: { x: 0, y: 0 } });
+    key(KeyCode.Home, true); key(KeyCode.Home, false);
+    for (let index = 0; index < removable; index++) { key(KeyCode.Down, true); key(KeyCode.Down, false); }
+    key(KeyCode.Delete, true); key(KeyCode.Delete, false);
     expect(local.input.binding({ kind: 'key', code: 106 })).toBeNull();
     expect(local.input.binding({ kind: 'key', code: 103 })).toEqual({ kind: 'command', text: '+grenade' });
     expect(local.input.binding({ kind: 'key', code: 104 })).toEqual({ kind: 'command', text: '+grenade' });
