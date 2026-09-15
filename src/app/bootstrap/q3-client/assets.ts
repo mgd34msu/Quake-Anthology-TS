@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ContentId } from "../../../contracts/content.ts";
+import { normalizeResourcePath } from "../../../content/mounts/paths.ts";
 import type { OpenedResource } from "../../../content/mounts/index.ts";
 import type { SoundAssetReader, Q3ResourceHost } from "../../../content/q3/presentation/resources.ts";
 import { DEFAULT_MODEL } from "../../../content/q3/presentation/ref-entity.ts";
@@ -15,6 +16,14 @@ import { MountedFontReader } from "../../../text/mounted.ts";
 import { RendererFontRegistry } from "../../../text/q3-font-registry.ts";
 import { UiAssetRegistry } from "../../../text/q3-font.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "../assets.ts";
+
+export async function registerQ3ModelRequest(path: string, load: (path: string) => Promise<SceneModel>): Promise<SceneModel> {
+  if (!path.startsWith("*")) {
+    try { path = normalizeResourcePath(path); }
+    catch (error) { if (error instanceof RangeError) return DEFAULT_MODEL; throw error; }
+  }
+  return load(path);
+}
 
 /** Synchronous source script/sound calls read bytes resolved through the actual mount plan. */
 export class ApplicationQ3Assets implements SoundAssetReader {
@@ -87,7 +96,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       return this.content;
     };
     return { scene, zeroPicture: this.provider.shaders.sourceDefaultPicture,
-      model: async path => {
+      model: path => registerQ3ModelRequest(path, async path => {
         const content = contentFor(path), provider = await this.assets.provider(content);
         if (!path.startsWith("*") && await provider.mounts.resolve(path) === null) return DEFAULT_MODEL;
         const asset = await this.assets.model(content, path);
@@ -98,7 +107,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
           model = { kind: "inline", path, index: asset.model.model, geometry: asset.model.world, resource: asset.resource, bounds };
         } else model = { kind: "model", path, model: asset.model, resource: asset.resource };
         this.modelProviders.set(model, provider); return model;
-      },
+      }),
       skin: async path => { const provider = await this.assets.provider(contentFor(path)), opened = await provider.mounts.open(path);
         return opened === null ? null : { path, surfaces: parseSkin(new TextDecoder().decode(opened.bytes)) }; },
       shader: (path, mip) => this.provider.shaders.registerSourcePicture(path, mip),
