@@ -424,5 +424,12 @@ export class Q3ApplicationEffects {
     return { admission, operations, q3Lights: this.lights };
   }
   drainSounds(): readonly SourceEffectSound[] { return this.sounds.splice(0); }
-  close(): void { this.effects.pool.initialize(); this.marks.reset(); this.refs = []; this.admission = snapshotQ3SceneAdmission("mixed", [], []); this.models.length = 0; this.sounds.length = 0; this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear(); }
+  resetRound(): void {
+    for (const entity of this.effects.pool.activeEntities()) this.bloodOwners.delete(entity.refEntity);
+    this.effects.pool.initialize(); this.marks.reset(); this.readyWeapons?.particles.resetRound();
+    this.refs = []; this.admission = snapshotQ3SceneAdmission("mixed", [], []); this.lights = [];
+    this.models.length = 0; this.options.clear(); this.sounds.length = 0;
+    this.projectiles.clear(); this.flashes.clear(); this.lastFires.clear(); this.bolts.clear();
+  }
+  close(): void { this.resetRound(); }
 }

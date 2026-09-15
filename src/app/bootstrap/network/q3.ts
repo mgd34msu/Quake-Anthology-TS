@@ -222,7 +222,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     peer.connection.phase = 'zombie';
   }
   changeWorld(host: Q3ApplicationServerHost): Promise<void> { return this.operation(() => this.replaceWorld(host)); }
-  restartSourceRound(run: (round: Q3NetworkRoundRestart) => Promise<void>): Promise<void> {
+  restartSourceRound(run: (round: Q3NetworkRoundRestart) => Promise<void>, onMutation?: () => undefined): Promise<void> {
     return this.operation(async () => {
       const binding = this.host.sourceRound;
       if (this.ended || binding === undefined) throw new Error('Q3 network host has no native source round restart');
@@ -238,6 +238,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         this.assertWorld(host, serverId);
       };
       try {
+        onMutation?.();
         await host.prepare(this.checksumFeed, serverId); current();
         await run({ clients: peers.map(peer => peer.player.client), snapshotServerBit: this.serverFlags,
           bindSource: async () => {

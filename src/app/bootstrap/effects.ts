@@ -598,6 +598,18 @@ export class ApplicationEffects {
       skin, color: { ...white, w: alpha }, shaderTime: { kind: "seconds", value: 0 },
       flags: { kind: "q2", bits: explosion.flags | (explosion.kind === "poly" && frame >= 10 ? 32 : 0) }, lightingOrigin: explosion.origin, shadowPlane: 0, attachments: [] });
   }
+  resetRound(): void {
+    if (this.closed) throw new Error("Effect world is closed");
+    this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
+    this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
+    this.entityTrails.clear(); this.shadowLights.clear(); this.sourceLights.clear();
+    this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.poses = []; this.time = null; this.q3WeaponTimes.clear();
+    for (const group of this.groups.values()) {
+      group.particles.clear(); group.models = []; group.statics.length = 0; group.beams = []; group.sampled = [];
+    }
+    for (const effects of new Set([...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()])) effects.resetRound();
+  }
   close(): void {
     if (this.closed) return;
     this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];

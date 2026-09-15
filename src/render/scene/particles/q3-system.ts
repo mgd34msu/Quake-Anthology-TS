@@ -122,8 +122,9 @@ export class ParticleSystem {
     this.resetPool();
   }
   get activeCount(): number { return this.count; }
+  resetRound(): void { this.resetPool(); }
   async clear(resources: Pick<ParticleResources, "registerShader">): Promise<void> {
-    this.resetPool();
+    this.resetRound();
     for (const animation of this.animations) {
       for (let frame = 0; frame < animation.count; frame++) {
         animation.frames[frame] = await resources.registerShader(`${animation.name}${frame + 1}`);

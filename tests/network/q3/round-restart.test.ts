@@ -17,14 +17,14 @@ const content = createContentId({ family: "q3", edition: "missionpack", package:
 function fixture(pure = false) {
   const hub = new LoopbackHub(), transport = hub.bind("round-server"), remote = hub.bind("round-client");
   const identity = createIdentityOwner("wire-round"), clientId = identity.client(0, 0);
-  let actorGeneration = 0, now = 1000, sourceGeneration = 0, eligible = true;
+  let actorGeneration = 0, now = 1000, sourceGeneration = 0, eligible = true, prepareFailure = false;
   let player: Q3ApplicationPlayer = { client: clientId, actor: identity.actor(0, actorGeneration), sourceEntity: 0 };
   const calls: string[] = [], feeds: number[] = [], moves: { generation: number; time: number; sequence: number }[] = [];
   const snapshots: Snapshot[] = [], commands: string[] = [], pureEpochs: number[] = [];
   let gamestates = 0, restarts = 0, randomDraws = 0;
   const host: Q3ApplicationServerHost = {
     product: "missionpack", maxClients: 1,
-    async prepare(feed) { feeds.push(feed); },
+    async prepare(feed) { if (prepareFailure) throw new Error("prepare failed"); feeds.push(feed); },
     pure: (serverId, checksumFeedServerId = serverId) => { pureEpochs.push(checksumFeedServerId); return { enabled: pure, checksumFeed: 0, checksumFeedServerId, cgameChecksum: 7, uiChecksum: 8, loadedPureChecksums: [] }; },
     downloadsEnabled: () => false, openDownload: () => null,
     rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: false, lan: true }),
@@ -77,7 +77,7 @@ function fixture(pure = false) {
     return network.poll(now);
   };
   return { hub, transport, remote, network, client, clientId, host, calls, feeds, moves, snapshots, commands, pureEpochs, output, read, send,
-    advance() { now += 100; }, reset() { actorGeneration++; }, incompatible() { eligible = false; },
+    advance() { now += 100; }, reset() { actorGeneration++; }, incompatible() { eligible = false; }, failPrepare() { prepareFailure = true; },
     get randomDraws() { return randomDraws; }, get gamestates() { return gamestates; }, get restarts() { return restarts; },
     async connect() {
       remote.send(transport.address, encodeConnect("\\protocol\\68\\qport\\77\\challenge\\0\\name\\Retained"));
@@ -150,7 +150,9 @@ test("preflight preserves live wire state and interrupted round retires the netw
   const f = fixture();
   try {
     await f.connect(); f.incompatible();
-    await expect(f.network.restartSourceRound(async () => { throw new Error("must not run"); })).rejects.toThrow("incompatible");
+    let notifications = 0;
+    await expect(f.network.restartSourceRound(async () => { throw new Error("must not run"); }, () => { notifications++; return undefined; })).rejects.toThrow("incompatible");
+    expect(notifications).toBe(0);
     expect(f.network.phase).toBe("active"); expect(f.network.clients).toHaveLength(1);
     f.advance(); await f.publish(); expect(f.snapshots.at(-1)?.flags).toBe(0);
   } finally { await f.close(); }
@@ -191,4 +193,20 @@ test("delayed pure commands retain the checksum epoch through fast restart but n
     full.client.reliable.add("cp 2 7 8 @ 0"); await full.send(40);
     expect(full.network.clients).toHaveLength(1);
   } finally { await full.close(); }
+});
+
+for (const failure of ["prepare", "notification"]) test(`round mutation notification precedes ${failure} failure and retires the wire`, async () => {
+  const f = fixture(); let notifications = 0, runs = 0;
+  try {
+    await f.connect();
+    if (failure === "prepare") f.failPrepare();
+    await expect(f.network.restartSourceRound(async () => { runs++; }, () => {
+      notifications++;
+      if (failure === "notification") throw new Error("notification failed");
+      return undefined;
+    })).rejects.toThrow(`${failure} failed`);
+    expect(notifications).toBe(1); expect(runs).toBe(0);
+    expect(f.network.phase).toBe("closed"); expect(f.transport.closed).toBe(true);
+    expect(f.network.clients).toEqual([]); expect(await f.network.poll(2000)).toEqual([]);
+  } finally { await f.close(); }
 });

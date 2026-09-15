@@ -50,6 +50,7 @@ function add(output: Float64Array, input: Float64Array | Int16Array, gain: numbe
 export class UnifiedAudio {
     readonly sampleRate: number;
     private readonly seats: SeatAudio[] = [];
+    private readonly roundMixers: { readonly seat: SeatId; readonly mixer: AudioMixer }[] = [];
     private readonly actors: ActorId[] = [];
     private dopplerEnabled = true;
     private readonly positions = new Map<number, Vec3>();
@@ -123,8 +124,10 @@ export class UnifiedAudio {
         for (const listener of listeners) {
             let state = this.seats.find(value => value.listener.seat.equals(listener.seat));
             if (state === undefined) {
+                const retained = this.roundMixers.findIndex(value => value.seat.equals(listener.seat));
+                const mixer = retained < 0 ? undefined : this.roundMixers.splice(retained, 1)[0]?.mixer;
                 state = { listener,
-                    mixer: new AudioMixer(this.sampleRate, this.options.milliseconds, 96, 2, this.options.maxActors ?? 65536),
+                    mixer: mixer ?? new AudioMixer(this.sampleRate, this.options.milliseconds, 96, 2, this.options.maxActors ?? 65536),
                     reverb: new StereoReverb(this.sampleRate), underwater: new UnderwaterFilter(this.sampleRate), environment: null, loops: new Map<string, LoopSound>() };
                 state.mixer.setEffectsVolume(this.effectsGain);
                 state.mixer.setDopplerEnabled(this.dopplerEnabled);
@@ -140,6 +143,7 @@ export class UnifiedAudio {
             state.mixer.setListener(entity, listener.origin, listener.axis);
             state.environment?.update(listener.origin, this.options.milliseconds());
         }
+        this.roundMixers.length = 0;
     }
     setEffectsVolume(gain: number): void {
         if (!Number.isFinite(gain) || gain < 0)
@@ -473,12 +477,28 @@ export class UnifiedAudio {
         this.device?.clear();
         this.queuedPcm = new Int16Array(0);
     }
+    resetRound(): void {
+        this.check();
+        this.stopAll();
+        for (const state of this.seats) {
+            const retained = this.roundMixers.findIndex(value => value.seat.equals(state.listener.seat));
+            const entry = { seat: state.listener.seat, mixer: state.mixer };
+            if (retained < 0) this.roundMixers.push(entry);
+            else this.roundMixers[retained] = entry;
+        }
+        this.seats.length = 0;
+        this.actors.length = 0;
+        this.positions.clear();
+        this.previousPumpFrame = null;
+        this.pumpIntervals.length = 0;
+    }
     close(): void { if (this.closed)
         return; try {
         this.stopAll();
     }
     finally {
         this.closed = true;
+        this.roundMixers.length = 0;
         this.device?.close();
         this.device = null;
         this.detachedOutput = null;

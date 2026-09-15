@@ -498,6 +498,15 @@ export class ApplicationAudio {
     this.engine.pump(undefined, performance.now() - frameStartedAt);
   }
 
+  resetRound(): void {
+    if (this.closed) throw new Error("Application audio closed");
+    this.music.stop();
+    this.engine.resetRound();
+    this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
+    this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
+    this.listeners = []; this.snapshot = null; this.environmentSeats.length = 0;
+  }
+
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true;
