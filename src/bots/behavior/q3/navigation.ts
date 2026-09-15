@@ -1,6 +1,8 @@
 /* Source AI navigation operations over the shared graph and selected movement. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { NavigationEdge, NavigationRoute } from "../../navigation/types.ts";
+import type { NavigationEstimateResult } from "../../navigation/types.ts";
+import { aasAreaTravelFlags, navigationEdgeTravelFlag } from "../../navigation/graph.ts";
+import { aasEstimateAreaTime } from "../../navigation/estimate-aas.ts";
 import { NavigationRuntime } from "../../navigation/runtime.ts";
 import type { BotGoal } from "../library/goals.ts";
 import type { BotActionBuffer } from "../library/actions.ts";
@@ -10,7 +12,7 @@ import type { BotMoveStateStore, BotMoveResult } from "./movement-state.ts";
 import type { BotRandom } from "../library/weights.ts";
 import { SourceBotTravel } from "./travel/index.ts";
 import type { BotTravelPredictionResult, BotTravelModel } from "./travel/types.ts";
-import { AlternativeRouteType, RouteStopEvent, TravelFlags, travelFlagForType } from "./navigation-types.ts";
+import { AlternativeRouteType, RouteStopEvent, TravelType } from "./navigation-types.ts";
 import type { AreaTravelTimeQuery, AlternativeGoal, AlternativeRouteQuery, BotMovementPrediction, BotNavigation,
   BotNavigationArea, PredictedRoute, PredictRouteQuery, RouteQuery, RouteResult } from "./navigation-types.ts";
 
@@ -76,75 +78,75 @@ export class SourceBotNavigation implements BotNavigation {
     return this.runtime.traceAreas(start, end, maximum).map(crossing => ({ ...crossing, area: this.source(crossing.area) }));
   }
   setAreaEnabled(area: number, enabled: boolean): void { if (area !== 0) this.runtime.enableArea(this.node(area), enabled); }
-  private edgeFlag(edge: NavigationEdge): number {
-    if (edge.source.kind === "aas") return travelFlagForType(edge.sourceTravelType);
-    switch (edge.mode) {
-      case "walk": return TravelFlags.WALK;
-      case "crouch": return TravelFlags.CROUCH;
-      case "jump": return TravelFlags.JUMP;
-      case "drop": return TravelFlags.WALKOFFLEDGE;
-      case "swim": return TravelFlags.SWIM;
-      case "water-jump": return TravelFlags.WATERJUMP;
-      case "ladder": return TravelFlags.LADDER;
-      case "teleport": return TravelFlags.TELEPORT;
-      case "mover": return TravelFlags.ELEVATOR | TravelFlags.FUNCBOB;
-      case "jump-pad": return TravelFlags.JUMPPAD;
-      case "rocket-jump": return TravelFlags.ROCKETJUMP;
-      case "bfg-jump": return TravelFlags.BFGJUMP;
-      case "grapple": return TravelFlags.GRAPPLEHOOK;
-      case "double-jump": return TravelFlags.DOUBLEJUMP;
-      case "ramp-jump": return TravelFlags.RAMPJUMP;
-      case "strafe-jump": return TravelFlags.STRAFEJUMP;
-      case "unknown": return TravelFlags.INVALID;
-    }
-  }
-  private selectedRoute(query: AreaTravelTimeQuery, filter?: (edge: NavigationEdge) => boolean): NavigationRoute | null {
-    if (query.area === 0 || query.goalArea === 0) return null;
-    const start = this.runtime.node(this.node(query.area)), goal = this.runtime.node(this.node(query.goalArea));
-    if (start === null || goal === null) return null;
-    const result = this.runtime.route({ start: query.origin ?? start.origin, goal: goal.origin,
-      startNode: start.id, goalNode: goal.id,
-      ...(this.offset === 0 ? { travelFlags: query.travelFlags } : {}),
-      edgeFilter: edge => (this.edgeFlag(edge) & query.travelFlags) !== 0 && (filter === undefined || filter(edge)) });
-    return result.kind === "route" ? result.route : null;
+  private selectedEstimate(query: AreaTravelTimeQuery): NavigationEstimateResult {
+    if (query.area === 0 || query.goalArea === 0) return { kind: "unreachable" };
+    return this.runtime.estimate({ startNode: this.node(query.area), goalNode: this.node(query.goalArea), origin: query.origin, travelFlags: query.travelFlags });
   }
   route(query: RouteQuery): RouteResult {
-    const route = this.selectedRoute(query);
-    return route === null ? { kind: "unreachable" } : { kind: "found", travelTime: Math.max(1, Math.trunc(f(route.travelSeconds * 100))),
-      nextReachability: route.edges[0] === undefined ? 0 : route.edges[0].id + (this.offset === 0 ? 0 : 1) };
+    const result = this.selectedEstimate(query);
+    return result.kind === "unreachable" ? result : { kind: "found", travelTime: result.travelTime,
+      nextReachability: result.firstEdge === null ? 0 : result.firstEdge.id + this.offset };
   }
   areaTravelTimeToGoal(query: AreaTravelTimeQuery): number {
-    const route = this.selectedRoute(query);
-    return route === null ? 0 : Math.max(1, Math.trunc(f(route.travelSeconds * 100)));
+    const result = this.selectedEstimate(query); return result.kind === "unreachable" ? 0 : result.travelTime;
   }
   predictRoute(query: PredictRouteQuery): PredictedRoute {
-    const route = this.selectedRoute(query);
-    let endArea = query.area, endPosition = query.origin, endTravelFlags = 0, time = 0, stopEvent = 0;
-    if (route === null) return { succeeded: false, stopEvent: RouteStopEvent.NO_ROUTE, endArea, endPosition,
-      endTravelFlags, time, endContents: this.area(endArea).contents };
-    let count = 0;
-    for (const edge of route.edges) {
-      if (query.maximumAreas > 0 && count >= query.maximumAreas) break;
-      const flags = this.edgeFlag(edge), destination = this.source(edge.to);
-      if ((query.stopEvent & RouteStopEvent.USE_TRAVEL_TYPE) !== 0 && (flags & query.stopTravelFlags) !== 0) {
-        stopEvent = RouteStopEvent.USE_TRAVEL_TYPE; endTravelFlags = flags; endPosition = edge.start; break;
+    let area = query.area, origin = query.origin;
+    let endArea = query.goalArea, endPosition = query.origin, endTravelFlags = 0, endContents = 0, time = 0;
+    const result = (succeeded: boolean, stopEvent = 0): PredictedRoute => ({ succeeded, stopEvent, endArea,
+      endPosition, endTravelFlags, time, endContents });
+    const initial = this.area(query.area);
+    const addTime = (start: Vec3, travelTime: number): void => {
+      time += aasEstimateAreaTime({ presence: initial.presenceType, flags: initial.flags }, query.origin, start) + travelTime;
+      if (time > 0x7fffffff) throw new RangeError("predicted route time exceeds source int range");
+    };
+    for (let count = 0; area !== query.goalArea && (query.maximumAreas === 0 || count < query.maximumAreas)
+      && count < this.runtime.graph.nodes.length; count++) {
+      const selected = this.selectedEstimate({ area, origin, goalArea: query.goalArea, travelFlags: query.travelFlags });
+      if (selected.kind === "unreachable" || selected.firstEdge === null) return result(false, RouteStopEvent.NO_ROUTE);
+      const edge = selected.firstEdge, flags = navigationEdgeTravelFlag(edge), destination = this.source(edge.to);
+      const asset = this.runtime.graph.asset;
+      const sourceReach = asset?.kind === "aas" && edge.source.kind === "aas" ? asset.reachability[edge.id] : undefined;
+      const travelTime = sourceReach?.travelTime ?? Math.max(1, Math.trunc(f(edge.travelSeconds * 100)));
+      if ((query.stopEvent & RouteStopEvent.USE_TRAVEL_TYPE) !== 0) {
+        if ((flags & query.stopTravelFlags) !== 0) {
+          endArea = area; endContents = this.area(area).contents; endTravelFlags = flags; endPosition = edge.start;
+          return result(true, RouteStopEvent.USE_TRAVEL_TYPE);
+        }
+        const contentsFlags = aasAreaTravelFlags(this.area(destination));
+        if ((contentsFlags & query.stopTravelFlags) !== 0) {
+          endArea = destination; endContents = this.area(destination).contents; endTravelFlags = contentsFlags; endPosition = edge.end;
+          addTime(edge.start, travelTime);
+          return result(true, RouteStopEvent.USE_TRAVEL_TYPE);
+        }
       }
-      const crossed = this.traceAreas(edge.start, edge.end, this.runtime.graph.nodes.length);
-      const entered = [...crossed.map(value => value.area), destination];
-      for (const area of entered) {
+      let crossed: readonly { readonly area: number; readonly point: Vec3 }[] = [];
+      if (sourceReach === undefined) crossed = this.traceAreas(edge.start, edge.end, 32);
+      else switch (sourceReach.travelType & 0xffffff) {
+        case TravelType.BARRIERJUMP:
+        case TravelType.WATERJUMP:
+          crossed = this.traceAreas(edge.start, { ...edge.start, z: edge.end.z }, 32); break;
+        case TravelType.WALKOFFLEDGE:
+          crossed = this.traceAreas({ ...edge.end, z: edge.start.z }, edge.end, 32); break;
+        case TravelType.GRAPPLEHOOK:
+          crossed = this.traceAreas(edge.start, edge.end, 32); break;
+      }
+      for (const area of [...crossed.map(value => value.area), destination]) {
         if ((query.stopEvent & RouteStopEvent.ENTER_CONTENTS) !== 0 && (this.area(area).contents & query.stopContents) !== 0) {
-          stopEvent = RouteStopEvent.ENTER_CONTENTS; endArea = area; endPosition = edge.end; break;
+          endArea = area; endContents = this.area(area).contents; endPosition = edge.end; addTime(edge.start, travelTime);
+          return result(true, RouteStopEvent.ENTER_CONTENTS);
         }
         if ((query.stopEvent & RouteStopEvent.ENTER_AREA) !== 0 && area === query.stopArea) {
-          stopEvent = RouteStopEvent.ENTER_AREA; endArea = area; endPosition = edge.start; break;
+          endArea = area; endContents = this.area(area).contents; endPosition = edge.start;
+          return result(true, RouteStopEvent.ENTER_AREA);
         }
       }
-      time = (time + Math.max(1, Math.trunc(f(edge.travelSeconds * 100)))) | 0;
-      if (stopEvent !== 0) break;
-      endArea = destination; endPosition = edge.end; endTravelFlags = flags; count++;
-      if (query.maximumTime > 0 && time >= query.maximumTime) break;
+      addTime(edge.start, travelTime);
+      endArea = destination; endContents = this.area(destination).contents; endPosition = edge.end; endTravelFlags = flags;
+      area = destination; origin = edge.end;
+      if (query.maximumTime !== 0 && time > query.maximumTime) break;
     }
-    return { succeeded: true, stopEvent, endArea, endPosition, endTravelFlags, time, endContents: this.area(endArea).contents };
+    return result(area === query.goalArea);
   }
   alternativeRouteGoals(query: AlternativeRouteQuery): readonly AlternativeGoal[] {
     if (query.startArea === 0 || query.goalArea === 0) return [];
@@ -294,13 +296,24 @@ export class SourceBotNavigation implements BotNavigation {
     if (state === null) { result.failure = true; return; }
     this.withClient(state.client, () => this.travel.moveToGoal(result, handle, goal, travelFlags));
   }
+  private estimatedPoints(query: RouteQuery): readonly Vec3[] | null {
+    const points: Vec3[] = [query.origin], visited = new Set<number>();
+    let area = query.area, origin = query.origin;
+    while (area !== query.goalArea) {
+      const result = this.selectedEstimate({ area, origin, goalArea: query.goalArea, travelFlags: query.travelFlags });
+      if (result.kind === "unreachable" || result.firstEdge === null || visited.has(result.firstEdge.id)) return null;
+      const edge = result.firstEdge; visited.add(edge.id); points.push(edge.start, edge.end);
+      area = this.source(edge.to); origin = edge.end;
+    }
+    return points;
+  }
   movementViewTarget(handle: number, goal: BotGoal, travelFlags: number, lookAhead: number, output: { value: Vec3 }): boolean {
     const state = this.host.moveStates.fromHandle(handle);
     if (state === null) return false;
-    const route = this.selectedRoute({ area: this.pointArea(state.origin), origin: state.origin, goalArea: goal.area, travelFlags });
+    const route = this.estimatedPoints({ area: this.pointArea(state.origin), origin: state.origin, goalArea: goal.area, travelFlags });
     if (route === null) return false;
     let start = state.origin, remaining = lookAhead;
-    for (const point of [...route.points, goal.origin]) {
+    for (const point of [...route, goal.origin]) {
       const delta = sub3(point, start), distance = length3(delta);
       if (distance >= remaining) { output.value = add3(start, scale3(normalize3(delta), remaining)); return true; }
       remaining -= distance; start = point;
@@ -308,9 +321,9 @@ export class SourceBotNavigation implements BotNavigation {
     output.value = goal.origin; return true;
   }
   predictVisiblePosition(origin: Vec3, area: number, goal: BotGoal, travelFlags: number, output: { value: Vec3 }): boolean {
-    const route = this.selectedRoute({ area, origin, goalArea: goal.area, travelFlags });
+    const route = this.estimatedPoints({ area, origin, goalArea: goal.area, travelFlags });
     if (route === null) return false;
-    for (const point of route.points) {
+    for (const point of route) {
       const trace = this.host.trace(point, goal.origin, null, -1, 1);
       if (trace.fraction === 1 && trace.solidity === "clear") { output.value = point; return true; }
     }

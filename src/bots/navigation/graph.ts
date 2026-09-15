@@ -16,7 +16,7 @@ export function aasTravelFlag(type: number): number {
   const index = type & 0xffffff;
   return index < 2 || index > 19 ? 1 : index === 19 ? 0x01000000 : 1 << (index >= 7 ? index : index - 1);
 }
-export function aasAreaTravelFlags(setting: AasAsset["settings"][number]): number {
+export function aasAreaTravelFlags(setting: Pick<AasAsset["settings"][number], "contents" | "flags">): number {
   const value = setting.contents;
   return ((value & 1) !== 0 ? 0x00100000 : (value & 4) !== 0 ? 0x00200000 : (value & 2) !== 0 ? 0x00400000 : 0x00080000)
     | ((value & 256) !== 0 ? 0x00800000 : 0) | ((value & 2048) !== 0 ? 0x08000000 : 0)
@@ -112,4 +112,27 @@ export function navigationFromAsset(map: NavigationMapIdentity, asset: AasAsset 
   }
   return { map, profile, asset, nodes, edges, clusters: navigationClusters(nodes, edges),
     rejected: edges.filter(edge => edge.mode === "unknown").map(edge => ({ source: edge.source, reason: `Unsupported source travel type ${edge.sourceTravelType}` })) };
+}
+
+export function navigationEdgeTravelFlag(edge: NavigationEdge): number {
+  if (edge.source.kind === "aas") return aasTravelFlag(edge.sourceTravelType);
+  switch (edge.mode) {
+    case "walk": return 2;
+    case "crouch": return 4;
+    case "jump": return 16;
+    case "drop": return 128;
+    case "swim": return 256;
+    case "water-jump": return 512;
+    case "ladder": return 32;
+    case "teleport": return 1024;
+    case "mover": return 16779264;
+    case "jump-pad": return 262144;
+    case "rocket-jump": return 4096;
+    case "bfg-jump": return 8192;
+    case "grapple": return 16384;
+    case "double-jump": return 32768;
+    case "ramp-jump": return 65536;
+    case "strafe-jump": return 131072;
+    case "unknown": return 1;
+  }
 }

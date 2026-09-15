@@ -84,3 +84,14 @@ export interface NavigationRoute {
 }
 export type NavigationRouteResult = { readonly kind: "route"; readonly route: NavigationRoute }
   | { readonly kind: "unreachable"; readonly reason: string };
+
+/** Metadata cost query; a null origin excludes the approach within the first area. */
+export interface NavigationEstimateQuery {
+  readonly startNode: number;
+  readonly goalNode: number;
+  readonly origin: Vec3 | null;
+  readonly travelFlags?: number;
+}
+/** Source centiseconds are estimates, never a movement-admitted trajectory or duration. */
+export type NavigationEstimateResult = { readonly kind: "estimate"; readonly travelTime: number; readonly firstEdge: NavigationEdge | null }
+  | { readonly kind: "unreachable" };

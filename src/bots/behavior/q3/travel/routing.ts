@@ -107,20 +107,24 @@ export class TravelGraph {
     if (asset?.kind === "aas" && (((asset.settings[state.area]?.contents ?? 0) | (asset.settings[goal.area]?.contents ?? 0)) & 256) !== 0) {
       travelFlags |= TravelFlags.DONOTENTER; moveTravelFlags |= TravelFlags.DONOTENTER;
     }
-    const result = this.runtime.route({ start: state.origin, goal: goal.origin, startNode: this.node(state.area), goalNode: this.node(goal.area),
-      ...(this.offset === 0 ? { travelFlags } : {}), edgeFilter: edge => {
-        const reach = this.describe(edge), number = this.handle(edge);
-        if ((travelFlagForType(reach.travelType) & travelFlags) === 0) return false;
-        if (edge.from !== this.node(state.area)) return true;
-        if ((travelFlagForType(reach.travelType) & moveTravelFlags) === 0) return false;
-        if (state.avoidReach[0] === number && state.avoidReachTimes[0] >= this.time && state.avoidReachTries[0] > 4) return false;
-        if (state.lastGoalArea === goal.area && reach.area === state.lastArea) return false;
-        if (avoidMovementSpots(state.origin, reach, state.avoidSpots, state.numAvoidSpots) !== 0) {
-          flags |= BotMoveResultFlag.BLOCKEDBYAVOIDSPOT; return false;
-        }
-        return true;
-      } });
-    return { reachability: result.kind === "route" && result.route.edges[0] !== undefined ? this.handle(result.route.edges[0]) : 0, flags };
+    const candidates: { readonly edge: NavigationEdge; readonly time: number }[] = [];
+    for (const edge of this.runtime.outgoing(this.node(state.area))) {
+      const reach = this.describe(edge), number = this.handle(edge);
+      if ((travelFlagForType(reach.travelType) & travelFlags) === 0 || (travelFlagForType(reach.travelType) & moveTravelFlags) === 0) continue;
+      if (state.avoidReach[0] === number && state.avoidReachTimes[0] >= this.time && state.avoidReachTries[0] > 4) continue;
+      if (state.lastGoalArea === goal.area && reach.area === state.lastArea) continue;
+      const tail = this.runtime.estimate({ startNode: edge.to, goalNode: this.node(goal.area), origin: reach.end, travelFlags });
+      if (tail.kind === "unreachable" || tail.travelTime === 0) continue;
+      if (avoidMovementSpots(state.origin, reach, state.avoidSpots, state.numAvoidSpots) !== 0) {
+        flags |= BotMoveResultFlag.BLOCKEDBYAVOIDSPOT; continue;
+      }
+      candidates.push({ edge, time: (tail.travelTime + reach.travelTime) | 0 });
+    }
+    candidates.sort((first, second) => first.time - second.time);
+    for (const candidate of candidates) {
+      if (this.runtime.admitEdge(candidate.edge, state.origin).admitted) return { reachability: this.handle(candidate.edge), flags };
+    }
+    return { reachability: 0, flags };
   }
   time = 0;
 }
