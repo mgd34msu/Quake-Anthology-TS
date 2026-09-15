@@ -59,7 +59,7 @@ export class InputCommandBuilder {
   }
   centerView(deltaPitch = 0): void { this.angles = { ...this.angles, x: -deltaPitch }; }
   clear(): void { this.angles = { x: 0, y: 0, z: 0 }; this.mouse.clear(); }
-  build(sample: SeatInputSample, frame: UserCommandFrame): UserCommand {
+  build(sample: SeatInputSample, frame: UserCommandFrame, sourceFrameMilliseconds = sample.frameMilliseconds): UserCommand {
     if (frame.kind !== this.dialect) throw new Error("User-command frame and input dialect differ");
     const q3 = frame.kind === "q3", q1 = frame.kind === "q1-netquake" || frame.kind === "q1-quakeworld";
     const f = q3 ? Math.fround : (value: number): number => value;
@@ -68,7 +68,7 @@ export class InputCommandBuilder {
     const active = (action: SourceAction): boolean => states.get(action)?.active ?? false;
     const pressed = (action: SourceAction): boolean => active(action) || (states.get(action)?.pressed ?? false);
     const speed = active("walk"), strafe = active("strafe"), klook = active("klook");
-    const angleSpeed = f(sample.frameMilliseconds / 1000 * (speed ? this.tuning.angleSpeedMultiplier : 1));
+    const angleSpeed = f(sourceFrameMilliseconds / 1000 * (speed ? this.tuning.angleSpeedMultiplier : 1));
     const previousPitch = this.angles.x;
     let pitch = this.angles.x, yaw = this.angles.y, roll = this.angles.z;
     if (!strafe) {
@@ -138,7 +138,7 @@ export class InputCommandBuilder {
       forward = clamp(forward, 400); side = clamp(side, 400);
     }
     this.angles = { x: pitch, y: yaw, z: roll };
-    const milliseconds = Math.trunc(sample.frameMilliseconds > 250 ? 100 : sample.frameMilliseconds);
+    const milliseconds = Math.trunc(sourceFrameMilliseconds > 250 ? 100 : sourceFrameMilliseconds);
     switch (frame.kind) {
       case "q1-netquake": return { kind: frame.kind, acknowledgedServerTimeSeconds: frame.acknowledgedServerTimeSeconds, viewAngles: this.viewAngles,
         forwardMove: Math.trunc(forward), sideMove: Math.trunc(side), upMove: Math.trunc(up), buttons, impulse: sample.impulse };

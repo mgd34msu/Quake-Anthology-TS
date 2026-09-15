@@ -2574,12 +2574,11 @@ export class SharedSimulation implements Simulation {
       this.hostMilliseconds += input.elapsedMilliseconds;
       for (const entry of commands) await guest.think(entry.player, entry.command);
       this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
-      if (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000) {
+      while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + profile.serverFrameMilliseconds) {
         this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
         await this.source.game.runFrame(Math.trunc(this.timeSeconds * 1000));
         this.assertOpen();
         this.sourceFrame = this.clock.enter("frame-exit");
-        if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000;
       }
       return { snapshot: this.snapshot(), events: this.events.take() };
     } finally { this.stepping = false; }
@@ -2610,11 +2609,16 @@ export class SharedSimulation implements Simulation {
       if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
       const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
-      const mapRun = !paused && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000);
+      const mapRun = !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
       const elapsed = fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
       const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
-      const mapEndMilliseconds = (selectedQ2?.mapMilliseconds ?? this.timeSeconds * 1000) + elapsed * 1000;
-      const deadlines = new Set<number>([mapEndMilliseconds]);
+      const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? this.timeSeconds * 1000;
+      const mapDeadlines = new Set<number>();
+      if (mapRun && profile.kind === "q3") {
+        for (let due = this.timeSeconds * 1000 + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
+      } else if (mapRun) mapDeadlines.add(mapStartMilliseconds + elapsed * 1000);
+      const mapEndMilliseconds = mapDeadlines.size === 0 ? mapStartMilliseconds : Math.max(...mapDeadlines);
+      const deadlines = new Set<number>(mapDeadlines.size === 0 ? [mapEndMilliseconds] : mapDeadlines);
       const weaponDeadlines = new Set<number>();
       if (mapRun) {
         if (selectedQ2 !== null) for (let due = selectedQ2.nextMilliseconds; due <= mapEndMilliseconds; due += selectedQ2.intervalMilliseconds) {
@@ -2626,11 +2630,13 @@ export class SharedSimulation implements Simulation {
         }
       }
       const boundaries = [...deadlines].sort((a, b) => a - b).map(milliseconds => ({
-        map: mapRun && milliseconds === mapEndMilliseconds, q2: weaponDeadlines.has(milliseconds), milliseconds,
+        map: mapDeadlines.has(milliseconds), q2: weaponDeadlines.has(milliseconds), milliseconds,
       }));
+      let commandsPending = true;
       for (const boundary of boundaries) {
-      const run = boundary.map, commandTurn = run || !mapRun;
-      if (run && selectedQ2 !== null) selectedQ2.mapMilliseconds = mapEndMilliseconds;
+      const run = boundary.map, commandTurn = commandsPending && (run || !mapRun);
+      if (commandTurn) commandsPending = false;
+      if (run && selectedQ2 !== null) selectedQ2.mapMilliseconds = boundary.milliseconds;
       if (boundary.q2 && selectedQ2 !== null) {
         const milliseconds = selectedQ2.frame.time.kind === "milliseconds";
         selectedQ2.frame = { frame: selectedQ2.frame.frame + 1, phase: "frame-entry",
@@ -2913,7 +2919,7 @@ export class SharedSimulation implements Simulation {
         }
         if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) this.source.game.forceRetouch--;
         if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
-        else { this.sourceFrame = this.clock.enter("frame-exit"); if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }
+        else { this.sourceFrame = this.clock.enter("frame-exit"); if (profile.kind !== "q3" && this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }
       }
       }
       if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);

@@ -62,6 +62,7 @@ import { ApplicationQ3Assets } from "./q3-client/assets.ts";
 import { createApplicationQ3Services } from "./q3-client/services.ts";
 import type { ApplicationQ3Services } from "./q3-client/services.ts";
 import { ApplicationQ3Cinematics } from "./q3-client/cinematics.ts";
+import { FrameTimeCvarMirror, frameTimeCvarNames, refreshFrameTimeCvars } from "./frame-time.ts";
 import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
 import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
 import { q3WeaponCamera } from "./q3-client/view.ts";
@@ -80,6 +81,7 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
 }
 interface ApplicationQ3ClientCommonOptions {
   readonly cvars?: CvarRegistry;
+  readonly timeCvars?: CvarRegistry;
   readonly weaponHud?: WeaponHudReader;
   assertCurrent?(): void;
   readonly assets: ApplicationAssets;
@@ -126,6 +128,8 @@ export class ApplicationQ3Client {
   private latestCamera: SceneCamera;
   private frameNumber = 0;
   private closed = false;
+  private timeMirror: FrameTimeCvarMirror | null = null;
+  private appliedTimeSystemInfo: string | undefined;
   private keyCatcher = 0;
   private selection = { weapon: 2, sensitivity: 1 };
   private cinematics: ApplicationQ3Cinematics | null = null;
@@ -163,18 +167,34 @@ export class ApplicationQ3Client {
   refreshSystemInfo(): void {
     if (this.closed) throw new Error("Q3 presentation is closed");
     this.options.assertCurrent?.();
-    const info = this.source.systemInfo?.(); if (info === undefined) return;
-    const fields = info.split("\\");
-    for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
-      const name = fields[index], value = fields[index + 1];
-      if (name !== undefined && name.length > 0 && value !== undefined && name.toLowerCase() !== "cl_allowdownload") this.cvars.set(name, value, true);
+    const info = this.source.systemInfo?.();
+    if (info !== undefined) {
+      const fields = info.split("\\");
+      for (let index = fields[0] === "" ? 1 : 0; index + 1 < fields.length; index += 2) {
+        const name = fields[index], value = fields[index + 1];
+        if (name !== undefined && this.options.timeCvars !== undefined && frameTimeCvarNames(this.options.timeCvars.dialect).includes(name.toLowerCase())) continue;
+        if (name?.toLowerCase() === "timescale" && info === this.appliedTimeSystemInfo) continue;
+        if (name !== undefined && name.length > 0 && value !== undefined && name.toLowerCase() !== "cl_allowdownload") this.cvars.set(name, value, true);
+      }
+      this.appliedTimeSystemInfo = info;
     }
+    if (this.timeMirror !== null) this.timeMirror.refresh();
+    else if (this.options.timeCvars !== undefined) refreshFrameTimeCvars(this.options.timeCvars, this.cvars);
   }
   static async create(options: ApplicationQ3ClientOptions): Promise<ApplicationQ3Client> {
     options.assertCurrent?.();
     const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.kind === "qvm" ? "guest-async" : "source-sync");
     const client = new ApplicationQ3Client(options, media);
-    try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); return client; } catch (error) { client.close(); throw error; }
+    try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
+  }
+  private bindFrameTime(): void {
+    const owner = this.options.timeCvars;
+    if (owner === undefined || owner === this.cvars) return;
+    this.refreshSystemInfo();
+    this.timeMirror = new FrameTimeCvarMirror(owner, this.cvars, () => {
+      if (this.closed) throw new Error("Q3 presentation is closed");
+      this.options.assertCurrent?.();
+    });
   }
   private commandContext(): CommandContext { const player = this.options.local.player; return { session: player.actor.session,
     origin: { kind: "local-seat", seat: player.seat.id, client: player.seat.client.id } }; }
@@ -422,6 +442,7 @@ export class ApplicationQ3Client {
   async shutdown(): Promise<void> { if (this.backend?.kind === "qvm") await this.backend.game.shutdown(); this.close(); }
   close(): void {
     if (this.closed) return;
+    this.timeMirror?.close(); this.timeMirror = null;
     this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
     this.closed = true; this.cinematics?.close(); this.media.close(); this.foreign.close(); this.renderers.clear(); this.submissions.length = 0;

@@ -1,3 +1,4 @@
+import { frameTimeCvarNames, readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
 import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
 import { prepareApplicationResources } from "./precache.ts";
 import { registerQ1ClientCommands, resolveQ1HostCommandActor } from "./q1-client-commands.ts";
@@ -514,12 +515,12 @@ export class Application {
       ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
       console: { dialect: () => this.sourceDialect(content), server: () => {
         const source = simulation.q3Source();
-        if (source !== null) return { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
-        if (q2Console !== null) return { cvars: q2Console.cvars, sharedNames: q2Console.sharedNames };
+        if (source !== null) return { cvars: source.host.cvars, sharedNames: [...source.settings.definitions.map(definition => definition.name), ...frameTimeCvarNames(source.host.cvars.dialect)] };
+        if (q2Console !== null) return { cvars: q2Console.cvars, sharedNames: [...q2Console.sharedNames, ...frameTimeCvarNames(q2Console.cvars.dialect)] };
         const guest = simulation.q3Guest();
-        if (guest !== null) return { cvars: guest.state.cvars, sharedNames: q3GameCvarDefinitions("missionpack").map(definition => definition.name) };
+        if (guest !== null) return { cvars: guest.state.cvars, sharedNames: [...q3GameCvarDefinitions("missionpack").map(definition => definition.name), ...frameTimeCvarNames(guest.state.cvars.dialect)] };
         const q1 = simulation.q1Source();
-        return q1 === null ? null : { cvars: q1.cvars, sharedNames: [] };
+        return q1 === null ? null : { cvars: q1.cvars, sharedNames: frameTimeCvarNames(q1.cvars.dialect) };
       }, seat: id => localGuest?.seats.get(id)?.cvars ?? clientCvars.get(id) ?? null },
       clientCapturesInput: seat => this.campaignMovie !== null || (this.graphical?.q3.get(seat)?.client.capturesInput ?? false),
       clientInput: event => {
@@ -559,6 +560,8 @@ export class Application {
   private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent, restoring = false): Promise<{
     readonly sourceCommands: CommandBuffer | null; readonly q2Console: ApplicationQ2Console | null;
   }> {
+    const timeCvars = this.sourceCvars(simulation);
+    if (timeCvars !== null) registerFrameTimeCvars(timeCvars);
     let sourceCommands: CommandBuffer | null = null;
     let q2Console: ApplicationQ2Console | null = null;
     if (simulation.q2Source() !== null) {
@@ -1004,13 +1007,15 @@ export class Application {
   private async createQ3SeatClient(local: LocalInput, assets: ApplicationAssets, audio: ApplicationAudio, input: ApplicationInput,
     renderer: NativeRenderer, simulation: SharedSimulation, settings?: readonly CvarSnapshot[], localGuest = this.localGuest, browser = this.guestBrowser,
     cvars = this.clientCvars.get(local.player.seat.id)): Promise<Q3SeatClient | null> {
-    if (simulation.q3Guest() !== null) {
+    const guest = simulation.q3Guest();
+    if (guest !== null) {
       const seat = localGuest?.seats.get(local.player.seat.id);
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
       const { state, cvars } = seat;
       const client = await ApplicationQ3Client.create({ kind: "qvm", localServer: true, source: state.source, connection: state, cvars,
         assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.commands,
         splitScreen: this.options.seats > 1,
+        timeCvars: guest.state.cvars,
         assertCurrent: () => { if (simulation.q3Guest()?.isRetired !== false || local.player.seat.client.isClosed) throw new Error("Guest presentation world is retired"); },
         clientState: () => ({ phase: 8, connectPacketCount: 0, clientNumber: state.clientNumber, serverName: "localhost", message: "" }),
         viewport: () => { const size = renderer.window.drawableSize; return seatViewport(local.player.seat.id.index, this.options.seats, size.width, size.height); },
@@ -1029,6 +1034,7 @@ export class Application {
     const initial = source.sourceState(); prediction.captureSource(initial);
     const client = await ApplicationQ3Client.create({ weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, queries: simulation.scene, initial, local, audio, movement: prediction,
       splitScreen: this.options.seats > 1,
+      timeCvars: source.host.cvars,
       ...(cvars === undefined ? {} : { cvars }),
       ...(settings === undefined ? {} : { settings }), predictionCommand: (command, time) => prediction.submit(command, time),
       linkBounds: number => source.world.linkState(number)?.absbounds ?? null,
@@ -1739,7 +1745,10 @@ export class Application {
       const paused = this.options.mode === "singleplayer" && this.network === null
         && this.simulation.players().length === this.localPlayers.length + this.botClients.length && this.graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) === true
         && retained !== null && retained.simulation === this.simulation;
-      if (!paused) this.elapsed += elapsedMilliseconds;
+      const timeCvars = this.sourceCvars();
+      const frameMilliseconds = timeCvars === null ? elapsedMilliseconds : sourceFrameMilliseconds(this.sourceDialect(), elapsedMilliseconds,
+        readFrameTimeControls(timeCvars), { dedicated: this.options.dedicated, localServer: true });
+      if (!paused) this.elapsed += frameMilliseconds;
       if (this.closed) throw new Error("Application closed during step");
       const remote = await this.network?.server.poll(performance.now()) ?? [];
       if (this.closed) throw new Error("Application closed during step");
@@ -1751,7 +1760,7 @@ export class Application {
           ? { provider: player.arsenal.provider, weapon: q3WeaponItem(selection.weapon)?.item ?? null } : null);
       }
       if (paused && this.graphical !== null) for (const local of this.graphical.input.locals) local.input.sample(this.graphical.input.now(), elapsedMilliseconds);
-      const localCommands = paused ? [] : this.graphical?.input.build(elapsedMilliseconds, this.elapsed, this.frames) ?? [];
+      const localCommands = paused ? [] : this.graphical?.input.build(frameMilliseconds, this.elapsed, this.frames, elapsedMilliseconds) ?? [];
       for (const command of localCommands) if (command.source.kind === "local-seat") {
         const state = this.localGuest?.seats.get(command.source.seat)?.state;
         if (state !== undefined) {
@@ -1759,7 +1768,7 @@ export class Application {
           state.commands.append(fromQ3UserCommand(command.command));
         }
       }
-      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : await this.session.stepAsync({ elapsedMilliseconds,
+      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : await this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds,
         commands: [...localCommands, ...remote] });
       this.lastOutput = { simulation: this.simulation, output };
       this.publishLocalGuestSnapshots();

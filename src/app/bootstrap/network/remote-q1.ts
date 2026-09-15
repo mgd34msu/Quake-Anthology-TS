@@ -21,6 +21,7 @@ export interface Q1RemoteWorld {
     readonly sounds: readonly string[];
 }
 export interface Q1RemotePresentationOptions {
+    presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
     readonly content: LoadedApplicationContent;
@@ -143,7 +144,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.seconds = message.seconds;
                     this.previous = this.current;
                     this.current = new Map<number, Q1ExtendedEntityState>();
-                    this.receivedAt = now;
+                    this.receivedAt = this.options.presentationTime?.() ?? now;
                     this.fraction = 1;
                     this.frameNumber++;
                     break;
@@ -332,6 +333,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         this.options.session.publish({ ...this.published, events: [] });
     }
     samplePresentation(now: number): SimulationOutput | null {
+        now = this.options.presentationTime?.() ?? now;
         if (this.seconds - this.previousSeconds > 0.1) this.previousSeconds = this.seconds - 0.1;
         const duration = Math.max(0, this.seconds - this.previousSeconds);
         this.fraction = duration === 0 ? 1 : Math.max(0, Math.min(1, (now - this.receivedAt) / (duration * 1000)));

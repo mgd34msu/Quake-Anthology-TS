@@ -373,7 +373,7 @@ export class ApplicationInput {
     }
   }
 
-  build(elapsedMilliseconds: number, serverMilliseconds: number, serverFrame: number): readonly ActorCommand[] {
+  build(elapsedMilliseconds: number, serverMilliseconds: number, serverFrame: number, wallElapsedMilliseconds = elapsedMilliseconds): readonly ActorCommand[] {
     const dialect = this.dialect;
     const frame: UserCommandFrame = dialect === "q1-netquake" ? { kind: "q1-netquake", acknowledgedServerTimeSeconds: serverMilliseconds / 1000 }
       : dialect === "q2-classic" ? { kind: "q2-classic", deltaAngles: { x: 0, y: 0, z: 0 }, lightLevel: 128, attackAllowed: true }
@@ -381,7 +381,7 @@ export class ApplicationInput {
       : dialect === "q1-quakeworld" ? { kind: "q1-quakeworld" }
       : { kind: "q3", serverTimeMilliseconds: Math.trunc(serverMilliseconds), weapon: 2, sensitivity: 1 };
     return this.locals.map(local => {
-      const sample = local.input.sample(this.now(), elapsedMilliseconds);
+      const sample = local.input.sample(this.now(), wallElapsedMilliseconds);
       const selectedSample = this.seatUi.get(local.player.seat.id)?.sample(sample) ?? sample;
       const selection = this.q3Selections.get(local.player.seat.id);
       const selectedFrame = frame.kind === "q3" && selection !== undefined ? { ...frame, ...selection } : frame;
@@ -389,7 +389,7 @@ export class ApplicationInput {
       const arsenal = impulseProvider == null ? this.arsenalSelections.get(local.player.seat.id) : { provider: impulseProvider, weapon: null };
       return { actor: local.player.actor,
         source: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id }, sequence: this.sequence++,
-        command: local.builder.build(selectedSample, selectedFrame),
+        command: local.builder.build(selectedSample, selectedFrame, elapsedMilliseconds),
         ...(arsenal === undefined ? {} : { arsenal: { ...arsenal, ...(impulseProvider == null || selectedSample.impulse === 0 ? {} : { impulse: selectedSample.impulse }), useHoldable: selectedSample.focus.kind === "game"
           && selectedSample.buttons.some(button => (button.action === "use" || button.action === "button2") && (button.active || button.pressed)) } }) };
     });

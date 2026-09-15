@@ -27,6 +27,7 @@ import { SelectedMovementPrediction } from '../simulation/prediction.ts';
 import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
 import { movementOrigin, movementProfile } from '../simulation/players.ts';
 export interface Q2RemotePresentationOptions {
+    presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
     readonly content: LoadedApplicationContent;
@@ -274,7 +275,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.current = frame;
         this.predicted = null;
         this.fraction = 1;
-        this.receivedAt = nowMilliseconds;
+        this.receivedAt = this.options.presentationTime?.() ?? nowMilliseconds;
         const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
         const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
             const bounds = q2RemoteEntityBounds(entity.solid, this.protocol.kind === 'q2-r1q2' && this.protocol.revision >= 1905);
@@ -356,6 +357,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     }
     /** Remote bodies remain presentation samples; pending moves replay in private player state. */
     samplePresentation(nowMilliseconds: number): SimulationOutput | null {
+        nowMilliseconds = this.options.presentationTime?.() ?? nowMilliseconds;
         const current = this.current, output = this.published, player = this.currentPlayer;
         if (current === null || output === null || player === null)
             return null;

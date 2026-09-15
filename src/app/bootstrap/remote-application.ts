@@ -1,3 +1,5 @@
+import { PresentationTime } from "./frame-clock.ts";
+import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
 import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
 import { remoteContentSelection, remoteContentProduct } from "../../content/catalog/index.ts";
 import { setImmediate } from "node:timers/promises";
@@ -110,6 +112,7 @@ export class RemoteApplication {
   private presentation: WorldSeatPresentation | null = null;
   private commands: RemoteCommand[] = [];
   private elapsed = 0;
+  private readonly presentationTime = new PresentationTime();
   private frames = 0;
   private stopping = false;
   private closed = false;
@@ -144,6 +147,7 @@ export class RemoteApplication {
       const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
       const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
         cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
+      registerFrameTimeCvars(cvars);
       this.downloadPermission = family === "qw" || family === "nq" ? null : createClientDownloadPermission(cvars, family);
       if (family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
       if (family === "q3") initializeQ3ClientCvars(cvars, { name: "Player", model: launchOptions.characterModel });
@@ -178,6 +182,7 @@ export class RemoteApplication {
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     if (launchOptions.network.kind === "qw-client") {
       const remote = new QwRemotePresentation({ identity, session, content: loadedContent,
+        presentationTime: () => this.presentationTime.milliseconds,
         skinOptions: { read: async path => (await (this.remoteContent?.mounts ?? this.content.mounts).open(path))?.bytes ?? null,
           noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
           baseskin: () => this.clientCommands?.cvars.variableString("baseskin") ?? "base", allskins: () => this.qwAllSkins },
@@ -194,6 +199,7 @@ export class RemoteApplication {
       this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" });
     } else if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, content: loadedContent,
+        presentationTime: () => this.presentationTime.milliseconds,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: world => this.loadServerWorld(world) });
       this.remote = remote;
@@ -202,6 +208,8 @@ export class RemoteApplication {
     } else if (launchOptions.network.kind === "q3-client") {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
       const remote = new Q3RemotePresentation({ identity, session, content: loadedContent,
+        presentationTime: () => this.presentationTime.milliseconds,
+        timescale: () => this.clientCommands?.cvars.variableValue("timescale") ?? 1,
         timeNudge: () => this.clientCommands?.cvars.get("cl_timeNudge")?.integerValue ?? 0,
         userinfo: () => this.clientCommands?.cvars.infoString(CvarFlag.UserInfo) ?? "",
         print: text => this.print(text), sendCommand: text => this.network.command(text),
@@ -222,6 +230,7 @@ export class RemoteApplication {
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
       const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: loadedContent, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },
+        presentationTime: () => this.presentationTime.milliseconds,
         userinfo: () => `\\name\\Player\\skin\\${launchOptions.characterModel}/${launchOptions.characterModel === "female" ? "athena" : launchOptions.characterModel === "cyborg" ? "oni911" : "grunt"}\\fov\\${this.viewSettings.fieldOfView}`,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         prepareServerData: (data, assertCurrent) => this.selectRemoteContent(remoteContentSelection("q2-classic-baseq2", data.gamedir), assertCurrent),
@@ -706,10 +715,14 @@ export class RemoteApplication {
       this.serverBrowser.poll();
       this.q3Browser?.poll();
       this.sourceEvents = []; this.unhandledEffects = [];
-      this.elapsed += elapsedMilliseconds;
       if (this.controls !== null) this.controls.pump();
       else for (const event of this.window.pollEvents()) if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
+      const timeCvars = this.clientCommands?.cvars;
+      const frameMilliseconds = timeCvars === undefined ? elapsedMilliseconds : sourceFrameMilliseconds(timeCvars.dialect, elapsedMilliseconds,
+        readFrameTimeControls(timeCvars), { dedicated: false, localServer: false });
+      this.elapsed += frameMilliseconds;
       const now = performance.now();
+      this.presentationTime.advance(now, elapsedMilliseconds, frameMilliseconds);
       await this.network.poll(now);
       if (this.remote instanceof QwRemotePresentation) { this.clientCommands?.cvars.takeEffects(); await this.remote.prepareSkins(); }
       this.frames++;
@@ -735,7 +748,7 @@ export class RemoteApplication {
         this.controls?.setQ3CommandSelection(seat, selection);
         this.controls?.setArsenalSelection(seat, { provider: this.content.recipe.inventory.provider, weapon: q3WeaponItem(selection.weapon)?.item ?? null });
       }
-      this.network.submit(this.controls?.build(elapsedMilliseconds, this.elapsed, this.remote.output.snapshot.frame.frame) ?? [], now);
+      this.network.submit(this.controls?.build(frameMilliseconds, this.elapsed, this.remote.output.snapshot.frame.frame, elapsedMilliseconds) ?? [], now);
       await this.dispatchCommands();
       await this.network.poll(now);
       if (this.remote instanceof QwRemotePresentation) await this.remote.prepareSkins();
