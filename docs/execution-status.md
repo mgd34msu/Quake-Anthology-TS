@@ -2,7 +2,7 @@
 
 ## Installed executable and recent fixes
 
-Verified installation on 2026-09-15 at `02:30:38.334Z` (September 14, 21:30 CDT): `/home/buzzkill/Projects/qfiles/quake-typescript`, source `7b8a19352d848d589ed755b7531d6e04789e6ad9`, tree `79795daaed64d862d3c53f6631f6d2a588cfaff9`. The executable is 122,493,056 bytes with mode `0755` and SHA-256 `87d20d6453b96223b1f761972a3093d9111973abab7143e75744b28d707d25d2`. Root independently verified the installed hash and `/home/buzzkill/Projects/qfiles/quake-typescript.build.json`.
+Current installed source is `99cd53d99c118ed203d7b485f4a0754246c65bbf`, tree `dac01a7852d20fde6f9c638339812c0e25968303`, installed at `2026-09-15T04:37:42.783Z`. The executable is 122,570,880 bytes, mode `0755`, SHA-256 `1804804e7621cb69885f8c11ebed3fc048d0ec983c12cc28a8a99fb8ed56bde7`. Receipt: `../qfiles/quake-typescript.build.json`; source and short compiled runtime evidence: `.artifacts/resume-20260913/final-99cd53d/`. The [console source comparison](console-source-parity.md) records current per-family scope. Earlier installation and runtime evidence below retains its original commit and limits.
 
 ```sh
 /home/buzzkill/Projects/qfiles/quake-typescript --content-root /home/buzzkill/Projects/qfiles --renderer gl --menu
