@@ -20,7 +20,7 @@ export type SettingCategory = "display" | "video" | "audio" | "input" | "network
 interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; }
 export type SettingBinding = SettingBase & (
   | { readonly kind: "toggle"; readonly read: () => boolean; readonly write: (value: boolean) => void }
-  | { readonly kind: "slider"; readonly read: () => number; readonly write: (value: number) => void; readonly minimum: number; readonly maximum: number; readonly step: number }
+  | { readonly kind: "slider"; readonly formatValue?: (value: number) => string; readonly read: () => number; readonly write: (value: number) => void; readonly minimum: number; readonly maximum: number; readonly step: number }
   | { readonly kind: "choice"; readonly read: () => string; readonly write: (value: string) => void; readonly choices: () => readonly UiChoice[] }
   | { readonly kind: "text-entry"; readonly read: () => string; readonly write: (value: string) => void; readonly maximumLength: number;
       readonly commit?: { submit(value: string): void; cancel(): void } }
@@ -31,7 +31,7 @@ export function settingControl(binding: SettingBinding, rect: Rect, seat: SeatId
   const base = { id: binding.id, label: binding.label, rect, visible: true, enabled: binding.enabled() };
   switch (binding.kind) {
     case "toggle": return { ...base, kind: "toggle", checked: binding.read(), change: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; } };
-    case "slider": return { ...base, kind: "slider", value: binding.read(), minimum: binding.minimum, maximum: binding.maximum, step: binding.step,
+    case "slider": return { ...base, kind: "slider", value: binding.read(), ...(binding.formatValue === undefined ? {} : { valueLabel: binding.formatValue(binding.read()) }), minimum: binding.minimum, maximum: binding.maximum, step: binding.step,
       change: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; } };
     case "choice": return { ...base, kind: "choice", selected: binding.read(), choices: binding.choices(),
       select: (actual, value) => { requireSeat(actual); binding.write(value); return undefined; } };
@@ -147,8 +147,8 @@ export interface AudioSettings { readonly effectsVolume: number; readonly musicV
 export interface SettingsValueService<T> { read(): T; write(values: Partial<T>): void; }
 function mouseAxis(service: SettingsValueService<PrimaryInputSettings>, axis: "pitch" | "yaw", name: string): SettingBinding {
   const read = (): number => Math.abs(service.read()[axis]) / defaultMouseTuning[axis] * 100;
-  return { id: `ui:input:mouse-${axis}`, get label() { return `${name}: ${Number(read().toFixed(2))}%`; }, category: "input",
-    kind: "slider", enabled: () => true, minimum: 0, maximum: 200, step: 1, read,
+  return { id: `ui:input:mouse-${axis}`, label: name, category: "input",
+    kind: "slider", enabled: () => true, minimum: 0, maximum: 200, step: 1, read, formatValue: value => `${Number(value.toFixed(2))}%`,
     write: value => {
       const current = service.read()[axis];
       const direction = current < 0 || Object.is(current, -0) ? -1 : 1;

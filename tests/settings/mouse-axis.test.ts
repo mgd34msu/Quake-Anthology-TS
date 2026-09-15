@@ -35,7 +35,7 @@ test("shared axis controls scale actual mouse movement independently and retain 
   expect(builder.mouse.tuning.yaw).toBeCloseTo(0.022);
   const motion = builder.mouse.sample({ x: 10, y: 10 }, 16, false, true);
   expect(motion.yaw).toBeCloseTo(-1.1); expect(motion.pitch).toBeCloseTo(0.55);
-  expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat).label).toBe("Vertical sensitivity: 50%");
+  expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "50%" });
   builder.mouse.tuning = { ...builder.mouse.tuning, invertPitch: true, yaw: -0.022 };
   vertical.write(0); vertical.write(100);
   horizontal.write(0);
@@ -52,7 +52,7 @@ test("menu reads retain console coefficients beyond the slider range", () => {
   cvars.set("m_pitch", "0.11"); cvars.set("m_yaw", "-0.066");
   const vertical = slider(bindings, "mouse-pitch");
   expect(vertical.read()).toBeCloseTo(500);
-  expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat).label).toBe("Vertical sensitivity: 500%");
+  expect(settingControl(vertical, { x: 0, y: 0, width: 100, height: 20 }, seat)).toMatchObject({ label: "Vertical sensitivity", valueLabel: "500%" });
   expect(builder.mouse.tuning.pitch).toBeCloseTo(0.11);
   expect(builder.mouse.tuning.yaw).toBeCloseTo(-0.066);
   vertical.write(201);

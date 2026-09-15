@@ -399,3 +399,22 @@ test("binding table search, wheel, scrollbar and keyboard reach every row withou
   expect(labels()).toContain("No matching actions");
   menus.dispose();
 });
+
+
+test("sliders render readable values separately from labels and tracks", () => {
+  const owner = createIdentityOwner("slider-values"), seat = owner.seat(0);
+  const ui = new NativeUiController({ seat, skin: () => defaultUiSkin(fontId), bindings: () => [], now: () => 1000,
+    focus: () => undefined, sound: () => undefined, executeScript: () => undefined });
+  ui.register("menu:test:values", () => ({ id: "menu:test:values", title: "Values", fullScreen: false, open: () => undefined, close: () => undefined,
+    controls: [{ id: "ui:test:value", kind: "slider", label: "Mouse sensitivity", rect: { x: 40, y: 140, width: 400, height: 30 }, enabled: true, visible: true,
+      value: 0.1 + 0.2, minimum: 0, maximum: 20, step: 0.1, change: () => undefined }] }));
+  ui.openMenu("menu:test:values");
+  const commands = ui.draw(drawContext(owner, seat));
+  const label = commands.find(command => command.kind === "text" && command.text === "Mouse sensitivity");
+  const value = commands.find(command => command.kind === "text" && command.text === "0.3");
+  if (label?.kind !== "text" || value?.kind !== "text") throw new Error("Missing slider label or value");
+  const labelRight = label.origin.x + label.text.length * 8 * label.scale;
+  const valueLeft = value.origin.x - value.text.length * 8 * value.scale;
+  expect(labelRight).toBeLessThan(valueLeft);
+  expect(value.origin.x).toBeLessThan(40 + 400 * 0.6);
+});

@@ -396,7 +396,7 @@ export class NativeUiController implements SeatUiController {
         }
         continue;
       }
-      text(control.label, control.rect.x + 10, control.rect.y + 6, color);
+      if (control.kind !== "slider") text(control.label, control.rect.x + 10, control.rect.y + 6, color);
       const right = control.rect.x + control.rect.width - 10, y = control.rect.y + 6;
       switch (control.kind) {
         case "button": break;
@@ -404,6 +404,14 @@ export class NativeUiController implements SeatUiController {
         case "choice": text(control.choices.find(choice => choice.id === control.selected)?.label ?? "", right, y, color, "right"); break;
         case "slider": {
           const x = control.rect.x + control.rect.width * 0.6, width = control.rect.width * 0.32;
+          const value = control.valueLabel ?? String(Number(control.value.toFixed(6)));
+          const valueRight = x - 12;
+          const measure = (content: string): number => this.options.measureText?.(content, skin.fontScale) ?? Array.from(content).length * 8 * skin.fontScale;
+          const valueScale = skin.fontScale * Math.min(1, control.rect.width * 0.16 / Math.max(1, measure(value)));
+          const labelWidth = valueRight - measure(value) * valueScale / skin.fontScale - 12 - (control.rect.x + 10);
+          const labelScale = skin.fontScale * Math.min(1, Math.max(1, labelWidth) / Math.max(1, measure(control.label)));
+          commands.push({ kind: "text", origin: { x: control.rect.x + 10, y }, text: control.label, font: skin.font, scale: labelScale, color, align: "left", shadow: true });
+          commands.push({ kind: "text", origin: { x: valueRight, y }, text: value, font: skin.font, scale: valueScale, color, align: "right", shadow: true });
           const ratio = control.maximum === control.minimum ? 0 : Math.max(0, Math.min(1, (control.value - control.minimum) / (control.maximum - control.minimum)));
           commands.push({ kind: "fill", rect: { x, y: y + 7, width, height: 2 }, color: skin.colors.disabled });
           commands.push({ kind: "fill", rect: { x: x + width * ratio - 3, y: y + 2, width: 6, height: 12 }, color }); break;
