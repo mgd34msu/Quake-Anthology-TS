@@ -50,6 +50,7 @@ export interface CommandBufferOptions {
   readonly readScript?: (name: string, source: CommandContext) => string | undefined | Promise<string | undefined>;
   readonly onScriptComplete?: (event: ScriptCompletion) => void;
   readonly commandLine?: readonly string[];
+  readonly startupCommandText?: string;
   readonly allowCommand?: (command: CommandInvocation) => boolean;
   readonly clientGame?: CommandFallback;
   readonly serverGame?: CommandFallback;
@@ -98,6 +99,7 @@ export class CommandBuffer {
   private chunks: CommandChunk[] = [];
   private deferred: CommandChunk[] = [];
   private waitFrames = 0;
+  private startupCommandText: string | undefined;
   private aliasCount = 0;
   private asyncDraining = false;
   private scriptRead: ScriptRead | undefined;
@@ -109,6 +111,7 @@ export class CommandBuffer {
 
   constructor(private readonly options: CommandBufferOptions) {
     this.dialect = options.dialect;
+    this.startupCommandText = options.startupCommandText;
     this.context = Object.freeze({ session: options.context.session, origin: copyOrigin(options.context.origin, options.context) });
     if (options.cvars !== undefined && (options.cvars.context.session !== this.context.session || options.cvars.dialect !== this.dialect)) {
       throw new RangeError("Commands and cvars require the same session and dialect");
@@ -127,10 +130,12 @@ export class CommandBuffer {
     this.chunks = [...previous.chunks];
     this.deferred = [...previous.deferred];
     this.waitFrames = previous.waitFrames;
+    this.startupCommandText = previous.startupCommandText;
     this.scriptRead = previous.scriptRead;
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
   }
 
+  get hasPendingCommands(): boolean { return this.chunks.length > 0 || this.scriptRead !== undefined; }
   get pendingText(): string { return this.chunks.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
   get deferredText(): string { return this.deferred.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
   get tokenizedArguments(): readonly string[] { return this.tokens; }
@@ -517,6 +522,7 @@ export class CommandBuffer {
     });
     if (isQ1(this.dialect)) register("stuffcmds", command => {
       if (this.dialect === "q1-netquake" && command.argv.length !== 1) { this.print("stuffcmds : execute command line parameters\n"); return; }
+      if (this.startupCommandText !== undefined) { command.insert(this.startupCommandText); return; }
       const text = (this.options.commandLine ?? []).slice(1).join(" ");
       let script = "";
       for (let offset = 0; offset < text.length; offset++) {

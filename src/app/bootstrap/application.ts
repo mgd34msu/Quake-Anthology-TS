@@ -1038,7 +1038,7 @@ export class Application {
     const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
       mounted: name => content.mounts.open(name).then(resource => resource?.bytes) });
     const requests: ApplicationCommandRequest[] = [];
-    const prepared = new PreparedStartup(source, inputCvars, scripts, { dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
+    const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
       sharedNames: source.snapshots().map(variable => variable.name), print: text => host.print(text),
       forward: (name, args, sourceContext) => {
         let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;

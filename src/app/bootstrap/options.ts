@@ -1,3 +1,4 @@
+import { readStartupCommand, startupRequestsWorld } from "./startup-commands.ts";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
@@ -6,6 +7,7 @@ import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
+  readonly startupCommands?: readonly string[];
   readonly explicitRules?: { readonly skill?: boolean; readonly mode?: boolean; readonly capacity?: boolean };
   readonly teamArenaSkirmish?: import("./team-arena-skirmish.ts").TeamArenaSkirmish;
   readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
@@ -47,6 +49,7 @@ export const applicationHelp = `Quake
 
 Usage: bun run src/main.ts [options]
 
+  +command [arguments]       Run source startup command (use '+bind x "+attack"' as one shell argument)
   --menu                     Open the startup menu (default without launch selections)
   --preset q2-q1-q3|q1-q2     Select an initial mixed-game profile
   --content-root PATH        Game data root (default ~/Projects/qfiles)
@@ -109,12 +112,16 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", gamma: 1, dedicated: false,
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
+  const startupCommands: string[] = [];
   let list = false, menu = false, explicitLaunch = false;
   let listenKind: "native-server" | "q2-server" = "q2-server";
   let remoteKind: "q1-client" | "qw-client" | "q2-client" | "q3-client" = "q2-client";
   let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
+    if (flag?.startsWith("+")) {
+      const command = readStartupCommand(argv, index); startupCommands.push(command.text); index = command.end; continue;
+    }
     if (flag === "--menu") { menu = true; continue; }
     if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
@@ -201,6 +208,8 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     }
   }
   if (options.rules === "ctf" || options.rules === "lmctf" || options.rules === undefined && (options.product === "q2-classic-ctf" || options.product === "q2-classic-lmctf")) options = { ...options, mode: "deathmatch" };
+  if (startupCommands.length > 0) options = { ...options, startupCommands };
+  explicitLaunch ||= startupRequestsWorld(startupCommands);
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };
   if (listen !== null && remote !== null) throw new Error("Choose a native server listener or --connect-q2");
   if (listen !== null) options = { ...options, network: { kind: listenKind, host: bind, port: listen } };

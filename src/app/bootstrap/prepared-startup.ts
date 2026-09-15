@@ -1,7 +1,8 @@
+import { startupCommandPhases } from "./startup-commands.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
-import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
+import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting } from "../../core/commands/index.ts";
 import { SeatInput, physicalInputKey } from "../../input/seat.ts";
 import { defaultBindings, namedPhysicalInput, registerBindingCommands } from "../../input/bindings.ts";
@@ -49,6 +50,7 @@ export class PreparedStartup {
   private forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
   constructor(public source: CvarRegistry, public movement: CvarRegistry, public scripts: ConsoleScriptFiles,
     private readonly options: {
+      readonly startupCommands?: readonly string[];
       readonly dialect: CommandDialect;
       readonly movementDialect: CommandDialect;
       readonly seats: readonly PreparedSeatConfiguration[];
@@ -64,7 +66,8 @@ export class PreparedStartup {
       seat: id => options.seats.find(seat => seat.id.equals(id))?.cvars ?? null,
       input: id => options.seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null,
       movement: () => this.movement, shared: () => options.shared });
-    this.commands = new CommandBuffer({ dialect: options.dialect, context: source.context, cvars: this.fallback,
+    const phases = startupCommandPhases(options.startupCommands ?? [], options.dialect);
+    this.commands = new CommandBuffer({ startupCommandText: phases.stuffed, dialect: options.dialect, context: source.context, cvars: this.fallback,
       cvarRouting: { owner: (name, context) => this.routing.owner(name, context), visible: context => this.routing.visible(context) },
       readScript: (name, context) => this.active?.readScript(name, context) ?? this.scripts.read(name, context),
       onScriptComplete: event => this.active?.onScriptComplete(event), print: options.print,
@@ -159,11 +162,26 @@ export class PreparedStartup {
     readonly sharedArchive: readonly CvarArchiveEntry[];
     readonly nextFrame: () => Promise<void>;
   }): AsyncGenerator<void, void, void> {
+    const phases = startupCommandPhases(this.options.startupCommands ?? [], this.options.dialect);
+    const commandContext = this.seats[0]?.context ?? this.source.context;
+    const applyStartupVariables = (): void => {
+      for (const variable of phases.variables) {
+        const owner = this.routing.owner(variable.name, commandContext);
+        owner.set(variable.name, variable.value, true);
+        const registered = owner.register(variable.name, "");
+        if (registered === undefined) throw new Error(`Q3 startup variable registration rejected: ${variable.name}`);
+        owner.addFlags(registered.name, CvarFlag.UserCreated);
+      }
+    };
+    applyStartupVariables();
+    this.commands.append(phases.early, commandContext);
+    await this.commands.executeScriptsAsync(async () => {});
+    if (this.options.dialect === "q1-quakeworld" && this.seats.length === 0) this.commands.append(phases.stuffed, commandContext);
     const configurations = this.seats.length === 0 ? [undefined] : this.seats;
     for (const [index, seat] of configurations.entries()) {
       const saved = this.options.seats[index];
       if (seat !== undefined && saved === undefined) throw new Error("Startup seat configuration is missing");
-      const startup = new StartupConfig({ dialect: this.options.dialect, context: seat?.context ?? this.source.context, hasMod: options.hasMod,
+      const startup = new StartupConfig({ safeMode: phases.safe, dialect: this.options.dialect, context: seat?.context ?? this.source.context, hasMod: options.hasMod,
         scope: index === 0 ? "source" : "seat", read: (name, context, scope) => {
           const read = this.scopedReader;
           if (read === undefined) throw new Error("Startup script reader is missing");
@@ -188,7 +206,8 @@ export class PreparedStartup {
             if (saved.profile.alwaysRun !== undefined) seat.mouse.cvars.setCommandFlags("cl_run", saved.profile.alwaysRun ? "1" : "0", "archive");
           }
           seat.collectingBindings = true;
-        }, applyLaunchOptions: () => { if (index === configurations.length - 1) options.applyLaunchOptions(); },
+        }, applyLaunchOptions: () => {},
+        replayStartupVariables: () => { if (index === 0) { applyStartupVariables(); this.commands.insert(phases.early, commandContext); } },
       });
       this.active = startup;
       if (seat !== undefined) seat.collectingBindings = index !== 0;
@@ -202,5 +221,14 @@ export class PreparedStartup {
       }, () => !this.worldAction)) yield;
       this.active = undefined;
     }
+    if (this.options.dialect !== "q1-netquake" && this.options.dialect !== "q1-quakeworld") {
+      this.commands.append(phases.late, commandContext);
+      do {
+        await this.commands.executeScriptsAsync(async () => {}, () => !this.worldAction);
+        if (this.worldAction || this.commands.hasPendingCommands) yield;
+        else break;
+      } while (true);
+    }
+    options.applyLaunchOptions();
   }
 }

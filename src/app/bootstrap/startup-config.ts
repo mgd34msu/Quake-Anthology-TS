@@ -13,10 +13,12 @@ export interface StartupConfigOptions {
   readonly context: CommandContext;
   readonly hasMod: boolean;
   readonly scope?: "source" | "seat";
+  readonly safeMode?: boolean;
   readonly read: (name: string, source: CommandContext, scope: StartupScriptScope) => Promise<string | undefined>;
   readonly applySelectedDefaults: () => void;
   readonly applyArchive: () => void;
   readonly applyLaunchOptions: () => void;
+  readonly replayStartupVariables?: () => void;
 }
 
 function scriptDepth(origin: CommandOrigin): number {
@@ -92,6 +94,9 @@ export class StartupConfig {
     if ((event.name === "config.cfg" || event.name === "q3config.cfg") && !this.archiveApplied) {
       this.archiveApplied = true; this.options.applyArchive();
     }
+    if ((this.options.dialect === "q3" && direct && event.name === "autoexec.cfg")
+      || ((this.options.dialect === "q2-classic" || this.options.dialect === "q2-rerelease") && direct && event.name === "config.cfg"))
+      this.options.replayStartupVariables?.();
     if (direct) this.active = undefined;
   };
 
@@ -118,6 +123,10 @@ export class StartupConfig {
           return true;
         }
         this.index++;
+        if (this.options.dialect === "q3" && this.options.safeMode && script.name === "q3config.cfg") {
+          this.archiveApplied = true;
+          continue;
+        }
         this.active = script;
         commands.append(`exec ${script.name}\n`, this.options.context);
       }
