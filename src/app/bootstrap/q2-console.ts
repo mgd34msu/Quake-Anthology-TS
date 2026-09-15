@@ -1,5 +1,6 @@
+import type { CommandContext } from "../../contracts/common.ts";
 /* LM_CTF 6.0 g_save.c native console declarations over the shared command registry. GPL-2.0-or-later. */
-import { CommandBuffer } from "../../core/commands/index.ts";
+import type { CommandBuffer, CommandHandler } from "../../core/commands/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { Q2Lmctf } from "../../content/q2/multiplayer/lmctf/runtime.ts";
 import { q2Userinfo } from "../../content/q2/base/player/index.ts";
@@ -17,7 +18,7 @@ export interface ApplicationQ2ConsoleOptions {
   readonly simulation: () => SharedSimulation;
   readonly content: () => LoadedApplicationContent;
   readonly print: (text: string) => undefined;
-  readonly execute: (name: string, args: readonly string[]) => undefined;
+  readonly execute: (name: string, args: readonly string[], source: CommandContext) => undefined;
 }
 export class ApplicationQ2Console {
   get cvars(): CvarRegistry {
@@ -25,16 +26,16 @@ export class ApplicationQ2Console {
     if (cvars === null) throw new Error("Q2 console requires the simulation's source registry");
     return cvars;
   }
-  readonly commands: CommandBuffer;
   constructor(private readonly options: ApplicationQ2ConsoleOptions) {
-    const simulation = options.simulation(), source = simulation.q2Source();
-    if (source === null) throw new Error("Q2 console requires a Q2 source runtime");
-    const dialect = source.product.configuration.edition === "rerelease" ? "q2-rerelease" : "q2-classic";
-    const context = { session: simulation.session, origin: { kind: "server-console" } } satisfies import("../../contracts/common.ts").CommandContext;
-    const owner = this;
-    this.commands = new CommandBuffer({ dialect, context, get cvars() { return owner.cvars; }, print: options.print });
-    for (const name of ["quit", "map", "say"]) this.commands.register(name, invocation => options.execute(name, invocation.args));
-    this.commands.register("status", () => {
+    if (options.simulation().q2Source() === null) throw new Error("Q2 console requires a Q2 source runtime");
+  }
+  bind(commands: CommandBuffer): () => void {
+    const options = this.options, handlers = new Map<string, CommandHandler>();
+    const register = (name: string, handler: CommandHandler): void => {
+      if (commands.register(name, handler)) handlers.set(name, handler);
+    };
+    for (const name of ["quit", "map", "say"]) register(name, invocation => options.execute(name, invocation.args, invocation.source));
+    register("status", () => {
       const current = options.simulation().q2Source();
       if (current === null) return options.print("No server running.\n");
       options.print(`map              : ${current.game.options.mapName}\nnum score ping name\n`);
@@ -42,7 +43,7 @@ export class ApplicationQ2Console {
         options.print(`${player.slot} ${player.score} ${player.ping} ${q2OperatorPlayerName(player)}\n`);
       return undefined;
     });
-    this.commands.register("dumpuser", invocation => {
+    register("dumpuser", invocation => {
       const target = invocation.args[0];
       if (target === undefined || invocation.args.length !== 1) return options.print("Usage: dumpuser <player name|slot>\n");
       const players = options.simulation().q2Source()?.players.states.values();
@@ -53,6 +54,7 @@ export class ApplicationQ2Console {
       for (const [key, value] of q2Userinfo(player.userinfo)) options.print(`${key.padEnd(20)}${value}\n`);
       return undefined;
     });
+    return () => { for (const [name, handler] of handlers) commands.unregister(name, handler); };
   }
   get sharedNames(): readonly string[] { return ["dmflags", "timelimit", "fraglimit", "capturelimit", ...(this.options.simulation().q2Source()?.product.match.source instanceof Q2Lmctf ? LMCTF_CONSOLE_NAMES : [])]; }
   initialize(): Promise<void> { return this.bindCurrent(); }

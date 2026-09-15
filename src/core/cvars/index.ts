@@ -139,6 +139,7 @@ function snapshot(state: CvarRead): CvarSnapshot {
 function validInfo(text: string): boolean { return !/[\\";]/.test(text); }
 
 export class CvarRegistry {
+  private readonly outputBindings = new Set<{ readonly print: (text: string) => void }>();
   readonly dialect: CommandDialect;
   readonly context: CommandContext;
   private readonly variables = new Map<string, CvarState>();
@@ -245,7 +246,16 @@ export class CvarRegistry {
   get modifiedFlags(): number { return this.changedFlags; }
   get userinfoModified(): boolean { return this.userinfoDirty; }
   get indexCount(): number { return this.indexes.length; }
-  private print(text: string): void { this.options.print?.(text); }
+  bindOutput(print: (text: string) => void): () => void {
+    const binding = { print };
+    this.outputBindings.add(binding);
+    return () => { this.outputBindings.delete(binding); };
+  }
+  private print(text: string): void {
+    let output = this.options.print;
+    for (const binding of this.outputBindings) output = binding.print;
+    output?.(text);
+  }
   private key(name: string): string { const text = sourceCommandText(name); return this.dialect === "q3" ? asciiFold(text) : text; }
   private numbers(value: string): { numericValue: number; integerValue: number } {
     const numericValue = Math.fround(isQ1(this.dialect) ? quakeAtof(value) : nativeAtof(value));

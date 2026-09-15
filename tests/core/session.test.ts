@@ -1,3 +1,7 @@
+import { CommandBuffer } from "../../src/core/commands/index.ts";
+import type { CommandContext } from "../../src/contracts/common.ts";
+import { SeatInput } from "../../src/input/seat.ts";
+import { InputRouter } from "../../src/input/router.ts";
 import { expect, spyOn, test } from "bun:test";
 import type { ExecutableRecipe } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -318,4 +322,25 @@ test("session shutdown owns unpublished prepared-client cleanup", () => {
   expect(closes).toBe(1);
   prepared.close();
   expect(closes).toBe(1);
+});
+
+
+test("failed world preflight leaves shared keys capture and profile untouched", () => {
+  const fixture = stepFixture("local"), foreign = stepFixture();
+  const world = fixture.session.attachWorld(fixture.simulation()), client = fixture.session.createClient(0), seat = fixture.session.createSeat(0, client);
+  const context: CommandContext = { session: fixture.session.session, origin: { kind: "local-seat", seat: seat.id, client: client.id } };
+  const commands = new CommandBuffer({ dialect: "q2-classic", context });
+  const input = new SeatInput({ seat: seat.id, dialect: "q2-classic", context, commands, uiEvent: () => false });
+  input.bind({ input: { kind: "key", code: 119 }, target: { kind: "action", action: "forward" } });
+  let relative = false, closed = false;
+  const router = new InputRouter({ seats: [{ input, controller: { kind: "none" } }], keyboardSeat: seat.id, controllers: null, now: () => 0, ticks: () => 0, subframe: false, unhandled: () => {} });
+  router.attachWindow({ beginInput: () => ({ get closed() { return closed; }, close: () => { closed = true; }, setRelativeMouse: value => { relative = value; } }),
+    logicalSize: { width: 320, height: 240 }, drawableSize: { width: 320, height: 240 }, pollEvents: () => [] });
+  input.input({ kind: "key", seat: seat.id, code: 119, down: true, repeat: false, timeMilliseconds: 0 });
+  const resources = client.worldResources;
+  expect(() => fixture.session.validateWorldReplacement(foreign.simulation())).toThrow("another session");
+  expect(input.hasHeldInput).toBe(true); expect(input.button("forward").active).toBe(true); expect(relative).toBe(true); expect(closed).toBe(false);
+  expect(input.dialect).toBe("q2-classic"); expect(commands.dialect).toBe("q2-classic"); expect(fixture.session.world).toBe(world); expect(client.worldResources).toBe(resources);
+  fixture.session.validateWorldReplacement(fixture.simulation()); expect(fixture.session.world).toBe(world); expect(client.worldResources).toBe(resources);
+  router.close(); fixture.session.close(); foreign.session.close();
 });

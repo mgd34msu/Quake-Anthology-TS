@@ -1,7 +1,8 @@
+import { SeatConsole } from "../../src/console/session.ts";
+import { registerDiscoveryCommands } from "../../src/console/discovery.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { CommandContext } from "../../src/contracts/common.ts";
-import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { ApplicationConsoleRouting, q1ConsoleServer } from "../../src/app/bootstrap/console.ts";
 import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
 import { MouseSettings } from "../../src/input/mouse-settings.ts";
@@ -17,6 +18,39 @@ function options(args: readonly string[] = []) {
   if (command.kind !== "run") throw new Error("Expected launch");
   return command.options;
 }
+
+test('prepared adoption retains binding commands and the same pending program owner', async () => {
+  const identity = createIdentityOwner('stable-prepared-owner');
+  const context: CommandContext = { session: identity.session, origin: { kind: 'local-seat', seat: identity.seat(0), client: identity.client(0, 0) } };
+  const source = new CvarRegistry({ dialect: 'q2-classic', context }); source.register('skill', '0');
+  const cvars = new CvarRegistry({ dialect: 'q2-classic', context });
+  const mouse = new MouseSettings(new CvarRegistry({ dialect: 'q2-classic', context }));
+  const prepared = new PreparedStartup(source, new CvarRegistry({ dialect: 'q2-classic', context }),
+    new ConsoleScriptFiles({ consoleRoot: '/unused', settings: new ConfigStore('/unused'), mounted: undefined }), {
+      dialect: 'q2-classic', movementDialect: 'q2-classic', shared: null, sharedNames: ['skill'],
+      seats: [{ id: identity.seat(0), context, cvars, mouse, profile: null, archive: [], mouseArchive: [] }],
+      print: () => {}, forward: () => undefined,
+    });
+  const commands = prepared.commands, input = prepared.seats[0]?.input;
+  await prepared.execute({ nextFrame: async () => {}, hasMod: false, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+    read: async name => name === 'autoexec.cfg' ? 'alias finish "set skill 3"; map first; wait; finish\n' : undefined,
+    applyLaunchOptions: () => {},
+  });
+  const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => 'q2-classic',
+    server: () => ({ cvars: source, sharedNames: ['skill'] }), seat: () => cvars, input: () => mouse.cvars });
+  const calls: string[] = [];
+  prepared.adopt(routing, name => { calls.push(`old:${name}`); return undefined; }, { source,
+    movement: prepared.movement, fallback: prepared.fallback, scripts: prepared.scripts, read: async () => undefined });
+  expect(prepared.commands).toBe(commands);
+  expect(prepared.seats[0]?.input).toBe(input);
+  expect(commands.exists('bind')).toBe(true);
+  expect(commands.exists('map')).toBe(true);
+  await prepared.advanceFrame(); expect(prepared.pending).toBe(true);
+  await prepared.advanceFrame(); expect(prepared.pending).toBe(false); expect(source.variableValue('skill')).toBe(3);
+  prepared.adopt(routing, name => { calls.push(`current:${name}`); return undefined; });
+  commands.append('map second\n'); commands.execute();
+  expect(calls).toEqual(['current:map']);
+});
 
 test("parsed source skill/mode determine initial simulation options unless explicitly selected", async () => {
   const id = createIdentityOwner("preworld-startup");
@@ -97,11 +131,9 @@ test("startup world action retains following wait and cvars in original buffer",
   const nextSource = new CvarRegistry({ dialect: "q2-classic", context }); nextSource.register("skill", "0");
   const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => "q2-classic",
     server: () => ({ cvars: nextSource, sharedNames: ["skill"] }), seat: () => cvars, input: () => mouse.cvars });
-  const nextCommands = new CommandBuffer({ dialect: "q2-classic", context, cvarRouting: routing,
-    readScript: (name, source) => prepared.readScript(name, source), onScriptComplete: event => prepared.onScriptComplete(event),
-    allowCommand: command => prepared.allowCommand(command) });
-  nextCommands.copyPendingFrom(prepared.commands);
-  prepared.adopt(routing, () => undefined, { commands: nextCommands, source: nextSource, movement: prepared.movement, fallback: prepared.fallback, scripts: prepared.scripts, read: async () => undefined });
+  const nextCommands = prepared.commands;
+  expect(nextCommands).toBe(prepared.commands);
+  prepared.adopt(routing, () => undefined, { source: nextSource, movement: prepared.movement, fallback: prepared.fallback, scripts: prepared.scripts, read: async () => undefined });
   await prepared.advanceFrame();
   expect(source.variableValue("skill")).toBe(0); expect(prepared.pending).toBe(true);
   await prepared.advanceFrame();
@@ -165,10 +197,8 @@ test("pending and ordinary exec use adopted readers after old content retires", 
   const newScripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: async () => new TextEncoder().encode("set skill 2\n") });
   const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => "q2-classic",
     server: () => ({ cvars: source, sharedNames: ["skill"] }), seat: () => seat.cvars });
-  const commands = new CommandBuffer({ dialect: "q2-classic", context, cvarRouting: routing,
-    readScript: (name, source) => prepared.readScript(name, source), onScriptComplete: event => prepared.onScriptComplete(event) });
-  commands.copyPendingFrom(prepared.commands);
-  prepared.adopt(routing, () => undefined, { commands, source, movement: prepared.movement, fallback: prepared.fallback,
+  const commands = prepared.commands;
+  prepared.adopt(routing, () => undefined, { source, movement: prepared.movement, fallback: prepared.fallback,
     scripts: newScripts, read: async name => name === "nested.cfg" ? "set skill 3\n" : undefined });
   retired = true;
   await prepared.advanceFrame();
@@ -200,10 +230,7 @@ for (const dialect of ["q1-netquake", "q1-quakeworld"] satisfies readonly import
     expect(server?.sharedNames).toContain("timescale");
     const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => dialect,
       server: () => q1ConsoleServer(getters), seat: () => seat.cvars });
-    const commands = new CommandBuffer({ dialect, context, cvarRouting: routing, readScript: (name, source) => prepared.readScript(name, source),
-      onScriptComplete: event => prepared.onScriptComplete(event) });
-    commands.copyPendingFrom(prepared.commands);
-    prepared.adopt(routing, () => undefined, { commands, source: current, movement: prepared.movement, fallback: prepared.fallback,
+    prepared.adopt(routing, () => undefined, { source: current, movement: prepared.movement, fallback: prepared.fallback,
       scripts, read: async () => undefined });
     await prepared.advanceFrame();
     expect(current.variableValue("skill")).toBe(3); expect(oldSource.variableValue("skill")).toBe(0);
@@ -259,3 +286,111 @@ for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic"] satisfies r
     }
   });
 }
+
+
+test("prepared output follows two real seat consoles through adoption and retired cleanup", () => {
+  const identity = createIdentityOwner("prepared-output"), startup: string[] = [], registryHost: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+  const source = new CvarRegistry({ dialect: "q3", context, print: text => registryHost.push(text) });
+  source.register("locked", "1", CvarFlag.ReadOnly);
+  const movement = new CvarRegistry({ dialect: "q3", context, print: text => registryHost.push(text) });
+  const seats = [0, 1].map(index => {
+    const seatContext: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } };
+    const cvars = new CvarRegistry({ dialect: "q3", context: seatContext, print: text => registryHost.push(text) });
+    cvars.register("validated", "1"); cvars.bindValue("validated", { validate: value => value === "1" ? null : "rejected value", changed: () => {} });
+    return { id: identity.seat(index), context: seatContext, cvars, mouse: new MouseSettings(new CvarRegistry({ dialect: "q3", context: seatContext, print: text => registryHost.push(text) })), profile: null, archive: [], mouseArchive: [] };
+  });
+  const prepared = new PreparedStartup(source, movement, new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }), {
+    dialect: "q3", movementDialect: "q3", seats, shared: null, sharedNames: ["locked"], print: text => startup.push(text), forward: () => undefined,
+  });
+  const commands = prepared.commands;
+  commands.append("echo before-ui\n", context); commands.execute();
+  expect(startup.join("")).toContain("before-ui"); startup.length = 0;
+  const makeConsoles = () => seats.map(seat => new SeatConsole({ seat: seat.id, dialect: "q3", context: seat.context, commands, cvars: seat.cvars,
+    now: () => 0, connected: () => true, clipboard: () => null, focus: () => {}, chat: () => {} }));
+  const oldConsoles = makeConsoles(), currentConsoles = makeConsoles(), seen: CommandContext[] = [];
+  const output = (consoles: readonly SeatConsole[]) => (text: string, source?: CommandContext): void => {
+    if (source === undefined) throw new Error("Private command output lost its source");
+    seen.push(source);
+    let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+    if (origin.kind !== "local-seat") throw new Error("Expected private seat output");
+    const console = consoles[origin.seat.index]; if (console === undefined) throw new Error("Missing output seat"); console.print(text);
+  };
+  const old = prepared.bindOutput(output(oldConsoles));
+  const first = seats[0], second = seats[1]; if (first === undefined || second === undefined) throw new Error("Two seats required");
+  commands.append("echo first-only\n", first.context); commands.execute();
+  expect(oldConsoles[0]?.buffer.dump()).toContain("first-only"); expect(oldConsoles[1]?.buffer.dump()).not.toContain("first-only");
+  const current = prepared.bindOutput(output(currentConsoles));
+  const nextSource = new CvarRegistry({ dialect: "q3", context, print: text => registryHost.push(text) }); nextSource.register("locked", "2", CvarFlag.ReadOnly);
+  const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => "q3", server: () => ({ cvars: nextSource, sharedNames: ["locked"] }),
+    seat: id => seats.find(seat => seat.id.equals(id))?.cvars ?? null, input: id => seats.find(seat => id !== null && seat.id.equals(id))?.mouse.cvars ?? null });
+  prepared.adopt(routing, () => undefined, { source: nextSource, movement, fallback: prepared.fallback, scripts: prepared.scripts, read: async () => undefined });
+  old(); old();
+  const releaseHelp = registerDiscoveryCommands(commands, text => output(currentConsoles)(text, commands.executionContext));
+  const nested: CommandContext = { session: context.session, origin: { kind: "script", name: "nested.cfg", caller: { kind: "script", name: "autoexec.cfg", caller: second.context.origin } } };
+  commands.append('echo second-only; bind w +forward; bind w; locked; set locked 3; set validated 2; help absent-command\n', nested); commands.execute();
+  const rendered = currentConsoles[1]?.buffer.dump() ?? "";
+  for (const expected of ["second-only", "+forward", 'is:"2', "locked is read only", "validated: rejected value", "No command, setting, or alias"]) expect(rendered).toContain(expected);
+  expect(currentConsoles[0]?.buffer.dump()).not.toContain("second-only");
+  expect(oldConsoles[1]?.buffer.dump()).not.toContain("second-only");
+  expect(startup).toEqual([]); expect(registryHost).toEqual([]);
+  for (const source of seen.slice(1)) expect(source).toEqual(nested);
+  source.set("locked", "4"); expect(registryHost.join("")).toContain("locked is read only"); registryHost.length = 0;
+  releaseHelp(); current();
+  commands.append("echo after-ui\n", first.context); commands.execute();
+  nextSource.set("locked", "4");
+  expect(startup.join("")).toContain("after-ui"); expect(registryHost.join("")).toContain("locked is read only");
+  expect(prepared.commands).toBe(commands); expect(prepared.source).toBe(nextSource);
+});
+
+test("registry output bindings restore the latest live sink without changing cvar state", () => {
+  const identity = createIdentityOwner("registry-output"), calls: string[] = [];
+  const registry = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } }, print: text => calls.push("host:" + text) });
+  registry.register("locked", "1", CvarFlag.ReadOnly);
+  const before = registry.captureSaveState();
+  const old = registry.bindOutput(text => calls.push("old:" + text));
+  const current = registry.bindOutput(text => calls.push("current:" + text));
+  old(); old(); expect(registry.captureSaveState()).toEqual(before); registry.set("locked", "2");
+  expect(calls).toEqual(["current:locked is read only.\n"]);
+  current(); registry.set("locked", "2");
+  expect(calls.at(-1)).toBe("host:locked is read only.\n"); expect(registry.variableString("locked")).toBe("1");
+  const control = new CvarRegistry({ dialect: "q3", context: registry.context });
+  control.register("locked", "1", CvarFlag.ReadOnly); control.set("locked", "2"); control.set("locked", "2");
+  expect(registry.captureSaveState()).toEqual(control.captureSaveState());
+});
+
+
+
+test("prepared profile publication preserves tail order and appended physical releases", async () => {
+  const identity = createIdentityOwner("profile-publication"), calls: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };
+  const source = new CvarRegistry({ dialect: "q2-classic", context });
+  const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: async () => undefined });
+  const prepared = new PreparedStartup(source, source, scripts, { dialect: "q2-classic", movementDialect: "q2-classic", shared: null, sharedNames: [],
+    seats: [{ id: identity.seat(0), context, cvars: source, mouse: new MouseSettings(source), profile: null, archive: [], mouseArchive: [] }], print: text => calls.push(text), forward: () => undefined });
+  const input = prepared.seats[0]?.input; if (input === undefined) throw new Error("Missing seat");
+  const commands = prepared.commands;
+  commands.register("+probe", () => undefined);
+  commands.register("-probe", command => { calls.push("release:" + prepared.source.dialect + ":" + command.dialect); });
+  commands.register("give", () => { calls.push("give:" + prepared.source.dialect); });
+  let pending = false; commands.unregister("load"); commands.register("load", () => { pending = true; });
+  input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: "+probe; echo suffix" } });
+  for (const dialect of ["q3", "q2-classic"] satisfies readonly import("../../src/contracts/common.ts").CommandDialect[]) {
+    const prior = commands.dialect, next = new CvarRegistry({ dialect, context }), mouse = new MouseSettings(next);
+    const routing = new ApplicationConsoleRouting({ fallback: next, sourceDialect: () => dialect, server: () => ({ cvars: next, sharedNames: [] }), seat: () => next, input: () => next });
+    input.input({ kind: "key", seat: input.seat, code: 119, down: true, repeat: false, timeMilliseconds: 0 }); commands.execute(); calls.length = 0;
+    commands.append("load; give all; echo tail\n");
+    const oldSource = prepared.source;
+    expect(() => prepared.adopt(routing, () => undefined, { source: next, movement: next, fallback: next, scripts, read: async () => undefined })).toThrow("released input");
+    expect(prepared.source).toBe(oldSource); expect(input.hasHeldInput).toBe(true);
+    await commands.executeAsync(async () => {
+      if (!pending) return; pending = false;
+      input.release(1); expect(input.hasHeldInput).toBe(false); expect(calls).toEqual([]);
+      prepared.adopt(routing, () => undefined, { source: next, movement: next, fallback: next, scripts, read: async () => undefined });
+      prepared.adoptSeat(input.seat, next, mouse); calls.push("publish:" + dialect);
+    });
+    expect(calls).toEqual(["publish:" + dialect, "give:" + dialect, "tail \n", "release:" + dialect + ":" + prior, "suffix \n"]);
+    expect(prepared.commands).toBe(commands); expect(prepared.seats[0]?.input).toBe(input);
+    expect(commands.dialect).toBe(dialect); expect(input.dialect).toBe(dialect); expect(prepared.seats[0]?.mouse).toBe(mouse);
+  }
+});

@@ -21,6 +21,69 @@ import { ClientConfiguration } from "../../src/content/q3/presentation/config.ts
 import { ClientGameState, ClientGameStaticState } from "../../src/content/q3/presentation/state.ts";
 import { SeatConsole } from "../../src/console/session.ts";
 
+test('persistent seat UI bindings release held keys and ignore retired older cleanup', () => {
+  const identity = createIdentityOwner('persistent-ui'), seat = identity.seat(0);
+  const context: CommandContext = { session: identity.session, origin: { kind: 'local-seat', seat, client: identity.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: 'q2-classic', context }), calls: string[] = [];
+  const input = new SeatInput({ seat, dialect: 'q2-classic', context, commands, uiEvent: () => { calls.push('menu'); return false; } });
+  registerInputCommands(commands, () => input);
+  input.bind({ input: { kind: 'key', code: 119 }, target: { kind: 'command', text: '+forward' } });
+  input.setFocus({ kind: 'menu', menu: 'menu:startup:main', control: null }, 0);
+  let now = 10;
+  const old = input.bindUiEvent(() => { calls.push('old'); return false; }, () => now);
+  input.setFocus({ kind: 'game' }, now);
+  input.input({ kind: 'key', seat, code: 119, down: true, repeat: false, timeMilliseconds: now }); commands.execute();
+  expect(input.button('forward').active).toBe(true);
+  now = 20;
+  const current = input.bindUiEvent(() => { calls.push('current'); return false; }, () => now);
+  commands.execute();
+  expect(input.button('forward').active).toBe(false);
+  input.setFocus({ kind: 'console' }, now);
+  input.input({ kind: 'key', seat, code: 119, down: true, repeat: false, timeMilliseconds: now });
+  old();
+  expect(input.focus).toEqual({ kind: 'console' });
+  expect(input.isDown({ kind: 'key', code: 119 })).toBe(true);
+  input.input({ kind: 'key', seat, code: 119, down: false, repeat: false, timeMilliseconds: 21 });
+  expect(calls).toEqual(['old', 'current', 'current']);
+  current();
+  expect(input.focus).toEqual({ kind: 'menu', menu: 'menu:startup:main', control: null });
+  expect(input.isDown({ kind: 'key', code: 119 })).toBe(false);
+  input.input({ kind: 'key', seat, code: 119, down: true, repeat: false, timeMilliseconds: 22 });
+  expect(calls.at(-1)).toBe('menu');
+});
+
+test('staged and retired routers do not release shared live seat state', () => {
+  const identity = createIdentityOwner('shared-router-seat'), seat = identity.seat(0);
+  const context: CommandContext = { session: identity.session, origin: { kind: 'local-seat', seat, client: identity.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: 'q2-classic', context });
+  const input = new SeatInput({ seat, dialect: 'q2-classic', context, commands, uiEvent: () => false });
+  input.bind({ input: { kind: 'key', code: 119 }, target: { kind: 'action', action: 'forward' } });
+  const make = (deferPlatform: boolean) => new InputRouter({ seats: [{ input, controller: { kind: 'none' } }], keyboardSeat: seat,
+    controllers: null, deferPlatform, now: () => 20, ticks: () => 20, subframe: false, unhandled: () => {} });
+  const active = make(false);
+  let closed = false, relative = false, closes = 0;
+  const lease = { get closed() { return closed; }, setRelativeMouse(value: boolean) { relative = value; }, close() { closed = true; relative = false; closes++; } };
+  active.attachWindow({ beginInput: () => lease, logicalSize: { width: 640, height: 480 }, drawableSize: { width: 640, height: 480 }, pollEvents: () => [] });
+  expect(relative).toBe(true);
+  input.input({ kind: 'key', seat, code: 119, down: true, repeat: false, timeMilliseconds: 10 });
+  const discarded = make(true); discarded.restart(); discarded.close();
+  expect(input.isDown({ kind: 'key', code: 119 })).toBe(true);
+  expect(input.button('forward').active).toBe(true);
+  expect(relative).toBe(true); expect(closes).toBe(0);
+  const next = make(true); next.restart(); active.transferWindowTo(next); active.close();
+  expect(input.isDown({ kind: 'key', code: 119 })).toBe(true);
+  expect(input.button('forward').active).toBe(true);
+  expect(relative).toBe(true); expect(closes).toBe(0);
+  input.setFocus({ kind: "console" }, 21); next.updateCapture();
+  expect(relative).toBe(false);
+  input.setFocus({ kind: "game" }, 22); next.updateCapture();
+  expect(relative).toBe(true);
+  next.close();
+  expect(closes).toBe(1); expect(lease.closed).toBe(true); expect(relative).toBe(false);
+  expect(input.isDown({ kind: 'key', code: 119 })).toBe(false);
+  expect(input.button('forward').active).toBe(false);
+});
+
 test("binding scripts preserve quoted semicolons and held-button release commands", () => {
   const owner = createIdentityOwner("quoted-binding"), seat = owner.seat(0);
   const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
@@ -391,4 +454,21 @@ test("detached world input preserves controller assignments and performs no sens
   expect(next.setGyroEnabled(seat, true).kind).toBe("accepted");
   expect(operations).toEqual(["sensor"]);
   next.close();
+});
+
+
+test("persistent input profile releases old bindings before adopting native movement sampling", async () => {
+  const owner = createIdentityOwner("input-profile"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q2-classic", context });
+  const input = new SeatInput({ seat, dialect: "q2-classic", context, commands, uiEvent: () => false });
+  registerInputCommands(commands, () => input);
+  input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: "+forward" } });
+  input.input({ kind: "key", seat, code: 119, down: true, repeat: false, timeMilliseconds: 10 }); await commands.advanceProgramFrame();
+  expect(() => input.setProfile("q3")).toThrow("released keys"); expect(input.dialect).toBe("q2-classic");
+  input.release(20); expect(commands.programComplete).toBe(false); await commands.advanceProgramFrame();
+  commands.setProfile("q3", undefined); input.setProfile("q3");
+  const fresh = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => false });
+  for (const current of [input, fresh]) { current.bind({ input: { kind: "key", code: 119 }, target: { kind: "action", action: "forward" } }); current.input({ kind: "key", seat, code: 119, down: true, repeat: false, timeMilliseconds: 30 }); }
+  expect(input.sample(40, 10)).toEqual(fresh.sample(40, 10)); expect(input.seat).toBe(seat);
 });

@@ -18,7 +18,7 @@ export interface PreparedSeat {
   readonly id: SeatId;
   cvars: CvarRegistry;
   mouse: MouseSettings;
-  input: SeatInput;
+  readonly input: SeatInput;
   readonly overriddenKeys: Set<string>;
   allBindingsChosen: boolean;
   collectingBindings: boolean;
@@ -36,7 +36,10 @@ export interface PreparedSeatConfiguration {
 
 /** Prepared registries and the command buffer become the live client's owners after world creation. */
 export class PreparedStartup {
-  commands: CommandBuffer;
+  private readonly outputBindings = new Set<{ readonly print: (text: string, source?: CommandContext) => void }>();
+  private readonly registryOutputs = new Map<CvarRegistry, () => void>();
+  private releaseView: () => void;
+  readonly commands: CommandBuffer;
   readonly seats: readonly PreparedSeat[];
   fallback: CvarRegistry;
   private routing: CommandCvarRouting;
@@ -45,9 +48,6 @@ export class PreparedStartup {
   private continuation: AsyncGenerator<void, void, void> | undefined;
   private worldAction = false;
   get pending(): boolean { return this.continuation !== undefined; }
-  private readonly releaseBindings: () => void;
-  private readonly releaseView: () => void;
-  private bindingsReleased = false;
   private readonly deferredCommands = ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team"];
   private forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
   constructor(public source: CvarRegistry, public movement: CvarRegistry, public scripts: ConsoleScriptFiles,
@@ -62,7 +62,7 @@ export class PreparedStartup {
       readonly forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
     }) {
     this.forward = options.forward;
-    this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => options.print(text) });
+    this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => this.print(text) });
     this.routing = new ApplicationConsoleRouting({ fallback: this.fallback, sourceDialect: () => options.dialect,
       server: () => ({ cvars: this.source, sharedNames: options.sharedNames }),
       seat: id => options.seats.find(seat => seat.id.equals(id))?.cvars ?? null,
@@ -72,7 +72,7 @@ export class PreparedStartup {
     this.commands = new CommandBuffer({ startupCommandText: phases.stuffed, dialect: options.dialect, context: source.context, cvars: this.fallback,
       cvarRouting: { owner: (name, context) => this.routing.owner(name, context), visible: context => this.routing.visible(context) },
       readScript: (name, context) => this.active?.readScript(name, context) ?? this.scripts.read(name, context),
-      onScriptComplete: event => this.active?.onScriptComplete(event), print: options.print,
+      onScriptComplete: event => this.active?.onScriptComplete(event), print: (text, source) => this.print(text, source),
       allowCommand: command => this.allowCommand(command),
       forwardToServer: invocation => { this.worldAction = true; return this.forward(invocation.argv[0] ?? "", invocation.args, invocation.source); } });
     this.seats = options.seats.map(seat => ({ ...seat, input: new SeatInput({ seat: seat.id, dialect: options.movementDialect,
@@ -80,8 +80,34 @@ export class PreparedStartup {
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
-    this.releaseBindings = registerBindingCommands(this.commands, id => this.seats.find(seat => seat.id.equals(id))?.input ?? null, text => options.print(text));
+    registerBindingCommands(this.commands, id => this.seats.find(seat => seat.id.equals(id))?.input ?? null, text => this.print(text));
     this.releaseView = registerQ1ViewCommands(this.commands);
+  }
+  bindOutput(print: (text: string, source?: CommandContext) => void): () => void {
+    const binding = { print };
+    this.outputBindings.add(binding);
+    this.refreshRegistryOutput();
+    return () => {
+      if (this.outputBindings.delete(binding)) this.refreshRegistryOutput();
+    };
+  }
+  private print(text: string, source?: CommandContext): void {
+    let output = this.options.print;
+    for (const binding of this.outputBindings) output = binding.print;
+    output(text, source ?? this.commands?.executionContext);
+  }
+  private refreshRegistryOutput(): void {
+    const registries = new Set<CvarRegistry>();
+    if (this.outputBindings.size !== 0) {
+      registries.add(this.source); registries.add(this.movement); registries.add(this.fallback);
+      for (const context of [this.source.context, ...this.seats.map(seat => seat.context)])
+        for (const registry of this.routing.visible(context)) registries.add(registry);
+    }
+    for (const [registry, release] of this.registryOutputs) if (!registries.has(registry)) {
+      release(); this.registryOutputs.delete(registry);
+    }
+    for (const registry of registries) if (!this.registryOutputs.has(registry))
+      this.registryOutputs.set(registry, registry.bindOutput(text => this.print(text, this.commands.executionContext ?? registry.context)));
   }
   allowCommand(command: CommandInvocation): boolean {
     if (this.pending && this.deferredCommands.includes(asciiFold(command.argv[0] ?? ""))) this.worldAction = true;
@@ -96,7 +122,7 @@ export class PreparedStartup {
     if (rawName === undefined) return true;
     const name = asciiFold(rawName);
     if (name === "cvar_restart") {
-      this.options.print("Ignoring shared cvar restart in saved secondary-seat configuration.\n", command.source); return false;
+      this.print("Ignoring shared cvar restart in saved secondary-seat configuration.\n", command.source); return false;
     }
     const target = ["set", "seta", "sets", "setu", "toggle", "reset"].includes(name) ? argument : name;
     if (target === undefined) return true;
@@ -107,7 +133,7 @@ export class PreparedStartup {
     const seatId = origin.kind === "local-seat" ? origin.seat : undefined;
     const seat = seatId === undefined ? undefined : this.seats.find(seat => seat.id.equals(seatId));
     if (seat !== undefined && (owner === seat.cvars || owner === seat.mouse.cvars)) return true;
-    this.options.print(`Ignoring shared cvar ${target} in saved secondary-seat configuration; use autoexec.cfg for intentional shared overrides.\n`, command.source);
+    this.print(`Ignoring shared cvar ${target} in saved secondary-seat configuration; use autoexec.cfg for intentional shared overrides.\n`, command.source);
     return false;
   }
   noteWorldAction(): void { if (this.pending) this.worldAction = true; }
@@ -117,21 +143,31 @@ export class PreparedStartup {
   adoptReaders(scripts: ConsoleScriptFiles, read: StartupConfigOptions["read"]): void {
     this.scripts = scripts; this.scopedReader = read;
   }
+  validateOwners(owners: { readonly source: CvarRegistry; readonly movement: CvarRegistry; readonly fallback: CvarRegistry }): void {
+    if (owners.fallback.dialect !== owners.source.dialect || [owners.source, owners.movement, owners.fallback].some(registry => registry.context.session !== this.commands.context.session))
+      throw new Error("Prepared profile registry belongs to another session or dialect");
+    this.commands.validateProfile(owners.source.dialect, owners.fallback);
+  }
   adopt(routing: CommandCvarRouting, forward: PreparedStartup["forward"], owners?: {
-    readonly commands: CommandBuffer; readonly source: CvarRegistry; readonly movement: CvarRegistry; readonly fallback: CvarRegistry;
+    readonly source: CvarRegistry; readonly movement: CvarRegistry; readonly fallback: CvarRegistry;
     readonly scripts: ConsoleScriptFiles; readonly read: StartupConfigOptions["read"];
   }): void {
-    if (!this.bindingsReleased) {
-      this.releaseBindings();
-      this.releaseView();
-      for (const name of this.deferredCommands) this.commands.unregister(name);
-      this.bindingsReleased = true;
-    }
+    const profileChanged = owners !== undefined && (this.commands.dialect !== owners.source.dialect || this.seats.some(seat => seat.input.dialect !== owners.movement.dialect));
+    if (profileChanged && this.seats.some(seat => seat.input.hasHeldInput))
+      throw new Error("Prepared profile requires released input");
+    if (owners !== undefined) this.validateOwners(owners);
+    if (profileChanged && owners !== undefined) this.commands.setProfile(owners.source.dialect, owners.fallback);
     this.routing = routing; this.forward = forward;
     if (owners !== undefined) {
-      this.commands = owners.commands; this.source = owners.source; this.movement = owners.movement; this.fallback = owners.fallback;
+      this.source = owners.source; this.movement = owners.movement; this.fallback = owners.fallback;
       this.adoptReaders(owners.scripts, owners.read);
+      if (profileChanged) {
+        this.releaseView();
+        for (const seat of this.seats) seat.input.setProfile(owners.movement.dialect);
+        this.releaseView = registerQ1ViewCommands(this.commands);
+      }
     }
+    this.refreshRegistryOutput();
   }
   bindings(id: SeatId, selectedDefaults: readonly InputBinding[]): readonly InputBinding[] {
     const seat = this.seats.find(seat => seat.id.equals(id));
@@ -155,9 +191,10 @@ export class PreparedStartup {
     if ((await continuation.next()).done) this.continuation = undefined;
     return true;
   }
-  adoptSeat(id: SeatId, input: SeatInput, cvars?: CvarRegistry, mouse?: MouseSettings): void {
+  adoptSeat(id: SeatId, cvars?: CvarRegistry, mouse?: MouseSettings): void {
     const seat = this.seats.find(seat => seat.id.equals(id));
-    if (seat !== undefined) { seat.input = input; if (cvars !== undefined) seat.cvars = cvars; if (mouse !== undefined) seat.mouse = mouse; }
+    if (seat !== undefined) { if (cvars !== undefined) seat.cvars = cvars; if (mouse !== undefined) seat.mouse = mouse; }
+    this.refreshRegistryOutput();
   }
   private async *run(options: Pick<StartupConfigOptions, "read" | "hasMod" | "applyLaunchOptions"> & {
     readonly sourceArchive: readonly CvarArchiveEntry[];

@@ -202,13 +202,8 @@ export class EngineSession implements SessionResource {
     return replacement.world;
   }
 
-  replaceWorld(simulation: Simulation, presentations: readonly {
-    readonly seat: SessionSeat;
-    readonly presentation: SeatPresentation;
-    readonly cleanup: () => undefined;
-  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] }): {
-    readonly world: WorldLifetime; readonly retired: SessionResource;
-  } {
+  validateWorldReplacement(simulation: Simulation, presentations: Parameters<EngineSession["replaceWorld"]>[1] = [],
+    clients: Parameters<EngineSession["replaceWorld"]>[2] = { added: [], removed: [] }): void {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
@@ -228,11 +223,27 @@ export class EngineSession implements SessionResource {
       if (existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${client.id.slot} is occupied`);
       additions.set(client.id.slot, client);
     }
-    const nextPresentations = new Map<SessionSeat, PresentationLifetime>();
+    const seats = new Set<SessionSeat>();
     for (const entry of presentations) {
       if (this.seats.get(entry.seat.id.index) !== entry.seat) throw new Error("Presentation seat is not owned by this session");
-      if (nextPresentations.has(entry.seat)) throw new Error("Duplicate replacement presentation");
+      if (seats.has(entry.seat)) throw new Error("Duplicate replacement presentation");
       entry.seat.validatePresentation(entry.presentation);
+      seats.add(entry.seat);
+    }
+  }
+
+  replaceWorld(simulation: Simulation, presentations: readonly {
+    readonly seat: SessionSeat;
+    readonly presentation: SeatPresentation;
+    readonly cleanup: () => undefined;
+  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] }): {
+    readonly world: WorldLifetime; readonly retired: SessionResource;
+  } {
+    this.validateWorldReplacement(simulation, presentations, clients);
+    const additions = new Map(clients.added.map(client => [client.id.slot, client]));
+    const removals = new Set(clients.removed);
+    const nextPresentations = new Map<SessionSeat, PresentationLifetime>();
+    for (const entry of presentations) {
       const resources = new ResourceScope(`Seat ${entry.seat.id.index} presentation`);
       resources.defer(entry.cleanup);
       nextPresentations.set(entry.seat, { presentation: entry.presentation, resources });

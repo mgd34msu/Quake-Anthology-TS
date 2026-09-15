@@ -7,6 +7,8 @@ import type { GyroCalibrationState } from "./gamepad.ts";
 import { sdlEventTime, sdlGameKey } from "./sdl-keys.ts";
 import { SeatInput } from "./seat.ts";
 
+type InputWindow = Pick<SdlWindow, "beginInput" | "logicalSize" | "drawableSize" | "pollEvents">;
+
 export interface InputSeatRoute { readonly input: SeatInput; readonly controller: ControllerSelection; }
 export interface InputRouterOptions {
   readonly seats: readonly InputSeatRoute[];
@@ -28,7 +30,7 @@ export class InputRouter {
   private readonly deviceSeats = new Map<number, SeatInput>();
   private readonly calibrationSensors = new Set<number>();
   private lease: SdlInputLease | null = null;
-  private window: SdlWindow | null = null;
+  private window: InputWindow | null = null;
   private closed = false;
   private platformActive: boolean;
   constructor(private readonly options: InputRouterOptions) {
@@ -92,11 +94,12 @@ export class InputRouter {
     }
   }
   setKeyboardSeat(id: SeatId | null): void {
-    this.keyboard?.release(this.options.now()); this.keyboardKeys.clear();
+    if (this.platformActive) this.keyboard?.release(this.options.now());
+    this.keyboardKeys.clear();
     this.keyboard = id === null ? null : this.seat(id);
     if (id !== null && this.keyboard === null) throw new Error("Keyboard route refers to an unregistered seat");
   }
-  attachWindow(window: SdlWindow): void {
+  attachWindow(window: InputWindow): void {
     this.detachWindow(); this.window = window; this.lease = window.beginInput(); this.updateCapture();
   }
   transferWindowTo(next: InputRouter): void {
@@ -110,7 +113,7 @@ export class InputRouter {
     this.lease = null;
   }
   detachWindow(): void {
-    for (const route of this.routes) route.input.release(this.options.now());
+    if (this.platformActive) for (const route of this.routes) route.input.release(this.options.now());
     this.finishGyroCalibration();
     this.keyboardKeys.clear(); this.lease?.close(); this.lease = null; this.window = null;
   }
@@ -207,21 +210,21 @@ export class InputRouter {
     this.updateCapture();
   }
   restart(): void {
-    for (const route of this.routes) { route.input.release(this.options.now()); route.input.gamepad.resetGyroCalibration(); }
+    if (this.platformActive) for (const route of this.routes) { route.input.release(this.options.now()); route.input.gamepad.resetGyroCalibration(); }
     this.finishGyroCalibration();
     this.deviceSeats.clear(); this.keyboardKeys.clear();
     if (this.platformActive) this.options.controllers?.setAssignments(this.routes.map(route => route.controller));
     const assignments = this.options.controllers?.assignments ?? [];
     for (const [slot, instance] of assignments.entries()) {
       const input = this.routes[slot]?.input;
-      if (instance !== null && input !== undefined) { input.remapControllerBindings(instance); this.deviceSeats.set(instance, input); }
+      if (instance !== null && input !== undefined) { if (this.platformActive) input.remapControllerBindings(instance); this.deviceSeats.set(instance, input); }
     }
     this.updateCapture();
   }
   close(): void {
     if (this.closed) return;
     this.detachWindow();
-    for (const route of this.routes) route.input.gamepad.resetGyroCalibration();
+    if (this.platformActive) for (const route of this.routes) route.input.gamepad.resetGyroCalibration();
     this.deviceSeats.clear(); this.closed = true;
   }
 }

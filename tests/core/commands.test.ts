@@ -431,3 +431,262 @@ test("shared collision cvars reach server settings and both cgame trace consumer
   server.set("cm_noCurves", "1", true);
   expect(seats.map(seat => seat.variableString("cm_noCurves"))).toEqual(["0", "0"]);
 });
+
+
+test("one command owner changes profiles with fresh native builtin, parser and wait behavior", async () => {
+  const source = context(), calls: string[] = [], reads: string[] = [];
+  const persistent = new CommandBuffer({ dialect: "q2-classic", context: source, print: text => calls.push(text), readScript: name => { reads.push(name); return "record file\n"; } });
+  persistent.register("record", command => { calls.push(command.args.join(" ")); return undefined; });
+  persistent.executeNow('alias retained "record retained"');
+  const identity = persistent;
+  for (const dialect of ["q3", "q2-classic", "q3"] satisfies readonly CommandDialect[]) {
+    const registry = new CvarRegistry({ dialect, context: source }), expected: string[] = [], expectedReads: string[] = [];
+    const fresh = new CommandBuffer({ dialect, context: source, cvars: new CvarRegistry({ dialect, context: source }), print: text => expected.push(text),
+      readScript: name => { expectedReads.push(name); return "record file\n"; } });
+    fresh.register("record", command => { expected.push(command.args.join(" ")); return undefined; });
+    persistent.setProfile(dialect, registry); calls.length = 0; reads.length = 0;
+    expect(persistent).toBe(identity); expect(persistent.maximumBufferLength).toBe(fresh.maximumBufferLength);
+    expect([...persistent.registeredNames()].sort()).toEqual([...fresh.registeredNames()].sort());
+    if (dialect === "q3") expect(persistent.aliasNames()).toEqual([]);
+    else { expect(persistent.aliasNames()).toContain("retained"); persistent.executeNow("retained"); await persistent.advanceProgramFrame(); expect(calls).toEqual(["retained"]); calls.length = 0; }
+    const script = dialect === "q3" ? 'set program "record vstr"; vstr program; exec fragment; wait 2; record end\n'
+      : 'alias invoke "record alias"; invoke; exec fragment; wait 2; record end\n';
+    persistent.append(script, source); fresh.append(script, source);
+    for (let frame = 0; frame < 6 && (!persistent.programComplete || !fresh.programComplete); frame++) {
+      await persistent.advanceProgramFrame(); await fresh.advanceProgramFrame(); expect(calls).toEqual(expected); expect(persistent.programComplete).toBe(fresh.programComplete);
+    }
+    expect(persistent.programComplete).toBe(true); expect(reads).toEqual(expectedReads); expect(calls).toContain("end");
+  }
+});
+
+test("profile boundary retains deferred nested scripts, completion callers and trailing waits", async () => {
+  const source = context(1), reads = Promise.withResolvers<string>(), calls: string[] = [], completed: CommandContext[] = [];
+  const commands = new CommandBuffer({ dialect: "q2-classic", context: source, readScript: () => reads.promise, onScriptComplete: event => completed.push(event.source), print: text => calls.push(text) });
+  commands.append("exec outer.cfg; echo tail\n", source); commands.copyToDefer();
+  expect(commands.programComplete).toBe(false); commands.setProfile("q3", undefined);
+  expect(commands.deferredText).toBe("exec outer.cfg; echo tail\n"); commands.setProfile("q2-classic", undefined);
+  const first = commands.advanceProgramFrame();
+  await Promise.resolve(); await Promise.resolve();
+  expect(() => commands.setProfile("q3", undefined)).toThrow("completed program");
+  reads.resolve("echo nested; wait; echo afterwait\n"); await first;
+  expect(calls.join("")).toContain("nested"); expect(calls.join("")).not.toContain("afterwait");
+  commands.setProfile("q3", undefined);
+  await commands.advanceProgramFrame(); expect(commands.programComplete).toBe(true);
+  expect(calls.join("")).toContain("afterwait"); expect(calls.join("")).toContain("tail");
+  expect(completed).toEqual([{ session: source.session, origin: { kind: "script", name: "outer.cfg", caller: source.origin } }]);
+  commands.setProfile("q3", undefined); commands.append("wait 2\n", source); await commands.advanceProgramFrame();
+  expect(commands.programComplete).toBe(false); await commands.advanceProgramFrame(); expect(commands.programComplete).toBe(false);
+  await commands.advanceProgramFrame(); expect(commands.programComplete).toBe(true);
+  commands.setProfile("q2-classic", undefined); expect(commands.dialect).toBe("q2-classic");
+});
+
+test("profile validation is atomic and builtin retirement preserves a newer command registration", () => {
+  const source = context(), calls: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q2-classic", context: source, maxBufferLength: 20000 });
+  commands.unregister("echo"); commands.register("echo", () => { calls.push("replacement"); return undefined; });
+  const wrong = new CvarRegistry({ dialect: "q2-classic", context: source });
+  expect(() => commands.setProfile("q3", wrong)).toThrow("session or dialect"); expect(commands.dialect).toBe("q2-classic");
+  commands.setProfile("q3", new CvarRegistry({ dialect: "q3", context: source })); commands.executeNow("echo");
+  expect(calls).toEqual(["replacement"]); expect(commands.maximumBufferLength).toBe(20000);
+});
+
+for (const [origin, destination] of [["q2-classic", "q3"], ["q3", "q2-classic"]] satisfies readonly (readonly [CommandDialect, CommandDialect])[]) {
+  test(`${origin} queued program retains syntax and caller across ${destination} publication`, async () => {
+    const first = context(0), second = context(1), calls: { argv: readonly string[]; dialect: CommandDialect; source: CommandContext; world: string }[] = [];
+    const output: { text: string; source: CommandContext | undefined }[] = [];
+    let world = "old", publish = false;
+    const commands = new CommandBuffer({ dialect: origin, context: first, print: (text, source) => output.push({ text, source }) });
+    commands.register("load", () => { publish = true; });
+    commands.register("probe", command => { calls.push({ argv: command.argv, dialect: command.dialect, source: command.source, world }); });
+    commands.append('load; probe a/*comment*/b; echo retained\n', first);
+    await commands.executeAsync(async () => {
+      if (!publish) return;
+      publish = false;
+      expect(commands.pendingText).toBe(' probe a/*comment*/b; echo retained\n');
+      commands.setProfile(destination, undefined); world = "new";
+      commands.append('probe a/*comment*/b; echo fresh\n', second);
+      expect(commands.dialect).toBe(destination);
+    });
+    expect(calls).toEqual([
+      { argv: tokenizeCommand('probe a/*comment*/b', origin, 'console').argv, dialect: origin, source: first, world: "new" },
+      { argv: tokenizeCommand('probe a/*comment*/b', destination, 'console').argv, dialect: destination, source: second, world: "new" },
+    ]);
+    expect(output).toEqual([{ text: 'retained \n', source: first }, { text: 'fresh \n', source: second }]);
+    expect(commands.programComplete).toBe(true);
+  });
+
+  test(`${origin} native wait remains independent of ${destination} default`, async () => {
+    const calls: string[] = [], expected: string[] = [];
+    const commands = new CommandBuffer({ dialect: origin, context: context(), print: text => calls.push(text) });
+    const fresh = new CommandBuffer({ dialect: origin, context: context(), print: text => expected.push(text) });
+    commands.append('wait 2; echo tail\n'); fresh.append('wait 2; echo tail\n');
+    let published = false;
+    await commands.executeAsync(async () => { if (!published) { commands.setProfile(destination, undefined); published = true; } });
+    fresh.execute(); expect(calls).toEqual(expected);
+    for (let frame = 0; frame < 4; frame++) {
+      commands.execute(); fresh.execute(); expect(calls).toEqual(expected); expect(commands.programComplete).toBe(fresh.programComplete);
+    }
+  });
+}
+
+test('origin boundaries prevent one seat or dialect consuming another fragment', async () => {
+  const calls: { argv: readonly string[]; source: CommandContext; dialect: CommandDialect }[] = [];
+  const commands = new CommandBuffer({ dialect: 'q2-classic', context: context() });
+  let publish = false;
+  commands.register('load', () => { publish = true; });
+  commands.register('probe', command => { calls.push({ argv: command.argv, source: command.source, dialect: command.dialect }); });
+  commands.append('load;probe old', context(0));
+  await commands.executeAsync(async () => {
+    if (!publish) return; publish = false; commands.setProfile('q3', undefined);
+    commands.append('probe new', context(1)); commands.append(' joined\n', context(1));
+  });
+  expect(calls).toEqual([
+    { argv: ['probe', 'old'], source: context(0), dialect: 'q2-classic' },
+    { argv: ['probe', 'new', 'joined'], source: context(1), dialect: 'q3' },
+  ]);
+});
+
+test('deferred alias and delayed script preserve program dialect, mode and completion caller', async () => {
+  const source = context(1), read = Promise.withResolvers<string>();
+  const calls: { argv: readonly string[]; source: CommandContext; dialect: CommandDialect }[] = [];
+  const completed: CommandContext[] = [];
+  const commands = new CommandBuffer({ dialect: 'q2-classic', context: source, readScript: () => read.promise,
+    onScriptComplete: event => { completed.push(event.source); commands.insert('probe completion/*kept*/text\n'); } });
+  commands.register('probe', command => { calls.push({ argv: command.argv, source: command.source, dialect: command.dialect }); });
+  commands.executeNow('alias retained "probe alias/*kept*/text"', source);
+  commands.append('exec pending.cfg; retained; probe tail\n', source); commands.copyToDefer(); commands.insertFromDefer();
+  let published = false;
+  await commands.executeAsync(async () => { if (!published) { commands.setProfile('q3', undefined); published = true; } });
+  expect(calls).toEqual([]); expect(commands.dialect).toBe('q3');
+  read.resolve('probe script/*kept*/text; wait; probe afterwait\n'); await read.promise;
+  await commands.executeAsync(async () => {});
+  expect(calls.map(call => call.argv)).toEqual([['probe', 'script/*kept*/text']]);
+  await commands.executeAsync(async () => {});
+  const script: CommandContext = { session: source.session, origin: { kind: 'script', name: 'pending.cfg', caller: source.origin } };
+  expect(calls).toEqual([
+    { argv: ['probe', 'script/*kept*/text'], source: script, dialect: 'q2-classic' },
+    { argv: ['probe', 'afterwait'], source: script, dialect: 'q2-classic' },
+    { argv: ['probe', 'completion/*kept*/text'], source: script, dialect: 'q2-classic' },
+    { argv: ['probe', 'alias/*kept*/text'], source, dialect: 'q2-classic' },
+    { argv: ['probe', 'tail'], source, dialect: 'q2-classic' },
+  ]);
+  expect(completed).toEqual([script]); expect(commands.programComplete).toBe(true);
+  expect(commands.exists('alias')).toBe(false); expect(commands.exists('vstr')).toBe(true);
+});
+
+test('publication rejects an active command and preserves overridden builtins across retained programs', async () => {
+  const calls: string[] = [], commands = new CommandBuffer({ dialect: 'q2-classic', context: context() });
+  commands.unregister('echo'); commands.register('echo', command => { calls.push(command.dialect); });
+  commands.register('load', () => { expect(() => commands.setProfile('q3', undefined)).toThrow('boundary'); });
+  commands.append('load; echo old\n');
+  let publish = true;
+  await commands.executeAsync(async () => { if (publish) { publish = false; commands.setProfile('q3', undefined); commands.append('echo new\n'); } });
+  expect(calls).toEqual(['q2-classic', 'q3']);
+});
+
+test('retained Q3 vstr and wait use Q3 grammar after Q2 default publication', async () => {
+  const source = context(), cvars = new CvarRegistry({ dialect: 'q3', context: source });
+  cvars.register('body', 'probe a/*comment*/b; wait 2; probe end', 0);
+  const calls: (readonly string[])[] = [], commands = new CommandBuffer({ dialect: 'q3', context: source, cvarRouting: { owner: () => cvars, visible: () => [cvars] } });
+  commands.register('load', () => {});
+  commands.register('probe', command => { calls.push(command.argv); expect(command.dialect).toBe('q3'); });
+  commands.append('load; vstr body\n');
+  let publish = true;
+  await commands.executeAsync(async () => { if (publish) { publish = false; commands.setProfile('q2-classic', undefined); } });
+  expect(calls).toEqual([['probe', 'a', 'b']]);
+  commands.execute(); expect(calls).toHaveLength(1);
+  commands.execute(); expect(calls).toEqual([['probe', 'a', 'b'], ['probe', 'end']]);
+  expect(commands.dialect).toBe('q2-classic'); expect(commands.exists('vstr')).toBe(false);
+});
+
+test("world command disposal cannot remove a later handler with the same name", () => {
+  const calls: string[] = [], commands = new CommandBuffer({ dialect: "q3", context: context() });
+  const old = (): undefined => { calls.push("old"); }, next = (): undefined => { calls.push("next"); };
+  commands.register("worldcmd", old);
+  expect(commands.unregister("worldcmd", old)).toBe(true);
+  commands.register("worldcmd", next);
+  expect(commands.unregister("worldcmd", old)).toBe(false);
+  commands.executeNow("worldcmd"); expect(calls).toEqual(["next"]);
+  expect(commands.unregister("worldcmd", next)).toBe(true);
+});
+
+test("client publication changes idle authority default without dispatching its retained program", async () => {
+  const client = new CommandBuffer({ dialect: "q2-classic", context: context() });
+  const authority = new CommandBuffer({ dialect: "q2-classic", context: { session: owner.session, origin: { kind: "server-console" } } });
+  let world = "old"; const calls: string[] = [];
+  client.register("load", () => {});
+  authority.register("probe", command => { calls.push(world + ":" + command.dialect + ":" + command.args.join("|")); });
+  authority.append("probe a/*kept*/b\n"); client.append("load\n");
+  await client.executeAsync(async () => {
+    authority.setProfile("q3", undefined); client.setProfile("q3", undefined); world = "new";
+    expect(calls).toEqual([]);
+  });
+  authority.append("probe a/*split*/b\n"); authority.execute();
+  expect(calls).toEqual(["new:q2-classic:a/*kept*/b", "new:q3:a|b"]);
+});
+
+test("same-profile guest retirement restores native exec and preserves another custom handler", async () => {
+  const output: string[] = [], commands = new CommandBuffer({ dialect: "q3", context: context(), readScript: () => "echo restored\n", print: text => output.push(text) });
+  const guest = (): undefined => {};
+  commands.unregister("exec"); commands.register("exec", guest);
+  commands.unregister("echo"); commands.register("echo", command => { output.push("custom:" + command.args.join(" ")); });
+  expect(commands.unregister("exec", guest)).toBe(true);
+  commands.setProfile("q3", undefined);
+  expect(commands.exists("exec")).toBe(true);
+  commands.append("exec restored.cfg\n"); await commands.executeScriptsAsync(async () => {});
+  expect(output).toEqual(["execing restored.cfg\n", "custom:restored"]);
+});
+
+test("candidate program applies INSERT APPEND and immediate vstr around the inherited tail", () => {
+  const source = context(), live = new CommandBuffer({ dialect: "q3", context: source });
+  const cvars = new CvarRegistry({ dialect: "q3", context: source }); cvars.register("body", "echo captured\n");
+  live.append("echo T\n");
+  const output: string[] = [], prepared = live.prepareProgram({ dialect: "q3", context: source, cvars, print: text => output.push(text) });
+  prepared.commands.append("echo A\n"); prepared.commands.insert("echo I\n"); prepared.commands.append("echo B\n");
+  prepared.commands.executeNow('set marker 2'); expect(cvars.variableString("marker")).toBe("2");
+  prepared.commands.executeNow("vstr body"); cvars.set("body", "echo changed\n");
+  expect(live.pendingText).toBe("echo T\n");
+  prepared.commands.insert("echo J\n");
+  prepared.publish(); expect(live.pendingText).toBe(prepared.commands.pendingText);
+  const calls: string[] = []; live.unregister("echo"); live.register("echo", command => { calls.push(command.args[0] ?? ""); });
+  live.execute(); expect(calls).toEqual(["J", "captured", "I", "T", "A", "B"]);
+  expect(() => prepared.publish()).toThrow("already published");
+});
+
+test("failed candidate and unexpected late authority input preserve the original program", () => {
+  const live = new CommandBuffer({ dialect: "q2-classic", context: context() });
+  live.defineAlias("kept", "echo original\n"); live.append("kept\n");
+  const prepared = live.prepareProgram({ dialect: "q2-classic", context: context() });
+  prepared.commands.defineAlias("kept", "echo changed\n"); prepared.commands.executeNow("wait"); prepared.commands.insert("echo candidate\n");
+  expect(live.aliasValue("kept")).toBe("echo original\n"); expect(live.pendingText).toBe("kept\n");
+  live.append("echo late\n"); expect(() => prepared.validatePublication()).toThrow("changed during preparation");
+  expect(() => prepared.publish()).toThrow("changed during preparation"); expect(live.pendingText).toBe("kept\necho late\n");
+});
+
+test("fork shares one pending script settlement and emits one completion after publication", async () => {
+  const read = Promise.withResolvers<string>(), complete: string[] = [], calls: string[] = [];
+  const live = new CommandBuffer({ dialect: "q2-classic", context: context(), readScript: () => read.promise,
+    onScriptComplete: event => complete.push(event.name), print: text => calls.push(text) });
+  live.append("exec original.cfg; echo tail\n"); live.execute();
+  const prepared = live.prepareProgram({ dialect: "q3", context: context() });
+  read.resolve("echo script; wait; echo end\n"); await read.promise;
+  prepared.validatePublication(); live.setProfile("q3", undefined); prepared.publish();
+  await live.executeAsync(async () => {}); expect(calls.join("")).not.toContain("end");
+  await live.executeAsync(async () => {}); expect(complete).toEqual(["original.cfg"]);
+  expect(calls.join("")).toContain("script"); expect(calls.join("")).toContain("end"); expect(calls.join("")).toContain("tail");
+});
+
+test("after-dispatch fork keeps nonempty NOW immediate and empty NOW rejected", async () => {
+  const live = new CommandBuffer({ dialect: "q3", context: context() }), cvars = new CvarRegistry({ dialect: "q3", context: context() });
+  live.register("load", () => {}); live.append("load; echo tail\n");
+  let first = true;
+  await live.executeAsync(async () => {
+    if (!first) return; first = false;
+    const prepared = live.prepareProgram({ dialect: "q3", context: context(), cvars });
+    prepared.commands.executeNow("set marker 2"); expect(cvars.variableString("marker")).toBe("2");
+    expect(() => prepared.commands.executeNow("")).toThrow("already draining asynchronously");
+    prepared.commands.executeNow("wait 2"); prepared.publish();
+  });
+  expect(live.pendingText).toContain("echo tail"); live.execute(); expect(live.pendingText).toContain("echo tail");
+  live.execute(); expect(live.programComplete).toBe(true);
+});

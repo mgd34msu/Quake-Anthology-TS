@@ -1,3 +1,4 @@
+import { CommandBuffer } from "../../../src/core/commands/index.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../../src/core/cvars/index.ts";
@@ -35,4 +36,27 @@ test("qagame common traps use command scope, console completion and supplied rea
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_REAL_TIME, [0]), common)).toBe(12345);
   expect(qvmCommonSyscall(f.call(QvmGameImport.G_REAL_TIME, [512]), common)).toBe(12345);
   expect(Array.from({ length: 9 }, (_, index) => f.guest.view(512, 36).getInt32(index * 4, true))).toEqual([1, 2, 3, 4, 5, 126, 6, 42, 1]);
+});
+
+test("candidate qagame NOW trap updates its VM cvar before the host call returns", () => {
+  const f = fixture(), liveCvars = new CvarRegistry({ dialect: "q3", context: f.cvars.context });
+  liveCvars.register("marker", "9");
+  const live = new CommandBuffer({ dialect: "q3", context: f.cvars.context, cvars: liveCvars });
+  live.append("echo inherited\n");
+  const prepared = live.prepareProgram({ dialect: "q3", context: f.cvars.context, cvars: f.cvars });
+  const common: QvmCommonServices = { role: "qagame", cvars: f.cvars, print: () => {}, milliseconds: () => 0,
+    arguments: () => [], realTime: () => 0, commands: {
+      executeNow: text => { prepared.commands.executeNow(text); },
+      append: text => prepared.commands.append(text), insert: text => prepared.commands.insert(text),
+    } };
+  f.guest.writeString(128, "marker", 32); f.guest.writeString(160, "1", 32);
+  expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_REGISTER, [1024, 128, 160, 0]), common)).toBe(0);
+  f.guest.writeString(256, "set marker 2", 64);
+  expect(qvmCommonSyscall(f.call(QvmGameImport.G_SEND_CONSOLE_COMMAND, [0, 256]), common)).toBe(0);
+  expect(qvmCommonSyscall(f.call(QvmGameImport.G_CVAR_UPDATE, [1024]), common)).toBe(0);
+  expect(f.guest.view(1024, 272).getInt32(12, true)).toBe(2);
+  expect(liveCvars.variableString("marker")).toBe("9"); expect(live.pendingText).toBe("echo inherited\n");
+  f.guest.writeString(256, "echo inserted\n", 64);
+  expect(qvmCommonSyscall(f.call(QvmGameImport.G_SEND_CONSOLE_COMMAND, [1, 256]), common)).toBe(0);
+  expect(prepared.commands.pendingText).toBe("echo inserted\n\necho inherited\n");
 });

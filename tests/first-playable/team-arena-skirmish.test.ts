@@ -160,16 +160,17 @@ test("Team Arena preparation captures once across map wait and adopted source an
   const currentSource = new CvarRegistry({ dialect: "q3", context }); currentSource.restoreSaveState(oldSource.captureSaveState());
   const currentSeat = new CvarRegistry({ dialect: "q3", context: seatContext }); currentSeat.restoreSaveState(oldSeat.captureSaveState());
   const seat = prepared.seats[0]; if (seat === undefined) throw new Error("Missing prepared seat");
-  prepared.adoptSeat(seat.id, seat.input, currentSeat);
+  const commands = prepared.commands, input = seat.input;
+  prepared.adoptSeat(seat.id, currentSeat);
   const routing = new ApplicationConsoleRouting({ fallback: prepared.fallback, sourceDialect: () => "q3",
     server: () => ({ cvars: currentSource, sharedNames: ["capturelimit", "sv_maxclients", "g_gametype"] }), seat: () => currentSeat });
-  const commands = new CommandBuffer({ dialect: "q3", context, cvarRouting: routing, readScript: (name, source) => prepared.readScript(name, source), onScriptComplete: event => prepared.onScriptComplete(event) });
-  commands.copyPendingFrom(prepared.commands);
-  prepared.adopt(routing, () => undefined, { commands, source: currentSource, movement: prepared.movement, fallback: prepared.fallback, scripts, read: async () => undefined });
+  prepared.adopt(routing, () => undefined, { source: currentSource, movement: prepared.movement, fallback: prepared.fallback, scripts, read: async () => undefined });
+  expect(prepared.commands).toBe(commands); expect(seat.input).toBe(input); expect(seat.cvars).toBe(currentSeat);
   oldSource.set("capturelimit", "88", true); oldSeat.set("cg_drawTimer", "88", true);
   for (let frame = 0; frame < 4 && prepared.pending; frame++) await prepared.advanceFrame();
   expect(prepared.pending).toBe(false);
   expect(applications).toBe(2);
+  expect(prepared.commands).toBe(commands); expect(seat.input).toBe(input);
   const parsed = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpteam1"]);
   if (parsed.kind !== "run") throw new Error("Missing native launch options");
   const resolved = resolveStartupRules(parsed.options, currentSource, setup.maxClients, [], false);

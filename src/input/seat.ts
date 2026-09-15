@@ -59,9 +59,12 @@ export interface SeatInputOptions {
   readonly uiEvent: (event: SeatInputEvent, focus: SeatInputFocus) => boolean;
   readonly gamepad?: GamepadTuning;
 }
+interface UiBinding { readonly callback: SeatInputOptions["uiEvent"]; readonly previous: UiBinding | null; focus: SeatInputFocus; active: boolean; }
 interface HeldBinding { readonly input: PhysicalInput; readonly target: InputBindingTarget | null; }
 
 export class SeatInput {
+  private currentDialect: CommandDialect;
+  get dialect(): CommandDialect { return this.currentDialect; }
   readonly seat: SeatId;
   readonly gamepad: GamepadInput;
   private currentFocus: SeatInputFocus = { kind: "game" };
@@ -71,9 +74,12 @@ export class SeatInput {
   private readonly buttons = new Map<SourceAction, InputButton>();
   private mouse: Vec2 = { x: 0, y: 0 };
   private pendingImpulse = 0;
+  private uiBinding: UiBinding;
 
   constructor(private readonly options: SeatInputOptions) {
+    this.currentDialect = options.dialect;
     this.seat = options.seat;
+    this.uiBinding = { callback: options.uiEvent, previous: null, focus: this.currentFocus, active: true };
     if (options.context.session !== options.seat.session || options.context.origin.kind !== "local-seat"
       || !options.context.origin.seat.equals(options.seat)) throw new Error("Input command context must belong to its local seat");
     this.gamepad = new GamepadInput(options.gamepad);
@@ -95,6 +101,29 @@ export class SeatInput {
   setFocus(focus: SeatInputFocus, nowMilliseconds: number): void {
     this.release(nowMilliseconds);
     this.currentFocus = focus;
+  }
+  bindUiEvent(callback: SeatInputOptions["uiEvent"], now: () => number): () => void {
+    const previous = this.uiBinding;
+    previous.focus = this.currentFocus;
+    this.release(now());
+    const binding: UiBinding = { callback, previous, focus: this.currentFocus, active: true };
+    this.uiBinding = binding;
+    return () => {
+      if (!binding.active) return;
+      binding.active = false;
+      if (this.uiBinding !== binding) return;
+      this.release(now());
+      let restored = previous;
+      while (!restored.active && restored.previous !== null) restored = restored.previous;
+      this.uiBinding = restored;
+      this.currentFocus = restored.focus;
+    };
+  }
+  get hasHeldInput(): boolean { return this.held.size !== 0 || [...this.buttons.values()].some(button => button.active); }
+  setProfile(dialect: CommandDialect): void {
+    if (this.currentDialect === dialect) return;
+    if (this.hasHeldInput) throw new Error("Input profile requires released keys");
+    this.currentDialect = dialect;
   }
   setImpulse(value: number): void {
     if (!Number.isInteger(value) || value < 0 || value > 255) throw new RangeError("Input impulse must fit a byte");
@@ -120,7 +149,7 @@ export class SeatInput {
     let hadButton = false;
     let remaining = sourceCommandText(target.text);
     while (remaining.length > 0) {
-      const offset = commandSeparatorOffset(remaining, this.options.dialect);
+      const offset = commandSeparatorOffset(remaining, this.currentDialect);
       const segment = remaining.slice(0, offset).trim();
       remaining = remaining.slice(offset + 1);
       if (segment.length === 0) continue;
@@ -147,10 +176,10 @@ export class SeatInput {
     if (event.kind === "focus") {
       this.windowFocused = event.focused;
       if (!event.focused) this.release(time);
-      return this.options.uiEvent(event, this.currentFocus);
+      return this.uiBinding.callback(event, this.currentFocus);
     }
     if (!this.windowFocused) return false;
-    const consumed = this.options.uiEvent(event, this.currentFocus);
+    const consumed = this.uiBinding.callback(event, this.currentFocus);
     switch (event.kind) {
       case "key": this.digital({ kind: "key", code: event.code }, event.down, time, consumed); break;
       case "mouse-button": this.digital({ kind: "mouse-button", button: event.button }, event.down, time, consumed); break;
@@ -194,7 +223,7 @@ export class SeatInput {
   }
   sample(nowMilliseconds: number, frameMilliseconds: number): SeatInputSample {
     if (!Number.isFinite(nowMilliseconds) || !Number.isFinite(frameMilliseconds) || frameMilliseconds <= 0) throw new RangeError("Input sample requires a positive frame duration");
-    const timing = this.options.dialect.startsWith("q1") ? "q1" : this.options.dialect === "q3" ? "q3" : "q2";
+    const timing = this.currentDialect.startsWith("q1") ? "q1" : this.currentDialect === "q3" ? "q3" : "q2";
     const buttons = [...this.buttons].map(([action, button]) => {
       const pressed = button.pressed, active = button.active;
       return { action, pressed, active, fraction: button.sample(timing, nowMilliseconds, frameMilliseconds) };
