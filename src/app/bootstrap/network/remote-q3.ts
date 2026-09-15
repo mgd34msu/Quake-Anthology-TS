@@ -1,3 +1,4 @@
+import { RemoteWorldContent } from './remote-world.ts';
 import type { WorldText } from "../../../text/world.ts";
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
 /* Q3 CL_ParseGamestate / CL_SetCGameTime and cgame host projection. GPL-2.0-or-later. */
@@ -16,7 +17,6 @@ import { HistorySnapshotSource } from '../../../content/q3/presentation/snapshot
 import { retailSnapshot } from '../../../content/q3/presentation/retail-snapshot.ts';
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from '../../../content/q3/foundation/arsenal.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
-import { createSceneQueries } from '../../../world/collision/index.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
 import { q3ArsenalWarning, q3WeaponStatus } from '../simulation/arsenal/weapon-status.ts';
@@ -34,7 +34,7 @@ export interface Q3RemoteWorld { readonly map: string; readonly models: readonly
 export interface Q3RemotePresentationOptions {
   readonly identity: IdentityOwner;
   readonly session: EngineSession;
-  readonly content: LoadedApplicationContent;
+  readonly content: LoadedApplicationContent | null;
   readonly userinfo: () => string;
   readonly timeNudge?: () => number;
   readonly timescale?: () => number;
@@ -59,8 +59,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   readonly userinfo;
   readonly clock = new Q3ClientClock();
   private connection: Q3ClientConnection | null = null;
-  private content: LoadedApplicationContent;
-  private collision;
+  private readonly world: RemoteWorldContent;
   private readonly actors = new Map<number, ActorId>();
   private generation = 0;
   private ordinal = 0;
@@ -73,11 +72,11 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private prediction: PresentationPredictionAdapter | null = null;
   private source: ApplicationQ3ClientSource | null = null;
   constructor(readonly options: Q3RemotePresentationOptions) {
-    this.content = options.content; this.collision = createSceneQueries(this.content.world);
+    this.world = new RemoteWorldContent(options.content);
     this.client = options.session.createClient(0); this.client.connect('remote');
     this.identity = { client: this.client.id, seat: null }; this.userinfo = options.userinfo;
   }
-  get scene() { return this.collision; }
+  get scene() { return this.world.scene; }
   get output(): SimulationOutput | null { return this.published; }
   get player() { return this.current === null ? null : { actor: this.actorAt(this.current.playerState.clientNum), client: this.client.id, sourceEntity: this.current.playerState.clientNum }; }
   get admittedPlayer() { const connection = this.connection; if (connection === null) throw new Error("Q3 seat has no decoded connection"); return { actor: this.actorAt(connection.clientNumber), client: this.client.id, sourceEntity: connection.clientNumber }; }
@@ -121,8 +120,8 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     this.gameStateMessage = connection.serverMessageSequence; this.gameStateCommands = state.commandSequence;
     this.loadingDownloads = await this.options.downloads?.prepare(connection) ?? false;
     if (this.loadingDownloads) return;
-    this.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
-    this.collision = createSceneQueries(this.content.world);
+    this.world.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
+
     await this.options.initialize?.(connection);
   }
   downloadSize(size: number): number {
@@ -146,7 +145,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
 
   playerView(actor: ActorId): PlayerView { if (this.current === null && this.admittedPlayer.actor.equals(actor)) return { origin: zero, angles: zero, viewHeight: 0 }; const ps = this.requirePlayer(actor).playerState; return { origin: ps.origin, angles: ps.viewangles, viewHeight: ps.viewheight }; }
   playerUi(actor: ActorId): PlayerUi {
-    const ps = this.requirePlayer(actor).playerState, weapon = q3WeaponItem(ps.weapon), source = this.content.recipe.weapons[0];
+    const ps = this.requirePlayer(actor).playerState, weapon = q3WeaponItem(ps.weapon), source = this.world.content.recipe.weapons[0];
     if (source === undefined) throw new Error('Q3 remote has no native weapon provider');
     const definitions = Q3_WEAPON_ITEMS.filter(value => value.weapon <= 10);
     const count = (item: ItemId): number => { const definition = definitions.find(value => value.item === item || value.ammo === item); return definition === undefined ? 0 : definition.item === item ? (ps.stats.get(2) & (1 << definition.weapon)) !== 0 ? 1 : 0 : ps.ammo.get(definition.weapon); };
@@ -173,13 +172,13 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   }
   private publish(time: number): void {
     const snapshot = this.current, player = this.player; if (snapshot === null || player === null) return;
-    const recipe = this.content.recipe, ps = snapshot.playerState;
+    const recipe = this.world.content.recipe, ps = snapshot.playerState;
     const bodies = snapshot.entities.filter(entity => entity.number !== ps.clientNum).map(entity => ({ actor: this.actorAt(entity.number), body: { origin: entity.pos.base, angles: entity.apos.base, velocity: entity.pos.delta, bounds, ground: null } }));
     bodies.push({ actor: player.actor, body: { origin: ps.origin, angles: ps.viewangles, velocity: ps.velocity, bounds, ground: null } });
     this.published = { snapshot: { session: this.options.session.session, frame: { frame: snapshot.messageNumber, time: { kind: 'milliseconds', value: time }, elapsed: { kind: 'milliseconds', value: 0 }, phase: 'frame-exit' },
       actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q3:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }],
       configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }],
-      scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.content.world }, entities: [], lights: [], particles: [], lightStyles: [], areaBits: snapshot.areaMask } }, events: [] };
+      scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [], areaBits: snapshot.areaMask } }, events: [] };
     this.options.session.publish(this.published);
   }
   samplePresentation(now: number): SimulationOutput | null {
@@ -188,7 +187,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   }
   private predictionSnapshot(): MovementPredictionSnapshot {
     const current = this.current, player = this.player; if (current === null || player === null) throw new Error('Q3 prediction needs a snapshot');
-    const ps = current.playerState, canonical = toQ3PlayerState(ps), recipe = this.content.recipe;
+    const ps = current.playerState, canonical = toQ3PlayerState(ps), recipe = this.world.content.recipe;
     const entities = { actorAt: (number: number) => this.actorAt(number), numberOf: (actor: ActorId) => this.numberOf(actor) };
     const base: MovementPredictionSnapshot = { sequence: this.connection?.commands.currentNumber ?? 0, commandTimeMilliseconds: ps.commandTime,
       state: { ...canonical, kind: 'q3', ground: predictionSourceHit(ps.groundEntityNum, entities), predictableEventSequence: ps.eventSequence, jumpPad: ps.jumppadEnt === 0 ? null : this.actorAt(ps.jumppadEnt), movementFrame: ps.pmoveFramecount, jumpPadFrame: ps.jumppadFrame },
@@ -200,8 +199,8 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   movement(seat: SeatId): PresentationPredictionAdapter {
     if (this.prediction !== null) return this.prediction;
     const player = this.player; if (player === null) throw new Error('Q3 prediction has no player');
-    this.prediction = createPresentationMovementHost({ movement: { actor: this.options.identity.ownedActor(player.actor, this.content.recipe.map.entities.provider), seat, recipe: this.content.recipe,
-      profile: movementProfile(this.content.recipe), standingBounds: bounds, standingViewHeight: 26, scene: this.scene, isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && this.current?.entities.some(entity => entity.solid === 0xffffff && this.actorAt(entity.number).equals(hit.actor)) === true },
+    this.prediction = createPresentationMovementHost({ movement: { actor: this.options.identity.ownedActor(player.actor, this.world.content.recipe.map.entities.provider), seat, recipe: this.world.content.recipe,
+      profile: movementProfile(this.world.content.recipe), standingBounds: bounds, standingViewHeight: 26, scene: this.scene, isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && this.current?.entities.some(entity => entity.solid === 0xffffff && this.actorAt(entity.number).equals(hit.actor)) === true },
       initial: this.predictionSnapshot(), entities: { actorAt: number => this.actorAt(number), numberOf: actor => this.numberOf(actor) } });
     return this.prediction;
   }

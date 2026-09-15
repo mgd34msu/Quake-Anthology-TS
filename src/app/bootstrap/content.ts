@@ -61,6 +61,24 @@ export async function openRemoteContent(roots: Pick<ApplicationOptions, "corpusR
   return { selection, catalog, product, mounts: opened, writeRoot, baseWriteRoot };
 }
 
+export type MountedApplicationContent = Pick<LoadedApplicationContent, "catalog" | "mounts" | "close">;
+
+export async function openRemoteApplicationContent(options: ApplicationOptions): Promise<MountedApplicationContent> {
+  const selection = options.remoteContent ?? (options.network.kind === "qw-client" ? remoteContentSelection("q1-quakeworld", "qw")
+    : options.network.kind === "q3-client" ? remoteContentSelection("q3-baseq3", "baseq3")
+    : options.network.kind === "q2-client" ? remoteContentSelection("q2-classic-baseq2", "baseq2") : undefined);
+  if (selection !== undefined) {
+    const content = await openRemoteContent(options, selection, () => {});
+    return { catalog: content.catalog, mounts: content.mounts, close: async () => { content.mounts.close(); } };
+  }
+  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot,
+    userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: false });
+  const product = catalog.require(options.product), mounts = await catalog.mountsFor(product.id);
+  const opened = await openMountPlan({ id: createMountPlanId("remote-connection", options.product), mounts,
+    defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+  return { catalog, mounts: opened, close: async () => { opened.close(); } };
+}
+
 function baseProduct(family: GameFamily): string {
   switch (family) {
     case "q1": return "q1-classic-id1";

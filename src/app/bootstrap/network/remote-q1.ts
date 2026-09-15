@@ -1,3 +1,4 @@
+import { RemoteWorldContent } from './remote-world.ts';
 import type { WorldText } from "../../../text/world.ts";
 /* WinQuake cl_parse.c and cl_main.c decoded presentation. GPL-2.0-or-later. */
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
@@ -9,7 +10,6 @@ import type { Q1ClientData, Q1ExtendedEntityState, Q1UserCommand } from '../../.
 import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
 import { ENTALPHA_DECODE, ENTSCALE_DECODE } from '../../../network/q1/constants.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
-import { createSceneQueries } from '../../../world/collision/index.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q1Event, Q1SoundChannel } from '../../../content/q1/foundation/types.ts';
@@ -24,7 +24,7 @@ export interface Q1RemotePresentationOptions {
     presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
-    readonly content: LoadedApplicationContent;
+    readonly content: LoadedApplicationContent | null;
     loadContent(world: Q1RemoteWorld): Promise<LoadedApplicationContent>;
     sendCommand(text: string): void;
     print(text: string): void;
@@ -49,8 +49,7 @@ function angles(a: Vec3, b: Vec3, f: number): Vec3 {
 }
 export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePresentationAccess {
     readonly client;
-    private content: LoadedApplicationContent;
-    private collision;
+    private readonly world: RemoteWorldContent;
     private generation = 0;
     private ordinal = 0;
     private sequence = 0;
@@ -83,12 +82,12 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     }>();
     private records: readonly NetQuakeMessage[] = [];
     constructor(readonly options: Q1RemotePresentationOptions) {
-        this.content = options.content;
-        this.collision = createSceneQueries(this.content.world);
+        this.world = new RemoteWorldContent(options.content);
+
         this.client = options.session.createClient(0);
         this.client.connect('remote');
     }
-    get scene() { return this.collision; }
+    get scene() { return this.world.scene; }
     get output(): SimulationOutput | null { return this.published; }
     get sourceRecords(): readonly NetQuakeMessage[] { return this.records; }
     get player() { return this.viewEntity === 0 ? null : { client: this.client.id, actor: this.actor(this.viewEntity), sourceEntity: this.viewEntity }; }
@@ -105,7 +104,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             return i - 1; return null; }
     isPlayer(actor: ActorId): boolean { return this.playerSlot(actor) !== null; }
     private emit(event: Q1Event, sourceEntity: number | null = null): void {
-        this.events.push({ kind: 'q1', event, content: this.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
+        this.events.push({ kind: 'q1', event, content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
     }
     async receive(messages: readonly NetQuakeMessage[], now: number): Promise<void> {
         this.records = messages;
@@ -115,7 +114,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     const map = message.models[0];
                     if (map === undefined || !map.startsWith('maps/') || !map.endsWith('.bsp'))
                         throw new Error('NetQuake server has no world model');
-                    this.content = await this.options.loadContent({ map, models: message.models, sounds: message.sounds });
+                    this.world.content = await this.options.loadContent({ map, models: message.models, sounds: message.sounds });
                     this.generation++;
                     this.actors.clear();
                     this.current.clear();
@@ -136,7 +135,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.published = null;
                     this.seconds = 0;
                     this.previousSeconds = 0;
-                    this.collision = createSceneQueries(this.content.world);
+
                     break;
                 }
                 case 'time':
@@ -160,7 +159,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 case 'set-angle':
                     this.viewAngles = message.angles;
                     if (this.player !== null)
-                        this.events.push({ kind: 'view-reset', reason: 'source', actor: this.player.actor, angles: message.angles, sequence: this.sequence++, seconds: this.seconds, content: this.content.recipe.map.entities.content });
+                        this.events.push({ kind: 'view-reset', reason: 'source', actor: this.player.actor, angles: message.angles, sequence: this.sequence++, seconds: this.seconds, content: this.world.content.recipe.map.entities.content });
                     break;
                 case 'client-data':
                     this.data = message.data;
@@ -255,7 +254,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const data = this.data;
         if (data === null)
             throw new Error('No Q1 clientdata');
-        const weapon = weapons.find(value => value.bit === data.activeWeapon || value.name === 'axe' && data.activeWeapon === 0 && this.models[data.weaponModel - 1] === 'progs/v_axe.mdl'), source = this.content.recipe.weapons[0];
+        const weapon = weapons.find(value => value.bit === data.activeWeapon || value.name === 'axe' && data.activeWeapon === 0 && this.models[data.weaponModel - 1] === 'progs/v_axe.mdl'), source = this.world.content.recipe.weapons[0];
         const counts = new Map([['shells', data.shells], ['nails', data.nails], ['rockets', data.rockets], ['cells', data.cells]]);
         const item: ItemId | null = weapon === undefined ? null : `q1:weapon/${weapon.name}`;
         const ammo = weapon?.ammo;
@@ -275,7 +274,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             if (path === undefined)
                 throw new Error(`Unknown NetQuake model ${state.modelIndex}`);
             const colors = state.colorMap > 0 && state.colorMap <= this.maxClients ? this.scoreboard.get(state.colorMap - 1)?.colors : undefined;
-            result.push({ actor: this.actor(number), content: this.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, alpha: ENTALPHA_DECODE(state.alpha), scale: ENTSCALE_DECODE(state.scale), visible: number !== this.viewEntity, viewWeapon: false,
+            result.push({ actor: this.actor(number), content: this.world.content.recipe.map.entities.content, family: 'q1', path, frame: state.frame, oldFrame: state.frame, skin: state.skin, effects: state.effects, renderFlags: 0, origin: state.origin, angles: state.angles, alpha: ENTALPHA_DECODE(state.alpha), scale: ENTSCALE_DECODE(state.scale), visible: number !== this.viewEntity, viewWeapon: false,
                 ...(colors === undefined ? {} : { playerColors: { top: Math.min(colors >> 4 & 15, 13), bottom: Math.min(colors & 15, 13) } }) });
         };
         for (const state of this.current.values())
@@ -287,7 +286,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
             if (path === undefined)
                 throw new Error('Unknown Q1 weapon model');
             const view = this.playerView(player.actor);
-            result.push({ actor: player.actor, content: this.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, alpha: ENTALPHA_DECODE(this.weaponAlpha), scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
+            result.push({ actor: player.actor, content: this.world.content.recipe.map.entities.content, family: 'q1', path, frame: data.weaponFrame, oldFrame: data.weaponFrame, skin: 0, effects: 0, renderFlags: 0, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles, alpha: ENTALPHA_DECODE(this.weaponAlpha), scale: 1, visible: data.health > 0 && (data.items & 524288) === 0, viewWeapon: true });
         }
         return result;
     }
@@ -327,9 +326,9 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const player = this.player, data = this.data;
         if (player === null || data === null || !this.current.has(this.viewEntity))
             return;
-        const recipe = this.content.recipe, time = this.previousSeconds + (this.seconds - this.previousSeconds) * this.fraction;
+        const recipe = this.world.content.recipe, time = this.previousSeconds + (this.seconds - this.previousSeconds) * this.fraction;
         const bodies = [...this.current.values()].map(state => ({ actor: this.actor(state.number), body: { origin: this.sampled(state).origin, angles: this.sampled(state).angles, velocity: state.number === this.viewEntity ? data.velocity : zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }));
-        this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: [...this.soundsPending] };
+        this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: [...this.soundsPending] };
         this.options.session.publish({ ...this.published, events: [] });
     }
     samplePresentation(now: number): SimulationOutput | null {

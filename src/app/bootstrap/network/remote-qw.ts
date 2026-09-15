@@ -1,3 +1,4 @@
+import { RemoteWorldContent } from './remote-world.ts';
 /* QW decoded protocol state shares the Q1 scene/session presentation. GPL-2.0-or-later. */
 import type { IndexedModelSkin } from '../../../contracts/scene.ts';
 import { QwPlayerSkins } from './qw-skins.ts';
@@ -7,7 +8,6 @@ import type { ActorId } from '../../../contracts/identity.ts';
 import { QuakeWorldPrediction } from '../simulation/prediction/qw-source-state.ts';
 import type { MovementPredictionSnapshot, MovementPredictionResult } from '../simulation/prediction/types.ts';
 import { movementProfile } from '../simulation/players.ts';
-import type { LoadedApplicationContent } from '../content.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { Q1ExtendedEntityState, QwUserCommand, QwPlayerState } from '../../../contracts/protocol.ts';
 import type { QuakeWorldMessage, QwMoveVariables } from '../../../network/q1/quakeworld.ts';
@@ -30,7 +30,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     readonly shared: Q1RemotePresentation;
     readonly downloads?: QwApplicationDownloads;
     private data: QwServerData | null = null;
-    private content: LoadedApplicationContent;
+    private readonly world: RemoteWorldContent;
     private predictor: QuakeWorldPrediction | null = null;
     private predicted: MovementPredictionResult | null = null;
     private acknowledgedSequence = 0;
@@ -80,7 +80,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     private kick = 0;
     private intermission: Extract<QuakeWorldMessage, { kind: 'intermission' }> | null = null;
     private variables: QwMoveVariables | null = null;
-    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.content = options.content; this.shared = new Q1RemotePresentation({ ...options, loadContent: async world => { this.content = await options.loadContent(world); return this.content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
+    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.world = new RemoteWorldContent(options.content); this.shared = new Q1RemotePresentation({ ...options, loadContent: async world => { this.world.content = await options.loadContent(world); return this.world.content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
     get moveVariables(): QwMoveVariables | null { return this.variables; }
     get client() { return this.shared.client; }
     get player() { return this.shared.player; }
@@ -94,7 +94,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         const map = models[0]; if (map === undefined) throw new Error('QW has no world model');
         await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0);
         this.soundCount = sounds.length; this.availableSounds.clear();
-        for (const [index, sound] of sounds.entries()) if (await this.content.mounts.resolve(`sound/${sound}`) !== null) this.availableSounds.add(index + 1);
+        for (const [index, sound] of sounds.entries()) if (await this.world.content.mounts.resolve(`sound/${sound}`) !== null) this.availableSounds.add(index + 1);
         return this.options.mapChecksum({ map, models, sounds }, data.gameDirectory);
     }
     async receive(messages: readonly QuakeWorldMessage[], now: number): Promise<void> {
@@ -154,7 +154,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     private receivePrediction(now: number): void {
         const own = this.ownPlayer, player = this.player, variables = this.variables, data = this.data;
         if (own === null || player === null || variables === null || data === null || this.shared.output === null) return;
-        const recipe = this.content.recipe, view = this.shared.playerView(player.actor), ui = this.shared.playerUi(player.actor);
+        const recipe = this.world.content.recipe, view = this.shared.playerView(player.actor), ui = this.shared.playerUi(player.actor);
         const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
         const base: MovementPredictionSnapshot = { sequence: this.acknowledgedSequence, commandTimeMilliseconds: now,
             state: { kind: 'q1-quakeworld', origin: own.origin, velocity: own.velocity, angles: view.angles, oldButtons: 0, waterJumpTimeSeconds: 0, dead: ui.health <= 0, spectator: 0, ground: { kind: 'none' } },

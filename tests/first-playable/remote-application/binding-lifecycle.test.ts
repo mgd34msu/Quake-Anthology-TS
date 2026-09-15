@@ -76,8 +76,8 @@ test('Q3 remote bindings wait for decoded player state and capture input after a
   let server: Application | null = null, client: RemoteApplication | null = null;
   const prints: string[] = [], host = { print: (text: string): undefined => { prints.push(text); return undefined; } };
   try {
-    const common = ['--game', 'q3-baseq3', '--map', 'q3dm1', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch', '--user-content-root', users];
-    const serverLaunch = parseApplicationCommand([...common, '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+    const common = ['--game', 'q3-baseq3', '--movement', 'q3', '--character', 'q3', '--mode', 'deathmatch', '--user-content-root', users];
+    const serverLaunch = parseApplicationCommand([...common, '--map', 'q3dm1', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
     if (serverLaunch.kind !== 'run') throw new Error('No server launch');
     server = await Application.open(serverLaunch.options, host);
     server.simulation.q3Source()?.host.cvars.set('sv_pure', '0', true);
@@ -85,9 +85,11 @@ test('Q3 remote bindings wait for decoded player state and capture input after a
     const launch = parseApplicationCommand([...common, '--connect-q3', `127.0.0.1:${address.port}`, '--renderer', 'cpu', '--width', '640', '--height', '480', '--hidden']);
     if (launch.kind !== 'run') throw new Error('No remote launch');
     client = await RemoteApplication.open(launch.options, host);
+    expect(() => client?.content).toThrow('Remote server has not supplied a world');
     const remote = client, authority = server;
     const exchange = async (): Promise<void> => { await remote.step(50); await Bun.sleep(1); await authority.step(50); await Bun.sleep(1); await remote.step(50); };
     for (let index = 0; index < 100 && remote.networkPhase !== 'active'; index++) await exchange();
+    expect(remote.content.recipe.map.geometry.requestedPath).toBe('maps/q3dm1.bsp');
     expect(remote.networkPhase).toBe('active'); expect(receivedSnapshot).toBe(true); expect(prematureReads).toBe(0);
     expect(attachedBeforeSnapshot).toEqual([true]);
     const ui = attached[0], local = remote.localPlayers[0];

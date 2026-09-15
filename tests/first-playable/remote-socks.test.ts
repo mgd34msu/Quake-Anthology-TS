@@ -140,9 +140,9 @@ test('closing during SOCKS negotiation rejects promptly and proxy loss never fal
 });
 
 for (const profile of [
-  { name: 'NQ', game: 'q1-classic-id1', family: 'q1', connect: '--connect-q1', directory: 'q1/id1', map: 'e1m1' },
-  { name: 'QW', game: 'q1-classic-id1', family: 'q1', connect: '--connect-qw', directory: 'q1/qw', map: 'e1m1' },
-  { name: 'Q3', game: 'q3-baseq3', family: 'q3', connect: '--connect-q3', directory: 'q3a/baseq3', map: 'q3dm1' },
+  { name: 'NQ', game: 'q1-classic-id1', family: 'q1', connect: '--connect-q1', directory: 'q1/id1' },
+  { name: 'QW', game: 'q1-classic-id1', family: 'q1', connect: '--connect-qw', directory: 'q1/qw' },
+  { name: 'Q3', game: 'q3-baseq3', family: 'q3', connect: '--connect-q3', directory: 'q3a/baseq3' },
 ]) test(`${profile.name} RemoteApplication sends native handshake and decodes proxy reply using the same saved owner`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'remote-socks-profile-'));
   const peer = createSocket('udp4'), packets: Uint8Array[] = [];
@@ -162,7 +162,7 @@ for (const profile of [
     const directory = join(root, profile.directory, 'settings'); await mkdir(directory, { recursive: true });
     await Bun.write(join(directory, 'client.cfg'), `seta net_socksEnabled 1\nseta net_socksServer 127.0.0.1\nseta net_socksPort ${proxy.port}\nseta net_socksUsername fixture-user\nseta net_socksPassword fixture-secret\n`);
     const selected = parseApplicationCommand(['--game', profile.game, '--movement', profile.family, '--character', profile.family,
-      '--map', profile.map, profile.connect, `127.0.0.1:${peer.address().port}`, '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
+      profile.connect, `127.0.0.1:${peer.address().port}`, '--renderer', 'cpu', '--width', '160', '--height', '120', '--hidden']);
     if (selected.kind !== 'run') throw new Error('No profile selection');
     application = await RemoteApplication.open({ ...selected.options, userContentRoot: root }, { print: text => { prints.push(text); return undefined; } });
     expect(proxy.authenticated).toBe(1); expect(proxy.outbound).toBe(0);
