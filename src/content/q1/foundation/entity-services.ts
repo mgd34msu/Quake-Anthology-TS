@@ -345,7 +345,11 @@ export class Q1EntityServices {
   }
   cancel(entity: Q1Actor): undefined { entity.nextThink = -1; entity.think = null; return this.host.cancelThink(entity.actor); }
   sound(entity: Q1Actor | OwnedActor, path: string, channel: Q1SoundChannel = "voice", attenuation = 1, volume = 1): undefined {
-    return this.host.emit({ kind: "sound", actor: entity instanceof Q1Actor ? entity.actor.id : entity.id, path, channel, volume, attenuation });
+    const actor = entity instanceof Q1Actor ? entity.actor.id : entity.id;
+    const body = this.host.bodies.read(actor);
+    if (body === null) throw new Error("Missing Q1 sound emitter body");
+    const origin = vadd(body.origin, vscale(vadd(body.bounds.min, body.bounds.max), 0.5));
+    return this.host.emit({ kind: "sound", actor, origin, path, channel, volume, attenuation });
   }
   message(player: ActorId | null, text: string, center = true, args: readonly (string | number)[] = []): undefined {
     if (player !== null && this.isPlayer(player) && text !== "") this.host.emit({ kind: "message", player, text, center, ...(args.length === 0 ? {} : { args: [...args] }) }); return undefined;

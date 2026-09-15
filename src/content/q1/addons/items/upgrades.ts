@@ -109,8 +109,8 @@ function upgradeTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId):
   for (const entry of game.host.inventory.entries(other)) if (entry.item.startsWith("q1:ammo/") && entry.count > entry.capacity)
     game.host.inventory.configure(player.actor, { ...entry, count: entry.capacity });
   game.selectWeapon(player.actor, player.weapon);
-  return finishMg3Pickup(context, entity, other, collected ? `$mg3_qc_upgrade_fail $mg3_qc_upgrade_${upgrade.label}`
-    : `$mg3_qc_upgrade_success $mg3_qc_upgrade_${upgrade.label} ${maximum}`, upgrade.type === "health" ? "player/tornoff2.wav" : "weapons/lock4.wav");
+  return finishMg3Pickup(context, entity, other, collected ? "$mg3_qc_upgrade_fail" : "$mg3_qc_upgrade_success",
+    upgrade.type === "health" ? "player/tornoff2.wav" : "weapons/lock4.wav", collected ? [`$mg3_qc_upgrade_${upgrade.label}`] : [`$mg3_qc_upgrade_${upgrade.label}`, maximum]);
 }
 
 export function registerMg3Upgrades(context: Q1AddonContext): undefined {

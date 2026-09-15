@@ -1,3 +1,4 @@
+import { bindConsoleSettings } from "../../ui/settings/console.ts";
 import type { LlmSettingsUi } from "../../ui/settings/llm.ts";
 import { readSdlClipboard } from "../../platform/sdl.ts";
 import { registerSavedGameMenus, type SavedGameMenuService } from "../../ui/saves/menu.ts";
@@ -131,7 +132,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
         report: text => local.console.print(`${text}\n`) });
     const display = bindNativeVideoSettings(input.window, input.sharedCvars, message => local.console.print(`${message}\n`));
-    const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars)];
+    const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars), ...bindConsoleSettings(input.sharedCvars)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];

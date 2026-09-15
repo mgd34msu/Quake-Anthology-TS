@@ -262,6 +262,8 @@ test.skipIf(!existsSync(archivePath))("source backpacks map ammo for native and 
     expect(inventory.count(player.id, "q1:ammo/cells")).toBe(native);
     expect(arsenal.read(player.id).activeWeapon).toBe(active); expect(arsenal.pendingWeapon(player.id)).toBe(null);
     expect(events.filter(event => event.kind === "sound").length).toBe(sounds + 1);
+    const notice = [...events].reverse().find(event => event.kind === "message");
+    expect(notice).toMatchObject({ kind: "message", text: "$qc_backpack_got", parts: [{ text: "$qc_backpack_got" }, { text: "$qc_backpack_cells", args: [5] }] });
   }
   expect(selections).toBe(0);
   inventory.configure(player, { item: "q3:ammo/lightning", count: 0, capacity: 200 });
@@ -276,4 +278,14 @@ test.skipIf(!existsSync(archivePath))("source backpacks map ammo for native and 
   if (armed === null) throw new Error("Missing weapon backpack");
   armed.touch?.(player.id, null); expect(game.live(armed)).toBe(false); expect(inventory.count(player.id, "q3:weapon/lightning")).toBe(1); expect(selections).toBe(1);
   actors.close();
+});
+
+test('source entity message strings decode once before emitting to foreign players', async () => {
+  const { game, actors, player, events } = createGame(await readMap('e1m7'));
+  try {
+    const entity = game.create('info_notnull', { properties: [{ key: 'message', value: 'first\\nsecond' }, { key: 'literal', value: 'first\\\\nsecond' }] });
+    expect(entity.message).toBe('first\nsecond'); expect(entity.text('literal')).toBe('first\\nsecond');
+    game.message(player.id, entity.message);
+    expect([...events].reverse().find(event => event.kind === 'message')).toMatchObject({ kind: 'message', text: 'first\nsecond' });
+  } finally { actors.close(); }
 });

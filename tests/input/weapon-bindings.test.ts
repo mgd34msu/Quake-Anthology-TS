@@ -120,3 +120,50 @@ test("known source commands display under the selected item action", () => {
   expect(weaponBindingItem("impulse 6", [...baseWeaponBindingItems("q1"), { id: "hipnotic:weapon/proximity", label: "Proximity Gun", kind: "weapon" }])).toBeNull();
   expect(weaponBindingItem("use Laser", [{ id: "mod:a", label: "Laser", kind: "weapon" }, { id: "mod:b", label: "Laser", kind: "weapon" }])).toBeNull();
 });
+
+test("Show scores identifies shared held bindings and keeps custom scripts distinct", () => {
+  for (const scoreCommand of [null, "score", "+scores"] satisfies readonly ("score" | "+scores" | null)[]) {
+    const actions = sharedBindingActions("q2-rerelease", [], { chat: false, scoreCommand, offhandGrapple: false, offhandGrenades: false });
+    const scores = actions.find(action => action.id === "scores");
+    if (scores === undefined) throw new Error("Missing shared scores action");
+    expect(scores.label).toBe("Show scores");
+    expect(scores.target).toEqual({ kind: "command", text: scoreCommand ?? "+scores" });
+    for (const text of ["+scores", "+showscores"]) expect(bindingMatchesAction({ kind: "command", text }, scores)).toBe(true);
+    expect(bindingMatchesAction({ kind: "command", text: "score" }, scores)).toBe(scoreCommand === "score");
+    for (const text of ["-scores", "my_scores", "+scores; echo custom", "score custom"]) {
+      expect(bindingMatchesAction({ kind: "command", text }, scores)).toBe(false);
+    }
+  }
+});
+
+test("default TAB and Pad Back render as Show scores without rewriting bindings", () => {
+  const owner = createIdentityOwner("scores-binding-editor"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q2-rerelease", context });
+  const input = new SeatInput({ seat, dialect: "q2-rerelease", context, commands, uiEvent: () => false });
+  for (const binding of defaultBindings(0, "q2-rerelease")) input.bind(binding);
+  const ui = new NativeUiController({ seat, now: () => 0, skin: () => defaultUiSkin("resource:test:font"), bindings: () => input.bindings,
+    focus: focus => input.setFocus(focus, 0), sound: () => undefined, executeScript: () => undefined });
+  const actions = sharedBindingActions("q2-rerelease", [], { chat: false, scoreCommand: "score", offhandGrapple: false, offhandGrenades: false })
+    .filter(action => action.id === "scores");
+  const menus = registerBindingMenus(ui, input, actions);
+  const provider = { provider: "ui:test", content: "q1:rerelease:id1:retail" } satisfies { readonly provider: "ui:test"; readonly content: "q1:rerelease:id1:retail" };
+  const draw: UiDrawContext = { binding: { seat, client: owner.client(0, 0), viewport: { x: 0, y: 0, width: 640, height: 480 },
+    safeArea: { x: 0, y: 0, width: 640, height: 480 }, hudScale: 1,
+    presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: provider.content, hud: provider, effects: provider, audio: provider } }, timeMilliseconds: 0 };
+  try {
+    ui.openMenu(menus.root);
+    const labels = ui.draw(draw).flatMap(command => command.kind === "text" ? [command.text] : []);
+    expect(labels.filter(text => text === "Show scores")).toHaveLength(2);
+    expect(labels).toContain("TAB"); expect(labels).toContain("Pad 1 Back");
+    expect(labels).not.toContain("Command: +scores");
+    ui.input({ kind: "mouse-motion", seat, timeMilliseconds: 0, position: { x: 400, y: 148 }, delta: { x: 0, y: 0 } });
+    ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down: true });
+    ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down: false });
+    expect(ui.bindingCapture).toBe(true);
+    ui.input({ kind: "key", seat, code: 122, down: true, repeat: false, timeMilliseconds: 0 });
+    expect(input.binding({ kind: "key", code: 122 })).toEqual({ kind: "command", text: "+scores" });
+    expect(input.binding({ kind: "key", code: 9 })).toBeNull();
+    expect(input.binding({ kind: "controller-button", device: 0, button: 4 })).toEqual({ kind: "command", text: "+scores" });
+  } finally { ui.closeAll(); menus.dispose(); }
+});

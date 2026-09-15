@@ -1,4 +1,6 @@
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
+import { bindRunCvar } from "./shared-setting-cvars.ts";
+import { registerQ1ClientCommands } from "./q1-client-commands.ts";
 import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import type { SeatSettings } from "../../settings/config.ts";
@@ -61,7 +63,7 @@ export interface ApplicationInputCommands {
   arsenalImpulseProvider?(seat: SeatId): ProviderId | null;
   readonly sharedCvars?: CvarRegistry;
   quit(): undefined;
-  execute(name: string, arguments_: readonly string[], seat: SeatId | null): undefined;
+  execute(name: string, arguments_: readonly string[], seat: SeatId | null, source?: CommandContext): undefined;
   print(text: string): undefined;
   readonly console?: {
     dialect(): CommandDialect;
@@ -101,9 +103,10 @@ export interface ApplicationInputCommandOwner {
 export class ApplicationInput {
   readonly scripts: ConsoleScriptFiles;
   get bindingCapabilities(): BindingCapabilities {
-    return this.actions.bindingCapabilities?.() ?? { chat: this.options.network.kind.endsWith("-client"),
-      scoreCommand: this.options.network.kind === "q2-client" ? "score" : this.options.network.kind === "q3-client" ? "+scores" : null,
-      offhandGrapple: false, offhandGrenades: false };
+    const capabilities = this.actions.bindingCapabilities?.() ?? { chat: this.options.network.kind.endsWith("-client"),
+      scoreCommand: this.options.network.kind === "q2-client" ? "score" : "+scores",
+      offhandGrapple: false, offhandGrenades: false } satisfies BindingCapabilities;
+    return { ...capabilities, scoreCommand: capabilities.scoreCommand ?? "+scores" };
   }
   get sharedCvars(): CvarRegistry | null { return this.actions.sharedCvars ?? null; }
   readonly commands: CommandBuffer;
@@ -248,10 +251,19 @@ export class ApplicationInput {
       local.console.history.replace(profile.history); local.haptics.setEnabled(profile.rumble); local.haptics.setStrength(profile.rumbleStrength ?? 1);
     }
     this.locals = locals;
+    const settingBindings = locals.map(local => {
+      const registry = this.inputCvars(local.player.seat.id);
+      if (registry === null) throw new Error("Local input has no settings registry");
+      const source: CommandContext = { session: context.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } };
+      const previousRun = this.commands.findCvar("cl_run", source);
+      if (registry.find("cl_run") === undefined && previousRun !== undefined) registry.applyArchive([{ name: "cl_run", value: previousRun.value }]);
+      return bindRunCvar(registry, local.builder);
+    });
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
-    this.unregister = [registerWheelCommands(this.commands, (seat, mode, down) => this.seatUi.get(seat)?.wheel(mode, down)),
+    this.unregister = [...settingBindings, registerWheelCommands(this.commands, (seat, mode, down) => this.seatUi.get(seat)?.wheel(mode, down)),
       registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
-      registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat))];
+      registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat)),
+      registerQ1ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source))];
     this.commands.register("quit", () => actions.quit());
     this.commands.register("toggleconsole", invocation => {
       let origin = invocation.source.origin;
@@ -373,7 +385,7 @@ export class ApplicationInput {
       const selectedSample = this.seatUi.get(local.player.seat.id)?.sample(sample) ?? sample;
       const selection = this.q3Selections.get(local.player.seat.id);
       const selectedFrame = frame.kind === "q3" && selection !== undefined ? { ...frame, ...selection } : frame;
-      const impulseProvider = dialect === "q3" ? this.actions.arsenalImpulseProvider?.(local.player.seat.id) : null;
+      const impulseProvider = dialect === "q3" || dialect === "q2-rerelease" ? this.actions.arsenalImpulseProvider?.(local.player.seat.id) : null;
       const arsenal = impulseProvider == null ? this.arsenalSelections.get(local.player.seat.id) : { provider: impulseProvider, weapon: null };
       return { actor: local.player.actor,
         source: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id }, sequence: this.sequence++,

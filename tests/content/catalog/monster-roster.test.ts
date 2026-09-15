@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import type { MonsterSelectionTarget, ProviderReference } from "../../../src/contracts/content.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../../src/content/catalog/monsters.ts";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
-import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
+import { applicationPreset, loadApplicationContent, resolveApplicationTravel } from "../../../src/app/bootstrap/content.ts";
+import { monsterSource } from "../../../src/content/monsters/definitions.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 
 const q1: ProviderReference = { provider: "q1:monsters/rerelease/id1", content: "q1:rerelease:id1:test" };
@@ -60,6 +61,62 @@ test("an available boss controller does not replace authored boss scripts automa
   expect(defaultMonsterRoster("q1", source, { monster_armagon: replacement }).byClassname["monster_armagon"]).toEqual(replacement);
   expect(defaultMonsterRoster("q1", source, { monster_army: replacement }).byClassname["monster_army"]).toEqual(replacement);
 });
+
+test("all Quake monster sources replace Q2 parasites with their inherited dog while preserving custom overrides", () => {
+  for (const source of monsterSources.filter(source => source.family === "q1")) {
+    const reference: ProviderReference = { provider: source.provider, content: `q1:${source.edition}:${source.program}:test` };
+    const replacement = target("q2", reference, "monster_parasite");
+    expect(replacement).toEqual({ source: reference, classname: "monster_dog" });
+    if (replacement === undefined || "kind" in replacement) throw new Error("Missing Quake dog replacement");
+    expect(monsterSource(replacement)).toBe(source);
+    expect(source.creatures[replacement.classname]?.resources).toContain("progs/dog.mdl");
+    for (const override of [{ kind: "map-defined" }, { source: q2, classname: "monster_parasite" }, { source: reference, classname: "monster_ogre" }] satisfies readonly MonsterSelectionTarget[])
+      expect(defaultMonsterRoster("q2", reference, { monster_parasite: override }).byClassname["monster_parasite"]).toEqual(override);
+  }
+  expect(target("q2", q2, "monster_parasite")).toEqual({ kind: "map-defined" });
+});
+
+test("all Quake II monster sources replace Quake dogs with parasites while preserving custom overrides", () => {
+  for (const source of monsterSources.filter(source => source.family === "q2")) {
+    const reference: ProviderReference = { provider: source.provider, content: `q2:${source.edition}:${source.program}:test` };
+    const replacement = target("q1", reference, "monster_dog");
+    expect(replacement).toEqual({ source: reference, classname: "monster_parasite" });
+    if (replacement === undefined || "kind" in replacement) throw new Error("Missing Quake II parasite replacement");
+    expect(monsterSource(replacement)).toBe(source);
+    expect(source.creatures[replacement.classname]?.resources).toContain("models/monsters/parasite/tris.md2");
+    for (const override of [{ kind: "map-defined" }, { source: q1, classname: "monster_dog" }, { source: reference, classname: "monster_berserk" }] satisfies readonly MonsterSelectionTarget[])
+      expect(defaultMonsterRoster("q1", reference, { monster_dog: override }).byClassname["monster_dog"]).toEqual(override);
+  }
+  expect(target("q1", q1, "monster_dog")).toEqual({ source: q1, classname: "monster_dog" });
+});
+
+test("installed Quake dog rosters retain their source behavior and resources across Q2 campaign travel", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1"]);
+  if (parsed.kind !== "run") throw new Error("Expected launch command");
+  const preset = applicationPreset(catalog, parsed.options);
+  for (const source of monsterSources.filter(source => source.family === "q1")) {
+    const product = catalog.require(`q1-${source.edition}-${source.program}`);
+    const reference = { provider: source.provider, content: product.id };
+    const enemies = defaultMonsterRoster("q2", reference);
+    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), enemies: { kind: "selected", value: enemies } } });
+    expect(recipe.enemies).toEqual(enemies);
+    expect(recipe.resources.some(resource => resource.requestedPath === "progs/dog.mdl")).toBe(true);
+    expect(recipe.resources.some(resource => resource.requestedPath === "sound/dog/dattack1.wav")).toBe(true);
+    const content = await loadApplicationContent(parsed.options, recipe);
+    try {
+      const next = await resolveApplicationTravel(content, "maps/base2.bsp");
+      expect(next.map.geometry.requestedPath).toBe("maps/base2.bsp");
+      expect(next.campaign).toEqual(recipe.campaign);
+      expect(next.enemies).toEqual(enemies);
+      if (next.enemies.kind !== "replace") throw new Error("Missing selected roster after travel");
+      const parasite = next.enemies.byClassname["monster_parasite"];
+      if (parasite === undefined || "kind" in parasite) throw new Error("Native parasite survived default Quake roster");
+      expect(monsterSource(parasite)).toBe(source);
+      expect(parasite.classname).toBe("monster_dog");
+    } finally { await content.close(); }
+  }
+}, 60000);
 
 test("actual Q2 base1 and Q1 e1m1 recipes resolve automatic campaign rosters without per-class setup", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });

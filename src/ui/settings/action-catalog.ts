@@ -29,7 +29,8 @@ export function sharedBindingActions(dialect: CommandDialect, items: readonly Bi
     ...(id === "weapon-wheel" || id === "powerup-wheel"
       ? { matches: (target: BindingAction["target"]) => target.kind === "command" && canonicalWheelCommand(target.text) === text } : {}) }));
   const append = (id: string, label: string, text: string): void => { actions.push({ id, label, target: { kind: "command", text } }); };
-  if (capabilities.scoreCommand !== null) append("scores", "Show scores", capabilities.scoreCommand);
+  actions.push({ id: "scores", label: "Show scores", target: { kind: "command", text: capabilities.scoreCommand ?? "+scores" },
+    matches: target => target.kind === "command" && (target.text === "+scores" || target.text === "+showscores") });
   if (capabilities.chat) { append("chat", "Chat", "messagemode"); append("team-chat", "Team chat", "messagemode2"); }
   if (capabilities.offhandGrapple) append("grapple", "Offhand grapple (hold)", "+grapple");
   if (capabilities.offhandGrenades) append("grenade", "Cook / throw offhand grenade", "+grenade");

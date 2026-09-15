@@ -1,5 +1,7 @@
+import { consoleGlyphMetrics } from "./metrics.ts";
+import { clipPicture } from "../render/commands/frame.ts";
 import type { Vec4 } from "../contracts/math.ts";
-import type { Draw2D, PictureAsset } from "../text/draw2d.ts";
+import { Draw2D, type PictureAsset } from "../text/draw2d.ts";
 import type { SeatTextPresentation } from "../text/layout.ts";
 import type { ConsoleRow } from "./buffer.ts";
 import type { ConsoleField } from "./field.ts";
@@ -16,17 +18,34 @@ export interface ConsoleDrawOptions {
   readonly field: ConsoleField | null;
   readonly height: number;
   readonly scale: number;
+  readonly cellWidth?: number;
   readonly nowMilliseconds: number;
   readonly background: PictureAsset | null;
   readonly selectedEntry?: ConsoleDiscoveryEntry | undefined;
 }
 export function drawConsole(options: ConsoleDrawOptions): void {
-  const { draw, text, scale } = options;
+  const { text, scale } = options;
+  const sink = options.draw.commands;
+  const bounds = { x: 0, y: 0, width: options.draw.width, height: Math.min(options.height, options.draw.height) };
+  const draw = new Draw2D({ seat: sink.seat, target: sink.target, setColor: color => sink.setColor(color),
+    stretchPixels: (rect, uv, picture) => {
+      const clipped = clipPicture(rect, { s1: uv.s, t1: uv.t, s2: uv.s2, t2: uv.t2 }, bounds);
+      if (clipped !== null) sink.stretchPixels(clipped.rect, { s: clipped.uv.s1, t: clipped.uv.t1, s2: clipped.uv.s2, t2: clipped.uv.t2 }, picture);
+    } }, options.draw.space);
   if (!draw.commands.seat.equals(text.seat)) throw new Error("Console text belongs to another viewport seat");
   if (options.background !== null) draw.drawPic({ x: 0, y: 0, width: draw.width, height: options.height }, options.background);
   const lineHeight = 8 * scale, fieldLines = options.field === null ? 0 : 1;
   const availableWidth = Math.max(1, draw.width - 16 * scale);
-  const measure = (value: string): number => text.layout({ text: value, scale, color: white, lineHeight }).width;
+  const cellWidth = options.cellWidth ?? lineHeight;
+  const measure = (value: string): number => [...value].length * cellWidth;
+  const drawCells = (value: string, x: number, y: number, color: Vec4, alternate = false): void => {
+    for (const character of value) {
+      const glyph = consoleGlyphMetrics(text.font, character, lineHeight, cellWidth);
+      const width = text.layout({ text: character, scale, color, alternate, lineHeight: glyph.lineHeight }).width;
+      text.draw(draw, { text: character, scale, color, alternate, lineHeight: glyph.lineHeight }, { x: x + (cellWidth - width) / 2, y: y - glyph.top });
+      x += cellWidth;
+    }
+  };
   const fit = (value: string, maximum: number, ellipsis: boolean): string => {
     const characters = [...value.replace(/[\r\n\t]/g, " ")];
     if (measure(characters.join("")) <= maximum) return characters.join("");
@@ -46,11 +65,12 @@ export function drawConsole(options: ConsoleDrawOptions): void {
     if (entry.kind === "cvar") help.push(`Current: ${JSON.stringify(entry.value)}`);
     else if (entry.kind === "alias") help.push(`Expands to: ${entry.value}`);
   }
-  const totalRows = Math.max(0, Math.floor(options.height / lineHeight));
+  const bottom = Math.max(0, Math.min(options.height, draw.height) - 2 * scale);
+  const totalRows = Math.max(0, Math.floor(bottom / lineHeight));
   if (totalRows < fieldLines) return;
   const helpLines = help.slice(0, Math.min(3, Math.max(0, totalRows - fieldLines)));
   const rowCount = Math.min(options.rows.length, Math.max(0, totalRows - fieldLines - helpLines.length));
-  let y = options.height - lineHeight * (rowCount + fieldLines + helpLines.length);
+  let y = bottom - lineHeight * (rowCount + fieldLines + helpLines.length);
   for (const row of options.rows.slice(options.rows.length - rowCount)) {
     let x = 8 * scale;
     for (let index = 0; index < row.cells.length;) {
@@ -62,8 +82,8 @@ export function drawConsole(options: ConsoleDrawOptions): void {
         if (cell === undefined || cell.color !== first.color || cell.alternate !== first.alternate) break;
         run += cell.character; index++;
       }
-      const layout = text.draw(draw, { text: run, scale, color: colors[first.color] ?? white, alternate: first.alternate, lineHeight }, { x, y });
-      x += layout.width;
+      drawCells(run, x, y, colors[first.color] ?? white, first.alternate);
+      x += measure(run);
     }
     y += lineHeight;
   }
@@ -73,15 +93,15 @@ export function drawConsole(options: ConsoleDrawOptions): void {
     let scroll = Math.min(field.scroll, field.cursor);
     while (scroll < field.cursor && measure(`]${characters.slice(scroll, field.cursor).join("")}`) + cursorWidth > availableWidth) scroll++;
     const visible = fit(characters.slice(scroll).join(""), Math.max(0, availableWidth - measure("]") - cursorWidth), false);
-    text.draw(draw, { text: `]${visible}`, scale, color: white, lineHeight }, { x: 8 * scale, y });
+    drawCells(`]${visible}`, 8 * scale, y, white);
     if ((Math.trunc(options.nowMilliseconds / 256) & 1) === 0) {
       const prefix = `]${characters.slice(scroll, field.cursor).join("")}`;
-      const width = text.layout({ text: prefix, scale, color: white, lineHeight }).width;
-      text.draw(draw, { text: field.overstrike ? "_" : "|", scale, color: white, lineHeight }, { x: 8 * scale + width, y });
+      const width = measure(prefix);
+      drawCells(field.overstrike ? "_" : "|", 8 * scale + width, y, white);
     }
     y += lineHeight;
     for (const line of helpLines) {
-      text.draw(draw, { text: fit(line, availableWidth, true), scale, color: { x: 0.65, y: 0.85, z: 1, w: 1 }, lineHeight }, { x: 8 * scale, y });
+      drawCells(fit(line, availableWidth, true), 8 * scale, y, { x: 0.65, y: 0.85, z: 1, w: 1 });
       y += lineHeight;
     }
   }

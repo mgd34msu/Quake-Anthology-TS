@@ -3,30 +3,39 @@
 import type { CommandDialect } from "../contracts/common.ts";
 export interface ConsoleCell { readonly character: string; readonly color: number; readonly alternate: boolean; }
 export interface ConsoleRow { readonly sequence: number; readonly cells: readonly ConsoleCell[]; readonly timeMilliseconds: number | null; }
-interface MutableRow { readonly sequence: number; cells: ConsoleCell[]; timeMilliseconds: number | null; }
+interface MutableRow { readonly sequence: number; wrapped: boolean; cells: ConsoleCell[]; timeMilliseconds: number | null; }
 
 export class ConsoleBuffer {
-  private rows: MutableRow[] = [{ sequence: 0, cells: [], timeMilliseconds: null }];
+  private rows: MutableRow[] = [{ sequence: 0, wrapped: false, cells: [], timeMilliseconds: null }];
   private x = 0;
+  private writeRow = 0;
   private nextSequence = 1;
   private backscroll = 0;
   constructor(readonly dialect: CommandDialect, public width = 78, readonly characterCapacity = 32768) {
     if (!Number.isSafeInteger(width) || width < 1 || width > characterCapacity) throw new RangeError("Invalid console width");
   }
   private current(): MutableRow {
-    const row = this.rows[this.rows.length - 1];
+    const row = this.rows[this.writeRow];
     if (row === undefined) throw new Error("Console has no current row");
     return row;
   }
-  private linefeed(time: number | null): void {
+  private linefeed(time: number | null, wrapped = false): void {
+    this.current().wrapped = wrapped;
     this.current().timeMilliseconds = time;
-    if (this.backscroll !== 0) this.backscroll++;
-    this.rows.push({ sequence: this.nextSequence++, cells: [], timeMilliseconds: time }); this.x = 0;
+    this.writeRow++;
+    if (this.writeRow === this.rows.length) {
+      if (this.backscroll !== 0) this.backscroll++;
+      this.rows.push({ sequence: this.nextSequence++, wrapped: false, cells: [], timeMilliseconds: time });
+    }
+    this.x = 0;
     this.trim();
   }
   private trim(): void {
     const maximum = Math.max(1, Math.floor(this.characterCapacity / this.width));
-    if (this.rows.length > maximum) this.rows.splice(0, this.rows.length - maximum);
+    if (this.rows.length > maximum) {
+      const removed = this.rows.length - maximum;
+      this.rows.splice(0, removed); this.writeRow = Math.max(0, this.writeRow - removed);
+    }
     this.backscroll = Math.min(this.backscroll, this.rows.length - 1);
   }
   print(text: string, timeMilliseconds: number): void {
@@ -47,20 +56,51 @@ export class ConsoleBuffer {
       if (character > " ") {
         let length = 0;
         while (length < this.width && (characters[index + length] ?? "") > " ") length++;
-        if (length < this.width && this.x + length >= this.width) this.linefeed(time);
+        if (length < this.width && this.x + length >= this.width) this.linefeed(time, true);
       }
       const row = this.current();
       row.cells[this.x++] = { character, color, alternate }; row.timeMilliseconds = time;
-      if (this.x >= this.width) this.linefeed(time);
+      if (this.x >= this.width) this.linefeed(time, true);
     }
   }
   resize(width: number): void {
     if (!Number.isSafeInteger(width) || width < 1 || width > this.characterCapacity) throw new RangeError("Invalid console width");
-    this.width = width;
-    for (const row of this.rows) row.cells = row.cells.slice(0, width);
-    this.x = Math.min(this.x, width - 1); this.trim(); this.clearNotify();
+    if (width === this.width) return;
+    const previous = this.rows;
+    const anchor = previous.length - 1 - this.backscroll;
+    const following = this.backscroll === 0;
+    const rebuilt: MutableRow[] = [];
+    let paragraph: ConsoleCell[] = [], cursorOffset = -1, anchorOffset = -1;
+    let newAnchor = 0, newCursor = 0, newWriteRow = 0;
+    const flush = (): void => {
+      const start = rebuilt.length;
+      for (let offset = 0; offset < paragraph.length || offset === 0; offset += width) {
+        rebuilt.push({ sequence: this.nextSequence++, wrapped: offset + width < paragraph.length,
+          cells: paragraph.slice(offset, offset + width), timeMilliseconds: null });
+      }
+      if (anchorOffset >= 0) newAnchor = start + Math.min(rebuilt.length - start - 1, Math.floor(anchorOffset / width));
+      if (cursorOffset >= 0) {
+        newCursor = cursorOffset % width; newWriteRow = start + Math.floor(cursorOffset / width);
+        if (newWriteRow === rebuilt.length) {
+          const tail = rebuilt[rebuilt.length - 1];
+          if (tail !== undefined) tail.wrapped = true;
+          rebuilt.push({ sequence: this.nextSequence++, wrapped: false, cells: [], timeMilliseconds: null });
+        }
+      }
+      paragraph = []; anchorOffset = -1; cursorOffset = -1;
+    };
+    for (const [index, row] of previous.entries()) {
+      if (index === anchor) anchorOffset = paragraph.length;
+      if (index === this.writeRow) cursorOffset = paragraph.length + this.x;
+      paragraph.push(...row.cells);
+      if (!row.wrapped) flush();
+    }
+    if (paragraph.length > 0) flush();
+    this.rows = rebuilt; this.width = width; this.x = newCursor; this.writeRow = newWriteRow;
+    this.backscroll = following ? 0 : rebuilt.length - 1 - newAnchor;
+    this.trim();
   }
-  clear(): void { this.rows = [{ sequence: this.nextSequence++, cells: [], timeMilliseconds: null }]; this.x = 0; this.backscroll = 0; }
+  clear(): void { this.rows = [{ sequence: this.nextSequence++, wrapped: false, cells: [], timeMilliseconds: null }]; this.x = 0; this.writeRow = 0; this.backscroll = 0; }
   clearNotify(): void { for (const row of this.rows) row.timeMilliseconds = null; }
   scroll(lines: number): void { this.backscroll = Math.max(0, Math.min(this.rows.length - 1, this.backscroll + Math.trunc(lines))); }
   bottom(): void { this.backscroll = 0; }

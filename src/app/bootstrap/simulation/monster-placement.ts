@@ -90,7 +90,7 @@ export function nearbyMonsterPlacement(input: {
   readonly locomotion: "walk" | "fly" | "swim";
   readonly worldActor: ActorId | null;
   readonly sameMedium: (origin: Vec3) => boolean;
-  readonly authored: { readonly origin: Vec3; readonly bounds: Bounds };
+  readonly authored: { readonly origin: Vec3; readonly bounds: Bounds; readonly locomotion: "walk" | "fly" | "swim" };
   readonly query: Omit<TraceQuery, "start" | "end" | "shape">;
   readonly trace: (query: TraceQuery) => TraceResult;
   readonly blockedBy?: (actor: ActorId) => undefined;
@@ -104,8 +104,16 @@ export function nearbyMonsterPlacement(input: {
   const sourceStart = { ...authored.origin, z: authored.origin.z + 1 };
   const sourceFloor = routeTrace({ ...query, start: sourceStart, end: { ...sourceStart, z: sourceStart.z - 256 }, shape: { kind: "box", bounds: authored.bounds } });
   const supported = !sourceFloor.startSolid && !sourceFloor.allSolid && sourceFloor.fraction < 1;
-  if (!supported && input.locomotion === "walk") return null;
-  const sourceOrigin = supported ? sourceFloor.end : authored.origin;
+  const sourceOrigin = supported && authored.locomotion === "walk" ? sourceFloor.end : authored.origin;
+  const reachable = (end: Vec3): boolean => {
+    const route = routeTrace({ ...query, start: sourceOrigin, end, shape: { kind: "box", bounds: authored.bounds } });
+    if (route.allSolid || route.fraction !== 1) return false;
+    if (!route.startSolid) return true;
+    // Authored hulls can overlap a wall. Require a clear center route and a full-hull exit.
+    const center = routeTrace({ ...query, start: sourceOrigin, end, shape: { kind: "point" } });
+    const exit = routeTrace({ ...query, start: end, end, shape: { kind: "box", bounds: authored.bounds } });
+    return !center.startSolid && !center.allSolid && center.fraction === 1 && !exit.startSolid && !exit.allSolid;
+  };
   const feet = sourceOrigin.z + authored.bounds.min.z;
   const anchor = { x: sourceFloor.end.x, y: sourceFloor.end.y, z: feet - body.bounds.min.z };
   const radius = 2 * Math.max(body.bounds.max.x - body.bounds.min.x, body.bounds.max.y - body.bounds.min.y,
@@ -120,23 +128,21 @@ export function nearbyMonsterPlacement(input: {
       const fit = trace({ ...query, start: origin, end: origin, shape: { kind: "box", bounds: body.bounds } });
       if (fit.startSolid || fit.allSolid) continue;
       const sourceEnd = { ...origin, z: origin.z + body.bounds.min.z - authored.bounds.min.z };
-      const route = routeTrace({ ...query, start: sourceOrigin, end: sourceEnd, shape: { kind: "box", bounds: authored.bounds } });
-      if (!route.startSolid && !route.allSolid && route.fraction === 1) return { origin, ground: null };
+      if (reachable(sourceEnd)) return { origin, ground: null };
     }
   }
   if (input.locomotion === "walk") for (const offset of offsets) for (const lift of [1, 18]) {
     const start = { x: anchor.x + offset.x, y: anchor.y + offset.y, z: anchor.z + lift };
-    const floor = trace({ ...query, start, end: { ...start, z: anchor.z - 18 }, shape: { kind: "box", bounds: body.bounds } });
+    const floor = trace({ ...query, start, end: { ...start, z: anchor.z - (supported && authored.locomotion === "walk" ? 18 : 256) }, shape: { kind: "box", bounds: body.bounds } });
     if (floor.startSolid || floor.allSolid || floor.fraction === 1 || floor.contact.kind !== "plane" || floor.contact.plane.normal.z < 0.7) continue;
     if (!input.sameMedium(floor.end)) continue;
     const fit = trace({ ...query, start: floor.end, end: floor.end, shape: { kind: "box", bounds: body.bounds } });
     if (fit.startSolid || fit.allSolid) continue;
     const sourceEnd = { ...floor.end, z: floor.end.z + body.bounds.min.z - authored.bounds.min.z };
-    const route = routeTrace({ ...query, start: sourceOrigin, end: sourceEnd, shape: { kind: "box", bounds: authored.bounds } });
-    if (route.startSolid || route.allSolid || route.fraction !== 1) continue;
+    if (!reachable(sourceEnd)) continue;
     return { origin: floor.end, ground: floor.hit.kind === "actor" ? floor.hit.actor : input.worldActor };
   }
-  if (!supported) return null;
+  if (!supported || authored.locomotion !== "walk") return null;
   // Tight authored pockets can open around a corner: follow walkable source-hull edges.
   const pending: Vec3[] = [sourceOrigin];
   const visited = new Set<string>(["0,0"]);

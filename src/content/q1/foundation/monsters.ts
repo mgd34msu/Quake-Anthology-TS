@@ -8,6 +8,7 @@ import type { Q1EntityServices } from "./entity-services.ts";
 import { POINT, vadd, vsub, vscale, length, normalize, dot, yawFor } from "./types.ts";
 import { fireBullets } from "./weapons.ts";
 import { throwGib, throwHead } from "../base/projectiles.ts";
+import { monsterTargetEligible } from "../../monsters/target.ts";
 
 const armyWalk: readonly number[] = [1, 1, 1, 1, 2, 3, 4, 4, 2, 2, 2, 1, 0, 1, 1, 1, 3, 3, 3, 3, 2, 1, 1, 1];
 const armyRun: readonly number[] = [11, 15, 10, 10, 8, 15, 10, 8];
@@ -104,9 +105,10 @@ function monsterFrame(game: Q1EntityServices, entity: Q1Actor, monster: Q1Monste
     }
   } else {
     let enemy = monster.enemy;
-    if (enemy === null || game.health(enemy) <= 0) {
-      if (monster.oldEnemy !== null && game.health(monster.oldEnemy) > 0) { monster.enemy = monster.oldEnemy; monster.oldEnemy = null; enemy = monster.enemy; }
-      else { monster.enemy = null; if (game.monsterMissions.get(entity.actor.id)?.route() != null || monster.path !== "") walk(monster); else stand(monster); return game.schedule(entity, 0.1, game.named.action(entity, "monster_frame")); }
+    if (enemy === null || !monsterTargetEligible(game.health(enemy), game.monsterTarget(enemy))) {
+      entity.attackState = "straight";
+      if (monster.oldEnemy !== null && monsterTargetEligible(game.health(monster.oldEnemy), game.monsterTarget(monster.oldEnemy))) { monster.enemy = monster.oldEnemy; monster.oldEnemy = null; run(monster); return monsterFrame(game, entity, monster); }
+      else { monster.enemy = null; monster.oldEnemy = null; if (game.monsterMissions.get(entity.actor.id)?.route() != null || monster.path !== "") walk(monster); else stand(monster); return game.schedule(entity, 0.1, game.named.action(entity, "monster_frame")); }
     }
     const target = game.host.bodies.read(enemy); if (target === null) return undefined;
     if (mode === "run") {

@@ -38,7 +38,7 @@ function weaponTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId): 
     if (game.options.deathmatch === 0 || mg3WeaponRank(weapon) < mg3WeaponRank(player.weapon)) game.selectWeapon(player.actor, weapon);
   }
   game.selectWeapon(player.actor, player.weapon);
-  game.message(other, `$qc_got_item ${entity.text("netname")}`); game.sound(player.actor, "weapons/pkup.wav", "item");
+  game.message(other, "$qc_got_item", true, [entity.text("netname")]); game.sound(player.actor, "weapons/pkup.wav", "item");
   game.effect("pickup", game.body(entity).origin, other); entity.activator = other; game.useTargets(entity, other);
   if (!game.live(entity)) return undefined;
   if (leave) { entity.target = ""; return undefined; }
@@ -106,7 +106,7 @@ export function registerMg3Pickups(context: Q1AddonContext): undefined {
   } });
   game.named.register(MG3_ITEM_PREFIX + "hug_tette", { touch: (_game, entity, other) => {
     base.campaign.writeFlags(base.campaign.readFlags() | TETTE);
-    return finishMg3Pickup(context, entity, other, `$qc_got_item ${entity.text("netname")}`, "misc/secret.wav");
+    return finishMg3Pickup(context, entity, other, "$qc_got_item", "misc/secret.wav", [entity.text("netname")]);
   } });
   game.registerSpawn("item_head_hellknight", (_game, entity) => {
     const flags = base.campaign.readFlags();

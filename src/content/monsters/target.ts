@@ -5,3 +5,7 @@ export interface MonsterTargetObservation {
   readonly lightLevel: number | null;
   readonly hostileUntil: number | null;
 }
+
+export function monsterTargetEligible(health: number, observation: MonsterTargetObservation | null): boolean {
+  return health > 0 && observation !== null && !observation.notarget;
+}

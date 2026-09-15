@@ -1,4 +1,5 @@
 import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
+import { registerQ1ClientCommands, resolveQ1HostCommandActor } from "./q1-client-commands.ts";
 import { resolveWeaponSelection } from "../../input/weapon-bindings.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
 import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
@@ -56,6 +57,8 @@ import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { SessionClient, SessionSeat } from "../../world/session/index.ts";
 import { SharedTransitionCoordinator } from "../../world/gameplay/transitions.ts";
+import { parseQ2Travel, type Q2TravelTarget } from "./q2-travel.ts";
+import { CampaignCinematic } from "./campaign-cinematic.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { ApplicationAssets } from "./assets.ts";
@@ -177,6 +180,7 @@ export class Application {
   private network: NativeServer | null = null;
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
+  private campaignMovie: { readonly playback: CampaignCinematic; readonly next: Q2TravelTarget | null; readonly carry: SimulationTravel } | null = null;
   private pendingMap: string | null = null;
   private sourceCommands: CommandBuffer | null = null;
   private q2Console: ApplicationQ2Console | null = null;
@@ -374,6 +378,7 @@ export class Application {
           dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
             host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
           } });
+        application.viewSettings.bindCvars(application.imageSettings.cvars);
         await application.openGraphical(initialSave !== undefined);
       }
       host.loading?.stage("Starting game...");
@@ -488,13 +493,13 @@ export class Application {
   private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest, clientCvars = this.clientCvars): ApplicationInputCommands {
     return { readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
-      execute: (name, arguments_, seat) => localGuest === null ? this.queueCommand(name, arguments_, seat)
+      execute: (name, arguments_, seat, source) => localGuest === null ? this.queueCommand(name, arguments_, seat, source)
         : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat }), print: text => this.host.print(text),
       arsenalImpulseProvider: seat => {
         const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
         const actor = client === undefined ? undefined : simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
         const player = actor === undefined ? null : simulation.movementPlayer(actor);
-        return player?.arsenal.state.kind === "q1" ? player.arsenal.provider : null;
+        return player !== null && (simulation.q1Source() !== null || player.arsenal.state.kind === "q1") ? player.arsenal.provider : null;
       },
       bindingItems: seat => {
         const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
@@ -515,8 +520,9 @@ export class Application {
         const q1 = simulation.q1Source();
         return q1 === null ? null : { cvars: q1.cvars, sharedNames: [] };
       }, seat: id => localGuest?.seats.get(id)?.cvars ?? clientCvars.get(id) ?? null },
-      clientCapturesInput: seat => this.graphical?.q3.get(seat)?.client.capturesInput ?? false,
+      clientCapturesInput: seat => this.campaignMovie !== null || (this.graphical?.q3.get(seat)?.client.capturesInput ?? false),
       clientInput: event => {
+        if (this.campaignMovie !== null) return this.campaignMovie.playback.input(event);
         const source = this.graphical?.q3.get(event.seat);
         if (source === undefined || !source.client.capturesInput) return false;
         this.clientInputs.push(event); return true;
@@ -568,6 +574,7 @@ export class Application {
       const commands = new CommandBuffer({ dialect: q1.cvars.dialect, cvars: q1.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => { this.host.print(text); } });
       commands.register("quit", () => this.requestQuit());
+      registerQ1ClientCommands(commands, q1.cvars.dialect, (name, args, seat, source) => this.queueCommand(name, args, seat, source));
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
       if (!restoring) q1.cvars.register("bot_minplayers", "0");
       sourceCommands = commands; return { sourceCommands, q2Console };
@@ -872,7 +879,7 @@ export class Application {
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
           await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 });
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
@@ -1080,6 +1087,7 @@ export class Application {
   }
 
   private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+    if (this.campaignMovie !== null) throw new Error("Finish or skip the campaign cinematic before changing worlds");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "travel";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
@@ -1266,7 +1274,7 @@ export class Application {
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
             await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 });
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
           stagedPresentations.push(presentation);
           presentations.push(presentation);
         }
@@ -1377,7 +1385,7 @@ export class Application {
     if (this.closed) throw new Error("Application is closed");
     if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
-    if (this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
+    if (this.campaignMovie !== null || this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
     const image = this.simulation.checkpoint();
     this.worldOperation = "saving";
@@ -1393,6 +1401,7 @@ export class Application {
   }
 
   private async restoreSavedGame(path: string): Promise<void> {
+    if (this.campaignMovie !== null) throw new Error("Finish or skip the campaign cinematic before loading a save");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "loading";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
@@ -1448,10 +1457,41 @@ export class Application {
     if (decision.kind === "travel") {
       const colon = decision.map.indexOf(":"), family = decision.map.slice(0, colon);
       if (family !== this.content.catalog.product(this.options.product).expectation.family) throw new Error("Campaign travel selected another content provider without a resolved launch recipe");
-      const map = decision.map.slice(colon + 1).replace(/^\*/, "");
-      await this.replaceWorld(map, this.simulation.captureTravel(decision.spawnPoint));
+      const carry = this.simulation.captureTravel(decision.spawnPoint);
+      if (family === "q2") {
+        const original = this.simulation.takeLevelChange()?.map
+          ?? `${decision.map.slice(colon + 1)}${decision.spawnPoint === "" ? "" : `${decision.spawnPoint}`}`;
+        try { await this.advanceQ2Travel(parseQ2Travel(original), carry); }
+        catch (error) { this.reportCampaignTravelError(error); }
+      } else {
+        const map = decision.map.slice(colon + 1).replace(/^\*/, "");
+        await this.replaceWorld(map, carry);
+      }
     } else if (decision.kind === "campaign-complete") this.host.print("Campaign complete.\n");
     else throw new Error("Round restart requires the selected match provider");
+  }
+
+  private reportCampaignTravelError(error: unknown): void {
+    const message = `Campaign transition failed: ${error instanceof Error ? error.message : String(error)}\n`;
+    this.host.print(message);
+    for (const local of this.graphical?.input.locals ?? []) {
+      local.console.print(message);
+      local.input.setFocus({ kind: "console" }, this.graphical?.input.now() ?? 0);
+    }
+  }
+
+  private async advanceQ2Travel(target: Q2TravelTarget, carry: SimulationTravel): Promise<void> {
+    if (target.kind === "map") {
+      await this.replaceWorld(target.name, { ...carry, spawnPoint: target.spawnPoint });
+      return;
+    }
+    const graphical = this.graphical, seat = this.localPlayers[0]?.seat.id;
+    if (graphical === null || seat === undefined || this.network !== null)
+      throw new Error("Campaign cinematics require an offline local presentation");
+    const playback = await CampaignCinematic.open(target, this.content, graphical.assets, graphical.audio, graphical.renderer, seat);
+    const next = target.kind === "picture" && target.name.toLowerCase() === "victory.pcx" && this.options.mode === "coop"
+      ? parseQ2Travel("*base1") : target.next;
+    this.campaignMovie = { playback, next, carry };
   }
 
   private underwater(camera: SceneCamera, actor: ActorId): boolean {
@@ -1603,7 +1643,15 @@ export class Application {
           if (map === undefined) throw new Error("Usage: map <name>");
           this.pendingMap = mapResourcePath(map);
         }
-        else if (this.simulation.q2Source() !== null || this.simulation.q3Source() !== null) {
+        else if ((this.simulation.q1Source() !== null || this.simulation.quakecSource() !== null)
+          && (command.name === "god" || command.name === "notarget" || command.name === "noclip")) {
+          const players = this.simulation.players().flatMap(actor => {
+            const player = this.simulation.movementPlayer(actor); return player === null ? [] : [{ actor, client: player.client }];
+          });
+          const actor = resolveQ1HostCommandActor(command.name, command.arguments_, source, players, () => this.commandActor(command.seat));
+          this.simulation.playerCommand(actor, command.name, []);
+        }
+        else if (this.simulation.q1Source() !== null || this.simulation.quakecSource() !== null || this.simulation.q2Source() !== null || this.simulation.q3Source() !== null) {
           const handled = this.simulation.q3Source()?.serverCommands.consoleCommand([command.name, ...command.arguments_]) ?? false;
           if (!handled) this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         }
@@ -1631,6 +1679,33 @@ export class Application {
       }
       await this.applyTransition();
       this.graphical?.input.pump();
+      const movie = this.campaignMovie;
+      if (movie !== null) {
+        const retained = this.lastOutput;
+        if (retained === null || retained.simulation !== this.simulation) throw new Error("Campaign movie has no completed world frame");
+        try {
+          const graphical = this.graphical;
+          const consoleOpen = graphical?.input.locals.some(local => local.input.focus.kind === "console") ?? false;
+          if (movie.playback.frame(elapsedMilliseconds, ++this.frames, consoleOpen)) {
+            movie.playback.close(this.frames); this.campaignMovie = null;
+            if (movie.next !== null) await this.advanceQ2Travel(movie.next, movie.carry);
+            else this.requestQuit();
+          } else if (consoleOpen && graphical !== null) {
+            const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
+            for (const presentation of graphical.presentations) {
+              await presentation.prepare(retained.output.snapshot, presentations, characters);
+              presentation.local.player.seat.present(retained.output.snapshot, graphical.renderer.backend);
+            }
+            graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
+          }
+        } catch (error) {
+          this.campaignMovie = null;
+          try { movie.playback.close(this.frames); } catch (closeError) { this.host.print(`${String(closeError)}\n`); }
+          this.reportCampaignTravelError(error);
+        }
+        await this.commands();
+        if (this.simulation === retained.simulation) return retained.output;
+      }
       await this.dispatchClientInputs();
       const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
       const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
@@ -1783,6 +1858,8 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
+    try { this.campaignMovie?.playback.close(this.frames); } catch (error) { errors.push(error); }
+    this.campaignMovie = null;
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     if (this.archivePersistence) {

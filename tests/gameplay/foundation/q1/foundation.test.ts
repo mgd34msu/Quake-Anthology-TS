@@ -49,6 +49,22 @@ async function loadMap(): Promise<Q1Map> {
   try { const entry = archive.findEntries("maps/e1m1.bsp")[0]; if (entry === undefined) throw new Error("Missing e1m1"); return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" }); }
   finally { archive.close(); }
 }
+test.skipIf(!existsSync(path))("Q1 authored button sound snapshots its brush midpoint and activation changes frame", async () => {
+  const { runtime, player, events } = gameFor(await loadMap(), undefined, "classic");
+  const button = [...runtime.entities.values()].find(entity => entity.classname === "func_button" && entity.target === "t9");
+  if (button === undefined || button.use === null) throw new Error("Missing authored button");
+  const body = runtime.body(button);
+  button.use(player.id, player.id);
+  const sound = events.find(event => event.kind === "sound" && event.actor.equals(button.actor.id));
+  if (sound?.kind !== "sound") throw new Error("Button did not emit source sound");
+  expect(sound.path).toMatch(/^buttons\//);
+  expect(sound.origin).toEqual({ x: body.origin.x + 0.5 * (body.bounds.min.x + body.bounds.max.x),
+    y: body.origin.y + 0.5 * (body.bounds.min.y + body.bounds.max.y), z: body.origin.z + 0.5 * (body.bounds.min.z + body.bounds.max.z) });
+  runtime.named.action(button, "button_wait")();
+  expect(button.frame).toBe(1);
+  runtime.named.action(button, "button_return")();
+  expect(button.frame).toBe(0);
+});
 interface SavedTestWorld {
   readonly source: Q1FoundationCheckpoint;
   readonly slots: ReturnType<SessionActorRegistry["checkpoint"]>;

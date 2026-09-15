@@ -108,6 +108,9 @@ export class SharedSceneQueries implements SceneQueries {
         this.#geometry.provider.adjustAreaPortalState(first, second, open);
     }
     geometryTrace(query: TraceQuery): TraceResult {
+        if (query.shape.kind === 'box' && query.shape.bounds.min.x === 0 && query.shape.bounds.min.y === 0 && query.shape.bounds.min.z === 0
+            && query.shape.bounds.max.x === 0 && query.shape.bounds.max.y === 0 && query.shape.bounds.max.z === 0)
+            query = { ...query, shape: { kind: 'point' } };
         const geometry = this.#geometry;
         const result = adaptTraceResult(geometry.provider.trace(query), query.policy);
         if (result.kind !== 'q1' || geometry.kind === 'q1') return result;

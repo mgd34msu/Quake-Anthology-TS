@@ -188,7 +188,7 @@ export class QuakeCSource {
       foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
     this.cvars = new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
     for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
-      teamplay: "0", sv_aim: "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
+      teamplay: "0", sv_cheats: "0", sv_aim: "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
     this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
     const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
       loading: () => this.spawning, client: actor => this.isReservedClient(actor), phs: () => this.cvars.variableValue("sv_phs") !== 0,
@@ -436,6 +436,25 @@ export class QuakeCSource {
   }
   isReservedClient(actor: ActorId): boolean { const slot = this.sourceSlot(actor); return slot !== null && slot > 0 && slot <= this.reservedClientSlots; }
   isActiveClient(actor: ActorId): boolean { return this.activeClients.has(actor); }
+  hostCheat(actor: ActorId, name: "god" | "notarget" | "noclip"): undefined {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("QC host command requires an admitted client");
+    const message = (text: string) => this.options.events.message({ kind: "print", level: 2, text }, actor);
+    // QW's server -cheats authority is represented by the source-owned server cvar.
+    const denied = this.kind === "quakeworld" ? this.cvars.variableValue("sv_cheats") === 0
+      : this.machine.globals.float(this.machine.globalOffset("deathmatch")) !== 0;
+    if (denied) return message("Cheats are disabled on this server.\n");
+    const words = this.entities.at(slot);
+    let enabled: boolean;
+    if (name === "noclip") {
+      enabled = words.float(this.field("movetype")) !== 8;
+      words.setFloat(this.field("movetype"), enabled ? 8 : 3);
+    } else {
+      const bit = name === "god" ? 64 : 128, flags = Math.trunc(words.float(this.field("flags"))) ^ bit;
+      words.setFloat(this.field("flags"), flags); enabled = (flags & bit) !== 0;
+    }
+    return message(`${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`);
+  }
   admitClient(client: ClientId): OwnedActor {
     const slot = client.slot + 1;
     if (slot > this.options.maxClients || this.spawning) throw new Error("QC client slot is unavailable");
@@ -508,7 +527,8 @@ export class QuakeCSource {
     const words = this.entities.fromReference(this.reference(actor)), origin = words.vector(this.field("origin")), mins = words.vector(this.field("mins"));
     return { ...state, origin: { x: origin.x + mins.x + 16, y: origin.y + mins.y + 16, z: origin.z + mins.z + 24 },
       velocity: words.vector(this.field("velocity")), angles: words.vector(this.field("v_angle")),
-      waterJumpTimeSeconds: words.float(this.field("teleport_time")), dead: words.float(this.field("health")) <= 0, spectator: 0 };
+      waterJumpTimeSeconds: words.float(this.field("teleport_time")), dead: words.float(this.field("health")) <= 0,
+      spectator: words.float(this.field("movetype")) === 8 ? 1 : 0 };
   }
   writeQuakeWorldState(actor: ActorId, state: QwMovementState): undefined {
     const words = this.entities.fromReference(this.reference(actor)), mins = words.vector(this.field("mins"));

@@ -2,13 +2,13 @@
 import type { ContentId } from "../../contracts/content.ts";
 import type { ImagePicture, Draw2D } from "../../text/draw2d.ts";
 import type { SeatTextPresentation } from "../../text/layout.ts";
-import { LocalizationCatalog } from "../../text/localization.ts";
+import { Q1MessageLocalization } from "./q1-localization.ts";
 import { decodeQpic, indexedRenderImage } from "../../formats/images/index.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 
 interface FinaleState { readonly content: ContentId; readonly sourceText: string; readonly started: number; readonly banner: boolean; }
-interface FinaleAssets { readonly localization: LocalizationCatalog; readonly banner: ImagePicture; readonly width: number; readonly height: number; }
+interface FinaleAssets { readonly banner: ImagePicture; readonly width: number; readonly height: number; }
 
 /** The source game controls stages and input gating; each seat reveals its own text. */
 export class SourceFinale {
@@ -16,7 +16,8 @@ export class SourceFinale {
   private readonly loaded = new Map<ContentId, Promise<FinaleAssets>>();
   private prepared: FinaleAssets | null = null;
   private message = "";
-  constructor(private readonly assets: ApplicationAssets, private readonly text: SeatTextPresentation) {}
+  constructor(private readonly assets: ApplicationAssets, private readonly text: SeatTextPresentation,
+    private readonly messages = new Q1MessageLocalization(text.seat, assets)) {}
 
   get active(): boolean { return this.state !== null; }
 
@@ -34,16 +35,12 @@ export class SourceFinale {
     const pending = (async (): Promise<FinaleAssets> => {
       const provider = await this.assets.provider(content);
       if (provider.family !== "q1" || provider.palette === null) throw new Error("Quake finale requires its source palette");
-      const [picture, english, override] = await Promise.all([
-        provider.mounts.open("gfx/finale.lmp"), provider.mounts.open("localization/loc_english.txt"), provider.mounts.open("localization/loc_english_mod.txt"),
-      ]);
+      const picture = await provider.mounts.open("gfx/finale.lmp");
       if (picture === null) throw new Error("Quake finale picture is absent from selected content");
       const decoded = decodeQpic(picture.bytes, "gfx/finale.lmp");
       const image = this.assets.images.register("gfx/finale.lmp", indexedRenderImage([{ width: decoded.width, height: decoded.height, pixels: decoded.indices }],
         provider.palette, { kind: "index", index: 255 }), { wrap: "clamp", filter: "nearest" }, { kind: "resource", resource: picture.reference });
-      const localization = new LocalizationCatalog(this.text.seat);
-      localization.loadOrdered({ base: english?.bytes ?? null, mods: override === null ? [] : [override.bytes] }, { base: null, mods: [] });
-      return { localization, banner: { kind: "image", name: "gfx/finale.lmp", image }, width: decoded.width, height: decoded.height };
+      return { banner: { kind: "image", name: "gfx/finale.lmp", image }, width: decoded.width, height: decoded.height };
     })();
     this.loaded.set(content, pending); return pending;
   }
@@ -51,7 +48,7 @@ export class SourceFinale {
   async prepare(): Promise<void> {
     if (this.state === null) return;
     this.prepared = await this.load(this.state.content);
-    this.message = this.prepared.localization.localize(this.state.sourceText);
+    this.message = await this.messages.resolve(this.state.content, this.state.sourceText, []);
   }
 
   draw(draw: Draw2D, seconds: number): void {

@@ -64,7 +64,8 @@ export class ApplicationRereleasePresentation {
   selectedLanguage(id: SeatId): string { return this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english"; }
 
   async languageBinding(id: SeatId, content: ContentId, failed: (error: unknown) => void): Promise<SettingBinding | undefined> {
-    if ((await this.assets.provider(content)).family !== "q2") return undefined;
+    const family = (await this.assets.provider(content)).family;
+    if (family !== "q1" && family !== "q2") return undefined;
     const seat = this.seats.find(seat => seat.binding.seat.equals(id));
     if (seat === undefined) throw new Error("Unknown localization seat");
     const settings = await this.catalog(seat, content), binding = settings.binding();
@@ -86,7 +87,7 @@ export class ApplicationRereleasePresentation {
         const match = /^loc_([a-z]+)\.txt$/iu.exec(file), language = match?.[1];
         if (language !== undefined) languages.add(language.toLowerCase());
       }
-      const result = new NativeLanguageSettings(new LocalizationCatalog(seat.binding.seat, "q2-rerelease"), [...languages].sort().map(language => ({
+      const result = new NativeLanguageSettings(new LocalizationCatalog(seat.binding.seat, provider.family === "q1" ? "q1-rerelease" : "q2-rerelease"), [...languages].sort().map(language => ({
         id: language, label: language.charAt(0).toUpperCase() + language.slice(1), load: async () => {
           const [primary, mod, english, englishMod] = await Promise.all([provider.mounts.open(`localization/loc_${language}.txt`), provider.mounts.open(`localization/loc_${language}_mod.txt`),
             language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt"), language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english_mod.txt")]);

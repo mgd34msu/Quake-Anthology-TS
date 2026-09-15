@@ -73,6 +73,8 @@ export interface Q1CompositionServices {
   disconnect(actor: ActorId): undefined;
   teleport(actor: ActorId, origin: Vec3, angles: Vec3, velocity: Vec3, until: number): undefined;
   weaponServices?(actor: ActorId): Q1EntityServices | null;
+  /** A foreign selected arsenal supplies its own complete weapon/ammo grant. */
+  cheatArsenal?(actor: ActorId): boolean;
   selectedWeapon(actor: ActorId): ItemId | null;
   selectedAmmo(actor: ActorId): ItemId | null;
   selectWeapon(actor: ActorId, item: ItemId): boolean;

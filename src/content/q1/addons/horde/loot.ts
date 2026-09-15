@@ -24,7 +24,7 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
     const definition = ammoDefinition(entity.number("weapon"), false);
     if (game.host.inventory.count(other, definition.item) >= definition.capacity) return undefined;
     const player = game.player(other); if (player !== null && player.weapon === game.chooseBest(player.actor)) game.selectWeapon(player.actor, game.chooseBest(player.actor));
-    game.message(other, `$qc_got_item ${definition.label}`, false); taken(entity, other, "weapons/lock4.wav");
+    game.message(other, "$qc_got_item", false, [definition.label]); taken(entity, other, "weapons/lock4.wav");
     for (const id of horde.livingPlayers()) {
       const actor = game.host.actors.resolveOwned(id); if (actor === null) continue;
       game.host.inventory.give(actor, definition.item, entity.number("aflag"));
@@ -37,7 +37,7 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
     const health = game.health(other); if (health <= 0 || health >= player.maxHealth) return undefined;
     if (context.services.cvar("horde") !== 0 && (context.base.campaign.readFlags() & 2) !== 0) context.setPlayerNumber(other, "hunger_time", game.time + 10);
     const amount = entity.number("healamount"); game.host.combat.setHealth(player.actor, Math.min(health + amount, player.maxHealth));
-    game.message(other, `$qc_item_health ${amount}`, false); taken(entity, other, entity.text("noise"));
+    game.message(other, "$qc_item_health", false, [amount]); taken(entity, other, entity.text("noise"));
     const owner = game.entity(entity.owner); if (owner !== null) owner.wait = 0; return game.remove(entity);
   } });
   game.named.register("mg1:horde:armor_touch", { touch: (_game, entity, other) => {
@@ -53,7 +53,7 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
   } });
   game.named.register("mg1:horde:key_touch", { touch: (_game, entity, other) => {
     if (!game.isPlayer(other) || game.health(other) <= 0 || horde.services.isBot(other)) return undefined;
-    game.message(other, `$qc_got_item ${entity.text("netname")}`, false); taken(entity, other, entity.text("noise"));
+    game.message(other, "$qc_got_item", false, [entity.text("netname")]); taken(entity, other, entity.text("noise"));
     horde.changeKeys(entity.text("horde.key") === "gold" ? "gold" : "silver", 1);
     const manager = horde.manager;
     if (manager !== null && manager.number("key_spawned") !== 0) { manager.wait = 1; horde.schedule(manager, "countdown", 0); }

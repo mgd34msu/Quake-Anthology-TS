@@ -16,6 +16,7 @@ import type { SeatClientState, SeatPresentation, SimulationEvent, WorldSnapshot 
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { anglesToAxis } from "../../core/math.ts";
 import { tokenizeCommand } from "../../core/commands/index.ts";
+import { consoleMetrics } from "../../console/metrics.ts";
 import { drawConsole } from "../../console/draw.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { prepareMaterialText } from "../../render/commands/material2d.ts";
@@ -76,12 +77,13 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
     private readonly worldTextCullFactor: (() => number) | null = null,
     private readonly fieldOfView: () => number = () => 90,
-    private readonly debugShapes: DebugShapePresentationAccess | null = null) {
-    this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets);
+    private readonly debugShapes: DebugShapePresentationAccess | null = null,
+    private readonly consoleScale: () => number = () => 0) {
+    this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
     this.text = new SeatTextPresentation(local.player.seat.id, font);
-    this.finale = new SourceFinale(assets, this.text);
+    this.finale = new SourceFinale(assets, this.text, this.q1Messages);
   }
 
   get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.local.player.seat.id.index, this.seatCount, size.width, size.height); }
@@ -173,7 +175,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     for (const source of q1Messages) {
       const event = source.event;
       if (event.kind !== "message") continue;
-      const text = await this.q1Messages.resolve(source.content, event.text, event.args ?? []);
+      const text = await this.q1Messages.resolve(source.content, event.text, event.args ?? [], event.parts);
       if (!event.center) this.local.console.print(`${text}\n`);
       this.ui.receive([{ ...source, event: { ...event, text } }]);
     }
@@ -240,16 +242,19 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
       !this.finale.active && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
       this.q3Client !== null, this.q3Client?.weaponHudView().aggregateWarning ?? true);
-    const scale = Math.max(1, Math.floor(camera.viewport.height / 300));
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(camera.viewport.height * 0.5);
+      const logical = this.native.window.logicalSize, drawable = this.native.window.drawableSize;
+      const metrics = consoleMetrics({ width: camera.viewport.width, height: camera.viewport.height,
+        pixelRatio: Math.max(drawable.width / logical.width, drawable.height / logical.height),
+        requestedScale: this.consoleScale(), font: this.text.font });
+      const { scale, columns } = metrics;
       const white = this.assets.world.shaders.textures.white.image;
       draw.fillRect({ x: 0, y: 0, width: camera.viewport.width, height }, { x: 0, y: 0, z: 0, w: 0.85 }, { kind: "image", name: "white", image: white });
-      const columns = Math.max(1, Math.trunc(camera.viewport.width / (8 * scale)) - 2);
       if (this.local.console.buffer.width !== columns) this.local.console.buffer.resize(columns);
-      drawConsole({ draw, text: this.text, rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / (8 * scale)) - 2)),
+      drawConsole({ draw, text: this.text, rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / metrics.lineHeight))),
         field: this.local.console.field, selectedEntry: this.local.console.selectedCompletionEntry,
-        height, scale, nowMilliseconds: this.preparedTime * 1000, background: null });
+        height, scale, cellWidth: metrics.cellWidth, nowMilliseconds: this.preparedTime * 1000, background: null });
     }
     return this.frames.finish(false);
   }

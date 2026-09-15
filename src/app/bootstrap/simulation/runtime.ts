@@ -653,6 +653,8 @@ export class SharedSimulation implements Simulation {
           if (!preserved && !preservedQ2) {
             const nativeBounds = map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.bounds
               : baseSpecies.find(species => species.classnames.includes(entry.classname))?.bounds;
+            const nativeMovement = map.kind === "q2" ? map.monsters.definition(entry.classname, map.game)?.locomotion
+              : baseSpecies.find(species => species.classnames.includes(entry.classname))?.movement;
             const position = map.kind === "q2" ? parseQ2Entities(this.options.world.entities, map.game.options.edition)[entry.sourceOrdinal]?.values.get("origin")
               : this.options.world.kind === "q1-bsp" ? this.options.world.entityList[entry.sourceOrdinal]?.properties.find(property => property.key === "origin")?.value : undefined;
             const flags = entity?.movementFlags ?? q2Entity?.flags ?? 0;
@@ -666,7 +668,7 @@ export class SharedSimulation implements Simulation {
             const blockers: ActorId[] = [];
             const search = (excluded: readonly ActorId[]) => nativeBounds === undefined || position === undefined ? null : nearbyMonsterPlacement({ body, locomotion, worldActor: this.worldActor(),
               sameMedium: origin => medium(origin) === originalMedium,
-              authored: { origin: parseVector(position), bounds: nativeBounds },
+              authored: { origin: parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
               query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
                 policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
               blockedBy: actor => { if (!blockers.some(value => value.equals(actor))) blockers.push(actor); return undefined; },
@@ -1492,6 +1494,13 @@ export class SharedSimulation implements Simulation {
         disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
         teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
         weaponServices: () => this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource.game : this.selectedArsenal === null && this.source.kind === "q1" ? this.source.game : null,
+        cheatArsenal: actor => {
+          const arsenal = this.selectedArsenal;
+          if (arsenal === null || arsenal.family === "q1") return false;
+          const player = this.requirePlayer(actor);
+          for (const entry of arsenal.read(actor).ammo) this.inventory.configure(player.actor, { ...entry, count: entry.capacity });
+          return true;
+        },
         selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
         selectWeapon: (actor, item) => { if (this.source.kind !== "q1") return false;
           if (this.selectedArsenal !== null) return this.selectedArsenal.select(actor, item);
@@ -1742,7 +1751,8 @@ export class SharedSimulation implements Simulation {
     const player = this.player(actor), entry = this.actorExecutions.get(actor);
     const q1 = entry?.kind === "q1" ? entry.services.player(actor) : null;
     return { viewHeight: player?.viewHeight ?? (entry?.kind === "q2" ? entry.entity.viewHeight : 25),
-      notarget: entry?.kind === "q1" ? (entry.entity.movementFlags & 128) !== 0 : entry?.kind === "q2" && (entry.entity.flags & (32 | (entry.services.options.edition === "rerelease" ? 0x1008000 : 0))) !== 0,
+      notarget: this.source.kind === "q1" && this.source.composition.noTarget(actor)
+        || (entry?.kind === "q1" ? (entry.entity.movementFlags & 128) !== 0 : entry?.kind === "q2" && (entry.entity.flags & (32 | (entry.services.options.edition === "rerelease" ? 0x1008000 : 0))) !== 0),
       invisible: (q1?.powerups.get("invisibility") ?? 0) > this.timeSeconds,
       lightLevel: entry?.kind === "q2" ? entry.entity.lightLevel : null,
       hostileUntil: q1?.hostileUntil ?? null };
@@ -1807,7 +1817,8 @@ export class SharedSimulation implements Simulation {
   private classname(actor: ActorId): string { const entry = this.actorExecutions.get(actor); return this.player(actor) !== null ? "player" : entry?.kind === "q3" ? "q3:projectile" : entry?.kind === "quakec" ? entry.source.classname(actor) : entry?.entity.classname ?? ""; }
 
   private powerup(actor: OwnedActor, powerup: Q1Powerup, expires: number): undefined {
-    if (powerup === "invulnerability") this.combat.setTraits(actor, { invulnerable: expires > this.timeSeconds });
+    if (powerup === "invulnerability") this.combat.setTraits(actor, { invulnerable: expires > this.timeSeconds
+      || this.source.kind === "q1" && (this.source.composition.clients.get(actor.id)?.godMode ?? false) });
     return undefined;
   }
 
@@ -2289,7 +2300,7 @@ export class SharedSimulation implements Simulation {
         const weaponPlayer = this.selectedArsenal.game.player(player.actor.id);
         if (intent?.impulse !== undefined && (handled || client !== null || weaponPlayer !== null && this.selectedArsenal.game.time >= weaponPlayer.attackFinished))
           player.arsenalIntent = { ...intent, impulse: 0 };
-      }
+      } else if (this.source.kind === "q1") this.source.composition.impulse(player.actor.id);
       if (this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf && this.source.product.match.source.match.paused)
         return { arsenal: this.selectedArsenal.read(player.actor.id), animation: input.animation, effects: [] };
       const arsenal = this.selectedArsenal.read(player.actor.id);
@@ -2773,6 +2784,7 @@ export class SharedSimulation implements Simulation {
             if (boundary.q2) this.frameSelectedQ2Weapon(actor);
             if (this.actors.isLive(actor.id)) {
               this.q2Characters.get(actor)?.beginFrame();
+              this.stepHandGrenade(clientPlayer, (this.combat.read(actor.id)?.health ?? 0) > 0 ? "alive" : "dead");
               this.playerWeapon(clientPlayer);
             }
             this.physics.commitAttachments(); continue;
@@ -3245,7 +3257,28 @@ export class SharedSimulation implements Simulation {
   }
 
   playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
+    if (this.source.kind === "quakec" && (name === "god" || name === "notarget" || name === "noclip"))
+      return this.source.game.hostCheat(actor, name);
     const player = this.requirePlayer(actor);
+    if (this.source.kind === "q1" && (name === "god" || name === "notarget" || name === "noclip")) {
+      const source = this.source, client = source.composition.clients.require(actor);
+      if (source.game.options.deathmatch !== 0 && (source.game.options.edition === "classic" || source.cvars.variableValue("sv_cheats") === 0)) {
+        source.game.message(actor, "Cheats are disabled on this server.\n", false); return undefined;
+      }
+      let enabled: boolean;
+      if (name === "god") {
+        client.godMode = !client.godMode; enabled = client.godMode;
+        this.combat.setTraits(player.actor, { invulnerable: enabled || (source.game.player(actor)?.powerups.get("invulnerability") ?? 0) > this.timeSeconds });
+      } else if (name === "notarget") {
+        enabled = !source.composition.noTarget(actor); source.composition.setNoTarget(actor, enabled);
+      } else {
+        const state = player.readState();
+        enabled = !(state.kind === "q1-netquake" ? state.moveType === 8 : state.kind === "q1-quakeworld" ? state.spectator !== 0
+          : state.kind === "q3" ? state.movementType === 1 : state.type === 1);
+        this.setPlayerMovement(actor, { kind: "noclip", enabled });
+      }
+      source.game.message(actor, `${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`, false); return undefined;
+    }
     if (this.weaponSlots.has(actor) && (name === "weapnext" || name === "weapprev" || name === "use")) {
       const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned), requested = args.join("").toLowerCase().replaceAll(" ", "");
       const selected = name === "use" ? owned.find(item => item.id === requested || item.id === `q1:weapon/${requested}` || item.label.toLowerCase().replaceAll(" ", "") === requested)

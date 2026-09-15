@@ -38,6 +38,8 @@ for (const fixture of fixtures) {
    const end = { ...start, z: start.z - 512 };
    for (const policy of policies) {
     const result = scene.trace({ start, end, shape: { kind: 'point' }, target: { kind: 'world' }, policy, numeric, passActor: null });
+    const zero = { x: 0, y: 0, z: 0 };
+    expect(scene.trace({ start, end, shape: { kind: 'box', bounds: { min: zero, max: zero } }, target: { kind: 'world' }, policy, numeric, passActor: null })).toEqual(result);
     expect(result.kind).toBe(policy.kind);
     expect(result.fraction).toBeGreaterThanOrEqual(0);
     expect(result.fraction).toBeLessThan(1);

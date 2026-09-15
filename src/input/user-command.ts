@@ -36,7 +36,22 @@ function clamp(value: number, maximum: number): number { return Math.max(-maximu
 
 export class InputCommandBuilder {
   private angles: Vec3 = { x: 0, y: 0, z: 0 };
-  constructor(readonly dialect: CommandDialect, readonly mouse = new MouseInput(), public tuning = defaultViewInputTuning(dialect)) {}
+  private tuningValue: ViewInputTuning;
+  private runPreference: { read(): boolean; write(value: boolean): void } | null = null;
+  constructor(readonly dialect: CommandDialect, readonly mouse = new MouseInput(), tuning = defaultViewInputTuning(dialect)) { this.tuningValue = tuning; }
+  get tuning(): ViewInputTuning { return this.tuningValue; }
+  set tuning(value: ViewInputTuning) {
+    const preference = this.runPreference;
+    if (preference === null) this.tuningValue = value;
+    else {
+      preference.write(value.alwaysRun);
+      this.tuningValue = { ...value, get alwaysRun() { return preference.read(); } };
+    }
+  }
+  bindAlwaysRun(preference: { read(): boolean; write(value: boolean): void }): void {
+    this.runPreference = preference;
+    this.tuningValue = { ...this.tuningValue, get alwaysRun() { return preference.read(); } };
+  }
   get viewAngles(): Vec3 { return { ...this.angles }; }
   setViewAngles(angles: Vec3): void {
     if (![angles.x, angles.y, angles.z].every(Number.isFinite)) throw new RangeError("View angles must be finite");

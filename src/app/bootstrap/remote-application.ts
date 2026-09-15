@@ -269,6 +269,7 @@ export class RemoteApplication {
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity, browser);
       application.initializeQ3Browser();
       await application.viewSettings.load(application.inputConfig);
+      application.viewSettings.bindCvars(application.imageSettings.cvars);
       const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
       if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
@@ -637,7 +638,7 @@ export class RemoteApplication {
       input.registerClientCommands([...q3.commandNames]);
       if (this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
     }
-    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView);
+    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));
     local.player.seat.attachPresentation(presentation, () => presentation.close());
     this.presentation = presentation;
     seatAttached = true;

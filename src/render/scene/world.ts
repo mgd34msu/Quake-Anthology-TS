@@ -11,7 +11,7 @@ import { prepareMaterialBatches, evaluateMaterialPasses } from "../../materials/
 import type { MaterialDrawContext } from "../../materials/evaluate.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
 import { RendererNoise } from "../../materials/deform.ts";
-import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1SkyTexCoords, q1SurfaceKind, q1TextureAnimations, splitQ1SkyTexture } from "../../materials/legacy.ts";
+import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1SkyTexCoords, q1SurfaceKind, q1TextureAnimations, splitQ1SkyTexture } from "../../materials/legacy.ts";
 import type { Q1Material, Q2Material } from "../../materials/legacy.ts";
 import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels } from "../../materials/lighting.ts";
 import type { LightmapFace, Q1LightmapEncoding, Q2LightStyle, SurfaceDynamicLight } from "../../materials/lighting.ts";
@@ -134,6 +134,7 @@ export class WorldScene {
   private shadowScene: Q2ShadowScene;
   private readonly owned: RendererImage[] = [];
   private q2Sky: readonly RendererImage[] = [];
+  private fullbrightByTexture = new Map<RendererImage, RendererImage | null>();
   private readonly remapped = new Map<RegisteredSceneMaterial, { readonly shader: RegisteredSceneMaterial; readonly timeOffset: number }>();
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
   private staticShadowWorld: { readonly surfaces: readonly WorldSurface[]; readonly first: number; readonly count: number; readonly world: StaticShadowWorld } | null = null;
@@ -159,6 +160,7 @@ export class WorldScene {
 
   static async load(map: DecodedWorld, shaders: SceneShaderRegistry, options: WorldSceneOptions = {}): Promise<WorldScene> {
     const owned: RendererImage[] = [], surfaces: WorldSurface[] = [];
+    const fullbrightByTexture = new Map<RendererImage, RendererImage | null>();
     const fogSelections: { readonly index: number; readonly volume: FogVolume }[] = [];
     const images = shaders.textures.images, materialWorld = shaders.registrations.owner.world(map);
     let result: WorldScene | null = null;
@@ -217,6 +219,7 @@ export class WorldScene {
             ?? shaders.textures.q1Embedded(texture) ?? shaders.textures.missing);
         }
       } else for (const info of map.textureInfo) textures.push(await shaders.textures.load(`textures/${info.name}`, { family: "q2", usage: "wall" }) ?? shaders.textures.missing);
+      for (const texture of textures) fullbrightByTexture.set(texture.image, texture.fullbright);
       const skyLayers = new Map<RendererImage, { readonly solid: RendererImage; readonly overlay: RendererImage }>();
       for (const [index, face] of map.faces.entries()) {
         const info = at<Exclude<DecodedWorld, { readonly kind: "q3-bsp" }>["textureInfo"][number]>(map.textureInfo, face.textureInfo);
@@ -260,6 +263,7 @@ export class WorldScene {
       }
     }
     result = new WorldScene(map, shaders, surfaces, options);
+    result.fullbrightByTexture = fullbrightByTexture;
     result.fogSelections = fogSelections;
     result.owned.push(...owned);
     if (map.kind === "q2-bsp" && options.q2SkyName !== undefined) {
@@ -521,7 +525,9 @@ export class WorldScene {
     const fragmentLighting = input.q2FragmentLighting;
     const rotateNormal = (normal: Vec3): Vec3 => normalize3(model === undefined ? normal : worldVector(normal, model));
     const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
-      alternateAnimation: input.alternateAnimation ?? false, fullbright: surface.fullbright, q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
+      alternateAnimation: input.alternateAnimation ?? false,
+      fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
+      q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined || material.kind !== "q2" ? {} : { fragmentLighting: { kind: "q2-world",
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
         normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
@@ -617,6 +623,7 @@ export class WorldScene {
     this.fogImage = replacement.fogImage; this.dlightImage = replacement.dlightImage;
     this.shadowScene = replacement.shadowScene;
     this.q2Sky = replacement.q2Sky;
+    this.fullbrightByTexture = replacement.fullbrightByTexture;
     this.owned.push(...replacement.owned); replacement.owned.length = 0;
     this.remapped.clear();
     for (const [material, remap] of replacement.remapped) this.remapped.set(this.shaders.registrations.owner.retained(material.registration),

@@ -598,7 +598,7 @@ export class CommandBuffer {
           length += sourceLength;
         }
       }
-      cvars.set(name, combined); cvars.addFlags(name, flags);
+      if (cvars.set(name, combined) !== undefined) cvars.addFlags(name, flags);
     }
   }
 }

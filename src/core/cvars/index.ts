@@ -40,6 +40,12 @@ export interface CvarArchiveEntry {
   readonly value: string;
 }
 
+export interface CvarValueBinding {
+  /** Return an explanation to reject the value before it enters registry state. */
+  validate(value: string): string | null;
+  changed(value: string): void;
+}
+
 interface CvarState {
   readonly index: number;
   readonly name: string;
@@ -138,6 +144,7 @@ export class CvarRegistry {
   private userinfoDirty = false;
   private readonly consoleVariables = new Set<string>();
   private readonly documents = new Map<string, CommandDocumentation>();
+  private readonly valueBindings = new Map<string, CvarValueBinding>();
 
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
@@ -189,11 +196,19 @@ export class CvarRegistry {
     const highCharacters = reader.field("highCharacters").boolean(), clientInfo = reader.field("clientInfo").string(), serverInfo = reader.field("serverInfo").string();
     const userinfoDirty = reader.field("userinfoDirty").boolean(), consoleVariables = reader.field("consoleVariables").list(item => item.string());
     if (new Set(consoleVariables).size !== consoleVariables.length) reader.fail("duplicate console variable");
+    for (const [name, binding] of this.valueBindings) {
+      const state = variables.get(name);
+      if (state === undefined) reader.fail(`missing bound cvar ${name}`);
+      else for (const text of [state.value, state.resetValue, ...(state.latchedValue === undefined ? [] : [state.latchedValue])]) {
+        const error = binding.validate(text); if (error !== null) reader.fail(`${name}: ${error}`);
+      }
+    }
     this.variables.clear(); for (const [key, state] of variables) this.variables.set(key, state);
     this.indexes.splice(0, this.indexes.length, ...indexes); this.first = first; this.effects = [];
     this.changedFlags = changedFlags; this.cheatsEnabled = cheatsEnabled; this.serverActive = serverActive; this.clientConnected = clientConnected;
     this.highCharacters = highCharacters; this.clientInfo = clientInfo; this.serverInfo = serverInfo; this.userinfoDirty = userinfoDirty;
     this.consoleVariables.clear(); for (const name of consoleVariables) this.consoleVariables.add(name);
+    for (const [name, binding] of this.valueBindings) { const state = this.variables.get(name); if (state !== undefined) binding.changed(state.value); }
   }
 
   get modifiedFlags(): number { return this.changedFlags; }
@@ -207,6 +222,21 @@ export class CvarRegistry {
   }
 
   find(name: string): CvarRead | undefined { return this.variables.get(this.key(name)); }
+  bindValue(name: string, binding: CvarValueBinding): () => void {
+    const key = this.key(name), state = this.variables.get(key);
+    if (state === undefined) throw new Error(`Cannot bind unregistered cvar ${name}`);
+    if (this.valueBindings.has(key)) throw new Error(`Cvar ${name} already has a value binding`);
+    for (const value of [state.value, state.resetValue, ...(state.latchedValue === undefined ? [] : [state.latchedValue])]) {
+      const error = binding.validate(value); if (error !== null) throw new Error(`${name}: ${error}`);
+    }
+    this.valueBindings.set(key, binding);
+    return () => { if (this.valueBindings.get(key) === binding) this.valueBindings.delete(key); };
+  }
+  private validBoundValue(name: string, value: string): boolean {
+    const error = this.valueBindings.get(this.key(name))?.validate(value);
+    if (error === undefined || error === null) return true;
+    this.print(`${name}: ${error}\n`); return false;
+  }
   document(name: string, documentation: CommandDocumentation): void {
     if (this.find(name) === undefined) throw new Error(`Cannot document unregistered cvar ${name}`);
     this.documents.set(this.key(name), documentation);
@@ -222,6 +252,7 @@ export class CvarRegistry {
   register(nameInput: string, defaultInput: string, flags = 0): CvarSnapshot | undefined {
     let name = sourceCommandText(nameInput);
     const defaultValue = sourceCommandText(defaultInput);
+    if (!this.validBoundValue(name, defaultValue)) return this.get(name);
     if (this.dialect === "q3" && !validInfo(name)) { this.print(`invalid cvar name string: ${name}\n`); name = "BADNAME"; }
     if (isQ2(this.dialect) && (flags & 6) !== 0 && !validInfo(name)) { this.print("invalid info cvar name\n"); return undefined; }
     const key = this.key(name), existing = this.variables.get(key);
@@ -276,6 +307,7 @@ export class CvarRegistry {
     let name = sourceCommandText(nameInput);
     if (this.dialect === "q3" && !validInfo(name)) { this.print(`invalid cvar name string: ${name}\n`); name = "BADNAME"; }
     const value = sourceCommandText(valueInput), state = this.variables.get(this.key(name));
+    if (!this.validBoundValue(name, value)) return undefined;
     if (state === undefined) {
       if (isQ1(this.dialect)) { this.print(`Cvar_Set: variable ${name} not found\n`); return undefined; }
       return this.register(name, value, this.dialect === "q3" && !force ? CvarFlag.UserCreated : 0);
@@ -301,7 +333,7 @@ export class CvarRegistry {
       } else state.latchedValue = undefined;
     } else {
       // Q3 checks equality before forced writes clear an outstanding latch.
-      if (value === state.value) return snapshot(state);
+      if (value === state.value) { this.valueBindings.get(this.key(name))?.changed(value); return snapshot(state); }
       this.changedFlags |= state.flags;
       if (!force) {
         if ((state.flags & CvarFlag.ReadOnly) !== 0) { this.print(`${name} is read only.\n`); return snapshot(state); }
@@ -324,7 +356,7 @@ export class CvarRegistry {
     if (state.value !== value) {
       this.applyValue(state, value, true);
       if (isQ2(this.dialect) && (state.flags & CvarFlag.UserInfo) !== 0) this.userinfoDirty = true;
-    }
+    } else this.valueBindings.get(this.key(name))?.changed(value);
     return snapshot(state);
   }
 
@@ -337,12 +369,14 @@ export class CvarRegistry {
     const state = this.variables.get(this.key(name));
     if (isQ2(this.dialect) && state !== undefined && state.value === value) {
       state.latchedValue = undefined;
+      this.valueBindings.get(this.key(name))?.changed(value);
       return snapshot(state);
     }
     return this.set(name, value);
   }
 
   setCommandFlags(name: string, value: string, kind: "archive" | "userinfo" | "serverinfo"): void {
+    if (!this.validBoundValue(name, sourceCommandText(value))) return;
     const q2 = isQ2(this.dialect);
     const flag = kind === "archive" ? q2 ? Q2CvarFlag.Archive : CvarFlag.Archive
       : kind === "userinfo" ? q2 ? Q2CvarFlag.UserInfo : CvarFlag.UserInfo
@@ -385,6 +419,7 @@ export class CvarRegistry {
   fullSet(name: string, value: string, flags: number): CvarSnapshot | undefined {
     if (!isQ2(this.dialect)) throw new Error("Cvar_FullSet belongs to Quake II");
     const state = this.variables.get(this.key(name));
+    if (!this.validBoundValue(name, sourceCommandText(value))) return state === undefined ? undefined : snapshot(state);
     if (state === undefined) return this.register(name, value, flags);
     if ((state.flags & CvarFlag.UserInfo) !== 0) this.userinfoDirty = true;
     this.applyValue(state, sourceCommandText(value), true);
@@ -405,6 +440,7 @@ export class CvarRegistry {
   stage(name: string, input: string): CvarSnapshot {
     const state = this.variables.get(this.key(name)), value = sourceCommandText(input);
     if (state === undefined) throw new Error(`Cannot stage an unregistered cvar ${name}`);
+    if (!this.validBoundValue(name, value)) return snapshot(state);
     if (this.dialect === "q3" ? (state.flags & (CvarFlag.ReadOnly | CvarFlag.Init)) !== 0 : isQ2(this.dialect) && (state.flags & Q2CvarFlag.NoSet) !== 0)
       throw new Error(`Cannot stage a protected cvar ${name}`);
     if (isQ2(this.dialect) && (state.flags & 6) !== 0 && !validInfo(value)) throw new Error(`Invalid staged info cvar ${name}`);
@@ -550,6 +586,7 @@ export class CvarRegistry {
     const numbers = this.numbers(value);
     state.numericValue = numbers.numericValue;
     state.integerValue = numbers.integerValue;
+    this.valueBindings.get(this.key(state.name))?.changed(value);
   }
   private emit(effect: CvarEffect): void { this.effects.push(effect); this.options.onEffect?.(effect); }
   private gameDirectory(state: CvarState): void {

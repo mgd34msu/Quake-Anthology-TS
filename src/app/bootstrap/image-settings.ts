@@ -39,6 +39,10 @@ export class ApplicationImageSettings {
     this.persistenceEnabled = !options.deferPersistence;
     this.store = new ConfigStore(join(options.userContentRoot ?? defaultUserContentRoot(), "settings"));
     this.cvars = new CvarRegistry(options);
+    this.cvars.register("fov", "90", CvarFlag.Archive);
+    this.cvars.register("con_scale", "0", CvarFlag.Archive);
+    this.cvars.document("con_scale", { summary: "Console text size. Auto chooses a readable size; small viewports limit the size to keep text usable.",
+      usage: "con_scale <0|1|2|3|4>", examples: ["con_scale 2"], allowedValues: ["0: Auto", "1: 1x", "2: 2x", "3: 3x", "4: 4x"] });
     this.cvars.register("r_gamma", String(options.gamma ?? 1), CvarFlag.Archive);
     this.cvars.register("r_customwidth", "0", CvarFlag.Archive);
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);

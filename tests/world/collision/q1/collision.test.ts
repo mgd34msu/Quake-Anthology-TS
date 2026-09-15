@@ -1,9 +1,10 @@
+import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import type { Bounds, Vec3 } from "../../../../src/contracts/math.ts";
 import type { BspChild, BspNode, BspPlane, Q1ClipChild, Q1ClipNode, Q1WorldGeometry, TraceQuery, TraceShape } from "../../../../src/contracts/scene.ts";
-import { Q1_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
+import { Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, Q3_BINARY32_PROFILE } from "../../../../src/core/numeric.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp, q1EntityValue } from "../../../../src/formats/q1-map/index.ts";
 import { q1FaceVertices } from "../../../../src/formats/q1-map/queries.ts";
@@ -80,6 +81,27 @@ describe("Quake hulls and derived solid cells", () => {
     expect(result.fraction).toBeLessThan(1);
     expect(result.end.x).toBeCloseTo(10 + Math.sqrt(2) + Math.sqrt(2) / 32, 5);
     expect(result.contact.kind).toBe("plane");
+  });
+  test("zero-size boxes retain point geometry across policies, numeric profiles and rotated models", () => {
+    const solid = cube();
+    const water = { ...solid, leaves: solid.leaves.map(leaf => ({ ...leaf, contents: leaf.contents === -2 ? -3 : leaf.contents })) };
+    for (const world of [solid, water, clipOnlyCube()]) {
+      const scene = createSceneQueries(world);
+      for (const policy of [
+        { kind: "q1", move: "normal", hull: null },
+        { kind: "q2", contentsMask: 0x46000003, leafContents: "merged" },
+        { kind: "q2", contentsMask: 56, leafContents: "merged" },
+        { kind: "q3", contentsMask: 0x06000039, curves: true, playerCurveClip: true },
+      ] satisfies readonly TraceQuery["policy"][]) for (const numeric of [Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, Q3_BINARY32_PROFILE]) {
+        for (const target of [{ kind: "world" }, { kind: "model", model: 0, origin: { x: 10, y: 20, z: 0 }, angles: { x: 0, y: 45, z: 0 } }] satisfies readonly TraceQuery["target"][]) {
+          const request = { ...query({ x: 30, y: 20, z: 0 }, zero), target, policy, numeric };
+          expect(scene.trace({ ...request, shape: { kind: "box", bounds: { min: zero, max: zero } } })).toEqual(scene.trace(request));
+        }
+      }
+    }
+    const scene = createSceneQueries(solid), request = query({ x: 5, y: 0, z: 0 }, zero);
+    const shifted = { x: 2, y: 0, z: 0 };
+    expect(scene.trace({ ...request, shape: { kind: "box", bounds: { min: shifted, max: shifted } } }).fraction).not.toBe(scene.trace(request).fraction);
   });
   test("compiler-removed clip solids remain collidable for two foreign sizes", () => {
     const collision = createQ1Collision(clipOnlyCube());

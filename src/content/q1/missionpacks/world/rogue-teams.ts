@@ -42,7 +42,7 @@ export class RogueTeams {
   private setColor(actor: ActorId, team: number): undefined { if (this.hooks.setTeamColor === undefined) throw new Error("Rogue CTF requires shared color mutation"); return this.hooks.setTeamColor(actor, team); }
   private score(actor: ActorId, delta: number): undefined { if (this.hooks.addFrags === undefined) throw new Error("Rogue CTF requires shared score authority"); return this.hooks.addFrags(actor, delta); }
   private name(actor: ActorId): string { if (this.hooks.playerName === undefined) throw new Error("Rogue CTF requires player names"); return this.hooks.playerName(actor); }
-  private message(actor: ActorId, text: string, center = true): undefined { return this.game.host.emit({ kind: "message", player: actor, text, center }); }
+  private message(actor: ActorId, text: string, center = true, args: readonly (string | number)[] = []): undefined { return this.game.host.emit({ kind: "message", player: actor, text, center, args }); }
   private broadcast(text: string): undefined { for (const actor of this.game.host.players()) this.message(actor, text, false); return undefined; }
   private sound(actor: ActorId, path: string, global = false): undefined { const owner = this.game.host.actors.resolveOwned(actor); return owner === null ? undefined : this.game.sound(owner, path, global ? "voice" : "item", global ? 0 : 1); }
   private legal(team: number): boolean { return this.mode < 4 ? team > 0 : this.ctf ? team === 5 || team === 14 || this.mode === 6 && team === 1 : true; }
@@ -166,7 +166,7 @@ export class RogueTeams {
   }
   private assists(target: ActorId, attacker: ActorId): undefined {
     const game = this.game, victim = this.state(target), killer = this.state(attacker), team = this.team(attacker);
-    if ((victim.number("ctf_flags") & 3) !== 0 && this.team(target) !== team) { number(killer, "ctf_lastfraggedcarrier", game.time); if (victim.number("ctf_flagsince") + 2 <= game.time) { this.score(attacker, 2); this.message(attacker, "$qc_enemy_killed_bonus", false); } else this.message(attacker, "$qc_enemy_killed_no_bonus", false); }
+    if ((victim.number("ctf_flags") & 3) !== 0 && this.team(target) !== team) { number(killer, "ctf_lastfraggedcarrier", game.time); if (victim.number("ctf_flagsince") + 2 <= game.time) { this.score(attacker, 2); this.message(attacker, "$qc_enemy_killed_bonus", false, [2]); } else this.message(attacker, "$qc_enemy_killed_no_bonus", false); }
     let flagBonus = false, carrierBonus = false;
     if (victim.number("ctf_lasthurtcarrier") + 4 > game.time && (killer.number("ctf_flags") & 3) === 0) { this.score(attacker, 2); carrierBonus = true; }
     for (const originActor of [attacker, target]) {

@@ -15,10 +15,10 @@ export function startMg3Item(context: Q1AddonContext, entity: Q1Actor): undefine
 }
 
 export function finishMg3Pickup(context: Q1AddonContext, entity: Q1Actor, other: ActorId,
-  message: string, sound: string): undefined {
+  message: string, sound: string, args: readonly (string | number)[] = []): undefined {
   const { game } = context, player = game.host.actors.resolveOwned(other);
   if (player === null) return undefined;
-  if (message !== "") game.message(other, message);
+  if (message !== "") game.message(other, message, true, args);
   game.sound(player, sound, "item"); game.effect("pickup", game.body(entity).origin, other);
   entity.activator = other; game.useTargets(entity, other);
   return game.live(entity) ? game.remove(entity) : undefined;

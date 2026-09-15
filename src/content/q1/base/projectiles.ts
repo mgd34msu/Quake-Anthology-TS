@@ -5,7 +5,7 @@ import type { Vec3 } from "../../../contracts/math.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { Q1Actor } from "../foundation/entity.ts";
 import type { Q1EntityServices } from "../foundation/entity-services.ts";
-import type { Q1Weapon } from "../foundation/types.ts";
+import type { Q1Weapon, Q1MessagePart } from "../foundation/types.ts";
 import { POINT, ZERO, length, normalize, vadd, vscale, vsub, weaponItem, yawFor } from "../foundation/types.ts";
 import type { BaseMonster } from "./monsters.ts";
 import { q1Creatures } from "./creatures.ts";
@@ -44,6 +44,38 @@ export interface BackpackContents {
   readonly avoidUnderwaterLightning?: boolean;
   readonly ownerPickupDelay?: number;
 }
+const backpackWeapons: Readonly<Partial<Record<Q1Weapon, { readonly classic: string; readonly localized: string }>>> = {
+  axe: { classic: "Axe", localized: "$qc_axe" }, shotgun: { classic: "Shotgun", localized: "$qc_shotgun" },
+  supershotgun: { classic: "Double-barrelled Shotgun", localized: "$qc_double_shotgun" }, nailgun: { classic: "Nailgun", localized: "$qc_nailgun" },
+  supernailgun: { classic: "Super Nailgun", localized: "$qc_super_nailgun" }, grenadelauncher: { classic: "Grenade Launcher", localized: "$qc_grenade_launcher" },
+  rocketlauncher: { classic: "Rocket Launcher", localized: "$qc_rocket_launcher" }, lightning: { classic: "Thunderbolt", localized: "$qc_thunderbolt" },
+  "hipnotic:laser": { classic: "Laser Cannon", localized: "$qc_laser_cannon" }, "hipnotic:proximity": { classic: "Proximity Gun", localized: "$qc_prox_gun" },
+  "hipnotic:mjolnir": { classic: "Mjolnir", localized: "$qc_mjolnir" },
+};
+
+/** items.qc composes one notice from its prefix, newly acquired weapon and backpack ammunition. */
+export function backpackMessage(contents: BackpackContents, edition: "classic" | "rerelease", newWeapon: boolean): { readonly text: string; readonly parts: readonly Q1MessagePart[] } {
+  const entries: { readonly classic: string; readonly localized: string; readonly count: number }[] = [
+    { classic: "shells", localized: "$qc_backpack_shells", count: contents.shells },
+    { classic: "nails", localized: "$qc_backpack_nails", count: contents.nails },
+    { classic: "rockets", localized: "$qc_backpack_rockets", count: contents.rockets },
+    { classic: "cells", localized: "$qc_backpack_cells", count: contents.cells },
+  ];
+  for (const extra of contents.extra ?? []) {
+    if (extra.item === "rogue:ammo/lava-nails") entries.push({ classic: "lava nails", localized: "$qc_backpack_lava_nails", count: extra.count });
+    else if (extra.item === "rogue:ammo/multi-rockets") entries.push({ classic: "multi rockets", localized: "$qc_backpack_multi_rockets", count: extra.count });
+    else if (extra.item === "rogue:ammo/plasma") entries.push({ classic: "plasma balls", localized: "$qc_backpack_plasma_balls", count: extra.count });
+  }
+  const weapon = newWeapon && contents.weapon !== null ? backpackWeapons[contents.weapon] : undefined;
+  const classic = [...(weapon === undefined ? [] : [`the ${weapon.classic}`]), ...entries.filter(entry => entry.count > 0).map(entry => `${entry.count} ${entry.classic}`)];
+  if (edition === "classic") return { text: `You get ${classic.join(", ")}`, parts: [] };
+  const parts: Q1MessagePart[] = [{ text: "$qc_backpack_got" }];
+  const items: Q1MessagePart[] = [...(weapon === undefined ? [] : [{ text: weapon.localized }]),
+    ...entries.filter(entry => entry.count > 0).map(entry => ({ text: entry.localized, args: [entry.count] }))];
+  for (const [index, item] of items.entries()) { if (index > 0) parts.push({ text: ", " }); parts.push(item); }
+  return { text: "$qc_backpack_got", parts };
+}
+
 export function dropBackpack(game: Q1EntityServices, origin: Vec3, contents: BackpackContents, launch?: { readonly origin: Vec3; readonly velocity: Vec3; readonly movement: "bounce" | "toss" }): Q1Actor | null {
   if (contents.shells + contents.nails + contents.rockets + contents.cells + (contents.extra?.reduce((total, entry) => total + entry.count, 0) ?? 0) === 0) return null;
   const pack = game.create("item_backpack"); pack.model = "progs/backpack.mdl"; pack.solid = "trigger"; pack.movement = launch?.movement ?? "toss";
@@ -69,8 +101,10 @@ function backpackTouch(game: Q1EntityServices, pack: Q1Actor, other: ActorId): u
     const player = game.player(other), actor = game.host.actors.resolveOwned(other);
     if (actor === null || !game.isPlayer(other) || game.health(other) <= 0 || !game.live(pack)) return undefined;
     if (pack.owner !== null && sameActor(other, pack.owner) && pack.nextThink - game.time > 120 - (contents.ownerPickupDelay ?? 0)) return undefined;
+    const newWeapon = weapon !== null && !(game.pickupAdmission?.owns(other, weaponItem(weapon)) ?? game.host.inventory.count(other, weaponItem(weapon)) > 0);
     const feedback = (): undefined => {
-      game.message(other, "$qc_backpack_got", false); game.sound(actor, "weapons/lock4.wav", "item"); game.effect("pickup", game.body(pack).origin, other);
+      const message = backpackMessage(contents, game.options.edition, newWeapon);
+      game.host.emit({ kind: "message", player: other, text: message.text, center: false, ...(message.parts.length === 0 ? {} : { parts: message.parts }) }); game.sound(actor, "weapons/lock4.wav", "item"); game.effect("pickup", game.body(pack).origin, other);
       return undefined;
     };
     const admission = game.pickupAdmission;

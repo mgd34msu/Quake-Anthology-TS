@@ -14,6 +14,7 @@ import { monsterAction, monsterJumpTouch } from "./monster-actions.ts";
 import { castLightning, throwGib, throwHead } from "./projectiles.ts";
 import { pathEndTime } from "../foundation/monsters.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
+import { monsterTargetEligible } from "../../monsters/target.ts";
 
 export interface BaseMonsterSource {
   readonly callbackPrefix: string;
@@ -62,6 +63,13 @@ export class BaseMonster {
 
   play(name: string): undefined {
     if (!this.game.live(this.entity)) return undefined;
+    if (this.game.health(this.entity.actor.id) > 0 && this.enemy !== null && !monsterTargetEligible(this.game.health(this.enemy), this.game.monsterTarget(this.enemy))) {
+      const previous = this.state.oldEnemy;
+      this.enemy = previous !== null && monsterTargetEligible(this.game.health(previous), this.game.monsterTarget(previous)) ? previous : null;
+      this.state.oldEnemy = null;
+      this.entity.attackState = "straight";
+      return this.play(this.enemy === null ? this.route() === null ? this.spec.stand : this.spec.walk : this.spec.run);
+    }
     const frame = this.source?.frames?.get(name) ?? monsterFrames.get(name); if (frame === undefined) throw new Error(`Missing Q1 source animation ${name}`);
     this.currentFrame = name; this.nextFrame = frame.next; this.entity.frame = frame.frame;
     this.game.schedule(this.entity, 0.1, this.game.named.action(this.entity, `${this.source?.callbackPrefix ?? "base"}:monster_frame`));
@@ -174,9 +182,10 @@ export class BaseMonster {
   }
   run(distance: number): undefined {
     const { game, entity } = this;
-    if (this.enemy === null || game.health(this.enemy) <= 0) {
-      if (this.state.oldEnemy !== null && game.health(this.state.oldEnemy) > 0) { this.enemy = this.state.oldEnemy; this.state.oldEnemy = null; }
-      else { this.enemy = null; return this.play(this.route() === null ? this.spec.stand : this.spec.walk); }
+    if (this.enemy === null || !monsterTargetEligible(game.health(this.enemy), game.monsterTarget(this.enemy))) {
+      entity.attackState = "straight";
+      if (this.state.oldEnemy !== null && monsterTargetEligible(game.health(this.state.oldEnemy), game.monsterTarget(this.state.oldEnemy))) { this.enemy = this.state.oldEnemy; this.state.oldEnemy = null; }
+      else { this.enemy = null; this.state.oldEnemy = null; return this.play(this.route() === null ? this.spec.stand : this.spec.walk); }
     }
     const enemy = this.enemy; if (enemy === null) return undefined;
     const combatRoute = game.monsterMissions.get(entity.actor.id)?.combatRoute();

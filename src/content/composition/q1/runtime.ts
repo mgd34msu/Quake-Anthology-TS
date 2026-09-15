@@ -141,7 +141,7 @@ export class Q1SourceComposition {
     if (this.addon !== null && handleMg3ItemImpulse(this.addon, actor, client.impulse, text => this.services.emit({ kind: "developer-message", text }))) { client.impulse = 0; return true; }
     if (this.addon !== null && handleQ1AddonImpulse(this.addon, actor, client.impulse)) { client.impulse = 0; return true; }
     if (weapons !== null && weaponPlayer !== null && q1WeaponImpulse(weapons, weaponPlayer, client.impulse)) { client.impulse = 0; return true; }
-    if (player === null || weapons === null) return false;
+    if (player === null) return false;
     if (baseQ1Impulse(this, player, client.impulse)) { client.impulse = 0; return true; }
     client.impulse = 0; return true;
   }

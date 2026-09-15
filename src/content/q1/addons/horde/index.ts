@@ -76,7 +76,7 @@ export class Q1Horde {
       if (entity.number("horde.countedDeath") !== 0) return undefined; context.setNumber(entity, "horde.countedDeath", 1);
       if (attacker !== null && game.isPlayer(attacker)) {
         const spree = context.playerNumber(attacker, "killspree") + 1; context.setPlayerNumber(attacker, "killspree", spree); context.setPlayerNumber(attacker, "killtime", game.time + 2);
-        if (spree > 1) game.message(attacker, spree >= 14 ? `$qc_horde_streak_generic ${spree}` : `$qc_horde_streak_${spree}`, false);
+        if (spree > 1) game.message(attacker, spree >= 14 ? "$qc_horde_streak_generic" : `$qc_horde_streak_${spree}`, false, spree >= 14 ? [spree] : []);
       }
       spawnHordePowerup(this, entity);
       if (attacker !== null && game.isPlayer(attacker)) services.addScore(attacker, 1);
@@ -98,7 +98,7 @@ export class Q1Horde {
     game.registerPlayerExtension({ id: "mg1:horde", attach: (_game, player) => { this.restoreKeys(player.actor.id); return undefined; }, afterPhysics: (_game, player) => {
       const spree = context.playerNumber(player.actor.id, "killspree");
       if (spree > 0 && game.time > context.playerNumber(player.actor.id, "killtime")) {
-        if (spree > 1) { const score = Math.ceil(spree * spree / 2); game.message(player.actor.id, `$qc_horde_streak_ended ${score}`, false); services.addScore(player.actor.id, score); }
+        if (spree > 1) { const score = Math.ceil(spree * spree / 2); game.message(player.actor.id, "$qc_horde_streak_ended", false, [score]); services.addScore(player.actor.id, score); }
         context.setPlayerNumber(player.actor.id, "killspree", 0);
       }
       return undefined;

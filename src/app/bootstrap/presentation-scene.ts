@@ -122,6 +122,7 @@ export class ApplicationWorldScene {
         const transform = { origin: weaponViewOrigin(source), axis, scale: source.scale };
         const alpha = source.alpha ?? 1;
         if (asset.brushScene === this.assets.world) inlineModels.push({ model: asset.model.model, transform, animationFrame: source.frame,
+          alternateAnimation: source.family === "q1" && source.frame !== 0,
           entityRGBA: { x: 255, y: 255, z: 255, w: alpha * 255 }, castsShadow: alpha === 1 });
         else {
           if (asset.brushScene === null) throw new Error(`Brush model ${source.path} has no prepared scene`);
@@ -202,6 +203,7 @@ export class ApplicationWorldScene {
     }
     if (this.flares.length > 0) modelOperations.push(sequenceDrawGroup("translucent", this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath))));
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
+      alternateAnimation: brush.scene.map.kind === "q1-bsp" && brush.frame !== 0,
       materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
     const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
     return this.assets.world.prepareView({ ...input, operations: [...operations.filter(polygon), ...brushes, ...modelOperations, ...operations.filter(operation => !polygon(operation))] });

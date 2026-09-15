@@ -51,11 +51,12 @@ export interface Q1TraceRequest {
 export interface Q1Basis { readonly forward: Vec3; readonly right: Vec3; readonly up: Vec3; }
 export type Q1CharacterAttack = { readonly kind: "axe"; readonly variant: 0 | 1 | 2 | 3 } | { readonly kind: "shotgun" | "rocket" | "nail" | "lightning" };
 
+export interface Q1MessagePart { readonly text: string; readonly args?: readonly (string | number)[]; }
 export type Q1Event =
   | { readonly kind: "stop-sound"; readonly actor: ActorId; readonly channel: number }
   | { readonly kind: "sound"; readonly origin?: Vec3; readonly actor: ActorId; readonly path: string; readonly channel: Q1SoundChannel; readonly attenuation: number; readonly volume: number }
   | { readonly kind: "ambient"; readonly origin: Vec3; readonly path: string; readonly volume: number; readonly attenuation: number }
-  | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[] }
+  | { readonly kind: "message"; readonly player: ActorId; readonly text: string; readonly center: boolean; readonly args?: readonly (string | number)[]; readonly parts?: readonly Q1MessagePart[] }
   | { readonly kind: "effect"; readonly effect: "blood" | "gunshot" | "spike" | "superspike" | "explosion" | "teleport" | "muzzleflash" | "pickup" | "lava-splash" | "tar-explosion" | "meat-spray" | "wizard-spike" | "knight-spike"; readonly actor: ActorId | null; readonly origin: Vec3; readonly amount: number }
   | { readonly kind: "colored-explosion"; readonly origin: Vec3; readonly colorStart: number; readonly colorLength: number }
   | { readonly kind: "static-model"; readonly path: string; readonly frame: number; readonly colorMap: number; readonly skin: number; readonly origin: Vec3; readonly angles: Vec3 }

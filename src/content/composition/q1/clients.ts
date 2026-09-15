@@ -9,6 +9,7 @@ export class Q1SourceClient {
   team = 0;
   observer = false;
   noTarget = false;
+  godMode = false;
   impulse = 0;
   use = false;
   deathRecorded = false;
@@ -50,6 +51,7 @@ export class Q1SourceClients {
   teamColor(actor: ActorId): number { return this.require(actor).team; }
   spawned(actor: ActorId): undefined {
     const client = this.require(actor);
+    client.godMode = false;
     if (this.game.options.edition === "rerelease" && this.program !== "ctf") {
       if (this.game.options.coop) client.team = 1;
       else if (this.program === "id1") client.team = -1;
@@ -68,7 +70,7 @@ export class Q1SourceClients {
   capture(): Uint8Array {
     return encodeCheckpointValue({ version: 1, program: this.program, redCaptures: this.redCaptures, blueCaptures: this.blueCaptures, clients: [...this.records.values()].map(client => ({
       actor: { slot: client.actor.id.slot, generation: client.actor.id.generation }, slot: client.slot, userinfo: [...client.userinfo].map(([key, value]) => ({ key, value })), frags: client.frags, team: client.team,
-      observer: client.observer, noTarget: client.noTarget, impulse: client.impulse, use: client.use, deathRecorded: client.deathRecorded, respawnRequestedAt: client.respawnRequestedAt,
+      observer: client.observer, noTarget: client.noTarget, godMode: client.godMode, impulse: client.impulse, use: client.use, deathRecorded: client.deathRecorded, respawnRequestedAt: client.respawnRequestedAt,
     })) });
   }
   restore(bytes: Uint8Array): undefined {
@@ -81,6 +83,7 @@ export class Q1SourceClients {
       const client = new Q1SourceClient(actor, slot, userinfo); client.frags = saved.field("frags").finite(); client.observer = saved.field("observer").boolean(); client.impulse = saved.field("impulse").integer(0); client.use = saved.field("use").boolean(); client.deathRecorded = saved.field("deathRecorded").boolean();
       client.respawnRequestedAt = saved.field("respawnRequestedAt").finite();
       client.noTarget = saved.field("noTarget").boolean();
+      const godMode = saved.field("godMode"); client.godMode = godMode.value === undefined ? false : godMode.boolean();
       client.team = saved.field("team").finite();
       this.records.set(actor, client); return undefined;
     }); return undefined;

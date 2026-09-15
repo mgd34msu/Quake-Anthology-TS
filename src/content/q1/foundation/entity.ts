@@ -1,3 +1,4 @@
+import { q1EntityString } from './text.ts';
 /* Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
@@ -89,7 +90,7 @@ export class Q1Actor {
   pathEnd: (() => undefined) | null = null;
 
   constructor(readonly actor: OwnedActor, public classname: string, readonly sourceOrdinal: number | null, private readonly combat: GameplayAuthority, source?: Q1Entity) {
-    if (source !== undefined) for (const property of source.properties) this.fields.set(property.key, property.value);
+    if (source !== undefined) for (const property of source.properties) this.fields.set(property.key, q1EntityString(property.value));
     this.model = this.text("model"); this.originalModel = this.model;
     this.target = this.text("target"); this.targetname = this.text("targetname"); this.killtarget = this.text("killtarget");
     this.message = this.text("message"); this.delay = this.number("delay"); this.spawnflags = this.number("spawnflags");

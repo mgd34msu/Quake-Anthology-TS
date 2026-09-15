@@ -42,6 +42,36 @@ test("LLM validates the entire batch before performing its first action", async 
   expect(f.effects).toHaveLength(0); expect(f.output[1]?.text).toContain("Unknown command"); f.remove();
 });
 
+test("LLM ask requests plain text and grounds engine advice in the live registry", async () => {
+  const f = fixture("q2-classic");
+  f.send('llm_ask "How do I adjust view angle?"');
+  const instructions = f.requests[0]?.input.instructions ?? "";
+  expect(instructions).toContain("plain-text game console without Markdown rendering");
+  expect(instructions).toContain("Do not use Markdown code fences");
+  expect(instructions).toContain("use only command and setting names from the registered catalog");
+  expect(instructions).toContain("say it is not registered");
+  expect(instructions).toContain("cvar:sensitivity");
+  expect(instructions).not.toContain("cvar:view_angle");
+  f.requests[0]?.resolve("That setting is not registered."); await settle();
+  f.cvars.register("view_angle", "90", 0);
+  f.send('llm_ask "How do I adjust view angle?"');
+  expect(f.requests[1]?.input.instructions).toContain("cvar:view_angle");
+  expect(f.requests[1]?.input.instructions).not.toContain("SECRET-MUST-STAY-LOCAL");
+  f.remove();
+});
+
+test("LLM ask permits general questions and preserves code text without executing it", async () => {
+  const f = fixture();
+  f.send('llm_ask "Explain shell command substitution"');
+  expect(f.requests[0]?.input.instructions).toContain("including general questions unrelated to the game");
+  const answer = 'Shell substitution uses $(date) or `date`.\n  echo "hello"\ngame_action\nsensitivity 9';
+  f.requests[0]?.resolve(answer); await settle();
+  expect(f.output[1]?.text).toBe(answer + "\n");
+  expect(f.effects).toHaveLength(0);
+  expect(f.cvars.variableString("sensitivity")).toBe("3");
+  f.remove();
+});
+
 test("LLM executes registered game commands and cvars in the original context, preserving quoted semicolons", async () => {
   const f = fixture(); let literal = "";
   f.commands.register("record", invocation => { literal = invocation.args[0] ?? ""; return undefined; });
