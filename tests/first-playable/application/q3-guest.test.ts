@@ -418,6 +418,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         expect(source.state.getUserCommand(idle.seat.client.id.slot)?.forwardmove).toBe(0);
         return trace;
       }
+      for (const local of app.localPlayers) app.queueCommand('score', [], local.seat.id);
       const continuous = await suffix(app);
       await app.close(); app = null;
       expect(() => firstView.q3Client?.source.current()).toThrow('retired');

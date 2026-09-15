@@ -1,3 +1,9 @@
+import { ApplicationQ3Client } from "../../../src/app/bootstrap/q3-client.ts";
+import { GameCommandRuntime } from "../../../src/content/q3/team-arena/commands.ts";
+import { BaseScoreboard } from "../../../src/content/q3/presentation/scoreboard.ts";
+import { MoveType } from "../../../src/content/q3/base/shared/definitions.ts";
+import { ApplicationAudio } from "../../../src/app/bootstrap/audio.ts";
+import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -91,4 +97,64 @@ test("native local autosave waits for a completed frame and restore preserves it
     await app.step(50);
     expect(await Bun.file(path).bytes()).toEqual(bytes);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
+}, 120000);
+
+
+test("restored native dead scoreboard requests saved player rows after initial open and committed load", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "application-restored-scoreboard-"));
+  const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3", "--mode", "deathmatch",
+    "--dedicated", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", directory]);
+  if (parsed.kind !== "run") throw new Error("Expected native scoreboard launch");
+  let app: Application | null = null;
+  const draws: { scores: number; clients: number[]; dead: boolean; requested: boolean }[] = [];
+  const scoreboardRequests = spyOn(GameCommandRuntime.prototype, "scoreboard");
+  const received: { client: number; text: string; seat: number }[] = [];
+  const originalReceive = ApplicationQ3Client.prototype.receive;
+  const receive = spyOn(ApplicationQ3Client.prototype, "receive").mockImplementation(function(this: ApplicationQ3Client, state, events, commands) {
+    for (const event of events) if (event.kind === "q3-source" && event.event.kind === "server-command")
+      received.push({ client: event.event.client, text: event.event.text, seat: this.options.local.player.seat.client.id.slot });
+    return originalReceive.call(this, state, events, commands);
+  });
+  const originalDraw = BaseScoreboard.prototype.draw;
+  const draw = spyOn(BaseScoreboard.prototype, "draw").mockImplementation(async function(this: BaseScoreboard) {
+    draws.push({ scores: this.state.numScores, clients: this.state.scores.slice(0, this.state.numScores).map(score => score.client),
+      dead: this.state.predictedPlayerState.pmType === MoveType.PM_DEAD, requested: this.state.showScores });
+    return originalDraw.call(this);
+  });
+  try {
+    app = await Application.open(parsed.options, { print: () => undefined, saveDirectory: join(directory, "saves") });
+    const human = app.session.createClient(0), player = app.simulation.admitPlayer(human.id);
+    app.queueCommand("addbot", ["sarge", "3"], null);
+    for (let frame = 0; frame < 60; frame++) await app.step(100);
+    expect(app.botClients).toHaveLength(1);
+    app.simulation.playerCommand(player.actor, "kill", []);
+    await app.step(100);
+    expect(app.simulation.playerUi(player.actor).health).toBeLessThanOrEqual(0);
+    const path = join(directory, "dead.sav"); await app.saveGame(path);
+    const image = await readSaveImage(path);
+    await app.close(); app = null;
+    scoreboardRequests.mockClear();
+    app = await Application.open({ ...parsed.options, dedicated: false }, { print: () => undefined }, image.recipe, undefined, image);
+    await app.step(100); await app.step(100);
+    expect(scoreboardRequests).toHaveBeenCalledTimes(1);
+    expect(received.some(event => event.client === 0 && event.seat === 0 && event.text.startsWith("scores 2 "))).toBe(true);
+    expect(received.some(event => event.text.includes("server: score"))).toBe(false);
+    expect(draws.filter(value => value.dead && !value.requested).map(value => ({ scores: value.scores, clients: [...value.clients].sort() })))
+      .toContainEqual({ scores: 2, clients: [0, 1] });
+    draws.length = 0;
+    scoreboardRequests.mockClear();
+    const original = app.simulation;
+    const failure = spyOn(ApplicationAudio.prototype, "prepareEnvironment").mockRejectedValueOnce(new Error("injected scoreboard candidate failure"));
+    try { await expect(app.loadGame(path)).rejects.toThrow("injected scoreboard candidate failure"); }
+    finally { failure.mockRestore(); }
+    expect(app.simulation).toBe(original);
+    await app.step(100);
+    expect(scoreboardRequests).not.toHaveBeenCalled();
+    draws.length = 0; received.length = 0;
+    await app.loadGame(path);
+    await app.step(100); await app.step(100);
+    expect(scoreboardRequests).toHaveBeenCalledTimes(1);
+    expect(draws.filter(value => value.dead && !value.requested).map(value => ({ scores: value.scores, clients: [...value.clients].sort() })))
+      .toContainEqual({ scores: 2, clients: [0, 1] });
+  } finally { draw.mockRestore(); receive.mockRestore(); scoreboardRequests.mockRestore(); await app?.close(); await rm(directory, { recursive: true, force: true }); }
 }, 120000);
