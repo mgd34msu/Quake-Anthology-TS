@@ -61,7 +61,6 @@ export interface SimulationOptions {
   readonly serverProfile?: import("../../../settings/server/types.ts").ServerProfile;
   readonly sourceRegistry?: import("../../../core/cvars/index.ts").CvarRegistry;
   readonly sourceArchive?: readonly CvarArchiveEntry[];
-  readonly q1Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly q2Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly q3Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialSourceMilliseconds?: number;

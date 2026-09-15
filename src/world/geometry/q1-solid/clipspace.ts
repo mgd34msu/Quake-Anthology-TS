@@ -2,7 +2,7 @@
  * id Software's brush/winding representation. GPL-2.0-or-later. */
 import type { Bounds, Plane } from "../../../contracts/math.ts";
 import type { Q1ClipChild, Q1Hull } from "../../../contracts/scene.ts";
-import { add, AXES, boxCell, boxSeparatingPlanes, clipCell, dot, negatePlane, scale, sub } from "./polyhedron.ts";
+import { add, AXES, boxCell, boxSeparatingPlanes, dot, scale, splitCell, sub } from "./polyhedron.ts";
 import type { ConvexCell } from "./polyhedron.ts";
 
 function *freeCells(hull: Q1Hull, envelope: Bounds): Generator<ConvexCell, void, undefined> {
@@ -15,7 +15,7 @@ function *freeCells(hull: Q1Hull, envelope: Bounds): Generator<ConvexCell, void,
     if (next.depth > hull.clipnodes.length) throw new RangeError("Cycle in Quake clip-space BSP");
     const node = hull.clipnodes[next.child.index], plane = node === undefined ? undefined : hull.planes[node.plane];
     if (node === undefined || plane === undefined) throw new RangeError("Invalid Quake clip-space node");
-    const front = clipCell(next.cell, negatePlane(plane)), back = clipCell(next.cell, plane);
+    const { front, back } = splitCell(next.cell, plane);
     if (back !== null) stack.push({ child: node.children[1], cell: back, depth: next.depth + 1 });
     if (front !== null) stack.push({ child: node.children[0], cell: front, depth: next.depth + 1 });
   }
@@ -26,9 +26,9 @@ function subtractRegion(cell: ConvexCell, planes: readonly Plane[]): readonly Co
   const outside: ConvexCell[] = [];
   let inside: ConvexCell | null = cell;
   for (const plane of planes) {
-    const remainder = clipCell(inside, negatePlane(plane));
+    const { front: remainder, back } = splitCell(inside, plane);
     if (remainder !== null) outside.push(remainder);
-    inside = clipCell(inside, plane);
+    inside = back;
     if (inside === null) break;
   }
   return outside;

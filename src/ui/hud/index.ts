@@ -154,12 +154,18 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   const fill = (rect: Rect, tint: Vec4): void => { commands.push({ command: { kind: "fill", rect, color: tint }, anchor, scale: groupScale }); };
   const state = options.messages.active(context.timeMilliseconds);
   if (preferences.crosshair && data.crosshair.visible && data.help === null && data.inventory === null && data.wheel === null) {
+    const first = commands.length;
     const size = preferences.crosshairSize;
     if (data.crosshair.image !== null) image(data.crosshair.image, { x: 320 - size / 2, y: 240 - size / 2, width: size, height: size }, data.crosshair.color);
     else { fill({ x: 320 - size / 2, y: 239, width: size, height: 2 }, data.crosshair.color); fill({ x: 319, y: 240 - size / 2, width: 2, height: size }, data.crosshair.color); }
     if (data.hitMarker !== null && data.hitMarker.expiresMilliseconds > context.timeMilliseconds && !preferences.reducedFlashes) {
       const opacity = Math.max(0, Math.min(1, (data.hitMarker.expiresMilliseconds - context.timeMilliseconds) / 150));
       for (const x of [-1, 1]) for (const y of [-1, 1]) fill({ x: 320 + x * (size + 2) - 2, y: 240 + y * (size + 2) - 2, width: 4, height: 4 }, { ...accent, w: opacity });
+    }
+    if (options.camera !== null) {
+      const area = options.camera.viewport, scale = fitUi(context.binding.safeArea).scale * groupScale;
+      const transform = { x: area.x + area.width / 2 - 320 * scale, y: area.y + area.height / 2 - 240 * scale, scale };
+      for (const [index, command] of commands.slice(first).entries()) commands[first + index] = { ...command, transform };
     }
   }
   if (data.vitals.length > 0) {
@@ -279,7 +285,7 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   result.push(...commands.map(item => transformUi(item.command, item.transform ?? { scale: transform.scale * item.scale,
     x: transform.x + item.anchor.x * transform.scale * (1 - item.scale), y: transform.y + item.anchor.y * transform.scale * (1 - item.scale) })));
   if (options.camera !== null) {
-    const project = createViewProjector(options.camera), area = context.binding.safeArea;
+    const project = createViewProjector(options.camera), area = options.camera.viewport;
     for (const point of state.points) {
       const clip = project(point.origin), divisor = clip.w === 0 ? 1 : clip.w;
       let x = area.x + (clip.x / divisor * 0.5 + 0.5) * area.width, y = area.y + (-clip.y / divisor * 0.5 + 0.5) * area.height;

@@ -46,6 +46,17 @@ export interface CvarValueBinding {
   changed(value: string): void;
 }
 
+export interface CvarAlias {
+  readonly name: string;
+  readonly target: string;
+  readonly documentation: CommandDocumentation;
+  readonly conversion: { readonly kind: "identity" } | {
+    readonly kind: "converted";
+    read(value: string): string;
+    write(value: string): { readonly kind: "value"; readonly value: string } | { readonly kind: "invalid"; readonly message: string };
+  };
+}
+
 interface CvarState {
   readonly index: number;
   readonly name: string;
@@ -119,7 +130,7 @@ class RegistryVmCvar implements VmCvar {
   }
 }
 
-function snapshot(state: CvarState): CvarSnapshot {
+function snapshot(state: CvarRead): CvarSnapshot {
   return Object.freeze({ name: state.name, value: state.value, resetValue: state.resetValue,
     latchedValue: state.latchedValue, flags: state.flags, modified: state.modified,
     modificationCount: state.modificationCount, numericValue: state.numericValue, integerValue: state.integerValue });
@@ -145,6 +156,9 @@ export class CvarRegistry {
   private readonly consoleVariables = new Set<string>();
   private readonly documents = new Map<string, CommandDocumentation>();
   private readonly valueBindings = new Map<string, CvarValueBinding>();
+  private readonly aliases = new Map<string, CvarAlias>();
+  private readonly aliasReads = new Map<string, CvarRead>();
+  private readonly aliasHandles = new Map<number, string>();
 
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
@@ -152,6 +166,8 @@ export class CvarRegistry {
   }
 
   captureSaveState() { return { dialect: this.dialect, ...this.captureRegistryState() }; }
+  /** Stage a new world without consuming or replaying the current world's pending effects. */
+  captureWorldTransferState() { return { dialect: this.dialect, ...this.snapshotRegistryState() }; }
   restoreSaveState(value: unknown): void {
     new SaveReader(value, "cvars").field("dialect").literal(this.dialect);
     this.restoreRegistryState(value);
@@ -166,10 +182,14 @@ export class CvarRegistry {
   }
   private captureRegistryState() {
     if (this.effects.length !== 0) throw new Error("Cvar save requires drained effects");
+    return this.snapshotRegistryState();
+  }
+  private snapshotRegistryState() {
     return { variables: this.indexes.map(state => state === undefined ? null : { ...snapshot(state), latchedValue: state.latchedValue ?? null }),
-      order: this.snapshots().map(state => state.name), changedFlags: this.changedFlags, cheatsEnabled: this.cheatsEnabled,
+      order: this.canonicalSnapshots().map(state => state.name), changedFlags: this.changedFlags, cheatsEnabled: this.cheatsEnabled,
       serverActive: this.serverActive, clientConnected: this.clientConnected, highCharacters: this.highCharacters,
-      clientInfo: this.clientInfo, serverInfo: this.serverInfo, userinfoDirty: this.userinfoDirty, consoleVariables: [...this.consoleVariables] };
+      clientInfo: this.clientInfo, serverInfo: this.serverInfo, userinfoDirty: this.userinfoDirty, consoleVariables: [...this.consoleVariables],
+      ...(this.aliasHandles.size === 0 ? {} : { aliasHandles: [...this.aliasHandles].map(([handle, name]) => ({ handle, name })) }) };
   }
   private restoreRegistryState(value: unknown): void {
     const reader = new SaveReader(value, "cvars");
@@ -180,6 +200,7 @@ export class CvarRegistry {
     const variables = new Map<string, CvarState>(), indexes: (CvarState | undefined)[] = [];
     for (const [index, saved] of states.entries()) {
       if (saved === null) { indexes.push(undefined); continue; }
+      if (this.aliases.has(this.key(saved.name))) reader.fail(`saved cvar ${saved.name} conflicts with an alias`);
       if (variables.has(this.key(saved.name))) reader.fail("duplicate cvar");
       const state: CvarState = { ...saved, index, next: undefined };
       indexes.push(state); variables.set(this.key(state.name), state);
@@ -196,6 +217,15 @@ export class CvarRegistry {
     const highCharacters = reader.field("highCharacters").boolean(), clientInfo = reader.field("clientInfo").string(), serverInfo = reader.field("serverInfo").string();
     const userinfoDirty = reader.field("userinfoDirty").boolean(), consoleVariables = reader.field("consoleVariables").list(item => item.string());
     if (new Set(consoleVariables).size !== consoleVariables.length) reader.fail("duplicate console variable");
+    const handlesReader = reader.field("aliasHandles"), handles = handlesReader.value === undefined ? [] : handlesReader.list(item => ({
+      handle: item.field("handle").integer(0), name: item.field("name").string() }));
+    const aliasHandles = new Map<number, string>();
+    for (const { handle, name } of handles) {
+      const alias = this.aliases.get(this.key(name));
+      if (handle >= indexes.length || indexes[handle] !== undefined || aliasHandles.has(handle) || alias === undefined
+        || alias.conversion.kind !== "converted" || !variables.has(this.key(alias.target))) reader.fail("invalid cvar alias handle");
+      aliasHandles.set(handle, name);
+    }
     for (const [name, binding] of this.valueBindings) {
       const state = variables.get(name);
       if (state === undefined) reader.fail(`missing bound cvar ${name}`);
@@ -204,6 +234,7 @@ export class CvarRegistry {
       }
     }
     this.variables.clear(); for (const [key, state] of variables) this.variables.set(key, state);
+    this.aliasHandles.clear(); for (const [handle, name] of aliasHandles) this.aliasHandles.set(handle, name);
     this.indexes.splice(0, this.indexes.length, ...indexes); this.first = first; this.effects = [];
     this.changedFlags = changedFlags; this.cheatsEnabled = cheatsEnabled; this.serverActive = serverActive; this.clientConnected = clientConnected;
     this.highCharacters = highCharacters; this.clientInfo = clientInfo; this.serverInfo = serverInfo; this.userinfoDirty = userinfoDirty;
@@ -221,8 +252,44 @@ export class CvarRegistry {
     return { numericValue, integerValue: nativeAtoi(value) };
   }
 
-  find(name: string): CvarRead | undefined { return this.variables.get(this.key(name)); }
+  registerAlias(alias: CvarAlias): void {
+    const key = this.key(alias.name), target = this.key(alias.target);
+    if (key === target || this.aliases.has(target)) throw new Error(`Cvar alias ${alias.name} must target a canonical variable, not an alias or itself`);
+    if (this.variables.has(key) || this.aliases.has(key) || this.options.commandExists?.(alias.name)) throw new Error(`Cvar alias ${alias.name} is already declared`);
+    if (!this.variables.has(target)) throw new Error(`Cvar alias ${alias.name} target ${alias.target} is not registered`);
+    this.rejectAliasInfoFlags(alias.name, this.variables.get(target)?.flags ?? 0);
+    this.aliases.set(key, alias);
+  }
+  canonicalName(name: string): string { return this.aliases.get(this.key(name))?.target ?? name; }
+  private rejectAliasInfoFlags(name: string, flags: number): void {
+    if ((flags & (CvarFlag.UserInfo | CvarFlag.ServerInfo | (this.dialect === "q3" ? CvarFlag.SystemInfo : 0))) !== 0)
+      throw new Error(`Cvar alias ${name} requires an explicit protocol info-key mapping`);
+  }
+  private aliasValue(alias: CvarAlias, value: string): string { return alias.conversion.kind === "identity" ? value : alias.conversion.read(value); }
+  private aliasWrite(alias: CvarAlias, value: string): string | undefined {
+    if (alias.conversion.kind === "identity") return value;
+    const converted = alias.conversion.write(value);
+    if (converted.kind === "value") return converted.value;
+    this.print(`${alias.name}: ${converted.message}\n`); return undefined;
+  }
+  find(name: string): CvarRead | undefined {
+    const key = this.key(name), alias = this.aliases.get(key);
+    if (alias === undefined) return this.variables.get(this.key(name));
+    const state = this.variables.get(this.key(alias.target));
+    if (state === undefined) return undefined;
+    const existing = this.aliasReads.get(key); if (existing !== undefined) return existing;
+    const current = () => this.variables.get(this.key(alias.target)) ?? state;
+    const project = (value: string) => this.aliasValue(alias, value), numbers = (value: string) => this.numbers(value);
+    const read = Object.freeze({ name: alias.name,
+      get value() { return project(current().value); }, get resetValue() { return project(current().resetValue); },
+      get latchedValue() { const value = current().latchedValue; return value === undefined ? undefined : project(value); },
+      get flags() { return current().flags; }, get modified() { return current().modified; }, get modificationCount() { return current().modificationCount; },
+      get numericValue() { return numbers(project(current().value)).numericValue; }, get integerValue() { return numbers(project(current().value)).integerValue; } });
+    this.aliasReads.set(key, read); return read;
+  }
+  isConsoleCreated(name: string): boolean { return this.consoleVariables.has(this.key(this.canonicalName(name))); }
   bindValue(name: string, binding: CvarValueBinding): () => void {
+    if (this.aliases.has(this.key(name))) throw new Error(`Bind the canonical cvar ${this.canonicalName(name)} instead of alias ${name}`);
     const key = this.key(name), state = this.variables.get(key);
     if (state === undefined) throw new Error(`Cannot bind unregistered cvar ${name}`);
     if (this.valueBindings.has(key)) throw new Error(`Cvar ${name} already has a value binding`);
@@ -241,8 +308,8 @@ export class CvarRegistry {
     if (this.find(name) === undefined) throw new Error(`Cannot document unregistered cvar ${name}`);
     this.documents.set(this.key(name), documentation);
   }
-  documentation(name: string): CommandDocumentation | undefined { return this.find(name) === undefined ? undefined : this.documents.get(this.key(name)); }
-  get(name: string): CvarSnapshot | undefined { const state = this.variables.get(this.key(name)); return state === undefined ? undefined : snapshot(state); }
+  documentation(name: string): CommandDocumentation | undefined { return this.find(name) === undefined ? undefined : this.documents.get(this.key(name)) ?? this.aliases.get(this.key(name))?.documentation; }
+  get(name: string): CvarSnapshot | undefined { const state = this.find(name); return state === undefined ? undefined : snapshot(state); }
   variableString(name: string): string { return this.find(name)?.value ?? ""; }
   variableValue(name: string): number { return this.find(name)?.numericValue ?? 0; }
   setServerActive(active: boolean): void { this.serverActive = active; }
@@ -251,6 +318,8 @@ export class CvarRegistry {
 
   register(nameInput: string, defaultInput: string, flags = 0): CvarSnapshot | undefined {
     let name = sourceCommandText(nameInput);
+    // A donor declaration of an alias must not replace the canonical default or policy.
+    if (this.aliases.has(this.key(name))) { this.rejectAliasInfoFlags(name, flags); return this.get(name); }
     const defaultValue = sourceCommandText(defaultInput);
     if (!this.validBoundValue(name, defaultValue)) return this.get(name);
     if (this.dialect === "q3" && !validInfo(name)) { this.print(`invalid cvar name string: ${name}\n`); name = "BADNAME"; }
@@ -305,6 +374,12 @@ export class CvarRegistry {
 
   set(nameInput: string, valueInput: string, force = false): CvarSnapshot | undefined {
     let name = sourceCommandText(nameInput);
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined) {
+      const value = this.aliasWrite(alias, sourceCommandText(valueInput));
+      if (value === undefined || this.set(alias.target, value, force) === undefined) return undefined;
+      return this.get(name);
+    }
     if (this.dialect === "q3" && !validInfo(name)) { this.print(`invalid cvar name string: ${name}\n`); name = "BADNAME"; }
     const value = sourceCommandText(valueInput), state = this.variables.get(this.key(name));
     if (!this.validBoundValue(name, value)) return undefined;
@@ -366,6 +441,12 @@ export class CvarRegistry {
   }
 
   setConsole(name: string, value: string): CvarSnapshot | undefined {
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined) {
+      const converted = this.aliasWrite(alias, sourceCommandText(value));
+      if (converted === undefined || this.setConsole(alias.target, converted) === undefined) return undefined;
+      return this.get(name);
+    }
     const state = this.variables.get(this.key(name));
     if (isQ2(this.dialect) && state !== undefined && state.value === value) {
       state.latchedValue = undefined;
@@ -376,6 +457,13 @@ export class CvarRegistry {
   }
 
   setCommandFlags(name: string, value: string, kind: "archive" | "userinfo" | "serverinfo"): void {
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined) {
+      if (kind !== "archive") { this.print(`Cvar alias ${name} requires an explicit protocol info-key mapping\n`); return; }
+      const converted = this.aliasWrite(alias, sourceCommandText(value));
+      if (converted !== undefined) this.setCommandFlags(alias.target, converted, kind);
+      return;
+    }
     if (!this.validBoundValue(name, sourceCommandText(value))) return;
     const q2 = isQ2(this.dialect);
     const flag = kind === "archive" ? q2 ? Q2CvarFlag.Archive : CvarFlag.Archive
@@ -418,6 +506,13 @@ export class CvarRegistry {
 
   fullSet(name: string, value: string, flags: number): CvarSnapshot | undefined {
     if (!isQ2(this.dialect)) throw new Error("Cvar_FullSet belongs to Quake II");
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined) {
+      this.rejectAliasInfoFlags(name, flags);
+      const converted = this.aliasWrite(alias, sourceCommandText(value));
+      if (converted === undefined || this.fullSet(alias.target, converted, flags) === undefined) return undefined;
+      return this.get(name);
+    }
     const state = this.variables.get(this.key(name));
     if (!this.validBoundValue(name, sourceCommandText(value))) return state === undefined ? undefined : snapshot(state);
     if (state === undefined) return this.register(name, value, flags);
@@ -438,6 +533,13 @@ export class CvarRegistry {
 
   /** Host configuration can defer a value without changing native cvar declaration flags. */
   stage(name: string, input: string): CvarSnapshot {
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined) {
+      const value = this.aliasWrite(alias, sourceCommandText(input));
+      if (value !== undefined) this.stage(alias.target, value);
+      const projected = this.get(name); if (projected === undefined) throw new Error(`Cannot stage an unregistered cvar ${name}`);
+      return projected;
+    }
     const state = this.variables.get(this.key(name)), value = sourceCommandText(input);
     if (state === undefined) throw new Error(`Cannot stage an unregistered cvar ${name}`);
     if (!this.validBoundValue(name, value)) return snapshot(state);
@@ -453,6 +555,7 @@ export class CvarRegistry {
   }
 
   applyLatched(name?: string): readonly CvarSnapshot[] {
+    if (name !== undefined) name = this.canonicalName(name);
     const changed: CvarSnapshot[] = [];
     for (let state = this.first; state !== undefined; state = state.next) {
       if ((name !== undefined && this.key(state.name) !== this.key(name)) || state.latchedValue === undefined) continue;
@@ -497,9 +600,17 @@ export class CvarRegistry {
     }
   }
 
-  snapshots(flags = 0): readonly CvarSnapshot[] {
+  canonicalSnapshots(flags = 0): readonly CvarSnapshot[] {
     const values: CvarSnapshot[] = [];
     for (let state = this.first; state !== undefined; state = state.next) if (flags === 0 || (state.flags & flags) !== 0) values.push(snapshot(state));
+    return Object.freeze(values);
+  }
+  snapshots(flags = 0): readonly CvarSnapshot[] {
+    const values = [...this.canonicalSnapshots(flags)];
+    for (const alias of this.aliases.values()) {
+      const value = this.get(alias.name);
+      if (value !== undefined && (flags === 0 || (value.flags & flags) !== 0)) values.push(value);
+    }
     return Object.freeze(values);
   }
   complete(partialInput: string): string | undefined {
@@ -558,8 +669,11 @@ export class CvarRegistry {
   markModifiedFlags(flags: number): void { this.changedFlags |= flags; }
   clearModifiedFlags(flags: number): void { this.changedFlags &= ~flags; }
   clearUserinfoModified(): void { this.userinfoDirty = false; }
-  addFlags(name: string, flags: number): void { const state = this.variables.get(this.key(name)); if (state !== undefined) state.flags |= flags; }
-  clearModified(name: string): void { const state = this.variables.get(this.key(name)); if (state !== undefined) state.modified = false; }
+  addFlags(name: string, flags: number): void {
+    if (this.aliases.has(this.key(name))) this.rejectAliasInfoFlags(name, flags);
+    const state = this.variables.get(this.key(this.canonicalName(name))); if (state !== undefined) state.flags |= flags;
+  }
+  clearModified(name: string): void { const state = this.variables.get(this.key(this.canonicalName(name))); if (state !== undefined) state.modified = false; }
   takeEffects(): readonly CvarEffect[] { const effects = this.effects; this.effects = []; return Object.freeze(effects); }
 
   createVm(): VmCvar {
@@ -569,13 +683,22 @@ export class CvarRegistry {
   registerVm(name: string, defaultValue: string, flags = 0): VmCvar { const vm = this.createVm(); vm.register(name, defaultValue, flags); return vm; }
   bindVm(name: string, defaultValue: string, flags = 0): number {
     if (this.dialect !== "q3") throw new Error("VM cvar handles belong to Quake III");
+    const alias = this.aliases.get(this.key(name));
+    if (alias !== undefined && alias.conversion.kind === "converted") {
+      this.rejectAliasInfoFlags(name, flags);
+      for (const [handle, existing] of this.aliasHandles) if (this.key(existing) === this.key(name)) return handle;
+      if (this.indexes.length === 1024) throw new RangeError("MAX_CVARS");
+      const handle = this.indexes.length;
+      this.indexes.push(undefined); this.aliasHandles.set(handle, alias.name); return handle;
+    }
     const registered = this.register(name, defaultValue, flags);
-    const state = registered === undefined ? undefined : this.variables.get(this.key(registered.name));
+    const state = registered === undefined ? undefined : this.variables.get(this.key(this.canonicalName(registered.name)));
     if (state === undefined) throw new Error("VM cvar registration failed");
     return state.index;
   }
   readVm(handle: number): CvarSnapshot | undefined {
     if (!Number.isInteger(handle) || handle < 0 || handle >= this.indexes.length) throw new RangeError("Cvar_Update: handle out of range");
+    const alias = this.aliasHandles.get(handle); if (alias !== undefined) return this.get(alias);
     const state = this.indexes[handle];
     return state === undefined ? undefined : snapshot(state);
   }

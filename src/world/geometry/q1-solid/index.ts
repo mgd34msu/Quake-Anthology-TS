@@ -2,7 +2,7 @@
  * brushes. Native clipnodes remain a separate source authority. GPL-2.0-or-later. */
 import type { Bounds } from "../../../contracts/math.ts";
 import type { BspChild, Q1WorldGeometry } from "../../../contracts/scene.ts";
-import { boxCell, clipCell, negatePlane } from "./polyhedron.ts";
+import { boxCell, splitCell } from "./polyhedron.ts";
 import type { ConvexCell } from "./polyhedron.ts";
 export type { ConvexCell, CellFace } from "./polyhedron.ts";
 
@@ -33,7 +33,7 @@ export class Q1SolidSpace {
       const node = this.geometry.nodes[next.child.index];
       const plane = node === undefined ? undefined : this.geometry.planes[node.plane];
       if (node === undefined || plane === undefined) throw new RangeError("Unknown Quake solid-space node/plane");
-      const front = clipCell(next.cell, negatePlane(plane)), back = clipCell(next.cell, plane);
+      const { front, back } = splitCell(next.cell, plane);
       if (back !== null) stack.push({ child: node.children[1], cell: back, depth: next.depth + 1 });
       if (front !== null) stack.push({ child: node.children[0], cell: front, depth: next.depth + 1 });
     }

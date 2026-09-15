@@ -1,11 +1,13 @@
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ActorId, ClientId, SeatId } from "../../contracts/identity.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
+import { registerQ1ViewCommands } from "./q1-client-settings.ts";
 
 /** Quake host_cmd.c registers these client names before forwarding them to authority. */
 export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: CommandDialect,
   execute: (name: string, args: readonly string[], seat: SeatId | null, source: CommandContext) => undefined): () => void {
   const registered: string[] = [];
+  const releaseView = registerQ1ViewCommands(commands);
   for (const { name, summary } of [
     { name: "god", summary: "Toggle god mode; multiplayer authority controls cheat access." },
     { name: "notarget", summary: "Toggle monster targeting immunity; multiplayer authority controls cheat access." },
@@ -24,7 +26,7 @@ export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: Comm
     }, { summary, usage: name === "give" ? "give [client slot: server console only] <all|health|armor|weapons|ammo|keys|item> [amount]"
       : `${name} [client slot: server console only]`, examples: name === "give" ? ["give all", "give health 100"] : [name] })) registered.push(name);
   }
-  return () => { for (const name of registered) commands.unregister(name); };
+  return () => { releaseView(); for (const name of registered) commands.unregister(name); };
 }
 
 export function resolveQ1HostCommandActor(name: string, args: readonly string[], source: CommandContext | undefined,

@@ -1,4 +1,5 @@
 import { menuSoundPath } from "./audio/menu.ts";
+import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { Q3_FOOTSTEP_PATHS } from "../../content/q3/presentation/character-resources.ts";
 import type { ApplicationInput } from "./input.ts";
 import type { ContentId, GameFamily } from "../../contracts/content.ts";
@@ -78,6 +79,7 @@ export class ApplicationAudio {
   private environment: { readonly definitions: readonly ReverbEnvironment[]; readonly trace: (listener: AudioListener) => AudioTraceQuery } | null = null;
   private readonly environmentSeats: SeatId[] = [];
   private volume = 0.7;
+  private volumeCvars: CvarRegistry | null = null;
   private closed = false;
   private haptics: ApplicationInput | null = null;
 
@@ -141,10 +143,15 @@ export class ApplicationAudio {
     } };
   }
 
-  get effectsVolume(): number { return this.volume; }
-  set effectsVolume(value: number) { this.engine.setEffectsVolume(value); this.volume = value; }
-  get musicVolume(): number { return this.music.volume; }
-  set musicVolume(value: number) { this.music.volume = value; }
+  bindVolumeCvars(cvars: CvarRegistry): void {
+    if (cvars.find("volume") === undefined || cvars.find("bgmvolume") === undefined) return;
+    this.volumeCvars = cvars;
+    this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
+  }
+  get effectsVolume(): number { return this.volumeCvars === null ? this.volume : Math.max(0, Math.min(1, this.volumeCvars.variableValue("volume"))); }
+  set effectsVolume(value: number) { this.volumeCvars?.set("volume", String(value)); this.engine.setEffectsVolume(value); this.volume = value; }
+  get musicVolume(): number { return this.volumeCvars === null ? this.music.volume : Math.max(0, Math.min(1, this.volumeCvars.variableValue("bgmvolume"))); }
+  set musicVolume(value: number) { this.volumeCvars?.set("bgmvolume", String(value)); this.music.volume = value; }
   pauseMusic(paused: boolean): void { this.music.pause(paused); }
   uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
   receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
@@ -412,6 +419,7 @@ export class ApplicationAudio {
   }
 
   async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now()): Promise<void> {
+    this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
     this.snapshot = snapshot;
     this.listeners = listeners;
     for (const body of snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);

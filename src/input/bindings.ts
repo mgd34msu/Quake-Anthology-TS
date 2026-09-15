@@ -28,7 +28,7 @@ export function namedPhysicalInput(name: string, device = 0): PhysicalInput | nu
   if (button !== undefined) return { kind: "controller-button", device, button };
   if (controllerName === "gamepad_left_trigger" || controllerName === "gamepad_right_trigger") return { kind: "controller-axis", device,
     axis: controllerName === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
-  const code = stringToKeynum(name);
+  const code = stringToKeynum(lower);
   return code < 0 ? null : { kind: "key", code };
 }
 export function physicalInputName(input: PhysicalInput): string {

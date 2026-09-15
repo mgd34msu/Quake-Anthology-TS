@@ -1,3 +1,5 @@
+import { readQ1ViewSettings } from "./q1-client-settings.ts";
+import { cloneQ1SourceCvars, registerQ1BotControls } from "./q1-source-cvars.ts";
 import { captureTeamArenaOverrides, readTeamArenaOverrides, saveTeamArenaOverrides, applyTeamArenaOverrides, releaseTeamArenaOverrides, teamArenaArchiveEntries, type TeamArenaOverrides, type OverrideRegistry } from "./team-arena-overrides.ts";
 import { q1ConsoleServer } from "./console.ts";
 import { PreparedStartup, type PreparedSeatConfiguration } from "./prepared-startup.ts";
@@ -634,7 +636,7 @@ export class Application {
       commands.register("quit", () => this.requestQuit());
       registerQ1ClientCommands(commands, q1.cvars.dialect, (name, args, seat, source) => this.queueCommand(name, args, seat, source));
       for (const name of ["map", "say", "addbot", "removebot", "botlist", "kick"]) commands.register(name, invocation => this.queueCommand(name, invocation.args, null));
-      if (!restoring) q1.cvars.register("bot_minplayers", "0");
+      if (!restoring) registerQ1BotControls(q1.cvars);
       sourceCommands = commands; return { sourceCommands, q2Console };
     }
     const guest = simulation.q3Guest();
@@ -947,6 +949,13 @@ export class Application {
         this.publishLocalGuestSnapshots();
       }
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));
+      if (this.imageSettings?.cvars.find("volume") !== undefined) {
+        if (this.preparedStartup === null) {
+          this.imageSettings.cvars.set("volume", String(audio.effectsVolume));
+          this.imageSettings.cvars.set("bgmvolume", String(audio.musicVolume));
+        }
+        audio.bindVolumeCvars(this.imageSettings.cvars);
+      }
       audio.bindHaptics(input);
       await audio.prepareEnvironment(this.simulation.scene);
       applyFrontendPreferences(this.frontendOverrides, input, audio);
@@ -974,7 +983,7 @@ export class Application {
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
           await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
@@ -1013,6 +1022,11 @@ export class Application {
     const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
       ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
     const sharedArchive = [...image?.persistedEntries ?? []];
+    if (image?.cvars.find("volume") !== undefined) {
+      const audio = await loadAudioSettings(settings);
+      if (audio.effectsVolume !== undefined) sharedArchive.push({ name: "volume", value: String(audio.effectsVolume) });
+      if (audio.musicVolume !== undefined) sharedArchive.push({ name: "bgmvolume", value: String(audio.musicVolume) });
+    }
     if (image !== null) {
       const view = new ApplicationViewSettings(value => image.cvars.set("fov", String(value)));
       await view.load(settings);
@@ -1347,10 +1361,10 @@ export class Application {
     const nextRules = save === undefined && skirmish === undefined && sameSourceOwner && currentSource !== null
       ? resolveStartupRules(options, currentSource, this.simulation.options.maxClients, [], false) : null;
     if (nextRules !== null) options = nextRules.options;
-    const q1BotCvars = this.simulation.q1Source()?.cvars.snapshots().filter(variable => variable.name.startsWith("bot_") || variable.name === "g_spSkill");
     const q3Session = q3?.captureSession();
     const serverProfile = this.simulation.serverProfile();
-    const q1Cvars = this.simulation.q1Source()?.cvars.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
+    const previousQ1Cvars = this.simulation.q1Source()?.cvars;
+    const q1CvarsSource = save === undefined && content.world.kind === "q1-bsp" && content.preparedQuakeC === null ? previousQ1Cvars : undefined;
     const sourceArchive = this.sourceCvars()?.archiveEntries() ?? [];
     const q2Cvars = this.simulation.q2ServerCvars()?.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname" && variable.name !== "mapname")
@@ -1371,6 +1385,7 @@ export class Application {
     const stagedClients: ApplicationQ3Client[] = [];
     let stagedCapture: ApplicationCapture | null = null;
     try {
+      const q1SourceRegistry = q1CvarsSource === undefined ? undefined : cloneQ1SourceCvars(q1CvarsSource, text => this.host.print(text));
       if (save !== undefined) nextOverrides = readTeamArenaOverrides(save, [...this.localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
       if (settings !== null) {
         options = applicationOptionsForRecipe(options, content);
@@ -1388,14 +1403,10 @@ export class Application {
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
-        ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1Cvars === undefined ? {} : { q1Cvars }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session, initialSourceMilliseconds }),
+        ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1SourceRegistry === undefined ? {} : { sourceRegistry: q1SourceRegistry }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session, initialSourceMilliseconds }),
           ...(q3Cvars === undefined ? {} : { q3Cvars: [...q3Cvars, ...(skirmish === undefined ? [] : teamArenaSourceCvars(skirmish, q3Cvars))] }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
       if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
-      const nextQ1 = nextSimulation.q1Source();
-      if (save === undefined && nextQ1 !== null) for (const variable of q1BotCvars ?? []) {
-        nextQ1.cvars.register(variable.name, variable.resetValue); nextQ1.cvars.set(variable.name, variable.value, true);
-      }
       if (previous !== null && nextSimulation.q3Guest() === null) for (const local of previous.input.locals) {
         const seat = local.player.seat;
         const cvars = this.createClientCvars(nextSimulation, content, options, seat,
@@ -1483,6 +1494,7 @@ export class Application {
           progress: message => this.host.loading?.stage(message), print: message => this.host.print(message) });
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
+        if (this.imageSettings !== null) audio.bindVolumeCvars(this.imageSettings.cvars);
         if (input !== previous.input) {
           applyFrontendPreferences(frontendOverrides, input, audio);
           for (const local of input.locals) {
@@ -1505,7 +1517,7 @@ export class Application {
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
             await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
           stagedPresentations.push(presentation);
           presentations.push(presentation);
         }

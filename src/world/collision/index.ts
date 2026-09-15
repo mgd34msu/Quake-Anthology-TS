@@ -1,4 +1,5 @@
 import type { SourceClipModels } from "./q3/clip-models.ts";
+import type { CollisionMapSettings } from "./q3/settings.ts";
 import type { ActorId } from '../../contracts/identity.ts';
 import { sameActor } from '../../contracts/identity.ts';
 import type { Bounds, Vec3 } from '../../contracts/math.ts';
@@ -45,6 +46,9 @@ export class SharedSceneQueries implements SceneQueries {
     #readActorCollision: ((actor: ActorId) => ActorCollision | null) | null = null;
     nativeQ3ClipModels(): SourceClipModels | null {
         return this.#geometry.kind === 'q3' ? this.#geometry.provider.world.sourceClipModels() : null;
+    }
+    bindCollisionSettings(settings: CollisionMapSettings): void {
+        if (this.#geometry.kind === 'q3') this.#geometry.provider.world.bindSettings(settings);
     }
     constructor(readonly geometry: DecodedWorld) {
         switch (geometry.kind) {

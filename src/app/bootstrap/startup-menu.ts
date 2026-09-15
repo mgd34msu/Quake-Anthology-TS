@@ -97,10 +97,9 @@ export class StartupMenu {
       focus: () => undefined, sound: sound => options.sound?.(sound), measureText: (text, scale) => this.measure(text, scale), executeScript: () => { throw new Error("Startup menu has no legacy scripts"); } });
     this.register(main, () => [
       this.button("native", "Play a game", 0, () => { this.status = ""; this.controller.openMenu(nativeFamilyMenu); }),
-      this.button("custom", "Custom game", 1, () => { this.status = ""; this.controller.openMenu(session); }),
-      this.button("load", "Load Game", 2, () => { this.savePage = 0; this.controller.openMenu(loadMenu); options.refreshSaves(); }),
-      this.button("options", "Options", 3, () => this.controller.openMenu(optionsMenu)),
-      this.button("quit", "Quit", 4, options.quit),
+      this.button("load", "Load Game", 1, () => { this.savePage = 0; this.controller.openMenu(loadMenu); options.refreshSaves(); }),
+      this.button("options", "Options", 2, () => this.controller.openMenu(optionsMenu)),
+      this.button("quit", "Quit", 3, options.quit),
     ]);
     this.register(nativeFamilyMenu, () => [
       ...([
@@ -113,7 +112,7 @@ export class StartupMenu {
         ...this.button(`game:${game.family}:${game.edition}`, game.label, index, () => {
           this.nativeFamily = game.family; this.nativeEdition = game.edition; this.status = ""; this.controller.openMenu(nativeCampaignMenu);
         }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family && preset.edition === game.edition),
-      })), this.back(),
+      })), this.button("custom", "Custom game", 5, () => { this.status = ""; this.controller.openMenu(session); }, true), this.back(),
     ]);
     this.register(nativeCampaignMenu, () => [
       ...this.nativeCampaigns().map((preset, index) => ({

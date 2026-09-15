@@ -105,7 +105,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   for (const binding of defaultBindings(0, "q1-netquake", model.bindingItems())) input.bind(binding);
   menu.bindInput(input, () => sharedBindingActions("q1-netquake", model.bindingItems(), model.bindingCapabilities()));
   try {
-    click(3); click(2);
+    click(2); click(2);
     expect(menu.controller.activeMenu).toBe("menu:settings:input:0");
     menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: true, repeat: false });
     menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 13, down: false, repeat: false });
@@ -118,7 +118,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     menu.input({ seat, timeMilliseconds: 0, kind: "key", code: 102, down: false, repeat: false });
     expect(input.binding({ kind: "key", code: 102 })).toEqual({ kind: "command", text: "+forward" });
     menu.controller.closeAll(); menu.controller.openMenu("menu:startup:main");
-    click(3); click(1);
+    click(2); click(1);
     expect(menu.controller.activeMenu).toBe("menu:startup:sound");
     click(0); click(2);
     expect(menu.controller.activeMenu).toBe("menu:startup:sound");
@@ -136,7 +136,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
     click(1); click(0);
     expect((await model.resolve()).recipe.presentation.doppler).toEqual({ kind: "source" });
     menu.controller.closeMenu(); menu.controller.closeMenu();
-    click(1); click(2); click(1); click(1);
+    click(0); click(5); click(2); click(1); click(1);
     await model.prepareMonsterRoster();
     expect(menu.controller.activeMenu).toBe("menu:startup:roster");
     expect(model.monsterRosterRows()[0]?.value).toBe("native");

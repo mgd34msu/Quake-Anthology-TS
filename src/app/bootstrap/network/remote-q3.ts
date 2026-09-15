@@ -1,4 +1,5 @@
 import { RemoteWorldContent } from './remote-world.ts';
+import type { CollisionMapSettings } from '../../../world/collision/q3/settings.ts';
 import type { WorldText } from "../../../text/world.ts";
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
 /* Q3 CL_ParseGamestate / CL_SetCGameTime and cgame host projection. GPL-2.0-or-later. */
@@ -77,6 +78,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     this.identity = { client: this.client.id, seat: null }; this.userinfo = options.userinfo;
   }
   get scene() { return this.world.scene; }
+  bindCollisionSettings(settings: CollisionMapSettings): void { this.world.bindCollisionSettings(settings); }
   get output(): SimulationOutput | null { return this.published; }
   get player() { return this.current === null ? null : { actor: this.actorAt(this.current.playerState.clientNum), client: this.client.id, sourceEntity: this.current.playerState.clientNum }; }
   get admittedPlayer() { const connection = this.connection; if (connection === null) throw new Error("Q3 seat has no decoded connection"); return { actor: this.actorAt(connection.clientNumber), client: this.client.id, sourceEntity: connection.clientNumber }; }

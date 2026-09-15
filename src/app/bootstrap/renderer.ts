@@ -131,7 +131,7 @@ export class NativeRenderer {
           this.operations(command.view.operations);
           break;
         case "swap-buffers":
-          this.current.finish();
+          if (this.current instanceof SoftwareRenderer) this.current.finish();
           if (this.captures.length !== 0) {
             const pixels = this.current instanceof SoftwareRenderer ? this.current.pixels : this.current.readPixels();
             for (const capture of this.captures.splice(0)) capture.resolve(pixels.slice());

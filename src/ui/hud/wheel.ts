@@ -44,7 +44,7 @@ export interface WheelOptions {
   readonly q2SlotZeroDeselect: boolean;
 }
 const defaults: WheelOptions = { radius: 180, selectionDistance: 140, fadePerSecond: 3, carouselTimeout: 400, carouselLock: 300, q2SlotZeroDeselect: true };
-type WheelState = { readonly kind: "closed" } | { readonly kind: "closing"; readonly mode: WheelMode } | { readonly kind: "open"; readonly mode: WheelMode };
+type WheelState = { readonly kind: "closed" } | { readonly kind: "open"; readonly mode: WheelMode };
 type CarouselState = { readonly kind: "closed" } | { readonly kind: "open"; readonly until: number } | { readonly kind: "closing"; readonly until: number };
 
 export class SeatWeaponWheel {
@@ -78,19 +78,15 @@ export class SeatWeaponWheel {
   }
   close(select: boolean): void {
     if (this.state.kind !== "open") return;
-    this.state = { kind: "closing", mode: this.mode };
+    this.state = { kind: "closed" };
     const selected = this.items(this.mode).find(item => item.id === this.selected);
     if (select && selected?.owned) this.services.select(selected.id, this.mode, this.seat);
     this.services.changed(this.seat);
   }
-  clearInput(): void {
-    if (this.state.kind === "closing") this.state = { kind: "closed" };
-  }
   input(event: SeatInputEvent): boolean {
     if (!event.seat.equals(this.seat)) throw new Error("Weapon wheel input belongs to another seat");
     if (this.state.kind === "closed") return false;
-    if (event.kind === "focus" && !event.focused) { this.close(false); this.clearInput(); return true; }
-    if (this.state.kind !== "open") return true;
+    if (event.kind === "focus" && !event.focused) { this.close(false); return true; }
     if (event.kind === "mouse-motion") this.move({ x: this.position.x + event.delta.x, y: this.position.y + event.delta.y });
     else if (event.kind === "controller-axis" && (event.axis === "right-x" || event.axis === "right-y")) {
       this.analog = event.axis === "right-x" ? { ...this.analog, x: event.value } : { ...this.analog, y: event.value };

@@ -1,3 +1,4 @@
+import { CollisionMapSettings } from "../../../world/collision/q3/settings.ts";
 import { WorldDebugLineStore } from "../../../debug/world.ts";
 import { sourceLevelTransition } from "./source-transition.ts";
 import type { SourceLevelAuthority } from "./source-transition.ts";
@@ -508,7 +509,10 @@ export class SharedSimulation implements Simulation {
     }
     try {
     if (this.source.kind !== "q3-qvm") { this.prepareSelectedMonsters(); options.monsterNavigation?.install(this, this.q1Movement); }
-    if (saved !== undefined) this.restore(saved);
+    if (saved !== undefined) {
+      this.restore(saved);
+      if (this.sourceCollisionSettings !== null) this.scene.bindCollisionSettings(this.sourceCollisionSettings);
+    }
     else if (this.source.kind === "q1" && options.world.kind === "q1-bsp") this.source.composition.spawnMap(options.world);
     else if (this.source.kind === "quakec") {
       if (options.travel?.source.kind === "quakeworld" || options.travel?.source.kind === "netquake") {
@@ -1481,7 +1485,6 @@ export class SharedSimulation implements Simulation {
       if (this.options.restore === undefined && this.options.sourceRegistry === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
       if (this.options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
         teamplay: "0", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", sv_cheats: "0", footsteps: "1" })) cvars.register(name, value);
-      for (const variable of this.options.q1Cvars ?? []) cvars.set(variable.name, variable.value, true);
       cvars.set("skill", String(this.q1Campaign.skill), true);
       cvars.set("deathmatch", this.options.mode === "deathmatch" ? "1" : "0", true);
       cvars.set("coop", this.options.mode === "coop" ? "1" : "0", true);
@@ -3077,7 +3080,13 @@ export class SharedSimulation implements Simulation {
   selectedQ3WeaponSource(): Pick<Q3SelectedArsenal, "has" | "read"> | null {
     return this.selectedArsenal?.family === "q3" ? this.selectedArsenal : null;
   }
+  private sourceCollisionSettings: CollisionMapSettings | null = null;
   private initializeServerSettings(cvars: CvarRegistry): void {
+    if (this.scene.geometry.kind === "q3-bsp") {
+      this.sourceCollisionSettings = new CollisionMapSettings(cvars);
+      this.sourceCollisionSettings.registerMap();
+      if (this.options.restore === undefined) this.scene.bindCollisionSettings(this.sourceCollisionSettings);
+    }
     if (this.options.serverProfile === undefined) return;
     const owner = cvarServerSettingsOwner(cvars, true);
     applyServerProfile(this.options.serverProfile, serverDefinitionsForRecipe(this.recipe).map(definition => ({ definition, owner })));

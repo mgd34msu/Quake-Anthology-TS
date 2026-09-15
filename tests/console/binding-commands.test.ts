@@ -151,3 +151,75 @@ test("stock wheel aliases use the production wheel registry for held press and r
     expect(commands.exists(`+${name}`)).toBe(false); expect(commands.exists(`-${name}`)).toBe(false);
   }
 });
+
+for (const dialect of dialects) test(`${dialect}: uppercase physical key unbind survives archive reload and stops wheel dispatch`, () => {
+  const owner = createIdentityOwner(`unbind-wheel-${dialect}`), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const cvars = new CvarRegistry({ dialect, context });
+  const commands = new CommandBuffer({ dialect, context, cvars });
+  const input = new SeatInput({ seat, dialect, context, commands, uiEvent: () => false });
+  const transitions: boolean[] = [];
+  const unregisterBindings = registerBindingCommands(commands, () => input, () => undefined);
+  const unregisterWheel = registerWheelCommands(commands, (_seat, _mode, down) => { transitions.push(down); });
+  const router = new InputRouter({ seats: [{ input, controller: { kind: "none" } }], keyboardSeat: seat,
+    controllers: null, now: () => 1, ticks: () => 1, subframe: false, unhandled: () => undefined });
+  const tap = (): void => {
+    for (const down of [true, false]) router.handlePlatform({ kind: "key", timestamp: 1, scancode: 20, keycode: 113, modifiers: 0, down, repeat: false });
+    commands.execute();
+  };
+  try {
+    commands.append('bind q +weaponwheel\n', context); commands.execute(); tap();
+    expect(transitions).toEqual([true, false]); transitions.length = 0;
+    commands.append('unbind Q\n', context); commands.execute();
+    expect(input.binding({ kind: "key", code: 113 })).toBeNull();
+    tap(); expect(transitions).toEqual([]);
+    const archive = archivedBindings(input);
+    commands.append('bind q +weaponwheel\n', context); commands.execute();
+    commands.append(`${archive.join("\n")}\n`, context); commands.execute();
+    tap(); expect(transitions).toEqual([]);
+    commands.append('bind Q +weaponwheel\n', context); commands.execute();
+    tap(); expect(transitions).toEqual([true, false]);
+  } finally { router.close(); unregisterWheel(); unregisterBindings(); }
+});
+
+for (const removal of ["console", "menu"]) test(`${removal} wheel unbind persists in seat profile without default reapplication`, async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { ConfigStore } = await import("../../src/settings/config.ts");
+  const { StartupInputProfile } = await import("../../src/app/bootstrap/startup-input-profile.ts");
+  const { NativeUiController, defaultUiSkin } = await import("../../src/ui/common/index.ts");
+  const { registerBindingMenus } = await import("../../src/ui/settings/bindings.ts");
+  const root = await mkdtemp(join(tmpdir(), "wheel-unbind-profile-"));
+  const owner = createIdentityOwner(`wheel-profile-${removal}`), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q1-netquake", context });
+  const input = new SeatInput({ seat, dialect: "q1-netquake", context, commands, uiEvent: () => false });
+  const settings = new ConfigStore(root);
+  const transitions: boolean[] = [];
+  const unbindCommands = registerBindingCommands(commands, () => input, () => undefined);
+  const unbindWheel = registerWheelCommands(commands, (_seat, _mode, down) => { transitions.push(down); });
+  const tap = (): void => {
+    for (const down of [true, false]) input.input({ kind: "key", seat, code: 113, timeMilliseconds: 1, down, repeat: false });
+    commands.execute();
+  };
+  try {
+    const profile = await StartupInputProfile.open(settings, input, "q1-netquake");
+    tap(); expect(transitions).toEqual([true, false]); transitions.length = 0;
+    if (removal === "console") { commands.append("unbind q\n", context); commands.execute(); }
+    else {
+      const ui = new NativeUiController({ seat, now: () => 1, skin: () => defaultUiSkin("resource:test:font"), bindings: () => input.bindings,
+        focus: (focus, time) => input.setFocus(focus, time), sound: () => undefined, executeScript: () => undefined });
+      const menus = registerBindingMenus(ui, input, [{ id: "wheel", label: "Weapon wheel", target: { kind: "command", text: "+weaponwheel" } }]);
+      ui.openMenu(menus.root);
+      ui.input({ kind: "mouse-motion", seat, timeMilliseconds: 1, position: { x: 300, y: 396 }, delta: { x: 0, y: 0 } });
+      for (const down of [true, false]) ui.input({ kind: "mouse-button", seat, timeMilliseconds: 1, button: 1, down });
+      ui.closeAll(); menus.dispose();
+    }
+    expect(input.binding({ kind: "key", code: 113 })).toBeNull(); tap(); expect(transitions).toEqual([]);
+    await profile.save();
+    expect((await settings.loadSeat("input/seat-1.json"))?.bindings.some(binding => binding.input.kind === "key" && binding.input.code === 113)).toBe(false);
+    await StartupInputProfile.open(settings, input, "q1-netquake");
+    expect(input.binding({ kind: "key", code: 113 })).toBeNull(); tap(); expect(transitions).toEqual([]);
+  } finally { unbindWheel(); unbindCommands(); await rm(root, { recursive: true, force: true }); }
+});

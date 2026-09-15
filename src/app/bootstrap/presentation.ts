@@ -1,4 +1,5 @@
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
+import { q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
 import type { DebugShapePresentationAccess } from "./simulation/types.ts";
 import { createSourceSceneOrder } from "../../render/scene/submissions.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
@@ -79,7 +80,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly worldTextCullFactor: (() => number) | null = null,
     private readonly fieldOfView: () => number = () => 90,
     private readonly debugShapes: DebugShapePresentationAccess | null = null,
-    private readonly consoleScale: () => number = () => 0) {
+    private readonly consoleScale: () => number = () => 0,
+    private readonly viewSize: () => Q1ViewSettings | null = () => null) {
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -117,13 +119,19 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   camera(): SceneCamera {
     if (this.q3Client?.options.kind === "qvm") return this.q3Client.camera();
-    const player = this.simulation.playerView(this.local.player.actor), viewport = this.viewport;
-    if (this.q3Client !== null) return cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
-      : cameraWithCharacterDeath(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
+    const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
+    const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
+    if (this.q3Client !== null) return this.applyViewSize(cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
+      : cameraWithCharacterDeath(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
     const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
     return this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;
+  }
+
+  private applyViewSize(camera: SceneCamera): SceneCamera {
+    const settings = this.viewSize();
+    return settings === null ? camera : q1ViewCamera(camera, this.viewport, settings, this.finale.active);
   }
 
   receive(events: readonly SimulationEvent[]): undefined {
@@ -205,7 +213,11 @@ export class WorldSeatPresentation implements SeatPresentation {
         ...(this.assets.imagePolicy === undefined ? {} : { imagePolicy: this.assets.imagePolicy }) }));
     }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
-    if (this.q3Client !== null) { await this.q3Client.prepare(snapshot.frame.frame, this.viewport, presentations); return; }
+    if (this.q3Client !== null) {
+      const size = this.viewSize();
+      const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
+      await this.q3Client.prepare(snapshot.frame.frame, viewport, presentations); return;
+    }
     await this.finale.prepare();
     await this.scene.prepare(this.local.player.actor, snapshot, presentations, characters);
   }
@@ -223,9 +235,13 @@ export class WorldSeatPresentation implements SeatPresentation {
     const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor), camera => {
       if (this.q3Client?.options.kind === "qvm") return camera;
       const player = this.simulation.playerView(this.local.player.actor);
-      return cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
+      return this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
     });
     this.frames.begin();
+    const area = this.viewport;
+    if (camera.viewport.x !== area.x || camera.viewport.y !== area.y || camera.viewport.width !== area.width || camera.viewport.height !== area.height)
+      this.frames.view({ target: input.target, time, viewport: area,
+      clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false }, clipPlane: null, beforeView: [], operations: [] });
     if (nativeFrame === undefined) {
       if (effects === null) throw new Error("Shared view lost its prepared effects");
       this.frames.world(this.scene.view(input, effects.operations,
@@ -245,29 +261,29 @@ export class WorldSeatPresentation implements SeatPresentation {
         return font.font;
       }, this.worldTextCullFactor?.()) }] });
     const material = (draw: Parameters<typeof prepareMaterialText>[0]): void => {
-      this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: camera.viewport, clear: null, clipPlane: null,
-        beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, camera.viewport, this.assets.world.materialContext(input)) }] });
+      this.frames.view({ target: { kind: "seat", seat: this.local.player.seat.id }, time, viewport: this.viewport, clear: null, clipPlane: null,
+        beforeView: [], operations: [{ kind: "draw", batches: prepareMaterialText(draw, this.viewport, this.assets.world.materialContext(input)) }] });
     };
-    const draw = new Draw2D(new TextCommandSink(this.local.player.seat.id, camera.viewport, command => {
+    const draw = new Draw2D(new TextCommandSink(this.local.player.seat.id, this.viewport, command => {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
-    if (this.q3Client === null && playerView.blend !== null) draw.fillRect({ x: 0, y: 0, width: camera.viewport.width, height: camera.viewport.height },
+    if (this.q3Client === null && playerView.blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
       playerView.blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
     this.finale.draw(draw, this.preparedTime);
-    this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, camera.viewport.height / 480));
+    this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
-      !this.finale.active && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
+      !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
       this.q3Client !== null, this.q3Client?.weaponHudView().aggregateWarning ?? true);
     if (this.local.input.focus.kind === "console") {
-      const height = Math.trunc(camera.viewport.height * 0.5);
+      const height = Math.trunc(this.viewport.height * 0.5);
       const logical = this.native.window.logicalSize, drawable = this.native.window.drawableSize;
-      const metrics = consoleMetrics({ width: camera.viewport.width, height: camera.viewport.height,
+      const metrics = consoleMetrics({ width: this.viewport.width, height: this.viewport.height,
         pixelRatio: Math.max(drawable.width / logical.width, drawable.height / logical.height),
         requestedScale: this.consoleScale(), font: this.text.font });
       const { scale, columns } = metrics;
       const white = this.assets.world.shaders.textures.white.image;
-      draw.fillRect({ x: 0, y: 0, width: camera.viewport.width, height }, { x: 0, y: 0, z: 0, w: 0.85 }, { kind: "image", name: "white", image: white });
+      draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height }, { x: 0, y: 0, z: 0, w: 0.85 }, { kind: "image", name: "white", image: white });
       if (this.local.console.buffer.width !== columns) this.local.console.buffer.resize(columns);
       drawConsole({ draw, text: this.text, rows: this.local.console.buffer.visible(Math.max(1, Math.trunc(height / metrics.lineHeight))),
         field: this.local.console.field, selectedEntry: this.local.console.selectedCompletionEntry,

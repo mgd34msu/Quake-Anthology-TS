@@ -574,6 +574,7 @@ export class CommandBuffer {
     register("resetall", command => {
       for (const variable of this.cvarSnapshots(command.source)) {
         const cvars = this.cvarOwner(variable.name, command.source);
+        if (cvars !== undefined && cvars.canonicalName(variable.name) !== variable.name) continue;
         cvars?.resetConsole(variable.name, true);
       }
     });

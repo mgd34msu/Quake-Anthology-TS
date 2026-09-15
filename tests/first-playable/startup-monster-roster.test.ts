@@ -114,7 +114,17 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
     key(KeyCode.Enter); expect(menu.controller.activeMenu).toBe("menu:startup:native-difficulty");
     for (let index = 0; index < 3; index++) key(KeyCode.Escape);
     await capture("native-main-menu");
-    click(100, 164); click(100, 198); click(100, 164);
+    click(100, 130); click(100, 300);
+    expect(menu.controller.activeMenu).toBe("menu:startup:session");
+    key(KeyCode.Escape);
+    expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+    key(KeyCode.Enter);
+    expect(menu.controller.activeMenu).toBe("menu:startup:session");
+    click(100, 368);
+    expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+    key(KeyCode.Escape);
+    expect(menu.controller.activeMenu).toBe("menu:startup:main");
+    click(100, 130); click(100, 300); click(100, 198); click(100, 164);
     await capture("roster-combat-source-presets");
     const preset = model.rows().find(row => row.id === "enemies")?.choices.findIndex(option => option.id === "q1:monsters/classic/id1") ?? -1;
     expect(preset).toBeGreaterThanOrEqual(0); click(100, 130 + preset * 34);

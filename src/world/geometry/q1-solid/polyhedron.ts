@@ -58,6 +58,10 @@ export function clipCell(cell: ConvexCell, plane: Plane): ConvexCell | null {
     }
     if (vertices.length >= 3) faces.push({ plane: face.plane, vertices });
   }
+  return closeCell(faces, cap, plane);
+}
+
+function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | null {
   if (cap.length >= 3) {
     const center = scale(cap.reduce(add, { x: 0, y: 0, z: 0 }), 1 / cap.length);
     const axis = Math.abs(plane.normal.z) < 0.9 ? AXES[2] : AXES[1];
@@ -66,6 +70,40 @@ export function clipCell(cell: ConvexCell, plane: Plane): ConvexCell | null {
     faces.push({ plane, vertices: cap });
   }
   return faces.length >= 4 ? { faces } : null;
+}
+
+/** Both BSP children share each edge intersection and its cap insertion order. */
+export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: ConvexCell | null; readonly back: ConvexCell | null } {
+  const opposite = negatePlane(plane);
+  let outside = false, inside = false;
+  classify: for (const face of cell.faces) for (const point of face.vertices) {
+    const distance = dot(point, plane.normal) - plane.distance;
+    if (!Number.isFinite(distance)) return { front: clipCell(cell, opposite), back: clipCell(cell, plane) };
+    if (distance > 1e-8) outside = true;
+    if (distance < -1e-8) inside = true;
+    if (outside && inside) break classify;
+  }
+  if (!outside || !inside) return { front: inside ? null : cell, back: outside ? null : cell };
+  const front: CellFace[] = [], back: CellFace[] = [], cap: Vec3[] = [];
+  for (const face of cell.faces) {
+    const frontVertices: Vec3[] = [], backVertices: Vec3[] = [];
+    for (let i = 0; i < face.vertices.length; i++) {
+      const a = face.vertices[i], b = face.vertices[(i + 1) % face.vertices.length];
+      if (a === undefined || b === undefined) continue;
+      const da = dot(a, plane.normal) - plane.distance, db = dot(b, plane.normal) - plane.distance;
+      if (!Number.isFinite(da) || !Number.isFinite(db)) return { front: clipCell(cell, opposite), back: clipCell(cell, plane) };
+      if (da >= 0) frontVertices.push(a);
+      if (da <= 0) backVertices.push(a);
+      if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
+        const point = lerp(a, b, da / (da - db));
+        frontVertices.push(point); backVertices.push(point);
+        if (!cap.some(v => length(sub(v, point)) < 1e-7)) cap.push(point);
+      } else if (da === 0 && !cap.some(v => length(sub(v, a)) < 1e-7)) cap.push(a);
+    }
+    if (frontVertices.length >= 3) front.push({ plane: face.plane, vertices: frontVertices });
+    if (backVertices.length >= 3) back.push({ plane: face.plane, vertices: backVertices });
+  }
+  return { front: closeCell(front, cap.slice(), opposite), back: closeCell(back, cap, plane) };
 }
 
 export function cellVertices(cell: ConvexCell): readonly Vec3[] {

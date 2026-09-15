@@ -1,3 +1,4 @@
+import { CollisionMapSettings } from "../../world/collision/q3/settings.ts";
 import { PresentationTime } from "./frame-clock.ts";
 import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
 import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
@@ -226,8 +227,10 @@ export class RemoteApplication {
             this.session.closeWorld(); this.presentation = null; this.clientInputs = [];
           }
         } });
+      if (this.clientCommands === null) throw new Error("Q3 remote requires its engine cvar owner");
+      remote.bindCollisionSettings(new CollisionMapSettings(this.clientCommands.cvars));
       this.remote = remote;
-      this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, ...(this.clientCommands === null ? {} : { cvars: this.clientCommands.cvars }), qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
+      this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, cvars: this.clientCommands.cvars, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
       const remote = new Q2RemotePresentation({ downloadPermission: this.downloadPermission, identity, session, content: null, protocol: launchOptions.q2Protocol ?? { kind: "q2-classic", version: 34 },

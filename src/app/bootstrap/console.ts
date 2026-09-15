@@ -1,10 +1,8 @@
-import { q3ServerCvarNames } from "./q3-common-cvars.ts";
 import { frameTimeCvarNames } from "./frame-time.ts";
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
-import { asciiFold, sourceCommandText } from "../../core/commands/text.ts";
-import { CvarFlag } from "../../core/cvars/index.ts";
+import { sourceCommandText } from "../../core/commands/text.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 
 export interface ApplicationConsoleServer {
@@ -87,24 +85,13 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     const name = sourceCommandText(nameInput), { server, seat, input, movement, origin } = this.owners(source);
     const shared = this.options.shared?.();
     if (shared?.find(name) !== undefined) return shared;
-    const serverVariable = server?.cvars.find(name);
-    const serverHas = serverVariable !== undefined;
+    // The current world defines the meaning of names also declared by selected content.
+    if (server !== null && server.cvars.find(name) !== undefined) return server.cvars;
     if (input !== null && input.find(name) !== undefined) {
-      if (serverHas && server?.cvars !== input) throw new Error(`Console cvar ${name} has conflicting server and input declarations`);
       return input;
     }
     const seatHas = seat !== null && seat.find(name) !== undefined;
     const movementHas = movement !== null && movement.find(name) !== undefined;
-    if (server !== null && serverHas && ((seatHas && server.cvars !== seat) || (movementHas && server.cvars !== movement))) {
-      const key = server.cvars.dialect === "q3" ? asciiFold(name) : name;
-      const systemInfoMirror = server.cvars.dialect === "q3" && ((serverVariable?.flags ?? 0) & CvarFlag.SystemInfo) !== 0;
-      const commonMirror = server.cvars.dialect === "q3" && [...q3ServerCvarNames, ...frameTimeCvarNames("q3")].some(shared => asciiFold(shared) === key);
-      if (!systemInfoMirror && !commonMirror && !server.sharedNames.some(shared => (server.cvars.dialect === "q3" ? asciiFold(shared) : shared) === key)) {
-        throw new Error(`Console cvar ${name} has conflicting server and seat declarations`);
-      }
-      return server.cvars;
-    }
-    if (server !== null && serverHas) return server.cvars;
     if (seatHas && movementHas && seat !== movement) throw new Error(`Console cvar ${name} has conflicting seat and movement declarations`);
     if (seat !== null && seatHas) return seat;
     if (movement !== null && movementHas) return movement;

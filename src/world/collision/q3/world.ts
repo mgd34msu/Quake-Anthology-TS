@@ -136,7 +136,7 @@ export class CollisionWorld {
   readonly #map: CollisionMapData;
   readonly #topology: CollisionTopology;
   readonly #debug: CollisionDebugSurface | null;
-  readonly #settings: CollisionMapSettings | null;
+  #settings: CollisionMapSettings | null;
   #sourceModels: SourceClipModels | null = null;
 
   constructor(map: CollisionMapData, debug: CollisionWorldProfile = { kind: "disabled" },
@@ -148,6 +148,10 @@ export class CollisionWorld {
   }
 
   get areaCount(): number { return this.#topology.areaCount; }
+  bindSettings(settings: CollisionMapSettings): void {
+    settings.registerMap();
+    this.#settings = settings;
+  }
   get clusterCount(): number { return this.#topology.clusterCount; }
   get modelCount(): number { return this.#map.models.length; }
   get hasNodes(): boolean { return this.#map.nodes.length !== 0; }
@@ -168,16 +172,13 @@ export class CollisionWorld {
   restorePortalCheckpoint(value: unknown): void { this.#topology.restorePortalCheckpoint(value); }
   adjustAreaPortalState(area1: number, area2: number, open: boolean): void { this.#topology.adjustAreaPortalState(area1, area2, open); }
   areasConnected(area1: number, area2: number): boolean {
-    if (this.#settings !== null) this.#topology.setNoAreas(this.#settings.noAreas);
-    return this.#topology.areasConnected(area1, area2);
+    return this.#topology.areasConnected(area1, area2, this.#settings?.noAreas);
   }
   writeAreaBits(buffer: Uint8Array, area: number): number {
-    if (this.#settings !== null) this.#topology.setNoAreas(this.#settings.noAreas);
-    return this.#topology.writeAreaBits(buffer, area);
+    return this.#topology.writeAreaBits(buffer, area, this.#settings?.noAreas);
   }
   areaBits(area: number): Uint8Array {
-    if (this.#settings !== null) this.#topology.setNoAreas(this.#settings.noAreas);
-    return this.#topology.areaBits(area);
+    return this.#topology.areaBits(area, this.#settings?.noAreas);
   }
   setNoAreas(enabled: boolean): void {
     if (this.#settings !== null) throw new Error("Shared collision worlds read cm_noAreas from their common cvars");

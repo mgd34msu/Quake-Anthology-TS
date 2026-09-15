@@ -4,6 +4,9 @@ import { resolve } from 'node:path';
 import type { NumericProfile } from '../../../src/contracts/numeric.ts';
 import type { DecodedWorld, TracePolicy } from '../../../src/contracts/scene.ts';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
+import { CvarRegistry } from '../../../src/core/cvars/index.ts';
+import { CollisionMapSettings } from '../../../src/world/collision/q3/settings.ts';
+import { q3Fixture } from '../../formats/q3-map/fixture.ts';
 import { openArchive } from '../../../src/content/archive/index.ts';
 import { parseEntities } from '../../../src/core/common-parse.ts';
 import { readQ1Bsp } from '../../../src/formats/q1-map/index.ts';
@@ -17,6 +20,54 @@ import { generatePatchCollide, tracePatch } from '../../../src/world/collision/q
 const numeric: NumericProfile = { id: 'test:f32', arithmetic: { kind: 'binary32', round: 'each-operation' }, scalarStorage: 'binary32', floatToInt: 'checked-c-truncation', integerOverflow: 'wrap32' };
 const policies: readonly TracePolicy[] = [{ kind: 'q1', move: 'normal', hull: null }, { kind: 'q2', contentsMask: 0x02010003, leafContents: 'merged' }, { kind: 'q3', contentsMask: 0x02010001, curves: true, playerCurveClip: true }];
 const root = process.env['QUAKE_DATA_PATH'] ?? resolve(import.meta.dir, '../../../../qfiles');
+test('canonical cm_noAreas bypasses shared Q3 topology without changing portal history', () => {
+ const decoded = decodeQ3World(q3Fixture()), leaf = decoded.leaves[0];
+ if (leaf === undefined) throw new Error('Q3 fixture has no leaf');
+ const geometry = { ...decoded, leaves: [{ ...leaf, area: 0 }, { ...leaf, area: 1 }] };
+ const identity = createIdentityOwner('common area settings');
+ const cvars = new CvarRegistry({ dialect: 'q3', context: { session: identity.session, origin: { kind: 'server-console' } }, cheatsAllowed: () => true });
+ const settings = new CollisionMapSettings(cvars), scene = createSceneQueries(geometry);
+ scene.bindCollisionSettings(settings);
+ const world = scene.nativeQ3ClipModels()?.world;
+ if (world === undefined) throw new Error('No shared Q3 topology');
+ const closed = world.capturePortalCheckpoint();
+ expect(scene.areasConnected(0, 1)).toBe(false);
+ expect(scene.areaBits(0)).toEqual(Uint8Array.of(1));
+ cvars.set('cm_noAreas', '1');
+ expect(scene.areasConnected(0, 1)).toBe(true);
+ expect(scene.areaBits(0)).toEqual(Uint8Array.of(255));
+ const bits = new Uint8Array(1);
+ expect(world.writeAreaBits(bits, 0)).toBe(1);
+ expect(bits).toEqual(Uint8Array.of(255));
+ expect(world.capturePortalCheckpoint()).toEqual(closed);
+ scene.adjustAreaPortalState(0, 1, true);
+ scene.adjustAreaPortalState(0, 1, true);
+ const opened = world.capturePortalCheckpoint();
+ expect(opened.portals).toEqual([0, 2, 2, 0]);
+ cvars.set('cm_noAreas', '0');
+ expect(scene.areasConnected(0, 1)).toBe(true);
+ scene.adjustAreaPortalState(0, 1, false);
+ expect(scene.areasConnected(0, 1)).toBe(true);
+ scene.adjustAreaPortalState(0, 1, false);
+ expect(scene.areasConnected(0, 1)).toBe(false);
+
+ const restored = createSceneQueries(geometry), restoredWorld = restored.nativeQ3ClipModels()?.world;
+ if (restoredWorld === undefined) throw new Error('No restored topology');
+ restoredWorld.restorePortalCheckpoint(opened);
+ restored.bindCollisionSettings(settings);
+ expect(restoredWorld.capturePortalCheckpoint()).toEqual(opened);
+ for (const connected of [true, false]) {
+   restored.adjustAreaPortalState(0, 1, false);
+   expect(restored.areasConnected(0, 1)).toBe(connected);
+ }
+ const restoredClosed = restoredWorld.capturePortalCheckpoint();
+ cvars.set('cm_noAreas', '1');
+ expect(restored.areasConnected(0, 1)).toBe(true);
+ expect(restoredWorld.capturePortalCheckpoint()).toEqual(restoredClosed);
+ cvars.set('cm_noAreas', '0');
+ expect(restored.areasConnected(0, 1)).toBe(false);
+ expect(restoredWorld.capturePortalCheckpoint()).toEqual(restoredClosed);
+});
 const fixtures: readonly { path: string; map: string; read(bytes: Uint8Array): DecodedWorld }[] = [
  { path: 'q1/rerelease/id1/pak0.pak', map: 'maps/start.bsp', read: readQ1Bsp },
  { path: 'q2/baseq2/pak0.pak', map: 'maps/base1.bsp', read: decodeQ2Map },

@@ -114,7 +114,7 @@ test("zero axis coefficients preserve inversion through menu changes and profile
   }
 });
 
-test("separate input routing preserves late source cvars and rejects wrong seats or server collisions", () => {
+test("separate input routing prefers world declarations and rejects wrong seats", () => {
   const f = fixture("q3");
   const fallback = new CvarRegistry({ dialect: "q3", context: f.context });
   let attached: CvarRegistry | null = null;
@@ -126,7 +126,7 @@ test("separate input routing preserves late source cvars and rejects wrong seats
   expect(routing.owner("cg_fov", f.context)).toBe(attached);
   expect(routing.visible(f.context)).toContain(attached); expect(routing.visible(f.context)).toContain(f.cvars);
   server.register("sensitivity", "20");
-  expect(() => routing.owner("sensitivity", f.context)).toThrow("conflicting server and input");
+  expect(routing.owner("sensitivity", f.context)).toBe(server);
   const wrong = new ApplicationConsoleRouting({ fallback, sourceDialect: () => "q3", server: () => null, seat: () => null, input: () => f.otherCvars });
   expect(() => wrong.owner("sensitivity", f.context)).toThrow("another seat");
 });

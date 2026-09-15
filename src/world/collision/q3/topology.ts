@@ -250,18 +250,18 @@ export class CollisionTopology {
     }
   }
 
-  areasConnected(area1: number, area2: number): boolean {
-    if (this.#noAreas) return true;
+  areasConnected(area1: number, area2: number, noAreas = this.#noAreas): boolean {
+    if (noAreas) return true;
     if (!Number.isInteger(area1) || !Number.isInteger(area2)) throw new RangeError("areas must be integers");
     if (area1 < 0 || area2 < 0) return false;
     if (area1 >= this.areaCount || area2 >= this.areaCount) throw new CommonError("drop", "area >= cm.numAreas");
     return at(this.#map.areas, area1).flood === at(this.#map.areas, area2).flood;
   }
 
-  writeAreaBits(buffer: Uint8Array, area: number): number {
+  writeAreaBits(buffer: Uint8Array, area: number, noAreas = this.#noAreas): number {
     const bytes = (this.areaCount + 7) >> 3;
     if (buffer.length < bytes) throw new RangeError(`area bits need ${bytes} bytes`);
-    if (this.#noAreas || area === -1) { buffer.fill(255, 0, bytes); return bytes; }
+    if (noAreas || area === -1) { buffer.fill(255, 0, bytes); return bytes; }
     this.#checkArea(area);
     const flood = at(this.#map.areas, area).flood;
     for (let other = 0; other < this.areaCount; other++) {
@@ -273,9 +273,9 @@ export class CollisionTopology {
     return bytes;
   }
 
-  areaBits(area: number): Uint8Array {
+  areaBits(area: number, noAreas = this.#noAreas): Uint8Array {
     const bits = new Uint8Array((this.areaCount + 7) >> 3);
-    this.writeAreaBits(bits, area);
+    this.writeAreaBits(bits, area, noAreas);
     return bits;
   }
 }

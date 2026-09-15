@@ -371,16 +371,18 @@ test("local Q3 console keeps source globals and SystemInfo mirrors under server 
   expect(second.variableString("local_only")).toBe("second");
   expect(commands.archiveCommands().filter(value => value.startsWith("seta pmove_msec "))).toEqual(['seta pmove_msec "16"']);
   server.register("undeclared_mirror", "server"); first.register("undeclared_mirror", "client");
-  expect(() => commands.cvarSnapshots()).toThrow("conflicting server and seat declarations");
+  expect(commands.cvarSnapshots().filter(value => value.name === "undeclared_mirror")).toMatchObject([{ value: "server" }]);
+  expect(first.variableString("undeclared_mirror")).toBe("client");
 });
 
-test("Q2 NoSet flag does not claim Q3 SystemInfo mirror ownership", () => {
+test("Q2 world declaration wins without treating NoSet as a Q3 mirror flag", () => {
   const server = new CvarRegistry({ dialect: "q2-classic", context: { session: owner.session, origin: { kind: "server-console" } } });
   const seat = new CvarRegistry({ dialect: "q2-classic", context: context() });
   server.register("duplicate", "server", Q2CvarFlag.NoSet); seat.register("duplicate", "client");
   const routing = new ApplicationConsoleRouting({ fallback: seat, sourceDialect: () => "q2-classic",
     server: () => ({ cvars: server, sharedNames: [] }), seat: () => seat });
-  expect(() => routing.owner("duplicate", context())).toThrow("conflicting server and seat declarations");
+  expect(routing.owner("duplicate", context())).toBe(server);
+  expect(seat.variableString("duplicate")).toBe("client");
 });
 
 

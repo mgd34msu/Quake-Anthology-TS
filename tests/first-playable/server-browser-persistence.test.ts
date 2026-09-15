@@ -183,8 +183,17 @@ async function openMenu(config: ConfigStore) {
     click(100, 158); key(KeyCode.Control, true); key(117, true); key(117, false); key(KeyCode.Control, false);
     menu.input({ seat, timeMilliseconds: 0, kind: "text", text });
   };
-  click(100, 160);
+  click(100, 130); click(100, 300);
   expect(menu.controller.activeMenu).toBe("menu:startup:session");
+  key(KeyCode.Escape, true); key(KeyCode.Escape, false);
+  expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+  key(KeyCode.Enter, true); key(KeyCode.Enter, false);
+  expect(menu.controller.activeMenu).toBe("menu:startup:session");
+  click(100, 368);
+  expect(menu.controller.activeMenu).toBe("menu:startup:native-family");
+  click(100, 436);
+  expect(menu.controller.activeMenu).toBe("menu:startup:main");
+  click(100, 130); click(100, 300);
   click(100, 400);
   expect(menu.controller.activeMenu).toBe("menu:startup:servers");
   click(400, 122);

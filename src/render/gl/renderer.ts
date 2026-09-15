@@ -504,7 +504,7 @@ export class GlRenderer implements RendererBackend {
   /** Returned RGBA pixels use top-left origin for SDL and captures. */
   readPixels(): Uint8Array {
     this.opened();
-    if (this.outputGamma !== null) this.finish();
+    this.resolveOutput();
     const width = this.width, height = this.height;
     const pixels = new Uint8Array(width * height * 4), topDown = new Uint8Array(pixels.length);
     withPixelStore(this.gl, "pack", () => this.gl.glReadPixels(0, 0, width, height, 0x1908, 0x1401, pixels));
@@ -526,18 +526,17 @@ export class GlRenderer implements RendererBackend {
     return { width: image.width, height: image.height, pixels };
   }
 
-  finish(): undefined {
-    this.opened();
+  private resolveOutput(): void {
     if (this.outputGamma !== null) {
       if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
       this.drawTarget(false);
       if (!this.gammaFinished) { this.outputGamma.finish(this.drawBuffer); this.gammaFinished = true; }
       else this.outputGamma.selectDefault(this.drawBuffer);
     }
-    this.gl.glFinish();
   }
+  finish(): undefined { this.opened(); this.resolveOutput(); this.gl.glFinish(); }
   getError(): number { this.opened(); return this.gl.glGetError(); }
-  present(): void { this.opened(); this.window.swap(); }
+  present(): void { this.opened(); this.resolveOutput(); this.window.swap(); }
 
   close(): undefined {
     if (this.closed) return;

@@ -1,4 +1,5 @@
 import { startupCommandPhases } from "./startup-commands.ts";
+import { registerQ1ViewCommands } from "./q1-client-settings.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
@@ -45,6 +46,7 @@ export class PreparedStartup {
   private worldAction = false;
   get pending(): boolean { return this.continuation !== undefined; }
   private readonly releaseBindings: () => void;
+  private readonly releaseView: () => void;
   private bindingsReleased = false;
   private readonly deferredCommands = ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team"];
   private forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
@@ -79,6 +81,7 @@ export class PreparedStartup {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
     this.releaseBindings = registerBindingCommands(this.commands, id => this.seats.find(seat => seat.id.equals(id))?.input ?? null, text => options.print(text));
+    this.releaseView = registerQ1ViewCommands(this.commands);
   }
   allowCommand(command: CommandInvocation): boolean {
     if (this.pending && this.deferredCommands.includes(asciiFold(command.argv[0] ?? ""))) this.worldAction = true;
@@ -120,6 +123,7 @@ export class PreparedStartup {
   }): void {
     if (!this.bindingsReleased) {
       this.releaseBindings();
+      this.releaseView();
       for (const name of this.deferredCommands) this.commands.unregister(name);
       this.bindingsReleased = true;
     }
