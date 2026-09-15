@@ -1,3 +1,5 @@
+import { q3GameCvarDefinitions } from "../../src/content/q3/base/settings.ts";
+import { cvarTable } from "../../src/content/q3/presentation/config.ts";
 import { expect, test } from "bun:test";
 import { ApplicationConsoleRouting } from "../../src/app/bootstrap/console.ts";
 import { SeatConsole } from "../../src/console/session.ts";
@@ -309,4 +311,46 @@ test("replacement command buffers retain deferred source context, aliases and wa
   expect(calls[1]?.source).toEqual(context(0));
   expect(before.pendingText).toContain("note queued");
   expect(before.deferredText).toBe("note deferred\n");
+});
+
+test("local Q3 console keeps source globals and SystemInfo mirrors under server authority", () => {
+  const server = new CvarRegistry({ dialect: "q3", context: { session: owner.session, origin: { kind: "server-console" } } });
+  const first = new CvarRegistry({ dialect: "q3", context: context(0) }), second = new CvarRegistry({ dialect: "q3", context: context(1) });
+  const fallback = new CvarRegistry({ dialect: "q3", context: context() });
+  for (const definition of q3GameCvarDefinitions("missionpack")) server.register(definition.name, definition.value, definition.flags);
+  for (const client of [first, second]) {
+    for (const definition of cvarTable("missionpack")) client.register(definition.name, definition.defaultValue, definition.flags);
+    client.register("mod_movement_scale", "1");
+    client.register("local_only", "1", CvarFlag.Archive);
+  }
+  server.register("mod_movement_scale", "2", CvarFlag.SystemInfo);
+  const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => "q3",
+    server: () => ({ cvars: server, sharedNames: q3GameCvarDefinitions("missionpack").map(definition => definition.name) }),
+    seat: id => id.equals(owner.seat(0)) ? first : second });
+  const commands = new CommandBuffer({ dialect: "q3", context: context(), cvarRouting: routing });
+  const snapshots = commands.cvarSnapshots();
+  for (const name of ["pmove_msec", "pmove_fixed", "g_synchronousClients", "com_blood", "g_redteam", "g_blueteam", "mod_movement_scale"])
+    expect(snapshots.filter(value => value.name === name)).toHaveLength(1);
+  expect(routing.owner("MOD_MOVEMENT_SCALE", context(1))).toBe(server);
+  commands.append("seta pmove_msec 16; set mod_movement_scale 3; set com_blood 0; set local_only first"); commands.execute();
+  commands.executeNow("set local_only second", context(1));
+  expect(server.variableString("pmove_msec")).toBe("16");
+  expect(server.variableString("mod_movement_scale")).toBe("3");
+  expect(server.variableString("com_blood")).toBe("0");
+  expect(first.variableString("pmove_msec")).toBe("8");
+  expect(second.variableString("pmove_msec")).toBe("8");
+  expect(first.variableString("local_only")).toBe("first");
+  expect(second.variableString("local_only")).toBe("second");
+  expect(commands.archiveCommands().filter(value => value.startsWith("seta pmove_msec "))).toEqual(['seta pmove_msec "16"']);
+  server.register("undeclared_mirror", "server"); first.register("undeclared_mirror", "client");
+  expect(() => commands.cvarSnapshots()).toThrow("conflicting server and seat declarations");
+});
+
+test("Q2 NoSet flag does not claim Q3 SystemInfo mirror ownership", () => {
+  const server = new CvarRegistry({ dialect: "q2-classic", context: { session: owner.session, origin: { kind: "server-console" } } });
+  const seat = new CvarRegistry({ dialect: "q2-classic", context: context() });
+  server.register("duplicate", "server", Q2CvarFlag.NoSet); seat.register("duplicate", "client");
+  const routing = new ApplicationConsoleRouting({ fallback: seat, sourceDialect: () => "q2-classic",
+    server: () => ({ cvars: server, sharedNames: [] }), seat: () => seat });
+  expect(() => routing.owner("duplicate", context())).toThrow("conflicting server and seat declarations");
 });

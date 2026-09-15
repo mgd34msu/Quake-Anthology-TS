@@ -2,6 +2,7 @@ import type { CommandContext, CommandDialect, CommandOrigin } from "../../contra
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
 import { asciiFold, sourceCommandText } from "../../core/commands/text.ts";
+import { CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 
 export interface ApplicationConsoleServer {
@@ -76,7 +77,8 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     const name = sourceCommandText(nameInput), { server, seat, input, movement, origin } = this.owners(source);
     const shared = this.options.shared?.();
     if (shared?.find(name) !== undefined) return shared;
-    const serverHas = server !== null && server.cvars.find(name) !== undefined;
+    const serverVariable = server?.cvars.find(name);
+    const serverHas = serverVariable !== undefined;
     if (input !== null && input.find(name) !== undefined) {
       if (serverHas && server?.cvars !== input) throw new Error(`Console cvar ${name} has conflicting server and input declarations`);
       return input;
@@ -85,7 +87,8 @@ export class ApplicationConsoleRouting implements CommandCvarRouting {
     const movementHas = movement !== null && movement.find(name) !== undefined;
     if (server !== null && serverHas && ((seatHas && server.cvars !== seat) || (movementHas && server.cvars !== movement))) {
       const key = server.cvars.dialect === "q3" ? asciiFold(name) : name;
-      if (!server.sharedNames.some(shared => (server.cvars.dialect === "q3" ? asciiFold(shared) : shared) === key)) {
+      const systemInfoMirror = server.cvars.dialect === "q3" && ((serverVariable?.flags ?? 0) & CvarFlag.SystemInfo) !== 0;
+      if (!systemInfoMirror && !server.sharedNames.some(shared => (server.cvars.dialect === "q3" ? asciiFold(shared) : shared) === key)) {
         throw new Error(`Console cvar ${name} has conflicting server and seat declarations`);
       }
       return server.cvars;

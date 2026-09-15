@@ -1,3 +1,4 @@
+import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
 import { resolveWeaponSelection } from "../../input/weapon-bindings.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
 import type { CvarArchiveEntry } from "../../core/cvars/index.ts";
@@ -510,7 +511,7 @@ export class Application {
         if (source !== null) return { cvars: source.host.cvars, sharedNames: source.settings.definitions.map(definition => definition.name) };
         if (q2Console !== null) return { cvars: q2Console.cvars, sharedNames: q2Console.sharedNames };
         const guest = simulation.q3Guest();
-        if (guest !== null) return { cvars: guest.state.cvars, sharedNames: serverDefinitionsForRecipe(content.recipe).map(definition => definition.target.name) };
+        if (guest !== null) return { cvars: guest.state.cvars, sharedNames: q3GameCvarDefinitions("missionpack").map(definition => definition.name) };
         const q1 = simulation.q1Source();
         return q1 === null ? null : { cvars: q1.cvars, sharedNames: [] };
       }, seat: id => localGuest?.seats.get(id)?.cvars ?? clientCvars.get(id) ?? null },
