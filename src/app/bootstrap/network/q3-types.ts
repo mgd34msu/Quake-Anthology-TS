@@ -10,13 +10,27 @@ import type { Gamestate } from '../../../network/q3/server-message.ts';
 import type { Product } from '../../../network/q3/state/product.ts';
 import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
 import type { PlayerStateFields } from '../../../network/q3/state/player.ts';
+import type { SimulationPresentationEvent } from '../simulation/types.ts';
 export interface Q3ApplicationPlayer { readonly client: ClientId; readonly actor: ActorId; readonly sourceEntity: number; }
 export type Q3ApplicationAdmission = { readonly kind: 'accepted'; readonly player: Q3ApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
+export interface Q3SourceRoundBinding {
+  preflight(): void;
+  rebind(): void;
+  reconnect(client: ClientId, userinfo: string, lastCommand: WireUserCommand): Q3ApplicationAdmission | Promise<Q3ApplicationAdmission>;
+}
+export interface Q3NetworkRoundRestart {
+  readonly clients: readonly ClientId[];
+  readonly snapshotServerBit: 0 | 4;
+  bindSource(): Promise<void>;
+  receiveEvents(events: readonly SimulationPresentationEvent[]): Promise<void>;
+  reconnectClient(client: ClientId): Promise<boolean>;
+}
 export interface Q3ApplicationServerHost {
+  readonly sourceRound?: Q3SourceRoundBinding;
   readonly product: Product;
   readonly maxClients: number;
   prepare(checksumFeed: number, serverId: number, configstring?: (index: number, value: string) => void | Promise<void>): Promise<void>;
-  pure(serverId: number): Q3PureServer;
+  pure(serverId: number, checksumFeedServerId?: number): Q3PureServer;
   downloadsEnabled(): boolean;
   openDownload(name: string): Q3DownloadReadFile | null;
   rate(player: Q3ApplicationPlayer): Q3ServerRate;

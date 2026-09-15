@@ -18,7 +18,7 @@ import { q3ChannelDelivery } from '../../../network/q3/transport.ts';
 import { encodeConnectionlessText } from '../../../network/q3/connectionless.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
-import type { Q3ApplicationPlayer, Q3ApplicationServerHost } from './q3-types.ts';
+import type { Q3ApplicationPlayer, Q3ApplicationServerHost, Q3NetworkRoundRestart } from './q3-types.ts';
 import { Q3GameCallbackError, q3GameCallback } from './q3-types.ts';
 interface Peer { readonly slot: number; readonly download: Q3ServerDownload; readonly baselines: Map<number, EntityStateFields>; remote: Q3Address; player: Q3ApplicationPlayer; readonly connection: Q3ServerConnection; lastReceived: number; readonly connectedAt: number; sequence: number; userinfo: string; }
 export interface Q3ServerNetworkOptions { readonly transport: DatagramTransport<NetworkAddress>; readonly host: Q3ApplicationServerHost; readonly random: () => number; readonly timeoutMilliseconds?: number; }
@@ -30,7 +30,8 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private closing: Promise<void> | null = null;
   private now = 0;
   private serverId = 1;
-  private serverFlags = 0;
+  private restartedServerId = 1;
+  private serverFlags: 0 | 4 = 0;
   private checksumFeed: number;
   private changedWorld = false;
   private pending: ActorCommand[] = [];
@@ -80,15 +81,15 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     if (admitted.kind === 'rejected') return admitted.reason;
     const baselines = new Map(this.host.gameState(admitted.player, this.serverId).entries.flatMap(entry => entry.kind === 'baseline' ? [[entry.number, entry.entity] satisfies [number, typeof entry.entity]] : []));
     const snapshots = new Q3ServerSnapshotHistory(this.entities, this.host.product, number => baselines.get(number) ?? new EntityStateRecord<number>(0));
-    const download = new Q3ServerDownload({ open: name => this.host.openDownload(name), enabled: () => this.host.downloadsEnabled(), pure: () => this.host.pure(this.serverId).enabled, drop: async reason => { await this.disconnectClient(peer.player.client, reason); }, print: text => this.host.print(text) });
+    const download = new Q3ServerDownload({ open: name => this.host.openDownload(name), enabled: () => this.host.downloadsEnabled(), pure: () => this.host.pure(this.serverId, this.restartedServerId).enabled, drop: async reason => { await this.disconnectClient(peer.player.client, reason); }, print: text => this.host.print(text) });
     const connection: Q3ServerConnection = new Q3ServerConnection({ client: admitted.player.client, seat: null }, request.challenge, request.qport, snapshots, {
-      assertCurrent: () => this.assertPeer(peer), serverId: () => this.serverId, restartedServerId: () => this.serverId, checksumFeed: () => this.checksumFeed,
-      pure: () => this.host.pure(this.serverId).enabled, debugBuild: false, time: () => this.host.time(), clientRunning: () => false, floodProtect: () => true, downloadName: () => download.name,
+      assertCurrent: () => this.assertPeer(peer), serverId: () => this.serverId, restartedServerId: () => this.restartedServerId, checksumFeed: () => this.checksumFeed,
+      pure: () => this.host.pure(this.serverId, this.restartedServerId).enabled, debugBuild: false, time: () => this.host.time(), clientRunning: () => false, floodProtect: () => true, downloadName: () => download.name,
       command: async (command, clientOK): Promise<boolean> => {
         const host = this.host, serverId = this.serverId;
         const argv = tokenizeCommand(command.text, 'q3').argv, name = argv[0] ?? '';
         if (name === 'disconnect') { await this.disconnectClient(peer.player.client, 'disconnected'); return false; }
-        if (name === 'cp') { await connection.verifyPure(this.host.pure(this.serverId), argv, () => this.snapshot(peer)); return connection.phase !== 'zombie'; }
+        if (name === 'cp') { await connection.verifyPure(this.host.pure(this.serverId, this.restartedServerId), argv, () => this.snapshot(peer)); return connection.phase !== 'zombie'; }
         if (name === 'vdr') { connection.pureAuthentic = false; connection.gotPureCommand = false; return true; }
         if (name === 'download') { const requested = (argv[1] ?? '').slice(0, 63); try { if (requested !== '') checkQ3DownloadName(requested); } catch { await this.disconnectClient(peer.player.client, 'Invalid download path'); return false; } download.begin(requested); return true; }
         if (name === 'nextdl') { await download.acknowledge(nativeAtoi(argv[1] ?? ''), this.host.time()); return connection.phase !== 'zombie'; }
@@ -150,6 +151,13 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   }
   private async publishEvents(_output: SimulationOutput, events: readonly SimulationPresentationEvent[], nowMilliseconds: number): Promise<void> {
     if (this.ended) return; this.now = Math.trunc(nowMilliseconds);
+    await this.receiveEvents(events);
+    if (this.ended) return;
+    for (const peer of this.peers.values()) if (peer.connection.phase !== 'connected' && this.host.time() >= peer.connection.nextSnapshotTime) {
+      this.snapshot(peer);
+    }
+  }
+  private async receiveEvents(events: readonly SimulationPresentationEvent[]): Promise<void> {
     for (const item of events) if (item.kind === 'q3-source') {
       const event = item.event;
       for (const peer of [...this.peers.values()]) {
@@ -161,10 +169,6 @@ export class Q3ServerNetwork implements ApplicationNetwork {
           await this.configstring(peer, event.index, event.value);
         }
       }
-    }
-    if (this.ended) return;
-    for (const peer of this.peers.values()) if (peer.connection.phase !== 'connected' && this.host.time() >= peer.connection.nextSnapshotTime) {
-      this.snapshot(peer);
     }
   }
   private snapshot(peer: Peer): void {
@@ -218,9 +222,77 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     peer.connection.phase = 'zombie';
   }
   changeWorld(host: Q3ApplicationServerHost): Promise<void> { return this.operation(() => this.replaceWorld(host)); }
+  restartSourceRound(run: (round: Q3NetworkRoundRestart) => Promise<void>): Promise<void> {
+    return this.operation(async () => {
+      const binding = this.host.sourceRound;
+      if (this.ended || binding === undefined) throw new Error('Q3 network host has no native source round restart');
+      binding.preflight();
+      if (this.serverId === 0x7fffffff) throw new Error('Q3 server id exhausted');
+      const peers = [...this.peers.values()], pending = new Set(peers.map(peer => peer.slot));
+      const reconnecting = new Set<number>();
+      const lifecycle: { phase: 'reset' | 'bound' | 'closed' } = { phase: 'reset' };
+      this.serverId++; this.serverFlags = this.serverFlags === 0 ? 4 : 0; this.pending = [];
+      const host = this.host, serverId = this.serverId;
+      const current = () => {
+        if (lifecycle.phase === 'closed') throw new Error('Q3 source restart scope has ended');
+        this.assertWorld(host, serverId);
+      };
+      try {
+        await host.prepare(this.checksumFeed, serverId); current();
+        await run({ clients: peers.map(peer => peer.player.client), snapshotServerBit: this.serverFlags,
+          bindSource: async () => {
+            current();
+            if (lifecycle.phase !== 'reset') throw new Error('Q3 network source round was already rebound');
+            binding.rebind();
+            await host.prepare(this.checksumFeed, serverId, (index, value) => this.broadcastConfigstring(index, value));
+            current(); lifecycle.phase = 'bound';
+          },
+          receiveEvents: async events => {
+            current();
+            if (lifecycle.phase !== 'bound') throw new Error('Bind the Q3 network source before delivering restart events');
+            await this.receiveEvents(events); current();
+          },
+          reconnectClient: async client => {
+            current();
+            if (lifecycle.phase !== 'bound') throw new Error('Bind the Q3 network source before reconnecting');
+            const peer = peers.find(peer => peer.player.client.equals(client));
+            if (peer === undefined) return false;
+            if (!pending.has(peer.slot) || reconnecting.has(peer.slot)) throw new Error('Q3 network client was already reconnected');
+            reconnecting.add(peer.slot);
+            try {
+              if (this.peers.get(peer.slot) === peer) {
+                await this.queue(peer, 'map_restart\n'); current();
+                if (this.peers.get(peer.slot) === peer) {
+                  const admitted = await q3GameCallback(() => binding.reconnect(client, peer.userinfo, peer.connection.lastUserCommand));
+                  current();
+                  if (admitted.kind === 'rejected') await this.disconnectClient(client, admitted.reason);
+                  else {
+                    if (!admitted.player.client.equals(client)) throw new Error('Q3 round admission changed client identity');
+                    peer.player = admitted.player; peer.connection.phase = 'active'; peer.connection.deltaMessage = -1;
+                    peer.connection.nextSnapshotTime = host.time();
+                  }
+                }
+              }
+              pending.delete(peer.slot); return true;
+            } finally { reconnecting.delete(peer.slot); }
+          },
+        });
+        current();
+        if (lifecycle.phase !== 'bound' || pending.size !== 0) throw new Error('Q3 source restart did not bind and reconnect every network client');
+      } catch (error) {
+        this.ended = true; this.pending = [];
+        const failures: unknown[] = [error];
+        for (const peer of this.peers.values()) { try { peer.download.close(); } catch (failure) { failures.push(failure); } }
+        this.peers.clear();
+        try { this.options.transport.close(); } catch (failure) { failures.push(failure); }
+        if (failures.length > 1) throw new AggregateError(failures, 'Q3 source restart and network retirement failed');
+        throw error;
+      } finally { lifecycle.phase = 'closed'; }
+    });
+  }
   private async replaceWorld(host: Q3ApplicationServerHost): Promise<void> {
     this.requireSupported(host); const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) }));
-    this.host = host; this.serverId++; this.serverFlags ^= 4; this.pending = []; this.checksumFeed = (this.options.random() << 16) ^ this.options.random(); this.changedWorld = true;
+    this.host = host; this.serverId++; this.restartedServerId = this.serverId; this.serverFlags = this.serverFlags === 0 ? 4 : 0; this.pending = []; this.checksumFeed = (this.options.random() << 16) ^ this.options.random(); this.changedWorld = true;
     for (const { peer, player } of carried) { peer.player = player; await q3GameCallback(() => this.host.userinfo(player, peer.userinfo)); this.assertPeer(peer); peer.download.close(); peer.connection.deltaMessage = -1; peer.connection.phase = 'connected'; }
   }
   close(): Promise<void> {

@@ -1,4 +1,5 @@
 import { SaveReader, encodeCheckpointValue } from "../../../../persistence/value.ts";
+
 import { savedActorId } from "../../../../persistence/save-image.ts";
 import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../../../content/q3/base/game/save-state.ts";
 import { readQ3Graph, readQ3Actor } from "../../../../content/q3/base/game/save-reader.ts";
@@ -65,6 +66,8 @@ import { triggerSpawnHandlers } from "../../../../content/q3/base/game/triggers.
 import { ConfigStringRegistry, findEntity, useTargets } from "../../../../content/q3/base/game/utilities.ts";
 import type { TargetUseContext } from "../../../../content/q3/base/game/utilities.ts";
 import { invulnerabilityEffect, logAccuracyHit, WeaponRuntime } from "../../../../content/q3/base/game/weapon.ts";
+
+export class Q3ClientAdmissionDenied extends Error {}
 
 export class Q3SourceRuntime {
   readonly level = new GameLevel();
@@ -636,7 +639,7 @@ export class Q3SourceRuntime {
     const entity = this.prepareClient(actor, client);
     const restored = this.options.sessionCarry?.clients.some(saved => saved.slot === client) ?? false;
     const rejected = this.admission.connect(client, !restored, false);
-    if (rejected !== null) throw new Error(rejected);
+    if (rejected !== null) throw new Q3ClientAdmissionDenied(rejected);
     this.admission.begin(client);
     return entity;
   }
