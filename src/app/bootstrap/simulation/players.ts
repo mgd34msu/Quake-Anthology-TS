@@ -292,7 +292,7 @@ export class MovementPlayer {
     this.commandAngles = this.viewAngles;
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Player has no combat state");
-    const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.standingBounds },
+    const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
       environment: playerMovementEnvironment(this, combat),
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
     const state = this.state, selectedProfile = selectedMovementProfile(this), command = input.command;
@@ -311,7 +311,9 @@ export class MovementPlayer {
       },
       afterPhysics: (_input: MovementInput, next: MovementState) => this.commit(next, false, false),
     } };
-    const provider = createPlayerMovementProvider(this, { q1: q1Options, q2: this.host.rereleaseMovement, q3: {
+    const provider = createPlayerMovementProvider(this, { nativeQuakeWorld: this.host.quakeWorld !== undefined,
+      publishPosture: (bounds, viewHeight) => { this.bounds = bounds; this.viewHeight = viewHeight; },
+      q1: q1Options, q2: this.host.rereleaseMovement, q3: {
       ...this.host.q3Hooks,
       weapon: context => { this.viewAngles = context.motion.viewangles; return this.host.q3Hooks.weapon(context); },
     } });

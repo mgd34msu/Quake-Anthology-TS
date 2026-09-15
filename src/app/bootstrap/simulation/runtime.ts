@@ -2311,6 +2311,7 @@ export class SharedSimulation implements Simulation {
         : { ...input.frame, time: { kind: "milliseconds", value: this.selectedMilliseconds } satisfies SourceTime };
       const result = this.selectedArsenal.step({ ...input, gauntletHit, frame }, player.arsenalIntent);
       player.arsenal = result.arsenal;
+      this.characters.get(player.actor)?.commitAnimation(result.animation);
       this.weaponSlots.get(player.actor.id)?.reconcile();
       return result;
     }

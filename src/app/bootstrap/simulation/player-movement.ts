@@ -15,6 +15,7 @@ import { readQ3ArsenalRuntime, readQ3MovementState } from "./q3/player-state.ts"
 import { movementOrigin, movementProfile, providerFamily } from "./players.ts";
 import type { MovementPlayer } from "./players.ts";
 import type { SharedSimulation } from "./runtime.ts";
+import { createSharedQuakeWorldMovement } from "./shared-quakeworld-movement.ts";
 
 function relocated(state: MovementState, origin: Vec3, velocity: Vec3): MovementState {
   if (state.kind === "q2-classic") return { ...state,
@@ -76,6 +77,8 @@ export function playerMovementEnvironment(player: Pick<MovementPlayer, "sourceEn
       gravityMultiplier: player.state.kind === "q3" ? 1 : source.gravityMultiplier };
 }
 export interface PlayerMovementHooks {
+  readonly nativeQuakeWorld?: boolean;
+  readonly publishPosture?: (bounds: Bounds, viewHeight: number) => void;
   readonly q1: Q1MovementOptions;
   readonly q2: Q2RereleaseMovementContext;
   readonly q3: Q3MovementHooks;
@@ -85,7 +88,9 @@ export function createPlayerMovementProvider(player: Pick<MovementPlayer, "profi
   const profile = player.profile;
   switch (profile.kind) {
     case "q1-netquake": return createQ1MovementProvider(profile.id, hooks.q1);
-    case "q1-quakeworld": return createQwMovementProvider(profile.id, hooks.q1);
+    case "q1-quakeworld": return hooks.nativeQuakeWorld === true ? createQwMovementProvider(profile.id, hooks.q1)
+      : createSharedQuakeWorldMovement(profile.id, hooks.q1, player.standingBounds,
+        playerPostures({ ...player, viewHeight: 22 }), hooks.publishPosture);
     case "q2-classic": return createQ2ClassicMovementProvider(profile.id);
     case "q2-rerelease": return createQ2RereleaseMovementProvider(profile.id, hooks.q2);
     case "q3": return createQ3MovementProvider({ id: profile.id, hooks: hooks.q3, postures: () => playerPostures(player),
@@ -119,7 +124,8 @@ export function createPlayerMovementPrediction(simulation: SharedSimulation, pla
       torso: context => context.animation.state.kind === "q3" ? q3SourceTorso(PlayerAnimation.TORSO_STAND, context, true) : { animation: context.animation, effects: [] },
       weapon: context => ({ arsenal: context.arsenal, animation: context.animation, effects: [], movementFlags: context.motion.pmFlags }) };
   }
-  const provider = createPlayerMovementProvider(player, { q1: { viewHeight: player.viewHeight }, q2: new Q2RereleaseMovementContext(), q3: q3Hooks });
+  const nativeQuakeWorld = simulation.quakecSource()?.kind === "quakeworld";
+  const provider = createPlayerMovementProvider(player, { nativeQuakeWorld, q1: { viewHeight: player.viewHeight }, q2: new Q2RereleaseMovementContext(), q3: q3Hooks });
   return { provider, services: { scene: simulation.scene, numeric: player.services.numeric,
     touch: (_contact, state) => ({ kind: "continue", state }),
     weaponStep: input => ({ arsenal: input.arsenal, animation: input.animation, effects: [] }),
@@ -130,7 +136,9 @@ export function createPlayerMovementPrediction(simulation: SharedSimulation, pla
       const horizontal = Math.min(400, Math.hypot(commandMove.x, commandMove.y)), up = Math.max(-400, Math.min(400, commandMove.z));
       const angles = { x: 0, y: yaw * 180 / Math.PI, z: 0 }, words: readonly [number, number, number] = [0, Math.round(yaw * 65536 / (Math.PI * 2)) & 65535, 0];
       const time = (baseline.kind === "q3" ? baseline.commandTimeMilliseconds : simulation.timeSeconds * 1000) + (index + 1) * milliseconds;
-      const base = { actor: player.actor, commandSequence: index, execution: "prediction", shape: { kind: "box", bounds: player.standingBounds },
+      const bounds = profile.kind === "q1-quakeworld" && !nativeQuakeWorld
+        ? previous?.bounds ?? (crouched ? playerCrouchedBounds(player) : player.bounds) : player.standingBounds;
+      const base = { actor: player.actor, commandSequence: index, execution: "prediction", shape: { kind: "box", bounds },
         frame: { frame: index, time: { kind: "milliseconds", value: time }, elapsed: { kind: "milliseconds", value: milliseconds }, phase: "client-command" },
         environment,
         arsenal: previous?.arsenal ?? player.arsenal, animation: previous?.animation ?? player.animation } satisfies Omit<MovementInput, "kind" | "profile" | "state" | "command">;
