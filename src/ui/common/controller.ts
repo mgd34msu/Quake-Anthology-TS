@@ -362,8 +362,9 @@ export class NativeUiController implements SeatUiController {
       const color = !control.enabled ? skin.colors.disabled : focused ? skin.colors.accent : skin.colors.text;
       if (control.kind === "owner-draw") { commands.push(...control.draw({ ...context, binding: { ...context.binding,
         viewport: { x: 0, y: 0, width: 640, height: 480 }, safeArea: { x: 0, y: 0, width: 640, height: 480 } } })); continue; }
-      const decoration = focused ? skin.focus ?? skin.button : skin.button;
-      commands.push({ kind: "fill", rect: { ...control.rect, height: control.rect.height - 2 }, color: focused ? skin.colors.focused : skin.colors.control });
+      const focusedControl = focused && control.kind !== "list";
+      const decoration = focusedControl ? skin.focus ?? skin.button : skin.button;
+      commands.push({ kind: "fill", rect: { ...control.rect, height: control.rect.height - 2 }, color: focusedControl ? skin.colors.focused : skin.colors.control });
       if (decoration !== null) commands.push(...nineSlice(decoration, control.rect, white));
       if (control.kind === "list") {
         const layout = this.listLayout(control), contentWidth = control.rect.width - (layout.maximum > 0 ? 16 : 0);

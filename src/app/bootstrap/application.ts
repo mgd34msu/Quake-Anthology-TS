@@ -1681,6 +1681,9 @@ export class Application {
     try { if (graphical !== null) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
     try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     for (const source of graphical?.q3.values() ?? []) { try { await source.client.shutdown(); } catch (error) { errors.push(error); } }
+    for (const local of graphical?.input.locals ?? []) {
+      try { local.player.seat.replacePresentation(null)?.close(); } catch (error) { errors.push(error); }
+    }
     for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();
     this.localGuest?.seats.clear(); this.localGuest = null;
     this.guestBrowser?.view.close();

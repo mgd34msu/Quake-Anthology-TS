@@ -377,7 +377,13 @@ test("binding table search, wheel, scrollbar and keyboard reach every row withou
   const button = (down: boolean): void => { ui.input({ kind: "mouse-button", seat, timeMilliseconds: 0, button: 1, down }); };
   const labels = (): string[] => ui.draw(drawContext(owner, seat)).flatMap(command => command.kind === "text" ? [command.text] : []);
   ui.openMenu(menus.root); labels();
-  pointer(400, 150); ui.input({ kind: "mouse-wheel", seat, timeMilliseconds: 0, delta: { x: 0, y: -1 } });
+  pointer(400, 150);
+  const focusedCommands = ui.draw(drawContext(owner, seat));
+  const listBackground = focusedCommands.find(command => command.kind === "fill" && command.rect.x === 48 && command.rect.y === 136 && command.rect.height === 238);
+  const selectedBackground = focusedCommands.find(command => command.kind === "fill" && command.rect.x === 48 && command.rect.y === 136 && command.rect.height === 24);
+  expect(listBackground?.kind === "fill" ? listBackground.color : null).toEqual(defaultUiSkin(fontId).colors.control);
+  expect(selectedBackground?.kind === "fill" ? selectedBackground.color : null).toEqual(defaultUiSkin(fontId).colors.focused);
+  ui.input({ kind: "mouse-wheel", seat, timeMilliseconds: 0, delta: { x: 0, y: -1 } });
   expect(labels()).toContain("Action 3"); expect(labels()).not.toContain("Action 0"); expect(ui.bindingCapture).toBe(false);
   pointer(582, 170); button(true); pointer(582, 374); button(false);
   expect(labels()).toContain("Action 49"); expect(ui.bindingCapture).toBe(false);
