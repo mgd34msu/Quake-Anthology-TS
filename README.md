@@ -52,7 +52,9 @@ Use `--renderer cpu` for software rendering. Gamma defaults to 1; higher values 
 
 **Controls, console, and LLM setup**
 
-**Options > Controls** offers overall mouse sensitivity and horizontal/vertical multipliers (0–200%, default 100%). Invert mouse is separate.
+Open **Options → Controls → Bindings (Player 1)** before starting a map. One searchable, scrollable table shows each action and its current keys. Select a key to capture its replacement directly; use **Add** for another binding. Existing profile bindings are preserved. Right mouse is `MOUSE2`; middle mouse is `MOUSE3`.
+
+**Options → Controls** shows numeric slider values, including overall sensitivity and horizontal/vertical multipliers. Invert mouse is separate. In the console, `bind mouse2` shows its current command and `bindlist` lists bindings. These controls are included in the installed executable recorded in [execution status](docs/execution-status.md#installed-executable-and-recent-fixes).
 
 In the console, Tab/Shift+Tab completes commands and inserts `/`. Use `find <text>` and `help <name>`. Up/Down recalls history; PageUp/PageDown scrolls output.
 
