@@ -1,3 +1,4 @@
+import { physicalMouseButton, quakeMouseButton } from "../../../input/mouse-buttons.ts";
 import { freemem } from 'node:os';
 import type { InputBindingTarget, InputAction, PhysicalInput } from '../../../contracts/ui.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -32,7 +33,7 @@ const actionCommands: Readonly<Record<InputAction, string>> = {
 };
 function bindingCommand(target: InputBindingTarget): string { return target.kind === "command" ? target.text : actionCommands[target.action]; }
 function physical(key: number): PhysicalInput {
-  return key >= KeyCode.Mouse1 && key <= KeyCode.Mouse5 ? { kind: 'mouse-button', button: key - KeyCode.Mouse1 + 1 } : { kind: 'key', code: key };
+  return key >= KeyCode.Mouse1 && key <= KeyCode.Mouse5 ? { kind: 'mouse-button', button: physicalMouseButton(key - KeyCode.Mouse1 + 1) } : { kind: 'key', code: key };
 }
 function vector(view: DataView, offset = 0): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
 function writeVector(view: DataView, value: Vec3): void { view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true); }
@@ -84,7 +85,7 @@ export class QvmApplicationScalars {
     } else if (code === QvmCgameImport.CG_KEY_GETKEY) {
       const name = guest.readString(words.getInt32(4, true));
       const binding = o.local.input.bindings.find(binding => bindingCommand(binding.target).toLowerCase() === name.toLowerCase());
-      return binding?.input.kind === 'key' ? binding.input.code : binding?.input.kind === 'mouse-button' ? KeyCode.Mouse1 + binding.input.button - 1 : -1;
+      return binding?.input.kind === 'key' ? binding.input.code : binding?.input.kind === 'mouse-button' ? KeyCode.Mouse1 + quakeMouseButton(binding.input.button) - 1 : -1;
     }
     if (code === (ui ? QvmUiImport.UI_REAL_TIME : QvmCgameImport.CG_REAL_TIME)) {
       const time = new Date(), pointer = words.getInt32(4, true);

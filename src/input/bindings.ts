@@ -3,26 +3,49 @@ import type { CommandDialect } from "../contracts/common.ts";
 import type { InputBinding, PhysicalInput } from "../contracts/ui.ts";
 import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts";
 import { keynumToString, stringToKeynum } from "./keys.ts";
+import { physicalMouseButton, quakeMouseButton } from "./mouse-buttons.ts";
 import { KeyCode } from "./key-codes.ts";
 import type { SeatInput } from "./seat.ts";
+
+const controllerButtons: readonly (readonly [command: string, button: number, label: string])[] = [
+  ["gamepad_a_button", 0, "A"], ["gamepad_b_button", 1, "B"], ["gamepad_x_button", 2, "X"], ["gamepad_y_button", 3, "Y"],
+  ["gamepad_back", 4, "Back"], ["gamepad_guide", 5, "Guide"], ["gamepad_start", 6, "Start"],
+  ["gamepad_left_stick", 7, "Left stick press"], ["gamepad_right_stick", 8, "Right stick press"],
+  ["gamepad_left_shoulder", 9, "Left shoulder"], ["gamepad_right_shoulder", 10, "Right shoulder"],
+  ["gamepad_dpad_up", 11, "D-pad up"], ["gamepad_dpad_down", 12, "D-pad down"],
+  ["gamepad_dpad_left", 13, "D-pad left"], ["gamepad_dpad_right", 14, "D-pad right"],
+  ["gamepad_misc", 15, "Miscellaneous"], ["gamepad_paddle1", 16, "Paddle 1"], ["gamepad_paddle2", 17, "Paddle 2"],
+  ["gamepad_paddle3", 18, "Paddle 3"], ["gamepad_paddle4", 19, "Paddle 4"], ["gamepad_touchpad", 20, "Touchpad"],
+];
 
 export function namedPhysicalInput(name: string, device = 0): PhysicalInput | null {
   const lower = name.toLowerCase();
   const mouse = /^mouse([1-9][0-9]*)$/.exec(lower);
-  if (mouse !== null) return { kind: "mouse-button", button: Number(mouse[1]) };
-  const controllerButtons: ReadonlyMap<string, number> = new Map([
-    ["gamepad_a_button", 0], ["gamepad_b_button", 1], ["gamepad_x_button", 2], ["gamepad_y_button", 3],
-    ["gamepad_back", 4], ["gamepad_guide", 5], ["gamepad_start", 6], ["gamepad_left_stick", 7], ["gamepad_right_stick", 8],
-    ["gamepad_left_shoulder", 9], ["gamepad_right_shoulder", 10], ["gamepad_dpad_up", 11], ["gamepad_dpad_down", 12],
-    ["gamepad_dpad_left", 13], ["gamepad_dpad_right", 14], ["gamepad_misc", 15], ["gamepad_paddle1", 16],
-    ["gamepad_paddle2", 17], ["gamepad_paddle3", 18], ["gamepad_paddle4", 19], ["gamepad_touchpad", 20],
-  ]);
-  const button = controllerButtons.get(lower);
+  if (mouse !== null) return { kind: "mouse-button", button: physicalMouseButton(Number(mouse[1])) };
+  const button = controllerButtons.find(([command]) => command === lower)?.[1];
   if (button !== undefined) return { kind: "controller-button", device, button };
   if (lower === "gamepad_left_trigger" || lower === "gamepad_right_trigger") return { kind: "controller-axis", device,
     axis: lower === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
   const code = stringToKeynum(name);
   return code < 0 ? null : { kind: "key", code };
+}
+export function physicalInputName(input: PhysicalInput): string {
+  switch (input.kind) {
+    case "key": return keynumToString(input.code);
+    case "mouse-button": return `MOUSE${quakeMouseButton(input.button)}`;
+    case "controller-button": return `Pad ${input.device + 1} ${controllerButtons.find(([, button]) => button === input.button)?.[2] ?? `Button ${input.button + 1}`}`;
+    case "controller-axis": {
+      const prefix = `Pad ${input.device + 1}`, positive = input.direction === "positive";
+      switch (input.axis) {
+        case "left-x": return `${prefix} Left stick ${positive ? "right" : "left"}`;
+        case "left-y": return `${prefix} Left stick ${positive ? "down" : "up"}`;
+        case "right-x": return `${prefix} Right stick ${positive ? "right" : "left"}`;
+        case "right-y": return `${prefix} Right stick ${positive ? "down" : "up"}`;
+        case "left-trigger": return `${prefix} Left trigger${positive ? "" : " released"}`;
+        case "right-trigger": return `${prefix} Right trigger${positive ? "" : " released"}`;
+      }
+    }
+  }
 }
 export function defaultBindings(device = 0, dialect: CommandDialect = "q3"): readonly InputBinding[] {
   const bindings: InputBinding[] = [];
@@ -47,8 +70,7 @@ export function archivedBindings(input: SeatInput): readonly string[] {
   const commands: string[] = ["unbindall"];
   for (const binding of input.bindings) {
     if (binding.target.kind !== "command") continue;
-    const name = binding.input.kind === "key" ? keynumToString(binding.input.code)
-      : binding.input.kind === "mouse-button" ? `MOUSE${binding.input.button}` : null;
+    const name = binding.input.kind === "key" || binding.input.kind === "mouse-button" ? physicalInputName(binding.input) : null;
     if (name !== null) commands.push(`bind ${quoted(name)} ${quoted(binding.target.text)}`);
   }
   return commands;
@@ -70,7 +92,9 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
     const input = namedPhysicalInput(name, device);
     if (input === null) { print(`Unknown key ${name}\n`); return; }
     if (invocation.argv.length === 2) {
-      const binding = seat.binding(input); print(binding?.kind === "command" ? `${name} = ${binding.text}\n` : `${name} is not bound to a command\n`); return;
+      const binding = seat.binding(input);
+      print(binding === null ? `${physicalInputName(input)} is not bound to a command\n`
+        : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`); return;
     }
     seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
   }, { summary: "Read or set a key binding for the invoking seat.", usage: "bind <key> [command]", examples: ['bind SPACE "+jump"'] });
@@ -88,7 +112,7 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
     } else seat.unbind(input);
   });
   add("unbindall", invocation => { local(invocation)?.unbindAll(); });
-  add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${JSON.stringify(binding)}\n`); });
+  add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); });
   return () => { for (const name of registered) commands.unregister(name); };
 }
 

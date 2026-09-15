@@ -9,6 +9,7 @@ import { commandSeparatorOffset, sourceCommandText } from "../core/commands/text
 import { InputButton } from "./buttons.ts";
 import { GamepadInput } from "./gamepad.ts";
 import type { GamepadTuning } from "./gamepad.ts";
+import { quakeMouseButton } from "./mouse-buttons.ts";
 import { KeyCode } from "./key-codes.ts";
 
 export type SourceAction = InputAction | "turn-left" | "turn-right" | "look-up" | "look-down" | "strafe" | "mlook" | "klook" | "holster" | `button${number}`;
@@ -31,7 +32,7 @@ export function physicalInputKey(input: PhysicalInput): string {
 function commandKey(input: PhysicalInput): number {
   switch (input.kind) {
     case "key": return input.code;
-    case "mouse-button": return KeyCode.Mouse1 + input.button - 1;
+    case "mouse-button": return KeyCode.Mouse1 + quakeMouseButton(input.button) - 1;
     case "controller-button": return 65536 + input.device * 64 + input.button;
     case "controller-axis": return 65536 + input.device * 64 + 32 + ["left-x", "left-y", "right-x", "right-y", "left-trigger", "right-trigger"].indexOf(input.axis) * 2 + Number(input.direction === "positive");
   }

@@ -1,3 +1,4 @@
+import { quakeMouseButton } from "../../input/mouse-buttons.ts";
 import { CommonError } from "../../core/common-error.ts";
 import { q3ProceduralFog } from "../../content/q3/presentation/scene.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
@@ -278,7 +279,7 @@ export class ApplicationQ3Client {
       switch (event.kind) {
         case "key": await this.keyEvent(event.code, event.down); break;
         case "text": for (const character of event.text) { const code = character.codePointAt(0); if (code !== undefined) await this.keyEvent(code | KEY_CHAR_FLAG, true); } break;
-        case "mouse-button": await this.keyEvent(KeyCode.Mouse1 + event.button - 1, event.down); break;
+        case "mouse-button": await this.keyEvent(KeyCode.Mouse1 + quakeMouseButton(event.button) - 1, event.down); break;
         case "mouse-motion": await this.mouseEvent(event.delta.x, event.delta.y); break;
         case "mouse-wheel": for (let count = 0; count < Math.abs(event.delta.y); count++) {
           const key = event.delta.y > 0 ? KeyCode.MouseWheelUp : KeyCode.MouseWheelDown;
