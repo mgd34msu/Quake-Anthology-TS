@@ -7,6 +7,7 @@ import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { SeatInput } from "../../src/input/seat.ts";
 import { defaultBindings } from "../../src/input/bindings.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
+import type { SeatSettings } from "../../src/settings/config.ts";
 import { StartupInputProfile } from "../../src/app/bootstrap/startup-input-profile.ts";
 import { baseWeaponBindingItems } from "../../src/input/weapon-bindings.ts";
 
@@ -66,5 +67,53 @@ test("startup fresh weapon bindings follow selected arsenal instead of movement"
     seat.unbindAll(); await profile.save();
     const reopened = await StartupInputProfile.open(settings, input(), "q1-netquake", baseWeaponBindingItems("q3"));
     expect(reopened.input.bindings).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("all startup input controls survive saving without a gameplay world", async () => {
+  const { FrontendPreferences } = await import("../../src/app/bootstrap/frontend-preferences.ts");
+  const root = await mkdtemp(join(tmpdir(), "startup-controls-"));
+  try {
+    const settings = new ConfigStore(root), profile = await StartupInputProfile.open(settings, input(), "q3");
+    const preferences = new FrontendPreferences(() => "q3");
+    await preferences.loadBaseline(settings);
+    for (const minimum of [false, true]) {
+      const expected = new Map<string, boolean | number>();
+      for (const binding of preferences.bindings()) {
+        if (binding.category !== "input") continue;
+        if (binding.kind === "toggle") { binding.write(minimum ? false : !binding.read()); expected.set(binding.id, binding.read()); }
+        else if (binding.kind === "slider") {
+          binding.write(minimum ? binding.minimum : binding.minimum + (binding.maximum - binding.minimum) * 0.7);
+          expected.set(binding.id, binding.read());
+        } else throw new Error(`Unhandled startup control ${binding.id}`);
+      }
+      expect(expected.size).toBe(10);
+      await profile.save(preferences.values);
+      const fresh = new FrontendPreferences(() => "q3"); await fresh.loadBaseline(settings);
+      for (const binding of fresh.bindings()) {
+        const value = expected.get(binding.id); if (value === undefined) continue;
+        if (binding.kind === "toggle" && typeof value === "boolean") expect(binding.read()).toBe(value);
+        else if (binding.kind === "slider" && typeof value === "number") expect(binding.read()).toBeCloseTo(value, 5);
+        else throw new Error(`Changed startup control ${binding.id}`);
+      }
+      expect(fresh.values).toEqual({});
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("startup control saves preserve fresh disk bindings and unrelated seat fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "startup-merge-"));
+  try {
+    const settings = new ConfigStore(root), seat = input(), profile = await StartupInputProfile.open(settings, seat, "q3");
+    await profile.save({ effectsVolume: 0.2, musicVolume: 0.1 });
+    expect(await settings.loadSeat("input/seat-1.json")).toBeNull();
+    await profile.save({ filter: true });
+    const saved = await settings.loadSeat("input/seat-1.json"); if (saved === null) throw new Error("Missing startup controls");
+    const latest = { ...saved, bindings: [], history: ["echo preserve"], controller: { kind: "none" },
+      mouse: { ...saved.mouse, side: 3, forward: 4 }, gamepad: { ...saved.gamepad, invertPitch: true } } satisfies SeatSettings;
+    await settings.saveSeat("input/seat-1.json", latest);
+    await profile.save({ filter: false, alwaysRun: false, controllerVibration: false, controllerVibrationStrength: 0 });
+    expect(await settings.loadSeat("input/seat-1.json")).toEqual({ ...latest, mouse: { ...latest.mouse, filter: false },
+      alwaysRun: false, rumble: false, rumbleStrength: 0 });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

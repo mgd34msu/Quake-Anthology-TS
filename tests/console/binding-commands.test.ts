@@ -4,9 +4,10 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { SeatConsole } from "../../src/console/session.ts";
-import { archivedBindings, namedPhysicalInput, physicalInputName, registerBindingCommands } from "../../src/input/bindings.ts";
+import { archivedBindings, namedPhysicalInput, physicalInputName, registerBindingCommands, registerWheelCommands } from "../../src/input/bindings.ts";
 import { SeatInput } from "../../src/input/seat.ts";
-import { physicalInputLabel } from "../../src/ui/settings/bindings.ts";
+import { sharedBindingActions } from "../../src/ui/settings/action-catalog.ts";
+import { bindingMatchesAction, physicalInputLabel } from "../../src/ui/settings/bindings.ts";
 import { InputRouter } from "../../src/input/router.ts";
 
 const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];
@@ -91,5 +92,62 @@ test("controller labels name buttons and stick directions without changing physi
     ["left-trigger", "positive", "Left trigger"], ["right-trigger", "positive", "Right trigger"],
   ] satisfies readonly (readonly ["left-x" | "left-y" | "right-x" | "right-y" | "left-trigger" | "right-trigger", "positive" | "negative", string])[]) {
     expect(physicalInputLabel({ kind: "controller-axis", device: 0, axis, direction })).toBe(`Pad 1 ${label}`);
+  }
+});
+
+test("rerelease stock controller aliases share physical bindings and display names", () => {
+  const owner = createIdentityOwner("rerelease-stock-bindings"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const output: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q2-rerelease", context });
+  const input = new SeatInput({ seat, dialect: "q2-rerelease", context, commands, uiEvent: () => false });
+  const unregister = registerBindingCommands(commands, () => input, text => { output.push(text); });
+  const defaults = [
+    ["left_trigger", "+moveup"], ["right_trigger", "+attack"], ["x_button", "cmd help"],
+    ["a_button", "+moveup"], ["b_button", "+movedown"], ["left_stick", "+movedown"],
+    ["right_stick", "centerview"], ["right_shoulder", "+wheel"], ["left_shoulder", "+wheel2"],
+    ["DPAD_LEFT", "cl_weapprev"], ["DPAD_RIGHT", "cl_weapnext"], ["DPAD_UP", "wave 4"],
+  ] satisfies readonly (readonly [string, string])[];
+  try {
+    for (const [alias, text] of defaults) {
+      const physical = namedPhysicalInput(alias), canonical = `GAMEPAD_${alias}`;
+      expect(physical).not.toBeNull();
+      if (physical === null) throw new Error(`Unknown stock key ${alias}`);
+      expect(namedPhysicalInput(canonical)).toEqual(physical);
+      commands.append(`bind ${alias} "${text}"\nbind ${canonical}\n`, context); commands.execute();
+      expect(input.binding(physical)).toEqual({ kind: "command", text });
+      expect(output.pop()).toBe(`${physicalInputLabel(physical)} = ${text}\n`);
+      commands.append(`unbind ${canonical}\nbind ${canonical} "${text}"\nunbind ${alias}\n`, context); commands.execute();
+      expect(input.binding(physical)).toBeNull();
+    }
+    expect(output).toEqual([]);
+  } finally { unregister(); }
+});
+
+test("stock wheel aliases use the production wheel registry for held press and release", () => {
+  const owner = createIdentityOwner("rerelease-wheel-aliases"), seat = owner.seat(0);
+  const context: CommandContext = { session: owner.session, origin: { kind: "local-seat", seat, client: owner.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q2-rerelease", context });
+  const input = new SeatInput({ seat, dialect: "q2-rerelease", context, commands, uiEvent: () => false });
+  const calls: { seat: typeof seat; mode: "weapons" | "powerups"; down: boolean }[] = [];
+  const actions = sharedBindingActions("q2-rerelease", [], { chat: false, scoreCommand: null, offhandGrapple: false, offhandGrenades: false });
+  const unregisterWheel = registerWheelCommands(commands, (seat, mode, down) => { calls.push({ seat, mode, down }); });
+  const unregisterBindings = registerBindingCommands(commands, () => input, () => undefined);
+  try {
+    for (const [name, mode] of [["wheel", "weapons"], ["weaponwheel", "weapons"], ["wheel2", "powerups"], ["powerupwheel", "powerups"]] satisfies readonly (readonly [string, "weapons" | "powerups"])[]) {
+      const action = actions.find(action => action.id === (mode === "weapons" ? "weapon-wheel" : "powerup-wheel"));
+      if (action === undefined) throw new Error(`Missing wheel row ${mode}`);
+      expect(bindingMatchesAction({ kind: "command", text: `+${name}` }, action)).toBe(true);
+      expect(bindingMatchesAction({ kind: "command", text: `-${name}` }, action)).toBe(false);
+      expect(bindingMatchesAction({ kind: "command", text: `+${name}; echo custom` }, action)).toBe(false);
+      commands.append(`bind right_shoulder +${name}\n`, context); commands.execute();
+      input.input({ kind: "controller-button", seat, device: 0, button: 10, down: true, timeMilliseconds: 1 }); commands.execute();
+      input.input({ kind: "controller-button", seat, device: 0, button: 10, down: false, timeMilliseconds: 2 }); commands.execute();
+      expect(calls.splice(0)).toEqual([{ seat, mode, down: true }, { seat, mode, down: false }]);
+      expect(input.binding({ kind: "controller-button", device: 0, button: 10 })).toEqual({ kind: "command", text: `+${name}` });
+    }
+  } finally { unregisterWheel(); unregisterBindings(); }
+  for (const name of ["wheel", "wheel2", "weaponwheel", "powerupwheel"]) {
+    expect(commands.exists(`+${name}`)).toBe(false); expect(commands.exists(`-${name}`)).toBe(false);
   }
 });

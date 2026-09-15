@@ -108,6 +108,7 @@ export type UiControl = UiControlBase & (
   | { readonly kind: "owner-draw"; readonly owner: ProviderId; readonly sourceId: number; readonly draw: (context: UiDrawContext) => readonly UiDrawCommand[]; readonly key: (seat: SeatId, code: number, down: boolean) => boolean }
 );
 export interface UiMenu {
+  readonly scroll?: { readonly rect: Rect; readonly contentHeight: number; readonly controls: readonly UiControlId[] };
   readonly id: UiMenuId;
   readonly title: string;
   readonly fullScreen: boolean;

@@ -1,8 +1,10 @@
+import { frontendSeatSettings } from "./frontend-preferences.ts";
+import type { FrontendPreferenceOverrides } from "./frontend-preferences.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
 import type { SeatInput } from "../../input/seat.ts";
 import { defaultBindings } from "../../input/bindings.ts";
 import { defaultMouseTuning } from "../../input/mouse.ts";
-import type { ConfigStore } from "../../settings/config.ts";
+import type { ConfigStore, SeatSettings } from "../../settings/config.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 
 /** The front end edits the same first-seat profile that gameplay loads. */
@@ -20,14 +22,17 @@ export class StartupInputProfile {
     return profile;
   }
 
-  async save(): Promise<void> {
+  async save(values: FrontendPreferenceOverrides = {}): Promise<void> {
     const bindings = this.input.bindings.map(binding => binding.input.kind === "controller-button" || binding.input.kind === "controller-axis"
       ? { ...binding, input: { ...binding.input, device: 0 } } : binding);
     const current = JSON.stringify(this.input.bindings);
-    if (current === this.baseline) return;
+    const bindingsChanged = current !== this.baseline;
+    if (!bindingsChanged && Object.keys(values).length === 0) return;
     const saved = await this.settings.loadSeat("input/seat-1.json");
-    await this.settings.saveSeat("input/seat-1.json", { ...(saved ?? { version: 1, gamepad: structuredClone(this.input.gamepad.tuning),
-      mouse: { ...defaultMouseTuning }, history: [], rumble: true, controller: { kind: "automatic" } }), bindings });
+    const baseline: SeatSettings = saved ?? { version: 1, gamepad: structuredClone(this.input.gamepad.tuning),
+      mouse: { ...defaultMouseTuning }, history: [], rumble: true, controller: { kind: "automatic" }, bindings };
+    const selected = frontendSeatSettings(values, bindingsChanged ? { ...baseline, bindings } : baseline);
+    if (bindingsChanged || JSON.stringify(selected) !== JSON.stringify(baseline)) await this.settings.saveSeat("input/seat-1.json", selected);
     this.baseline = current;
   }
 }

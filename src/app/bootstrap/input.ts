@@ -14,7 +14,7 @@ import type { SeatInputEvent, SeatInputFocus } from "../../contracts/ui.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { SeatConsole } from "../../console/session.ts";
-import { defaultBindings, registerBindingCommands } from "../../input/bindings.ts";
+import { defaultBindings, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
@@ -249,15 +249,10 @@ export class ApplicationInput {
     }
     this.locals = locals;
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
-    this.unregister = [registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
+    this.unregister = [registerWheelCommands(this.commands, (seat, mode, down) => this.seatUi.get(seat)?.wheel(mode, down)),
+      registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
       registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat))];
     this.commands.register("quit", () => actions.quit());
-    for (const name of ["+weaponwheel", "-weaponwheel", "+powerupwheel", "-powerupwheel"]) this.commands.register(name, invocation => {
-      let origin = invocation.source.origin;
-      while (origin.kind === "script") origin = origin.caller;
-      if (origin.kind === "local-seat") this.seatUi.get(origin.seat)?.wheel(name.includes("powerup") ? "powerups" : "weapons", name.startsWith("+"));
-      return undefined;
-    });
     this.commands.register("toggleconsole", invocation => {
       let origin = invocation.source.origin;
       while (origin.kind === "script") origin = origin.caller;

@@ -89,7 +89,7 @@ const categories: readonly { readonly id: SettingCategory; readonly label: strin
   { id: "display", label: "Display" }, { id: "video", label: "Graphics" }, { id: "audio", label: "Audio" }, { id: "input", label: "Controls" },
   { id: "network", label: "Network" }, { id: "accessibility", label: "Accessibility" }, { id: "language", label: "Language" },
 ];
-/** Pagination keeps every bound option reachable at the smallest native menu size. */
+/** Categories retain native controls in one scrollable view. */
 export function registerSettingsMenus(controller: NativeUiController, bindings: readonly SettingBinding[], llm?: LlmSettingsUi): SettingsMenus {
   const root: UiMenuId = "menu:settings:root", disposers: (() => void)[] = [];
   const llmMenu = llm === undefined ? null : registerLlmSettingsMenu(controller, llm);
@@ -99,26 +99,16 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
   for (const category of categories) {
     const selected = bindings.filter(binding => binding.category === category.id);
     if (selected.length === 0) continue;
-    const pages = Math.ceil(selected.length / 10);
-    for (let page = 0; page < pages; page++) {
-      const id: UiMenuId = `menu:settings:${category.id}:${page}`;
-      disposers.push(controller.register(id, () => {
-        const controls = selected.slice(page * 10, page * 10 + 10).map((binding, index) => settingControl(binding, menuRow(index), controller.seat));
-        for (const direction of [-1, 1]) {
-          const target = page + direction;
-          if (target < 0 || target >= pages) continue;
-          controls.push({ id: `ui:settings:page:${direction}`, kind: "button", label: direction < 0 ? "Previous page" : "Next page",
-            rect: menuRow(10, { x: direction < 0 ? 64 : 336, width: 240 }), enabled: true, visible: true,
-            activate: () => { controller.closeMenu(); return controller.openMenu(`menu:settings:${category.id}:${target}`); } });
-        }
-        controls.push(back());
-        return { id, title: `${category.label}${pages > 1 ? ` ${page + 1}/${pages}` : ""}`, fullScreen: false,
-          controls, open: () => undefined, close: () => {
-            for (const binding of selected.slice(page * 10, page * 10 + 10)) if (binding.kind === "text-entry") binding.commit?.cancel();
-            return undefined;
-          } };
-      }));
-    }
+    const id: UiMenuId = `menu:settings:${category.id}:0`;
+    disposers.push(controller.register(id, () => {
+      const controls = selected.map((binding, index) => settingControl(binding, menuRow(index, { width: 496 }), controller.seat));
+      return { id, title: category.label, fullScreen: false,
+        scroll: { rect: { x: 64, y: 92, width: 512, height: 300 }, contentHeight: selected.length * 28, controls: controls.map(control => control.id) },
+        controls: [...controls, back()], open: () => undefined, close: () => {
+          for (const binding of selected) if (binding.kind === "text-entry") binding.commit?.cancel();
+          return undefined;
+        } };
+    }));
   }
   disposers.push(controller.register(root, () => ({ id: root, title: "Options", fullScreen: false,
     controls: [...categories.filter(category => bindings.some(binding => binding.category === category.id)).map((category, index): UiControl => ({

@@ -92,7 +92,7 @@ export class StartupApplication {
     const options = this.model.options;
     const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
-    await this.graphics?.inputProfile.save();
+    await this.graphics?.inputProfile.save(this.preferences.values);
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
@@ -195,7 +195,7 @@ export class StartupApplication {
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame(); }
 
   private async launch(action: StartupAction): Promise<void> {
-    await this.graphics?.inputProfile.save();
+    await this.graphics?.inputProfile.save(this.preferences.values);
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     this.preferenceStore = null;
     this.graphics?.audio.close();
@@ -285,7 +285,7 @@ export class StartupApplication {
     this.model.setDisplay({ ...graphics.renderer.window.logicalSize, gamma: graphics.renderer.outputGamma });
     let frameGraphics = graphics;
     if (this.applyDisplay) {
-      await graphics.inputProfile.save();
+      await graphics.inputProfile.save(this.preferences.values);
       this.applyDisplay = false; graphics.close(); this.graphics = null;
       let reopened: StartupGraphics;
       try { reopened = await this.openGraphics(); this.status = ""; }
@@ -308,8 +308,8 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
-    try { await this.graphics?.inputProfile.save(); }
-    catch (error) { this.host.print(`Could not save bindings: ${error instanceof Error ? error.message : String(error)}\n`); }
+    try { await this.graphics?.inputProfile.save(this.preferences.values); }
+    catch (error) { this.host.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`); }
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.host.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     this.game?.requestQuit(); this.remote?.requestQuit(); await this.browser?.close(); this.browser = null; this.graphics?.close(); this.graphics = null;

@@ -1,5 +1,6 @@
 import type { CommandDialect } from "../../contracts/common.ts";
 import type { BindingAction } from "./bindings.ts";
+import { canonicalWheelCommand } from "../../input/bindings.ts";
 import { weaponBindingItem } from "../../input/weapon-bindings.ts";
 
 export interface BindingCapabilities {
@@ -24,7 +25,9 @@ export function sharedBindingActions(dialect: CommandDialect, items: readonly Bi
     ["weapon-wheel", "Weapon wheel", "+weaponwheel"], ["powerup-wheel", "Powerup wheel", "+powerupwheel"],
     ["console", "Toggle console", "toggleconsole"],
   ];
-  const actions: BindingAction[] = rows.map(([id, label, text]) => ({ id, label, target: { kind: "command", text } }));
+  const actions: BindingAction[] = rows.map(([id, label, text]) => ({ id, label, target: { kind: "command", text },
+    ...(id === "weapon-wheel" || id === "powerup-wheel"
+      ? { matches: (target: BindingAction["target"]) => target.kind === "command" && canonicalWheelCommand(target.text) === text } : {}) }));
   const append = (id: string, label: string, text: string): void => { actions.push({ id, label, target: { kind: "command", text } }); };
   if (capabilities.scoreCommand !== null) append("scores", "Show scores", capabilities.scoreCommand);
   if (capabilities.chat) { append("chat", "Chat", "messagemode"); append("team-chat", "Team chat", "messagemode2"); }

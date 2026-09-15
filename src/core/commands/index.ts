@@ -57,6 +57,7 @@ interface AliasEntry { readonly name: string; value: string; }
 interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; }
 interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly parent: ExecutionFrame | undefined; active: boolean; }
 interface ScriptRead {
+  readonly settled: Promise<void>;
   readonly name: string;
   readonly source: CommandContext;
   result: { readonly kind: "pending" } | { readonly kind: "ready"; readonly text: string | undefined } | { readonly kind: "failed"; readonly error: unknown };
@@ -268,18 +269,34 @@ export class CommandBuffer {
     return executed;
   }
 
-  async executeAsync(afterDispatch: () => Promise<void>): Promise<number> {
+  executeAsync(afterDispatch: () => Promise<void>): Promise<number> {
+    return this.drainAsync(afterDispatch, false);
+  }
+
+  /** Await nested script reads, stopping at the same wait boundary as one frame. */
+  executeScriptsAsync(afterDispatch: () => Promise<void>): Promise<number> {
+    return this.drainAsync(afterDispatch, true);
+  }
+
+  private async drainAsync(afterDispatch: () => Promise<void>, awaitScripts: boolean): Promise<number> {
     if (this.asyncDraining || this.frame !== undefined) throw new Error("Command buffer is already executing");
     this.asyncDraining = true;
     try {
       let executed = 0;
-      for (const count of this.drain()) { executed += count; await afterDispatch(); }
+      let firstDrain = true;
+      do {
+        for (const count of this.drain(firstDrain)) { executed += count; await afterDispatch(); }
+        const read = this.scriptRead;
+        if (!awaitScripts || read === undefined) break;
+        await read.settled;
+        firstDrain = false;
+      } while (true);
       return executed;
     } finally { this.asyncDraining = false; }
   }
 
-  private *drain(): Generator<number, void, void> {
-    if (isQ2(this.dialect)) this.aliasCount = 0;
+  private *drain(resetAliases = true): Generator<number, void, void> {
+    if (resetAliases && isQ2(this.dialect)) this.aliasCount = 0;
     while (this.chunks.length > 0 || this.scriptRead !== undefined) {
       const script = this.scriptRead;
       if (script !== undefined) {
@@ -447,9 +464,9 @@ export class CommandBuffer {
       const filename = this.dialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
       const file = this.options.readScript?.(filename, command.source);
       if (file instanceof Promise) {
-        const read: ScriptRead = { name: filename, source: command.source, result: { kind: "pending" } };
+        const read: ScriptRead = { name: filename, source: command.source, result: { kind: "pending" },
+          settled: file.then(text => { read.result = { kind: "ready", text }; }, (error: unknown) => { read.result = { kind: "failed", error }; }) };
         this.scriptRead = read;
-        void file.then(text => { read.result = { kind: "ready", text }; }, (error: unknown) => { read.result = { kind: "failed", error }; });
       } else this.insertScript(filename, file, command.source);
     });
     if (this.dialect !== "q3") register("alias", command => {

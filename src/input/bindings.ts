@@ -23,10 +23,11 @@ export function namedPhysicalInput(name: string, device = 0): PhysicalInput | nu
   const lower = name.toLowerCase();
   const mouse = /^mouse([1-9][0-9]*)$/.exec(lower);
   if (mouse !== null) return { kind: "mouse-button", button: physicalMouseButton(Number(mouse[1])) };
-  const button = controllerButtons.find(([command]) => command === lower)?.[1];
+  const controllerName = lower.startsWith("gamepad_") ? lower : `gamepad_${lower}`;
+  const button = controllerButtons.find(([command]) => command === controllerName)?.[1];
   if (button !== undefined) return { kind: "controller-button", device, button };
-  if (lower === "gamepad_left_trigger" || lower === "gamepad_right_trigger") return { kind: "controller-axis", device,
-    axis: lower === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
+  if (controllerName === "gamepad_left_trigger" || controllerName === "gamepad_right_trigger") return { kind: "controller-axis", device,
+    axis: controllerName === "gamepad_left_trigger" ? "left-trigger" : "right-trigger", direction: "positive" };
   const code = stringToKeynum(name);
   return code < 0 ? null : { kind: "key", code };
 }
@@ -116,6 +117,33 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
   add("unbindall", invocation => { local(invocation)?.unbindAll(); });
   add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); });
   return () => { for (const name of registered) commands.unregister(name); };
+}
+
+const wheelCommands: readonly (readonly [name: string, mode: "weapons" | "powerups"])[] = [
+  ["weaponwheel", "weapons"], ["wheel", "weapons"], ["powerupwheel", "powerups"], ["wheel2", "powerups"],
+];
+
+export function canonicalWheelCommand(text: string): string {
+  const command = text.trim().toLowerCase(), prefix = command.charAt(0);
+  if (prefix !== "+" && prefix !== "-") return text;
+  const mode = wheelCommands.find(([name]) => name === command.slice(1))?.[1];
+  return mode === undefined ? text : `${prefix}${mode === "weapons" ? "weaponwheel" : "powerupwheel"}`;
+}
+
+export function registerWheelCommands(commands: CommandBuffer,
+  wheel: (seat: SeatId, mode: "weapons" | "powerups", down: boolean) => void): () => void {
+  const registered: string[] = [];
+  for (const [name, mode] of wheelCommands) {
+    for (const down of [true, false]) {
+      const command = `${down ? "+" : "-"}${name}`;
+      if (commands.register(command, invocation => {
+        let origin = invocation.source.origin;
+        while (origin.kind === "script") origin = origin.caller;
+        if (origin.kind === "local-seat") wheel(origin.seat, mode, down);
+      })) registered.push(command);
+    }
+  }
+  return () => { for (const command of registered) commands.unregister(command); };
 }
 
 /** VM-facing source key values stay separate from the shared physical namespace. */

@@ -26,7 +26,7 @@ export interface NativeUiOptions {
   readonly clipboard?: () => string | null;
   readonly measureText?: (text: string, scale: number) => number;
 }
-interface MenuCursor { readonly id: UiMenuId; focus: UiControlId | null; }
+interface MenuCursor { readonly id: UiMenuId; focus: UiControlId | null; scroll: number; }
 interface FieldCursor { cursor: number; start: number; overstrike: boolean; }
 interface HeldDirection { readonly code: number; next: number; }
 interface BindingCapture { readonly accept: (input: PhysicalInput) => void; readonly cancel: () => void; }
@@ -44,6 +44,7 @@ export class NativeUiController implements SeatUiController {
   private readonly listTops = new Map<UiControlId, number>();
   private readonly listRows = new Map<UiControlId, readonly string[]>();
   private listDragOffset = 0;
+  private menuDragOffset: number | null = null;
   private readonly heldAxes = new Map<string, HeldDirection>();
   private cursor: Vec2 = { x: 320, y: 240 };
   private pointerPosition: Vec2 | null = null;
@@ -78,7 +79,11 @@ export class NativeUiController implements SeatUiController {
     const menu = factory();
     if (menu.id !== cursor.id) throw new Error("Menu factory returned a different identity");
     if (!menu.controls.some(control => control.id === cursor.focus && enabled(control))) cursor.focus = menu.controls.find(enabled)?.id ?? null;
-    return { menu, cursor };
+    const scroll = menu.scroll;
+    if (scroll === undefined) return { menu, cursor };
+    cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), cursor.scroll));
+    return { menu: { ...menu, controls: menu.controls.map(control => scroll.controls.includes(control.id)
+      ? { ...control, rect: { ...control.rect, y: control.rect.y - cursor.scroll } } : control) }, cursor };
   }
   private focusChanged(): void {
     const top = this.stack.at(-1);
@@ -101,14 +106,14 @@ export class NativeUiController implements SeatUiController {
       this.focusChanged(); return undefined;
     }
     const menu = factory();
-    this.stack.push({ id, focus: menu.controls.find(enabled)?.id ?? null });
-    this.dragging = null; this.heldAxes.clear(); menu.open(this.seat); this.focusChanged(); this.options.sound("open", this.seat);
+    this.stack.push({ id, focus: menu.controls.find(enabled)?.id ?? null, scroll: 0 });
+    this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear(); menu.open(this.seat); this.focusChanged(); this.options.sound("open", this.seat);
     return undefined;
   }
   closeMenu(): undefined {
     const current = this.stack.pop();
     if (current === undefined) return undefined;
-    this.capture?.cancel(); this.capture = null; this.dragging = null; this.heldAxes.clear();
+    this.capture?.cancel(); this.capture = null; this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear();
     this.menus.get(current.id)?.().close(this.seat);
     this.focusChanged(); this.options.sound("close", this.seat); return undefined;
   }
@@ -119,8 +124,30 @@ export class NativeUiController implements SeatUiController {
     const controls = active.menu.controls.filter(enabled), index = controls.findIndex(control => control.id === active.cursor.focus);
     const next = controls[(index + direction + controls.length) % controls.length];
     if (next !== undefined && next.id !== active.cursor.focus) {
-      active.cursor.focus = next.id; this.focusChanged(); this.options.sound("move", this.seat);
+      active.cursor.focus = next.id; this.reveal(active.menu, active.cursor, next); this.focusChanged(); this.options.sound("move", this.seat);
     }
+  }
+  private reveal(menu: UiMenu, cursor: MenuCursor, control: UiControl): void {
+    const scroll = menu.scroll;
+    if (scroll === undefined || !scroll.controls.includes(control.id)) return;
+    if (control.rect.y < scroll.rect.y) cursor.scroll -= scroll.rect.y - control.rect.y;
+    else if (control.rect.y + control.rect.height > scroll.rect.y + scroll.rect.height)
+      cursor.scroll += control.rect.y + control.rect.height - scroll.rect.y - scroll.rect.height;
+    cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), cursor.scroll));
+  }
+  private hit(menu: UiMenu, control: UiControl): boolean {
+    return enabled(control) && contains(control.rect, this.cursor)
+      && (menu.scroll === undefined || !menu.scroll.controls.includes(control.id) || contains(menu.scroll.rect, this.cursor));
+  }
+  private menuThumb(menu: UiMenu): number {
+    const scroll = menu.scroll;
+    return scroll === undefined ? 0 : Math.min(scroll.rect.height, Math.max(24, scroll.rect.height * scroll.rect.height / Math.max(1, scroll.contentHeight)));
+  }
+  private menuPointer(menu: UiMenu, cursor: MenuCursor): void {
+    const scroll = menu.scroll;
+    if (scroll === undefined || this.menuDragOffset === null) return;
+    const travel = scroll.rect.height - this.menuThumb(menu), maximum = Math.max(0, scroll.contentHeight - scroll.rect.height);
+    cursor.scroll = travel <= 0 ? 0 : Math.max(0, Math.min(maximum, (this.cursor.y - scroll.rect.y - this.menuDragOffset) / travel * maximum));
   }
   private change(control: UiControl, direction: number): void {
     if (!enabled(control)) return;
@@ -221,6 +248,7 @@ export class NativeUiController implements SeatUiController {
     if (control?.kind === "owner-draw" && control.key(this.seat, code, down)) return true;
     if (!down) return true;
     if (code === KeyCode.Escape) { this.closeMenu(); return true; }
+    if (control !== undefined) this.reveal(active.menu, active.cursor, control);
     if (control?.kind === "text-entry" && this.fieldKey(control, code)) return true;
     if (control?.kind === "list" && this.listKey(control, code)) return true;
     if (code === KeyCode.Tab) this.moveFocus(this.shift ? -1 : 1);
@@ -235,10 +263,11 @@ export class NativeUiController implements SeatUiController {
     this.pointerPosition = position;
     this.cursor = uiPoint(position, this.transform);
     const active = this.active(); if (active === null) return;
+    if (this.menuDragOffset !== null) { this.menuPointer(active.menu, active.cursor); return; }
     const drag = active.menu.controls.find(control => control.id === this.dragging);
     if (drag?.kind === "slider") { this.sliderPointer(drag); return; }
     if (drag?.kind === "list") { this.listPointer(drag); return; }
-    const hovered = [...active.menu.controls].reverse().find(control => enabled(control) && contains(control.rect, this.cursor));
+    const hovered = [...active.menu.controls].reverse().find(control => this.hit(active.menu, control));
     if (hovered !== undefined && hovered.id !== active.cursor.focus) {
       active.cursor.focus = hovered.id; this.focusChanged(); this.options.sound("move", this.seat);
     }
@@ -262,7 +291,7 @@ export class NativeUiController implements SeatUiController {
   input(event: SeatInputEvent): boolean {
     if (!event.seat.equals(this.seat)) throw new Error("UI input delivered to another seat");
     if (event.kind === "focus" && !event.focused) {
-      this.dragging = null; this.heldAxes.clear(); this.shift = false; this.control = false;
+      this.dragging = null; this.menuDragOffset = null; this.heldAxes.clear(); this.shift = false; this.control = false;
       this.capture?.cancel(); this.capture = null;
     }
     if (this.captureEvent(event)) return true;
@@ -270,13 +299,20 @@ export class NativeUiController implements SeatUiController {
     switch (event.kind) {
       case "key": return this.key(event.code, event.down);
       case "text": { const control = active.menu.controls.find(control => control.id === active.cursor.focus);
-        if (control?.kind === "text-entry") this.text(control, event.text); break; }
+        if (control?.kind === "text-entry") { this.reveal(active.menu, active.cursor, control); this.text(control, event.text); } break; }
       case "mouse-motion": this.pointer(event.position); break;
       case "mouse-button": {
-        if (!event.down) { this.dragging = null; break; }
+        if (!event.down) { this.dragging = null; this.menuDragOffset = null; break; }
         if (event.button === 3) { this.closeMenu(); break; }
         if (event.button !== 1) break;
-        const control = [...active.menu.controls].reverse().find(control => enabled(control) && contains(control.rect, this.cursor));
+        const scroll = active.menu.scroll;
+        if (scroll !== undefined && scroll.contentHeight > scroll.rect.height && contains(scroll.rect, this.cursor)
+          && this.cursor.x >= scroll.rect.x + scroll.rect.width - 16) {
+          const thumb = this.menuThumb(active.menu), y = scroll.rect.y + (scroll.rect.height - thumb) * active.cursor.scroll / (scroll.contentHeight - scroll.rect.height);
+          this.menuDragOffset = this.cursor.y >= y && this.cursor.y < y + thumb ? this.cursor.y - y : thumb / 2;
+          this.menuPointer(active.menu, active.cursor); break;
+        }
+        const control = [...active.menu.controls].reverse().find(control => this.hit(active.menu, control));
         if (control === undefined) break;
         active.cursor.focus = control.id; this.focusChanged();
         if (control.kind === "slider") { this.dragging = control.id; this.sliderPointer(control); }
@@ -305,6 +341,11 @@ export class NativeUiController implements SeatUiController {
         break;
       }
       case "mouse-wheel": {
+        const scroll = active.menu.scroll;
+        if (scroll !== undefined && contains(scroll.rect, this.cursor)) {
+          active.cursor.scroll = Math.max(0, Math.min(Math.max(0, scroll.contentHeight - scroll.rect.height), active.cursor.scroll - Math.sign(event.delta.y) * 84));
+          break;
+        }
         const hovered = active.menu.controls.find(control => enabled(control) && control.kind === "list" && contains(control.rect, this.cursor));
         const control = hovered ?? active.menu.controls.find(control => control.id === active.cursor.focus);
         if (control?.kind === "list") {
@@ -358,6 +399,10 @@ export class NativeUiController implements SeatUiController {
       font: skin.titleFont, scale: skin.titleScale ?? skin.fontScale, color: skin.colors.accent, align: "left", shadow: true });
     for (const control of active.menu.controls) {
       if (!control.visible) continue;
+      const region = active.menu.scroll;
+      const scrolled = region !== undefined && region.controls.includes(control.id);
+      if (scrolled && (control.rect.y + control.rect.height <= region.rect.y || control.rect.y >= region.rect.y + region.rect.height)) continue;
+      commands.push({ kind: "clip", rect: scrolled ? region.rect : null });
       const focused = control.id === active.cursor.focus;
       const color = !control.enabled ? skin.colors.disabled : focused ? skin.colors.accent : skin.colors.text;
       if (control.kind === "owner-draw") { commands.push(...control.draw({ ...context, binding: { ...context.binding,
@@ -430,6 +475,13 @@ export class NativeUiController implements SeatUiController {
           break;
         }
       }
+    }
+    commands.push({ kind: "clip", rect: null });
+    const region = active.menu.scroll;
+    if (region !== undefined && region.contentHeight > region.rect.height) {
+      const thumb = this.menuThumb(active.menu), x = region.rect.x + region.rect.width - 14;
+      commands.push({ kind: "fill", rect: { x, y: region.rect.y, width: 12, height: region.rect.height }, color: skin.colors.control });
+      commands.push({ kind: "fill", rect: { x, y: region.rect.y + (region.rect.height - thumb) * active.cursor.scroll / (region.contentHeight - region.rect.height), width: 12, height: thumb }, color: skin.colors.accent });
     }
     if (this.capture !== null) text("Press key/button. Esc cancels.", 380, 432, skin.colors.accent, "center");
     const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];

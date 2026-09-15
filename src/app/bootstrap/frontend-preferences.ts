@@ -6,7 +6,7 @@ import type { MouseTuning } from "../../input/mouse.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
-import type { ConfigStore } from "../../settings/config.ts";
+import type { ConfigStore, SeatSettings } from "../../settings/config.ts";
 import { defaultViewInputTuning } from "../../input/user-command.ts";
 import { bindAudioSettings, bindPrimaryInputSettings, bindMouseMotionSettings, bindControllerVibration } from "../../ui/settings/index.ts";
 import type { AudioSettings, PrimaryInputSettings, MouseMotionSettings, ControllerVibrationSettings, SettingBinding } from "../../ui/settings/index.ts";
@@ -31,7 +31,11 @@ export function readFrontendInput(local: LocalInput): FrontendInputValues {
 export function applyFrontendInput(values: Partial<FrontendInputValues>, local: LocalInput): void {
   if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength);
   if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration);
-  local.builder.mouse.tuning = { ...local.builder.mouse.tuning,
+  local.builder.mouse.tuning = frontendMouseTuning(values, local.builder.mouse.tuning);
+  if (values.alwaysRun !== undefined) local.builder.tuning = { ...local.builder.tuning, alwaysRun: values.alwaysRun };
+}
+function frontendMouseTuning(values: Partial<FrontendInputValues>, mouse: MouseTuning): MouseTuning {
+  return { ...mouse,
     ...(values.sensitivity === undefined ? {} : { sensitivity: values.sensitivity }),
     ...(values.pitch === undefined ? {} : { pitch: values.pitch }),
     ...(values.yaw === undefined ? {} : { yaw: values.yaw }),
@@ -39,7 +43,12 @@ export function applyFrontendInput(values: Partial<FrontendInputValues>, local: 
     ...(values.filter === undefined ? {} : { filter: values.filter }),
     ...(values.freeLook === undefined ? {} : { freeLook: values.freeLook }),
     ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
-  if (values.alwaysRun !== undefined) local.builder.tuning = { ...local.builder.tuning, alwaysRun: values.alwaysRun };
+}
+export function frontendSeatSettings(values: FrontendPreferenceOverrides, saved: SeatSettings): SeatSettings {
+  return { ...saved, mouse: frontendMouseTuning(values, saved.mouse),
+    ...(values.alwaysRun === undefined ? {} : { alwaysRun: values.alwaysRun }),
+    ...(values.controllerVibration === undefined ? {} : { rumble: values.controllerVibration }),
+    ...(values.controllerVibrationStrength === undefined ? {} : { rumbleStrength: values.controllerVibrationStrength }) };
 }
 export function readFrontendPreferences(input: ApplicationInput, audio: ApplicationAudio): FrontendPreferenceValues | null {
   const local = input.locals[0];
@@ -69,6 +78,7 @@ export class FrontendPreferences {
   audioBaseline: Partial<AudioPreferences> = {};
   get audioValues(): AudioSettings { return { effectsVolume: this.values.effectsVolume ?? this.audioBaseline.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? this.audioBaseline.musicVolume ?? 0.25 }; }
   private alwaysRunBaseline: boolean | undefined;
+  private vibrationBaseline = { controllerVibration: true, controllerVibrationStrength: 1 };
   private mouseBaseline: MouseTuning = defaultMouseTuning;
   constructor(private readonly dialect: () => CommandDialect) {}
   async loadBaseline(settings: ConfigStore): Promise<void> {
@@ -79,6 +89,7 @@ export class FrontendPreferences {
     if (saved !== null) mouse.write(saved.mouse);
     this.mouseBaseline = mouse.read();
     this.alwaysRunBaseline = saved?.alwaysRun;
+    this.vibrationBaseline = { controllerVibration: saved?.rumble ?? true, controllerVibrationStrength: saved?.rumbleStrength ?? 1 };
   }
   async saveAudioBaseline(settings: ConfigStore): Promise<void> {
     if (this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
@@ -90,7 +101,7 @@ export class FrontendPreferences {
     this.audioBaseline = { deviceName, ...volume };
   }
   bindings(): readonly SettingBinding[] {
-    return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? true, controllerVibrationStrength: this.values.controllerVibrationStrength ?? 1 }),
+    return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? this.vibrationBaseline.controllerVibration, controllerVibrationStrength: this.values.controllerVibrationStrength ?? this.vibrationBaseline.controllerVibrationStrength }),
       write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => this.audioValues,
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,

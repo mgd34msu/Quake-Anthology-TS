@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { CommandContext } from "../../src/contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 
 const identity = createIdentityOwner("async-exec");
@@ -56,4 +56,68 @@ test("async exec discarded from a synchronous batch never publishes after comple
   read.resolve("record leaked\n"); await read.promise;
   commands.execute();
   expect(seen).toEqual(["original"]);
+});
+
+test("script drain awaits nested reads and retains native wait boundaries", async () => {
+  for (const dialect of ["q1-netquake", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const outer = pendingScript(), inner = pendingScript(), seen: string[] = [];
+    const sources: CommandContext[] = [];
+    const commands = new CommandBuffer({ dialect, context, readScript: name => name === "outer.cfg" ? outer.promise : inner.promise });
+    commands.register("record", invocation => { seen.push(invocation.args.join(" ")); sources.push(invocation.source); });
+    commands.append("exec outer.cfg; record after\n");
+    const draining = commands.executeScriptsAsync(async () => {});
+    expect(() => commands.execute()).toThrow("already draining");
+    outer.resolve("record outer; exec inner.cfg; record outer-tail\n");
+    inner.resolve("record inner; wait; record inner-tail\n");
+    await draining;
+    expect(seen).toEqual(["outer", "inner"]);
+    expect(sources[1]?.origin).toEqual({ kind: "script", name: "inner.cfg", caller: { kind: "script", name: "outer.cfg", caller: context.origin } });
+    await commands.executeScriptsAsync(async () => {});
+    expect(seen).toEqual(["outer", "inner", "inner-tail", "outer-tail", "after"]);
+  }
+});
+
+test("script drain reports rejected reads and continues in order", async () => {
+  const read = pendingScript(), seen: string[] = [], output: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context, readScript: () => read.promise, print: text => { output.push(text); } });
+  commands.register("record", invocation => { seen.push(invocation.args.join(" ")); });
+  commands.append("exec missing; record after\n");
+  const draining = commands.executeScriptsAsync(async () => {});
+  read.reject(new Error("denied"));
+  await draining;
+  expect(seen).toEqual(["after"]);
+  expect(output).toEqual(["couldn't exec missing.cfg: denied\n"]);
+});
+
+test("script drain callback failure releases ownership and retains pending commands", async () => {
+  const seen: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context, readScript: async () => "record script\n" });
+  commands.register("record", invocation => { seen.push(invocation.args.join(" ")); });
+  commands.append("exec startup; record after\n");
+  await expect(commands.executeScriptsAsync(async () => { throw new Error("dispatch cancelled"); })).rejects.toThrow("dispatch cancelled");
+  expect(seen).toEqual([]);
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["script", "after"]);
+});
+
+test("ordinary asynchronous frame drain still returns before a pending script read", async () => {
+  const read = pendingScript(), seen: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context, readScript: () => read.promise });
+  commands.register("record", invocation => { seen.push(invocation.args.join(" ")); });
+  commands.append("exec startup; record after\n");
+  expect(await commands.executeAsync(async () => {})).toBe(1);
+  expect(seen).toEqual([]);
+  read.resolve("record script\n");
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["script", "after"]);
+});
+
+test("Q2 script reads do not reset the alias limit within an awaited frame", async () => {
+  let reads = 0;
+  const output: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q2-classic", context, readScript: async () => { reads++; return "again\n"; }, print: text => { output.push(text); } });
+  commands.append('alias again "exec loop.cfg"; again\n');
+  await commands.executeScriptsAsync(async () => {});
+  expect(reads).toBe(15);
+  expect(output.some(text => text.includes("ALIAS_LOOP_COUNT"))).toBe(true);
 });

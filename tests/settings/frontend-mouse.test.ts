@@ -95,7 +95,7 @@ test("startup reads selected product profiles, preserves other seats through pla
     const startup = app;
     const key = (code: number): void => { const seat = startup.inputSeat; if (seat === null) throw new Error("Missing startup seat");
       for (const down of [true, false]) startup.input({ seat, kind: "key", code, down, repeat: false, timeMilliseconds: performance.now() }); };
-    const focus = (id: string): void => { for (let i = 0; i < 14; i++) {
+    const focus = (id: string): void => { for (let i = 0; i < 40; i++) {
       const current = observed.controller?.state().focus; if (current?.kind === "menu" && current.control === id) return; key(KeyCode.Tab);
     } throw new Error(`Unreachable ${id}`); };
     const read = (id: string): number | boolean => { const binding = control(startup.preferences.bindings(), id);
@@ -148,30 +148,30 @@ for (const width of [320, 640]) test(`startup Controls at ${width} reaches share
     key(KeyCode.Down); key(KeyCode.Down); key(KeyCode.Enter);
     expect(controller.activeMenu).toBe("menu:settings:input:0");
     const focus = (id: string): void => {
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < 40; i++) {
         const current = controller.state().focus; if (current.kind === "menu" && current.control === id) return;
         key(KeyCode.Tab);
       }
       throw new Error(`Unreachable startup control ${id}`);
     };
-    const page = menus.get("menu:settings:input:0")?.(); if (page === undefined) throw new Error("Missing Controls page");
+    const page = menus.get("menu:settings:input:0")?.(); if (page === undefined) throw new Error("Missing Controls menu");
+    expect(page.scroll?.rect.y).toBe(92); expect(page.scroll?.rect.height).toBe(300);
+    expect(page.controls.some(row => row.label === "Next page")).toBe(false);
     for (const row of page.controls) {
-      expect(row.rect.y).toBeGreaterThanOrEqual(0); expect(row.rect.y + row.rect.height).toBeLessThanOrEqual(480);
+      expect(row.rect.y).toBeGreaterThanOrEqual(0);
       if (row.enabled && row.visible) focus(row.id);
     }
     focus("ui:input:filter"); key(KeyCode.Enter); expect(startup.preferences.values).toEqual({ filter: true });
     focus("ui:input:acceleration"); key(KeyCode.Right); expect(startup.preferences.values.acceleration).toBe(0.05);
     focus("ui:input:freelook"); key(KeyCode.Enter); expect(startup.preferences.values.freeLook).toBe(false);
     const first = startup.captureNextFrame(); await startup.step();
-    await Bun.write(`/tmp/frontend-mouse-${width}-page1.png`, encodePng(width, height, await first));
-    focus("ui:settings:page:1"); key(KeyCode.Enter);
-    expect(controller.activeMenu).toBe("menu:settings:input:1");
+    await Bun.write(`/tmp/frontend-mouse-${width}-controls.png`, encodePng(width, height, await first));
+    expect(controller.activeMenu).toBe("menu:settings:input:0");
     focus("ui:startup:gyro");
     const second = startup.captureNextFrame(); await startup.step();
-    await Bun.write(`/tmp/frontend-mouse-${width}-page2.png`, encodePng(width, height, await second));
+    await Bun.write(`/tmp/frontend-mouse-${width}-scrolled.png`, encodePng(width, height, await second));
     key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:settings:gyro");
-    key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:1");
-    focus("ui:settings:page:-1"); key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:settings:input:0");
+    key(KeyCode.Escape); expect(controller.activeMenu).toBe("menu:settings:input:0");
     focus("ui:settings:back"); key(KeyCode.Enter); expect(controller.activeMenu).toBe("menu:startup:options");
   } finally { await app?.close(); registration.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
