@@ -34,7 +34,7 @@ export function q3SourcePresentationState(runtime: Q3SourceRuntime): Q3SourcePre
     const value = runtime.host.configstrings.get(index);
     if (value !== "") configstrings.push({ index, value });
   }
-  return { product: runtime.options.product, time: runtime.level.time, entities, clients, configstrings };
+  return { product: runtime.options.product, time: runtime.host.now(), entities, clients, configstrings };
 }
 
 function missileModel(weapon: number): string | null {

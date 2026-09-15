@@ -123,7 +123,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
       if (!simulation.recipe.character.definition.provider.startsWith('q3:')) reasons.push('Native Q3 wire requires a Q3 character');
       return reasons.length === 0 ? { kind: 'supported' } : { kind: 'unsupported', reasons };
     },
-    time: () => guest ? Math.trunc(simulation.timeSeconds * 1000) : nativeSource().level.time,
+    time: () => guest ? Math.trunc(simulation.timeSeconds * 1000) : nativeSource().host.now(),
     occupiedSlots: () => guest ? source.players().map(player => player.sourceEntity) : simulation.players().map(actor => nativeSource().records.byActor(actor)?.slot ?? -1),
     admit: async request => {
       const client = options.session.createClient(request.slot); client.connect(request.address.kind === 'loopback' ? 'loopback' : 'remote');

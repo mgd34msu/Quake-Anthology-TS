@@ -250,6 +250,11 @@ export class SharedSimulation implements Simulation {
   private sourceSchedulingMilliseconds = 0;
   private closed = false;
   private stepping = false;
+  private sourceRoundSettlement:
+    | { readonly kind: "none" }
+    | { readonly kind: "ready"; readonly source: Q3SourceRuntime }
+    | { readonly kind: "active"; readonly source: Q3SourceRuntime; completed: number }
+    | { readonly kind: "failed"; readonly source: Q3SourceRuntime } = { kind: "none" };
   private checkingQ2Rules = false;
   private readonly q1ClientVisibility: Q1ClientVisibility;
   private attackSequence = 0;
@@ -2602,6 +2607,13 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3-qvm") throw new Error("Q3 guest requires the awaited simulation step");
     if (this.stepping) throw new Error("Simulation step is already running");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
+    const settlement = this.sourceRoundSettlement;
+    if (settlement.kind === "failed") throw new Error("Source round settlement failed; close the session");
+    if (settlement.kind === "active") {
+      if (this.source.kind !== "q3" || this.source.game !== settlement.source) throw new Error("Source round settlement belongs to a retired source");
+      if (settlement.completed >= 4) throw new Error("Source round settlement already completed four frames");
+      if (input.elapsedMilliseconds !== 100 || input.commands.length !== 0) throw new Error("Source round settlement requires one empty 100ms input");
+    } else if (settlement.kind === "ready") this.sourceRoundSettlement = { kind: "none" };
     this.stepping = true;
     try {
       if (this.source.kind === "q2" && this.q2ServerRegistry !== null) {
@@ -2621,12 +2633,13 @@ export class SharedSimulation implements Simulation {
       if (!paused) this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
       const fixed = profile.kind === "q2-classic" ? 100 : profile.kind === "q2-rerelease" ? profile.frameMilliseconds : profile.kind === "q3" ? profile.serverFrameMilliseconds : null;
-      const mapRun = !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
-      const elapsed = fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
+      const mapRun = settlement.kind === "active" || !paused && input.elapsedMilliseconds > 0 && (fixed === null || this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + (profile.kind === "q3" ? profile.serverFrameMilliseconds : 0));
+      const elapsed = settlement.kind === "active" ? 0.1 : fixed === null ? Math.min(0.1, Math.max(0.001, input.elapsedMilliseconds / 1000)) : fixed / 1000;
       const selectedQ2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
       const mapStartMilliseconds = selectedQ2?.mapMilliseconds ?? this.timeSeconds * 1000;
       const mapDeadlines = new Set<number>();
-      if (mapRun && profile.kind === "q3") {
+      if (settlement.kind === "active") mapDeadlines.add(mapStartMilliseconds);
+      else if (mapRun && profile.kind === "q3") {
         for (let due = this.timeSeconds * 1000 + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
       } else if (mapRun) mapDeadlines.add(mapStartMilliseconds + elapsed * 1000);
       const mapEndMilliseconds = mapDeadlines.size === 0 ? mapStartMilliseconds : Math.max(...mapDeadlines);
@@ -2660,7 +2673,9 @@ export class SharedSimulation implements Simulation {
       let botCommands: readonly ActorCommand[] = [];
       const preparesQ1Clients = this.source.kind === "q1" || this.source.kind === "quakec";
       if (run) {
-        if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
+        if (settlement.kind === "active") this.sourceFrame = { ...this.clock.frame, frame: this.clock.frame.frame + 1,
+          elapsed: { kind: "milliseconds", value: 100 }, phase: "frame-entry" };
+        else if (fixed === null) this.sourceFrame = { ...this.clock.frame, elapsed: { kind: "seconds", value: elapsed }, phase: "frame-entry" };
         else this.sourceFrame = this.clock.advance({ kind: this.clock.frame.time.kind, value: this.clock.frame.time.kind === "seconds" ? elapsed : fixed });
         this.beginMonsterFrames(boundary.milliseconds, true);
         if (this.selectedArsenal?.family === "q1") {
@@ -2726,7 +2741,7 @@ export class SharedSimulation implements Simulation {
         emitQ2ShadowLights(this.source.game);
         return { snapshot: this.snapshot(), events: this.events.take() };
       }
-      if (run && !preparesQ1Clients) botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
+      if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
         let command = paused ? { ...received, command: { ...received.command, buttons: received.command.buttons & ~1 } } : received;
         const player = this.player(command.actor);
@@ -2930,12 +2945,18 @@ export class SharedSimulation implements Simulation {
           if (this.source.game.kind === "quakeworld") { this.runQuakeWorldCommands(); this.source.game.messages.flush(); }
         }
         if (this.source.kind === "q1" && this.source.game.forceRetouch > 0) this.source.game.forceRetouch--;
-        if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
+        if (settlement.kind === "active") {
+          this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: 100 }, "frame-exit");
+          settlement.completed++;
+        } else if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
         else { this.sourceFrame = this.clock.enter("frame-exit"); if (profile.kind !== "q3" && this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }
       }
       }
       if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);
       return { snapshot: this.snapshot(), events: this.events.take() };
+    } catch (error) {
+      if (settlement.kind === "active") this.sourceRoundSettlement = { kind: "failed", source: settlement.source };
+      throw error;
     } finally { this.primaryCommandBlocks.clear(); this.stepping = false; }
   }
 
@@ -3135,6 +3156,7 @@ export class SharedSimulation implements Simulation {
   }
 
   restartSourceRound(): readonly ClientId[] {
+    if (this.sourceRoundSettlement.kind === "active" || this.sourceRoundSettlement.kind === "failed") throw new Error("Complete or retire source round settlement before another restart");
     const plan = this.sourceRestartPlan();
     if (plan.kind === "replace-world") throw new Error("Source restart requires full world replacement: " + plan.reason);
     if (this.stepping) throw new Error("Source restart requires a completed simulation frame");
@@ -3156,11 +3178,30 @@ export class SharedSimulation implements Simulation {
       this.source = { kind: "q3", game };
       if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(game.bridge.policy());
       game.load();
+      this.sourceRoundSettlement = { kind: "ready", source: game };
       return clients;
     } catch (error) {
       this.close();
       throw error;
     }
+  }
+
+  beginSourceRoundSettlement(): void {
+    this.assertOpen();
+    const settlement = this.sourceRoundSettlement;
+    if (this.stepping || settlement.kind !== "ready" || this.source.kind !== "q3" || this.source.game !== settlement.source)
+      throw new Error("Source round settlement requires a fresh matching source reset");
+    if (this.sourceRestartPlan().kind !== "source-reset" || this.clock.frame.time.kind !== "milliseconds")
+      throw new Error("Source round settlement requires a compatible native Q3 clock");
+    this.sourceRoundSettlement = { kind: "active", source: settlement.source, completed: 0 };
+  }
+
+  completeSourceRoundSettlement(): void {
+    this.assertOpen();
+    const settlement = this.sourceRoundSettlement;
+    if (this.stepping || settlement.kind !== "active" || this.source.kind !== "q3" || this.source.game !== settlement.source || settlement.completed !== 4)
+      throw new Error("Source round settlement requires four completed frames before resuming");
+    this.sourceRoundSettlement = { kind: "none" };
   }
 
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }
@@ -3518,6 +3559,7 @@ export class SharedSimulation implements Simulation {
   checkpoint(): SaveImage {
     this.assertOpen();
     this.assertBotRestoreReady();
+    if (this.sourceRoundSettlement.kind === "active" || this.sourceRoundSettlement.kind === "failed") throw new Error("Save requires completed source round settlement");
     if (this.stepping || this.transitions.length !== 0 || this.levelChange !== null) throw new Error("Save requires a completed frame without pending world travel");
     const source = this.source;
     if (source.kind === "loading") throw new Error("The selected source world does not yet expose a complete saved-game checkpoint");
