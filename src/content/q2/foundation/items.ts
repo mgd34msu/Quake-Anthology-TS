@@ -13,7 +13,7 @@ import { freeQ2Entity } from "./callbacks.ts";
 import { restoreQ2Actor } from "./checkpoint.ts";
 import type { Q2Touch, Q2Use } from "./host.ts";
 
-interface ItemVisual { readonly classname: string; readonly model: string; readonly icon: string; readonly name: string; readonly sound: string; readonly rotate: boolean; readonly respawn: number; }
+interface ItemVisual { readonly classname: string; readonly model: string; readonly icon: string; readonly name: string; readonly sound: string; readonly rotate: boolean; readonly respawn: number; readonly consoleGive?: "inventory-only" | "individual-only" | "forbidden"; }
 export type Q2ItemDefinition = ItemVisual & (
   | { readonly kind: "ammo"; readonly quantity: number; readonly capacity: number; readonly weaponAmmo?: boolean; readonly infiniteAmmoQuantity?: number | null }
   | { readonly kind: "weapon"; readonly ammo: ItemId | null; readonly coopStay?: boolean }
@@ -115,6 +115,9 @@ export interface Q2InventoryItem {
   readonly usable: boolean;
   readonly droppable: boolean;
   readonly stayCoop: boolean;
+  readonly capacity: number;
+  readonly weapon: boolean;
+  readonly consoleGive: "pickup" | "inventory-only" | "individual-only" | "forbidden";
 }
 export interface Q2DropOptions { readonly playerDeath: boolean; readonly yawOffset?: number; readonly expiresAt?: number; }
 
@@ -160,9 +163,13 @@ export class Q2ItemModule implements Q2SpawnModule {
   }
 
   itemName(classname: string): string | null { return this.catalog.get(classname)?.name ?? null; }
+  resourcePaths(classnames: ReadonlySet<string>): readonly string[] {
+    return [...this.catalog.values()].filter(item => classnames.has(item.classname)).flatMap(item => [item.model, `sound/${item.sound}`]);
+  }
 
   setPickupPolicy(policy: Q2PickupPolicy): undefined { this.pickupPolicy = policy; return undefined; }
   setPickupAdmission(admission: PickupAdmission | null): undefined { this.pickupAdmission = admission; return undefined; }
+  mapsSupply(item: ItemId): boolean { return this.pickupAdmission !== null && (baseAmmoIds.has(item) || baseWeaponIds.has(item)); }
 
   get callbacks(): Q2CallbackDefinitions {
     return { think: { q2_items_respawn: this.respawn, q2_items_drop_to_floor: this.dropToFloor, q2_items_make_touchable: this.makeTouchable,
@@ -200,12 +207,33 @@ export class Q2ItemModule implements Q2SpawnModule {
       quantity: item.kind === "ammo" || item.kind === "custom" ? item.quantity : 1,
       usable: item.kind === "custom" ? item.use !== null : item.kind === "power" || item.kind === "power-armor" || item.kind === "weapon" || item.kind === "ammo" && item.weaponAmmo === true,
       droppable: item.kind === "custom" ? item.droppable : item.kind === "key" || item.kind === "ammo" || item.kind === "power" || item.kind === "power-armor" || item.kind === "weapon" && item.classname !== "weapon_blaster",
-      stayCoop: staysCoop(item) }));
+      stayCoop: staysCoop(item), capacity: item.kind === "ammo" || item.kind === "custom" ? item.capacity : 32767,
+      weapon: item.kind === "weapon" || item.kind === "ammo" && item.weaponAmmo === true,
+      consoleGive: item.consoleGive ?? "pickup" }));
   }
 
   lookup(value: string): Q2InventoryItem | null {
     const key = value.toLowerCase();
     return this.list().find(item => item.id.toLowerCase() === key || item.classname.toLowerCase() === key || item.name.toLowerCase() === key) ?? null;
+  }
+
+  giveAmmoCount(player: OwnedActor, game: Q2GameServices, itemId: ItemId, count: number | null): undefined {
+    const item = this.lookup(itemId);
+    if (item === null || item.kind !== "ammo") throw new Error("Console ammo grant requires a source ammo item");
+    const mapped = this.pickupAdmission !== null && baseAmmoIds.has(item.id);
+    const destinations = mapped && this.pickupAdmission !== null
+      ? this.pickupAdmission.preview(player.id, { kind: "ammo", offer: { item: item.id, amount: 0 } }).ammo.map(receipt => receipt.item)
+      : [item.id];
+    for (const destination of destinations) {
+      const entry = game.host.inventory.entries(player.id).find(value => value.item === destination);
+      if (mapped && entry === undefined) throw new Error("Console ammo destination was not admitted");
+      const next = count ?? (entry?.count ?? 0) + item.quantity;
+      if (mapped && entry !== undefined) game.host.inventory.configure(player, { ...entry,
+        count: entry.countPolicy?.kind === "source-counter" ? next : Math.max(0, next) });
+      else game.host.inventory.configure(player, { item: destination, count: next, capacity: entry?.capacity ?? item.capacity,
+        countPolicy: { kind: "source-counter", arithmetic: "int32" } });
+    }
+    return undefined;
   }
 
   clearPowerups(player: ActorId): undefined { this.powers.delete(player); return undefined; }

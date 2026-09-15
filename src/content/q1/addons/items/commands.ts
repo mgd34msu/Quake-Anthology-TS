@@ -13,6 +13,7 @@ function count(context: Q1AddonContext, player: Q1PlayerState, item: ItemId, amo
   return context.game.host.inventory.configure(player.actor, previous === undefined ? { item, count: amount, capacity } : { ...previous, count: amount });
 }
 function restock(context: Q1AddonContext, player: Q1PlayerState): undefined {
+  if (context.services.cheatArsenal?.(player.actor.id, "ammo") === true) return undefined;
   count(context, player, "q1:ammo/shells", 100, 100); count(context, player, "q1:ammo/nails", 200, 200);
   count(context, player, "q1:ammo/rockets", 100, 100); count(context, player, "q1:ammo/cells", 200, 100); return undefined;
 }
@@ -52,9 +53,10 @@ export function handleMg3ItemImpulse(context: Q1AddonContext, actor: ActorId, im
   if (impulse === 9 || impulse === 99) {
     if ((game.options.deathmatch !== 0 || game.options.coop) && context.services.cvar("sv_cheats") === 0) return true;
     restock(context, player);
-    for (const weapon of [...WEAPONS, "mg3:laser"] satisfies readonly Q1Weapon[]) count(context, player, game.weaponItem(weapon), 1, 1);
+    const selected = context.services.cheatArsenal?.(actor, "weapons") ?? false;
+    if (!selected) for (const weapon of [...WEAPONS, "mg3:laser"] satisfies readonly Q1Weapon[]) count(context, player, game.weaponItem(weapon), 1, 1);
     if (impulse !== 99) { count(context, player, "q1:key/silver", 1, 1); count(context, player, "q1:key/gold", 1, 1); }
-    game.selectWeapon(player.actor, "rocketlauncher"); return true;
+    if (!selected) game.selectWeapon(player.actor, "rocketlauncher"); return true;
   }
   if (impulse === 100) {
     developerMessage("Resetting to defaults\n"); player.maxHealth = 100; game.host.combat.setHealth(player.actor, 100);

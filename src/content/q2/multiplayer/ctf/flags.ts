@@ -20,7 +20,7 @@ export class Q2CtfFlags {
   register(): undefined {
     for (const team of [1, 2] satisfies readonly Q2CtfPlayingTeam[]) {
       const flag = CTF_FLAGS[team];
-      this.context.hooks.items.register({ kind: "custom", classname: flag.classname, model: flag.model, icon: flag.icon, name: `${team === 1 ? "Red" : "Blue"} Flag`,
+      this.context.hooks.items.register({ kind: "custom", consoleGive: "individual-only", classname: flag.classname, model: flag.model, icon: flag.icon, name: `${team === 1 ? "Red" : "Blue"} Flag`,
         sound: "ctf/flagtk.wav", rotate: false, respawn: 0, capacity: 1, quantity: 1, coopStay: false, droppable: false, use: null,
         pickup: (entity, game, player) => { this.pickup(entity, game, player.id); return false; } });
     }

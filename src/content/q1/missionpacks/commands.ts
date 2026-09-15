@@ -10,6 +10,7 @@ import { missionWeapons } from "./types.ts";
 import { missionMessage } from "./messages.ts";
 
 export interface MissionPackCommandOptions {
+  readonly cheatArsenal?: (actor: import("../../../contracts/identity.ts").ActorId, category: "weapons" | "ammo") => boolean;
   readonly cheatsAllowed?: () => boolean;
   readonly developerMessage?: (text: string) => undefined;
 }
@@ -21,12 +22,17 @@ export function missionPackCommand(game: Q1EntityServices, base: Q1Base, players
   const multiplayer = game.options.deathmatch !== 0 || game.options.coop;
   if (impulse === 9) {
     if (multiplayer && (game.options.edition === "classic" || !(options.cheatsAllowed?.() ?? false))) return true;
-    for (const weapon of WEAPONS) setCount(game, player, weaponItem(weapon), 1, 1);
-    for (const weapon of missionWeapons) if (weapon.id.startsWith(`${pack}:`)) setCount(game, player, weaponItem(weapon.id), 1, 1);
+    const selectedWeapons = options.cheatArsenal?.(player.actor.id, "weapons") ?? false;
+    if (!selectedWeapons) {
+      for (const weapon of WEAPONS) setCount(game, player, weaponItem(weapon), 1, 1);
+      for (const weapon of missionWeapons) if (weapon.id.startsWith(`${pack}:`)) setCount(game, player, weaponItem(weapon.id), 1, 1);
+    }
     setCount(game, player, "q1:key/silver", 1, 1); setCount(game, player, "q1:key/gold", 1, 1);
-    setCount(game, player, "q1:ammo/shells", 100, 100); setCount(game, player, "q1:ammo/nails", 200, 200); setCount(game, player, "q1:ammo/rockets", 100, 100); setCount(game, player, "q1:ammo/cells", 200, 100);
-    if (pack === "rogue") { setCount(game, player, "rogue:ammo/lava-nails", 200, 200); setCount(game, player, "rogue:ammo/multi-rockets", 100, 100); setCount(game, player, "rogue:ammo/plasma", 100, 100); }
-    game.selectWeapon(player.actor, "rocketlauncher"); return true;
+    if (!(options.cheatArsenal?.(player.actor.id, "ammo") ?? false)) {
+      setCount(game, player, "q1:ammo/shells", 100, 100); setCount(game, player, "q1:ammo/nails", 200, 200); setCount(game, player, "q1:ammo/rockets", 100, 100); setCount(game, player, "q1:ammo/cells", 200, 100);
+      if (pack === "rogue") { setCount(game, player, "rogue:ammo/lava-nails", 200, 200); setCount(game, player, "rogue:ammo/multi-rockets", 100, 100); setCount(game, player, "rogue:ammo/plasma", 100, 100); }
+    }
+    if (!selectedWeapons) game.selectWeapon(player.actor, "rocketlauncher"); return true;
   }
   if (impulse === 11) { base.campaign.writeFlags(Math.fround(base.campaign.readFlags() * 2 + 1)); return true; }
   if (impulse === 255 || pack === "hipnotic" && (impulse === 200 || impulse === 201)) {

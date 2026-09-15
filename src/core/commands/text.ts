@@ -36,15 +36,18 @@ export function commandSeparatorOffset(text: string, dialect: CommandDialect): n
 
 interface ParsedToken { readonly value: string; readonly end: number; }
 
-function whitespace(text: string, index: number): boolean {
+export type CommandTextMode = "source" | "console";
+
+/** Original signed-char lexers skip high bytes; direct console input keeps extended glyphs. */
+function whitespace(text: string, index: number, mode: CommandTextMode): boolean {
   const byte = text.charCodeAt(index);
-  return byte <= 32 || byte >= 128;
+  return byte <= 32 || mode === "source" && byte >= 128;
 }
 
-function parseToken(text: string, start: number, dialect: CommandDialect): ParsedToken | undefined {
+function parseToken(text: string, start: number, dialect: CommandDialect, mode: CommandTextMode): ParsedToken | undefined {
   let offset = start;
   while (offset < text.length) {
-    while (offset < text.length && whitespace(text, offset)) offset++;
+    while (offset < text.length && whitespace(text, offset, mode)) offset++;
     if (text.startsWith("//", offset)) {
       if (dialect === "q3") return undefined;
       while (offset < text.length && text.charAt(offset) !== "\n") offset++;
@@ -66,7 +69,7 @@ function parseToken(text: string, start: number, dialect: CommandDialect): Parse
   } else if (isQ1(dialect) && "{}()':".includes(text.charAt(offset))) {
     offset++;
   } else {
-    while (offset < text.length && !whitespace(text, offset)) {
+    while (offset < text.length && !whitespace(text, offset, mode)) {
       if (isQ1(dialect) && "{}()':".includes(text.charAt(offset))) break;
       if (dialect === "q3" && (text.charAt(offset) === '"' || text.startsWith("//", offset) || text.startsWith("/*", offset))) break;
       offset++;
@@ -84,14 +87,14 @@ function parseToken(text: string, start: number, dialect: CommandDialect): Parse
 }
 
 /** Q2 expands unquoted $cvars repeatedly and rejects unmatched quotes. */
-export function expandCommandMacros(input: string, variable: (name: string) => string, print: (text: string) => void): string | undefined {
+export function expandCommandMacros(input: string, variable: (name: string) => string, print: (text: string) => void, mode: CommandTextMode = "source"): string | undefined {
   let text = sourceCommandText(input), budgetLength = text.length;
   if (budgetLength >= 1024) { print("Line exceeded 1024 chars, discarded.\n"); return undefined; }
   let quoted = false, count = 0;
   for (let offset = 0; offset < text.length; offset++) {
     if (text.charAt(offset) === '"') quoted = !quoted;
     if (quoted || text.charAt(offset) !== "$") continue;
-    const token = parseToken(text, offset + 1, "q2-classic");
+    const token = parseToken(text, offset + 1, "q2-classic", mode);
     if (token === undefined) continue;
     const value = variable(token.value);
     budgetLength += value.length;
@@ -109,15 +112,15 @@ export interface CommandTokens {
   readonly argsText: string;
 }
 
-export function tokenizeCommand(input: string, dialect: CommandDialect): CommandTokens {
+export function tokenizeCommand(input: string, dialect: CommandDialect, mode: CommandTextMode = "source"): CommandTokens {
   const text = sourceCommandText(input), argv: string[] = [];
   const maximumTokens = dialect === "q3" ? 1024 : 80;
   let offset = 0, argsText = "", storedBytes = 0;
   while (offset < text.length) {
-    while (offset < text.length && whitespace(text, offset) && (dialect === "q3" || text.charAt(offset) !== "\n")) offset++;
+    while (offset < text.length && whitespace(text, offset, mode) && (dialect === "q3" || text.charAt(offset) !== "\n")) offset++;
     if (dialect !== "q3" && text.charAt(offset) === "\n") break;
     if (argv.length === 1) argsText = isQ2(dialect) ? text.slice(offset).replace(/[\x00-\x20]+$/, "") : text.slice(offset);
-    const token = parseToken(text, offset, dialect);
+    const token = parseToken(text, offset, dialect, mode);
     if (token === undefined) break;
     offset = token.end;
     if (argv.length < maximumTokens) {

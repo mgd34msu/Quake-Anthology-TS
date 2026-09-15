@@ -174,7 +174,7 @@ const lastWeapon: Q2CommandHandler = (_players, context) => {
 
 const killPlayer: Q2CommandHandler = (_players, context) => {
   const { entity, game, state } = context;
-  if (game.host.now() - state.respawnTime < 5) return;
+  if (game.options.edition === "rerelease" && state.spectator || game.host.now() - state.respawnTime < 5) return;
   state.god = false; entity.flags &= ~16; game.host.combat.setTraits(entity.actor, { invulnerable: false });
   q2EnvironmentDamage(context, Math.max(1, game.host.combat.read(entity.actor.id)?.health ?? 0) + 1, 23, 32);
 };
@@ -196,7 +196,7 @@ const gesture: Q2CommandHandler = (_players, context, args) => {
 
 const cheat: Q2CommandHandler = (_players, context, args, command) => {
   const { entity, game, state, hooks } = context;
-  if (game.options.mode === "deathmatch" && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); return; }
+  if ((game.options.edition === "rerelease" ? game.options.maxClients > 1 : game.options.mode === "deathmatch") && !context.rules.cheats) { print(context, "You must run the server with '+set cheats 1' to enable this command.\n"); return; }
   if (command === "god") { state.god = !state.god; entity.flags ^= 16; game.host.combat.setTraits(entity.actor, { invulnerable: state.god }); print(context, `godmode ${state.god ? "ON" : "OFF"}\n`); }
   else if (command === "notarget") { state.notarget = !state.notarget; entity.flags ^= 32; print(context, `notarget ${state.notarget ? "ON" : "OFF"}\n`); }
   else if (command === "noclip") { state.noclip = !state.noclip; hooks.setMovement(entity.actor.id, { kind: "noclip", enabled: state.noclip }); print(context, `noclip ${state.noclip ? "ON" : "OFF"}\n`); }
@@ -246,34 +246,82 @@ export function runQ2ClientCommand(players: Q2Players, context: Q2PlayerContext,
 }
 
 function give(context: Q2PlayerContext, args: readonly string[]): undefined {
-  const { entity, game, items } = context;
-  const requested = args.join(" ").toLowerCase(), all = requested === "all";
+  const { entity, game, items, hooks } = context;
+  const requested = args.join(" ").toLowerCase(), all = requested === "all", rerelease = game.options.edition === "rerelease";
+  const catalog = items.list();
+  const write = (item: (typeof catalog)[number], count: number): void => {
+    const entry = game.host.inventory.entries(entity.actor.id).find(value => value.item === item.id);
+    game.host.inventory.configure(entity.actor, { item: item.id, count, capacity: entry?.capacity ?? item.capacity, countPolicy: { kind: "source-counter", arithmetic: "int32" } });
+  };
+  const pickup = (classname: string): void => {
+    const temporary = game.create(classname);
+    if (!items.spawn(temporary, game) || !game.host.actors.isLive(temporary.actor.id)) return;
+    game.cancel(temporary); items.touch(temporary, game, entity.actor.id);
+    if (game.host.actors.isLive(temporary.actor.id)) game.remove(temporary);
+  };
   if (all || args[0]?.toLowerCase() === "health") {
-    game.host.combat.setHealth(entity.actor, args.length === 2 && args[0]?.toLowerCase() === "health" ? Number.parseInt(args[1] ?? "0", 10) || 0 : entity.maxHealth);
+    game.host.combat.setHealth(entity.actor, args.length === 2 ? Number.parseInt(args[1] ?? "0", 10) || 0 : entity.maxHealth);
     if (!all) return undefined;
   }
-  for (const item of items.list()) {
-    if (all && item.kind !== "health" && item.kind !== "armor" && item.kind !== "shard" && item.kind !== "maximum-health" || requested === "weapons" && item.kind === "weapon" || requested === "ammo" && item.kind === "ammo") {
-      const existing = game.host.inventory.entries(entity.actor.id).find(entry => entry.item === item.id);
-      game.host.inventory.configure(entity.actor, { item: item.id, count: item.kind === "ammo" ? existing?.capacity ?? 1000 : 1, capacity: existing?.capacity ?? 32767 });
+  if (all || requested === "weapons") {
+    if (hooks.grantSelectedArsenal?.(entity.actor.id, "weapons") !== true)
+      for (const item of catalog) if (item.weapon && item.consoleGive !== "inventory-only") write(item, game.host.inventory.count(entity.actor.id, item.id) + 1);
+    if (!all) return undefined;
+  }
+  if (all || requested === "ammo") {
+    if (hooks.grantSelectedArsenal?.(entity.actor.id, "ammo") !== true) {
+      if (all && rerelease) pickup("item_pack");
+      for (const item of catalog) if (item.kind === "ammo") {
+        const entry = game.host.inventory.entries(entity.actor.id).find(value => value.item === item.id);
+        write(item, Math.min((entry?.count ?? 0) + 1000, entry?.capacity ?? item.capacity));
+      }
     }
+    if (!all) return undefined;
   }
   if (all || requested === "armor") {
     const old = game.host.combat.read(entity.actor.id)?.armor;
     game.host.combat.setArmor(entity.actor, { kind: "q2", item: "q2:item_armor_body", points: 200, normalProtection: 0.8, energyProtection: 0.6, powerArmor: old?.kind === "q2" ? old.powerArmor : { kind: "none" } });
+    if (!all) return undefined;
   }
-  if (all || requested === "weapons" || requested === "ammo" || requested === "armor") return undefined;
-  const item = items.lookup(args.length === 2 ? args[0] ?? "" : args.join(" "));
-  if (item === null) return print(context, `unknown item: ${requested}\n`);
-  if (item.kind === "ammo") {
-    const count = args.length === 2 ? Number.parseInt(args[1] ?? "0", 10) || 0 : game.host.inventory.count(entity.actor.id, item.id) + item.quantity;
-    const old = game.host.inventory.entries(entity.actor.id).find(entry => entry.item === item.id);
-    game.host.inventory.configure(entity.actor, { item: item.id, count: Math.max(0, count), capacity: old?.capacity ?? 1000 });
-  } else {
-    const temporary = game.create(item.classname);
-    if (!items.spawn(temporary, game)) return undefined;
-    game.cancel(temporary); items.touch(temporary, game, entity.actor.id);
-    if (game.host.actors.isLive(temporary.actor.id)) game.remove(temporary);
+  if (all || !rerelease && requested === "power shield") {
+    pickup("item_power_shield");
+    if (!all) return undefined;
   }
+  if (all) {
+    for (const item of catalog) {
+      if (item.weapon || item.kind === "ammo" || item.kind === "armor" || item.kind === "shard" || item.consoleGive === "inventory-only") continue;
+      if (rerelease && (item.consoleGive === "forbidden" || item.consoleGive === "individual-only" || item.kind === "health" || item.kind === "maximum-health" && item.classname !== "item_adrenaline")) continue;
+      write(item, rerelease && item.kind === "key" ? 8 : 1);
+    }
+    if (rerelease) { entity.powerCubes = 0xff; checkPowerArmorAfterGive(context); }
+    return undefined;
+  }
+  const first = args[0]?.toLowerCase() ?? "";
+  const item = catalog.find(value => value.name.toLowerCase() === requested) ?? catalog.find(value => value.name.toLowerCase() === first)
+    ?? (rerelease ? catalog.find(value => value.classname.toLowerCase() === first || value.id.toLowerCase() === first) : undefined);
+  if (item === undefined) {
+    if (hooks.giveSelectedItem?.(entity.actor.id, args) === true) return undefined;
+    return print(context, "unknown item\n");
+  }
+  if (rerelease && item.consoleGive === "forbidden") return print(context, "Item is not giveable.\n");
+  if ((item.weapon || item.kind === "ammo") && !items.mapsSupply(item.id)
+    && hooks.giveSelectedItem?.(entity.actor.id, [item.id, ...(item.kind === "ammo" && args.length === 2 ? [args[1] ?? "0"] : [])]) === true) return undefined;
+  if (item.consoleGive === "inventory-only") {
+    if (rerelease) write(item, 1); else print(context, "non-pickup item\n");
+  } else if (item.kind === "ammo") {
+    items.giveAmmoCount(entity.actor, game, item.id, args.length === 2 ? Number.parseInt(args[1] ?? "0", 10) || 0 : null);
+  } else pickup(item.classname);
   return undefined;
+}
+
+function checkPowerArmorAfterGive(context: Q2PlayerContext): void {
+  const { entity, game, state, items } = context;
+  const fields = state.userinfo.split("\\");
+  let automatic = -1;
+  for (let index = 1; index < fields.length; index += 2) if (fields[index] === "autoshield") automatic = Number.parseInt(fields[index + 1] ?? "0", 10) || 0;
+  const cells = game.host.inventory.count(entity.actor.id, "q2:ammo_cells");
+  const enough = cells !== 0 && (automatic < 0 || (entity.flags & 0x40000000) !== 0 && cells > automatic);
+  const armor = game.host.combat.read(entity.actor.id)?.armor, active = armor?.kind === "q2" && armor.powerArmor.kind !== "none";
+  const shield = game.host.inventory.count(entity.actor.id, "q2:item_power_shield") !== 0 ? "q2:item_power_shield" : "q2:item_power_screen";
+  if (active && !enough || !active && automatic !== -1 && enough) items.use(entity.actor, shield, game);
 }

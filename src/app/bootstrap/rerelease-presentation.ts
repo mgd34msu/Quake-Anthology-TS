@@ -12,6 +12,7 @@ import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import { RereleaseFog } from "./rerelease-presentation/fog.ts";
 import { NativeLanguageSettings } from "../../ui/settings/services.ts";
 import type { SettingBinding } from "../../ui/settings/index.ts";
+import { q2LocalizedText } from "./q2-localization.ts";
 
 export interface RereleasePresentationSeat { readonly seat: SeatId; readonly actor: ActorId; readonly language?: string; }
 export type RereleaseSkyView = NonNullable<WorldViewInput["q2Sky"]>;
@@ -62,6 +63,13 @@ export class ApplicationRereleasePresentation {
   }
 
   selectedLanguage(id: SeatId): string { return this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english"; }
+
+  async localizeMessage(id: SeatId, content: ContentId, text: string, args: readonly string[] = []): Promise<string> {
+    const seat = this.seats.find(seat => seat.binding.seat.equals(id));
+    if (seat === undefined) throw new Error("Unknown localization seat");
+    const catalog = await this.catalog(seat, content);
+    return q2PlayerNameTokens(q2LocalizedText(catalog.localization, text, args), this.names);
+  }
 
   async languageBinding(id: SeatId, content: ContentId, failed: (error: unknown) => void): Promise<SettingBinding | undefined> {
     const family = (await this.assets.provider(content)).family;
@@ -124,15 +132,14 @@ export class ApplicationRereleasePresentation {
       if (event.kind !== "story" && event.kind !== "localized-print") continue;
       for (const seat of this.seats) {
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;
-        const catalog = await this.catalog(seat, source.content), text = q2PlayerNameTokens(catalog.localization.localize(event.text, event.kind === "localized-print" ? event.args : []), this.names);
+        const text = await this.localizeMessage(seat.binding.seat, source.content, event.text, event.kind === "localized-print" ? event.args : []);
         if (event.kind === "story") { seat.story = text; seat.storySource = { content: source.content, text: event.text }; }
         else this.prints.push({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
           ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }), event: { kind: "print", target: seat.binding.actor, level: event.level, text } });
       }
     }
     for (const seat of this.seats) if (seat.storySource !== null) {
-      const catalog = await this.catalog(seat, seat.storySource.content);
-      seat.story = q2PlayerNameTokens(catalog.localization.localize(seat.storySource.text), this.names);
+      seat.story = await this.localizeMessage(seat.binding.seat, seat.storySource.content, seat.storySource.text);
     }
   }
 

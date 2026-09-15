@@ -430,6 +430,8 @@ export class Q3SourceRuntime {
   private createCommands(admission: ClientAdmissionRuntime): GameCommandRuntime {
     const runtime = this;
     return new GameCommandRuntime({ pool: this.pool, state: this.level, teamScores: this.level.teamScores,
+      grantSelectedArsenal: (actor, category) => this.host.grantSelectedArsenal?.(actor, category) ?? false,
+      giveSelectedItem: (actor, args) => this.host.giveSelectedItem?.(actor, args) ?? false,
       get settings() { return { gameType: runtime.gameType, cheats: runtime.integer("sv_cheats") !== 0,
         teamForceBalance: runtime.integer("g_teamForceBalance") !== 0, maxGameClients: runtime.integer("g_maxGameClients"),
         dedicated: runtime.integer("dedicated") !== 0, allowVote: runtime.integer("g_allowVote") !== 0 }; },

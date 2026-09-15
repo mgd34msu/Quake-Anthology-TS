@@ -45,7 +45,7 @@ export type SimulationEventPayload =
   | { readonly kind: "sound"; readonly resource: ResourceId; readonly actor: ActorId | null; readonly origin: Vec3; readonly channel: number; readonly volume: number; readonly attenuation: number }
   | { readonly kind: "damage"; readonly outcome: DamageOutcome }
   | { readonly kind: "transition"; readonly decision: TransitionDecision }
-  | { readonly kind: "message"; readonly event: NetworkEvent };
+  | { readonly kind: "message"; readonly event: NetworkEvent; readonly sourcePresentationSequence?: number };
 
 export interface SimulationEvent {
   readonly sequence: number;

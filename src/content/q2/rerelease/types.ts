@@ -74,7 +74,7 @@ export interface Q2RereleaseOptions {
 }
 export function createQ2RereleaseOptions(changes: Partial<Q2RereleaseOptions> = {}): Q2RereleaseOptions {
   return { coopSquadRespawn: true, coopInstancedItems: true, coopLives: false, coopNumLives: 2,
-    deathmatchForceRespawn: false, deathmatchNoFallDamage: false, deathmatchSpawnFarthest: false, deathmatchForceRespawnTime: 0, deathmatchAllowExit: false, coopPlayerCollision: true, autoSaveMinimumTime: 60, ...changes };
+    deathmatchForceRespawn: false, deathmatchNoFallDamage: false, deathmatchSpawnFarthest: true, deathmatchForceRespawnTime: 0, deathmatchAllowExit: false, coopPlayerCollision: false, autoSaveMinimumTime: 60, ...changes };
 }
 export type Q2RereleaseEvent =
   | { readonly kind: "debug-shapes"; readonly lines: readonly DebugLine[]; readonly lifetimeMilliseconds: number }

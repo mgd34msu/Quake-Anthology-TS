@@ -1,4 +1,5 @@
 import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
+import { prepareApplicationResources } from "./precache.ts";
 import { registerQ1ClientCommands, resolveQ1HostCommandActor } from "./q1-client-commands.ts";
 import { resolveWeaponSelection } from "../../input/weapon-bindings.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
@@ -864,6 +865,8 @@ export class Application {
       const effectSimulation = this.simulation;
       effects = new ApplicationEffects(assets, effectSimulation.scene, actor => effectSimulation.players().some(player => player.equals(actor)), this.options.seed);
       for (const failure of await effects.preloadTransientResources()) this.host.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
+      await prepareApplicationResources({ content: assets.content, simulation: this.simulation, audio, effects,
+        progress: message => this.host.loading?.stage(message), print: message => this.host.print(message) });
       const native = renderer;
       const inputOwner = input, audioOwner = audio, menuArt = art, worldEffects = effects;
       const rerelease = new ApplicationRereleasePresentation(assets, players.map(player => ({ seat: player.seat.id, actor: player.actor })));
@@ -1250,6 +1253,8 @@ export class Application {
         const effects = new ApplicationEffects(assets, nextSimulation.scene, actor => nextSimulation.players().some(player => player.equals(actor)), options.seed);
         nextEffects = effects;
         for (const failure of await effects.preloadTransientResources()) this.host.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
+        await prepareApplicationResources({ content: assets.content, simulation: nextSimulation, audio, effects,
+          progress: message => this.host.loading?.stage(message), print: message => this.host.print(message) });
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
         if (input !== previous.input) {
@@ -1643,13 +1648,14 @@ export class Application {
           if (map === undefined) throw new Error("Usage: map <name>");
           this.pendingMap = mapResourcePath(map);
         }
-        else if ((this.simulation.q1Source() !== null || this.simulation.quakecSource() !== null)
-          && (command.name === "god" || command.name === "notarget" || command.name === "noclip")) {
+        else if (command.name === "god" || command.name === "notarget" || command.name === "noclip" || command.name === "fly"
+          || command.name === "give" || command.name === "giveall" || command.name === "kill" || command.name === "suicide") {
           const players = this.simulation.players().flatMap(actor => {
             const player = this.simulation.movementPlayer(actor); return player === null ? [] : [{ actor, client: player.client }];
           });
-          const actor = resolveQ1HostCommandActor(command.name, command.arguments_, source, players, () => this.commandActor(command.seat));
-          this.simulation.playerCommand(actor, command.name, []);
+          const actor = resolveQ1HostCommandActor(command.name, command.arguments_, source, players, () => this.commandActor(command.seat), command.name === "give");
+          let origin = source?.origin; while (origin?.kind === "script") origin = origin.caller;
+          this.simulation.playerCommand(actor, command.name, origin?.kind === "server-console" ? command.arguments_.slice(1) : command.arguments_);
         }
         else if (this.simulation.q1Source() !== null || this.simulation.quakecSource() !== null || this.simulation.q2Source() !== null || this.simulation.q3Source() !== null) {
           const handled = this.simulation.q3Source()?.serverCommands.consoleCommand([command.name, ...command.arguments_]) ?? false;

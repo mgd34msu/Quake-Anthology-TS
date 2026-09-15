@@ -21,7 +21,7 @@ export class Q2Tag implements Q2SpawnModule {
   private owner: ActorId | null = null;
   private count = 0;
   constructor(readonly hooks: Q2TagHooks) {
-    hooks.items.register({ kind: "custom", classname: "dm_tag_token", name: "Tag Token", icon: "i_tagtoken", model: "models/items/tagtoken/tris.md2",
+    hooks.items.register({ kind: "custom", consoleGive: "forbidden", classname: "dm_tag_token", name: "Tag Token", icon: "i_tagtoken", model: "models/items/tagtoken/tris.md2",
       sound: "items/pkup.wav", rotate: true, respawn: 0, capacity: 32767, quantity: 1, coopStay: false, droppable: false, use: null,
       pickup: (entity, game, player) => {
         this.token = entity.actor.id; this.owner = player.id; this.count = 0;

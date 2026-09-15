@@ -48,9 +48,11 @@ export class Q1SourceComposition {
       finaleFinished: () => this.finaleAcknowledgement.poll(game.time, new Map([...this.clients.records.values()]
         .map((client): readonly [ActorId, boolean] => [client.actor.id, game.player(client.actor.id)?.attackHeld ?? false]))) });
     const addonServices = { emit: (event: import("../../q1/addons/context.ts").Q1AddonEvent) => services.emit({ kind: "addon", event }),
+      cheatArsenal: (actor: ActorId, category: "weapons" | "ammo") => services.cheatArsenal?.(actor, category) ?? false,
       isMonster: (actor: ActorId) => this.isMonster(actor), cvar: (name: string) => services.cvar(name), setCvar: (name: string, value: string) => services.setCvar(name, value) };
     if (selection.program === "hipnotic" || selection.program === "rogue") {
       this.packs = registerQ1MissionPack(game, this.base, selection.program, {
+        cheatArsenal: addonServices.cheatArsenal,
         gamecfg: () => services.cvar("gamecfg"), teamColor: actor => this.clients.teamColor(actor),
         setTeamColor: (actor, color) => this.clients.colors(actor, color - 1, color - 1),
         addFrags: (actor, delta) => this.clients.addScore(actor, delta), frags: actor => this.clients.require(actor).frags,

@@ -222,6 +222,7 @@ export class ApplicationAudio {
   }
 
   private sound(content: ContentId, path: string, family: GameFamily, actor: ActorId | null = null): Promise<SoundAsset | null> {
+    if (path.startsWith("sound/")) path = path.slice(6);
     const model = family === "q2" ? actor === null ? "male" : this.actor(actor).model : this.characterModel;
     const key = `${content}/${family}/${path}/${path.startsWith("*") ? model : ""}`;
     const prior = this.sounds.get(key);
@@ -229,6 +230,10 @@ export class ApplicationAudio {
     const pending = this.loadSound(content, path, family, model);
     this.sounds.set(key, pending);
     return pending;
+  }
+
+  async preloadSound(content: ContentId, path: string): Promise<void> {
+    await this.sound(content, path, this.content.catalog.product(content).expectation.family);
   }
 
   private async loadSound(content: ContentId, path: string, family: GameFamily, model: string): Promise<SoundAsset | null> {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
-import type { DamageDecision } from "../../../../src/contracts/gameplay.ts";
+import type { DamageDecision, ItemId } from "../../../../src/contracts/gameplay.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVictimArmor } from "../../../../src/world/gameplay/index.ts";
 import { Q2CharacterActor, Q2PlayerState, q2Obituary } from "../../../../src/content/q2/base/player/index.ts";
@@ -88,15 +88,17 @@ test("Q2 obituary records source means-of-death scoring including friendly fire"
 });
 
 import { Q2Players } from "../../../../src/content/q2/base/player/index.ts";
+import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
+import { Q2_Q3_SUPPLY_PROFILE } from "../../../../src/content/composition/q2-q3-supply.ts";
 import type { Q2PlayerHooks, Q2PlayerEvent } from "../../../../src/content/q2/base/player/index.ts";
 import { Q2Foundation } from "../../../../src/content/q2/foundation/runtime.ts";
 import { createQ2TargetModule } from "../../../../src/content/q2/foundation/targets.ts";
 import { createQ2ItemModule } from "../../../../src/content/q2/foundation/items.ts";
 import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.ts";
-import type { Q2FoundationHost } from "../../../../src/content/q2/foundation/host.ts";
+import type { Q2FoundationHost, Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
 import type { Q2WeaponInput } from "../../../../src/content/q2/foundation/weapons/index.ts";
 
-function campaign() {
+function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "maxClients">> = {}) {
   const shared = character(), events: Q2PlayerEvent[] = [];
   const actor = shared.actor;
   let now = 0;
@@ -121,12 +123,12 @@ function campaign() {
     playerViewState: () => ({ viewAngles: zero, oldVelocity: zero }), prepareLevelChange: () => undefined, transition: () => undefined, diagnostic: text => { throw new Error(text); },
   };
   const game = new Q2Foundation(host, { edition: "classic", mapName: "base1", skill: 1, mode: "coop", deathmatchFlags: 0, maxClients: 4,
-    provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, [players, createQ2TargetModule(), items]);
+    provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement", ...options }, [players, createQ2TargetModule(), items]);
   game.load('{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "32 64 24" } { "classname" "info_player_intermission" "origin" "100 200 300" }');
   const entity = game.attachPlayer(actor);
   shared.movement.value = { ...shared.movement.value, animateQ2: false, waterLevel: 0, waterType: 0 };
   players.attach(entity, game, { slot: 0, userinfo: "\\name\\Ranger\\skin\\male/grunt", initializeInventory: false });
-  return { shared, game, entity, players, events, advance(value: number) { now = value; shared.advance(value); } };
+  return { shared, game, entity, players, items, events, advance(value: number) { now = value; shared.advance(value); } };
 }
 
 test("Q2 campaign death bookkeeping leaves a foreign character's body to its own provider", () => {
@@ -176,4 +178,81 @@ test("Q2 catalogue dispatch retains native help, unknown chat, hooks, and interm
   let hooked = false;
   players.hooks.command = (_entity, _game, name, args) => { hooked = name === "god" && args[0] === "hook"; return true; };
   run("GOD", ["hook"]); expect(hooked).toBe(true); expect(state.god).toBe(true);
+});
+
+test("Q2 classic give uses full item names, increments weapons, and preserves direct ammo counters", () => {
+  const { players, entity, game, shared } = campaign();
+  const give = (...args: string[]): void => { players.clientCommand(entity, game, "give", args); };
+  give("Power", "Shield"); expect(shared.inventory.count(entity.actor.id, "q2:item_power_shield")).toBe(1);
+  give("Super", "Shotgun"); expect(shared.inventory.count(entity.actor.id, "q2:weapon_supershotgun")).toBe(1);
+  give("weapons"); give("weapons"); expect(shared.inventory.count(entity.actor.id, "q2:weapon_supershotgun")).toBe(3);
+  give("Shells", "400"); expect(shared.inventory.count(entity.actor.id, "q2:ammo_shells")).toBe(400);
+  give("Shells", "-7"); expect(shared.inventory.count(entity.actor.id, "q2:ammo_shells")).toBe(-7);
+  give("ammo"); expect(shared.inventory.count(entity.actor.id, "q2:ammo_shells")).toBe(100);
+});
+
+test("Q2 rerelease give all upgrades ammo, grants eight keys, excludes protected items and supports non-pickup inventory", () => {
+  const { players, entity, game, shared, items, events } = campaign({ edition: "rerelease", mode: "singleplayer", maxClients: 1 });
+  const custom = (classname: string, name: string, consoleGive: "individual-only" | "inventory-only" | "forbidden"): void => {
+    items.register({ kind: "custom", classname, name, consoleGive, model: "", icon: "", sound: "", rotate: false, respawn: 0,
+      capacity: 1, quantity: 1, coopStay: false, droppable: false, use: null, pickup: () => { throw new Error("Excluded give item unexpectedly touched"); } });
+  };
+  custom("item_flag_team1", "Red Flag", "individual-only"); custom("item_tech1", "Resistance", "individual-only");
+  custom("dm_tag_token", "Tag Token", "forbidden"); custom("item_compass", "Compass", "inventory-only");
+  const give = (...args: string[]): void => { players.clientCommand(entity, game, "give", args); };
+  give("all");
+  expect(shared.inventory.count(entity.actor.id, "q2:ammo_shells")).toBe(200);
+  expect(shared.inventory.count(entity.actor.id, "q2:ammo_cells")).toBe(300);
+  expect(shared.inventory.count(entity.actor.id, "q2:key_power_cube")).toBe(8); expect(entity.powerCubes).toBe(255);
+  expect(shared.inventory.count(entity.actor.id, "q2:item_power_shield")).toBe(1);
+  expect(shared.combat.read(entity.actor.id)?.armor).toMatchObject({ kind: "q2", points: 200 });
+  for (const id of ["q2:item_flag_team1", "q2:item_tech1", "q2:dm_tag_token", "q2:item_compass"] satisfies readonly ItemId[]) expect(shared.inventory.count(entity.actor.id, id)).toBe(0);
+  give("item_compass"); expect(shared.inventory.count(entity.actor.id, "q2:item_compass")).toBe(1);
+  give("Tag Token"); expect(events.at(-1)).toMatchObject({ kind: "print", text: "Item is not giveable.\n" });
+  give("ammo_shells", "401"); expect(shared.inventory.count(entity.actor.id, "q2:ammo_shells")).toBe(401);
+});
+
+test("Q2 rerelease coop cheat gate precedes selected arsenal grants and native source items retain priority", () => {
+  const { players, entity, game, shared } = campaign({ edition: "rerelease" });
+  const granted: string[] = [];
+  players.hooks.grantSelectedArsenal = (actor, category) => {
+    expect(actor).toBe(entity.actor.id); granted.push(category);
+    shared.inventory.configure(entity.actor, { item: category === "weapons" ? "q3:weapon/railgun" : "q3:ammo/slugs", count: category === "weapons" ? 1 : 200, capacity: 200 });
+    return true;
+  };
+  players.hooks.giveSelectedItem = (_actor, args) => { granted.push(args.join(" ")); return true; };
+  players.clientCommand(entity, game, "give", ["all"]); expect(granted).toEqual([]);
+  players.rules.cheats = true; players.clientCommand(entity, game, "give", ["all"]);
+  expect(granted).toEqual(["weapons", "ammo"]);
+  expect(shared.inventory.count(entity.actor.id, "q3:weapon/railgun")).toBe(1);
+  expect(shared.inventory.count(entity.actor.id, "q3:ammo/slugs")).toBe(200);
+  expect(shared.inventory.entries(entity.actor.id).filter(entry => entry.item.startsWith("q2:weapon_") || entry.item.startsWith("q2:ammo_"))).toEqual([]);
+  players.clientCommand(entity, game, "give", ["Power", "Shield"]); expect(granted).toHaveLength(2);
+  players.clientCommand(entity, game, "give", ["foreign weapon"]); expect(granted.at(-1)).toBe("foreign weapon");
+});
+
+test("Q2 named ammo grants resolve the admitted source supply mapping even when the native name matches", () => {
+  const { players, entity, game, shared, items } = campaign();
+  for (const mapping of Q2_Q3_SUPPLY_PROFILE.ammo) for (const item of mapping.destinations)
+    shared.inventory.configure(entity.actor, { item, count: 7, capacity: 200 });
+  items.setPickupAdmission(new SharedPickupAdmission({ inventory: shared.inventory, profile: Q2_Q3_SUPPLY_PROFILE,
+    ammoGranted: () => undefined, weaponGranted: () => undefined }));
+  players.clientCommand(entity, game, "give", ["Cells", "50"]);
+  expect(shared.inventory.count(entity.actor.id, "q3:ammo/lightning")).toBe(50);
+  expect(shared.inventory.count(entity.actor.id, "q2:ammo_cells")).toBe(50);
+  players.clientCommand(entity, game, "give", ["Cells"]);
+  expect(shared.inventory.count(entity.actor.id, "q3:ammo/lightning")).toBe(100);
+  players.clientCommand(entity, game, "give", ["Shells", "25"]);
+  expect(shared.inventory.count(entity.actor.id, "q3:ammo/shotgun")).toBe(25);
+  expect(shared.inventory.entries(entity.actor.id).some(entry => entry.item === "q2:ammo_shells")).toBe(false);
+});
+
+test("Q2 named supply without a pickup adapter offers canonical item IDs to the selected arsenal", () => {
+  const { players, entity, game, shared } = campaign();
+  const received: string[][] = [];
+  players.hooks.giveSelectedItem = (_actor, args) => { received.push([...args]); return true; };
+  players.clientCommand(entity, game, "give", ["Cells", "50"]);
+  players.clientCommand(entity, game, "give", ["Super", "Shotgun"]);
+  expect(received).toEqual([["q2:ammo_cells", "50"], ["q2:weapon_supershotgun"]]);
+  expect(shared.inventory.entries(entity.actor.id).some(entry => entry.item === "q2:ammo_cells" || entry.item === "q2:weapon_supershotgun")).toBe(false);
 });

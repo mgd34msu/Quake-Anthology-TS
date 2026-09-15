@@ -262,7 +262,7 @@ export class ApplicationInput {
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
     this.unregister = [...settingBindings, registerWheelCommands(this.commands, (seat, mode, down) => this.seatUi.get(seat)?.wheel(mode, down)),
       registerInputCommands(this.commands, lookup), registerBindingCommands(this.commands, lookup, print), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
-      registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat) => actions.execute(name, args, seat)),
+      registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source)),
       registerQ1ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source))];
     this.commands.register("quit", () => actions.quit());
     this.commands.register("toggleconsole", invocation => {

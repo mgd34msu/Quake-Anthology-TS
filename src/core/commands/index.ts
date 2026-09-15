@@ -7,7 +7,7 @@ import { CvarFlag, Q2CvarFlag } from "../cvars/index.ts";
 import type { CvarRead, CvarRegistry, CvarSnapshot } from "../cvars/index.ts";
 import { cvarValueText } from "../cvars/numbers.ts";
 import { nativeAtof, nativeAtoi } from "../numeric.ts";
-import { asciiFold, commandSeparatorOffset, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand } from "./text.ts";
+import { asciiFold, commandSeparatorOffset, expandCommandMacros, isQ1, isQ2, sourceCommandText, tokenizeCommand, type CommandTextMode } from "./text.ts";
 import { sourceFilter } from "./filter.ts";
 import type { CommandDocumentation } from "./documentation.ts";
 export { asciiFold, sourceCommandText, tokenizeCommand, expandCommandMacros } from "./text.ts";
@@ -53,9 +53,9 @@ export interface CommandBufferOptions {
 }
 
 interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
-interface AliasEntry { readonly name: string; value: string; }
-interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; }
-interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly parent: ExecutionFrame | undefined; active: boolean; }
+interface AliasEntry { readonly name: string; value: string; textMode: CommandTextMode; }
+interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
+interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
 interface ScriptRead {
   readonly settled: Promise<void>;
   readonly name: string;
@@ -223,7 +223,8 @@ export class CommandBuffer {
     const name = sourceCommandText(nameInput), text = sourceCommandText(textInput);
     if (name.length >= 32) { this.print("Alias name is too long\n"); return false; }
     const existing = this.aliases.find(alias => alias.name === name);
-    if (existing === undefined) this.aliases.unshift({ name, value: text }); else existing.value = text;
+    const textMode = this.frame?.textMode ?? "source";
+    if (existing === undefined) this.aliases.unshift({ name, value: text, textMode }); else { existing.value = text; existing.textMode = textMode; }
     return true;
   }
   aliasNames(): readonly string[] { return Object.freeze(this.aliases.map(alias => alias.name)); }
@@ -235,12 +236,16 @@ export class CommandBuffer {
     if (source.session !== this.context.session) throw new RangeError("Command input belongs to another session");
     return Object.freeze({ session: source.session, origin: copyOrigin(source.origin, source) });
   }
-  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script"): void {
+  private inputTextMode(source: CommandContext, direct: boolean): CommandTextMode {
+    if (source.origin.kind !== "local-seat" && source.origin.kind !== "local-console") return "source";
+    return this.frame?.textMode ?? (direct ? "console" : "source");
+  }
+  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct)): void {
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) this.chunks.push({ text, source, direct });
+    if (text.length > 0) this.chunks.push({ text, source, direct, textMode });
   }
-  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script"): void {
+  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct)): void {
     const text = sourceCommandText(input) + (this.dialect === "q1-quakeworld" || this.dialect === "q3" ? "\n" : "");
     if (this.dialect === "q3") {
       if (this.pendingText.length + text.length > this.maximumBuffer) { this.print("Cbuf_InsertText overflowed\n"); return; }
@@ -248,7 +253,7 @@ export class CommandBuffer {
       if (text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
       if (this.pendingText.length + text.length > this.maximumBuffer) throw new RangeError("Cbuf_InsertText overflows source sizebuf");
     }
-    if (text.length > 0) this.chunks.unshift({ text, source, direct });
+    if (text.length > 0) this.chunks.unshift({ text, source, direct, textMode });
   }
   copyToDefer(): void {
     if (!isQ2(this.dialect)) throw new Error("Deferred command buffers belong to Quake II");
@@ -317,7 +322,7 @@ export class CommandBuffer {
       }
       const line = buffer.slice(0, offset), consumed = offset === buffer.length ? offset : offset + 1;
       this.consume(consumed);
-      const count = this.dispatch(line, first.source, first.direct);
+      const count = this.dispatch(line, first.source, first.direct, first.textMode);
       if (count !== 0) yield count;
       if (this.dialect !== "q3" && this.waitFrames !== 0) { this.waitFrames = 0; break; }
     }
@@ -358,23 +363,23 @@ export class CommandBuffer {
     while (count > 0) {
       const chunk = this.chunks.shift();
       if (chunk === undefined) return;
-      if (chunk.text.length > count) { this.chunks.unshift({ text: chunk.text.slice(count), source: chunk.source, direct: chunk.direct }); return; }
+      if (chunk.text.length > count) { this.chunks.unshift({ ...chunk, text: chunk.text.slice(count) }); return; }
       count -= chunk.text.length;
     }
   }
 
-  private dispatch(raw: string, source: CommandContext, direct = false): number {
+  private dispatch(raw: string, source: CommandContext, direct = false, textMode = this.inputTextMode(source, direct)): number {
     if (this.batchBudget?.signal?.aborted) throw new Error("Command batch cancelled; remaining batch discarded.");
     if (this.batchBudget !== undefined && --this.batchBudget.remaining < 0) throw new Error("Command batch exceeded 128 dispatched commands; remaining batch discarded.");
     const expanded = isQ2(this.dialect) ? expandCommandMacros(raw, name => {
       const owner = this.cvarOwner(name, source), variable = owner?.find(name);
       return owner !== undefined && isQ2(owner.dialect) && variable !== undefined && (variable.flags & Q2CvarFlag.Private) !== 0 ? "" : variable?.value ?? "";
-    }, text => this.print(text)) : raw;
+    }, text => this.print(text), textMode) : raw;
     if (expanded === undefined) { this.tokens = []; return 0; }
-    const tokens = tokenizeCommand(expanded, this.dialect), name = tokens.argv[0];
+    const tokens = tokenizeCommand(expanded, this.dialect, textMode), name = tokens.argv[0];
     this.tokens = tokens.argv;
     if (name === undefined) return 0;
-    const frame: ExecutionFrame = { source, direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"), parent: this.frame, active: true };
+    const frame: ExecutionFrame = { source, direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"), textMode, parent: this.frame, active: true };
     this.frame = frame;
     const requireActive = (): void => { if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active"); };
     const command: CommandInvocation = Object.freeze({ source, direct: frame.direct, dialect: this.dialect, argv: tokens.argv,
@@ -396,7 +401,7 @@ export class CommandBuffer {
         const alias = this.aliases.find(value => asciiFold(value.name) === asciiFold(name));
         if (alias !== undefined) {
           if (isQ2(this.dialect) && ++this.aliasCount === 16) { this.print("ALIAS_LOOP_COUNT\n"); return 1; }
-          this.insertFor(alias.value, source);
+          this.insertFor(alias.value, source, false, alias.textMode);
           return 1;
         }
       }

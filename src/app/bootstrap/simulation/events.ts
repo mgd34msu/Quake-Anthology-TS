@@ -61,8 +61,8 @@ export class SimulationEvents {
         this.message({ kind: "q2-layout", program: event.layout }, event.actor);
       else if (event.kind === "match-status") this.message({ kind: "print", level: 2, text: event.text });
     }
-    if (source.kind === "q1") this.q1(content, source.event);
-    else if (source.kind === "q2") this.q2(content, source.event);
+    if (source.kind === "q1") this.q1(content, source.event, presentation.sequence);
+    else if (source.kind === "q2") this.q2(content, source.event, presentation.sequence);
     else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
       const entityNumber = this.sourceSlot(source.event.actor);
       if (entityNumber !== null) this.message({ kind: "q2-muzzle-flash", entityNumber, flash: source.event.flash, monster: false });
@@ -77,8 +77,8 @@ export class SimulationEvents {
     return undefined;
   }
 
-  message(event: NetworkEvent, actor: ActorId | null = null): undefined {
-    return this.append({ kind: "message", event }, actor);
+  message(event: NetworkEvent, actor: ActorId | null = null, sourcePresentationSequence?: number): undefined {
+    return this.append({ kind: "message", event, ...(sourcePresentationSequence === undefined ? {} : { sourcePresentationSequence }) }, actor);
   }
 
   take(): readonly SimulationEvent[] { return this.emitted.splice(0); }
@@ -133,7 +133,7 @@ export class SimulationEvents {
     return undefined;
   }
 
-  private q1(content: ContentId, event: Q1Event): undefined {
+  private q1(content: ContentId, event: Q1Event, sequence: number): undefined {
     if (event.kind === "sound") {
       const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
       const body = this.bodies.read(event.actor);
@@ -145,15 +145,15 @@ export class SimulationEvents {
       };
       this.sound(content, event.path, event.actor, center, channel, event.volume, event.attenuation);
     } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation);
-    else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player);
+    else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player, sequence);
     else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q1", pattern: event.pattern });
     return undefined;
   }
 
-  private q2(content: ContentId, event: Q2PresentationEvent): undefined {
+  private q2(content: ContentId, event: Q2PresentationEvent, sequence: number): undefined {
     if (event.kind === "sound") this.sound(content, event.path, event.actor, event.origin, event.channel, event.volume, event.attenuation);
-    else if (event.kind === "centerprint") this.message({ kind: "center-print", text: event.text }, event.actor);
-    else if (event.kind === "help") this.message({ kind: "print", level: 2, text: event.text });
+    else if (event.kind === "centerprint") this.message({ kind: "center-print", text: event.text }, event.actor, sequence);
+    else if (event.kind === "help") this.message({ kind: "print", level: 2, text: event.text }, null, sequence);
     else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q2", pattern: event.pattern });
     return undefined;
   }

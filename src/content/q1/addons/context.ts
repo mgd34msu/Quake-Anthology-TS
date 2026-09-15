@@ -28,6 +28,7 @@ export type Q1AddonEvent =
   | { readonly kind: "debug-bounds"; readonly min: Vec3; readonly max: Vec3; readonly color: number; readonly lifetime: number; readonly depthTest: boolean };
 
 export interface Q1AddonServices {
+  cheatArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
   emit(event: Q1AddonEvent): undefined;
   isMonster(actor: ActorId): boolean;
   cvar(name: string): number;

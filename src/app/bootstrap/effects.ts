@@ -155,6 +155,17 @@ export class ApplicationEffects {
     }
     return failures;
   }
+
+  async preloadModel(content: ContentId, path: string): Promise<void> {
+    const provider = await this.assets.provider(content);
+    const asset = await this.assets.model(content, path);
+    let renderer = this.groups.get(content)?.renderer ?? this.preparedRenderers.get(content);
+    if (renderer === undefined) {
+      renderer = new SceneModelRenderer(provider, this.assets.world);
+      this.preparedRenderers.set(content, renderer);
+    }
+    await renderer.preloadModel(asset, {}, false);
+  }
   private light(origin: Vec3, time: number, radius: number, duration: number, color: Vec3, decay = 0, minimum = 0, actor: ActorId | null = null): void {
     const prior = actor === null ? -1 : this.lights.findIndex(light => light.actor?.equals(actor));
     if (prior >= 0) this.lights.splice(prior, 1);

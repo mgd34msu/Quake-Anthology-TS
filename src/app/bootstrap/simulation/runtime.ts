@@ -7,9 +7,10 @@ import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
 import type { WorldText } from "../../../text/world.ts";
-import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
+import { applyServerProfile, bindQ2ServerCvars, captureServerProfile, cvarServerSettingsOwner, registerQ2ServerCvars, restoreQ2ServerCvars, serverDefinitionsForRecipe } from "../../../settings/server/index.ts";
 import type { BoundServerSetting, ServerProfile, ServerSettingsOwner } from "../../../settings/server/index.ts";
 import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
+import { giveQ1 } from "../../../content/composition/q1/give.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
 import { QuakeCSource } from "./quakec-source.ts";
 import type { QwUserCommand } from "../../../contracts/protocol.ts";
@@ -1417,6 +1418,8 @@ export class SharedSimulation implements Simulation {
     if (this.options.world.kind === "q3-bsp") {
       const product = content.includes("missionpack") ? "missionpack" : "baseq3";
       const host = createQ3SourceHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+        grantSelectedArsenal: (actor, category) => this.grantSelectedArsenal(actor, category),
+        giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
         scene: this.scene, deathAnimations: this.deathAnimations, bots: this.botServices.source,
         now: () => Math.trunc(this.timeSeconds * 1000), schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due / 1000),
         runThink: actor => { this.scheduler.run(actor.id, { ...this.sourceFrame, phase: "entity-think" }, "during-physics"); return undefined; },
@@ -1494,13 +1497,9 @@ export class SharedSimulation implements Simulation {
         disconnect: actor => { const player = this.requirePlayer(actor); return this.actors.release(player.actor); },
         teleport: (actor, origin, angles, velocity, until) => { const player = this.requirePlayer(actor); return this.setPlayerMovement(actor, { kind: "teleport", origin, angles, velocity, commandAngles: player.commandAngles, holdMilliseconds: Math.max(0, (until - this.timeSeconds) * 1000), spectator: false }); },
         weaponServices: () => this.selectedWeaponSource?.kind === "q1" ? this.selectedWeaponSource.game : this.selectedArsenal === null && this.source.kind === "q1" ? this.source.game : null,
-        cheatArsenal: actor => {
-          const arsenal = this.selectedArsenal;
-          if (arsenal === null || arsenal.family === "q1") return false;
-          const player = this.requirePlayer(actor);
-          for (const entry of arsenal.read(actor).ammo) this.inventory.configure(player.actor, { ...entry, count: entry.capacity });
-          return true;
-        },
+        cheatArsenal: (actor, category) => category === undefined
+          ? this.grantSelectedArsenal(actor, "weapons") && this.grantSelectedArsenal(actor, "ammo") : this.grantSelectedArsenal(actor, category),
+        giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
         selectedWeapon: actor => this.playerUi(actor).activeWeapon, selectedAmmo: actor => this.playerUi(actor).ammo?.item ?? null,
         selectWeapon: (actor, item) => { if (this.source.kind !== "q1") return false;
           if (this.selectedArsenal !== null) return this.selectedArsenal.select(actor, item);
@@ -1544,6 +1543,8 @@ export class SharedSimulation implements Simulation {
     }, silencer: (actor, charges) => { if (this.source.kind !== "q2") throw new Error("Q2 silencer before source admission"); const source = this.q2ItemWeaponSource(); if (source === null) throw new Error("Q2 silencer has no arsenal source"); return source.weapons.grantSilencer(actor, source.game, charges); },
     powerArmor: (actor, kind) => this.events.message({ kind: "print", level: 2, text: `Power armor ${kind}\n` }, actor) };
     const playerHooks: Q2PlayerHooks = {
+      grantSelectedArsenal: (actor, category) => this.grantSelectedArsenal(actor, category),
+      giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
       weaponState: actor => { const active = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource.weapons : weapons;
         const state = active.states.get(actor); return state === undefined ? null : { q2Name: state.weapon,
           ammo: state.weapon === null ? null : active.definition(state.weapon).ammo, kickAngles: state.kickAngles, kickOrigin: state.kickOrigin, loopSound: state.loopSound }; },
@@ -1581,7 +1582,7 @@ export class SharedSimulation implements Simulation {
     serverCvars.set("coop", this.options.mode === "coop" ? "1" : "0", true);
     this.initializeServerSettings(serverCvars);
     const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
-    if (savedCvars !== undefined) serverCvars.restoreSaveState(savedCvars);
+    if (savedCvars !== undefined) restoreQ2ServerCvars(serverCvars, savedCvars);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
       match: recipe.match.provider === "q2:lmctf" ? { kind: "lmctf", ...(this.options.travel?.source.kind === "q2" && this.options.travel.source.lmctf !== undefined ? { travel: this.options.travel.source.lmctf } : {}) } : { kind: recipe.match.provider === "q2:ctf" ? "ctf" : "standard" }, playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
@@ -1640,7 +1641,7 @@ export class SharedSimulation implements Simulation {
     }
     bindQ2ServerCvars(serverCvars, product);
     serverCvars.setServerActive(true);
-    if (savedCvars !== undefined) serverCvars.restoreSaveState(savedCvars);
+    if (savedCvars !== undefined) restoreQ2ServerCvars(serverCvars, savedCvars);
     owningMonsters = product.monsters;
     return { kind: "q2", product, game: product.game, weapons, monsters: product.monsters, movers: product.movers, items: product.items, players: product.players, baseEntities: product.baseEntities };
   }
@@ -3256,11 +3257,78 @@ export class SharedSimulation implements Simulation {
     });
   }
 
+  private grantSelectedArsenal(actor: ActorId, category: "weapons" | "ammo"): boolean {
+    const arsenal = this.selectedArsenal; if (arsenal === null) return false;
+    const player = this.requirePlayer(actor), weapons = new Set(arsenal.ui(actor, this.recipe.map.entities).items.filter(item => item.kind === "weapon").map(item => item.id));
+    for (const entry of arsenal.read(actor).ammo) if ((category === "weapons") === weapons.has(entry.item))
+      this.inventory.configure(player.actor, { ...entry, count: category === "weapons" ? 1 : entry.capacity });
+    player.arsenal = arsenal.read(actor); return true;
+  }
+
+  private giveSelectedItem(actor: ActorId, args: readonly string[]): boolean {
+    const arsenal = this.selectedArsenal; if (arsenal === null) return false;
+    const last = args.at(-1), quantity = last !== undefined && /^-?\d+$/.test(last) ? Number(last) : null;
+    const requested = (quantity === null ? args : args.slice(0, -1)).join(" ").toLowerCase();
+    const normalize = (value: string) => value.toLowerCase().replaceAll(" ", "").replaceAll("_", "");
+    const entries = arsenal.read(actor).ammo, ui = arsenal.ui(actor, this.recipe.map.entities);
+    const named = ui.items.find(item => normalize(item.id) === normalize(requested) || normalize(item.label) === normalize(requested));
+    const entry = entries.find(entry => entry.item === named?.id || normalize(entry.item) === normalize(requested)
+      || normalize(entry.item.split("/").at(-1) ?? "") === normalize(requested));
+    if (entry === undefined) {
+      const profile = this.source.kind === "q1" ? arsenal.family === "q3" ? Q1_Q3_SUPPLY_PROFILE : arsenal.family === "q2" ? Q1_Q2_SUPPLY_PROFILE : Q1_HIPNOTIC_SUPPLY_PROFILE
+        : this.source.kind === "q2" ? arsenal.family === "q3" ? Q2_Q3_SUPPLY_PROFILE : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser") ? Q2_HIPNOTIC_SUPPLY_PROFILE : Q2_Q1_SUPPLY_PROFILE
+          : this.source.kind === "q3" ? arsenal.family === "q2" ? Q3_Q2_SUPPLY_PROFILE : arsenal.family === "q1" && arsenal.game.registeredWeapons.has("hipnotic:laser") ? Q3_HIPNOTIC_SUPPLY_PROFILE : Q3_Q1_SUPPLY_PROFILE : null;
+      const weapon = profile?.weapons.find(item => item.source === requested), ammo = profile?.ammo.find(item => item.source === requested);
+      const sourceItem = this.source.kind === "q2" ? this.source.items.lookup(requested) : null;
+      const destinations = weapon?.destinations ?? ammo?.destinations;
+      if (destinations === undefined) {
+        if (sourceItem?.weapon === true || sourceItem?.kind === "ammo" || requested.startsWith("q1:weapon/") || requested.startsWith("q1:ammo/") || requested.startsWith("rogue:ammo/")) {
+          this.events.message({ kind: "print", level: 2, text: `No selected-arsenal grant mapping for ${sourceItem?.name ?? requested}\n` }, actor); return true;
+        }
+        return false;
+      }
+      for (const item of destinations) {
+        const target = this.inventory.entries(actor).find(entry => entry.item === item);
+        if (target === undefined) throw new Error(`Selected grant destination is unavailable: ${item}`);
+        const count = weapon === undefined ? quantity ?? (sourceItem?.kind === "ammo" ? target.count + sourceItem.quantity : target.capacity) : 1;
+        this.inventory.configure(this.requirePlayer(actor).actor, { ...target, count: Math.max(0, count), capacity: Math.max(target.capacity, count) });
+      }
+      if (weapon !== undefined && this.source.kind === "q2") {
+        const definition = this.source.weapons.registeredDefinitions().find(item => item.item === requested);
+        const sourceAmmo = definition?.ammo == null ? null : this.source.items.lookup(definition.ammo);
+        const mappedAmmo = sourceAmmo === null ? undefined : profile?.ammo.find(item => item.source === sourceAmmo.id);
+        if (mappedAmmo !== undefined && sourceAmmo !== null) for (const item of mappedAmmo.destinations)
+          this.inventory.give(this.requirePlayer(actor).actor, item, (this.source.game.options.deathmatchFlags & 8192) !== 0 ? 1000 : sourceAmmo.quantity);
+        arsenal.pickupWeapons(this.requirePlayer(actor).actor, destinations, "better");
+      }
+      this.requirePlayer(actor).arsenal = arsenal.read(actor);
+      return true;
+    }
+    const weapon = ui.items.some(item => item.id === entry.item && item.kind === "weapon"), count = weapon ? 1 : quantity ?? entry.capacity;
+    this.inventory.configure(this.requirePlayer(actor).actor, { ...entry, count: Math.max(0, count), capacity: Math.max(entry.capacity, count) });
+    this.requirePlayer(actor).arsenal = arsenal.read(actor); return true;
+  }
+
   playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
-    if (this.source.kind === "quakec" && (name === "god" || name === "notarget" || name === "noclip"))
-      return this.source.game.hostCheat(actor, name);
+    if (name === "giveall") return this.playerCommand(actor, "give", ["all"]);
+    if (name === "suicide") return this.playerCommand(actor, "kill", args);
+    if (this.source.kind === "quakec" && name === "kill") {
+      this.source.game.clientKill(actor); return undefined;
+    }
+    if (this.source.kind === "quakec" && (name === "god" || name === "notarget" || name === "noclip" || name === "fly" || name === "give"))
+      return this.source.game.hostCheat(actor, name, args);
     const player = this.requirePlayer(actor);
-    if (this.source.kind === "q1" && (name === "god" || name === "notarget" || name === "noclip")) {
+    if (this.source.kind === "q1" && name === "kill") {
+      if (this.source.game.health(actor) <= 0) return this.source.game.message(actor, "Can't suicide -- already dead!\n", false);
+      return this.source.composition.suicide(actor);
+    }
+    if (this.source.kind === "q1" && name === "give") {
+      const source = this.source;
+      if (source.game.options.deathmatch !== 0 && (source.game.options.edition === "classic" || source.cvars.variableValue("sv_cheats") === 0))
+        return source.game.message(actor, "Cheats are disabled on this server.\n", false);
+      return giveQ1(source.composition, actor, args);
+    }
+    if (this.source.kind === "q1" && (name === "god" || name === "notarget" || name === "noclip" || name === "fly")) {
       const source = this.source, client = source.composition.clients.require(actor);
       if (source.game.options.deathmatch !== 0 && (source.game.options.edition === "classic" || source.cvars.variableValue("sv_cheats") === 0)) {
         source.game.message(actor, "Cheats are disabled on this server.\n", false); return undefined;
@@ -3271,6 +3339,10 @@ export class SharedSimulation implements Simulation {
         this.combat.setTraits(player.actor, { invulnerable: enabled || (source.game.player(actor)?.powerups.get("invulnerability") ?? 0) > this.timeSeconds });
       } else if (name === "notarget") {
         enabled = !source.composition.noTarget(actor); source.composition.setNoTarget(actor, enabled);
+      } else if (name === "fly") {
+        const state = player.readState();
+        if (state.kind !== "q1-netquake") throw new Error("Fly requires movement with collision-preserving flight support");
+        enabled = state.moveType !== 5; player.state = { ...state, moveType: enabled ? 5 : 3 };
       } else {
         const state = player.readState();
         enabled = !(state.kind === "q1-netquake" ? state.moveType === 8 : state.kind === "q1-quakeworld" ? state.spectator !== 0
@@ -3530,7 +3602,11 @@ export class SharedSimulation implements Simulation {
     const bytes = (schema: SaveImage["providers"][number]["schema"]) => simulationProviderCheckpoint(save, schema).bytes;
     if (source.kind === "q1" && savedSourceCvars(save) === undefined) reader.field("sourceCvars").list(value => { source.cvars.set(value.field("name").string(), value.field("value").string(), true); return undefined; });
     if (source.kind === "q1") source.game.restore(decodeQ1FoundationCheckpoint(bytes("q1:foundation")), { scheduleThinks: false });
-    else if (source.kind === "q2") restoreQ2Product(source.product, save.providers);
+    else if (source.kind === "q2") {
+      restoreQ2Product(source.product, save.providers);
+      const savedCvars = savedSourceCvars(save);
+      if (this.q2ServerRegistry !== null && savedCvars !== undefined) restoreQ2ServerCvars(this.q2ServerRegistry, savedCvars);
+    }
     const monsters = reader.field("selectedMonsters");
     if (this.selectedMonsters !== null) this.restoreSelectedMonsters(readSelectedMonstersCheckpoint(monsters));
     else if (monsters.value !== null) monsters.fail("Saved selected monsters have no matching admission");

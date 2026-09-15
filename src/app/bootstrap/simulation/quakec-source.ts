@@ -436,7 +436,7 @@ export class QuakeCSource {
   }
   isReservedClient(actor: ActorId): boolean { const slot = this.sourceSlot(actor); return slot !== null && slot > 0 && slot <= this.reservedClientSlots; }
   isActiveClient(actor: ActorId): boolean { return this.activeClients.has(actor); }
-  hostCheat(actor: ActorId, name: "god" | "notarget" | "noclip"): undefined {
+  hostCheat(actor: ActorId, name: "god" | "notarget" | "noclip" | "fly" | "give", args: readonly string[] = []): undefined {
     const slot = this.sourceSlot(actor);
     if (slot === null || !this.activeClients.has(actor)) throw new Error("QC host command requires an admitted client");
     const message = (text: string) => this.options.events.message({ kind: "print", level: 2, text }, actor);
@@ -445,15 +445,86 @@ export class QuakeCSource {
       : this.machine.globals.float(this.machine.globalOffset("deathmatch")) !== 0;
     if (denied) return message("Cheats are disabled on this server.\n");
     const words = this.entities.at(slot);
+    if (name === "give") {
+      this.hostGive(actor, slot, args);
+      const refresh = this.prepared.program.functionsByName.get("W_SetCurrentAmmo");
+      if (refresh !== undefined) this.invoke(refresh.index, slot, 0, this.currentTime);
+      return undefined;
+    }
     let enabled: boolean;
-    if (name === "noclip") {
-      enabled = words.float(this.field("movetype")) !== 8;
-      words.setFloat(this.field("movetype"), enabled ? 8 : 3);
+    if (name === "noclip" || name === "fly") {
+      const moveType = name === "fly" ? 5 : 8;
+      enabled = words.float(this.field("movetype")) !== moveType;
+      words.setFloat(this.field("movetype"), enabled ? moveType : 3);
     } else {
       const bit = name === "god" ? 64 : 128, flags = Math.trunc(words.float(this.field("flags"))) ^ bit;
       words.setFloat(this.field("flags"), flags); enabled = (flags & bit) !== 0;
     }
     return message(`${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`);
+  }
+  private hostGive(actor: ActorId, slot: number, args: readonly string[]): undefined {
+    const input = args[0]?.toLowerCase(); if (input === undefined) throw new Error("Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]");
+    const words = this.entities.at(slot), all = input === "all", amount = args[1] === undefined ? undefined : nativeAtoi(args[1]);
+    const write = (name: string, value: number) => { words.setFloat(this.field(name), value); };
+    const addItems = (bits: number) => write("items", Math.trunc(words.float(this.field("items"))) | bits);
+    if (all || input === "health" || input === "h") { write("health", amount ?? (input === "h" ? 0 : 100)); if (!all) return undefined; }
+    if (all || input === "armor" || input === "a") {
+      const points = amount ?? (input === "a" ? 0 : 200), armorBit = points > 150 ? 32768 : points > 100 ? 16384 : points > 0 ? 8192 : 0;
+      write("items", (Math.trunc(words.float(this.field("items"))) & ~(8192 | 16384 | 32768)) | armorBit);
+      write("armorvalue", points); write("armortype", points > 150 ? 0.8 : points > 100 ? 0.6 : points > 0 ? 0.3 : 0);
+      if (!all) return undefined;
+    }
+    if (all || input === "weapons") { for (const weapon of this.weapons) addItems(weapon.bit); if (!all) return undefined; }
+    if (all || input === "ammo") {
+      for (const [field, value] of [["ammo_shells", 100], ["ammo_nails", 200], ["ammo_rockets", 100], ["ammo_cells", 100]] satisfies readonly (readonly [string, number])[]) write(field, value);
+      for (const field of ["ammo_shells1", "ammo_nails1", "ammo_rockets1", "ammo_cells1", "ammo_lava_nails", "ammo_multi_rockets", "ammo_plasma"]) {
+        const definition = this.prepared.program.fieldsByName.get(field); if (definition !== undefined) words.setFloat(definition.offset, field.includes("nails") ? 200 : 100);
+      }
+      if (!all) return undefined;
+    }
+    if (all || input === "keys") { addItems(131072 | 262144); return undefined; }
+    if (input === "items") {
+      for (const item of ["quad", "pent", "ring", "suit"]) this.hostGive(actor, slot, [item]);
+      return undefined;
+    }
+    const hipnotic = this.weapons.some(weapon => weapon.item === "q1:weapon/hipnotic:laser");
+    const named = hipnotic && input === "6a" ? "q1:weapon/hipnotic:proximity" : hipnotic && input === "9" ? "q1:weapon/hipnotic:laser"
+      : hipnotic && input === "0" ? "q1:weapon/hipnotic:mjolnir" : /^[2-8]$/.test(input) ? this.weapons[Number(input) - 1]?.item : undefined;
+    const weapon = this.weapons.find(weapon => weapon.item === named || weapon.item === input || weapon.item.split("/").at(-1) === input);
+    if (weapon !== undefined) { addItems(weapon.bit); return undefined; }
+    const ammo = input === "s" || input === "shells" ? "ammo_shells" : input === "n" || input === "nails" ? "ammo_nails"
+      : input === "r" || input === "rockets" ? "ammo_rockets" : input === "c" || input === "cells" ? "ammo_cells"
+        : input === "l" ? "ammo_lava_nails" : input === "m" ? "ammo_multi_rockets" : input === "p" ? "ammo_plasma" : null;
+    if (ammo !== null) {
+      const value = amount ?? 0, alternate = this.prepared.program.fieldsByName.get(`${ammo}1`);
+      if (alternate !== undefined) words.setFloat(alternate.offset, value);
+      if (alternate === undefined || ammo === "ammo_shells" || words.float(this.field("weapon")) <= 64) write(ammo, value);
+      const native = ammo === "ammo_lava_nails" ? "ammo_nails" : ammo === "ammo_multi_rockets" ? "ammo_rockets" : ammo === "ammo_plasma" ? "ammo_cells" : null;
+      if (native !== null && words.float(this.field("weapon")) > 64) write(native, value);
+      return undefined;
+    }
+    const classname = input === "quad" ? "item_artifact_super_damage" : input === "pent" ? "item_artifact_invulnerability"
+      : input === "ring" ? "item_artifact_invisibility" : input === "suit" ? "item_artifact_envirosuit" : input;
+    if (!classname.startsWith("item_") && !classname.startsWith("weapon_")) throw new Error(`Unknown QuakeC item: ${input}`);
+    let template: Uint8Array | null = null;
+    for (let candidate = this.reservedClientSlots + 1; candidate < this.entities.count; candidate++) {
+      const owner = this.slots.at(candidate), source = this.entities.at(candidate);
+      if (owner !== null && this.options.actors.isLive(owner.id) && source.int(this.field("touch")) !== 0
+        && this.machine.strings.get(source.int(this.field("classname"))) === classname) { template = source.bytes.slice(); break; }
+    }
+    if (template === null) throw new Error(`Cannot give ${classname}: this map has no source item template`);
+    this.machine.execute(this.prepared.program.functionNamed("spawn").index);
+    const reference = this.machine.globals.int(1), itemSlot = this.entities.slot(reference), item = this.worldHost.actor(itemSlot), itemWords = this.entities.at(itemSlot);
+    try {
+      itemWords.bytes.set(template); itemWords.setVector(this.field("origin"), words.vector(this.field("origin")));
+      itemWords.setFloat(this.field("solid"), 1); itemWords.setFloat(this.field("nextthink"), 0);
+      for (const name of ["target", "targetname", "killtarget"]) {
+        const field = this.prepared.program.fieldsByName.get(name); if (field !== undefined) itemWords.setInt(field.offset, 0);
+      }
+      const touch = itemWords.int(this.field("touch"));
+      this.invoke(touch, itemSlot, this.reference(actor), this.currentTime);
+    } finally { if (this.options.actors.isLive(item.id)) this.options.actors.release(item); }
+    return undefined;
   }
   admitClient(client: ClientId): OwnedActor {
     const slot = client.slot + 1;

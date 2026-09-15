@@ -3,6 +3,7 @@
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
  */
 import { vec3 } from "../../../core/math.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 import { setInfoValue } from "../../../core/cvars/info.ts";
 import { GameType, PersistentIndex, Team, Weapon, statSchema, weaponCount } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
@@ -57,6 +58,8 @@ export interface GameCommandImports {
 }
 
 export interface GameCommandHost {
+  grantSelectedArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
+  giveSelectedItem?(actor: ActorId, args: readonly string[]): boolean;
   readonly pool: EntityPool;
   readonly state: MatchState;
   readonly teamScores: PlayerStateSlots;
@@ -212,10 +215,15 @@ export class GameCommandRuntime {
     const client = clientOf(entity), schema = statSchema(client.ps.product);
     if (all || key === "health") { entity.health = client.ps.stats.get(schema.maxHealth); if (!all) return; }
     if (all || key === "weapons") {
-      client.ps.stats.set(schema.weapons, (1 << weaponCount(client.ps.product)) - 1 - (1 << Weapon.WP_GRAPPLING_HOOK) - (1 << Weapon.WP_NONE));
+      if (this.host.grantSelectedArsenal?.(entity.actor.id, "weapons") !== true)
+        client.ps.stats.set(schema.weapons, (1 << weaponCount(client.ps.product)) - 1 - (1 << Weapon.WP_GRAPPLING_HOOK) - (1 << Weapon.WP_NONE));
       if (!all) return;
     }
-    if (all || key === "ammo") { for (let index = 0; index < 16; index++) client.ps.ammo.set(index, 999); if (!all) return; }
+    if (all || key === "ammo") {
+      if (this.host.grantSelectedArsenal?.(entity.actor.id, "ammo") !== true)
+        for (let index = 0; index < 16; index++) client.ps.ammo.set(index, 999);
+      if (!all) return;
+    }
     if (all || key === "armor") { client.ps.stats.set(schema.armor, 200); if (!all) return; }
     const award = key === "excellent" ? PersistentIndex.PERS_EXCELLENT_COUNT : key === "impressive" ? PersistentIndex.PERS_IMPRESSIVE_COUNT
       : key === "gauntletaward" ? PersistentIndex.PERS_GAUNTLET_FRAG_COUNT : key === "defend" ? PersistentIndex.PERS_DEFEND_COUNT
@@ -223,7 +231,7 @@ export class GameCommandRuntime {
     if (award !== null) { client.ps.persistant.set(award, client.ps.persistant.get(award) + 1); return; }
     if (all) return;
     const item = findItem(client.ps.product, name);
-    if (item === null) return;
+    if (item === null) { this.host.giveSelectedItem?.(entity.actor.id, args.values.slice(1)); return; }
     const temporary = this.host.pool.spawn();
     temporary.s.origin = { ...entity.r.currentOrigin };
     temporary.classname = item.className;

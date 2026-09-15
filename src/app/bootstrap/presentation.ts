@@ -60,8 +60,9 @@ export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView
 
 export class WorldSeatPresentation implements SeatPresentation {
   private readonly q1Messages: Q1MessageLocalization;
-  private readonly pendingMessages: string[] = [];
+  private readonly pendingMessages: { readonly text: string; readonly sourcePresentationSequence: number | undefined }[] = [];
   private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
+  private readonly pendingQ2Messages: Extract<SimulationPresentationEvent, { readonly kind: "q2" | "q2-player" }>[] = [];
   private readonly frames: SceneFrameBuilder;
   private readonly text: SeatTextPresentation;
   private readonly finale: SourceFinale;
@@ -128,7 +129,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   receive(events: readonly SimulationEvent[]): undefined {
     for (const event of events) if (event.payload.kind === "message") {
       const message = event.payload.event;
-      if ("text" in message && typeof message.text === "string") this.pendingMessages.push(message.text);
+      if ("text" in message && typeof message.text === "string") this.pendingMessages.push({ text: message.text, sourcePresentationSequence: event.payload.sourcePresentationSequence });
     }
     return undefined;
   }
@@ -140,7 +141,9 @@ export class WorldSeatPresentation implements SeatPresentation {
       return;
     }
     this.scene.receive(events);
-    this.ui.receive(events.filter(source => source.kind !== "q1" || source.event.kind !== "message"));
+    this.ui.receive(events.filter(source => source.kind !== "q1" || source.event.kind !== "message")
+      .filter(source => source.kind !== "q2" || !["help", "pickup", "print", "centerprint"].includes(source.event.kind))
+      .filter(source => source.kind !== "q2-player" || source.event.kind !== "print"));
     this.finale.receive(events);
     const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
     for (const source of events) {
@@ -150,12 +153,9 @@ export class WorldSeatPresentation implements SeatPresentation {
         const event = source.event;
         if (event.kind === "teleport-player" && owns(event.player)) this.local.builder.setViewAngles(event.angles);
       } else if (source.kind === "q2") {
-        const event = source.event;
-        if (event.kind === "help") this.local.console.print(`${event.text}\n`);
-        if (event.kind === "pickup" && owns(event.player)) this.local.console.print(`${event.name}\n`);
-        if (event.kind === "print" && (event.actor === null || owns(event.actor))) this.local.console.print(event.text);
+        if (["help", "pickup", "print", "centerprint"].includes(source.event.kind)) this.pendingQ2Messages.push(source);
       } else if (source.kind === "q2-player") {
-        if (source.event.kind === "print" && (source.event.target === null || owns(source.event.target))) this.local.console.print(source.event.text);
+        if (source.event.kind === "print") this.pendingQ2Messages.push(source);
       } else if (source.kind === "q3-source" && source.event.kind === "server-command"
         && (source.event.client < 0 || source.event.client === this.local.player.seat.client.id.slot)) {
         const [command, text] = tokenizeCommand(source.event.text, "q3").argv;
@@ -166,11 +166,11 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     const q1Messages = this.pendingQ1Messages.splice(0);
-    const mirrored = q1Messages.flatMap(source => source.event.kind === "message" ? [source.event.text] : []);
+    const q2Messages = this.pendingQ2Messages.splice(0);
+    const mirrored = new Set([...q1Messages.map(source => source.sequence), ...q2Messages.filter(source => source.kind === "q2"
+      && (source.event.kind === "help" || source.event.kind === "centerprint" && source.event.actor.equals(this.local.player.actor))).map(source => source.sequence)]);
     for (const message of this.pendingMessages.splice(0)) {
-      const paired = mirrored.indexOf(message);
-      if (paired < 0) this.local.console.print(`${message}\n`);
-      else mirrored.splice(paired, 1);
+      if (message.sourcePresentationSequence === undefined || !mirrored.has(message.sourcePresentationSequence)) this.local.console.print(`${message.text}\n`);
     }
     for (const source of q1Messages) {
       const event = source.event;
@@ -178,6 +178,23 @@ export class WorldSeatPresentation implements SeatPresentation {
       const text = await this.q1Messages.resolve(source.content, event.text, event.args ?? [], event.parts);
       if (!event.center) this.local.console.print(`${text}\n`);
       this.ui.receive([{ ...source, event: { ...event, text } }]);
+    }
+    for (const source of q2Messages) {
+      const resolve = (text: string): Promise<string> => this.rerelease?.localizeMessage(this.local.player.seat.id, source.content, text) ?? Promise.resolve(text);
+      const owns = (actor: ActorId): boolean => actor.equals(this.local.player.actor);
+      if (source.kind === "q2") {
+        const event = source.event;
+        if (event.kind === "pickup" && owns(event.player)) this.local.console.print(`${await resolve(event.name)}\n`);
+        else if (event.kind === "help" || event.kind === "print" && (event.actor === null || owns(event.actor)) || event.kind === "centerprint" && owns(event.actor)) {
+          const text = await resolve(event.text);
+          if (event.kind !== "centerprint") this.local.console.print(event.kind === "help" ? `${text}\n` : text);
+          this.ui.receive([{ ...source, event: { ...event, text } }]);
+        }
+      } else if (source.event.kind === "print" && (source.event.target === null || owns(source.event.target))) {
+        const text = await resolve(source.event.text);
+        this.local.console.print(text);
+        this.ui.receive([{ ...source, event: { ...source.event, text } }]);
+      }
     }
     await this.ui.prepare(this.assets);
     this.worldText = this.simulation.worldText();

@@ -199,6 +199,13 @@ export function spawnPickup(game: Q1EntityServices, entity: Q1Actor): boolean {
   return true;
 }
 
+export function givePickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId): boolean {
+  if (pickupDefinition(game, entity) === null) return false;
+  entity.solid = "trigger";
+  pickupTouch(game, entity, other);
+  return true;
+}
+
 function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
     const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
     if (entity.solid !== "trigger") return undefined;

@@ -29,6 +29,14 @@ const cableOffsets: readonly Vec3[] = [
 const reinforcementPositions: readonly Vec3[] = [{ x: 80, y: 0, z: 0 }, { x: 40, y: 60, z: 0 }, { x: 40, y: -60, z: 0 }, { x: 0, y: 80, z: 0 }, { x: 0, y: -80, z: 0 }];
 const defaultReinforcements = "monster_soldier_light 1;monster_soldier 2;monster_soldier_ss 2;monster_infantry 3;monster_gunner 4;monster_medic 5;monster_gladiator 6";
 interface Reinforcement { readonly classname: string; readonly strength: number; readonly bounds: Bounds; }
+export function rereleaseMedicReinforcements(fields: Q2Entity["spawn"]["values"]): readonly Pick<Reinforcement, "classname" | "strength">[] {
+  const value = fields.get("reinforcements") ?? defaultReinforcements;
+  if (value === "") return [];
+  return value.split(";").map(entry => {
+    const [classname = "", strength = "0"] = entry.trim().split(/\s+/);
+    return { classname, strength: Number.parseInt(strength, 10) };
+  });
+}
 function anglemod(angle: number): number { return (Math.trunc(angle * 65536 / 360) & 65535) * 360 / 65536; }
 const spawnGrowLaserThink: Q2Think = (beam, game) => {
   const owner = game.entity(beam.owner);
@@ -209,13 +217,10 @@ export function createRereleaseMedicDefinitions(monsters: Q2Monsters, weapons: Q
     return game.host.emit({ kind: "monster-beam", effect: "medic", actor: entity.actor.id, start: add(start, scale(anglesVectors(game.body(entity).angles).forward, 8)), end: { ...body.origin, z: body.origin.z + (body.bounds.min.z + body.bounds.max.z) / 2 } });
   }
   function reinforcementList(context: MonsterContext): readonly Reinforcement[] {
-    const value = context.entity.spawn.values.get("reinforcements") ?? defaultReinforcements;
-    if (value === "") return [];
-    return value.split(";").map(entry => {
-      const [classname = "", strength = "0"] = entry.trim().split(/\s+/);
+    return rereleaseMedicReinforcements(context.entity.spawn.values).map(({ classname, strength }) => {
       const definition = monsters.definition(classname, context.game);
       if (definition === null) throw new Error(`Unknown medic reinforcement ${classname}`);
-      return { classname, strength: Number.parseInt(strength, 10), bounds: definition.bounds };
+      return { classname, strength, bounds: definition.bounds };
     });
   }
   function eachSpawn(context: MonsterContext, behind: boolean, visit: (point: Vec3, reinforcement: Reinforcement) => boolean, determine = false): undefined {

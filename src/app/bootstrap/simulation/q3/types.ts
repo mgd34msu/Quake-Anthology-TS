@@ -50,6 +50,8 @@ export interface Q3SourceHost extends ClientMovementHost {
   readonly serverState: import("./server-state.ts").Q3ServerState;
   readonly moverActors: Pick<MoverActorAccess, "observe" | "write" | "link" | "release">;
   primaryAttackAllowed?(actor: ActorId): boolean;
+  grantSelectedArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
+  giveSelectedItem?(actor: ActorId, args: readonly string[]): boolean;
   previewPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupPreview;
   admitPickup?(item: import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupDescriptor): import("../../../../content/q3/base/game/item-lifecycle.ts").SourcePickupAdmission;
   readonly actors: SessionActorRegistry;

@@ -6,6 +6,7 @@ import { precacheQ1World } from "../q1/foundation/precache-world.ts";
 import type { InstalledCatalog } from "./index.ts";
 import { nativeProviderTiming } from "./timing.ts";
 import { EQUIPMENT_PROVIDERS } from "./equipment.ts";
+import type { Q2Weapons } from "../q2/foundation/weapons/player.ts";
 
 export const Q1_WEAPON_PROVIDERS = {
   classic: "q1:weapons/classic/id1",
@@ -88,11 +89,34 @@ function q2BaseWeaponPaths(rerelease: boolean): readonly string[] {
     ...(rerelease ? ["sound/weapons/change.wav", "sound/weapons/lowammo.wav"] : [])];
 }
 
+/** Expansion g_items precaches plus projectile dependencies used by their source callbacks. */
+const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
+  trap: ["models/weapons/z_trap/tris.md2", "models/objects/trapfx/tris.md2", "models/objects/gibs/chest/tris.md2", "models/objects/gibs/sm_meat/tris.md2",
+    "sound/misc/fhit3.wav", "sound/weapons/trapcock.wav", "sound/weapons/traploop.wav", "sound/weapons/trapsuck.wav", "sound/weapons/trapdown.wav", "sound/items/s_health.wav"],
+  ionripper: ["models/objects/boomrang/tris.md2", "sound/weapons/rg_hum.wav", "sound/weapons/rippfire.wav", "sound/misc/lasfly.wav"],
+  phalanx: ["sprites/s_photon.sp2", "sound/weapons/plasshot.wav", "sound/weapons/rockfly.wav"],
+  tesla: ["models/weapons/g_tesla/tris.md2", "sound/weapons/teslaopen.wav", "sound/weapons/hgrenb1a.wav", "sound/weapons/hgrenb2a.wav"],
+  proxlauncher: ["models/weapons/g_prox/tris.md2", "sound/weapons/grenlf1a.wav", "sound/weapons/grenlr1b.wav", "sound/weapons/grenlb1b.wav", "sound/weapons/proxwarn.wav", "sound/weapons/proxopen.wav"],
+  chainfist: ["sound/weapons/sawidle.wav", "sound/weapons/sawhit.wav", "sound/weapons/sawslice.wav"],
+  disintegrator: ["models/proj/disintegrator/tris.md2", "sound/weapons/disrupt.wav", "sound/weapons/disint2.wav", "sound/weapons/disrupthit.wav"],
+  etf_rifle: ["models/proj/flechette/tris.md2", "sound/weapons/nail1.wav"],
+  heatbeam: ["models/weapons/v_beamer2/tris.md2", "sound/weapons/bfg__l1a.wav"],
+};
+
+export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
+  return [...q2BaseWeaponPaths(rerelease), ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
+    ...q2ExpansionWeaponPaths[weapon.name] ?? [], ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : []]),
+    ...rerelease ? ["sound/weapons/railgr1b.wav"] : []];
+}
+
 export function selectedWeaponResources(map: ProviderReference, weapons: readonly ProviderReference[], catalog: InstalledCatalog): readonly ResourceRequest[] {
+  return weaponResources(map, weapons, catalog).filter(resource => resource.content !== map.content);
+}
+
+export function weaponResources(map: ProviderReference, weapons: readonly ProviderReference[], catalog: InstalledCatalog): readonly ResourceRequest[] {
   return weapons.flatMap(reference => {
     const weapon = canonicalWeaponSource(map, reference, catalog);
     if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return [];
-    if (weapon.content === map.content) return [];
     const product = catalog.require(weapon.content).expectation;
     if (weapon.provider.startsWith("q2:") && product.family === "q2" && product.campaign === "baseq2" &&
       (product.edition === "classic" || product.edition === "rerelease"))

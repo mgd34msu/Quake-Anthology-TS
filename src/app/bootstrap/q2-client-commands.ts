@@ -1,9 +1,9 @@
-import type { CommandDialect } from "../../contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 import { q2ClientCommands } from "../../content/q2/base/player/commands.ts";
 
-type ExecuteQ2ClientCommand = (name: string, args: readonly string[], seat: SeatId | null) => undefined;
+type ExecuteQ2ClientCommand = (name: string, args: readonly string[], seat: SeatId | null, source: CommandContext) => undefined;
 
 export function registerQ2ClientCommands(commands: CommandBuffer, dialect: CommandDialect, execute: ExecuteQ2ClientCommand): () => void {
   const registered: string[] = [];
@@ -17,7 +17,7 @@ export function registerQ2ClientCommands(commands: CommandBuffer, dialect: Comma
       if (commands.register(name, invocation => {
         let origin = invocation.source.origin;
         while (origin.kind === "script") origin = origin.caller;
-        return execute(definition.name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);
+        return execute(definition.name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
       }, documentation)) registered.push(name);
     }
   }

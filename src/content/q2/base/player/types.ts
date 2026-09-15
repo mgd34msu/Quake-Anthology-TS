@@ -56,6 +56,8 @@ export type Q2PlayerEvent =
   | { readonly kind: "chase"; readonly actor: ActorId; readonly target: ActorId | null };
 
 export interface Q2PlayerHooks {
+  grantSelectedArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
+  giveSelectedItem?(actor: ActorId, args: readonly string[]): boolean;
   weaponState?(actor: ActorId): Q2CharacterWeapon | null;
   movement(actor: ActorId): Q2PlayerMovement;
   setMovement(actor: ActorId, change: Q2PlayerMovementChange): undefined;

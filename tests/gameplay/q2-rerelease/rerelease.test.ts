@@ -280,6 +280,7 @@ test("Q64 moving scenery and camera use shared bodies and the source scheduler",
 
 test("rerelease cooperative telefrag overlap protects both shared players", () => {
   const active = rerelease(), { first, second, game, players } = active;
+  players.rereleaseOptions.coopPlayerCollision = true;
   game.solid(first, "box"); game.solid(second, "box"); game.link(first); game.link(second);
   first.clipMask = 0x42010003; second.clipMask = 0x42010003;
   expect(killQ2RereleaseBox(first, game, players, true, true)).toBe(true);

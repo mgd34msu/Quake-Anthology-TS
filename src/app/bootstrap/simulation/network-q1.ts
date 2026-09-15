@@ -274,7 +274,8 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         }
         else if (name === 'color')
             source.composition.clients.colors(player.actor, Number(args[0] ?? 0), Number(args[1] ?? args[0] ?? 0));
-        else if (name === 'use' || name === 'weapnext' || name === 'weapprev')
+        else if (name === 'use' || name === 'weapnext' || name === 'weapprev' || name === 'give' || name === 'god'
+            || name === 'notarget' || name === 'noclip' || name === 'fly' || name === 'kill')
             simulation.playerCommand(player.actor, name, args);
         else
             options.print(`Unsupported native Q1 client command: ${name}`); },

@@ -20,7 +20,7 @@ export class Q2CtfTechs {
   constructor(readonly context: Q2CtfContext) {}
   get callbacks(): Q2CallbackDefinitions { return { think: { TechThink: this.think, SpawnTechs: this.spawnTechs } }; }
   register(): undefined {
-    for (const tech of techs) this.context.hooks.items.register({ kind: "custom", classname: tech.classname,
+    for (const tech of techs) this.context.hooks.items.register({ kind: "custom", consoleGive: "individual-only", classname: tech.classname,
       model: `models/ctf/${tech.model}/tris.md2`, icon: tech.icon, name: tech.name, sound: "items/pkup.wav",
       rotate: true, respawn: 0, capacity: 1, quantity: 0, coopStay: false, droppable: true, use: null,
       pickup: (entity, game, player) => this.pickup(entity, game, player) });

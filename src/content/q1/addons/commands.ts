@@ -10,13 +10,15 @@ import { waitingMg3Monster } from "./monsters/startup.ts";
 function noKeys(context: Q1AddonContext, actor: ActorId): undefined {
   const { game } = context, player = game.player(actor); if (player === null) throw new Error("Addon command requires an admitted Q1 arsenal");
   if ((game.options.deathmatch !== 0 || game.options.coop) && context.services.cvar("sv_cheats") === 0) return undefined;
+  const weapons = context.services.cheatArsenal?.(actor, "weapons") ?? false;
+  const ammo = context.services.cheatArsenal?.(actor, "ammo") ?? false;
   const setCount = (item: ItemId, count: number, capacity: number): undefined => {
     const previous = game.host.inventory.entries(actor).find(entry => entry.item === item);
     return game.host.inventory.configure(player.actor, previous === undefined ? { item, count, capacity } : { ...previous, count });
   };
-  setCount("q1:ammo/rockets", 100, 100); setCount("q1:ammo/nails", 200, 200); setCount("q1:ammo/shells", 100, 100);
-  for (const weapon of WEAPONS) setCount(game.weaponItem(weapon), 1, 1);
-  setCount("q1:ammo/cells", 200, 100); game.selectWeapon(player.actor, "rocketlauncher"); return undefined;
+  if (!ammo) { setCount("q1:ammo/rockets", 100, 100); setCount("q1:ammo/nails", 200, 200); setCount("q1:ammo/shells", 100, 100); setCount("q1:ammo/cells", 200, 100); }
+  if (!weapons) { for (const weapon of WEAPONS) setCount(game.weaponItem(weapon), 1, 1); game.selectWeapon(player.actor, "rocketlauncher"); }
+  return undefined;
 }
 
 export function omnicideQ1Addons(context: Q1AddonContext, actor: ActorId): undefined {

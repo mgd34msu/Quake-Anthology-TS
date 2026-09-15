@@ -57,7 +57,7 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
       capacity: 1, quantity: 1, coopStay: true, droppable: false,
       pickup: (_entity, game, player) => game.host.inventory.count(player.id, "q2:item_flashlight") === 0 && game.host.inventory.give(player, "q2:item_flashlight", 1) > 0,
       use: (player, game) => { this.toggleFlashlight(player.id, game, !this.players.extra(player.id).flashlight); return true; } });
-    items.register({ kind: "custom", classname: "item_compass", model: "", icon: "p_compass", name: "Compass", sound: "", rotate: false, respawn: 0,
+    items.register({ kind: "custom", consoleGive: "inventory-only", classname: "item_compass", model: "", icon: "p_compass", name: "Compass", sound: "", rotate: false, respawn: 0,
       capacity: 1, quantity: 0, coopStay: true, droppable: false, pickup: () => false,
       use: (player, game) => { this.useCompass(player.id, game); return true; } });
   }
