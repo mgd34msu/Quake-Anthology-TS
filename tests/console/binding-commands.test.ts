@@ -58,7 +58,7 @@ for (const dialect of dialects) test(`${dialect}: console binding queries, raw m
     router.handlePlatform({ kind: "mouse-wheel", timestamp: 3, x: 0, y: 1, preciseX: 0, preciseY: 1, flipped: false }); commands.execute();
     expect(calls).toEqual([["record", "right"], ["record", "second"], ["record", "middle"], ["record", "x1"], ["record", "x2"], ["record", "wheel"]]);
     submit("unbind mouse2"); expect(input.binding({ kind: "mouse-button", button: 3 })).toBeNull();
-    output.length = 0; submit("bind mouse2"); expect(output).toEqual(["MOUSE2 is not bound to a command\n"]);
+    output.length = 0; submit("bind mouse2"); expect(output).toEqual(["MOUSE2 = Unbound\n"]);
     input.bind({ input: { kind: "mouse-button", button: 3 }, target: { kind: "action", action: "jump" } });
     output.length = 0; submit("bind mouse2"); expect(output).toEqual(["MOUSE2 = jump\n"]);
     expect(chats).toEqual([]);

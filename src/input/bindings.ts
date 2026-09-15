@@ -93,7 +93,7 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
     if (input === null) { print(`Unknown key ${name}\n`); return; }
     if (invocation.argv.length === 2) {
       const binding = seat.binding(input);
-      print(binding === null ? `${physicalInputName(input)} is not bound to a command\n`
+      print(binding === null ? `${physicalInputName(input)} = Unbound\n`
         : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`); return;
     }
     seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
