@@ -29,7 +29,7 @@ import { GrappleRuntime } from "./grapple-runtime.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
 import { nearbyMonsterPlacement, preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
 import { parseVector } from "../../../content/q1/foundation/entity.ts";
-import { parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
+import { numberField, parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { SelectedMonsterSource } from "./monster-runtime.ts";
 import { monsterSource } from "../../../content/monsters/definitions.ts";
 import type { MonsterMission } from "../../../content/monsters/authored.ts";
@@ -516,6 +516,8 @@ export class SharedSimulation implements Simulation {
     else if (this.source.kind === "q3") { if (providerFamily(this.recipe.combat.provider) === "q3") this.combat.register(this.source.game.bridge.policy()); this.source.game.load(); }
     else if (this.source.kind === "q2") {
       if (options.travel?.source.kind === "q2") this.source.game.counters.serverFlags = options.travel.source.serverFlags;
+      const worldspawn = parseQ2Entities(options.world.entities, this.source.game.options.edition).find(entity => entity.classname === "worldspawn");
+      this.setWorldGravity(worldspawn === undefined ? 800 : numberField(worldspawn, "gravity", 800));
       const report = this.source.game.load(options.world.entities);
       this.source.product.afterSpawn();
       if (report.unsupported.length !== 0) throw new Error(`Unimplemented authored Q2 spawns: ${[...new Set(report.unsupported.map(entity => entity.classname))].join(", ")}`);
@@ -2576,6 +2578,10 @@ export class SharedSimulation implements Simulation {
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Host elapsed time must be finite and nonnegative");
     this.stepping = true;
     try {
+      if (this.source.kind === "q2" && this.q2ServerRegistry !== null) {
+        const gravity = this.q2ServerRegistry.variableValue("sv_gravity");
+        if (gravity !== this.physics.gravity) this.setWorldGravity(gravity);
+      }
       for (const command of input.commands) {
         const player = this.player(command.actor);
         if (player === null) throw new Error("Command targets an unadmitted player");
@@ -3102,6 +3108,7 @@ export class SharedSimulation implements Simulation {
   }
   setWorldGravity(gravity: number): undefined {
     this.physics.setWorldGravity(gravity);
+    this.q2ServerRegistry?.set("sv_gravity", String(gravity), true);
     for (const player of this.playerStates.values()) {
       player.worldGravity = gravity;
       if (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3") player.state = { ...player.state, gravity: Math.trunc(gravity * player.gravityMultiplier) };
@@ -3328,9 +3335,9 @@ export class SharedSimulation implements Simulation {
     if (bots !== null) {
       this.events.assertOutputConsumed();
       add("world:bots", encodeCheckpointValue(bots));
-      const cvars = source.kind === "q1" ? source.cvars : source.kind === "q2" ? this.q2ServerRegistry : null;
-      if (cvars !== null) add("world:source-cvars", encodeCheckpointValue(cvars.captureSaveState()));
     }
+    const cvars = source.kind === "q1" ? source.cvars : source.kind === "q2" ? this.q2ServerRegistry : null;
+    if (cvars !== null) add("world:source-cvars", encodeCheckpointValue(cvars.captureSaveState()));
     if (source.kind === "q1") add("q1:foundation", encodeQ1FoundationCheckpoint(source.game.capture()));
     else if (source.kind === "q2") providers.push(...captureQ2Product(source.product));
     else if (source.kind === "q3") {
@@ -3553,6 +3560,10 @@ export class SharedSimulation implements Simulation {
     reader.field("portals").list(value => { const portal = value.field("portal").integer(0), open = value.field("open").boolean(); this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); });
     restoreSharedBodyLinks(save, { actors: this.actors, bodies: this.bodies });
     this.physics.restoreSpatial(reader.field("physics"));
+    if (source.kind === "q2" && this.q2ServerRegistry !== null) {
+      if (savedSourceCvars(save) === undefined) this.q2ServerRegistry.set("sv_gravity", String(this.physics.gravity), true);
+      else if (this.q2ServerRegistry.find("sv_gravity") === undefined) this.q2ServerRegistry.register("sv_gravity", String(this.physics.gravity), 0);
+    }
     for (const think of save.thinks) {
       const actor = this.actors.resolveSaved(think.actor); if (actor === null) throw new Error("Saved think has no restored actor");
       this.scheduler.schedule(actor, think.callback, { due: think.due, boundary: think.boundary,
