@@ -35,10 +35,11 @@ export function boxCell(bounds: Bounds): ConvexCell {
 export function clipCell(cell: ConvexCell, plane: Plane): ConvexCell | null {
   const faces: CellFace[] = [], cap: Vec3[] = [];
   let outside = false, inside = false;
-  for (const face of cell.faces) for (const point of face.vertices) {
+  classify: for (const face of cell.faces) for (const point of face.vertices) {
     const d = dot(point, plane.normal) - plane.distance;
     if (d > 1e-8) outside = true;
     if (d < -1e-8) inside = true;
+    if (outside && inside) break classify;
   }
   if (!outside) return cell;
   if (!inside) return null;
@@ -75,8 +76,9 @@ export function cellVertices(cell: ConvexCell): readonly Vec3[] {
 export function boxSeparatingPlanes(cell: ConvexCell, axes: readonly Vec3[]): readonly Plane[] {
   const normals: Vec3[] = [];
   const insert = (normal: Vec3): void => {
-    if (length(normal) < 1e-8) return;
-    const n = unit(normal);
+    const magnitude = length(normal);
+    if (magnitude < 1e-8) return;
+    const n = scale(normal, 1 / magnitude);
     if (!normals.some(p => dot(p, n) > 1 - 1e-10)) normals.push(n);
   };
   for (const face of cell.faces) {
@@ -84,7 +86,8 @@ export function boxSeparatingPlanes(cell: ConvexCell, axes: readonly Vec3[]): re
     for (let i = 0; i < face.vertices.length; i++) {
       const a = face.vertices[i], b = face.vertices[(i + 1) % face.vertices.length];
       if (a === undefined || b === undefined) continue;
-      for (const axis of axes) { const n = cross(sub(b, a), axis); insert(n); insert(scale(n, -1)); }
+      const edge = sub(b, a);
+      for (const axis of axes) { const n = cross(edge, axis); insert(n); insert(scale(n, -1)); }
     }
   }
   for (const axis of axes) { insert(axis); insert(scale(axis, -1)); }
