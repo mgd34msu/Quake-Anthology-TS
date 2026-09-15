@@ -19,6 +19,6 @@ export async function loadCvarArchive(store: ConfigStore, owner: CvarArchiveOwne
   return entries;
 }
 
-export async function saveCvarArchive(store: ConfigStore, owner: CvarArchiveOwner, registry: CvarRegistry): Promise<void> {
-  await store.dump(archivePath(owner), `${JSON.stringify({ version: 1, dialect: registry.dialect, entries: registry.archiveEntries() })}\n`);
+export async function saveCvarArchive(store: ConfigStore, owner: CvarArchiveOwner, registry: CvarRegistry, entries: readonly CvarArchiveEntry[] = registry.archiveEntries()): Promise<void> {
+  await store.dump(archivePath(owner), `${JSON.stringify({ version: 1, dialect: registry.dialect, entries })}\n`);
 }

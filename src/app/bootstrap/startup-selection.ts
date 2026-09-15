@@ -17,6 +17,7 @@ import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../c
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
+import { readTeamArenaSkirmish } from "./team-arena-skirmish.ts";
 import { applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
@@ -165,12 +166,12 @@ export class StartupSelectionModel {
       && expectedProducts.some(expected => expected.id === product.expectation.id)
       && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")
       && product.expectation.campaign !== "ctf" && product.expectation.campaign !== "lmctf").map(product => {
-      const { family, edition, campaign } = product.expectation;
+      const { family, edition } = product.expectation;
       const difficulties = family === "q3"
         ? [choice("1", "I Can Win"), choice("2", "Bring It On"), choice("3", "Hurt Me Plenty"), choice("4", "Hardcore"), choice("5", "Nightmare")]
         : [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")];
       return { ...productChoice(product), family, edition, difficulties, defaultSkill: family === "q3" ? "2" : "1",
-        unavailable: campaign === "missionpack" ? "Team Arena campaign team setup is not connected yet." : null };
+        unavailable: null };
     });
   }
   async resolvePreset(id: string, difficulty?: number): Promise<StartupLaunch> {
@@ -180,14 +181,16 @@ export class StartupSelectionModel {
     const level = difficulty ?? Number(selected.defaultSkill);
     if (!selected.difficulties.some(choice => Number(choice.id) === level)) throw new Error("Invalid preset difficulty");
     const product = this.catalog.require(id), family = product.expectation.family;
-    const preferred = family === "q3" ? await this.q3TrainingMap(product)
-      : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null);
+    const teamArenaSkirmish = product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
+      ? await readTeamArenaSkirmish(this.catalog, level) : undefined;
+    const preferred = teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
+      : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
     const map = this.playableMaps.get(id)?.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
     if (map === undefined || map.unavailable !== null) throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
-    const characterModel = family === "q1" ? "player" : family === "q2" ? "male" : "sarge";
+    const characterModel = teamArenaSkirmish?.playerModel ?? (family === "q1" ? "player" : family === "q2" ? "male" : "sarge");
     const model = this.modelsFor(product).find(model => model.id === characterModel);
     if (model === undefined || model.unavailable !== null) throw new Error(`${selected.label}: native ${characterModel} model is unavailable`);
-    const { botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
+    const { teamArenaSkirmish: _teamArenaSkirmish, botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
       quakeCProgram: _quakeCProgram, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
     const skill = family === "q3" ? 1 : level;
     if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid campaign difficulty");
@@ -196,6 +199,7 @@ export class StartupSelectionModel {
     if (renderer !== "gl" && renderer !== "cpu") throw new Error("Invalid renderer selection");
     const options: ApplicationOptions = { ...preferences, ...this.display,
       ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
+      ...(teamArenaSkirmish === undefined ? {} : { teamArenaSkirmish }),
       product: id, map: map.id, movement: family, character: family, characterModel, skill, ...bot,
       mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } };
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
@@ -226,10 +230,11 @@ export class StartupSelectionModel {
     if (product.expectation.family === "q1") return [choice("player", "Quake player", paths.has("progs/player.mdl") ? null : "Player model not installed")];
     const models = new Set<string>();
     for (const path of paths) {
-      const match = /^models\/players\/([^/]+)\/lower\.md3$/.exec(path);
+      const match = /^models\/players\/(?:characters\/)?([^/]+)\/lower\.md3$/.exec(path);
       const q2 = /^players\/([^/]+)\/tris\.md2$/.exec(path);
       const name = product.expectation.family === "q3" ? match?.[1] : q2?.[1];
-      if (name !== undefined && (product.expectation.family !== "q3" || paths.has(`models/players/${name}/upper.md3`) && paths.has(`models/players/${name}/head.md3`))) models.add(name);
+      if (name !== undefined && (product.expectation.family !== "q3" || (paths.has(`models/players/${name}/upper.md3`) || paths.has(`models/players/characters/${name}/upper.md3`))
+        && (paths.has(`models/players/${name}/head.md3`) || paths.has(`models/players/heads/${name}/${name}.md3`)))) models.add(name);
     }
     return [...models].sort().map(name => choice(name));
   }

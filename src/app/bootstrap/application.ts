@@ -1,3 +1,4 @@
+import { captureTeamArenaOverrides, readTeamArenaOverrides, saveTeamArenaOverrides, applyTeamArenaOverrides, releaseTeamArenaOverrides, teamArenaArchiveEntries, type TeamArenaOverrides, type OverrideRegistry } from "./team-arena-overrides.ts";
 import { q1ConsoleServer } from "./console.ts";
 import { PreparedStartup, type PreparedSeatConfiguration } from "./prepared-startup.ts";
 import { createStartupSource, resolveStartupRules } from "./startup-source.ts";
@@ -74,7 +75,8 @@ import { ApplicationAssets } from "./assets.ts";
 import { ApplicationAudio } from "./audio.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
-import { applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
+import { presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
+import { applicationPreset, applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommands, LocalInput, LocalPlayer } from "./input.ts";
@@ -85,6 +87,10 @@ import { ApplicationQ3Client } from "./q3-client.ts";
 import { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import { createSimulationPredictionHost } from "./simulation/prediction.ts";
 import { NativeRenderer } from "./renderer.ts";
+import { GameType, Team, PersistentIndex } from "../../content/q3/base/shared/definitions.ts";
+import { parseTeamArenaPostgame, recordTeamArenaScore, type TeamArenaPostgameStats } from "./team-arena-scores.ts";
+import type { TeamArenaResultService } from "./team-arena-results.ts";
+import { readTeamArenaSkirmish, teamArenaSourceCvars, teamArenaClientCvars, TeamArenaLaunchOverrides, teamArenaServerOverrides, type TeamArenaSkirmish } from "./team-arena-skirmish.ts";
 import { ApplicationSeatUi } from "./ui.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
 import { createSimulation, savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
@@ -166,6 +172,15 @@ export class Application {
   private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBots | null = null;
   private clientCvars = new Map<SeatId, CvarRegistry>();
+  private teamArenaOverrides: TeamArenaOverrides | null = null;
+
+  private overrideSeats(clients: ReadonlyMap<SeatId, CvarRegistry> = this.clientCvars): readonly OverrideRegistry[] {
+    return [...this.localSeats.values()].map(seat => {
+      const cvars = clients.get(seat.id);
+      if (cvars === undefined) throw new Error("Missing local override registry");
+      return { seat: seat.id.index, client: seat.client.id.slot, cvars };
+    });
+  }
   private archivePersistence = false;
   private dedicatedConsole: DedicatedConsole | null = null;
   private dedicatedCommands: CommandBuffer | null = null;
@@ -192,6 +207,8 @@ export class Application {
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
   private campaignMovie: { readonly playback: CampaignCinematic; readonly next: Q2TravelTarget | null; readonly carry: SimulationTravel } | null = null;
   private pendingMap: string | null = null;
+  private pendingTeamArena: "next" | "retry" | null = null;
+  private pendingTeamArenaPostgame: TeamArenaPostgameStats | null = null;
   private sourceCommands: CommandBuffer | null = null;
   private q2Console: ApplicationQ2Console | null = null;
   private pendingRestart: number | null = null;
@@ -226,7 +243,7 @@ export class Application {
       this.saveOperation = { run, resolve, reject };
     });
     return { list: () => saves.list, refresh: () => saves.refresh(),
-      ...(this.levelRecoveryAvailable ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
+      ...(this.levelRecoveryAvailable && !this.isTeamArenaSkirmish() ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
       unavailable: () => this.network !== null ? "Save/load unavailable while hosting a network game."
         : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
@@ -255,16 +272,16 @@ export class Application {
     this.imageSettings?.enablePersistence();
   }
 
-  private async saveSourceArchive(options: ApplicationOptions, content: LoadedApplicationContent, simulation: SharedSimulation): Promise<void> {
+  private async saveSourceArchive(options: ApplicationOptions, content: LoadedApplicationContent, simulation: SharedSimulation, overrides: TeamArenaOverrides | null): Promise<void> {
     const cvars = this.sourceCvars(simulation);
     if (cvars !== null) await saveCvarArchive(Application.sourceConfig(options, content),
-      ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider], cvars);
+      ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider], cvars, teamArenaArchiveEntries(cvars, overrides));
   }
 
-  private async saveClientArchives(options: ApplicationOptions, content: LoadedApplicationContent, clients: ReadonlyMap<SeatId, CvarRegistry>): Promise<void> {
+  private async saveClientArchives(options: ApplicationOptions, content: LoadedApplicationContent, clients: ReadonlyMap<SeatId, CvarRegistry>, overrides: TeamArenaOverrides | null): Promise<void> {
     const store = Application.clientConfig(options, content);
     for (const [seat, cvars] of clients) await saveCvarArchive(store,
-      ["client", content.recipe.engineBehavior.content, content.recipe.engineBehavior.provider, String(seat.index)], cvars);
+      ["client", content.recipe.engineBehavior.content, content.recipe.engineBehavior.provider, String(seat.index)], cvars, teamArenaArchiveEntries(cvars, overrides, seat.index));
   }
 
   private sourceCvars(simulation = this.simulation): CvarRegistry | null {
@@ -315,7 +332,7 @@ export class Application {
     const savedBots = initialSave === undefined ? null : savedBotCheckpoint(initialSave);
     if (initialSave !== undefined && savedSettings !== null) {
       if (options.network.kind !== "offline") throw new Error("Save/load unavailable while hosting a network game.");
-      const { botSkill, serverProfile, serverProfilePath, ...frontendOptions } = options;
+      const { botSkill, teamArenaSkirmish, serverProfile, serverProfilePath, ...frontendOptions } = options;
       const humanSlots = savedSettings.clientSlots.filter(slot => !savedBots?.transport.connections.some(connection => connection.client.slot === slot));
       if (!options.dedicated && (humanSlots.length < 1 || humanSlots.length > 4)) throw new Error("Saved local player count must be between one and four");
       options = { ...frontendOptions, map: initialSave.recipe.map.geometry.requestedPath, skill: savedSettings.skill,
@@ -367,7 +384,7 @@ export class Application {
         ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
         ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
-        maxClients: startup?.maxClients ?? savedSettings?.maxClients ?? defaultCapacity,
+        maxClients: startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
         promptSupported: client => !options.dedicated && localSeats.has(client),
         playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
       session.attachWorld(simulation);
@@ -378,6 +395,10 @@ export class Application {
       }
       application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig);
       application.preparedStartup = startup?.prepared ?? null;
+      if (initialSave !== undefined) {
+        application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
+        if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
+      }
       const startupApplication = application;
       startup?.prepared.forwardCommands((name, args, source) => {
         let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
@@ -430,6 +451,7 @@ export class Application {
       host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
       application.enableStartupPersistence();
       if (initialSave === undefined) {
+        if (options.teamArenaSkirmish !== undefined) application.startTeamArenaSkirmish(options.teamArenaSkirmish);
         await application.autosaveLevel();
       }
       else application.requestRestoredScores();
@@ -658,6 +680,15 @@ export class Application {
       this.pendingMap = mapResourcePath(map); return undefined;
     });
     commands.register("map_restart", invocation => this.requestRestart(invocation.args));
+    if (this.isTeamArenaSkirmish(simulation)) commands.register("postgame", invocation => {
+      this.pendingTeamArenaPostgame = parseTeamArenaPostgame(invocation.args);
+      this.host.print("Match complete. Choose Next match, Retry match, or Main menu.\n");
+      return undefined;
+    });
+    commands.register("teamarena-results", () => {
+      if (!this.isTeamArenaSkirmish(simulation)) throw new Error("No Team Arena skirmish is active");
+      return undefined;
+    });
     commands.register("kick", invocation => {
       for (const actor of this.kickTargets(invocation.args)) {
         const player = simulation.movementPlayer(actor);
@@ -771,6 +802,28 @@ export class Application {
       }
     }
     if (this.simulation.q1Source() === null && this.simulation.quakecSource() === null) this.sourceCommands?.execute();
+    if (this.pendingTeamArenaPostgame !== null) {
+      const stats = this.pendingTeamArenaPostgame;
+      this.pendingTeamArenaPostgame = null;
+      const source = this.simulation.q3Source();
+      if (source === null || !this.isTeamArenaSkirmish()) throw new Error("Team Arena postgame lost its source owner");
+      const files = new UserFileStore(Application.sourceConfig(this.options, this.content).root);
+      const result = await recordTeamArenaScore({ stats, map: this.options.map.replace(/^maps\//, "").replace(/\.bsp$/, ""), gameType: source.gameType,
+        matchStartTime: source.level.startTime, skill: source.host.cvars.variableValue("g_spSkill"), timeToBeat: source.host.cvars.variableValue("ui_teamArenaTimeToBeat") }, {
+        readFile: async path => { const file = Bun.file(join(files.root, path)); return await file.exists() ? new Uint8Array(await file.arrayBuffer()) : null; },
+        writeFile: async (path, bytes) => {
+          const file = files.open(path, "write", text => this.host.print(text));
+          if (file === null) throw new Error("Cannot open Team Arena score file");
+          try { if (file.write(bytes) !== bytes.length) throw new Error("Incomplete Team Arena score write"); } finally { file.close(); }
+        },
+      });
+      source.host.cvars.set("ui_scoreScore", String(result.score.score), true);
+      source.host.cvars.set("ui_scoreTime", `${Math.trunc(result.score.time / 60).toString().padStart(2, "0")}:${(result.score.time % 60).toString().padStart(2, "0")}`, true);
+      source.host.cvars.set("ui_scoreTeam", `${result.score.redScore} to ${result.score.blueScore}`, true);
+      for (const setting of teamArenaServerOverrides) source.host.cvars.set(setting.name, source.host.cvars.variableString(setting.saved), true);
+      this.teamArenaOverrides = releaseTeamArenaOverrides(this.teamArenaOverrides, this.overrideSeats());
+      if (result.newHighScore) this.host.print(`New Team Arena high score: ${result.score.score}\n`);
+    }
   }
 
   private async networkHost(simulation = this.simulation, content = this.content, serverCount = this.nativeWorldCount): Promise<NativeServerHost> {
@@ -880,6 +933,8 @@ export class Application {
           players.push({ seat, actor: player.actor });
         }
       }
+      if (restoring) applyTeamArenaOverrides(this.teamArenaOverrides, this.overrideSeats());
+      else if (this.options.teamArenaSkirmish !== undefined) this.teamArenaOverrides = captureTeamArenaOverrides(this.overrideSeats());
       this.host.loading?.stage("Loading sounds...");
       input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined);
@@ -918,7 +973,7 @@ export class Application {
         if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -992,6 +1047,7 @@ export class Application {
       } });
     const product = content.catalog.product(content.recipe.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
+    const teamArenaLaunch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     let resolved = { options, maxClients: defaultCapacity };
     await prepared.execute({ nextFrame, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
       read: Application.startupScriptReader(content, options, scripts),
@@ -999,7 +1055,10 @@ export class Application {
       movementArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["movement", movement], movement),
       fallbackArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["fallback", dialect], dialect),
       applyLaunchOptions: () => {
-        resolved = resolveStartupRules(options, prepared.source, defaultCapacity, serverDefinitionsForRecipe(content.recipe));
+        teamArenaLaunch?.apply(prepared.source, prepared.seats);
+        resolved = resolveStartupRules(options, prepared.source, options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
+          serverDefinitionsForRecipe(content.recipe), options.teamArenaSkirmish === undefined);
+        if (options.teamArenaSkirmish !== undefined) resolved = { ...resolved, options: { ...resolved.options, mode: options.mode } };
         if (options.displayOverrides?.width !== undefined) image?.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
         if (options.displayOverrides?.height !== undefined) image?.cvars.set("r_customheight", String(options.displayOverrides.height), true);
         if (options.displayOverrides?.gamma !== undefined) image?.cvars.set("r_gamma", String(options.displayOverrides.gamma), true);
@@ -1069,7 +1128,43 @@ export class Application {
       if (selectedIdentity) for (const name of ["model", "headmodel", "team_model", "team_headmodel"])
         cvars.set(name, `${options.characterModel}/default`, true);
     }
+    if (userinfo === null && options.teamArenaSkirmish !== undefined && selectedIdentity) {
+      const setup = options.teamArenaSkirmish;
+      if (seat.id.index === 0) simulation.q3Source()?.host.cvars.set("ui_drawTimer", String(cvars.variableValue("cg_drawTimer")), true);
+      for (const name of ["model", "team_model"]) cvars.set(name, setup.playerModel, true);
+      for (const name of ["headmodel", "team_headmodel"]) cvars.set(name, setup.playerHeadModel, true);
+      for (const setting of teamArenaClientCvars(setup, cvars.snapshots())) cvars.set(setting.name, setting.value, true);
+    }
     return cvars;
+  }
+
+  private isTeamArenaSkirmish(simulation = this.simulation): boolean {
+    const source = simulation.q3Source();
+    return source?.options.product === "missionpack" && source.host.cvars.variableString("nextmap") === "teamarena-results";
+  }
+
+  private teamArenaResults(simulation: SharedSimulation, seat: SessionSeat): TeamArenaResultService | undefined {
+    if (!this.isTeamArenaSkirmish(simulation)) return undefined;
+    return { read: () => {
+      const source = simulation.q3Source();
+      if (source === null || source.level.intermissionTime === 0) return null;
+      const human = source.pool.clientAt(seat.client.id.slot);
+      const team = human.sess.sessionTeam;
+      const score = source.gameType >= GameType.GT_CTF ? source.level.teamScores.get(team)
+        : human.ps.persistant.get(PersistentIndex.PERS_SCORE);
+      const opponent = source.gameType >= GameType.GT_CTF ? source.level.teamScores.get(team === Team.TEAM_RED ? Team.TEAM_BLUE : Team.TEAM_RED)
+        : source.pool.clients.filter(client => client !== human).reduce((highest, client) => Math.max(highest, client.ps.persistant.get(PersistentIndex.PERS_SCORE)), -9999);
+      return { title: source.host.cvars.variableString("ui_scoreMap"),
+        won: source.gameType >= GameType.GT_CTF ? score > opponent : source.level.sortedClients[0] === seat.client.id.slot, score, opponent,
+        points: source.host.cvars.variableValue("ui_scoreScore"), time: source.host.cvars.variableString("ui_scoreTime") };
+    }, next: () => this.queueCommand("teamarena-next", [], seat.id), retry: () => this.queueCommand("teamarena-retry", [], seat.id), quit: () => this.requestQuit() };
+  }
+
+  private startTeamArenaSkirmish(setup: TeamArenaSkirmish): void {
+    const commands = this.sourceCommands;
+    if (commands === null || this.simulation.q3Source() === null) throw new Error("Team Arena requires the native Quake III source command owner");
+    for (const bot of setup.bots) commands.append(`addbot ${bot.ai} ${setup.skill} ${bot.team === "" ? "," : bot.team} ${bot.delayMilliseconds} ${bot.name}\n`);
+    for (const source of this.graphical?.q3.values() ?? []) source.client.options.commands.reliable(`team ${setup.playerTeam}`);
   }
 
   private prepareRestoredGuestSeat(world: LocalQ3GuestWorld, simulation: SharedSimulation, seat: SessionSeat,
@@ -1202,34 +1297,42 @@ export class Application {
     }
   }
 
-  private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+  private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage, skirmish?: TeamArenaSkirmish): Promise<void> {
     if (this.campaignMovie !== null) throw new Error("Finish or skip the campaign cinematic before changing worlds");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "travel";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
-    try { await serviceLoading(() => this.prepareAndReplaceWorld(map, carry, initialSourceMilliseconds, save), () => {
+    try { await serviceLoading(() => this.prepareAndReplaceWorld(map, carry, initialSourceMilliseconds, save, skirmish), () => {
       if (!this.closed) this.graphical?.input.pollLoadingEvents();
     }); }
     finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
     if (save === undefined) await this.autosaveLevel();
   }
 
-  private async prepareAndReplaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage): Promise<void> {
+  private async prepareAndReplaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage, skirmish?: TeamArenaSkirmish): Promise<void> {
     if (save === undefined && this.simulation.q3Guest() !== null) throw new Error("Q3 guest map changes and restart are unsupported");
     if (save !== undefined && this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     const settings = save === undefined ? null : savedSimulationSettings(save);
     const savedBots = save === undefined ? null : savedBotCheckpoint(save);
     let options = { ...this.options, map: mapResourcePath(map),
+      ...(skirmish === undefined ? {} : { teamArenaSkirmish: skirmish, characterModel: skirmish.playerModel }),
       ...(settings === null ? {} : { skill: settings.skill, mode: settings.mode, seed: settings.seed }) };
-    const recipe = save?.recipe ?? await resolveApplicationTravel(this.content, options.map);
+    if (save !== undefined) { const { teamArenaSkirmish, ...restoredOptions } = options; options = restoredOptions; }
+    let recipe: ExecutableRecipe;
+    if (save !== undefined) recipe = save.recipe;
+    else if (skirmish !== undefined) {
+      const preset = applicationPreset(this.content.catalog, options, { movement: this.content.recipe.movement, character: this.content.recipe.character.definition });
+      recipe = await resolveLaunch({ catalog: this.content.catalog, preset, choice: presetChoice(preset.id) });
+    } else recipe = await resolveApplicationTravel(this.content, options.map);
     if (save !== undefined && recipe.execution.some(module => module.kind === "qvm" && module.role === "server-game")) {
       const { botSkill, ...savedOptions } = options;
       options = savedOptions;
     }
     const content = await loadApplicationContent(options, recipe);
     const previousContent = this.content, previous = this.graphical, previousSimulation = this.simulation, previousLocalGuest = this.localGuest;
-    const previousOptions = this.options, previousClientCvars = this.clientCvars;
+    const previousOptions = this.options, previousClientCvars = this.clientCvars, previousOverrides = this.teamArenaOverrides;
+    let nextOverrides = previousOverrides;
     const sameClientOwner = content.recipe.engineBehavior.content === previousContent.recipe.engineBehavior.content
       && content.recipe.engineBehavior.provider === previousContent.recipe.engineBehavior.provider;
     const sameSourceOwner = content.recipe.map.entities.content === previousContent.recipe.map.entities.content
@@ -1237,11 +1340,11 @@ export class Application {
     const frontendOverrides = this.frontendSettings;
     const q3 = this.simulation.q3Source();
     const previousBotClients = this.bots?.clients() ?? [];
-    const preserveBots = (initialSourceMilliseconds !== 0 || q3?.gameType !== 2);
+    const preserveBots = skirmish === undefined && (initialSourceMilliseconds !== 0 || q3?.gameType !== 2);
     const botClients = preserveBots ? previousBotClients : [];
     const previousBots = this.bots;
     const currentSource = this.sourceCvars();
-    const nextRules = save === undefined && sameSourceOwner && currentSource !== null
+    const nextRules = save === undefined && skirmish === undefined && sameSourceOwner && currentSource !== null
       ? resolveStartupRules(options, currentSource, this.simulation.options.maxClients, [], false) : null;
     if (nextRules !== null) options = nextRules.options;
     const q1BotCvars = this.simulation.q1Source()?.cvars.snapshots().filter(variable => variable.name.startsWith("bot_") || variable.name === "g_spSkill");
@@ -1268,6 +1371,7 @@ export class Application {
     const stagedClients: ApplicationQ3Client[] = [];
     let stagedCapture: ApplicationCapture | null = null;
     try {
+      if (save !== undefined) nextOverrides = readTeamArenaOverrides(save, [...this.localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
       if (settings !== null) {
         options = applicationOptionsForRecipe(options, content);
         initialSourceMilliseconds = settings.hostMilliseconds;
@@ -1281,11 +1385,11 @@ export class Application {
       };
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
       simulation = createSimulation({ dedicated: options.dedicated, ...Application.guestOptions(content, options, this.host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-        skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
+        skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
-        ...(save === undefined ? { serverProfile, sourceArchive, ...(q1Cvars === undefined ? {} : { q1Cvars }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined ? {} : { q3Session, initialSourceMilliseconds }),
-          ...(q3Cvars === undefined ? {} : { q3Cvars }) } : { restore: save, restoredClients: clients }) });
+        ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1Cvars === undefined ? {} : { q1Cvars }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session, initialSourceMilliseconds }),
+          ...(q3Cvars === undefined ? {} : { q3Cvars: [...q3Cvars, ...(skirmish === undefined ? [] : teamArenaSourceCvars(skirmish, q3Cvars))] }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
       if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
       const nextQ1 = nextSimulation.q1Source();
@@ -1296,9 +1400,14 @@ export class Application {
         const seat = local.player.seat;
         const cvars = this.createClientCvars(nextSimulation, content, options, seat,
           save === undefined ? null : nextSimulation.q3Source()?.host.engine.getUserinfo(seat.client.id.slot) ?? null,
-          sameClientOwner ? previousClientCvars.get(seat.id) : undefined, sameClientOwner ? [] : await this.loadClientArchive(seat, content, options));
+          sameClientOwner ? previousClientCvars.get(seat.id) : undefined, sameClientOwner ? [] : await this.loadClientArchive(seat, content, options), skirmish !== undefined);
         nextClientCvars.set(seat.id, cvars);
         if (save === undefined) nextSimulation.q3Source()?.host.engine.setUserinfo(seat.client.id.slot, `${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`);
+      }
+      if (previous !== null && nextSimulation.q3Guest() === null) {
+        if (save !== undefined) applyTeamArenaOverrides(nextOverrides, this.overrideSeats(nextClientCvars));
+        else if (skirmish !== undefined) nextOverrides = captureTeamArenaOverrides(this.overrideSeats(nextClientCvars));
+        else if (!sameClientOwner || nextSimulation.q3Source() === null) nextOverrides = null;
       }
       const admissions = nextSimulation.q3Guest() !== null || nextSimulation.quakecSource()?.kind === "quakeworld" ? new Map<number, ActorId>() : new Map(clients.filter(client => !botClients.some(bot => bot.client.id.equals(client))).map(client => {
         if (save === undefined) return [client.slot, nextSimulation.admitPlayer(client).actor];
@@ -1394,7 +1503,7 @@ export class Application {
           if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
-            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm");
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0);
           stagedPresentations.push(presentation);
@@ -1421,6 +1530,7 @@ export class Application {
       this.bots = nextBots;
       this.graphical = nextGraphical;
       this.clientCvars = nextClientCvars;
+      this.teamArenaOverrides = nextOverrides;
       nextGraphical?.input.adoptStartup();
       if (nextGraphical === null && this.preparedStartup !== null) {
         const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings: this.inputConfig,
@@ -1447,8 +1557,8 @@ export class Application {
       const retire = async (label: string, close: () => unknown): Promise<void> => {
         try { await close(); } catch (error) { this.host.print(`Entered world; ${label} failed: ${String(error)}\n`); }
       };
-      if (this.archivePersistence && !this.preparedStartup?.pending && !sameSourceOwner) await retire("previous source archive", () => this.saveSourceArchive(previousOptions, previousContent, previousSimulation));
-      if (this.archivePersistence && !this.preparedStartup?.pending && !sameClientOwner) await retire("previous client archives", () => this.saveClientArchives(previousOptions, previousContent, previousClientCvars));
+      if (this.archivePersistence && !this.preparedStartup?.pending && !sameSourceOwner) await retire("previous source archive", () => this.saveSourceArchive(previousOptions, previousContent, previousSimulation, previousOverrides));
+      if (this.archivePersistence && !this.preparedStartup?.pending && !sameClientOwner) await retire("previous client archives", () => this.saveClientArchives(previousOptions, previousContent, previousClientCvars, previousOverrides));
       await retire("capture retirement", () => previousCapture?.close());
       await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
       for (const { state } of previousLocalGuest?.seats.values() ?? []) state.retire();
@@ -1475,6 +1585,7 @@ export class Application {
         if (graphical.q3.size === 0) await retire("world music", () => graphical.audio.startWorldMusic());
       }
       if (nextNetworkHost !== null) await retire("network publication", () => this.changeNetworkWorld(nextNetworkHost));
+      if (skirmish !== undefined) this.startTeamArenaSkirmish(skirmish);
       this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
     } catch (error) {
       if (committed) { this.host.print(`Entered world; finalization failed: ${String(error)}\n`); return; }
@@ -1514,9 +1625,9 @@ export class Application {
     if (this.closed) throw new Error("Application is closed");
     if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
-    if (this.campaignMovie !== null || this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
+    if (this.campaignMovie !== null || this.pendingTeamArena !== null || this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
-    const image = this.simulation.checkpoint();
+    const image = saveTeamArenaOverrides(this.simulation.checkpoint(), this.teamArenaOverrides, this.overrideSeats());
     this.worldOperation = "saving";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
     try { await writeSaveImage(path, image); }
@@ -1539,7 +1650,7 @@ export class Application {
         const image = await readSaveImage(path);
         await this.prepareAndReplaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
       }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
-      this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
+      this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
     } finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
   }
 
@@ -1549,7 +1660,27 @@ export class Application {
       this.pendingSave = null;
       try {
         await this.replaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
-        this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null;
+        this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null;
+      } catch (error) {
+        if (this.content !== previous) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        this.host.print(`${message}\n`);
+        for (const local of this.graphical?.input.locals ?? []) local.console.print(`${message}\n`);
+      }
+      return;
+    }
+    if (this.pendingTeamArena !== null) {
+      const action = this.pendingTeamArena;
+      this.pendingTeamArena = null;
+      const source = this.simulation.q3Source();
+      if (source === null || !this.isTeamArenaSkirmish()) throw new Error("Team Arena progression has no native source owner");
+      const gameType = source.gameType, skill = source.host.cvars.variableValue("g_spSkill");
+      if ((gameType !== 1 && gameType !== 4 && gameType !== 5 && gameType !== 6 && gameType !== 7)
+        || (skill !== 1 && skill !== 2 && skill !== 3 && skill !== 4 && skill !== 5)) throw new Error("Team Arena source settings do not identify an authored match");
+      const previous = this.content;
+      try {
+        const setup = await readTeamArenaSkirmish(this.content.catalog, skill, { map: this.options.map, gameType, advance: action === "next" });
+        await this.replaceWorld(setup.map, null, 0, undefined, setup);
       } catch (error) {
         if (this.content !== previous) throw error;
         const message = error instanceof Error ? error.message : String(error);
@@ -1766,6 +1897,10 @@ export class Application {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
           if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
           this.pendingSave = await readSaveImage(path);
+        }
+        else if (command.name === "teamarena-next" || command.name === "teamarena-retry") {
+          if (!this.isTeamArenaSkirmish() || this.simulation.q3Source()?.level.intermissionTime === 0) throw new Error("Team Arena match has not finished");
+          this.pendingTeamArena = command.name === "teamarena-next" ? "next" : "retry";
         }
         else if (command.name === "map") {
           const map = command.arguments_[0];
@@ -1998,8 +2133,8 @@ export class Application {
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     if (this.archivePersistence && !this.preparedStartup?.pending) {
-      try { await this.saveSourceArchive(this.options, this.content, this.simulation); } catch (error) { errors.push(error); }
-      try { await this.saveClientArchives(this.options, this.content, this.clientCvars); } catch (error) { errors.push(error); }
+      try { await this.saveSourceArchive(this.options, this.content, this.simulation, this.teamArenaOverrides); } catch (error) { errors.push(error); }
+      try { await this.saveClientArchives(this.options, this.content, this.clientCvars, this.teamArenaOverrides); } catch (error) { errors.push(error); }
     }
     try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
     try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }

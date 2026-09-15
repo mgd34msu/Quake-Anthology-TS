@@ -1,3 +1,4 @@
+import { Q3_PROTOCOL } from '../../../../network/q3/adapters.ts';
 import { SaveReader } from "../../../../persistence/value.ts";
 import type { SessionId } from '../../../../contracts/identity.ts';
 import type { WireUserCommand } from '../../../../network/q3/message.ts';
@@ -5,6 +6,13 @@ import { CvarFlag, CvarRegistry } from '../../../../core/cvars/index.ts';
 import type { Q3HostSettings } from './host.ts';
 
 export function registerQ3ServerCvars(cvars: CvarRegistry, settings: Pick<Q3HostSettings, "maxClients" | "mapName">): void {
+  for (const [name, value, flags] of [
+    ['protocol', String(Q3_PROTOCOL.version), CvarFlag.ServerInfo | CvarFlag.ReadOnly],
+    ['sv_pure', '1', CvarFlag.SystemInfo], ['sv_allowDownload', '0', CvarFlag.ServerInfo],
+    ['sv_maxRate', '0', CvarFlag.ServerInfo], ['sv_fps', '20', CvarFlag.None], ['sv_serverid', '0', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+    ['sv_paks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_pakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+    ['sv_referencedPaks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_referencedPakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
+  ] satisfies readonly (readonly [string, string, number])[]) cvars.register(name, value, flags);
   cvars.register('sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
   cvars.register('mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
   cvars.register('sv_mapname', '', CvarFlag.ServerInfo | CvarFlag.ReadOnly);

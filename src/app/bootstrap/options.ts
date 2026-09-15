@@ -7,6 +7,7 @@ import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
   readonly explicitRules?: { readonly skill?: boolean; readonly mode?: boolean; readonly capacity?: boolean };
+  readonly teamArenaSkirmish?: import("./team-arena-skirmish.ts").TeamArenaSkirmish;
   readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
   readonly q1Protocol?: Q1ProtocolIdentity;
   readonly q2Protocol?: Extract<Q2ProtocolIdentity, { kind: "q2-classic" }> | { readonly kind: "q2-r1q2"; readonly version: 35; readonly revision: 1904 | 1905 };

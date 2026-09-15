@@ -287,8 +287,11 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native Q3 pres
   expect(launch.recipe.campaign.kind).toBe("campaign");
   expect(model.presets().find(preset => preset.id === "q3-baseq3")?.difficulties).toHaveLength(5);
   if (catalog.product("q3-missionpack").availability.kind === "installed") {
-    expect(model.presets().find(preset => preset.id === "q3-missionpack")?.unavailable).toContain("team setup");
-    await expect(model.resolvePreset("q3-missionpack")).rejects.toThrow("team setup");
+    expect(model.presets().find(preset => preset.id === "q3-missionpack")?.unavailable).toBeNull();
+    const teamArena = await model.resolvePreset("q3-missionpack", 4);
+    expect(teamArena.options).toMatchObject({ map: "maps/mpteam1.bsp", characterModel: "james", botSkill: 4,
+      teamArenaSkirmish: { gameType: 4, maxClients: 6, playerTeam: "Red", playerHeadModel: "*james" } });
+    expect(teamArena.recipe.character.appearance.provider).toBe("q3:model/james");
   }
 }, 60000);
 

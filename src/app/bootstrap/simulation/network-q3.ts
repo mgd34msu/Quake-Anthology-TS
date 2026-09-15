@@ -28,14 +28,7 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
   const entityCount = () => guest ? source.game.data.numEntities : source.pool.numEntities;
   const sharedEntity = (number: number) => guest ? source.records.entity(number) : source.pool.at(number);
   const linked = (number: number) => guest ? source.records.entity(number).r.linked : source.pool.at(number).inuse && source.pool.at(number).r.linked;
-  if (mode === 'new') for (const [name, value, flags] of [
-    ['protocol', String(Q3_PROTOCOL.version), CvarFlag.ServerInfo | CvarFlag.ReadOnly],
-    ['sv_pure', '1', CvarFlag.SystemInfo], ['sv_allowDownload', '0', CvarFlag.ServerInfo],
-    ['sv_maxRate', '0', CvarFlag.ServerInfo], ['sv_fps', '20', CvarFlag.None], ['sv_serverid', '0', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
-    ['sv_paks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_pakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
-    ['sv_referencedPaks', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly], ['sv_referencedPakNames', '', CvarFlag.SystemInfo | CvarFlag.ReadOnly],
-    ['fs_game', guest ? cvars.variableString('fs_game') : product === 'missionpack' ? 'missionpack' : '', CvarFlag.SystemInfo],
-  ] satisfies readonly (readonly [string, string, number])[]) cvars.register(name, value, flags);
+  if (mode === 'new') cvars.register('fs_game', guest ? cvars.variableString('fs_game') : product === 'missionpack' ? 'missionpack' : '', CvarFlag.SystemInfo);
   let packages: Q3ApplicationPackages | null = null, preparing: Promise<Q3ApplicationPackages> | null = null;
   let touchedCgame = false;
   const archiveState = (): Q3ApplicationPackages => { if (packages === null) throw new Error('Q3 package metadata has not been prepared'); return packages; };

@@ -38,13 +38,15 @@ import { SeatGamePrompt, gamePromptMenu } from "./game-prompt.ts";
 import { Q2MatchUi } from "./q2-match-ui.ts";
 import { bindImageSettings, bindModelSettings } from "../../ui/settings/images.ts";
 
+import { TeamArenaResults, type TeamArenaResultService } from "./team-arena-results.ts";
 import { SeatPlayerDeath, playerDeathMenu } from "./player-death.ts";
 
 export class ApplicationSeatUi implements ApplicationInputUi {
   readonly controller: NativeUiController;
   private manualPause = false;
-  get pauseMenuOpen(): boolean { return this.manualPause || this.death.active && this.controller.activeMenu !== playerDeathMenu; }
+  get pauseMenuOpen(): boolean { return this.manualPause || this.teamArena?.active === true || this.death.active && this.controller.activeMenu !== playerDeathMenu; }
   private readonly death: SeatPlayerDeath;
+  private readonly teamArena: TeamArenaResults | null;
   private readonly saves: ReturnType<typeof registerSavedGameMenus>;
   readonly preferences: SeatUiPreferences;
   readonly messages: SeatHudMessages;
@@ -79,7 +81,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   async prepare(assets: ApplicationAssets): Promise<void> {
     if (this.guestUi) return;
-    this.death.observe(this.simulation.playerUi(this.local.player.actor).health);
+    this.teamArena?.update();
+    if (this.teamArena === null) this.death.observe(this.simulation.playerUi(this.local.player.actor).health);
     if (this.death.active) this.weaponWheel.close(false);
     await this.prompt.prepare(assets, () => this.local.input.focus);
     this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
@@ -96,7 +99,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false) {
+    command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService) {
     const seat = local.player.seat.id;
     this.font = font; this.typography = typography;
     this.now = input.now;
@@ -115,6 +118,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
+    this.teamArena = teamArena === undefined ? null : new TeamArenaResults(this.controller, teamArena);
     this.prompt = new SeatGamePrompt(seat, () => local.player.actor, this.controller, value => local.input.setImpulse(value));
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
@@ -236,5 +240,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  close(): void { this.death.close(); this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.teamArena?.close(); this.death.close(); this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }
