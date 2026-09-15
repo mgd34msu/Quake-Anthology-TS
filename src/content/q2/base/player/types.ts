@@ -84,6 +84,7 @@ export interface Q2PlayerRules {
   timeLimitMinutes: number;
   fragLimit: number;
   mapList: readonly string[];
+  mapListShuffle: boolean;
   nextMap: string;
   spawnPoint: string;
   floodMessages: number;
@@ -100,7 +101,7 @@ export interface Q2PlayerRules {
 }
 export function createQ2PlayerRules(changes: Partial<Q2PlayerRules> = {}): Q2PlayerRules {
   return { password: "", spectatorPassword: "", maxSpectators: 4, cheats: false, timeLimitMinutes: 0, fragLimit: 0,
-    mapList: [], nextMap: "", spawnPoint: "", floodMessages: 4, floodSeconds: 4, floodWaitSeconds: 10,
+    mapList: [], mapListShuffle: false, nextMap: "", spawnPoint: "", floodMessages: 4, floodSeconds: 4, floodWaitSeconds: 10,
     rollSpeed: 200, rollAngle: 2, runPitch: 0.002, runRoll: 0.005, bobUp: 0.005, bobPitch: 0.002, bobRoll: 0.002,
     gunOffset: { x: 0, y: 0, z: 0 }, ...changes };
 }

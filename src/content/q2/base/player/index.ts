@@ -634,8 +634,23 @@ export class Q2Players implements Q2SpawnModule {
   endDeathmatchLevel(game: Q2GameServices): undefined {
     let next = game.options.mapName;
     if ((game.options.deathmatchFlags & 32) === 0) {
-      const index = this.rules.mapList.findIndex(map => map.toLowerCase() === game.options.mapName.toLowerCase());
-      if (index >= 0) next = this.rules.mapList[(index + 1) % this.rules.mapList.length] ?? next;
+      const maps = this.rules.mapList;
+      const index = maps.findIndex(map => map.toLowerCase() === game.options.mapName.toLowerCase());
+      if (index >= 0) {
+        if (game.options.edition === "rerelease" && this.rules.mapListShuffle && maps.length > 1 && index === maps.length - 1) {
+          const shuffled = [...maps];
+          for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = game.host.rereleaseRandom?.integer(i + 1) ?? Math.floor(game.host.random() * (i + 1));
+            const current = shuffled[i], selected = shuffled[j];
+            if (current === undefined || selected === undefined) throw new Error("Q2 map shuffle index outside rotation");
+            shuffled[i] = selected; shuffled[j] = current;
+          }
+          const first = shuffled[0], last = shuffled[shuffled.length - 1];
+          if (first === game.options.mapName && last !== undefined) { shuffled[0] = last; shuffled[shuffled.length - 1] = first; }
+          this.rules.mapList = shuffled;
+          next = shuffled[0] ?? next;
+        } else if (game.options.edition !== "rerelease" || maps.length !== 1) next = maps[(index + 1) % maps.length] ?? next;
+      }
       else next = this.rules.nextMap || q2EntitiesNamed(game, "target_changelevel")[0]?.spawn.values.get("map") || next;
     }
     return this.beginIntermission(game, next);

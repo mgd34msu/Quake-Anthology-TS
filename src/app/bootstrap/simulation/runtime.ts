@@ -1,4 +1,6 @@
 import { WorldDebugLineStore } from "../../../debug/world.ts";
+import { sourceLevelTransition } from "./source-transition.ts";
+import type { SourceLevelAuthority } from "./source-transition.ts";
 import type { DebugLine } from "../../../debug/shapes.ts";
 import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
@@ -1040,7 +1042,7 @@ export class SharedSimulation implements Simulation {
     return selected;
   }
 
-  private q1ActorHost(source: ProviderReference, runtime: ActorHostRuntime): Q1FoundationHost {
+  private q1ActorHost(source: ProviderReference, runtime: ActorHostRuntime, authority: SourceLevelAuthority = "actor-source"): Q1FoundationHost {
     const content = source.content;
     const movement = source.provider === this.recipe.map.entities.provider ? this.q1Movement : this.createMonsterMovement(runtime.numeric, runtime.random);
     const visibilityNumeric = createNumericOperations(runtime.numeric);
@@ -1069,7 +1071,7 @@ export class SharedSimulation implements Simulation {
           }
           if (event.kind === "teleport-player") { this.grapple?.release(event.player); const player = this.player(event.player); if (player !== null) { player.viewAngles = event.angles; if (player.state.kind === "q1-netquake") player.state = { ...player.state, viewAngles: event.angles, teleportTimeSeconds: event.lockUntil }; } }
           return this.events.emit(content, { kind: "q1", event }, { kind: "seconds", value: runtime.now() });
-        }, transition: intent => { this.transitions.push(intent); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
+        }, transition: intent => { this.transitions.push(sourceLevelTransition(intent, this.recipe, authority)); return undefined; }, players: () => this.players(), classname: actor => this.classname(actor),
         checkClient: observer => {
           const eye = this.q1VisibilityEye(observer.id);
           return eye === null ? null : this.q1ClientVisibility.check(eye, runtime.now(), visibilityNumeric);
@@ -1082,7 +1084,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private q2ActorHost(source: ProviderReference, runtime: ActorHostRuntime,
-    readMonster: (actor: ActorId) => Q2MonsterState | undefined): Q2FoundationHost {
+    readMonster: (actor: ActorId) => Q2MonsterState | undefined, authority: SourceLevelAuthority = "actor-source"): Q2FoundationHost {
     const content = source.content;
     return createQ2ActorHost({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
       gravity: () => this.physics.gravity,
@@ -1102,11 +1104,11 @@ export class SharedSimulation implements Simulation {
       setMotion: motion => this.physics.setMotion(motion), setAreaPortal: (portal, open) => { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); return undefined; },
       emit: event => { if (event.kind === "model") this.sourceModels.set(event.actor, event); return this.events.emit(content, { kind: "q2", event }, this.source.kind === "q2" && source.content === this.recipe.map.entities.content ? this.sourceFrame.time : { kind: "seconds", value: runtime.now() }); },
       transition: intent => {
-        if (!this.checkingQ2Rules && this.source.kind === "q2" && intent.kind === "campaign-level") {
+        if (authority === "primary-world" && !this.checkingQ2Rules && this.source.kind === "q2" && intent.kind === "campaign-level") {
           const change = this.levelChange;
           return this.source.players.beginIntermission(this.source.game, change?.map ?? intent.map.replace(/^q2:/, ""), change?.landmark ?? null);
         }
-        this.transitions.push(intent); return undefined;
+        this.transitions.push(sourceLevelTransition(intent, this.recipe, authority)); return undefined;
       }, diagnostic: message => this.events.message({ kind: "print", level: 2, text: message }) }, { scene: this.scene, numeric: runtime.numeric, worldActor: () => this.worldActor(), sourceOrder: (a, b) => this.sourceOrder(a, b) });
   }
 
@@ -1473,7 +1475,7 @@ export class SharedSimulation implements Simulation {
         saved === undefined ? { kind: "new" } : { kind: "restore", state: decodeCheckpointValue(simulationProviderCheckpoint(saved, "q3:native").bytes) }) };
     }
     if (this.options.world.kind === "q1-bsp") {
-      const host = this.q1ActorHost(recipe.map.entities, actorRuntime);
+      const host = this.q1ActorHost(recipe.map.entities, actorRuntime, "primary-world");
       const cvars = this.options.sourceRegistry ?? new CvarRegistry({ dialect: "q1-netquake", context: { session: this.session, origin: { kind: "server-console" } },
         print: text => { this.events.message({ kind: "print", level: 2, text }); } });
       if (this.options.restore === undefined && this.options.sourceRegistry === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
@@ -1572,7 +1574,7 @@ export class SharedSimulation implements Simulation {
       noise: (actor, origin) => { if (this.source.kind !== "q2") throw new Error("Q2 noise before source entry"); return this.source.monsters.reportNoise(actor, origin); }, weaponInput: actor => this.q2WeaponInput(this.requirePlayer(actor)), banned: () => false,
     };
     let owningMonsters: Q2ProductRuntime["monsters"] | null = null;
-    const host = this.q2ActorHost(recipe.map.entities, actorRuntime, actor => owningMonsters?.context(actor)?.state);
+    const host = this.q2ActorHost(recipe.map.entities, actorRuntime, actor => owningMonsters?.context(actor)?.state, "primary-world");
     const serverCvars = this.options.sourceRegistry ?? new CvarRegistry({ dialect: content.includes(":rerelease:") ? "q2-rerelease" : "q2-classic",
       context: { session: this.session, origin: { kind: "server-console" } }, print: text => this.events.message({ kind: "print", level: 2, text }) });
     this.q2ServerRegistry = serverCvars;

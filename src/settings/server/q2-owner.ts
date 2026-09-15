@@ -66,6 +66,7 @@ export function registerQ2ServerCvars(cvars: CvarRegistry, match: string): void 
   cvars.register("cheats", "0", Q2CvarFlag.ServerInfo | Q2CvarFlag.Latch);
   for (const axis of ["x", "y", "z"]) cvars.register(`gun_${axis}`, "0", 0);
   cvars.register(cvars.dialect === "q2-rerelease" ? "g_map_list" : "sv_maplist", "", 0);
+  if (cvars.dialect === "q2-rerelease") cvars.register("g_map_list_shuffle", "0", 0);
   if (cvars.dialect === "q2-rerelease") for (const [name, , value, flags] of [...rereleaseBooleans, ...rereleaseNumbers]) cvars.register(name, value, flags);
   if (match === "q2:ctf") cvars.register("capturelimit", String(createQ2CtfRules().captureLimit), Q2CvarFlag.ServerInfo);
   if (match === "q2:lmctf") bindLmctfConsoleRules(cvars, createLmctfRules());
@@ -103,6 +104,8 @@ export function bindQ2PlayerCvars(cvars: CvarRegistry, rules: Q2PlayerRules, rer
     get: () => cvars.variableString(mapList).split(rerelease === null ? /[\s,]+/ : /\s+/).filter(value => value !== ""),
     set: (value: readonly string[]) => { cvars.set(mapList, value.join(" "), true); } });
   if (rerelease !== null) {
+    Object.defineProperty(rules, "mapListShuffle", { enumerable: true, configurable: true,
+      get: () => cvars.variableValue("g_map_list_shuffle") !== 0, set: (value: boolean) => { cvars.set("g_map_list_shuffle", value ? "1" : "0", true); } });
     for (const [name, key] of rereleaseBooleans) Object.defineProperty(rerelease, key, { enumerable: true, configurable: true,
       get: () => cvars.variableValue(name) !== 0, set: (value: boolean) => { cvars.set(name, value ? "1" : "0", true); } });
     for (const [name, key] of rereleaseNumbers) Object.defineProperty(rerelease, key, { enumerable: true, configurable: true,

@@ -68,3 +68,11 @@ test('older Q2 source saves hydrate newly bound cvars and retain saved rule valu
   restoreQ2ServerCvars(current, modern);
   expect(options.coopNumLives).toBe(6); expect(current.find('g_coop_num_lives')?.latchedValue).toBe('8');
 });
+
+test("map shuffle is a live rerelease-only cvar with a disabled source default", () => {
+  const classic = source("q2-classic"), rerelease = source("q2-rerelease");
+  expect(classic.cvars.find("g_map_list_shuffle")).toBeUndefined(); expect(classic.rules.mapListShuffle).toBe(false);
+  expect(rerelease.cvars.find("g_map_list_shuffle")?.flags).toBe(0); expect(rerelease.rules.mapListShuffle).toBe(false);
+  rerelease.cvars.set("g_map_list_shuffle", "1"); expect(rerelease.rules.mapListShuffle).toBe(true);
+  rerelease.rules.mapListShuffle = false; expect(rerelease.cvars.variableString("g_map_list_shuffle")).toBe("0");
+});

@@ -98,7 +98,7 @@ import { Q2Weapons } from "../../../../src/content/q2/foundation/weapons/index.t
 import type { Q2FoundationHost, Q2GameOptions } from "../../../../src/content/q2/foundation/host.ts";
 import type { Q2WeaponInput } from "../../../../src/content/q2/foundation/weapons/index.ts";
 
-function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "maxClients">> = {}) {
+function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "maxClients" | "mapName" | "deathmatchFlags">> = {}, random = new Q2RereleaseRandom()) {
   const shared = character(), events: Q2PlayerEvent[] = [];
   const actor = shared.actor;
   let now = 0;
@@ -113,7 +113,7 @@ function campaign(options: Partial<Pick<Q2GameOptions, "edition" | "mode" | "max
   const players = new Q2Players(items, weapons, hooks);
   const host: Q2FoundationHost = {
     actors: shared.actors, bodies: shared.bodies, combat: shared.combat, inventory: shared.inventory, callbacks: new ActorCallbackTable(shared.actors),
-    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5, schedule: () => undefined,
+    now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5, rereleaseRandom: random, schedule: () => undefined,
     touchTriggers: () => undefined, keyConsumed: id => { const entity = game.entity(id); return entity === null ? undefined : players.consumedKey(entity, game); },
     trace: request => ({ kind: "q2", fraction: 1, startSolid: false, allSolid: false, end: request.end, contact: { kind: "none" }, hit: { kind: "none" }, contents: 0,
       surface: null, sourcePlane: { normal: zero, distance: 0, type: 0, signbits: 0 }, secondary: null }),
@@ -256,3 +256,80 @@ test("Q2 named supply without a pickup adapter offers canonical item IDs to the 
   expect(received).toEqual([["q2:ammo_cells", "50"], ["q2:weapon_supershotgun"]]);
   expect(shared.inventory.entries(entity.actor.id).some(entry => entry.item === "q2:ammo_cells" || entry.item === "q2:weapon_supershotgun")).toBe(false);
 });
+
+import { Q2RereleaseRandom } from "../../../../src/core/random/q2-rerelease.ts";
+import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
+import { bindQ2PlayerCvars, registerQ2ServerCvars } from "../../../../src/settings/server/q2-owner.ts";
+import { createQ2RereleaseOptions } from "../../../../src/content/q2/rerelease/types.ts";
+import { decodeQ2PlayersCheckpoint, encodeQ2PlayersCheckpoint } from "../../../../src/persistence/q2-players.ts";
+
+test("rerelease tail shuffle uses the session stream, persists the rewritten cvar order", () => {
+  class FirstIndexRandom extends Q2RereleaseRandom { override integer(): number { return 0; } }
+  const active = campaign({ edition: "rerelease", mode: "deathmatch", mapName: "base3" }, new FirstIndexRandom());
+  const identity = createIdentityOwner("rotation"), cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: identity.session, origin: { kind: "server-console" } } });
+  registerQ2ServerCvars(cvars, "q2:official"); bindQ2PlayerCvars(cvars, active.players.rules, createQ2RereleaseOptions());
+  cvars.set("g_map_list", "base1 base2 base3"); cvars.set("g_map_list_shuffle", "1");
+  active.players.endDeathmatchLevel(active.game);
+  expect(active.players.intermission).toMatchObject({ map: "base2" });
+  expect(cvars.variableString("g_map_list")).toBe("base2 base3 base1");
+  const saved = decodeQ2PlayersCheckpoint(encodeQ2PlayersCheckpoint(active.players.capture()));
+  expect(saved.rules.mapListShuffle).toBe(true); expect(saved.rules.mapList).toEqual(["base2", "base3", "base1"]);
+  const savedCvars = cvars.captureSaveState(); cvars.set("g_map_list", "changed"); cvars.restoreSaveState(savedCvars);
+  expect(active.players.rules.mapList).toEqual(["base2", "base3", "base1"]);
+});
+
+test("rerelease tail shuffle rewrites the rotation and preserves donor case-sensitive first-map comparison", () => {
+  class FirstIndexRandom extends Q2RereleaseRandom { override integer(): number { return 0; } }
+  for (const [mapName, maps, expected, destination] of [
+    ["base3", ["base1", "base2", "base3"], ["base2", "base3", "base1"], "base2"],
+    ["base2", ["base1", "base2"], ["base1", "base2"], "base1"],
+    ["BASE2", ["base1", "base2"], ["base2", "base1"], "base2"],
+  ] satisfies readonly (readonly [string, readonly string[], readonly string[], string])[]) {
+    const active = campaign({ edition: "rerelease", mode: "deathmatch", mapName }, new FirstIndexRandom());
+    active.players.rules.mapList = maps; active.players.rules.mapListShuffle = true;
+    active.players.endDeathmatchLevel(active.game);
+    expect(active.players.rules.mapList).toEqual(expected); expect(active.players.intermission).toMatchObject({ map: destination });
+  }
+});
+
+test("rotation consumes no shuffle draws before the tail, when disabled, on classic, on a singleton, or with same-level flags", () => {
+  for (const [edition, mapName, maps, enabled, flags, destination] of [
+    ["rerelease", "base1", ["base1", "base2"], true, 0, "base2"],
+    ["rerelease", "base2", ["base1", "base2"], false, 0, "base1"],
+    ["classic", "base2", ["base1", "base2"], true, 0, "base1"],
+    ["rerelease", "BASE1", ["base1"], true, 0, "BASE1"],
+    ["rerelease", "base2", ["base1", "base2"], true, 32, "base2"],
+  ] satisfies readonly (readonly ["classic" | "rerelease", string, readonly string[], boolean, number, string])[]) {
+    const random = new Q2RereleaseRandom(), active = campaign({ edition, mode: "deathmatch", mapName, deathmatchFlags: flags }, random);
+    active.players.rules.mapList = maps; active.players.rules.mapListShuffle = enabled;
+    active.players.endDeathmatchLevel(active.game);
+    expect(random.capture().draws).toBe(0); expect(active.players.rules.mapList).toEqual(maps);
+    expect(active.players.intermission).toMatchObject({ map: destination });
+  }
+});
+
+test("missing and empty map lists retain explicit and authored travel", () => {
+  for (const maps of [[], ["other"]]) {
+    const active = campaign({ edition: "rerelease", mode: "deathmatch" });
+    active.players.rules.mapList = maps; active.players.rules.mapListShuffle = true; active.players.rules.nextMap = "explicit";
+    active.players.endDeathmatchLevel(active.game); expect(active.players.intermission).toMatchObject({ map: "explicit" });
+    active.players.intermission = { kind: "playing" }; active.players.rules.nextMap = "";
+    active.game.spawn({ classname: "target_changelevel", ordinal: -1, values: new Map([["map", "authored"]]) });
+    active.players.endDeathmatchLevel(active.game); expect(active.players.intermission).toMatchObject({ map: "authored" });
+  }
+});
+
+test("rotation resumes the owned MT stream and older player checkpoints default shuffle off", () => {
+  const random = new Q2RereleaseRandom(), active = campaign({ edition: "rerelease", mode: "deathmatch", mapName: "base4" }, random);
+  active.players.rules.mapList = ["base1", "base2", "base3", "base4"]; active.players.rules.mapListShuffle = true;
+  const state = random.capture(), checkpoint = active.players.capture();
+  active.players.endDeathmatchLevel(active.game); const order = active.players.rules.mapList, intermission = active.players.intermission;
+  expect(random.capture().draws).toBeGreaterThan(state.draws);
+  random.restore(state); active.players.restore(active.game, checkpoint); active.players.endDeathmatchLevel(active.game);
+  expect(active.players.rules.mapList).toEqual(order); expect(active.players.intermission).toEqual(intermission);
+  const { mapListShuffle, ...oldRules } = checkpoint.rules; expect(mapListShuffle).toBe(true);
+  const old = decodeQ2PlayersCheckpoint(encodeQ2PlayersCheckpoint({ ...checkpoint, rules: { ...oldRules, mapListShuffle: false } }));
+  const legacy = decodeQ2PlayersCheckpoint(encodeCheckpointValue({ ...old, rules: oldRules }));
+  expect(legacy.rules.mapListShuffle).toBe(false);
+});
+import { encodeCheckpointValue } from "../../../../src/persistence/value.ts";

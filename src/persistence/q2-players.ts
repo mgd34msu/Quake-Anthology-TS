@@ -12,7 +12,7 @@ function carry(reader: SaveReader): Q2PlayerCarry {
 function rules(reader: SaveReader): Q2PlayerRules {
   const n = (key: string): number => reader.field(key).number(), s = (key: string): string => reader.field(key).string();
   return { password: s("password"), spectatorPassword: s("spectatorPassword"), maxSpectators: n("maxSpectators"), cheats: reader.field("cheats").boolean(), timeLimitMinutes: n("timeLimitMinutes"), fragLimit: n("fragLimit"),
-    mapList: reader.field("mapList").list(value => value.string()), nextMap: s("nextMap"), spawnPoint: s("spawnPoint"), floodMessages: n("floodMessages"), floodSeconds: n("floodSeconds"), floodWaitSeconds: n("floodWaitSeconds"),
+    mapList: reader.field("mapList").list(value => value.string()), mapListShuffle: reader.field("mapListShuffle").value === undefined ? false : reader.field("mapListShuffle").boolean(), nextMap: s("nextMap"), spawnPoint: s("spawnPoint"), floodMessages: n("floodMessages"), floodSeconds: n("floodSeconds"), floodWaitSeconds: n("floodWaitSeconds"),
     rollSpeed: n("rollSpeed"), rollAngle: n("rollAngle"), runPitch: n("runPitch"), runRoll: n("runRoll"), bobUp: n("bobUp"), bobPitch: n("bobPitch"), bobRoll: n("bobRoll"), gunOffset: readVector(reader.field("gunOffset")) };
 }
 function intermission(reader: SaveReader): Q2PlayerIntermissionCheckpoint {
