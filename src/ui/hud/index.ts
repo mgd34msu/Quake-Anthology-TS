@@ -1,4 +1,4 @@
-import { drawWeaponHud } from "./weapon.ts";
+import { drawWeaponHud, hudStatusRows } from "./weapon.ts";
 import type { CommonWeaponHud } from "./weapon.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Shared per-seat overlay drawing; gameplay providers retain their source HUD/stat layouts.
@@ -18,9 +18,9 @@ import type { CarouselPresentation, WheelPresentation } from "./wheel.ts";
 export * from "./wheel.ts";
 export * from "./q1-wheel.ts";
 
-export function hudVitalRects(count: number, scale: number): readonly Rect[] {
+export function hudVitalRects(count: number, scale: number, height = 42): readonly Rect[] {
   const width = Math.min(600 / scale / Math.max(1, count), 160), start = 320 - width * count / 2;
-  return Array.from({ length: count }, (_, index) => ({ x: start + index * width, y: 434, width: width - 4, height: 42 }));
+  return Array.from({ length: count }, (_, index) => ({ x: start + index * width, y: 476 - height, width: width - 4, height }));
 }
 
 function statusLayout(context: UiDrawContext, count: number, hudScale: number, textScale: number, capHeight = 8): { readonly rects: readonly Rect[]; readonly transform: UiTransform; readonly minimumTextScale: number } {
@@ -32,7 +32,7 @@ function statusLayout(context: UiDrawContext, count: number, hudScale: number, t
       y: area.y + area.height - 36, width: width - 4, height: 32 })), transform: { scale: 1, x: 0, y: 0 }, minimumTextScale: 8 / capHeight };
   }
   const scale = requested;
-  return { rects: hudVitalRects(count, group), minimumTextScale: 8 / capHeight / scale,
+  return { rects: hudVitalRects(count, group, hudStatusRows(textScale, capHeight).height), minimumTextScale: 8 / capHeight / scale,
     transform: { scale, x: fitted.x + 320 * fitted.scale * (1 - group), y: fitted.y + 480 * fitted.scale * (1 - group) } };
 }
 
@@ -169,24 +169,29 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
       const rect = rects[index];
       if (rect === undefined) continue;
       const x = rect.x;
-      const compact = status.transform.scale === 1 && status.minimumTextScale * (skin.capInk?.height ?? 8) === 8;
+      const compact = rect.height === 32;
       statusCommand({ kind: "fill", rect, color: background });
       if (vital.icon !== null) statusCommand({ kind: "image", resource: vital.icon, rect: { x: x + 6, y: rect.y + 8, width: 24, height: 24 }, texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color });
       const scale = compact ? status.minimumTextScale : textScale;
       const label = options.localize(vital.label), value = String(vital.value), full = label + " " + value;
       const left = x + (vital.icon === null ? 4 : 34), available = rect.x + rect.width - 4 - left;
       const measure = (text: string): number => options.measureText?.(text, scale) ?? text.length * 8 * scale;
-      const lines = measure(full) <= available ? [full] : [label, value];
+      const rows = hudStatusRows(textScale, skin.capInk?.height);
+      const lines = compact ? measure(full) <= available ? [full] : [label, value] : [value, label];
       for (const [row, line] of lines.entries()) {
+        const requestedScale = compact ? scale : textScale * (row === 0 ? 1.5 : 0.8);
+        const rowScale = !compact && row === 0 ? Math.min(requestedScale, available / Math.max(1, options.measureText?.(line, 1) ?? line.length * 8)) : requestedScale;
+        const measureRow = (text: string): number => options.measureText?.(text, rowScale) ?? text.length * 8 * rowScale;
         const chars = Array.from(line);
-        while (chars.length > 0 && measure(chars.join("")) > available) chars.pop();
-        statusCommand({ kind: "text", origin: { x: left, y: rect.y + (compact ? 4 + row * 14 - (skin.capInk?.top ?? 0) * scale : 12) }, text: chars.join(""), font: skin.font,
-          scale, color: vital.warning ? accent : color, align: "left", shadow: true });
+        while (chars.length > 0 && measureRow(chars.join("")) > available) chars.pop();
+        statusCommand({ kind: "text", origin: { x: left, y: rect.y + (compact ? 4 + row * 14 - (skin.capInk?.top ?? 0) * scale : (row === 0 ? 4 : rows.labelTop) - (skin.capInk?.top ?? 0) * rowScale) }, text: chars.join(""), font: skin.font,
+          scale: rowScale, color: vital.warning ? accent : color, align: "left", shadow: true });
       }
     }
   }
   if (data.weapon !== undefined) {
-    const rect = data.weapon.nativeStatus ? { x: 8, y: 434, width: 152, height: 42 }
+    const nativeHeight = hudStatusRows(textScale, skin.capInk?.height).height;
+    const rect = data.weapon.nativeStatus ? { x: 8, y: 476 - nativeHeight, width: 152, height: nativeHeight }
       : status.rects[data.vitals.length];
     if (rect !== undefined) {
       anchor = { x: data.weapon.nativeStatus ? 0 : 320, y: 480 };
