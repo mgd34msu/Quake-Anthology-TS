@@ -1,4 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
+import { ApplicationMusic, worldMusicTrack } from "../../src/app/bootstrap/audio/music.ts";
+import { SoundBank, UnifiedAudio, Q2Jukebox, remapQ2MusicTrack } from "../../src/audio/index.ts";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -58,8 +60,8 @@ test.skipIf(!existsSync(join(import.meta.dir, "../../../qfiles/q3a/baseq3/pak0.p
   const seat = createIdentityOwner("startup-audio-test").seat(0);
   try {
     for (const withTheme of [true, false]) {
-      const audio = await StartupAudio.open({ mounts: cues, content: q3.id, family: "q3", seat, print: () => undefined,
-        preferences: { effectsVolume: 0, musicVolume: 0 }, theme: withTheme ? { mounts: themeMounts, content: theme.id } : null });
+      const audio = await StartupAudio.open({ mounts: cues, source: { content: q3.id, ...q3.expectation }, seat, print: () => undefined,
+        preferences: { effectsVolume: 0, musicVolume: 0 }, theme: withTheme ? { mounts: themeMounts, source: { content: theme.id, ...theme.expectation } } : null });
       try {
         audio.sound("open"); expect(audio.engine.mix(4096).every(value => value === 0)).toBe(true);
         audio.setVolumes(0, 0.4);
@@ -117,7 +119,7 @@ test("in-memory menu fallback uses each mounted family, loops once, and respects
     const content = createContentId({ family: fixture.family, edition: "test", package: "menu", revision: "1" });
     const mounts = new MenuMemoryMounts(content, new Map([[fixture.path, menuWave(1000)]]));
     const messages: string[] = [];
-    const audio = await StartupAudio.open({ mounts, content, family: fixture.family, theme: null,
+    const audio = await StartupAudio.open({ mounts, source: { content, family: fixture.family, edition: "classic", campaign: "base" }, theme: null,
       seat: createIdentityOwner("menu-fallback").seat(0), print: text => { messages.push(text); }, preferences: { effectsVolume: 0, musicVolume: 0 } });
     try {
       expect(audio.engine.outputState).toBe("detached");
@@ -142,7 +144,7 @@ test("in-memory menu prefers rerelease theme and falls back only when it is miss
     const mounts = new MenuMemoryMounts(content, new Map([["music/track02.wav", menuWave(1000)]]));
     const theme = new MenuMemoryMounts(themeContent, new Map(themePresent ? [["music/track77.wav", menuWave(2000)]] : []));
     const started = spyOn(MusicPlayer.prototype, "start");
-    const audio = await StartupAudio.open({ mounts, content, family: "q1", theme: { mounts: theme, content: themeContent },
+    const audio = await StartupAudio.open({ mounts, source: { content, family: "q1", edition: "classic", campaign: "id1" }, theme: { mounts: theme, source: { content: themeContent, family: "q2", edition: "rerelease", campaign: "baseq2" } },
       seat: createIdentityOwner("menu-preference").seat(0), print: () => undefined, preferences: { effectsVolume: 0, musicVolume: 0.25 } });
     try {
       expect([...new Set(audio.engine.mix(256))]).toEqual([themePresent ? 500 : 250]);
@@ -155,7 +157,7 @@ test("in-memory menu with no supported soundtrack remains silent and closes clea
   const content = createContentId({ family: "q1", edition: "test", package: "missing", revision: "1" });
   const mounts = new MenuMemoryMounts(content, new Map([["music/track02.mp3", new Uint8Array([1, 2, 3])]]));
   const messages: string[] = [];
-  const audio = await StartupAudio.open({ mounts, content, family: "q1", theme: null,
+  const audio = await StartupAudio.open({ mounts, source: { content, family: "q1", edition: "classic", campaign: "id1" }, theme: null,
     seat: createIdentityOwner("menu-missing").seat(0), print: text => { messages.push(text); }, preferences: { musicVolume: 1 } });
   try { expect(audio.engine.mix(256).every(sample => sample === 0)).toBe(true); expect(messages).toEqual([]); }
   finally { audio.close(); mounts.close(); }
@@ -177,4 +179,68 @@ test("in-memory menu gain is immediate while default Q3 source smoothing remains
     expect(source.volume).toBe(0.0625); expect(menu.volume).toBe(0);
     expect(menu.mix(64).every(sample => sample === 0)).toBe(true);
   } finally { source.close(); menu.close(); }
+});
+
+
+test("soundtrack source edition preserves classic expansion discs and remaps rerelease cues", async () => {
+  for (const campaign of ["xatrix", "rogue"]) for (const edition of ["classic", "rerelease"]) {
+    const content = createContentId({ family: "q2", edition, package: campaign, revision: "1" });
+    const mounts = new MenuMemoryMounts(content, new Map([["music/06.wav", menuWave(1000)], ["music/16.wav", menuWave(2000)]]));
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const music = new ApplicationMusic(engine, () => undefined);
+    try {
+      await music.play({ content, family: "q2", edition, campaign }, new SoundBank(mounts), "6");
+      expect([...new Set(engine.mix(256))]).toEqual([edition === "classic" ? 250 : 500]);
+      expect([...new Set(engine.mix(256))]).toEqual([edition === "classic" ? 250 : 500]);
+      expect(engine.outputState).toBe("detached");
+    } finally { music.stop(); mounts.close(); }
+  }
+});
+
+test("soundtrack profiles preserve base Q2, Q1 numbers, and named Q3 intro loops", async () => {
+  for (const family of ["q1", "q2", "q3"] satisfies readonly GameFamily[]) {
+    const content = createContentId({ family, edition: "classic", package: "base", revision: "1" });
+    const mounts = new MenuMemoryMounts(content, new Map([["music/06.wav", menuWave(1000)],
+      ["music/intro.wav", menuWave(1000)], ["music/loop.wav", menuWave(2000)]]));
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const music = new ApplicationMusic(engine, () => undefined, "immediate");
+    try {
+      await music.play({ content, family, edition: "classic", campaign: "baseq2" }, new SoundBank(mounts),
+        family === "q3" ? "music/intro.wav music/loop.wav" : "6");
+      expect([...new Set(engine.mix(32))]).toEqual([250]);
+      expect([...new Set(engine.mix(128))]).toEqual([family === "q3" ? 500 : 250]);
+      music.stop(); expect(engine.mix(16).every(sample => sample === 0)).toBe(true);
+    } finally { music.stop(); mounts.close(); }
+  }
+});
+
+test("Q2 jukebox explicit disc profile disables remapping and defaults retain base numbering", async () => {
+  const player = new MusicPlayer(44100, "q2"), opened: string[] = [];
+  const jukebox = new Q2Jukebox(player, [{ name: "track06", path: "disc" }, { name: "track16", path: "remastered" }], async path => {
+    opened.push(path); return new MemoryPcmStream({ samples: new Int16Array(32).fill(1000), channels: 1, sampleRate: 44100, frameCount: 32, loopStart: null });
+  }, () => 0);
+  try {
+    expect(await jukebox.play("6")).toBe(true);
+    jukebox.soundtrack = { kind: "remastered", campaign: "rogue" };
+    expect(await jukebox.play("6")).toBe(true);
+    jukebox.soundtrack = { kind: "disc" };
+    expect(await jukebox.play("6")).toBe(true);
+    expect(opened).toEqual(["disc", "remastered", "disc"]);
+    expect(remapQ2MusicTrack(14, { kind: "remastered", campaign: "xatrix" })).toBe(14);
+    expect(remapQ2MusicTrack(6, { kind: "remastered", campaign: "baseq2" })).toBe(6);
+  } finally { jukebox.close(); }
+});
+
+test("world music honors rerelease named override without changing classic or Q3 cue rules", () => {
+  const world = new Map([["sounds", "6"], ["music", "music/custom.ogg"]]);
+  expect(worldMusicTrack(world, { family: "q2", edition: "rerelease" })).toBe("music/custom.ogg");
+  expect(worldMusicTrack(world, { family: "q2", edition: "classic" })).toBe("6");
+  expect(worldMusicTrack(world, { family: "q1", edition: "rerelease" })).toBe("6");
+  expect(worldMusicTrack(world, { family: "q3", edition: "classic" })).toBe("music/custom.ogg");
+  world.set("music", "");
+  expect(worldMusicTrack(world, { family: "q2", edition: "rerelease" })).toBe("6");
+  expect(worldMusicTrack(world, { family: "q3", edition: "classic" })).toBe("");
+  world.set("music", "0");
+  expect(worldMusicTrack(world, { family: "q2", edition: "rerelease" })).toBe("0");
+  expect(worldMusicTrack(undefined, { family: "q2", edition: "rerelease" })).toBe("");
 });

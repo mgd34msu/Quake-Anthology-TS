@@ -2,10 +2,11 @@ import { menuSoundPath } from "./audio/menu.ts";
 import { SoundBank, UnifiedAudio } from "../../audio/index.ts";
 import type { SoundAsset } from "../../audio/index.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
-import type { ContentId, GameFamily } from "../../contracts/content.ts";
+import type { GameFamily } from "../../contracts/content.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
 import { ApplicationMusic } from "./audio/music.ts";
+import type { MusicSource } from "./audio/music.ts";
 import type { AudioPreferences } from "./audio-settings.ts";
 
 /** The frontend uses the same mixer and music decoder as a gameplay session. */
@@ -25,24 +26,24 @@ export class StartupAudio {
       axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false }]);
   }
 
-  static async open(options: { readonly mounts: MountedContent; readonly family: GameFamily; readonly content: ContentId;
-    readonly theme: { readonly mounts: MountedContent; readonly content: ContentId } | null;
+  static async open(options: { readonly mounts: MountedContent; readonly source: MusicSource;
+    readonly theme: { readonly mounts: MountedContent; readonly source: MusicSource } | null;
     readonly seat: SeatId; readonly print: (text: string) => undefined; readonly preferences: Partial<AudioPreferences> }): Promise<StartupAudio> {
-    const audio = new StartupAudio(options.mounts, options.family, options.seat, options.print, options.preferences);
+    const audio = new StartupAudio(options.mounts, options.source.family, options.seat, options.print, options.preferences);
     try {
       const events: readonly UiSound[] = ["open", "close", "move", "change", "reject"];
       for (const event of events) {
-        const sound = await audio.bank.register(menuSoundPath(options.family, event), options.family);
+        const sound = await audio.bank.register(menuSoundPath(options.source.family, event), options.source.family);
         if (sound !== null) audio.sounds.set(event, sound);
       }
-      const fallback = options.family === "q1" ? ["music/track02", "music/02"]
-        : options.family === "q2" ? ["music/02", "music/track02"] : ["music/sonic5"];
-      const candidates = [{ mounts: options.mounts, content: options.content, family: options.family, names: fallback }];
-      if (options.theme !== null) candidates.unshift({ ...options.theme, family: "q2", names: ["music/track77"] });
+      const fallback = options.source.family === "q1" ? ["music/track02", "music/02"]
+        : options.source.family === "q2" ? ["music/02", "music/track02"] : ["music/sonic5"];
+      const candidates = [{ mounts: options.mounts, source: options.source, names: fallback }];
+      if (options.theme !== null) candidates.unshift({ ...options.theme, names: ["music/track77"] });
       music: for (const candidate of candidates) for (const name of candidate.names) for (const extension of ["ogg", "wav"]) {
         const path = name + "." + extension;
         if (await candidate.mounts.resolve(path) === null) continue;
-        await audio.music.play(candidate.content, candidate.family, "", new SoundBank(candidate.mounts), path);
+        await audio.music.play(candidate.source, new SoundBank(candidate.mounts), path);
         break music;
       }
       return audio;

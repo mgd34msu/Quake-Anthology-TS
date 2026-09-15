@@ -22,7 +22,7 @@ import type { Q3CharacterEvent } from "../../content/q3/foundation/character.ts"
 import type { LoadedApplicationContent } from "./content.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
-import { ApplicationMusic, q1MusicFallback } from "./audio/music.ts";
+import { ApplicationMusic, q1MusicFallback, worldMusicTrack } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds, q2MonsterMuzzleSounds } from "./audio/q2-events.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
@@ -285,14 +285,15 @@ export class ApplicationAudio {
   async playMusic(content: ContentId, track: string): Promise<void> {
     const bank = await this.bank(content), product = this.content.catalog.product(content).expectation;
     const alternate = q1MusicFallback(content, this.content.catalog);
-    if (!this.closed) await this.music.play(content, product.family, product.campaign, bank, track,
+    if (!this.closed) await this.music.play({ content, ...product }, bank, track,
       alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate));
   }
 
   async startWorldMusic(): Promise<void> {
     const world = parseEntities(this.content.world.entities).find(entity => entity.get("classname") === "worldspawn");
-    const track = world?.get(this.content.world.kind === "q3-bsp" ? "music" : "sounds") ?? "";
-    await this.playMusic(this.content.recipe.map.entities.content, track);
+    const content = this.content.recipe.map.entities.content;
+    const track = worldMusicTrack(world, this.content.catalog.product(content).expectation);
+    await this.playMusic(content, track);
   }
 
   private async q3Footsteps(content: ContentId): Promise<PlayerFootsteps> {

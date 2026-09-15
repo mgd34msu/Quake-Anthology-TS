@@ -139,7 +139,7 @@ export class StartupApplication {
         themeMounts = await openMountPlan({ id: createMountPlanId("startup", "music"), mounts: themePlan, defaultOrder: themePlan.map(mount => mount.identity.id), prefixOrders: [] });
       }
       const activeThemeMounts = themeMounts;
-      audio = await StartupAudio.open({ theme: themeProduct === undefined || themeMounts === null ? null : { content: themeProduct.id, mounts: themeMounts }, mounts: mounted, family: product.expectation.family, content: product.id, seat, print: this.host.print,
+      audio = await StartupAudio.open({ theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
         preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues } });
       audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
       const activeAudio = audio;

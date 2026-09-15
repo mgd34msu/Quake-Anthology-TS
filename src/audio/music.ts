@@ -127,10 +127,11 @@ export class CdMusic {
     close(): void { this.stop(); }
 }
 const xatrixTracks: readonly number[] = [9, 13, 14, 7, 16, 2, 15, 3, 4, 18];
-export function remapQ2MusicTrack(track: number, gameDirectory: string, enabled = true): number {
-    if (!enabled || track < 2 || track > 11)
+export type Q2SoundtrackProfile = { readonly kind: "disc" } | { readonly kind: "remastered"; readonly campaign: string };
+export function remapQ2MusicTrack(track: number, profile: Q2SoundtrackProfile): number {
+    if (profile.kind === "disc" || track < 2 || track > 11)
         return track;
-    const game = gameDirectory.toLowerCase();
+    const game = profile.campaign.toLowerCase();
     if (game === "rogue")
         return track + 10;
     if (game === "xatrix") {
@@ -156,8 +157,7 @@ export class Q2Jukebox {
     enabled = true;
     shuffle = false;
     menuTrack = "77";
-    gameDirectory = "baseq2";
-    remapExpansionTracks = true;
+    soundtrack: Q2SoundtrackProfile = { kind: "remastered", campaign: "baseq2" };
     constructor(readonly player: MusicPlayer, tracks: readonly MusicTrack[], private readonly open: OpenMusicTrack, private readonly random: () => number) {
         for (const track of tracks)
             if (!this.names.has(track.name.toLowerCase()))
@@ -166,7 +166,7 @@ export class Q2Jukebox {
     }
     private lookup(name: string): MusicTrack | undefined {
         if (/^\d+$/.test(name)) {
-            const track = remapQ2MusicTrack(Number(name), this.gameDirectory, this.remapExpansionTracks);
+            const track = remapQ2MusicTrack(Number(name), this.soundtrack);
             if (track <= 0)
                 return undefined;
             const number = String(track).padStart(2, "0");

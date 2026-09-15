@@ -4,7 +4,7 @@ export { AudioMixer, SOUND_TIME_EPOCH, spatializeSoundOrigin } from "./mixer.ts"
 export type { StartSoundOptions, VoiceOrigin, MixerSoundMemory, SoundPaintRange } from "./mixer.ts";
 export { SoundBank } from "./bank.ts";
 export { MusicPlayer, CdMusic, Q2Jukebox, remapQ2MusicTrack } from "./music.ts";
-export type { OpenMusicTrack, MusicTrack } from "./music.ts";
+export type { OpenMusicTrack, MusicTrack, Q2SoundtrackProfile } from "./music.ts";
 export { decodeWav, decodeQuakeWav, readWavInfo } from "./wav.ts";
 export type { PcmSound, DecodedWav, WavInfo } from "./wav.ts";
 export { MemoryPcmStream, VorbisPcmStream, RawAudioStream, decodeSoundBytes, openPcmBytes } from "./streams.ts";

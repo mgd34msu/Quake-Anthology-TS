@@ -5,6 +5,19 @@ import type { ContentId, GameFamily } from "../../../contracts/content.ts";
 import type { InstalledCatalog } from "../../../content/catalog/index.ts";
 import type { OpenMusicTrack, MusicVolumeMode } from "../../../audio/music.ts";
 
+export interface MusicSource {
+  readonly content: ContentId;
+  readonly family: GameFamily;
+  readonly edition: string;
+  readonly campaign: string;
+}
+
+export function worldMusicTrack(world: ReadonlyMap<string, string> | undefined, source: Pick<MusicSource, "family" | "edition">): string {
+  if (source.family === "q3") return world?.get("music") ?? "";
+  const music = source.family === "q2" && source.edition === "rerelease" ? world?.get("music") ?? "" : "";
+  return music !== "" ? music : world?.get("sounds") ?? "";
+}
+
 /** Only the official original campaigns share numbered soundtracks across Q1 editions. */
 export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
   const pairs = [["q1-classic-id1", "q1-rerelease-id1"], ["q1-classic-hipnotic", "q1-rerelease-hipnotic"], ["q1-classic-rogue", "q1-rerelease-rogue"]];
@@ -40,7 +53,8 @@ export class ApplicationMusic {
     this.current = null;
   }
 
-  async play(content: ContentId, family: GameFamily, campaign: string, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null): Promise<void> {
+  async play(source: MusicSource, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null): Promise<void> {
+    const { content, family, edition, campaign } = source;
     const selected = track.trim();
     if (selected === "" || selected === "0") { this.stop(); return; }
     if (this.current?.content === content && this.current.track === selected && this.current.player.playing) return;
@@ -54,7 +68,7 @@ export class ApplicationMusic {
     this.engine.attachMusic({ id: "world", audience: { kind: "world" }, gain: 1 }, player);
     if (/^[0-9]+$/.test(selected) && family !== "q3") {
       const number = Number(selected);
-      const mapped = family === "q2" ? remapQ2MusicTrack(number, campaign) : number;
+      const mapped = family === "q2" ? remapQ2MusicTrack(number, edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : number;
       let played = await cd.play(mapped, true);
       if (!played && family === "q1" && fallback !== null && request === this.request) {
         openMusic = fallback;

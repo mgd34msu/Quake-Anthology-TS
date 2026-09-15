@@ -95,14 +95,14 @@ for (const campaign of ["id1", "hipnotic", "rogue"]) {
       const open = async (path: string) => { attempts.push(path); return fallbackBank.openMusic(path, alternate); };
       try {
         music.volume = 1;
-        await music.play(selected, "q1", campaign, bank, "6", open);
+        await music.play({ content: selected, ...catalog.product(selected).expectation }, bank, "6", open);
         expect(attempts).toEqual([]);
         expect(engine.mix(1)[0]).toBe(1000);
-        await music.play(selected, "q1", campaign, bank, "7", open);
+        await music.play({ content: selected, ...catalog.product(selected).expectation }, bank, "7", open);
         expect(attempts).toEqual(["music/07.ogg", "music/track07.ogg", "music/07.wav", "music/track07.wav"]);
         expect(engine.mix(1)[0]).toBe(3000);
         expect(printed).toEqual([]);
-        await music.play(selected, "q1", campaign, bank, "8", open);
+        await music.play({ content: selected, ...catalog.product(selected).expectation }, bank, "8", open);
         if (campaign === "id1") expect(engine.mix(1)[0]).toBe(4000);
         else {
           expect(engine.mix(1)[0]).toBe(0);
@@ -138,10 +138,10 @@ test.skipIf(!existsSync(corpusRoot))("Q1 music fallback resolves real classic tr
   using engine = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 0, random: () => 0 });
   const music = new ApplicationMusic(engine, text => { printed.push(text); return undefined; });
   try {
-    await music.play(selected, "q1", "id1", bank, "6");
+    await music.play({ content: selected, ...catalog.product(selected).expectation }, bank, "6");
     expect(printed).toEqual([`Music unavailable: ${selected}/6\n`]);
     printed.length = 0;
-    await music.play(selected, "q1", "id1", bank, "6", async path => {
+    await music.play({ content: selected, ...catalog.product(selected).expectation }, bank, "6", async path => {
       const stream = await fallbackBank.openMusic(path, alternate);
       if (stream !== null) streams.push(stream);
       return stream;

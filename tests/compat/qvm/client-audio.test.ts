@@ -44,7 +44,7 @@ test('cgame and UI sound traps use shared bank handles, mixer and music through 
       updateSoundPosition: (entity, position) => target.updateSoundPosition(entity, position), stopLoopingSound: entity => target.stopLoopingSound(entity),
       clearLoopingSounds: killAll => audio.clearQ3SeatLoops(seat, killAll), setListener: (entity, origin, axis) => {
         listener = { entity, origin, axis }; audio.setListeners([{ seat, actor: identity.actor(entity, 0), origin, axis, gain: 1, underwater: false }]);
-      }, startBackgroundTrack: (intro, loop) => music.play(content, 'q3', 'baseq3', sourceBank, `${intro} ${loop}`) };
+      }, startBackgroundTrack: (intro, loop) => music.play({ content, family: 'q3', edition: 'classic', campaign: 'baseq3' }, sourceBank, `${intro} ${loop}`) };
     const guest = new QvmMemory(new Uint8Array(4096));
     const syscalls = { cgame: createQvmSystemCall('cgame', call => qvmClientAudioSyscall(call, { role: 'cgame', sound, print: text => printed.push(text) }) ?? rejectQvmSyscall(call)),
       ui: createQvmSystemCall('ui', call => qvmClientAudioSyscall(call, { role: 'ui', sound, print: text => printed.push(text) }) ?? rejectQvmSyscall(call)) };
