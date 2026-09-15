@@ -22,6 +22,7 @@ export interface Q3HostSettings {
   readonly singlePlayer: boolean;
   readonly maxClients: number;
   readonly mapName: string;
+  readonly sourceRegistry?: import("../../../../core/cvars/index.ts").CvarRegistry;
   readonly sourceArchive?: readonly CvarArchiveEntry[];
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
 }
@@ -30,7 +31,7 @@ export interface Q3HostSettings {
 export function createQ3SourceHost(operations: Q3HostOperations, settings: Q3HostSettings): Q3SourceHost {
   const serverState = new Q3ServerState({ session: operations.actors.session, now: () => operations.now(),
     print: text => operations.emit({ kind: "print", text }), settings: { ...settings, cvars: [
-      { name: "g_gametype", value: String(settings.gameType) },
+      ...(settings.sourceRegistry === undefined ? [{ name: "g_gametype", value: String(settings.gameType) }] : []),
       { name: "ui_singlePlayerActive", value: settings.singlePlayer ? "1" : "0" }, ...(settings.cvars ?? []),
     ] } });
   return { ...operations, serverState, cvars: serverState.cvars, bots: operations.bots,

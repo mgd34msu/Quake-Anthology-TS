@@ -4,6 +4,12 @@ import type { WireUserCommand } from '../../../../network/q3/message.ts';
 import { CvarFlag, CvarRegistry } from '../../../../core/cvars/index.ts';
 import type { Q3HostSettings } from './host.ts';
 
+export function registerQ3ServerCvars(cvars: CvarRegistry, settings: Pick<Q3HostSettings, "maxClients" | "mapName">): void {
+  cvars.register('sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
+  cvars.register('mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
+  cvars.register('sv_mapname', '', CvarFlag.ServerInfo | CvarFlag.ReadOnly);
+}
+
 export interface Q3ServerStateOptions {
   readonly session: SessionId;
   readonly settings: Q3HostSettings;
@@ -62,11 +68,10 @@ export class Q3ServerState {
 
   constructor(private readonly options: Q3ServerStateOptions) {
     const settings = options.settings;
-    this.cvars = new CvarRegistry({ dialect: 'q3', context: { session: options.session, origin: { kind: 'server-console' } }, print: text => options.print(text) });
-    this.cvars.register('sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
+    this.cvars = settings.sourceRegistry ?? new CvarRegistry({ dialect: 'q3', context: { session: options.session, origin: { kind: 'server-console' } }, print: text => options.print(text) });
+    registerQ3ServerCvars(this.cvars, settings);
     this.cvars.set('sv_mapname', settings.mapName, true);
-    this.cvars.register('mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
-    this.cvars.applyArchive(settings.sourceArchive ?? []);
+    if (settings.sourceRegistry === undefined) this.cvars.applyArchive(settings.sourceArchive ?? []);
     this.cvars.set('sv_maxclients', String(settings.maxClients), true);
     this.cvars.set('sv_mapname', settings.mapName, true);
     this.cvars.set('mapname', settings.mapName, true);

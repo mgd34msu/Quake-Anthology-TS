@@ -59,6 +59,7 @@ export interface SimulationOptions {
   readonly playerIdentity?: (client: ClientId) => { readonly seat: number; readonly socialId: string };
   readonly q3Session?: Q3SourceSessionCarry;
   readonly serverProfile?: import("../../../settings/server/types.ts").ServerProfile;
+  readonly sourceRegistry?: import("../../../core/cvars/index.ts").CvarRegistry;
   readonly sourceArchive?: readonly CvarArchiveEntry[];
   readonly q1Cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly q2Cvars?: readonly { readonly name: string; readonly value: string }[];

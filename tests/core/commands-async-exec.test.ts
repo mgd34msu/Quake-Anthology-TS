@@ -121,3 +121,101 @@ test("Q2 script reads do not reset the alias limit within an awaited frame", asy
   expect(reads).toBe(15);
   expect(output.some(text => text.includes("ALIAS_LOOP_COUNT"))).toBe(true);
 });
+
+test("completion boundaries finish nested scripts before callers, across wait", async () => {
+  const seen: string[] = [], sources: CommandContext[] = [];
+  const commands = new CommandBuffer({ dialect: "q1-netquake", context,
+    readScript: async name => name === "quake.rc" ? "exec default.cfg\nexec config.cfg\nrecord autoexec\n" : name === "default.cfg" ? "record default\nwait\n" : undefined,
+    onScriptComplete: event => { seen.push(`${event.name}:${event.result.kind}`); sources.push(event.source); } });
+  commands.register("record", invocation => { seen.push(invocation.args.join(" ")); });
+  commands.append("exec quake.rc\nrecord caller\n");
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["default"]);
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["default", "default.cfg:completed", "config.cfg:missing", "autoexec", "quake.rc:completed", "caller"]);
+  expect(sources[0]?.origin).toEqual({ kind: "script", name: "default.cfg", caller: { kind: "script", name: "quake.rc", caller: context.origin } });
+});
+
+test("completion follows inserted alias work and preserves Q2 cross-file bytes", () => {
+  const seen: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q2-classic", context,
+    readScript: name => name === "alias.cfg" ? "alias nested record-alias\nnested\n" : "record joined",
+    onScriptComplete: event => { seen.push(event.name); } });
+  commands.register("record-alias", () => { seen.push("alias-body"); });
+  commands.register("record", invocation => { seen.push(invocation.args.join(" ")); });
+  commands.append("exec alias.cfg\nexec bytes.cfg\n-tail\n");
+  commands.execute();
+  expect(seen).toEqual(["alias-body", "alias.cfg", "joined-tail", "bytes.cfg"]);
+});
+
+test("empty and rejected scripts complete once and hook failure retains caller", async () => {
+  const seen: string[] = [], failure = new Error("read denied");
+  const commands = new CommandBuffer({ dialect: "q3", context, readScript: async name => { if (name === "bad.cfg") throw failure; return ""; },
+    onScriptComplete: event => {
+      seen.push(`${event.name}:${event.result.kind}`);
+      if (event.result.kind === "failed") { expect(event.result.error).toBe(failure); throw new Error("stop startup"); }
+    } });
+  commands.register("record", () => { seen.push("caller"); });
+  commands.append("exec empty; exec bad; record\n");
+  await expect(commands.executeScriptsAsync(async () => {})).rejects.toThrow("stop startup");
+  expect(seen).toEqual(["empty.cfg:completed", "bad.cfg:failed"]);
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["empty.cfg:completed", "bad.cfg:failed", "caller"]);
+});
+
+test("completion nodes survive replacement and Q2 defer without firing early", () => {
+  const seen: string[] = [];
+  const original = new CommandBuffer({ dialect: "q2-classic", context, readScript: () => "wait\n", onScriptComplete: () => { seen.push("original"); } });
+  original.append("exec saved.cfg\n"); original.execute();
+  original.copyToDefer();
+  const replacement = new CommandBuffer({ dialect: "q2-classic", context, onScriptComplete: event => { seen.push(event.name); } });
+  replacement.copyPendingFrom(original);
+  replacement.execute(); expect(seen).toEqual([]);
+  replacement.insertFromDefer(); replacement.execute();
+  expect(seen).toEqual(["saved.cfg"]);
+  replacement.execute(); expect(seen).toEqual(["saved.cfg"]);
+});
+
+test("failed synchronous batches discard their completion nodes and preserve original ones", () => {
+  const seen: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context, readScript: () => "wait\n", onScriptComplete: event => { seen.push(event.name); } });
+  commands.append("exec original\n"); commands.execute();
+  expect(() => commands.executeBatch("exec discarded\n", context)).toThrow("paused or deferred");
+  expect(seen).toEqual([]);
+  commands.execute();
+  expect(seen).toEqual(["original.cfg"]);
+});
+
+test("rejected script insertion and synchronous reader throws never report completion", () => {
+  const seen: string[] = [];
+  const overflow = new CommandBuffer({ dialect: "q3", context, maxBufferLength: 32, readScript: () => "x".repeat(40), onScriptComplete: event => { seen.push(event.name); } });
+  overflow.append("exec too-big\n"); overflow.execute();
+  expect(seen).toEqual([]);
+  const failure = new Error("sync read failure");
+  const throwing = new CommandBuffer({ dialect: "q3", context, readScript: () => { throw failure; }, onScriptComplete: event => { seen.push(event.name); } });
+  throwing.append("exec throws\n");
+  expect(() => throwing.execute()).toThrow(failure);
+  throwing.execute(); expect(seen).toEqual([]);
+});
+
+for (const dialect of ["q1-netquake", "q2-classic", "q3"] satisfies readonly CommandDialect[]) {
+  test(`${dialect} stopped script drain resumes copied chunks and nested completion after wait`, async () => {
+    const seen: string[] = [], completed: string[] = [];
+    let running = true;
+    const options = { dialect, context, readScript: async () => "record before; boundary; wait; record after\n",
+      onScriptComplete: (event: import("../../src/core/commands/index.ts").ScriptCompletion) => { completed.push(event.name); } };
+    const commands = new CommandBuffer(options);
+    commands.register("record", command => { seen.push(command.args[0] ?? ""); });
+    commands.register("boundary", () => { running = false; });
+    commands.append("exec outer.cfg\n");
+    await commands.executeScriptsAsync(async () => {}, () => running);
+    expect(seen).toEqual(["before"]); expect(completed).toEqual([]);
+    const replacement = new CommandBuffer(options);
+    replacement.register("record", command => { seen.push(command.args[0] ?? ""); });
+    replacement.copyPendingFrom(commands);
+    await replacement.executeScriptsAsync(async () => {});
+    expect(seen).toEqual(["before"]); expect(completed).toEqual([]);
+    await replacement.executeScriptsAsync(async () => {});
+    expect(seen).toEqual(["before", "after"]); expect(completed).toEqual(["outer.cfg"]);
+  });
+}

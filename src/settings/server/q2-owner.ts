@@ -56,6 +56,7 @@ export function q2ServerSettingCollections(match: string, q2Combat: boolean): re
 export function registerQ2ServerCvars(cvars: CvarRegistry, match: string): void {
   const defaults = createQ2PlayerRules();
   cvars.register("sv_gravity", "800", 0);
+  cvars.register("sv_airaccelerate", "0", 0);
   cvars.register("dmflags", "0", Q2CvarFlag.ServerInfo);
   cvars.register("timelimit", String(defaults.timeLimitMinutes), Q2CvarFlag.ServerInfo);
   cvars.register("fraglimit", String(defaults.fragLimit), Q2CvarFlag.ServerInfo);

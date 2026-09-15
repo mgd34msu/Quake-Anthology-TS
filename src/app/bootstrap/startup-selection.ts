@@ -201,7 +201,7 @@ export class StartupSelectionModel {
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
     const character: ProviderReference = { provider: `${family}:character`, content: product.id };
     const preset = applicationPreset(this.catalog, options, { movement, character });
-    return { options, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }) };
+    return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }) };
   }
   private maps(): readonly StartupSelectionChoice[] { return this.playableMaps.get(this.geometry().expectation.id) ?? []; }
   private defaultMap(): string {
@@ -496,7 +496,7 @@ export class StartupSelectionModel {
       selections = { ...selections, enemies: { kind: "selected", value: this.effectiveMonsterRoster() } };
     }
     selections = { ...selections, equipment: { kind: "selected", value: this.selectedEquipment(base.equipment) } };
-    return { options, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: selections }) };
+    return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: selections }) };
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {

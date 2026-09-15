@@ -205,7 +205,7 @@ export class StartupApplication {
       if (action.kind === "connect") { await this.connect(action.connection); return; }
       const loading = this.graphics;
       loading?.controllerSettings.close(); loading?.router.close(); loading?.controllers.close();
-      const game = await serviceLoading(async () => {
+      const game = await serviceLoading(async nextFrame => {
         loading?.menu.setStatus("Loading map...", true);
         const selected = action.kind === "preset" ? { ...await this.model.resolvePreset(action.id, action.skill), image: undefined }
           : action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
@@ -218,7 +218,9 @@ export class StartupApplication {
             seats } };
         })();
         loading?.menu.setStatus("Preparing world...", true);
-        const game = await Application.open(selected.options, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true,
+        const game = await Application.open(selected.options, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true, nextFrame: async () => {
+          await nextFrame(); if (this.stopping) throw new Error("Startup cancelled");
+        },
           stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values, selected.image);
         this.game = game;
         try {

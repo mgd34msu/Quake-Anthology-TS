@@ -1,3 +1,4 @@
+import { frameTimeCvarNames } from "./frame-time.ts";
 import type { CommandContext, CommandDialect, CommandOrigin } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CommandCvarRouting } from "../../core/commands/index.ts";
@@ -9,6 +10,14 @@ export interface ApplicationConsoleServer {
   readonly cvars: CvarRegistry;
   /** Names declared by the source game that a client may also register as mirrors. */
   readonly sharedNames: readonly string[];
+}
+
+export function q1ConsoleServer(simulation: {
+  q1Source(): { readonly cvars: CvarRegistry } | null;
+  quakecSource(): { readonly cvars: CvarRegistry } | null;
+}): ApplicationConsoleServer | null {
+  const source = simulation.q1Source() ?? simulation.quakecSource();
+  return source === null ? null : { cvars: source.cvars, sharedNames: frameTimeCvarNames(source.cvars.dialect) };
 }
 
 export interface ApplicationConsoleRoutingOptions {

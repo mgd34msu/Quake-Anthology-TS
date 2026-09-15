@@ -34,6 +34,8 @@ export class ApplicationImageSettings {
   private appliedDebugLineWidth = 2;
   private displayApplied = "";
   private restoredSize: { readonly width: number; readonly height: number } | null = null;
+  private persisted: readonly { readonly name: string; readonly value: string }[] = [];
+  get persistedEntries(): readonly { readonly name: string; readonly value: string }[] { return this.persisted; }
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
   private constructor(private readonly options: ImageSettingsOptions) {
     this.persistenceEnabled = !options.deferPersistence;
@@ -109,7 +111,15 @@ export class ApplicationImageSettings {
     const text = await settings.store.loadText("images.cfg");
     if (text !== null) {
       const commands = new CommandBuffer({ dialect: options.dialect, context: options.context, cvars: settings.cvars, print: options.print });
-      commands.append(text, options.context); commands.execute();
+      const loaded = new Map<string, { readonly name: string; readonly value: string }>();
+      commands.append(text, options.context);
+      await commands.executeAsync(async () => {
+        const [command, argument] = commands.tokenizedArguments;
+        const name = command === "set" || command === "seta" ? argument : command;
+        const state = name === undefined ? undefined : settings.cvars.find(name);
+        if (state !== undefined && (state.flags & CvarFlag.Archive) !== 0) loaded.set(state.name, { name: state.name, value: state.value });
+      });
+      settings.persisted = [...loaded.values()];
       settings.restoredSize = { width: settings.cvars.variableValue("r_customwidth"), height: settings.cvars.variableValue("r_customheight") };
     }
     const saved = settings.signature();

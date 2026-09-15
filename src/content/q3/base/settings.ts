@@ -69,7 +69,6 @@ export class Q3GameSettings {
   register(buildDate: string): void {
     for (const definition of this.definitions) {
       if (definition.name === "g_restarted") { this.host.cvars.register("gamename", "baseq3", S | R); this.host.cvars.register("gamedate", buildDate, R); }
-      if (definition.name === "g_gametype") this.host.cvars.register("sv_mapname", "", S | R);
       const current = this.host.cvars.register(definition.name, definition.value, definition.flags);
       if (current === undefined) throw new Error("Could not register Q3 game cvar " + definition.name);
       this.snapshots.set(definition.name, current);

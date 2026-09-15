@@ -1,3 +1,4 @@
+import { registerQuakeWorldEngineCvars } from "./quakeworld-cvars.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint, type QcExecutorHost } from "../../../compat/qc/executor.ts";
 import type { QuakeCCheckpoint, ModuleIdentity } from "../../../contracts/execution.ts";
@@ -110,6 +111,7 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
 export type QuakeCPhysicsCallback = Id1PhysicsCallback;
 
 export interface QuakeCSourceOptions {
+  readonly sourceRegistry?: CvarRegistry;
   readonly restore?: { readonly checkpoint: QuakeCCheckpoint; readonly clients: readonly ClientId[] };
   readonly recipe: ExecutableRecipe;
   readonly world: Q1WorldGeometry;
@@ -186,8 +188,8 @@ export class QuakeCSource {
       bodies: options.physics.bodies, scene: options.scene, numeric: Q1_DONOR_PROFILE,
       model: name => name === "" ? { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } } : this.models.get(name) ?? null,
       foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
-    this.cvars = new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
-    for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
+    this.cvars = options.sourceRegistry ?? new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
+    if (options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
       teamplay: "0", sv_cheats: "0", sv_aim: "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
     this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
     const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
@@ -214,9 +216,7 @@ export class QuakeCSource {
       return aim(vm);
     });
     if (binding.kind === "quakeworld") {
-      this.cvars.register("sv_phs", "1");
-      for (const [name, value] of Object.entries({ sv_stopspeed: "100", sv_spectatormaxspeed: "500", sv_accelerate: "10", sv_airaccelerate: "0.7",
-        sv_wateraccelerate: "10", sv_friction: "4", sv_waterfriction: "4" })) this.cvars.register(name, value);
+      registerQuakeWorldEngineCvars(this.cvars);
       host.set("infokey", vm => {
         const slot = this.entities.slot(vm.argInt(0)), key = vm.argString(1);
         const value = this.userInfo.get(slot)?.get(key) ?? (slot === 0 ? this.cvars.variableString(key) : "");

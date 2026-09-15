@@ -6,6 +6,7 @@ import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
+  readonly explicitRules?: { readonly skill?: boolean; readonly mode?: boolean; readonly capacity?: boolean };
   readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
   readonly q1Protocol?: Q1ProtocolIdentity;
   readonly q2Protocol?: Extract<Q2ProtocolIdentity, { kind: "q2-classic" }> | { readonly kind: "q2-r1q2"; readonly version: 35; readonly revision: 1904 | 1905 };
@@ -161,7 +162,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         const height = integer(value, flag, 64, 16384);
         options = { ...options, height, displayOverrides: { ...options.displayOverrides, height } }; break;
       }
-      case "--seats": options = { ...options, seats: integer(value, flag, 1, 4) }; break;
+      case "--seats": options = { ...options, seats: integer(value, flag, 1, 4), explicitRules: { ...options.explicitRules, capacity: true } }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;
       case "--frames": options = { ...options, frameLimit: integer(value, flag, 1, Number.MAX_SAFE_INTEGER) }; break;
       case "--listen": case "--listen-q2": {
@@ -181,7 +182,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--skill": {
         const skill = integer(value, flag, 0, 3);
         if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new RangeError("Invalid skill");
-        options = { ...options, skill }; break;
+        options = { ...options, skill, explicitRules: { ...options.explicitRules, skill: true } }; break;
       }
       case "--bot-skill": {
         const botSkill = integer(value, flag, 1, 5);
@@ -194,7 +195,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         options = { ...options, rules: value }; break;
       case "--mode":
         if (value !== "singleplayer" && value !== "coop" && value !== "deathmatch") throw new Error(`Unknown game mode: ${value}`);
-        options = { ...options, mode: value }; break;
+        options = { ...options, mode: value, explicitRules: { ...options.explicitRules, mode: true } }; break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
   }

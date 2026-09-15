@@ -35,6 +35,12 @@ export interface CommandCvarRouting {
   visible(source: CommandContext): readonly CvarRegistry[];
 }
 
+export interface ScriptCompletion {
+  readonly name: string;
+  readonly source: CommandContext;
+  readonly result: { readonly kind: "completed" } | { readonly kind: "missing" } | { readonly kind: "failed"; readonly error: unknown };
+}
+
 export interface CommandBufferOptions {
   readonly dialect: CommandDialect;
   readonly context: CommandContext;
@@ -42,7 +48,9 @@ export interface CommandBufferOptions {
   readonly cvarRouting?: CommandCvarRouting;
   readonly print?: (text: string, source?: CommandContext) => void;
   readonly readScript?: (name: string, source: CommandContext) => string | undefined | Promise<string | undefined>;
+  readonly onScriptComplete?: (event: ScriptCompletion) => void;
   readonly commandLine?: readonly string[];
+  readonly allowCommand?: (command: CommandInvocation) => boolean;
   readonly clientGame?: CommandFallback;
   readonly serverGame?: CommandFallback;
   readonly ui?: CommandFallback;
@@ -54,7 +62,8 @@ export interface CommandBufferOptions {
 
 interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
 interface AliasEntry { readonly name: string; value: string; textMode: CommandTextMode; }
-interface TextChunk { readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
+interface TextChunk { readonly kind: "text"; readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
+type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion };
 interface ExecutionFrame { readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
 interface ScriptRead {
   readonly settled: Promise<void>;
@@ -86,8 +95,8 @@ export class CommandBuffer {
   readonly context: CommandContext;
   private handlers: RegisteredEntry | undefined;
   private readonly aliases: AliasEntry[] = [];
-  private chunks: TextChunk[] = [];
-  private deferred: TextChunk[] = [];
+  private chunks: CommandChunk[] = [];
+  private deferred: CommandChunk[] = [];
   private waitFrames = 0;
   private aliasCount = 0;
   private asyncDraining = false;
@@ -122,8 +131,8 @@ export class CommandBuffer {
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
   }
 
-  get pendingText(): string { return this.chunks.map(chunk => chunk.text).join(""); }
-  get deferredText(): string { return this.deferred.map(chunk => chunk.text).join(""); }
+  get pendingText(): string { return this.chunks.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
+  get deferredText(): string { return this.deferred.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
   get tokenizedArguments(): readonly string[] { return this.tokens; }
   get maximumCommandLength(): number { return this.maximumCommand; }
   get maximumBufferLength(): number { return this.maximumBuffer; }
@@ -243,9 +252,9 @@ export class CommandBuffer {
   private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct)): void {
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) this.chunks.push({ text, source, direct, textMode });
+    if (text.length > 0) this.chunks.push({ kind: "text", text, source, direct, textMode });
   }
-  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct)): void {
+  private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", completion?: ScriptCompletion, textMode = this.inputTextMode(source, direct)): void {
     const text = sourceCommandText(input) + (this.dialect === "q1-quakeworld" || this.dialect === "q3" ? "\n" : "");
     if (this.dialect === "q3") {
       if (this.pendingText.length + text.length > this.maximumBuffer) { this.print("Cbuf_InsertText overflowed\n"); return; }
@@ -253,7 +262,8 @@ export class CommandBuffer {
       if (text.length >= this.maximumBuffer) { this.print("Cbuf_AddText: overflow\n"); return; }
       if (this.pendingText.length + text.length > this.maximumBuffer) throw new RangeError("Cbuf_InsertText overflows source sizebuf");
     }
-    if (text.length > 0) this.chunks.unshift({ text, source, direct, textMode });
+    if (completion !== undefined) this.chunks.unshift({ kind: "completion", event: completion });
+    if (text.length > 0) this.chunks.unshift({ kind: "text", text, source, direct, textMode });
   }
   copyToDefer(): void {
     if (!isQ2(this.dialect)) throw new Error("Deferred command buffers belong to Quake II");
@@ -279,20 +289,20 @@ export class CommandBuffer {
   }
 
   /** Await nested script reads, stopping at the same wait boundary as one frame. */
-  executeScriptsAsync(afterDispatch: () => Promise<void>): Promise<number> {
-    return this.drainAsync(afterDispatch, true);
+  executeScriptsAsync(afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<number> {
+    return this.drainAsync(afterDispatch, true, shouldContinue);
   }
 
-  private async drainAsync(afterDispatch: () => Promise<void>, awaitScripts: boolean): Promise<number> {
+  private async drainAsync(afterDispatch: () => Promise<void>, awaitScripts: boolean, shouldContinue?: () => boolean): Promise<number> {
     if (this.asyncDraining || this.frame !== undefined) throw new Error("Command buffer is already executing");
     this.asyncDraining = true;
     try {
       let executed = 0;
       let firstDrain = true;
       do {
-        for (const count of this.drain(firstDrain)) { executed += count; await afterDispatch(); }
+        for (const count of this.drain(firstDrain, shouldContinue)) { executed += count; await afterDispatch(); }
         const read = this.scriptRead;
-        if (!awaitScripts || read === undefined) break;
+        if (!awaitScripts || read === undefined || shouldContinue?.() === false) break;
         await read.settled;
         firstDrain = false;
       } while (true);
@@ -300,20 +310,28 @@ export class CommandBuffer {
     } finally { this.asyncDraining = false; }
   }
 
-  private *drain(resetAliases = true): Generator<number, void, void> {
+  private *drain(resetAliases = true, shouldContinue?: () => boolean): Generator<number, void, void> {
     if (resetAliases && isQ2(this.dialect)) this.aliasCount = 0;
-    while (this.chunks.length > 0 || this.scriptRead !== undefined) {
+    while ((this.chunks.length > 0 || this.scriptRead !== undefined) && shouldContinue?.() !== false) {
       const script = this.scriptRead;
       if (script !== undefined) {
         if (script.result.kind === "pending") return;
         this.scriptRead = undefined;
-        if (script.result.kind === "failed") this.options.print?.(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
+        if (script.result.kind === "failed") {
+          this.options.print?.(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
+          this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }) });
+        }
         else this.insertScript(script.name, script.result.text, script.source);
         continue;
       }
       if (this.dialect === "q3" && this.waitFrames !== 0) { this.waitFrames = (this.waitFrames - 1) | 0; break; }
       const first = this.chunks[0];
       if (first === undefined) break;
+      if (first.kind === "completion") {
+        this.chunks.shift();
+        this.options.onScriptComplete?.(first.event);
+        continue;
+      }
       const buffer = this.pendingText;
       let offset = commandSeparatorOffset(buffer, this.dialect);
       if (offset >= this.maximumCommand) {
@@ -360,10 +378,16 @@ export class CommandBuffer {
   }
 
   private consume(count: number): void {
+    let index = 0;
     while (count > 0) {
-      const chunk = this.chunks.shift();
+      const chunk = this.chunks[index];
       if (chunk === undefined) return;
-      if (chunk.text.length > count) { this.chunks.unshift({ ...chunk, text: chunk.text.slice(count) }); return; }
+      if (chunk.kind === "completion") { index++; continue; }
+      if (chunk.text.length > count) {
+        this.chunks[index] = { ...chunk, text: chunk.text.slice(count) };
+        return;
+      }
+      this.chunks.splice(index, 1);
       count -= chunk.text.length;
     }
   }
@@ -388,6 +412,7 @@ export class CommandBuffer {
       insert: (text: string): void => { requireActive(); this.insertFor(text, source); },
       executeNow: (text: string): number => { requireActive(); return this.executeNow(text); }, assertActive: requireActive });
     try {
+      if (this.options.allowCommand?.(command) === false) return 1;
       for (let entry = this.handlers; entry !== undefined; entry = entry.next) {
         if (asciiFold(entry.name) !== asciiFold(name)) continue;
         if (this.dialect === "q3") this.touch(entry);
@@ -401,7 +426,7 @@ export class CommandBuffer {
         const alias = this.aliases.find(value => asciiFold(value.name) === asciiFold(name));
         if (alias !== undefined) {
           if (isQ2(this.dialect) && ++this.aliasCount === 16) { this.print("ALIAS_LOOP_COUNT\n"); return 1; }
-          this.insertFor(alias.value, source, false, alias.textMode);
+          this.insertFor(alias.value, source, false, undefined, alias.textMode);
           return 1;
         }
       }
@@ -434,15 +459,24 @@ export class CommandBuffer {
     if (this.dialect !== "q1-quakeworld" || this.findCvar("cl_warncmd", command.source)?.numericValue || this.findCvar("developer", command.source)?.numericValue) this.print(`Unknown command "${name}"\n`);
   }
 
+  private scriptCompletion(name: string, caller: CommandContext, result: ScriptCompletion["result"]): ScriptCompletion {
+    const source: CommandContext = Object.freeze({ session: caller.session,
+      origin: Object.freeze({ kind: "script", name, caller: caller.origin }) });
+    return Object.freeze({ name, source, result });
+  }
+
   private insertScript(filename: string, file: string | undefined, caller: CommandContext): void {
-    if (file === undefined) { this.options.print?.(`couldn't exec ${filename}\n`, caller); return; }
+    if (file === undefined) {
+      this.options.print?.(`couldn't exec ${filename}\n`, caller);
+      this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(filename, caller, { kind: "missing" }) });
+      return;
+    }
     this.options.print?.(`execing ${filename}\n`, caller);
     let text = sourceCommandText(file);
     // Preserve the Q1 donor repair without changing NQ Cbuf_InsertText semantics.
     if (isQ1(this.dialect) && !text.endsWith("\n")) text += "\n";
-    const source: CommandContext = Object.freeze({ session: caller.session,
-      origin: Object.freeze({ kind: "script", name: filename, caller: caller.origin }) });
-    this.insertFor(text, source);
+    const completion = this.scriptCompletion(filename, caller, { kind: "completed" });
+    this.insertFor(text, completion.source, false, completion);
   }
 
   private registerBuiltins(): void {

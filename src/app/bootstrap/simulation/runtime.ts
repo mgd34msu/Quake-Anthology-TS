@@ -1336,7 +1336,8 @@ export class SharedSimulation implements Simulation {
       const state = new Q3ServerState({ session: this.session, now, print: guest.print,
         settings: { gameType: 0, singlePlayer: false, maxClients: this.options.maxClients,
           mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
-          ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
+          ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
+        ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
           ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) } });
       state.cvars.set("fs_game", guest.gameDirectory, true);
       this.initializeServerSettings(state.cvars);
@@ -1360,7 +1361,7 @@ export class SharedSimulation implements Simulation {
     if (this.options.preparedQuakeC !== undefined) {
       if (this.options.world.kind !== "q1-bsp") throw new Error("QuakeC requires a Q1 world");
       const checkpoint = this.options.restore === undefined ? null : simulationQuakeCCheckpoint(this.options.restore);
-      const game: QuakeCSource = new QuakeCSource(this.options.preparedQuakeC, { recipe, world: this.options.world, scene: this.scene,
+      const game: QuakeCSource = new QuakeCSource(this.options.preparedQuakeC, { ...(this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }), recipe, world: this.options.world, scene: this.scene,
         actors: this.actors, callbacks: this.callbacks, physics: this.physics, combat: this.combat, inventory: this.inventory, events: this.events,
         random: this.random, skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients,
         initialSourceTimeSeconds: this.timeSeconds,
@@ -1458,6 +1459,7 @@ export class SharedSimulation implements Simulation {
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
       }, { gameType: this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
         mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+        ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
         ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
         ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) });
       const saved = this.options.restore;
@@ -1472,10 +1474,10 @@ export class SharedSimulation implements Simulation {
     }
     if (this.options.world.kind === "q1-bsp") {
       const host = this.q1ActorHost(recipe.map.entities, actorRuntime);
-      const cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: this.session, origin: { kind: "server-console" } },
+      const cvars = this.options.sourceRegistry ?? new CvarRegistry({ dialect: "q1-netquake", context: { session: this.session, origin: { kind: "server-console" } },
         print: text => { this.events.message({ kind: "print", level: 2, text }); } });
-      if (this.options.restore === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
-      for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
+      if (this.options.restore === undefined && this.options.sourceRegistry === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
+      if (this.options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(this.q1Campaign.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0",
         teamplay: "0", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", sv_cheats: "0", footsteps: "1" })) cvars.register(name, value);
       for (const variable of this.options.q1Cvars ?? []) cvars.set(variable.name, variable.value, true);
       cvars.set("skill", String(this.q1Campaign.skill), true);
@@ -1571,12 +1573,11 @@ export class SharedSimulation implements Simulation {
     };
     let owningMonsters: Q2ProductRuntime["monsters"] | null = null;
     const host = this.q2ActorHost(recipe.map.entities, actorRuntime, actor => owningMonsters?.context(actor)?.state);
-    const serverCvars = new CvarRegistry({ dialect: content.includes(":rerelease:") ? "q2-rerelease" : "q2-classic",
+    const serverCvars = this.options.sourceRegistry ?? new CvarRegistry({ dialect: content.includes(":rerelease:") ? "q2-rerelease" : "q2-classic",
       context: { session: this.session, origin: { kind: "server-console" } }, print: text => this.events.message({ kind: "print", level: 2, text }) });
     this.q2ServerRegistry = serverCvars;
     registerQ2ServerCvars(serverCvars, recipe.match.provider);
-    serverCvars.register("sv_airaccelerate", "0", 0);
-    if (this.options.restore === undefined) serverCvars.applyArchive(this.options.sourceArchive ?? []);
+    if (this.options.restore === undefined && this.options.sourceRegistry === undefined) serverCvars.applyArchive(this.options.sourceArchive ?? []);
     for (const variable of this.options.q2Cvars ?? []) serverCvars.set(variable.name, variable.value, true);
     serverCvars.set("skill", String(this.options.skill), true);
     serverCvars.set("deathmatch", this.options.mode === "deathmatch" ? "1" : "0", true);
