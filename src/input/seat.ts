@@ -11,6 +11,7 @@ import { GamepadInput } from "./gamepad.ts";
 import type { GamepadTuning } from "./gamepad.ts";
 import { quakeMouseButton } from "./mouse-buttons.ts";
 import { KeyCode } from "./key-codes.ts";
+import { parseImpulse } from "./impulse.ts";
 
 export type SourceAction = InputAction | "turn-left" | "turn-right" | "look-up" | "look-down" | "strafe" | "mlook" | "klook" | "holster" | `button${number}`;
 const actionCommands: ReadonlyMap<string, SourceAction> = new Map([
@@ -224,7 +225,7 @@ export function registerInputCommands(commands: CommandBuffer, lookup: (seat: Se
   if (commands.register("impulse", invocation => {
     let origin = invocation.source.origin;
     while (origin.kind === "script") origin = origin.caller;
-    if (origin.kind === "local-seat") lookup(origin.seat)?.setImpulse(Number(invocation.argv[1] ?? 0));
+    if (origin.kind === "local-seat") lookup(origin.seat)?.setImpulse(parseImpulse(invocation.argv[1] ?? "", invocation.dialect));
   })) names.push("impulse");
   return () => { for (const name of names) commands.unregister(name); };
 }

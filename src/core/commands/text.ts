@@ -66,11 +66,11 @@ function parseToken(text: string, start: number, dialect: CommandDialect, mode: 
   const tokenStart = offset;
   if (quoted) {
     while (offset < text.length && text.charAt(offset) !== '"') offset++;
-  } else if (isQ1(dialect) && "{}()':".includes(text.charAt(offset))) {
+  } else if (dialect === "q1-netquake" && "{}()':".includes(text.charAt(offset))) {
     offset++;
   } else {
     while (offset < text.length && !whitespace(text, offset, mode)) {
-      if (isQ1(dialect) && "{}()':".includes(text.charAt(offset))) break;
+      if (dialect === "q1-netquake" && "{}()':".includes(text.charAt(offset))) break;
       if (dialect === "q3" && (text.charAt(offset) === '"' || text.startsWith("//", offset) || text.startsWith("/*", offset))) break;
       offset++;
     }
