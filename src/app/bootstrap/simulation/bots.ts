@@ -1,3 +1,4 @@
+import type { SourceBotDirectorHost } from "../../../bots/behavior/director.ts";
 import { createBotArsenalBinding, type BotArsenalBinding } from "./bot-arsenal.ts";
 import { SaveReader } from "../../../persistence/value.ts";
 import type { ApplicationBotNavigation, ApplicationBotNavigationCheckpoint } from "./navigation.ts";
@@ -157,9 +158,14 @@ class RestoredBotReliableCommands extends ServerReliableCommands {
 export class ApplicationBots {
   readonly director: SourceBotDirector;
   readonly population: SharedBotPopulation;
-  readonly source: Q3SourceRuntime | null;
-  readonly game: SourceBotGame;
-  private readonly arsenal: BotArsenalBinding | null;
+  private sourceValue: Q3SourceRuntime | null;
+  private gameValue: SourceBotGame;
+  get source(): Q3SourceRuntime | null { return this.sourceValue; }
+  get game(): SourceBotGame { return this.gameValue; }
+  private restartPhase: { readonly kind: "active" }
+    | { readonly kind: "detached"; readonly source: Q3SourceRuntime; readonly clients: readonly ApplicationBotClient[] }
+    | { readonly kind: "bound"; readonly clients: readonly ApplicationBotClient[]; readonly pending: Set<number> } = { kind: "active" };
+  private arsenal: BotArsenalBinding | null;
   private readonly shared: ReturnType<typeof createSharedBotWorld> | null;
   private readonly connections = new Map<number, BotConnection>();
   private readonly snapshots = new Map<number, readonly number[]>();
@@ -171,7 +177,7 @@ export class ApplicationBots {
     if (error !== null) throw new Error(error);
     const source = options.simulation.q3Source();
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
-    this.source = source;
+    this.sourceValue = source;
     this.arsenal = source === null ? null : createBotArsenalBinding(options.simulation, client =>
       options.simulation.players().find(actor => options.simulation.movementPlayer(actor)?.client.slot === client) ?? null);
     if (source === null && options.configuration === undefined) throw new Error("Shared bot configuration requires the application console registry");
@@ -190,14 +196,10 @@ export class ApplicationBots {
       message: (client, text) => { for (const [slot, connection] of this.connections) if (client === -1 || client === slot) connection.reliable.add(text); } }) : null;
     const game = source === null ? this.shared?.game : q3BotGame(source, options.insertConsoleCommand, this.arsenal ?? undefined);
     if (game === undefined) throw new Error("Bot world projection is unavailable");
-    this.game = game;
+    this.gameValue = game;
     this.director = new SourceBotDirector({ files: options.files, entities: source?.options.entities ?? options.simulation.sourceEntityText,
       restoring: options.restore !== undefined,
-      host: { game, provider: "q3:bot", allocateClient: () => this.allocateClient(),
-        actor: client => this.connections.get(client)?.actor ?? null,
-        encodeCommand: (client, command) => this.encodeCommand(client, command),
-        snapshotEntity: (client, sequence) => this.snapshotEntity(client, sequence),
-        consoleMessage: client => this.consoleMessage(client), pointContents: point => game.world.pointContents(point, -1) },
+      host: this.directorHost(game),
       library: { files: options.files, random: { nextInt: () => options.simulation.random.nextInteger() }, debug: false,
         milliseconds: () => options.simulation.timeSeconds * 1000,
         print: (_severity, text) => { options.print(text); return undefined; }, openLog: options.openLog,
@@ -279,6 +281,56 @@ export class ApplicationBots {
     });
   }
 
+  private directorHost(game: SourceBotGame): SourceBotDirectorHost {
+    return { game, provider: "q3:bot", allocateClient: () => this.allocateClient(),
+      actor: client => this.connections.get(client)?.actor ?? null,
+      encodeCommand: (client, command) => this.encodeCommand(client, command),
+      snapshotEntity: (client, sequence) => this.snapshotEntity(client, sequence),
+      consoleMessage: client => this.consoleMessage(client), pointContents: point => game.world.pointContents(point, -1) };
+  }
+  beginRoundRestart(): readonly ApplicationBotClient[] {
+    if (this.closed || this.restartPhase.kind !== "active" || this.source === null) throw new Error("Bot fast restart requires an active native Q3 round");
+    const navigation = this.options.navigation;
+    if (!("restartRound" in navigation)) throw new Error("Bot fast restart requires retained application navigation");
+    const clients = this.clients(), source = this.source;
+    this.director.beginRoundRestart();
+    this.options.simulation.botServices.detach(this.director);
+    this.connections.clear(); this.snapshots.clear(); this.elapsedMilliseconds = 0;
+    this.restartPhase = { kind: "detached", source, clients };
+    return clients;
+  }
+  bindRestartedRound(): void {
+    const phase = this.restartPhase, source = this.options.simulation.q3Source(), navigation = this.options.navigation;
+    if (this.closed || phase.kind !== "detached" || source === null || source === phase.source) throw new Error("Publish a new source round before rebinding bots");
+    if (!("restartRound" in navigation)) throw new Error("Bot fast restart lost application navigation");
+    navigation.restartRound();
+    this.sourceValue = source;
+    this.arsenal = createBotArsenalBinding(this.options.simulation, client => this.connections.get(client)?.actor.id ?? null);
+    const game = q3BotGame(source, this.options.insertConsoleCommand, this.arsenal ?? undefined);
+    this.gameValue = game;
+    this.director.bindRestartedRound(this.directorHost(game), library => q3BotNavigation(game, library, navigation));
+    this.options.simulation.botServices.attach(this.director, this);
+    this.restartPhase = { kind: "bound", clients: phase.clients, pending: new Set(phase.clients.map(client => client.client.id.slot)) };
+  }
+  /** Call once for each preserved slot after the three source settle frames; humans return false. */
+  reconnectRestartedClient(client: ClientId): boolean {
+    const phase = this.restartPhase;
+    if (this.closed || phase.kind !== "bound") throw new Error("Bind the new bot round before reconnecting clients");
+    const saved = phase.clients.find(entry => entry.client.id.equals(client));
+    if (saved === undefined) return false;
+    if (!phase.pending.has(client.slot)) throw new Error("Bot restart client was already reconnected");
+    this.restoreClient(saved);
+    phase.pending.delete(client.slot);
+    return true;
+  }
+  /** The caller owns the final source settle frame and must complete it before resuming. */
+  resumeRoundBots(): void {
+    const phase = this.restartPhase;
+    if (this.closed || phase.kind !== "bound" || phase.pending.size !== 0) throw new Error("Reconnect every preserved bot before resuming");
+    this.director.resumeRoundBots();
+    this.restartPhase = { kind: "active" };
+  }
+
   private connection(client: number): BotConnection {
     const connection = this.connections.get(client);
     if (connection === undefined) throw new Error(`Source bot ${client} has no session connection`);
@@ -312,6 +364,7 @@ export class ApplicationBots {
       if (rejection !== null) throw new Error(rejection);
       this.game.clientBegin(client.id.slot); return;
     }
+    this.game.options.engine.setUserinfo(client.id.slot, connection.userinfo ?? this.game.options.engine.getUserinfo(client.id.slot));
     const entity = this.source.pool.at(client.id.slot);
     entity.r.svFlags |= ServerEntityFlags.BOT;
     this.source.pool.activateClient(client.id.slot);
@@ -390,6 +443,7 @@ export class ApplicationBots {
   }
   frame(timeMilliseconds: number, elapsedMilliseconds: number): readonly ActorCommand[] {
     if (this.closed) throw new Error("Bot transport is closed");
+    if (this.restartPhase.kind !== "active") return [];
     this.elapsedMilliseconds = elapsedMilliseconds;
     this.snapshots.clear();
     this.shared?.refresh();
@@ -398,6 +452,7 @@ export class ApplicationBots {
     return this.population.frame({ timeMilliseconds: sourceTime, elapsedMilliseconds });
   }
   clients(): readonly ApplicationBotClient[] {
+    if (this.restartPhase.kind !== "active") return this.restartPhase.clients;
     return Array.from(this.connections.values(), connection => ({ client: connection.client, reliable: connection.reliable, userinfo: this.game.options.engine.getUserinfo(connection.client.id.slot) }));
   }
   checkpointOrchestration(): ApplicationBotTransportCheckpoint {
@@ -451,7 +506,8 @@ export class ApplicationBots {
   }
   close(restart = false): void {
     if (this.closed) return;
-    this.director.close(restart); this.options.simulation.botServices.detach(this.director);
+    this.director.close(restart);
+    if (this.restartPhase.kind !== "detached") this.options.simulation.botServices.detach(this.director);
     this.snapshots.clear(); this.connections.clear(); this.closed = true;
   }
 }

@@ -57,9 +57,12 @@ export interface SourceBotDirectorOrchestration {
 /** Source arena/AI scheduling generates commands for the existing shared player pipeline. */
 export class SourceBotDirector {
   readonly library: BotLibrary;
-  readonly navigation: BotNavigation & GoalNavigation;
-  readonly ai: GameAi;
-  readonly catalog: GameBotCatalog;
+  private round: { readonly navigation: BotNavigation & GoalNavigation; readonly ai: GameAi; readonly catalog: GameBotCatalog };
+  private roundPhase: "active" | "detached" | "bound" = "active";
+  get navigation(): BotNavigation & GoalNavigation { return this.round.navigation; }
+  get ai(): GameAi { return this.round.ai; }
+  get catalog(): GameBotCatalog { return this.round.catalog; }
+  get options(): SourceBotDirectorOptions { return this.currentOptions; }
   readonly bspEntities: AasBspEntities;
   private readonly sequences = new Map<OwnedActor, number>();
   private readonly generated: ActorCommand[] = [];
@@ -67,18 +70,21 @@ export class SourceBotDirector {
   private closed = false;
   private running = false;
 
-  constructor(readonly options: SourceBotDirectorOptions) {
-    const { host } = options, game = host.game;
+  constructor(private currentOptions: SourceBotDirectorOptions) {
+    const options = currentOptions;
     this.library = new BotLibrary(options.library);
-    this.navigation = options.navigation(this.library);
     this.bspEntities = new AasBspEntities((severity, text) => options.library.print(severity, text), this.library.memory);
     if (options.restoring !== true) this.bspEntities.load(options.entities);
-    this.ai = new GameAi(game, this.library, { navigation: this.navigation, bspEntities: this.bspEntities,
+    this.round = this.createRound(options.host, options.navigation);
+  }
+  private createRound(host: SourceBotDirectorHost, navigationFor: SourceBotDirectorOptions["navigation"]) {
+    const game = host.game, navigation = navigationFor(this.library);
+    const ai = new GameAi(game, this.library, { navigation, bspEntities: this.bspEntities,
       pointContents: point => host.pointContents(point),
       getSnapshotEntity: (client, sequence) => host.snapshotEntity(client, sequence),
       getConsoleMessage: client => host.consoleMessage(client),
       insertConsoleCommand: text => game.options.engine.insertConsoleCommand(text),
-      checkBotSpawn: () => this.catalog.checkSpawn(),
+      checkBotSpawn: () => catalog.checkSpawn(),
       loadMap: () => this.library.loadMap(this.goalWorld()),
       userCommand: (client, command) => {
         const actor = host.actor(client);
@@ -88,10 +94,36 @@ export class SourceBotDirector {
         this.generated.push({ actor: actor.id, source: { kind: "bot", provider: host.provider }, sequence,
           ...host.encodeCommand(client, { ...command, angles: { ...command.angles } }) });
       } });
-    this.catalog = new GameBotCatalog(game, options.files, new CommonParseState(), {
-      allocateClient: () => host.allocateClient(), setupClient: (client, settings, restart) => this.ai.setupClient(client, settings, restart),
-      shutdownClient: (client, restart) => { this.ai.shutdownClient(client, restart); const actor = host.actor(client); if (actor !== null) this.sequences.delete(actor); },
+    const catalog = new GameBotCatalog(game, this.options.files, new CommonParseState(), {
+      allocateClient: () => host.allocateClient(), setupClient: (client, settings, restart) => ai.setupClient(client, settings, restart),
+      shutdownClient: (client, restart) => { ai.shutdownClient(client, restart); const actor = host.actor(client); if (actor !== null) this.sequences.delete(actor); },
     });
+    return { ai, catalog, navigation };
+  }
+
+  beginRoundRestart(): void {
+    if (!this.loaded || this.closed || this.running || this.generated.length !== 0 || this.roundPhase !== "active") {
+      throw new Error("Bot round restart requires a live idle director");
+    }
+    this.ai.shutdown(true);
+    this.sequences.clear();
+    this.roundPhase = "detached";
+  }
+  bindRestartedRound(host: SourceBotDirectorHost, navigation: SourceBotDirectorOptions["navigation"]): void {
+    if (this.closed || this.roundPhase !== "detached") throw new Error("Detach bot round before rebinding");
+    if (host.game.options.product !== this.options.host.game.options.product || host.game.maxClients !== this.options.host.game.maxClients) {
+      throw new Error("Bot fast restart must retain its product and client capacity");
+    }
+    this.currentOptions = { ...this.options, host, navigation, restoring: false };
+    this.round = this.createRound(host, navigation);
+    this.library.goals.rebindWorld(this.goalWorld());
+    if (!this.ai.setup(true) || !this.ai.loadMap(true)) throw new Error("Source bot round initialization failed");
+    this.catalog.initializeBots(true);
+    this.roundPhase = "bound";
+  }
+  resumeRoundBots(): void {
+    if (this.closed || this.roundPhase !== "bound") throw new Error("Bind bot round before resuming");
+    this.roundPhase = "active";
   }
 
   private goalWorld(): GoalWorld {
@@ -166,14 +198,14 @@ export class SourceBotDirector {
 
   /** Called once by the session's source frame phase; it never runs actor physics itself. */
   frame(milliseconds: number): readonly ActorCommand[] {
-    if (!this.loaded || this.closed || this.running) throw new Error("Bot commands require a live idle director");
+    if (!this.loaded || this.closed || this.running || this.roundPhase !== "active") throw new Error("Bot commands require a live idle director");
     if (this.generated.length !== 0) throw new Error("Bot command output from the previous source frame was not drained");
     this.running = true;
     try { this.ai.startFrame(milliseconds); return this.generated.splice(0); }
     finally { this.running = false; }
   }
   checkpointOrchestration(): SourceBotDirectorOrchestration {
-    if (!this.loaded || this.closed || this.running || this.generated.length !== 0) throw new Error("Bot director checkpoint requires a completed frame in a live map");
+    if (!this.loaded || this.closed || this.running || this.generated.length !== 0 || this.roundPhase !== "active") throw new Error("Bot director checkpoint requires a completed frame in a live map");
     return { version: 1, sequences: [...this.sequences].map(([actor, next]) => ({
       actor: { slot: actor.id.slot, generation: actor.id.generation }, owner: actor.owner, next,
     })) };

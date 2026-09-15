@@ -32,6 +32,7 @@ export interface ApplicationBotNavigationCheckpoint {
   readonly clients: readonly { readonly client: number; readonly reusable: boolean; readonly runtime: NavigationRuntimeCheckpoint }[];
 }
 export interface ApplicationBotNavigation extends SelectedBotNavigation {
+  restartRound(): void;
   checkpoint(): ApplicationBotNavigationCheckpoint;
   restoreCheckpoint(value: unknown, remapClient?: (saved: number) => number): void;
 }
@@ -117,6 +118,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content),
     navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
     mapBytes: await content.mounts.read(content.recipe.map.geometry) });
+  let baseRuntime = loaded.runtime;
   type CachedNavigation = { readonly player: Readonly<MovementPlayer> | null; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer };
   const clients = new Map<number, CachedNavigation>();
   const forClient = (client: number): NavigationRuntime => {
@@ -125,9 +127,14 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     const runtime = new NavigationRuntime({ ...loaded.runtime.graph, profile: profileFor(player) }, worldFor(player));
     clients.set(client, { player, runtime, locomotion: capturePlayerLocomotion(player) }); return runtime;
   };
-  return { runtime: loaded.runtime, forClient,
+  return { get runtime() { return baseRuntime; }, forClient,
+    restartRound() {
+      const selected = firstPlayer() ?? locomotionTemplate(content.recipe);
+      baseRuntime = new NavigationRuntime({ ...loaded.runtime.graph, profile: profileFor(selected) }, worldFor(null));
+      clients.clear();
+    },
     checkpoint() {
-      return { version: 1, base: loaded.runtime.checkpoint(), clients: Array.from(clients, ([client, cached]) => {
+      return { version: 1, base: baseRuntime.checkpoint(), clients: Array.from(clients, ([client, cached]) => {
         const current = simulation.players().map(actor => simulation.movementPlayer(actor)).find(player => player?.client.slot === client);
         return { client, reusable: current !== undefined && current !== null && current === cached.player
           && playerLocomotionMatches(current, cached.locomotion), runtime: cached.runtime.checkpoint() };
@@ -136,7 +143,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     restoreCheckpoint(value, remapClient = client => client) {
       const reader = new SaveReader(value, "applicationNavigation");
       reader.field("version").literal(1);
-      const base = new NavigationRuntime(loaded.runtime.graph, loaded.runtime.world);
+      const base = new NavigationRuntime(baseRuntime.graph, baseRuntime.world);
       base.restoreCheckpoint(reader.field("base").value);
       const restored = new Map<number, CachedNavigation>();
       const savedClients = new Set<number>();
@@ -151,7 +158,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
         runtime.restoreCheckpoint(entry.field("runtime").value);
         restored.set(client, { player, locomotion, runtime });
       });
-      loaded.runtime.restoreCheckpoint(base.checkpoint());
+      baseRuntime.restoreCheckpoint(base.checkpoint());
       clients.clear(); for (const [client, cached] of restored) clients.set(client, cached);
     }, crouchedBounds: profile.crouchedShape?.bounds ?? first.standingBounds,
     travelWeapon: () => null,

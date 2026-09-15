@@ -1057,6 +1057,16 @@ export class BotGoalLibrary {
     }
   }
 
+  /** Same-map restart replaces live observers without reallocating retained map goals. */
+  rebindWorld(world: GoalWorld): void {
+    if (this.world === null || this.world.bspEntities !== world.bspEntities || this.states.size !== 0) {
+      throw new Error("Goal world rebinding requires retained map metadata and retired bot states");
+    }
+    this.mapRevision++;
+    this.world = world;
+    this.sourceGoals.clear();
+  }
+
   initLevelItems(world: GoalWorld | null = this.world): void {
     if (world === null) throw new Error("BotInitLevelItems requires a retained goal world");
     this.world = world;
