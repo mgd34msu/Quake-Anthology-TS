@@ -225,19 +225,18 @@ export class Application {
   private pendingRestart: number | null = null;
   private pendingSave: SaveImage | null = null;
   private savedGames: StartupSaves | null = null;
-  private pendingLevelAutosave = false;
   private localGuest: LocalQ3GuestWorld | null = null;
   private guestBrowser: LocalQ3GuestBrowser | null = null;
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
-  private get levelRecoveryAvailable(): boolean {
-    return !this.options.dedicated && this.options.network.kind === "offline" && this.options.mode === "singleplayer";
+  private levelRecoveryAvailable(simulation: SharedSimulation, options: ApplicationOptions): boolean {
+    return !options.dedicated && options.network.kind === "offline" && options.mode === "singleplayer"
+      && (simulation.q1Source() !== null || simulation.q2Source() !== null || simulation.quakecSource() !== null);
   }
 
   private async autosaveLevel(): Promise<void> {
-    if (!this.levelRecoveryAvailable || this.network !== null || this.localPlayers.length === 0) return;
-    if (this.simulation.q3Source() !== null && this.lastOutput?.simulation !== this.simulation) { this.pendingLevelAutosave = true; return; }
+    if (!this.levelRecoveryAvailable(this.simulation, this.options) || this.network !== null || this.localPlayers.length === 0) return;
     const directory = join(this.saveDirectory, this.content.catalog.product(this.content.recipe.map.entities.content).expectation.id);
     try {
       await mkdir(directory, { recursive: true });
@@ -247,14 +246,14 @@ export class Application {
     } catch (error) { this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`); }
   }
 
-  private saveMenu(): SavedGameMenuService {
+  private saveMenu(simulation: SharedSimulation, options: ApplicationOptions): SavedGameMenuService {
     const saves = this.savedGames ??= new StartupSaves(this.content.catalog, this.saveDirectory);
     const queue = (run: () => Promise<void>): Promise<void> => new Promise((resolve, reject) => {
       if (this.closed || this.saveOperation !== null) { reject(new Error("Another save operation is in progress.")); return; }
       this.saveOperation = { run, resolve, reject };
     });
     return { list: () => saves.list, refresh: () => saves.refresh(),
-      ...(this.levelRecoveryAvailable && !this.isTeamArenaSkirmish() ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
+      ...(this.levelRecoveryAvailable(simulation, options) ? { recovery: { restart: () => queue(() => this.replaceWorld(this.content.recipe.map.geometry.requestedPath, null)) } } : {}),
       unavailable: () => this.network !== null ? "Save/load unavailable while hosting a network game."
         : null,
       save: (name, overwrite) => queue(async () => { await this.saveGame(overwrite === null ? await saves.namedPath(name) : saves.path(overwrite)); }),
@@ -1024,7 +1023,7 @@ export class Application {
         if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(this.simulation, this.options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
         local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
@@ -1563,7 +1562,7 @@ export class Application {
           if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
-            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(current, options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
           const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
           stagedPresentations.push(presentation);
@@ -1638,7 +1637,6 @@ export class Application {
       const replacement = this.session.replaceWorld(nextSimulation, replacementPresentations, replacementClients);
       committed = true;
       this.worldSimulation = nextSimulation;
-      if (save !== undefined) this.pendingLevelAutosave = false;
       this.loadedContent = content;
       this.launchOptions = options;
       this.bots = nextBots;
@@ -2201,10 +2199,6 @@ export class Application {
         await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
       await this.capture?.drain();
-      if (this.pendingLevelAutosave && this.pendingTransition === null && this.pendingMap === null && this.pendingRestart === null && this.pendingSave === null) {
-        this.pendingLevelAutosave = false;
-        await this.autosaveLevel();
-      }
       await this.commands();
       await this.sourceActions();
       await this.commands();

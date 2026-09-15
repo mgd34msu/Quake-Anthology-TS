@@ -148,3 +148,41 @@ test.skipIf(process.env["QUAKE_DEATH_APPLICATION_TEST"] !== "1")("actual applica
     await capture("restarted");
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
+
+test("native Q3 singleplayer death retains match input and attack respawns without a recovery menu", async () => {
+  const { Application } = await import("../../../src/app/bootstrap/application.ts");
+  const { WorldSeatPresentation } = await import("../../../src/app/bootstrap/presentation.ts");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = await mkdtemp(join(tmpdir(), "quake-q3-match-death-")), saves = join(root, "saves");
+  const parsed = parseApplicationCommand(["--game", "q3-baseq3", "--map", "q3dm1", "--movement", "q3", "--character", "q3",
+    "--mode", "singleplayer", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", root]);
+  if (parsed.kind !== "run") throw new Error("Missing native Q3 match launch");
+  const prints: string[] = [];
+  const app = await Application.open(parsed.options, { print: text => { prints.push(text); }, saveDirectory: saves });
+  try {
+    const local = app.localPlayers[0], simulation = app.simulation;
+    if (local === undefined || !(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing match seat");
+    const presentation = local.seat.presentation, client = presentation.q3Client;
+    await app.step(50);
+    presentation.local.console.field.setText("/kill"); presentation.local.console.submit(); await app.step(50);
+    expect(simulation.playerUi(local.actor).health).toBeLessThanOrEqual(0);
+    const time = app.timeMilliseconds;
+    for (let frame = 0; frame < 25; frame++) {
+      await app.step(100);
+      expect(presentation.ui.controller.activeMenu).toBeNull();
+      expect(presentation.local.input.focus.kind).toBe("game");
+    }
+    expect(app.timeMilliseconds).toBe(time + 2500);
+    app.input({ kind: "mouse-button", seat: local.seat.id, button: 1, down: true, timeMilliseconds: performance.now() });
+    try {
+      for (let frame = 0; frame < 10 && simulation.playerUi(local.actor).health <= 0; frame++) await app.step(100);
+      expect(simulation.playerUi(local.actor).health).toBeGreaterThan(0);
+      expect(app.simulation).toBe(simulation); expect(local.seat.presentation).toBe(presentation); expect(presentation.q3Client).toBe(client);
+      expect(presentation.ui.controller.activeMenu).toBeNull(); expect(presentation.local.input.focus.kind).toBe("game");
+    } finally { app.input({ kind: "mouse-button", seat: local.seat.id, button: 1, down: false, timeMilliseconds: performance.now() }); }
+    expect(prints.some(text => text.includes("Autosaved ") || text.includes("Autosave failed:"))).toBe(false);
+    expect(await Bun.file(join(saves, "q3-baseq3", "autosave.sav")).exists()).toBe(false);
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+}, 60000);
