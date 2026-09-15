@@ -2,7 +2,7 @@ import type { ResourceRequest } from "../../contracts/content.ts";
 import { equipmentResources } from "../../content/catalog/equipment.ts";
 import { monsterResources, monsterSources } from "../../content/catalog/monsters.ts";
 import { q2RegisteredWeaponResources, weaponResources } from "../../content/catalog/weapons.ts";
-import { Q2_TRANSIENT_SOUNDS } from "../../content/q2/foundation/effect-resources.ts";
+import { Q2_ROGUE_TRANSIENT_SOUNDS, Q2_TRANSIENT_SOUNDS } from "../../content/q2/foundation/effect-resources.ts";
 import type { Q2Entity } from "../../content/q2/foundation/host.ts";
 import type { MonsterSourceDefinition } from "../../content/monsters/definitions.ts";
 import { rereleaseMedicReinforcements } from "../../content/q2/rerelease/monsters/base-variants/medic.ts";
@@ -75,7 +75,11 @@ export function applicationResourceRequests(content: ResourceContent,
     append(native, entities.flatMap(entity => [entity.model, entity.model2, entity.model3, entity.model4]), entities.flatMap(entity => [entity.noise, entity.sound]));
   }
   for (const content of new Set([native, ...requests.map(request => request.content)])) {
-    if (catalog.product(content).expectation.family === "q2") append(content, [], Q2_TRANSIENT_SOUNDS);
+    const product = catalog.product(content).expectation;
+    if (product.family === "q2") {
+      append(content, [], Q2_TRANSIENT_SOUNDS);
+      if (product.edition === "rerelease" || product.campaign === "rogue") append(content, [], Q2_ROGUE_TRANSIENT_SOUNDS);
+    }
   }
   return [...new Map(requests.filter(request => /\.(mdl|md2|md3|spr|sp2|wav|ogg)$/i.test(request.path))
     .map(request => [`${request.content}\0${request.path}`, request])).values()];

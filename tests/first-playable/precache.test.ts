@@ -2,14 +2,14 @@ import { expect, test } from "bun:test";
 import { applicationResourceRequests, characterResourceRequests, nativeQ2MonsterResources, prepareApplicationResources } from "../../src/app/bootstrap/precache.ts";
 import { InstalledCatalog, expectedProducts } from "../../src/content/catalog/index.ts";
 import type { CatalogProduct } from "../../src/content/catalog/index.ts";
-import { createContentId } from "../../src/contracts/content.ts";
+import { type ProviderReference, createContentId } from "../../src/contracts/content.ts";
 import { disabledEquipment, EQUIPMENT_PROVIDERS } from "../../src/content/catalog/equipment.ts";
 import { q2RegisteredWeaponResources, selectedWeaponResources, weaponResources } from "../../src/content/catalog/weapons.ts";
 import { rogueWeaponDefinitions, xatrixWeaponDefinitions } from "../../src/content/q2/missionpacks/weapons/definitions.ts";
 import { monsterSources } from "../../src/content/monsters/definitions.ts";
 import { rereleaseMedicReinforcements } from "../../src/content/q2/rerelease/monsters/base-variants/medic.ts";
 
-const catalog = new InstalledCatalog("/unused", expectedProducts.filter(product => ["q1-classic-id1", "q2-rerelease-baseq2", "q3-baseq3"].includes(product.id)).map(expectation => ({
+const catalog = new InstalledCatalog("/unused", expectedProducts.filter(product => ["q1-classic-id1", "q2-classic-baseq2", "q2-classic-rogue", "q2-rerelease-baseq2", "q3-baseq3"].includes(product.id)).map(expectation => ({
   id: createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "precache-test" }),
   expectation, availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [],
 } satisfies CatalogProduct)), [], 0);
@@ -17,6 +17,19 @@ const native = { provider: "q1:official", content: catalog.product("q1-classic-i
 const gunner = { source: { provider: "q2:monsters/rerelease/baseq2", content: catalog.product("q2-rerelease-baseq2").id }, classname: "monster_gunner" } satisfies
   Extract<Parameters<typeof applicationResourceRequests>[0]["recipe"]["enemies"], { kind: "replace" }>["default"];
 const simulation = { q1Source: () => null, quakecSource: () => null, q2Source: () => null, q1WeaponSource: () => null };
+
+test("Q2 transient precache selects expansion sounds by source content", () => {
+  for (const product of ["q2-classic-baseq2", "q2-classic-rogue", "q2-rerelease-baseq2"]) {
+    const source = { provider: "q2:entities", content: catalog.product(product).id } satisfies ProviderReference;
+    const content = { catalog, recipe: { map: { entities: source }, weapons: [], equipment: disabledEquipment(),
+      character: { definition: native, appearance: native }, enemies: { kind: "replace", default: gunner, byClassname: {} } } } satisfies Parameters<typeof applicationResourceRequests>[0];
+    const paths = applicationResourceRequests(content, simulation).filter(request => request.content === source.content).map(request => request.path);
+    expect(paths).toContain("sound/weapons/rocklx1a.wav");
+    for (const path of ["sound/weapons/tesla.wav", "sound/weapons/disrupthit.wav"]) expect(paths.includes(path)).toBe(product !== "q2-classic-baseq2");
+  }
+  const registered = q2RegisteredWeaponResources({ registeredDefinitions: () => rogueWeaponDefinitions }, false);
+  expect(registered).toContain("sound/weapons/disrupthit.wav");
+});
 
 test("shared precache keeps selected source identity and deduplicates overlapping monster, weapon and equipment declarations", () => {
   const content = { catalog, recipe: { map: { entities: native }, weapons: [native], character: { definition: native, appearance: native },

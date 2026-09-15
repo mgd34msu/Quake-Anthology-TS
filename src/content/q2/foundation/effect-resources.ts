@@ -15,5 +15,7 @@ export const Q2_TRANSIENT_SOUNDS: readonly string[] = [
   "world/ric1.wav", "world/ric2.wav", "world/ric3.wav", "weapons/lashit.wav",
   "world/spark5.wav", "world/spark6.wav", "world/spark7.wav", "weapons/railgf1a.wav",
   "weapons/rocklx1a.wav", "weapons/grenlx1a.wav", "weapons/xpld_wat.wav",
-  "player/land1.wav", "player/fall2.wav", "player/fall1.wav", "weapons/tesla.wav", "weapons/disrupthit.wav",
+  "player/land1.wav", "player/fall2.wav", "player/fall1.wav",
 ];
+
+export const Q2_ROGUE_TRANSIENT_SOUNDS: readonly string[] = ["weapons/tesla.wav", "weapons/disrupthit.wav"];
