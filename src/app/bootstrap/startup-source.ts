@@ -13,7 +13,7 @@ export function createStartupSource(options: ApplicationOptions, recipe: Executa
   const cvars = new CvarRegistry({ dialect, context, print });
   if (dialect === "q2-classic" || dialect === "q2-rerelease") registerQ2ServerCvars(cvars, recipe.match.provider);
   else if (dialect === "q3") {
-    for (const definition of q3GameCvarDefinitions(!recipe.map.entities.provider.includes("missionpack") ? "baseq3" : "missionpack"))
+    for (const definition of q3GameCvarDefinitions(recipe.map.entities.content.includes("missionpack") ? "missionpack" : "baseq3"))
       cvars.register(definition.name, definition.value, definition.flags);
   } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: "0.93",
     sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);
