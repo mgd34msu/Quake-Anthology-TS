@@ -3,7 +3,7 @@ import type { SoundBank, UnifiedAudio } from "../../../audio/index.ts";
 import type { PcmStream } from "../../../audio/streams.ts";
 import type { ContentId, GameFamily } from "../../../contracts/content.ts";
 import type { InstalledCatalog } from "../../../content/catalog/index.ts";
-import type { OpenMusicTrack } from "../../../audio/music.ts";
+import type { OpenMusicTrack, MusicVolumeMode } from "../../../audio/music.ts";
 
 /** Only the official original campaigns share numbered soundtracks across Q1 editions. */
 export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): ContentId | null {
@@ -22,7 +22,7 @@ export class ApplicationMusic {
   private gain = 0.25;
   private paused = false;
 
-  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined) {}
+  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source") {}
 
   get volume(): number { return this.gain; }
   set volume(value: number) {
@@ -46,7 +46,7 @@ export class ApplicationMusic {
     if (this.current?.content === content && this.current.track === selected && this.current.player.playing) return;
     this.stop();
     const request = this.request;
-    const player = new MusicPlayer(this.engine.sampleRate, family);
+    const player = new MusicPlayer(this.engine.sampleRate, family, this.volumeMode);
     player.setVolume(this.gain);
     let openMusic: OpenMusicTrack = path => bank.openMusic(path);
     const cd = new CdMusic(player, path => openMusic(path));

@@ -19,7 +19,7 @@ export class StartupAudio {
   private constructor(mounts: MountedContent, private readonly family: GameFamily, private readonly seat: SeatId,
     print: (text: string) => undefined, preferences: Partial<AudioPreferences>) {
     this.bank = new SoundBank(mounts);
-    this.music = new ApplicationMusic(this.engine, print);
+    this.music = new ApplicationMusic(this.engine, print, "immediate");
     this.setVolumes(preferences.effectsVolume ?? 0.7, preferences.musicVolume ?? 0.25);
     this.engine.setListeners([{ seat, actor: null, origin: { x: 0, y: 0, z: 0 },
       axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], gain: 1, underwater: false }]);
@@ -35,8 +35,16 @@ export class StartupAudio {
         const sound = await audio.bank.register(menuSoundPath(options.family, event), options.family);
         if (sound !== null) audio.sounds.set(event, sound);
       }
-      if (options.theme !== null && await options.theme.mounts.resolve("music/track77.ogg") !== null)
-        await audio.music.play(options.theme.content, "q2", "", new SoundBank(options.theme.mounts), "music/track77.ogg");
+      const fallback = options.family === "q1" ? ["music/track02", "music/02"]
+        : options.family === "q2" ? ["music/02", "music/track02"] : ["music/sonic5"];
+      const candidates = [{ mounts: options.mounts, content: options.content, family: options.family, names: fallback }];
+      if (options.theme !== null) candidates.unshift({ ...options.theme, family: "q2", names: ["music/track77"] });
+      music: for (const candidate of candidates) for (const name of candidate.names) for (const extension of ["ogg", "wav"]) {
+        const path = name + "." + extension;
+        if (await candidate.mounts.resolve(path) === null) continue;
+        await audio.music.play(candidate.content, candidate.family, "", new SoundBank(candidate.mounts), path);
+        break music;
+      }
       return audio;
     } catch (error) { audio.close(); throw error; }
   }

@@ -3,6 +3,7 @@
 import { RawAudioStream } from "./streams.ts";
 import type { PcmStream } from "./streams.ts";
 import type { SoundFamily, StreamPcm } from "./types.ts";
+export type MusicVolumeMode = "source" | "immediate";
 export class MusicPlayer {
     private stream: PcmStream | null = null;
     private loop: PcmStream | null = null;
@@ -10,17 +11,17 @@ export class MusicPlayer {
     private targetVolume = 0.25;
     private smoothedVolume = Math.fround(0.5);
     paused = false;
-    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3") {
+    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source") {
         this.pcm = new RawAudioStream(outputRate);
     }
     get playing(): boolean { return this.stream !== null; }
     get sourcePosition(): number { return this.pcm.sourcePosition; }
-    get volume(): number { return this.family === "q3" ? this.smoothedVolume : this.targetVolume; }
+    get volume(): number { return this.family === "q3" && this.volumeMode === "source" ? this.smoothedVolume : this.targetVolume; }
     setVolume(value: number): void { if (!Number.isFinite(value) || value < 0)
         throw new RangeError("Invalid music volume"); this.targetVolume = value; }
     /** Called once by the presentation frame, matching Q3's source smoothing clock. */
     update(): void {
-        if (this.family === "q3" && this.stream !== null && !this.paused)
+        if (this.family === "q3" && this.volumeMode === "source" && this.stream !== null && !this.paused)
             this.smoothedVolume = Math.fround(Math.fround(this.smoothedVolume + Math.fround(Math.fround(this.targetVolume) * 2)) / 4);
     }
     start(intro: PcmStream, loop: PcmStream | null = null): void {
