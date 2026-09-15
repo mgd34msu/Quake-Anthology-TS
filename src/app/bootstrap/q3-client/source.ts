@@ -31,17 +31,50 @@ export class ApplicationQ3Source implements SnapshotSource {
   private reliable = 0;
   private sequence = -1;
   private commandSequence = -1;
+  private snapshotServerBit: 0 | 4 = 0;
+  private pendingRoundTime: number | null = null;
+  private readonly product: Q3SourcePresentationState["product"];
   time = 0;
   readonly clientNumber: number;
-  constructor(readonly actor: ActorId, initial: Q3SourcePresentationState,
+  constructor(private currentActor: ActorId, initial: Q3SourcePresentationState,
     private readonly select: (player: PlayerStateRecord<number, number, number>, source: Q3SourcePresentationState) => Q3VisibleEntities,
     private readonly sourceActor: (number: number) => ActorId | null,
     private readonly predictionCommand?: (command: ActorCommand, sourceTimeMilliseconds: number) => UserCommand) {
-    const client = initial.clients.find(client => client.actor.equals(actor));
+    const client = initial.clients.find(client => client.actor.equals(currentActor));
     if (client === undefined) throw new Error("Q3 presentation seat has no source player");
-    this.clientNumber = client.slot;
+    this.clientNumber = client.slot; this.product = initial.product;
     for (const entry of initial.configstrings) { this.strings[entry.index] = entry.value; this.appliedStrings[entry.index] = entry.value; }
     this.receive(initial, [], []);
+  }
+  get actor(): ActorId { return this.currentActor; }
+  assertCanRestartRound(): void {
+    if (this.pendingRoundTime !== null) throw new Error("Local Q3 round restart is already pending");
+  }
+  beginRoundRestart(bit: 0 | 4, source: Q3SourcePresentationState): void {
+    this.assertCanRestartRound();
+    if (bit === this.snapshotServerBit || source.product !== this.product || source.time < this.time)
+      throw new Error("Invalid local Q3 restart epoch");
+    this.configstrings(source);
+    this.command(["map_restart"]);
+    this.snapshotServerBit = bit; this.pendingRoundTime = source.time; this.actors.clear();
+  }
+  validateRoundActor(actor: ActorId, source: Q3SourcePresentationState): void {
+    if (this.pendingRoundTime === null || actor.session !== this.actor.session || actor.equals(this.actor)
+      || source.product !== this.product || source.time < this.pendingRoundTime
+      || !source.clients.some(client => client.slot === this.clientNumber && client.actor.equals(actor)))
+      throw new Error("Invalid local Q3 round actor binding");
+  }
+  rebindRound(actor: ActorId, source: Q3SourcePresentationState): void {
+    this.validateRoundActor(actor, source);
+    this.currentActor = actor; this.pendingRoundTime = null;
+  }
+  private configstrings(source: Q3SourcePresentationState): void {
+    const strings = Array.from({ length: 1024 }, () => "");
+    for (const entry of source.configstrings) strings[entry.index] = entry.value;
+    for (const [index, value] of strings.entries()) {
+      if (this.strings[index] === value) continue;
+      this.strings[index] = value; this.command(["cs", String(index), value]);
+    }
   }
   current(): { readonly number: number; readonly serverTime: number } { return { number: this.number, serverTime: this.time }; }
   read(number: number): Snapshot | null { return this.snapshots.get(number) ?? null; }
@@ -56,6 +89,7 @@ export class ApplicationQ3Source implements SnapshotSource {
     return command;
   }
   actorAt(number: number): ActorId {
+    if (this.pendingRoundTime !== null) throw new Error("Local Q3 actor binding is suspended for restart");
     const actor = this.actors.get(number) ?? this.sourceActor(number);
     if (actor === null) throw new Error(`Q3 sound entity ${number} has no source actor`);
     return actor;
@@ -64,24 +98,23 @@ export class ApplicationQ3Source implements SnapshotSource {
     this.serverCommands.set(++this.reliable, argv);
     this.serverCommands.delete(this.reliable - 64);
   }
-  receive(source: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void {
-    if (source.time < this.time) throw new Error("Q3 presentation world time rewound");
-    const player = source.clients.find(client => client.actor.equals(this.actor));
-    if (player === undefined || player.slot !== this.clientNumber) throw new Error("Q3 presentation seat changed source player");
-    for (const row of source.entities) this.actors.set(row.state.number, row.actor);
-    for (const row of source.clients) this.actors.set(row.slot, row.actor);
-    const strings = Array.from({ length: 1024 }, () => "");
-    for (const entry of source.configstrings) strings[entry.index] = entry.value;
-    for (const [index, value] of strings.entries()) {
-      if (this.strings[index] === value) continue;
-      this.strings[index] = value; this.command(["cs", String(index), value]);
-    }
+  receiveEvents(events: readonly SimulationPresentationEvent[]): void {
     for (const event of events) {
       if (event.sequence <= this.sequence) continue;
       this.sequence = event.sequence;
       if (event.kind !== "q3-source") continue;
       if (event.event.kind === "server-command" && (event.event.client < 0 || event.event.client === this.clientNumber)) this.command(tokenizeCommand(event.event.text, "q3").argv);
     }
+  }
+  receive(source: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void {
+    if (this.pendingRoundTime !== null) throw new Error("Local Q3 restart requires actor rebinding before publication");
+    if (source.time < this.time) throw new Error("Q3 presentation world time rewound");
+    const player = source.clients.find(client => client.actor.equals(this.actor));
+    if (player === undefined || player.slot !== this.clientNumber) throw new Error("Q3 presentation seat changed source player");
+    for (const row of source.entities) this.actors.set(row.state.number, row.actor);
+    for (const row of source.clients) this.actors.set(row.slot, row.actor);
+    this.configstrings(source);
+    this.receiveEvents(events);
     for (const input of commands) {
       if (!input.actor.equals(this.actor) || input.sequence <= this.commandSequence) continue;
       this.commandSequence = input.sequence;
@@ -97,7 +130,7 @@ export class ApplicationQ3Source implements SnapshotSource {
     const areaMask = new Uint8Array(32); areaMask.set(visible.areaMask);
     const previous = this.number++;
     this.snapshots.set(this.number, { messageNumber: this.number, serverTime: source.time, deltaNumber: previous === 0 ? -1 : previous,
-      flags: 0, serverCommandNumber: this.reliable, parseEntitiesNumber: 0, areaMask,
+      flags: this.snapshotServerBit, serverCommandNumber: this.reliable, parseEntitiesNumber: 0, areaMask,
       playerState, entities: visible.entities });
     this.snapshots.delete(this.number - 32);
   }

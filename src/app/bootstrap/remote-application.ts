@@ -623,6 +623,11 @@ export class RemoteApplication {
       this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], this.remote);
     }
     const input = this.controls, local = input.locals[0];
+    if (local !== undefined && local.builder.dialect === "q3" && connection !== undefined) {
+      const command = connection.commands.read(connection.commands.currentNumber);
+      local.builder.setViewAngles(command === null ? { x: 0, y: 0, z: 0 } : { x: (command.angles[0] << 16 >> 16) * (360 / 65536),
+        y: (command.angles[1] << 16 >> 16) * (360 / 65536), z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
+    }
     frontend.audio.bindHaptics(input);
     if (local === undefined) throw new Error("Remote input has no local seat");
     const typography = await frontend.assets.loadMenuTypography();
@@ -699,6 +704,14 @@ export class RemoteApplication {
         const player = this.localPlayers.find(player => command.seat === null || player.seat.id.equals(command.seat));
         if (player === undefined || this.network.phase !== "active") throw new Error("Remote command requires a connected local player");
         const q3 = this.presentation?.q3Client;
+        if (command.name === "centerview") {
+          const local = this.controls?.locals.find(local => local.player.actor.equals(player.actor));
+          if (local !== undefined) {
+            const state = local.builder.dialect === "q3" && q3 != null ? q3.source.read(q3.source.current().number)?.playerState : undefined;
+            local.builder.setViewAngles({ ...local.builder.viewAngles, x: state === undefined ? 0 : -(state.deltaAngles.x << 16 >> 16) * (360 / 65536) });
+          }
+          continue;
+        }
         if (q3 !== null && q3 !== undefined) {
           if (command.name === "use") { const selected = this.remote.playerUi(player.actor).items.find(item => item.id === command.args[0]); if (selected !== undefined && await q3.command(["weapon", String(selected.sourceOrdinal)])) continue; }
           if (await q3.command([command.name, ...command.args])) continue;

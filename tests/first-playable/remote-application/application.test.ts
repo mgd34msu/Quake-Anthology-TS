@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import { WorldSeatPresentation } from "../../../src/app/bootstrap/presentation.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { RemoteApplication } from "../../../src/app/bootstrap/remote-application.ts";
@@ -31,6 +32,19 @@ test("native remote frontend renders, moves, fires, travels and disconnects thro
     const local = remote.localPlayers[0], admitted = server.networkClients[0];
     if (local === undefined || admitted === undefined) throw new Error(`No remote player: ${prints.join("")}`);
     expect(local.actor.equals(admitted.actor)).toBe(false);
+    if (!(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing remote input presentation");
+    const localInput = local.seat.presentation.local;
+    const forwarded = spyOn(remote.remote, "playerCommand");
+    try {
+      remote.input({ kind: "mouse-motion", seat: local.seat.id, position: { x: 0, y: 0 }, delta: { x: 0, y: 137 }, timeMilliseconds: performance.now() });
+      await exchange();
+      expect(Math.abs(localInput.builder.viewAngles.x)).toBeGreaterThan(1);
+      localInput.console.field.setText("/centerview"); localInput.console.submit();
+      await exchange(); await exchange();
+      expect(localInput.builder.viewAngles.x).toBe(0);
+      expect(Math.abs(remote.remote.playerView(local.actor).angles.x)).toBeLessThan(0.02);
+      expect(forwarded.mock.calls.some(call => call[1] === "centerview")).toBe(false);
+    } finally { forwarded.mockRestore(); }
     expect(remote.input({ seat: createIdentityOwner("other application").seat(0), kind: "key", code: 119,
       down: true, repeat: false, timeMilliseconds: performance.now() })).toBe(false);
     const pixels = remote.readPixels();

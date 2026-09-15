@@ -169,7 +169,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   command(command: ActorCommand): WireUserCommand {
     const snapshot = this.requirePlayer(command.actor); if (command.command.kind !== 'q3') throw new Error('Native Q3 remote requires Q3 commands');
     const delta = snapshot.playerState.deltaAngles;
-    const source = relativeQ3SourceCommand(command.source, presentationSourceCommand(command, this.clock.time, command.command.weapon), delta);
+    const source = relativeQ3SourceCommand(command.source, command.command.kind, presentationSourceCommand(command, this.clock.time, command.command.weapon), delta);
     return { ...source, serverTime: this.clock.time, angles: [source.angles.x & 65535, source.angles.y & 65535, source.angles.z & 65535] };
   }
   private publish(time: number): void {

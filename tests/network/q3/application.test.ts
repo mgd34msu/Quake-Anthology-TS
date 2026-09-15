@@ -1,3 +1,4 @@
+import type { ActorCommand } from "../../../src/contracts/session.ts";
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
 import { knownQvmArtifacts } from "../../../src/compat/qvm/artifacts.ts";
 import type { ModuleIdentity, Q3ApiIdentity } from "../../../src/contracts/execution.ts";
@@ -185,6 +186,12 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
     const player = remote.player, serverPlayer = app.networkClients[0];
     if (player === null || serverPlayer === undefined) throw new Error(`No remote player: ${messages.join('')}`);
     const before = app.simulation.bodies.read(serverPlayer.actor)?.origin;
+    const localSource = { kind: "local-seat", seat: identity.seat(0), client: remote.client.id } satisfies ActorCommand["source"];
+    const rawInput: ActorCommand = { actor: player.actor, source: localSource, sequence: 0,
+      command: { kind: "q3", serverTimeMilliseconds: now, angleWords: [1234, 5678, 0], forwardMove: 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 2 } };
+    expect(remote.command(rawInput).angles).toEqual([1234, 5678, 0]);
+    const predicted = remote.movement(localSource.seat).submit(rawInput, now);
+    expect(predicted.angles).toEqual({ x: 1234, y: 5678, z: 0 });
     for (let sequence = 1; sequence <= 12; sequence++) {
       network.submit([{ actor: player.actor, source: { kind: 'remote-client', client: remote.client.id }, sequence,
         command: { kind: 'q3', serverTimeMilliseconds: now, angleWords: [0, 0, 0], forwardMove: 127, rightMove: 0, upMove: 0, buttons: 0, weapon: 2 } }], now);

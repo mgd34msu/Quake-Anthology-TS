@@ -107,9 +107,7 @@ for (const map of maps) for (const family of families) test(`${map.map}: private
       const privateState = raw.copy();
       for (const entry of commands) {
         const originalCommand = entry.command;
-        const localCommand: UserCommand = originalCommand.kind === "q3" ? { ...originalCommand,
-          angleWords: [(originalCommand.angleWords[0] + raw.deltaAngles.x) & 65535,
-            (originalCommand.angleWords[1] + raw.deltaAngles.y) & 65535, (originalCommand.angleWords[2] + raw.deltaAngles.z) & 65535] } : originalCommand;
+        const localCommand = originalCommand;
         const wire = adapter.submit({ actor: admission.actor, source: { kind: "local-seat", seat, client }, sequence: entry.sequence, command: localCommand }, entry.timeMilliseconds);
         if (originalCommand.kind === "q3") expect([wire.angles.x & 65535, wire.angles.y & 65535, wire.angles.z & 65535]).toEqual([...originalCommand.angleWords]);
         adapter.movePlayer(privateState, wire, { trace: (start, end, bounds, _skip, mask) => {
@@ -136,15 +134,16 @@ for (const map of maps) for (const family of families) test(`${map.map}: private
   } finally { simulation.close(); await content.close(); }
 }, 30000);
 
-test("Q3 local absolute command conversion preserves source-relative bot/network words and wraparound", () => {
+test("Q3 raw local commands and foreign absolute conversion preserve bot/network words and wraparound", () => {
   const owner = createIdentityOwner("q3-command-angles"), client = owner.client(0, 0), seat = owner.seat(0);
   const command = { serverTime: 50, angles: { x: 65530, y: 5, z: 57344 }, buttons: 0, weapon: 2, forwardmove: 0, rightmove: 0, upmove: 0 };
   const delta = { x: 20, y: 65530, z: 57344 };
-  const relative = relativeQ3SourceCommand({ kind: "local-seat", seat, client }, command, delta);
+  const relative = relativeQ3SourceCommand({ kind: "local-seat", seat, client }, "q1-netquake", command, delta);
+  expect(relativeQ3SourceCommand({ kind: "local-seat", seat, client }, "q3", command, delta)).toBe(command);
   expect(relative.angles).toEqual({ x: 65510, y: -65525, z: 0 });
   expect((relative.angles.x + delta.x) & 65535).toBe(command.angles.x);
   expect((relative.angles.y + delta.y) & 65535).toBe(command.angles.y);
   expect((relative.angles.z + delta.z) & 65535).toBe(command.angles.z);
-  expect(relativeQ3SourceCommand({ kind: "bot", provider: "q3:official" }, command, delta)).toBe(command);
-  expect(relativeQ3SourceCommand({ kind: "remote-client", client }, command, delta)).toBe(command);
+  expect(relativeQ3SourceCommand({ kind: "bot", provider: "q3:official" }, "q3", command, delta)).toBe(command);
+  expect(relativeQ3SourceCommand({ kind: "remote-client", client }, "q3", command, delta)).toBe(command);
 });

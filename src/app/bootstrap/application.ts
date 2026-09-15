@@ -60,6 +60,7 @@ import type { IpAddress } from "../../network/common/endpoint.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { UdpTransport, Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
 import { CommandBuffer, tokenizeCommand, type CommandBufferOptions, type CommandHandler } from "../../core/commands/index.ts";
+import { nativeAtoi } from "../../core/numeric.ts";
 import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
@@ -105,7 +106,7 @@ import { createQwApplicationServerHost } from "./simulation/network-qw.ts";
 import { Q3ServerNetwork } from "./network/q3.ts";
 import { Q3GameCallbackError, q3GameCallback } from "./network/q3-types.ts";
 import type { Q1ApplicationServerHost } from "./network/q1-types.ts";
-import type { Q3ApplicationServerHost } from "./network/q3-types.ts";
+import type { Q3ApplicationServerHost, Q3NetworkRoundRestart } from "./network/q3-types.ts";
 import { createQ1ApplicationServerHost } from "./simulation/network-q1.ts";
 import { createQ3ApplicationServerHost } from "./simulation/network-q3.ts";
 
@@ -150,7 +151,7 @@ interface GraphicalApplication {
   readonly effects: ApplicationEffects;
   readonly art: NativeUiArt;
   readonly presentations: readonly WorldSeatPresentation[];
-  readonly q3: ReadonlyMap<SeatId, Q3SeatClient>;
+  readonly q3: Map<SeatId, Q3SeatClient>;
   readonly rerelease: ApplicationRereleasePresentation;
 }
 
@@ -223,6 +224,10 @@ export class Application {
   private releaseSourceCommands: () => void = () => {};
   private q2Console: ApplicationQ2Console | null = null;
   private pendingRestart: number | null = null;
+  private lastRestartFrame = -1;
+  private localSnapshotServerBit: 0 | 4 = 0;
+  private fatalRoundFailure = false;
+  private roundPresentationEvents: SimulationPresentationEvent[] = [];
   private pendingSave: SaveImage | null = null;
   private savedGames: StartupSaves | null = null;
   private localGuest: LocalQ3GuestWorld | null = null;
@@ -781,10 +786,14 @@ export class Application {
   }
 
   private requestRestart(args: readonly string[]): undefined {
-    if (this.simulation.q3Source() === null) throw new Error("map_restart requires the Quake III game provider");
-    const delay = args[0] === undefined ? 5 : Number(args[0]);
-    if (!Number.isFinite(delay) || delay < 0) throw new Error("map_restart requires a nonnegative delay in seconds");
-    this.pendingRestart = this.elapsed + delay * 1000; return undefined;
+    const source = this.simulation.q3Source();
+    if (source === null) throw new Error("map_restart requires the Quake III game provider");
+    if (this.lastRestartFrame === this.frames || this.pendingRestart !== null) return undefined;
+    const delay = args[0] === undefined ? 5 : nativeAtoi(args[0]);
+    const scheduled = delay !== 0 && source.host.cvars.variableValue("g_doWarmup") === 0;
+    this.pendingRestart = scheduled ? (source.host.now() + Math.imul(delay, 1000)) | 0 : source.host.now();
+    if (scheduled) source.host.configstrings.set(5, String(this.pendingRestart));
+    return undefined;
   }
 
   private appendQ1Commands(events: readonly SimulationPresentationEvent[]): void {
@@ -795,8 +804,8 @@ export class Application {
     }
   }
 
-  private async sourceActions(): Promise<void> {
-    for (const source of this.sourceEvents) {
+  private async sourceActions(events: readonly SimulationPresentationEvent[] = this.sourceEvents): Promise<void> {
+    for (const source of events) {
       if (source.kind === "q1-composition") {
         const event = source.event.kind === "addon" ? source.event.event : source.event;
         if (event.kind === "developer-message") {
@@ -981,8 +990,8 @@ export class Application {
       this.host.loading?.stage("Loading sounds...");
       input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
         this.inputActions(), () => performance.now(), this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined);
+      this.restoreQ3InputAngles(input, this.simulation);
       if (restoring) {
-        this.restoreGuestInputAngles(input, this.simulation);
         input.resumeCommands(Math.max(0, ...players.map(player => (this.simulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
       }
       if (this.localGuest !== null) {
@@ -1237,12 +1246,13 @@ export class Application {
     return player.actor;
   }
 
-  private restoreGuestInputAngles(input: ApplicationInput, simulation: SharedSimulation): void {
-    const guest = simulation.q3Guest();
-    if (guest === null) return;
+  private restoreQ3InputAngles(input: ApplicationInput, simulation: SharedSimulation): void {
+    const state = simulation.q3Source()?.host.serverState ?? simulation.q3Guest()?.state;
+    if (state === undefined) return;
     for (const local of input.locals) {
-      const command = guest.state.getUserCommand(local.player.seat.client.id.slot);
-      if (command !== undefined) local.builder.setViewAngles({ x: (command.angles[0] << 16 >> 16) * (360 / 65536),
+      if (local.builder.dialect !== "q3") continue;
+      const command = state.getUserCommand(local.player.seat.client.id.slot);
+      local.builder.setViewAngles(command === undefined ? { x: 0, y: 0, z: 0 } : { x: (command.angles[0] << 16 >> 16) * (360 / 65536),
         y: (command.angles[1] << 16 >> 16) * (360 / 65536), z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
     }
   }
@@ -1525,7 +1535,7 @@ export class Application {
         const input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
           this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars), () => performance.now(), this.inputConfig, undefined, previous.input);
         nextInput = input;
-        if (nextLocalGuest !== null) this.restoreGuestInputAngles(input, nextSimulation);
+        this.restoreQ3InputAngles(input, nextSimulation);
         if (input.commands !== previous.input.commands) input.commands.copyPendingFrom(previous.input.commands);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
@@ -1648,7 +1658,7 @@ export class Application {
       this.frontendOverrides = frontendOverrides;
       this.capture = nextCapture;
       this.elapsed = initialSourceMilliseconds;
-      this.sourceEvents = [];
+      this.sourceEvents = []; this.roundPresentationEvents = []; this.localSnapshotServerBit = 0;
       this.clientInputs = [];
       this.unhandledEffects = [];
       this.reportedEffectGaps.clear();
@@ -1743,6 +1753,136 @@ export class Application {
     } finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
   }
 
+  private async restartSourceRound(): Promise<boolean> {
+    const simulation = this.simulation, graphical = this.graphical, network = this.network;
+    if (simulation.sourceRestartPlan().kind !== "source-reset" || network !== null && network.kind !== "q3"
+      || this.campaignMovie !== null || this.localGuest !== null) return false;
+    if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
+    const snapshot = this.session.snapshot, oldSource = simulation.q3Source();
+    if (snapshot === null || oldSource === null) return false;
+    const serverId = oldSource.host.cvars.variableValue("sv_serverid");
+    if (network === null && (!Number.isInteger(serverId) || serverId < 0 || serverId >= 0x7fffffff))
+      throw new Error("Local Q3 server id exhausted");
+    const clients = [...simulation.clientIdentities()].sort((left, right) => left.slot - right.slot);
+    for (const local of graphical?.input.locals ?? []) {
+      if (local.player.seat.isClosed || local.player.seat.client.isClosed
+        || !clients.some(client => client.equals(local.player.seat.client.id)))
+        throw new Error("Round restart has no live local client");
+      const presentation = graphical?.q3.get(local.player.seat.id);
+      if (presentation?.kind !== "native") return false;
+      presentation.client.assertCanRestartRound();
+    }
+    this.worldOperation = "travel";
+    const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
+    let mutated = false;
+    try {
+      for (;;) {
+        const oldEvents = simulation.drainPresentationEvents();
+        if (oldEvents.length === 0) break;
+        for (const presentation of graphical?.q3.values() ?? []) presentation.client.receiveEvents(oldEvents);
+        for (const presentation of graphical?.presentations ?? []) presentation.sourceEvents(oldEvents);
+        this.bots?.receive(oldEvents);
+        await network?.server.publish({ snapshot, events: [] }, oldEvents, performance.now());
+        await this.sourceActions(oldEvents);
+      }
+      if (this.closed) throw new Error("Application closed before round restart");
+      if (this.stopping) return true;
+      const clients = [...simulation.clientIdentities()].sort((left, right) => left.slot - right.slot);
+      for (const local of graphical?.input.locals ?? []) {
+        if (local.player.seat.isClosed || local.player.seat.client.isClosed
+          || !clients.some(client => client.equals(local.player.seat.client.id)))
+          throw new Error("Round restart lost a local client during old event delivery");
+        const presentation = graphical?.q3.get(local.player.seat.id);
+        if (presentation?.kind !== "native") throw new Error("Round restart lost its local cgame during old event delivery");
+        presentation.client.assertCanRestartRound();
+      }
+      if (simulation.sourceRestartPlan().kind !== "source-reset") return false;
+      const restart = async (round: Q3NetworkRoundRestart | null): Promise<void> => {
+        mutated = true; this.lastRestartFrame = this.frames;
+        const epochEvents = simulation.drainPresentationEvents();
+        graphical?.effects.resetRound(); graphical?.audio.resetRound();
+        this.bots?.beginRoundRestart();
+        if (network === null) oldSource.host.cvars.set("sv_serverid", String(serverId + 1), true);
+        simulation.restartSourceRound();
+        simulation.beginSourceRoundSettlement();
+        this.bots?.bindRestartedRound();
+        await round?.bindSource();
+        const source = simulation.q3Source();
+        if (source === null) throw new Error("Round restart lost its native source");
+        const bit = this.localSnapshotServerBit === 0 ? 4 : 0;
+        const deliver = async (initial: readonly SimulationPresentationEvent[] = []): Promise<void> => {
+          let pending = initial;
+          for (;;) {
+            const events = pending.length === 0 ? simulation.drainPresentationEvents() : pending; pending = [];
+            if (events.length === 0) break;
+            for (const presentation of graphical?.q3.values() ?? []) presentation.client.receiveEvents(events);
+            this.bots?.receive(events);
+            await round?.receiveEvents(events);
+            await this.sourceActions(events);
+            this.roundPresentationEvents.push(...events);
+          }
+          if (this.closed) throw new Error("Application closed during round restart");
+        };
+        const settle = async (): Promise<SimulationOutput> => {
+          const output = await this.session.stepAsync({ elapsedMilliseconds: 100, commands: [] });
+          this.elapsed += 100;
+          this.lastOutput = { simulation, output };
+          await deliver();
+          return output;
+        };
+        await deliver(epochEvents);
+        for (let frame = 0; frame < 3; frame++) await settle();
+        const players: LocalPlayer[] = [];
+        for (const client of clients) {
+          if (await round?.reconnectClient(client)) { await deliver(); continue; }
+          if (this.bots?.reconnectRestartedClient(client)) { await deliver(); continue; }
+          const local = graphical?.input.locals.find(local => local.player.seat.client.id.equals(client));
+          if (local === undefined || graphical === null) throw new Error("Round restart client has no admission owner");
+          const presentation = graphical.q3.get(local.player.seat.id);
+          if (presentation?.kind !== "native") throw new Error("Round restart lost its local cgame");
+          presentation.client.beginRoundRestart(bit, source.sourceState());
+          players.push({ seat: local.player.seat, actor: simulation.admitPlayer(client).actor });
+          await deliver();
+        }
+        graphical?.input.rebindPlayers(players, simulation, "source-round");
+        for (const local of graphical?.input.locals ?? []) {
+          const presentation = graphical?.q3.get(local.player.seat.id);
+          if (presentation?.kind !== "native") throw new Error("Round restart lost its prediction owner");
+          const prediction = createSimulationPredictionHost(simulation, local.player.actor, local.player.seat.id);
+          const initial = source.sourceState(); prediction.captureSource(initial);
+          presentation.client.rebindRound({ actor: local.player.actor, initial, movement: prediction,
+            predictionCommand: (command, time) => prediction.submit(command, time),
+            linkBounds: number => source.world.linkState(number)?.absbounds ?? null,
+            sourceActor: number => { const record = source.records.get(number); return record?.inuse ? record.actor.id : null; },
+            serverSettings: () => source.host.cvars.snapshots().filter(variable => source.settings.definitions.some(definition => definition.name === variable.name)) });
+          graphical?.q3.set(local.player.seat.id, { kind: "native", client: presentation.client, prediction });
+        }
+        await settle();
+        simulation.completeSourceRoundSettlement();
+        this.localSnapshotServerBit = bit;
+      };
+      if (network?.kind === "q3") {
+        await network.server.restartSourceRound(restart, () => { mutated = true; this.lastRestartFrame = this.frames; return undefined; });
+      } else await restart(null);
+      this.bots?.resumeRoundBots();
+      const final = this.lastOutput, source = simulation.q3Source();
+      if (final === null || final.simulation !== simulation || source === null) throw new Error("Round restart has no final frame");
+      const state = source.sourceState();
+      for (const presentation of graphical?.q3.values() ?? []) {
+        if (presentation.kind !== "native") throw new Error("Round restart has a foreign cgame");
+        presentation.prediction.captureSource(state); presentation.client.receive(state, [], []);
+      }
+      await network?.server.publish(final.output, [], performance.now());
+      return true;
+    } catch (error) {
+      if (mutated) { this.fatalRoundFailure = true; this.closed = true; this.stopping = true; }
+      throw error;
+    } finally {
+      this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
+      if (!this.closed) this.resumeInput();
+    }
+  }
+
   private async applyTransition(): Promise<void> {
     if (this.pendingSave !== null) {
       const image = this.pendingSave, previous = this.content;
@@ -1794,10 +1934,12 @@ export class Application {
       }
       return;
     }
-    if (this.pendingRestart !== null && this.elapsed >= this.pendingRestart) {
+    if (this.pendingRestart !== null && (this.simulation.q3Source()?.host.now() ?? 0) >= this.pendingRestart) {
       this.pendingRestart = null;
       if (this.simulation.q3Source() === null) throw new Error("Quake III restart has no source game");
-      await this.replaceWorld(this.options.map, null, this.elapsed);
+      if (!await this.restartSourceRound()) {
+        await this.replaceWorld(this.options.map, null, this.elapsed); this.lastRestartFrame = this.frames;
+      }
       return;
     }
     const decision = this.pendingTransition;
@@ -1885,6 +2027,16 @@ export class Application {
         }
       };
       try {
+        if (command.name === "centerview") {
+          for (const target of this.graphical?.input.locals ?? []) {
+            if (command.seat !== null && !target.player.seat.id.equals(command.seat)) continue;
+            const client = this.graphical?.q3.get(target.player.seat.id)?.client;
+            const state = target.builder.dialect === "q3" && client !== undefined
+              ? client.source.read(client.source.current().number)?.playerState : undefined;
+            target.builder.setViewAngles({ ...target.builder.viewAngles, x: state === undefined ? 0 : -(state.deltaAngles.x << 16 >> 16) * (360 / 65536) });
+          }
+          continue;
+        }
         if (command.target === "source") {
           if (command.name === "postgame") {
             this.pendingTeamArenaPostgame = parseTeamArenaPostgame(command.arguments_);
@@ -1898,8 +2050,6 @@ export class Application {
               const player = this.simulation.movementPlayer(actor);
               if (player !== null) game.host.engine.dropClient(player.client.slot, "was kicked");
             }
-          } else if (command.name === "centerview") {
-            for (const local of this.graphical?.input.locals ?? []) local.builder.setViewAngles({ ...local.builder.viewAngles, x: 0 });
           } else throw new Error("Unknown source application action " + command.name);
           continue;
         }
@@ -2159,13 +2309,14 @@ export class Application {
           : { kind: "competitive", match: this.content.recipe.match.provider } satisfies Parameters<SharedTransitionCoordinator["resolve"]>[0];
         this.transitions.commit(this.transitions.resolve(mode, intents));
       }
+      const roundEvents = this.roundPresentationEvents.splice(0);
       const graphical = this.graphical;
       if (graphical !== null) {
         this.simulation.beginPresentationFrame(this.frames);
         const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
         graphical.rerelease.receive(this.sourceEvents);
         await graphical.rerelease.prepare();
-        const presentationEvents = [...this.sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
+        const presentationEvents = [...roundEvents, ...this.sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
         const nativeQ3 = this.simulation.q3Source()?.sourceState();
         for (const source of graphical.q3.values()) {
           if (source.kind === "qvm") continue;
@@ -2204,8 +2355,18 @@ export class Application {
       await this.commands();
       const currentGraphics = this.graphical;
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
+      this.sourceEvents = [...roundEvents, ...this.sourceEvents];
       return output;
-    } catch (error) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
+    } catch (error) {
+      if (!this.fatalRoundFailure) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
+      const original = error instanceof Q3GameCallbackError ? error.cause : error;
+      const errors: unknown[] = [original];
+      try { await this.capture?.beforeWorldChange(); } catch (cleanup) { errors.push(cleanup); }
+      this.stepping = false; this.stepCompletion = null; completion.resolve();
+      try { await this.close(); } catch (cleanup) { errors.push(cleanup); }
+      if (errors.length > 1) throw new AggregateError(errors, "Round restart and shutdown failed");
+      throw original;
+    }
     finally { this.stepping = false; this.stepCompletion = null; completion.resolve(); }
   }
 

@@ -145,6 +145,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   sourceEvents(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
     if (this.q3Client !== null) {
+      if (this.local.builder.dialect === "q3") return;
       for (const source of events) if (source.kind === "view-reset" && source.actor.equals(this.local.player.actor)) this.local.builder.setViewAngles(source.angles);
       return;
     }

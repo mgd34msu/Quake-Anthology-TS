@@ -165,3 +165,35 @@ for (const game of ["q1-classic-id1", "q1-quakeworld"]) for (const health of [-1
     expect(machine.strings.get(words.int(field("model")))).toBe(health < -40 ? "progs/h_player.mdl" : "progs/player.mdl");
   } finally { simulation.close(); await content.close(); }
 }, 30000);
+
+test("Q2 source respawn resets Q3 movement pitch-clamp delta with its absolute view reset", async () => {
+  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q3", "--character", "q2", "--dedicated"]);
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner("q2-q3-respawn-angle");
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, mode: "coop", skill: 1, seed: 17, maxClients: 1 });
+  try {
+    const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor), source = simulation.q2Source();
+    if (player === null || source === null) throw new Error("Missing actual Q2 source player");
+    let sequence = 0;
+    const step = (pitch: number, yaw: number, attack: boolean): void => {
+      simulation.step({ elapsedMilliseconds: 100, commands: [{ actor, source: { kind: "local-seat", client, seat: identity.seat(0) }, sequence: sequence++,
+        command: { kind: "q3", serverTimeMilliseconds: Math.round(simulation.timeSeconds * 1000) + 100,
+          angleWords: [pitch, yaw, 0], forwardMove: 0, rightMove: 0, upMove: 0, buttons: attack ? 1 : 0, weapon: 0 } }] });
+    };
+    step(30000, 12345, false);
+    const clamped = player.readState(); if (clamped.kind !== "q3") throw new Error("Missing selected Q3 state");
+    expect(clamped.deltaAngleWords[0]).not.toBe(0);
+    simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { kind: "none" });
+    source.game.damage(actor, actor, actor, 117, 0, { x: 0, y: 0, z: 0 }, simulation.playerView(actor).origin, { x: 0, y: 0, z: 0 }, 0);
+    expect(simulation.playerUi(actor).health).toBeLessThan(0);
+    for (let frame = 0; frame < 30 && simulation.playerUi(actor).health <= 0; frame++) step(30000, 12345, frame >= 22);
+    expect(simulation.playerUi(actor).health).toBeGreaterThan(0);
+    const respawned = player.readState(); if (respawned.kind !== "q3") throw new Error("Missing respawned Q3 state");
+    expect(respawned.deltaAngleWords).toEqual([0, 0, 0]);
+    const desired = simulation.playerView(actor).angles;
+    step(Math.trunc(desired.x * 65536 / 360) & 65535, Math.trunc(desired.y * 65536 / 360) & 65535, false);
+    const viewed = simulation.playerView(actor).angles;
+    expect(Math.abs(((viewed.x - desired.x + 540) % 360) - 180)).toBeLessThan(0.02);
+    expect(Math.abs(((viewed.y - desired.y + 540) % 360) - 180)).toBeLessThan(0.02);
+  } finally { simulation.close(); await content.close(); }
+}, 30000);

@@ -24,7 +24,12 @@ export class ApplicationQ3ForeignModels {
   private readonly groups = new Map<ProviderSceneAssets, Group>();
   private readonly ordered: { readonly group: Group; readonly model: Model }[] = [];
   private readonly poses = new Map<ActorId, { readonly origin: Vec3; readonly angles: Vec3 }>();
-  constructor(readonly assets: ApplicationAssets, readonly actor: ActorId, readonly sourceActor: (number: number) => ActorId) {}
+  constructor(readonly assets: ApplicationAssets, private currentActor: ActorId, readonly sourceActor: (number: number) => ActorId) {}
+  get actor(): ActorId { return this.currentActor; }
+  rebindActor(actor: ActorId): void {
+    this.currentActor = actor; this.poses.clear(); this.ordered.length = 0;
+    for (const group of this.groups.values()) group.models.length = 0;
+  }
   character(entity: ClientEntity): void {
     this.poses.set(this.sourceActor(entity.currentState.number), { origin: entity.lerpOrigin, angles: entity.lerpAngles });
   }

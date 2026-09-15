@@ -181,7 +181,7 @@ export class ApplicationInput {
   }
 
   private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
-    private simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
+    simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
     routing: { readonly keyboardSeat: number | null } | null,
     private readonly loadedArchives: { readonly movement: readonly CvarArchiveEntry[]; readonly fallback: readonly CvarArchiveEntry[]; readonly input: readonly (readonly CvarArchiveEntry[])[] } | null,
@@ -355,7 +355,7 @@ export class ApplicationInput {
       else button.up(key, time);
       return active === button.active ? undefined : actions.execute(name, [], origin.seat);
     });
-    for (const name of ["weapnext", "weapprev", "use", "weapon", "save", "load", "map", "say", "say_team", ...applicationAudioCommands]) {
+    for (const name of ["weapnext", "weapprev", "use", "weapon", "save", "load", "map", "say", "say_team", "centerview", ...applicationAudioCommands]) {
       if ((sourceDialect === "q2-classic" || sourceDialect === "q2-rerelease") && this.commands.exists(name)) continue;
       this.registerCommand(name, invocation => {
         let origin = invocation.source.origin;
@@ -526,11 +526,6 @@ export class ApplicationInput {
     return () => { this.seatUi.delete(seat); };
   }
 
-  synchronizeView(actor: ActorId): void {
-    const local = this.locals.find(local => local.player.actor.equals(actor));
-    local?.builder.setViewAngles(this.simulation.playerView(actor).angles);
-  }
-
   enqueueClientCommand(text: string, source: CommandContext): void {
     if (this.commandsActive) this.commands.append(text, source);
     else this.stagedCommands.push({ kind: "console", text, source });
@@ -558,19 +553,18 @@ export class ApplicationInput {
     this.ownsControllers = false;
   }
 
-  rebindPlayers(players: readonly LocalPlayer[], simulation: Pick<SimulationPresentationAccess, "playerView">): void {
-    this.releaseOffhand(true);
+  rebindPlayers(players: readonly LocalPlayer[], simulation: Pick<SimulationPresentationAccess, "playerView">, mode: "world" | "source-round" = "world"): void {
+    if (mode === "world") this.releaseOffhand(true);
     if (players.length !== this.locals.length) throw new Error("World travel changed the local seat count");
     for (const local of this.locals) {
       const player = players.find(player => player.seat.id.equals(local.player.seat.id));
       if (player === undefined) throw new Error("World travel has no player for a local seat");
       this.seatUi.get(local.player.seat.id)?.clearPrompt?.();
       local.haptics.invalidateAssets();
-      local.input.release(this.now());
+      if (mode === "world") local.input.release(this.now());
       local.player.actor = player.actor;
-      local.builder.setViewAngles(simulation.playerView(player.actor).angles);
+      if (mode === "world" || local.builder.dialect !== "q3") local.builder.setViewAngles(simulation.playerView(player.actor).angles);
     }
-    this.simulation = simulation;
     this.q3Selections.clear();
     this.arsenalSelections.clear();
   }

@@ -1470,7 +1470,7 @@ export class SharedSimulation implements Simulation {
           if (client == null) throw new Error("Q3 source command has no actual client");
           const command = q3SourceCommand(input, this.requirePlayer(input.actor), this.sourceSchedulingMilliseconds, client.ps.weapon);
           const delta = client.ps.deltaAngles;
-          return relativeQ3SourceCommand(input.source, command, delta);
+          return relativeQ3SourceCommand(input.source, input.command.kind, command, delta);
         },
         spawnPlayer: (entity, pose) => this.spawnQ3Player(entity, pose), moveClient: (entity, command, options) => this.moveQ3Client(entity, command, options),
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
@@ -1997,7 +1997,7 @@ export class SharedSimulation implements Simulation {
     const pending = this.q3Commands.get(player.actor);
     const converted = selectedQ3Command(player.profile.kind === "q3" ? command : { ...command, angles: add(command.angles, client.ps.deltaAngles) }, player, elapsed);
     const before = pending === undefined ? command : q3SourceCommand(pending, player, this.sourceSchedulingMilliseconds, client.ps.weapon);
-    const sourceBefore = pending === undefined ? before : relativeQ3SourceCommand(pending.source, before, client.ps.deltaAngles);
+    const sourceBefore = pending === undefined ? before : relativeQ3SourceCommand(pending.source, pending.command.kind, before, client.ps.deltaAngles);
     const input: ActorCommand = pending === undefined ? { actor: player.actor.id, sequence: player.lastSequence + 1,
       source: { kind: "bot", provider: this.recipe.map.entities.provider }, command: converted,
       ...(this.selectedArsenal === null ? {} : { arsenal: { provider: this.weaponProvider.provider, weapon: null,
@@ -2422,7 +2422,9 @@ export class SharedSimulation implements Simulation {
       timeEightMilliseconds: change.kind === "freeze" ? 0 : Math.trunc(change.holdMilliseconds / 8), deltaAngleShorts: [0, 0, 0], type: change.kind === "freeze" ? 4 : 0 };
     else if (state.kind === "q2-rerelease") player.state = { ...state, origin: change.origin, velocity, flags: change.kind === "freeze" ? state.flags : (change.kind === "spawn" ? 0 : state.flags & ~56) | (change.holdMilliseconds > 0 ? 32 : 0),
       timeMilliseconds: change.kind === "freeze" ? 0 : change.holdMilliseconds, deltaAngles: zero, type: change.kind === "freeze" ? 5 : 0 };
-    else if (state.kind === "q3") player.state = { ...state, origin: change.origin, velocity, viewAngles: change.angles, movementType: change.kind === "freeze" ? 4 : 0, ground: { kind: "none" } };
+    else if (state.kind === "q3") player.state = { ...state, origin: change.origin, velocity, viewAngles: change.angles,
+      deltaAngleWords: this.source.kind === "q3" || this.source.kind === "q3-qvm" ? state.deltaAngleWords : [0, 0, 0],
+      movementType: change.kind === "freeze" ? 4 : 0, ground: { kind: "none" } };
     else player.state = { ...state, origin: change.origin, velocity, angles: change.angles, ground: { kind: "none" } };
     const character = this.characters.get(player.actor);
     if (change.kind === "spawn" && character !== undefined && (character.sourceFlags & 1) !== 0) {

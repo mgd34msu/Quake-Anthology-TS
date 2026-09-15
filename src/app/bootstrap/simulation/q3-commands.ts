@@ -5,9 +5,9 @@ import type { UserCommand as SelectedCommand } from "../../../contracts/protocol
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import type { MovementPlayer } from "./players.ts";
 
-/** Local input owns absolute aim; source PMove adds its spawn/teleport angle words. */
-export function relativeQ3SourceCommand(source: ActorCommand["source"], command: UserCommand, delta: Vec3): UserCommand {
-  return source.kind === "local-seat" ? { ...command, angles: {
+/** Foreign local input owns absolute aim; Q3 commands already contain source-relative words. */
+export function relativeQ3SourceCommand(source: ActorCommand["source"], dialect: SelectedCommand["kind"], command: UserCommand, delta: Vec3): UserCommand {
+  return source.kind === "local-seat" && dialect !== "q3" ? { ...command, angles: {
     x: command.angles.x - delta.x, y: command.angles.y - delta.y, z: command.angles.z - delta.z
   } } : command;
 }
