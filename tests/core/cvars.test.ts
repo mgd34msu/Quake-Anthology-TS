@@ -124,3 +124,32 @@ test("archive entries share exclusions and dialect latch selection with commands
   expect(q2.archiveEntries()).toEqual([{ name: "pending", value: "old" }]);
   expect(q2.archiveCommands()).toEqual(['set pending "old"']);
 });
+
+test("canonical snapshots retain old values across metadata, latch and restore changes", () => {
+  const cvars = new CvarRegistry({ dialect: "q3", context });
+  cvars.register("setting", "1", CvarFlag.Archive | CvarFlag.Latch);
+  const saved = cvars.captureSaveState();
+  const initial = cvars.canonicalSnapshots();
+  expect(Object.isFrozen(initial)).toBe(true);
+  expect(Object.isFrozen(initial[0])).toBe(true);
+  cvars.clearModified("setting");
+  expect(cvars.canonicalSnapshots()[0]?.modified).toBe(false);
+  expect(initial[0]?.modified).toBe(true);
+  cvars.set("setting", "2.5");
+  const pending = cvars.canonicalSnapshots();
+  expect(pending[0]).toEqual(cvars.get("setting"));
+  expect(pending[0]?.latchedValue).toBe("2.5");
+  expect(initial[0]?.latchedValue).toBeUndefined();
+  cvars.addFlags("setting", CvarFlag.UserInfo);
+  expect(cvars.canonicalSnapshots(CvarFlag.UserInfo)[0]).toEqual(cvars.get("setting"));
+  expect(pending[0]?.flags).toBe(CvarFlag.Archive | CvarFlag.Latch);
+  cvars.register("setting", "9");
+  const applied = cvars.canonicalSnapshots();
+  expect(applied[0]).toEqual(cvars.get("setting"));
+  expect(applied[0]?.numericValue).toBe(2.5);
+  expect(applied[0]?.integerValue).toBe(2);
+  expect(pending[0]?.value).toBe("1");
+  cvars.restoreSaveState(saved);
+  expect(cvars.canonicalSnapshots()).toEqual(initial);
+  expect(applied[0]?.value).toBe("2.5");
+});

@@ -136,6 +136,19 @@ function snapshot(state: CvarRead): CvarSnapshot {
     modificationCount: state.modificationCount, numericValue: state.numericValue, integerValue: state.integerValue });
 }
 
+const canonicalSnapshotCache = new WeakMap<CvarState, CvarSnapshot>();
+function canonicalSnapshot(state: CvarState): CvarSnapshot {
+  const previous = canonicalSnapshotCache.get(state);
+  if (previous !== undefined && previous.name === state.name && previous.value === state.value
+    && previous.resetValue === state.resetValue && previous.latchedValue === state.latchedValue
+    && Object.is(previous.flags, state.flags) && previous.modified === state.modified
+    && Object.is(previous.modificationCount, state.modificationCount)
+    && Object.is(previous.numericValue, state.numericValue) && Object.is(previous.integerValue, state.integerValue)) return previous;
+  const current = snapshot(state);
+  canonicalSnapshotCache.set(state, current);
+  return current;
+}
+
 function validInfo(text: string): boolean { return !/[\\";]/.test(text); }
 
 export class CvarRegistry {
@@ -670,7 +683,7 @@ export class CvarRegistry {
 
   canonicalSnapshots(flags = 0): readonly CvarSnapshot[] {
     const values: CvarSnapshot[] = [];
-    for (let state = this.first; state !== undefined; state = state.next) if (flags === 0 || (state.flags & flags) !== 0) values.push(snapshot(state));
+    for (let state = this.first; state !== undefined; state = state.next) if (flags === 0 || (state.flags & flags) !== 0) values.push(canonicalSnapshot(state));
     return Object.freeze(values);
   }
   snapshots(flags = 0): readonly CvarSnapshot[] {
