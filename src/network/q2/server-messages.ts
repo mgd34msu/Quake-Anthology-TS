@@ -99,6 +99,7 @@ export interface Q2ServerRecord {
     readonly event: Q2ServerEvent;
 }
 export interface Q2ServerMessageOptions {
+    readonly readMode?: "network" | "demo";
     readonly maxConfigStrings: number;
     readonly inventorySlots: number;
     readonly q2proExtendedTempEntities?: boolean;
@@ -117,6 +118,7 @@ export class Q2ServerMessageReader {
     private readonly histories = new Map<number, Q2FrameHistory>();
     private readonly baselines = new Map<number, EntityStateT>();
     private selectedSeat = 0;
+    private legacyDemo26 = false;
     private stream: 'none' | 'config' | 'baseline' | 'gamestate-config' = 'none';
     private compressedDownload: Uint8Array = new Uint8Array(0);
     private inflatedDownloadBytes = 0;
@@ -136,7 +138,7 @@ export class Q2ServerMessageReader {
         this.histories.set(seat, history);
         return history;
     }
-    reset(): void { this.histories.clear(); this.baselines.clear(); this.configStrings.clear(); this.stream = 'none'; this.selectedSeat = 0; this.compressedDownload = new Uint8Array(0); this.inflatedDownloadBytes = 0; }
+    reset(): void { this.legacyDemo26 = false; this.histories.clear(); this.baselines.clear(); this.configStrings.clear(); this.stream = 'none'; this.selectedSeat = 0; this.compressedDownload = new Uint8Array(0); this.inflatedDownloadBytes = 0; }
     read(bytes: Uint8Array): Q2ServerRecord[] { this.wire.begin(bytes); const records = this.parse(); this.wire.finish(); return records; }
     private record(opcode: number, start: number, event: Q2ServerEvent): Q2ServerRecord { checkMessageRead(this.wire.message); return { seat: this.selectedSeat, opcode, raw: this.wire.message.data.slice(start, this.wire.message.readcount), event }; }
     private config(): Q2ServerEvent | null {
@@ -259,11 +261,14 @@ export class Q2ServerMessageReader {
                     break;
                 case 12: {
                     const protocol = MSG_ReadLong(m);
-                    if (protocol !== this.wire.protocol.version)
+                    const legacyDemo26 = protocol === 26 && this.options.readMode === "demo" && this.wire.protocol.kind === "q2-classic";
+                    if (protocol !== this.wire.protocol.version && !legacyDemo26)
                         throw new Error(`Q2 serverdata protocol ${protocol} differs from negotiated ${this.wire.protocol.version}`);
                     const data = this.wire.codec.readServerData();
                     this.wire.acceptServerRevision(data.r1q2Version);
+                    checkMessageRead(m);
                     this.reset();
+                    this.legacyDemo26 = legacyDemo26;
                     event = { kind: 'server-data', data };
                     break;
                 }
@@ -282,7 +287,7 @@ export class Q2ServerMessageReader {
                     break;
                 }
                 case 20:
-                    event = { kind: 'frame', frame: this.history().read(this.wire) };
+                    event = { kind: 'frame', frame: this.history().read(this.wire, !this.legacyDemo26) };
                     break;
                 case 9:
                     event = { kind: 'sound', sound: this.sound() };

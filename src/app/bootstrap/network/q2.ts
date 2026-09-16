@@ -1,11 +1,12 @@
+import { Q2ClientReceiver } from './q2-client-receiver.ts';
 import type { ClientId } from "../../../contracts/identity.ts";
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { WireSelection } from '../../../network/common/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
 import { parseQ2Token } from '../../../core/common-parse.ts';
-import { Q2Channel, Q2ChallengeTable, Q2ClientHandshake, Q2CommandReplay, Q2ServerMessageReader, Q2WireCodec, UsercmdT, encodeQ2ClientControl, encodeQ2Frame, encodeQ2Move, encodeQ2ServerEvent, q2OutOfBand, readQ2ClientMessages, readQ2Connect, readQ2OutOfBand } from '../../../network/q2/index.ts';
-import type { Q2ChannelReceive, Q2ServerRecord, Q2ServerWriteEvent, Q2WireFrame, ServerDataParamsT } from '../../../network/q2/index.ts';
+import { Q2Channel, Q2ChallengeTable, Q2ClientHandshake, Q2CommandReplay, Q2WireCodec, UsercmdT, encodeQ2ClientControl, encodeQ2Frame, encodeQ2Move, encodeQ2ServerEvent, q2OutOfBand, readQ2ClientMessages, readQ2Connect, readQ2OutOfBand } from '../../../network/q2/index.ts';
+import type { Q2ChannelReceive, Q2ServerWriteEvent, Q2WireFrame } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase, Q2ApplicationGameState, Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ClientNetworkOptions, Q2ServerNetworkOptions } from './types.ts';
 import { Q2PeerDownload } from './q2-downloads.ts';
@@ -416,119 +417,33 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
 export class Q2ClientNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
     readonly role = 'client';
     readonly wire: WireSelection;
-    readonly reader: Q2ServerMessageReader;
+    private readonly receiver: Q2ClientReceiver;
+    get reader(): Q2ClientReceiver["reader"] { return this.receiver.reader; }
     private readonly handshake: Q2ClientHandshake;
     private channel: Q2Channel | null = null;
     private state: ApplicationNetworkPhase = 'challenging';
-    private serverData: ServerDataParamsT | null = null;
-    private lastFrame = -1;
     private lastReceived: number | null = null;
     private previous: UsercmdT = new UsercmdT();
     private oldest: UsercmdT = new UsercmdT();
     private pendingCommands: UsercmdT[] = [];
-    private pendingGameState: Q2ApplicationGameState | null = null;
     constructor(readonly options: Q2ClientNetworkOptions<TAddress>) {
         this.wire = { kind: 'source', protocol: options.host.protocol };
-        this.reader = new Q2ServerMessageReader(options.host.protocol, options.host.messageOptions);
+        this.receiver = new Q2ClientReceiver(options.host, { kind: 'network',
+            ...(options.host.downloads === undefined ? {} : { downloads: options.host.downloads }),
+            closed: () => options.transport.closed, command: text => this.command(text), resetCommands: () => {
+                this.previous = new UsercmdT(); this.oldest = new UsercmdT(); this.pendingCommands = [];
+            } });
         this.handshake = new Q2ClientHandshake(options.remote, [options.host.protocol], options.qport, options.host.userinfo);
     }
-    get phase(): ApplicationNetworkPhase { return this.state; }
-    get acknowledgedFrame(): number { return this.lastFrame; }
+    get phase(): ApplicationNetworkPhase { return this.channel === null || this.state === 'closed' || this.state === 'rejected' ? this.state : this.receiver.phase; }
+    get acknowledgedFrame(): number { return this.receiver.acknowledgedFrame; }
     command(text: string): void { const channel = this.channel; if (channel === null)
         throw new Error('Q2 client is not connected'); channel.queueReliable(encodeQ2ClientControl({ kind: 'command', text })); }
     userinfo(text: string): void {
         this.channel?.queueReliable(encodeQ2ClientControl({ kind: 'userinfo', text }));
     }
-    private loadingGeneration = 0;
-    private cancelLoading(): void {
-        this.loadingGeneration++;
-        this.pendingGameState = null;
-        this.options.host.downloads?.close();
-    }
-    private async prepareGameState(): Promise<void> {
-        const state = this.pendingGameState;
-        if (state === null) return;
-        const preparation = await this.options.host.downloads?.prepare(state) ?? 'ready';
-        if (this.pendingGameState !== state || preparation !== 'ready') return;
-        await this.options.host.gameState(state);
-        if (this.pendingGameState !== state) return;
-        this.pendingGameState = null;
-        this.command(`begin ${state.data.servercount}`);
-        this.state = 'active';
-    }
-    private async serverCommands(text: string): Promise<void> {
-        for (const line of text.split(/\n|;/)) {
-            const words = tokens(line), name = words[0];
-            if (name === 'cmd' && (words[1] === 'configstrings' || words[1] === 'baselines'))
-                this.command(words.slice(1).join(' '));
-            else if (name === 'precache') {
-                const data = this.serverData;
-                if (data === null || integer(words[1]) !== data.servercount)
-                    throw new Error('Q2 precache refers to another server generation');
-                this.cancelLoading();
-                this.pendingGameState = { data, configStrings: new Map(this.reader.configStrings), baselines: new Map(this.reader.history().baselines) };
-                await this.prepareGameState();
-            }
-            else if (name === 'changing') {
-                this.cancelLoading();
-                this.lastFrame = -1;
-                this.state = 'loading';
-            }
-            else if (name !== undefined && name !== '')
-                this.options.host.print(`Server command requires application binding: ${line}\n`);
-        }
-    }
-    private async serverRecords(records: readonly Q2ServerRecord[], now: number): Promise<void> {
-        for (const record of records) {
-            switch (record.event.kind) {
-                case 'server-data': {
-                    this.cancelLoading();
-                    const generation = this.loadingGeneration;
-                    const assertCurrent = (): void => {
-                        if (generation !== this.loadingGeneration || this.options.transport.closed) throw new Error('Q2 server directory selection was retired');
-                    };
-                    await this.options.host.serverData?.(record.event.data, assertCurrent);
-                    assertCurrent();
-                    this.serverData = record.event.data;
-                    this.lastFrame = -1;
-                    this.previous = new UsercmdT();
-                    this.oldest = new UsercmdT();
-                    this.pendingCommands = [];
-                    this.state = 'loading';
-                    break;
-                }
-                case 'command-text':
-                    await this.serverCommands(record.event.text);
-                    break;
-                case 'frame':
-                    this.lastFrame = record.event.frame.valid === false ? -1 : record.event.frame.serverFrame;
-                    if (record.event.frame.valid !== false)
-                        this.options.host.frame(record.event.frame, records, now);
-                    break;
-                case 'disconnect':
-                    this.cancelLoading();
-                    this.state = 'closed';
-                    this.options.host.disconnected('Server disconnected');
-                    break;
-                case 'reconnect':
-                    this.cancelLoading();
-                    this.lastFrame = -1;
-                    this.state = 'loading';
-                    this.command('new');
-                    break;
-                case 'print':
-                    this.options.host.print(record.event.text);
-                    break;
-                case 'download':
-                    if (this.options.host.downloads?.receive(record.event) === 'complete') await this.prepareGameState();
-                    break;
-                default: break;
-            }
-        }
-        this.options.host.records(records);
-    }
     async poll(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
-        if (this.state === 'closed' || this.state === 'rejected')
+        if (this.phase === 'closed' || this.phase === 'rejected')
             return [];
         if (this.channel === null) {
             const packet = this.handshake.poll(nowMilliseconds);
@@ -570,21 +485,25 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 const result = this.channel.receive(packet.payload, nowMilliseconds);
                 if (result.kind === 'message') {
                     this.options.host.prediction?.acknowledged(result.acknowledged, nowMilliseconds);
-                    await this.serverRecords(this.reader.read(result.bytes), nowMilliseconds);
+                    await this.receiver.receive(result.bytes, nowMilliseconds);
                 }
             }
         }
         if (this.lastReceived !== null && nowMilliseconds - this.lastReceived > (this.options.timeoutMilliseconds ?? 120000)) {
-            this.cancelLoading();
+            this.receiver.close();
             this.state = 'rejected';
             this.options.host.disconnected('Connection timed out');
         }
-        await this.prepareGameState();
+        await this.receiver.prepareGameState();
+        this.sendPending(nowMilliseconds);
+        return [];
+    }
+    private sendPending(nowMilliseconds: number): void {
         const channel = this.channel;
         if (channel !== null && this.phase !== 'closed' && this.phase !== 'rejected') {
             for (const command of this.pendingCommands) {
                 const sequence = channel.outgoingSequence;
-                const bytes = encodeQ2Move(this.reader.wire, sequence, this.lastFrame, [this.oldest, this.previous, command]);
+                const bytes = encodeQ2Move(this.reader.wire, sequence, this.receiver.acknowledgedFrame, [this.oldest, this.previous, command]);
                 channel.send(this.options.transport, this.options.remote, bytes, nowMilliseconds);
                 this.options.host.prediction?.sent(sequence, command, nowMilliseconds);
                 this.oldest = this.previous;
@@ -594,10 +513,9 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             if (channel.shouldUpdate(nowMilliseconds))
                 channel.send(this.options.transport, this.options.remote, new Uint8Array(0), nowMilliseconds);
         }
-        return [];
     }
     submit(commands: readonly ActorCommand[], _nowMilliseconds: number): void {
-        if (this.state !== 'active')
+        if (this.phase !== 'active')
             return;
         if (commands.length > 1)
             throw new Error('A native Q2 connection carries one player; use independent connections for local seats');
@@ -606,10 +524,11 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     }
     publish(_output: SimulationOutput, _events: readonly SimulationPresentationEvent[], _nowMilliseconds: number): void { throw new Error('Remote Q2 client cannot publish authoritative server state'); }
     close(): void {
-        this.cancelLoading();
+        const phase = this.phase;
+        this.receiver.close();
         if (this.options.transport.closed)
             return;
-        if (this.channel !== null && this.state !== 'closed') {
+        if (this.channel !== null && phase !== 'closed') {
             this.command('disconnect');
             this.channel.send(this.options.transport, this.options.remote, new Uint8Array(0), performance.now());
         }

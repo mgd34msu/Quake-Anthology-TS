@@ -19,10 +19,13 @@ import { UdpTransport } from '../../../src/network/common/transport.ts';
 import { EngineSession } from '../../../src/world/session/session.ts';
 test('native Q2 UDP signon admits and moves the actual Application player', async () => {
     const userRoot = await mkdtemp(join(tmpdir(), 'q2-application-content-'));
-    const parsed = parseApplicationCommand(['--user-content-root', userRoot, '--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop', '--listen-q2', '0', '--bind', '127.0.0.1']);
+    const parsed = parseApplicationCommand(['--user-content-root', userRoot, '--game', 'q2-classic-baseq2', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop', '--listen-q2', '0', '--bind', '127.0.0.1', '+set', 'allow_download', '0']);
     if (parsed.kind !== 'run')
         throw new Error('No application launch');
     const prints: string[] = [], server = await Application.open(parsed.options, { print: text => { prints.push(text); return undefined; } });
+    const initialDownloadCvars = server.simulation.q2ServerCvars();
+    if (initialDownloadCvars === null) throw new Error('Server has no source download cvars');
+    expect(initialDownloadCvars.variableString('allow_download')).toBe('0');
     let content = await loadApplicationContent(parsed.options);
     const identity = createIdentityOwner('Q2 UDP remote application'), session = new EngineSession(identity, { kind: 'headless' });
     const otherIdentity = createIdentityOwner('Q2 UDP second peer'), otherSession = new EngineSession(otherIdentity, { kind: 'headless' });
@@ -84,7 +87,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         return null;
     };
     try {
-        for (let count = 0; count < 80 && remote.output === null; count++)
+        for (let count = 0; count < 80 && (remote.output === null || downloads.length === 0); count++)
             await exchange();
         expect(client.phase).toBe('active');
         expect(remote.output).not.toBeNull();
