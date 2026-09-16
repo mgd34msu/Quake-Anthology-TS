@@ -107,6 +107,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
   const iterator = lightmapLighting === null && modelLighting === null ? compiled.finished.iterator : sourceMaterialIterator({ stages: compiled.finished.sourceStages,
     sky: definition.sky !== null, polygonOffset: definition.polygonOffset, deformCount: definition.deforms.length },
     { ignoreFastPath: true, multitexture: false, textureEnvAdd: false, driver: "generic" });
+  let firstVertices: DrawBatch["vertices"] | null = null;
   for (const pass of iterator.passes) {
     const first = pass.bundles[0], second = pass.bundles[1];
     if (!first.active) continue;
@@ -121,8 +122,9 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       let color = evaluateStageColor(pass.stage, vertex, { ...context, time, previousColor }, pass.alphaGen === "skip", pass.rgbGen);
       if (context.fog !== null) color = attenuateFogColor(color, adjustment, context.fog.coordinates(vertex.position));
       previousColors[index] = color;
-      return { position: context.project(vertex.position), color, texCoord: coordinates(first, vertex, time, context) };
+      return { position: firstVertices?.[index]?.position ?? context.project(vertex.position), color, texCoord: coordinates(first, vertex, time, context) };
     });
+    firstVertices ??= vertices;
     if (second === undefined) {
       batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" }
         : pass.rgbGen === SourceColorGenerator.LightingDiffuse && modelLighting !== null ? modelLighting : { kind: "vertex" },

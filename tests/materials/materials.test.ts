@@ -232,6 +232,42 @@ test("Q1 fragment lights use direct RGB lightmaps for all source encodings witho
   }
 });
 
+test("material passes reuse projection while preserving independent colors and texture coordinates", async () => {
+  const [material] = await compileShaderScript(`projection/test {
+    { map textures/base.tga
+      rgbGen vertex }
+    { map textures/glow.tga
+      blendFunc add
+      rgbGen identity
+      tcMod scale 2 3 }
+  }`, host, { lightmapIndex: -1 });
+  if (material === undefined) throw new Error("Missing projection fixture");
+  let calls = 0;
+  const project: MaterialDrawContext["project"] = point => {
+    calls++;
+    return { x: Math.fround(point.x * 3 - 1), y: Math.fround(point.y * 7 + 2), z: -0, w: 2 };
+  };
+  const batches = prepareMaterialBatches(material, geometry, { ...context, project });
+  expect(batches).toHaveLength(2);
+  expect(calls).toBe(geometry.vertices.length);
+  const first = batches[0], second = batches[1];
+  if (first === undefined || second === undefined) throw new Error("Missing projection passes");
+  expect(first.indices).toEqual(second.indices);
+  for (let index = 0; index < geometry.vertices.length; index++) {
+    const a = first.vertices[index], b = second.vertices[index], original = geometry.vertices[index];
+    if (a === undefined || b === undefined || original === undefined) throw new Error("Missing projection vertex");
+    expect(a.position).toEqual(project(original.position));
+    expect(b.position).toEqual(a.position);
+    expect(Object.is(b.position.z, -0)).toBe(true);
+    expect(b.texCoord).toEqual({ x: a.texCoord.x * 2, y: a.texCoord.y * 3 });
+    expect(b.color).not.toEqual(a.color);
+  }
+  calls = 0;
+  const next = prepareMaterialBatches(material, geometry, { ...context, project });
+  expect(calls).toBe(geometry.vertices.length);
+  expect(next).toEqual(batches);
+});
+
 test("Q3 model fragment lights bind only to diffuse skin stages and preserve emissive stages", async () => {
   const [material] = await compileShaderScript(`models/test/skin
 {
