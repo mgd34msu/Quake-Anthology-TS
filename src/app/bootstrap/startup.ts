@@ -1,3 +1,4 @@
+import { MusicControls } from "../../audio/music.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
@@ -98,6 +99,7 @@ export class StartupApplication {
   private baselineInput = "";
   private preferenceStore: ConfigStore | null = null;
   private client: ClientBootstrap | null = null;
+  private readonly musicControls = new MusicControls();
   private scripts: ConsoleScriptFiles | null = null;
   private releaseMenuInput: (() => void) | null = null;
   private lastFrame = performance.now();
@@ -199,7 +201,7 @@ export class StartupApplication {
         themeMounts = await openMountPlan({ id: createMountPlanId("startup", "music"), mounts: themePlan, defaultOrder: themePlan.map(mount => mount.identity.id), prefixOrders: [] });
       }
       const activeThemeMounts = themeMounts;
-      audio = await StartupAudio.open({ theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
+      audio = await StartupAudio.open({ musicControls: this.musicControls, theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
         preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues } });
       audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
       const activeAudio = audio;
@@ -283,7 +285,7 @@ export class StartupApplication {
         print: text => { const client = this.captureClient(), local = this.captureSeats()[0];
           this.host.print(text); if (local !== undefined) client.consoles.get(local.seat)?.print(text); },
       }, native);
-      this.client = { capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
+      this.client = { musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
         output: { current: activeAudio.engine }, platform: { current: { kind: "menu", router: activeRouter, controllerSettings,
           retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } } },
         source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: () => this.activateFrontend(),
@@ -296,6 +298,7 @@ export class StartupApplication {
       if (savedInput !== null) this.client.consoles.get(primarySeat)?.history.replace(savedInput.history);
       initial.prepared.forwardCommands((name, args, source) => { this.frontendCommand(name, args, source); return undefined; });
       for (const request of initial.requests) this.frontendCommand(request.name, request.arguments_, request.source);
+      await activeAudio.flushCommands();
       if (this.pending === null && this.pendingDemo === null && this.entry === "run") this.pending = { kind: "initial", options: initial.options };
       return this.graphics;
     } catch (error) {
@@ -394,7 +397,7 @@ export class StartupApplication {
   private frontendCommand(name: string, args: readonly string[], source: CommandContext): void {
     if (this.routeCommand(name, args, source)) return;
     if (name === "cd" && this.graphics !== null) {
-      this.graphics.audio.cdCommand(args, text => this.print(text)); return;
+      this.graphics.audio.queueCdCommand(args, text => this.print(text)); return;
     }
     this.print(`Cannot execute ${name} without an active world.\n`);
   }
@@ -641,7 +644,10 @@ export class StartupApplication {
     }
     const source = this.game ?? this.remote;
     if (source !== null) await source.executeApplicationRequest(request);
-    else this.frontendCommand(request.name, request.arguments_, request.source);
+    else {
+      this.frontendCommand(request.name, request.arguments_, request.source);
+      await this.graphics?.audio.flushCommands();
+    }
   }
 
   async step(): Promise<void> {
@@ -656,6 +662,7 @@ export class StartupApplication {
       for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
     } else source?.pumpClientInput();
     const afterDispatch = async (): Promise<void> => {
+      await graphics.audio.flushCommands();
       await (this.game ?? this.remote)?.flushClientCommands();
       await this.publishPendingSource();
     };

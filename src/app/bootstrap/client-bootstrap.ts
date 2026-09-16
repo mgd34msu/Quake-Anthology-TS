@@ -1,3 +1,4 @@
+import type { MusicControls } from "../../audio/music.ts";
 import type { ApplicationCapture } from "./capture.ts";
 import type { SeatConsole } from "../../console/session.ts";
 import type { UnifiedAudio } from "../../audio/index.ts";
@@ -43,6 +44,7 @@ export interface ClientSourceLifetime {
 
 /** Source borrowers receive the existing client objects without their final close authority. */
 export interface ClientBootstrap {
+  readonly musicControls: MusicControls;
   readonly capture: ApplicationCapture;
   readonly consoles: Map<SessionSeat, SeatConsole>;
   readonly identity: IdentityOwner;

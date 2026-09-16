@@ -21,7 +21,8 @@ import { MountedContent } from "../../src/content/mounts/index.ts";
 import type { OpenedResource } from "../../src/content/mounts/index.ts";
 import { createContentId, createContentDigest, createMountId, createMountIdentity, createResourceId } from "../../src/contracts/content.ts";
 import type { ContentId, GameFamily, ResolvedResourceReference } from "../../src/contracts/content.ts";
-import { MusicPlayer } from "../../src/audio/music.ts";
+import type { PcmStream } from "../../src/audio/streams.ts";
+import { CdMusic, MusicControls, MusicPlayer } from "../../src/audio/music.ts";
 import { MemoryPcmStream } from "../../src/audio/streams.ts";
 
 const evidence = join(import.meta.dir, "../../.artifacts/resume-20260913");
@@ -263,26 +264,26 @@ test("cd pause resume info preserves authored PCM position, loops and gain", asy
     const source = { content, family, edition: "classic", campaign: "base" };
     const track = family === "q3" ? "music/intro.wav music/loop.wav" : "6";
     try {
-      music.cdCommand(["pause"]); // An idle command must not pause the next authored track.
+      await music.cdCommand(["pause"]); // An idle command must not pause the next authored track.
       await music.play(source, bank, track); await reference.play(source, new SoundBank(mounts), track);
       const opens = opening.mock.calls.length;
       expect(actual.mix(4)).toEqual(control.mix(4));
-      music.cdCommand(["PAUSE"]); music.cdCommand(["pause"]);
-      music.cdCommand(["info"]);
+      await music.cdCommand(["PAUSE"]); await music.cdCommand(["pause"]);
+      await music.cdCommand(["info"]);
       expect(lines.at(-2)).toBe(`Paused looping track ${track}\n`);
       expect(lines.at(-1)).toBe("Volume is 0.25\n");
       expect(actual.mix(96).every(sample => sample === 0)).toBe(true);
       music.volume = 0.5; reference.volume = 0.5;
-      music.cdCommand(["RESUME"]); music.cdCommand(["resume"]);
+      await music.cdCommand(["RESUME"]); await music.cdCommand(["resume"]);
       expect(actual.mix(96)).toEqual(control.mix(96));
       expect(opening.mock.calls.length).toBe(opens);
-      music.cdCommand(["info"]);
+      await music.cdCommand(["info"]);
       expect(lines.at(-2)).toBe(`Currently looping track ${track}\n`);
       expect(lines.at(-1)).toBe("Volume is 0.5\n");
-      music.cdCommand(["pause"]); music.stop();
+      await music.cdCommand(["pause"]); music.stop();
       await music.play(source, bank, track);
       expect(actual.mix(8).some(sample => sample !== 0)).toBe(true);
-      music.stop(); music.cdCommand(["info"]);
+      music.stop(); await music.cdCommand(["info"]);
       expect(lines.slice(-2)).toEqual(["Not playing.\n", "Volume is 0.5\n"]);
     } finally { opening.mockRestore(); music.stop(); reference.stop(); }
   }
@@ -297,16 +298,16 @@ test("frontend cd commands control the existing menu music and retain mute", asy
   try {
     expect(audio.engine.outputState).toBe("detached");
     expect([...new Set(audio.engine.mix(16))]).toEqual([250]);
-    audio.cdCommand(["pause"], text => { lines.push(text); });
+    await audio.cdCommand(["pause"], text => { lines.push(text); });
     expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
     audio.setVolumes(0.7, 0);
-    audio.cdCommand(["resume"], text => { lines.push(text); });
+    await audio.cdCommand(["resume"], text => { lines.push(text); });
     expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
     audio.setVolumes(0.7, 0.25);
     expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
-    audio.cdCommand(["info"], text => { lines.push(text); });
+    await audio.cdCommand(["info"], text => { lines.push(text); });
     expect(lines).toEqual(["Currently looping track music/02.wav\n", "Volume is 0.25\n"]);
-    audio.close(); audio.cdCommand(["info"], text => { lines.push(text); });
+    audio.close(); await audio.cdCommand(["info"], text => { lines.push(text); });
     expect(lines.length).toBe(2);
   } finally { audio.close(); }
 });
@@ -324,27 +325,240 @@ test("retained cd registration routes Q1 QW Q2 Q3 frontend commands and survives
       seat: identity.seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
     const forwarded: string[] = [];
     const frontend = (name: string, args: readonly string[]): undefined => {
-      forwarded.push(name); if (name === "cd") audio.cdCommand(args, text => { output.push(text); }); return undefined;
+      forwarded.push(name); if (name === "cd") audio.queueCdCommand(args, text => { output.push(text); }); return undefined;
     };
     try {
       prepared.forwardCommands(frontend);
       expect(prepared.commands.registeredNames().filter(name => name === "cd")).toEqual(["cd"]);
-      expect(prepared.commands.commandDocumentation("cd")?.usage).toBe("cd <pause|resume|info>");
-      prepared.commands.executeNow("cd pause", context);
+      expect(prepared.commands.commandDocumentation("cd")?.usage).toContain("cd <play|loop> <track>");
+      prepared.commands.append("cd pause" + "\n", context);
+      await prepared.commands.executeAsync(() => audio.flushCommands());
       expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
-      prepared.commands.executeNow("cd info", context);
+      prepared.commands.append("cd info" + "\n", context);
+      await prepared.commands.executeAsync(() => audio.flushCommands());
       expect(output).toContain("Paused looping track music/02.wav\n");
       const world: string[] = [];
       prepared.forwardCommands((name, args) => { world.push(`${name} ${args.join(" ")}`); return undefined; });
-      prepared.commands.executeNow("cd resume", context);
+      prepared.commands.append("cd resume" + "\n", context);
+      await prepared.commands.executeAsync(() => audio.flushCommands());
       expect(world).toEqual(["cd resume"]);
       expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
       prepared.forwardCommands(frontend);
-      prepared.commands.executeNow("cd resume", context);
+      prepared.commands.append("cd resume" + "\n", context);
+      await prepared.commands.executeAsync(() => audio.flushCommands());
       expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
       expect(prepared.commands.registeredNames().filter(name => name === "cd")).toEqual(["cd"]);
       expect(forwarded).toEqual(["cd", "cd", "cd"]);
       expect(output.some(line => /unknown|already|allready/i.test(line))).toBe(false);
     } finally { audio.close(); }
   }
+});
+
+test("cd numbered controls retain silent source, remap atomically, stop and disable automatic playback", async () => {
+  const content = createContentId({ family: "q2", edition: "test", package: "cd-full", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/03.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const lines: string[] = [], music = new ApplicationMusic(engine, text => { lines.push(text); }), bank = new SoundBank(mounts);
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  try {
+    await music.play(source, bank, "0");
+    await music.cdCommand(["loop", "2"]); expect([...new Set(engine.mix(96))]).toEqual([250]);
+    await music.cdCommand(["remap", "1", "3"]); await music.cdCommand(["loop", "2"]);
+    expect([...new Set(engine.mix(64))]).toEqual([500]);
+    await music.cdCommand(["remap", "1", "2"]); await music.cdCommand(["loop", "2"]);
+    expect([...new Set(engine.mix(64))]).toEqual([250]);
+    await music.cdCommand(["stop"]); expect(engine.mix(16).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["play", "3"]); expect([...new Set(engine.mix(32))]).toEqual([500]);
+    expect(engine.mix(32).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["remap", "3", "3"]);
+    await music.cdCommand(["remap", "2", "999"]);
+    await music.cdCommand(["remap"]);
+    expect(lines.slice(-2)).toEqual(["  1 -> 3\n", "  2 -> 3\n"]);
+    await music.cdCommand(["loop", "2"]); expect([...new Set(engine.mix(96))]).toEqual([500]);
+    await music.cdCommand(["off"]);
+    await music.play(source, bank, "2"); await music.cdCommand(["play", "3"]);
+    expect(engine.mix(96).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["on"]); expect(engine.mix(16).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["loop", "2"]); expect([...new Set(engine.mix(64))]).toEqual([500]);
+    await music.cdCommand(["off"]); await music.cdCommand(["reset"]);
+    expect(engine.mix(16).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["loop", "2"]); expect([...new Set(engine.mix(64))]).toEqual([250]);
+    expect(music.volume).toBe(0.25);
+    await music.cdCommand(["eject"]); expect(lines.at(-1)).toContain("unavailable with file-backed music");
+    expect([...new Set(engine.mix(64))]).toEqual([250]);
+  } finally { music.stop(); }
+});
+
+test("CdMusic validates the complete remap before changing its table", () => {
+  const player = new MusicPlayer(44100, "q2"), cd = new CdMusic(player, async () => null);
+  cd.setRemap([3, 4]);
+  expect(() => cd.setRemap([2, 999])).toThrow("Invalid CD track");
+  expect(cd.remappedTracks.slice(0, 3)).toEqual([3, 4, 3]);
+  cd.close();
+});
+
+test("cd pending opens are cancelled by stop off reset retirement and source replacement", async () => {
+  for (const action of ["stop", "off", "reset", "retire", "replace", "missing-after-stop"]) {
+    const content = createContentId({ family: "q2", edition: "test", package: "pending-cd", revision: "1" });
+    using mounts = new MenuMemoryMounts(content, new Map<string, Uint8Array>());
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    let release: ((value: PcmStream | null) => void) | undefined;
+    const opened: string[] = [];
+    class PendingBank extends SoundBank {
+      override openMusic(path: string): Promise<PcmStream | null> {
+        opened.push(path); return new Promise(resolve => { release = resolve; });
+      }
+    }
+    const music = new ApplicationMusic(engine, () => undefined), bank = new PendingBank(mounts);
+    const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+    const stream = new MemoryPcmStream({ samples: new Int16Array(32).fill(1000), channels: 1, sampleRate: 44100, frameCount: 32, loopStart: null });
+    const closed = spyOn(stream, "close");
+    try {
+      await music.play(source, bank, "0");
+      const pending = music.cdCommand(["loop", "2"]);
+      if (release === undefined) throw new Error("Track open did not begin");
+      if (action === "retire") music.stop();
+      else if (action === "replace") music.select(source, new SoundBank(mounts));
+      else await music.cdCommand([action === "missing-after-stop" ? "stop" : action]);
+      release(action === "missing-after-stop" ? null : stream); await pending;
+      expect(opened).toEqual(["music/02.ogg"]);
+      expect(closed.mock.calls.length).toBe(action === "missing-after-stop" ? 0 : 1);
+      expect(engine.mix(32).every(sample => sample === 0)).toBe(true);
+    } finally { music.stop(); closed.mockRestore(); stream.close(); }
+  }
+});
+
+test("registered frontend cd commands await track opens in order with no automatic menu cue", async () => {
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const identity = createIdentityOwner("ordered-cd"), context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+    const cvars = new CvarRegistry({ dialect, context }), output: string[] = [];
+    const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
+    const prepared = new PreparedStartup(cvars, cvars, scripts, { dialect, movementDialect: dialect, seats: [], shared: null,
+      sharedNames: [], print: text => { output.push(text); }, forward: () => undefined });
+    const content = createContentId({ family: "q2", edition: "test", package: "no-menu-cue", revision: "1" });
+    using mounts = new MenuMemoryMounts(content, new Map([["music/03.wav", menuWave(2000)]]));
+    const audio = await StartupAudio.open({ mounts, source: { content, family: "q2", edition: "classic", campaign: "baseq2" }, theme: null,
+      seat: identity.seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
+    try {
+      expect(audio.engine.mix(16).every(sample => sample === 0)).toBe(true);
+      prepared.forwardCommands((name, args) => { if (name === "cd") audio.queueCdCommand(args, text => { output.push(text); }); return undefined; });
+      prepared.commands.append("cd play 3; cd info\n", context);
+      await prepared.commands.executeScriptsAsync(() => audio.flushCommands());
+      expect(output).toEqual(["Currently playing track 3\n", "Volume is 0.25\n"]);
+      expect([...new Set(audio.engine.mix(32))]).toEqual([500]);
+      expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
+      prepared.commands.append("cd loop 3; cd pause; cd info; cd resume\n", context);
+      await prepared.commands.executeScriptsAsync(() => audio.flushCommands());
+      expect(output.slice(-2)).toEqual(["Paused looping track 3\n", "Volume is 0.25\n"]);
+      expect([...new Set(audio.engine.mix(96))]).toEqual([500]);
+      audio.queueCdCommand(["loop", "3"], text => { output.push(text); });
+      audio.close(); await audio.flushCommands();
+    } finally { audio.close(); }
+  }
+});
+
+test("manual cd tracks preserve selected Q2 edition mapping and Q1 fallback", async () => {
+  for (const edition of ["classic", "rerelease"]) {
+    const content = createContentId({ family: "q2", edition, package: "rogue", revision: "test" });
+    using mounts = new MenuMemoryMounts(content, new Map([["music/06.wav", menuWave(1000)], ["music/16.wav", menuWave(2000)]]));
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const music = new ApplicationMusic(engine, () => undefined);
+    try {
+      await music.play({ content, family: "q2", edition, campaign: "rogue" }, new SoundBank(mounts), "0");
+      await music.cdCommand(["loop", "6"]);
+      expect([...new Set(engine.mix(64))]).toEqual([edition === "classic" ? 250 : 500]);
+    } finally { music.stop(); }
+  }
+  const content = createContentId({ family: "q1", edition: "classic", package: "id1", revision: "test" });
+  using mounts = new MenuMemoryMounts(content, new Map<string, Uint8Array>()), alternate = new MenuMemoryMounts(content, new Map([["music/track03.wav", menuWave(1200)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const music = new ApplicationMusic(engine, () => undefined), bank = new SoundBank(alternate);
+  try {
+    await music.play({ content, family: "q1", edition: "classic", campaign: "id1" }, new SoundBank(mounts), "0", path => bank.openMusic(path));
+    await music.cdCommand(["loop", "3"]);
+    expect([...new Set(engine.mix(64))]).toEqual([300]);
+    await music.cdCommand(["stop"]); await music.cdCommand(["play", "3"]);
+    expect([...new Set(engine.mix(32))]).toEqual([300]);
+    expect(engine.mix(32).every(sample => sample === 0)).toBe(true);
+  } finally { music.stop(); }
+});
+
+test("shared client music controls survive dormant menu and replacement owners without moving gain", async () => {
+  const controls = new MusicControls(), content = createContentId({ family: "q2", edition: "test", package: "shared-cd", revision: "1" });
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/03.wav", menuWave(2000)]]));
+  const menu = await StartupAudio.open({ mounts, source, musicControls: controls, theme: null,
+    seat: createIdentityOwner("shared-cd").seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
+  using localEngine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  using replacementEngine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const local = new ApplicationMusic(localEngine, () => undefined, "source", controls);
+  const replacement = new ApplicationMusic(replacementEngine, () => undefined, "source", controls);
+  try {
+    expect([...new Set(menu.engine.mix(32))]).toEqual([250]);
+    local.volume = 0.5; await local.play(source, new SoundBank(mounts), "0");
+    await local.cdCommand(["remap", "1", "3"]); await local.cdCommand(["loop", "2"]);
+    expect([...new Set(localEngine.mix(64))]).toEqual([1000]);
+    await local.cdCommand(["off"]);
+    expect(menu.engine.mix(64).every(sample => sample === 0)).toBe(true);
+    expect(localEngine.mix(64).every(sample => sample === 0)).toBe(true);
+    local.stop();
+    await replacement.play(source, new SoundBank(mounts), "2");
+    expect(replacementEngine.mix(64).every(sample => sample === 0)).toBe(true);
+    expect(controls.remappedTracks[1]).toBe(3);
+    await replacement.cdCommand(["on"]);
+    expect(replacementEngine.mix(64).every(sample => sample === 0)).toBe(true);
+    await replacement.cdCommand(["loop", "2"]);
+    expect([...new Set(replacementEngine.mix(64))]).toEqual([500]);
+    await replacement.cdCommand(["stop"]);
+    await menu.cdCommand(["stop"], () => undefined);
+    await replacement.cdCommand(["reset"]);
+    expect(menu.engine.mix(32).every(sample => sample === 0)).toBe(true);
+    expect(replacementEngine.mix(32).every(sample => sample === 0)).toBe(true);
+    await menu.cdCommand(["loop", "2"], () => undefined);
+    expect([...new Set(menu.engine.mix(64))]).toEqual([250]);
+    expect(local.volume).toBe(0.5); expect(replacement.volume).toBe(0.25);
+  } finally { menu.close(); local.stop(); replacement.stop(); }
+});
+
+test("standalone music controls remain independent", async () => {
+  const content = createContentId({ family: "q2", edition: "test", package: "standalone-cd", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)]]));
+  using firstEngine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  using secondEngine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const first = new ApplicationMusic(firstEngine, () => undefined), second = new ApplicationMusic(secondEngine, () => undefined);
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  try {
+    expect(first.controls).not.toBe(second.controls);
+    await first.play(source, new SoundBank(mounts), "2"); await second.play(source, new SoundBank(mounts), "2");
+    await first.cdCommand(["off"]);
+    expect(firstEngine.mix(32).every(sample => sample === 0)).toBe(true);
+    expect([...new Set(secondEngine.mix(64))]).toEqual([250]);
+    await second.cdCommand(["remap", "3", "3"]);
+    expect(first.controls.remappedTracks[1]).toBe(2);
+  } finally { first.stop(); second.stop(); }
+});
+
+test("explicit cd play and loop change the same cue mode and info reports disabled remaps", async () => {
+  const controls = new MusicControls(), content = createContentId({ family: "q2", edition: "test", package: "cd-mode", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/03.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const lines: string[] = [], music = new ApplicationMusic(engine, text => { lines.push(text); }, "source", controls);
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  try {
+    await music.play(source, new SoundBank(mounts), "2");
+    expect([...new Set(engine.mix(64))]).toEqual([250]);
+    await music.cdCommand(["play", "2"]);
+    expect([...new Set(engine.mix(32))]).toEqual([250]);
+    expect(engine.mix(32).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["play", "2"]); engine.mix(8);
+    await music.cdCommand(["loop", "2"]);
+    expect([...new Set(engine.mix(96))]).toEqual([250]);
+    await music.cdCommand(["remap", "1", "3"]); await music.cdCommand(["loop", "2"]);
+    await music.cdCommand(["info"]);
+    expect(lines.at(-2)).toBe("Currently looping track 2 (mapped to 3)\n");
+    controls.enabled = false;
+    expect(engine.mix(32).every(sample => sample === 0)).toBe(true);
+    await music.cdCommand(["info"]);
+    expect(lines.slice(-2)).toEqual(["CD music is disabled.\n", "Volume is 0.25\n"]);
+  } finally { music.stop(); }
 });

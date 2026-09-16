@@ -1,3 +1,4 @@
+import { MusicControls } from "../../../audio/music.ts";
 import { CdMusic, MusicPlayer, remapQ2MusicTrack } from "../../../audio/index.ts";
 import type { SoundBank, UnifiedAudio } from "../../../audio/index.ts";
 import type { PcmStream } from "../../../audio/streams.ts";
@@ -30,88 +31,138 @@ export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): 
 
 /** One world soundtrack owns the shared engine's intro/loop stream. */
 export class ApplicationMusic {
-  private current: { readonly content: ContentId; readonly player: MusicPlayer; readonly cd: CdMusic; track: string; looping: boolean } | null = null;
+  private current: {
+    readonly source: MusicSource; readonly bank: SoundBank; readonly fallback: OpenMusicTrack | null;
+    readonly player: MusicPlayer; readonly cd: CdMusic; readonly opener: { open: OpenMusicTrack };
+    track: string; looping: boolean;
+  } | null = null;
   private request = 0;
   private gain = 0.25;
 
-  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source") {}
+  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {}
 
   get volume(): number { return this.gain; }
   set volume(value: number) {
     if (!Number.isFinite(value) || value < 0) throw new RangeError("Invalid music volume");
-    this.gain = value;
-    this.current?.player.setVolume(value);
+    this.gain = value; this.current?.player.setVolume(value);
   }
 
-  cdCommand(args: readonly string[], print: (text: string) => void = this.print): void {
+  select(source: MusicSource, bank: SoundBank, fallback: OpenMusicTrack | null = null): void {
+    if (this.current?.source.content === source.content && this.current.bank === bank) return;
+    this.stop();
+    const player = new MusicPlayer(this.engine.sampleRate, source.family, this.volumeMode, this.controls);
+    player.setVolume(this.gain);
+    const opener = { open: (path: string) => bank.openMusic(path) };
+    const cd = new CdMusic(player, path => opener.open(path));
+    this.current = { source, bank, fallback, player, cd, opener, track: "", looping: false };
+  }
+
+  async cdCommand(args: readonly string[], print: (text: string) => void = this.print): Promise<void> {
     const command = args[0]?.toLowerCase();
     if (command === undefined) return;
+    if (command === "close" || command === "eject") { print(`cd ${command}: disc tray operations are unavailable with file-backed music.\n`); return; }
     const current = this.current;
-    if (command === "pause" || command === "resume") {
-      if (current?.player.playing) current.player.paused = command === "pause";
-      return;
-    }
     if (command === "info") {
-      if (current?.player.playing) print(`${current.player.paused ? "Paused" : "Currently"} ${current.looping ? "looping" : "playing"} track ${current.track}\n`);
+      if (!this.controls.enabled) print("CD music is disabled.\n");
+      else if (current?.player.playing) {
+        const mapped = current.cd.playingTrack;
+        const track = mapped !== null && String(mapped) !== current.track ? `${current.track} (mapped to ${mapped})` : current.track;
+        print(`${current.player.paused ? "Paused" : "Currently"} ${current.looping ? "looping" : "playing"} track ${track}\n`);
+      }
       else print("Not playing.\n");
-      print(`Volume is ${this.gain}\n`);
+      print(`Volume is ${this.gain}\n`); return;
+    }
+    if (command === "on") { this.controls.enabled = true; return; }
+    if (command === "off") { this.stopPlayback(); this.controls.enabled = false; return; }
+    if (command === "stop") { this.stopPlayback(); return; }
+    if (command === "reset") { this.stopPlayback(); this.controls.reset(); return; }
+    if (command === "remap") {
+      if (args.length === 1) {
+        this.controls.remappedTracks.forEach((track, index) => { if (track !== index + 1) print(`  ${index + 1} -> ${track}\n`); });
+        return;
+      }
+      const tracks = args.slice(1).map(value => /^\d+$/.test(value) ? Number(value) : NaN);
+      if (tracks.length > 99 || tracks.some(track => !Number.isSafeInteger(track) || track < 0 || track > 255)) {
+        print("cd remap requires at most 99 track numbers from 0 through 255.\n"); return;
+      }
+      this.controls.setRemap(tracks); return;
+    }
+    if (current === null) {
+      if (command !== "pause" && command !== "resume") print("No soundtrack source selected.\n");
       return;
     }
-    print(`cd ${command}: supported commands are pause, resume and info.\n`);
+    if (command === "play" || command === "loop") {
+      const argument = args[1] ?? "", track = /^\d+$/.test(argument) ? Number(argument) : NaN;
+      if (args.length !== 2 || !Number.isSafeInteger(track) || track < 1 || track > 255) {
+        print(`cd ${command} <track 1..255>\n`); return;
+      }
+      await this.startTrack(String(track), command === "loop", true); return;
+    }
+    if (command === "pause" || command === "resume") {
+      if (command === "pause") current.cd.pause(); else current.cd.resume();
+      return;
+    }
+
+    print(`Unknown cd command: ${command}.\n`);
   }
 
-  stop(): void {
-    this.request++;
-    this.current?.cd.stop();
-    this.engine.stopMusic("world");
-    this.current = null;
+  stopPlayback(): void {
+    this.request++; this.current?.cd.stop(); this.engine.stopMusic("world");
   }
+
+  /** Retire the selected content as well as playback when its application closes. */
+  stop(): void { this.stopPlayback(); this.current = null; }
 
   async play(source: MusicSource, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null): Promise<void> {
-    const { content, family, edition, campaign } = source;
+    this.select(source, bank, fallback);
     const selected = track.trim();
-    if (selected === "" || selected === "0") { this.stop(); return; }
-    if (this.current?.content === content && this.current.track === selected && this.current.player.playing) return;
-    this.stop();
+    if (selected === "" || selected === "0") { this.stopPlayback(); return; }
+    await this.startTrack(selected, true, false);
+  }
+
+  private async startTrack(selected: string, looping: boolean, numbered: boolean): Promise<void> {
+    const current = this.current;
+    if (current === null || !current.cd.enabled) return;
+    const { source: { content, family, edition, campaign }, bank, fallback, player, cd, opener } = current;
+    const numeric = /^[0-9]+$/.test(selected) && (family !== "q3" || numbered);
+    const mapped = !numeric ? null : family === "q2"
+      ? remapQ2MusicTrack(Number(selected), edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : Number(selected);
+    if (current.track === selected && current.looping === looping && player.playing
+      && (mapped === null || cd.playingTrack === (cd.remappedTracks[mapped - 1] ?? mapped))) return;
+    this.stopPlayback();
     const request = this.request;
-    const player = new MusicPlayer(this.engine.sampleRate, family, this.volumeMode);
-    player.setVolume(this.gain);
-    let openMusic: OpenMusicTrack = path => bank.openMusic(path);
-    const cd = new CdMusic(player, path => openMusic(path));
-    this.current = { content, player, cd, track: selected, looping: true };
+    current.track = selected; current.looping = looping;
+    opener.open = path => bank.openMusic(path);
     this.engine.attachMusic({ id: "world", audience: { kind: "world" }, gain: 1 }, player);
-    if (/^[0-9]+$/.test(selected) && family !== "q3") {
-      const number = Number(selected);
-      const mapped = family === "q2" ? remapQ2MusicTrack(number, edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : number;
-      let played = await cd.play(mapped, true);
+    if (mapped !== null) {
+      let played = await cd.play(mapped, looping);
       if (!played && family === "q1" && fallback !== null && request === this.request) {
-        openMusic = fallback;
-        played = await cd.play(mapped, true);
+        opener.open = fallback; played = await cd.play(mapped, looping);
       }
-      if (request !== this.request) return;
+      if (request !== this.request || !this.controls.enabled) return;
       if (!played) this.print(`Music unavailable: ${content}/${selected}\n`);
       return;
     }
-    // CG_StartMusic accepts an intro and an optional loop token; an omitted loop repeats the intro.
     const [introName = "", loopName] = selected.match(/"[^"]*"|\S+/g)?.map(token => token.replace(/^"|"$/g, "")) ?? [];
     const open = async (name: string): Promise<PcmStream | null> => {
       const normalized = name.replaceAll("\\", "/");
       const path = normalized.startsWith("music/") ? normalized : `music/${normalized}`;
       const candidates = /\.(?:wav|ogg)$/i.test(path) ? [path] : family === "q3" ? [`${path}.wav`, `${path}.ogg`] : [`${path}.ogg`, `${path}.wav`];
-      for (const openTrack of [openMusic, family === "q1" ? fallback : null]) {
+      for (const openTrack of [opener.open, family === "q1" ? fallback : null]) {
         if (openTrack === null) continue;
         for (const candidate of candidates) {
           const stream = await openTrack(candidate);
           if (stream !== null) return stream;
+          if (request !== this.request || !this.controls.enabled) return null;
         }
       }
       return null;
     };
     const intro = await open(introName);
     if (intro === null) { if (request === this.request) this.print(`Music unavailable: ${content}/${introName}\n`); return; }
-    const loop = loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName);
-    if (request !== this.request) { intro.close(); if (loop !== intro) loop?.close(); return; }
-    if (this.current !== null) this.current.looping = loop !== null;
-    player.start(intro, loop);
+    if (request !== this.request || !this.controls.enabled) { intro.close(); return; }
+    const loop = !looping ? null : loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName);
+    if (request !== this.request || !this.controls.enabled) { intro.close(); if (loop !== intro) loop?.close(); return; }
+    current.looping = loop !== null; player.start(intro, loop);
   }
 }

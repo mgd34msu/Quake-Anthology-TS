@@ -4,6 +4,18 @@ import { RawAudioStream } from "./streams.ts";
 import type { PcmStream } from "./streams.ts";
 import type { SoundFamily, StreamPcm } from "./types.ts";
 export type MusicVolumeMode = "source" | "immediate";
+export class MusicControls {
+    enabled = true;
+    private readonly remap: number[] = Array.from({ length: 100 }, (_, index) => index);
+    get remappedTracks(): readonly number[] { return this.remap.slice(1); }
+    mappedTrack(track: number): number { return this.remap[track] ?? track; }
+    setRemap(tracks: readonly number[]): void {
+        if (tracks.length >= this.remap.length) throw new RangeError("CD remap exceeds 99 tracks");
+        for (const track of tracks) if (!Number.isInteger(track) || track < 0 || track > 255) throw new RangeError("Invalid CD track");
+        tracks.forEach((track, index) => { this.remap[index + 1] = track; });
+    }
+    reset(): void { this.enabled = true; for (let index = 0; index < this.remap.length; index++) this.remap[index] = index; }
+}
 export class MusicPlayer {
     private stream: PcmStream | null = null;
     private loop: PcmStream | null = null;
@@ -11,7 +23,7 @@ export class MusicPlayer {
     private targetVolume = 0.25;
     private smoothedVolume = Math.fround(0.5);
     paused = false;
-    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source") {
+    constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {
         this.pcm = new RawAudioStream(outputRate);
     }
     get playing(): boolean { return this.stream !== null; }
@@ -21,7 +33,7 @@ export class MusicPlayer {
         throw new RangeError("Invalid music volume"); this.targetVolume = value; }
     /** Called once by the presentation frame, matching Q3's source smoothing clock. */
     update(): void {
-        if (this.family === "q3" && this.volumeMode === "source" && this.stream !== null && !this.paused)
+        if (this.family === "q3" && this.volumeMode === "source" && this.stream !== null && !this.paused && this.controls.enabled)
             this.smoothedVolume = Math.fround(Math.fround(this.smoothedVolume + Math.fround(Math.fround(this.targetVolume) * 2)) / 4);
     }
     start(intro: PcmStream, loop: PcmStream | null = null): void {
@@ -68,7 +80,7 @@ export class MusicPlayer {
         return { ...loopChunk, sourceSample: 0, resetStream: true };
     }
     mix(frames: number): Float64Array {
-        if (this.paused || this.volume <= 0 || this.stream === null)
+        if (!this.controls.enabled || this.paused || this.volume <= 0 || this.stream === null)
             return new Float64Array(frames * 2);
         return this.pcm.mix(frames, this.volume, () => this.nextChunk());
     }
@@ -77,26 +89,21 @@ export class MusicPlayer {
 export type OpenMusicTrack = (path: string) => Promise<PcmStream | null>;
 /** Track remapping precedes the ordered loose/archive search through the caller's mount plan. */
 export class CdMusic {
-    private readonly remap: number[] = Array.from({ length: 100 }, (_, index) => index);
     private track: number | null = null;
     private request = 0;
-    enabled = true;
+    get enabled(): boolean { return this.player.controls.enabled; }
+    set enabled(value: boolean) { this.player.controls.enabled = value; }
     constructor(readonly player: MusicPlayer, private readonly open: OpenMusicTrack) { }
     get playingTrack(): number | null { return this.track; }
-    setRemap(tracks: readonly number[]): void {
-        if (tracks.length >= this.remap.length)
-            throw new RangeError("CD remap exceeds 99 tracks");
-        tracks.forEach((track, index) => { if (!Number.isInteger(track) || track < 0 || track > 255)
-            throw new RangeError("Invalid CD track"); this.remap[index + 1] = track; });
-    }
-    reset(): void { this.stop(); for (let i = 0; i < this.remap.length; i++)
-        this.remap[i] = i; this.enabled = true; }
+    get remappedTracks(): readonly number[] { return this.player.controls.remappedTracks; }
+    setRemap(tracks: readonly number[]): void { this.player.controls.setRemap(tracks); }
+    reset(): void { this.stop(); this.player.controls.reset(); }
     async play(track: number, looping: boolean): Promise<boolean> {
         if (!this.enabled)
             return false;
         if (!Number.isInteger(track) || track < 0 || track > 255)
             throw new RangeError("Invalid CD track");
-        const mapped = this.remap[track] ?? track;
+        const mapped = this.player.controls.mappedTrack(track);
         if (mapped < 1)
             return false;
         if (this.track === mapped && this.player.playing)
@@ -108,12 +115,11 @@ export class CdMusic {
         const candidates = [`music/${number}.ogg`, `music/track${number}.ogg`, `music/${number}.wav`, `music/track${number}.wav`];
         for (const path of candidates) {
             const stream = await this.open(path);
-            if (stream === null)
-                continue;
-            if (request !== this.request) {
-                stream.close();
+            if (request !== this.request || !this.enabled) {
+                stream?.close();
                 return false;
             }
+            if (stream === null) continue;
             this.player.start(stream, looping ? stream : null);
             this.track = mapped;
             return true;

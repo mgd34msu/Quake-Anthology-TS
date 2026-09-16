@@ -1,3 +1,4 @@
+import { MusicControls } from "../../audio/music.ts";
 import type { ConfigurationCommandRequest } from "./configuration.ts";
 import { RecordedRemoteSource } from "./network/recorded-source.ts";
 import type { DemoResource, DemoFamily } from "./demo-playback.ts";
@@ -167,10 +168,12 @@ export class RemoteApplication {
   private readonly seatId: SeatId;
   private uiPreferences: ApplicationSeatUi["preferences"]["values"] | null = null;
 
+  private readonly musicControls: MusicControls;
   private constructor(private launchOptions: ApplicationOptions, private readonly mountedContent: MountedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, launch: RemoteLaunch, identity: ReturnType<typeof createIdentityOwner>,
     private readonly browser: RemoteBrowser, private readonly ownership: RemoteOwnership) {
+    this.musicControls = ownership.kind === "borrowed" ? ownership.client.musicControls : new MusicControls();
     this.family = launch.kind === "live" ? launch.family : launch.playback.resource.kind;
     const retained = ownership.kind === "borrowed" ? ownership.client.locals[0] : undefined;
     if (ownership.kind === "borrowed" && retained === undefined) throw new Error("Remote source requires a retained primary seat");
@@ -579,7 +582,7 @@ export class RemoteApplication {
       const font = await assets.loadConsoleFont(), source = font.classic.picture.image.source;
       if (source.kind !== "resource") throw new Error("Remote console font has no mounted resource identity");
       art = await loadNativeUiArt(source.resource.id, assets.images, loadMenuArtImage);
-      audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => { this.print(text); return undefined; }, { ...await loadAudioSettings(this.inputConfig), ...(this.ownership.kind === "borrowed" ? { deferOutput: true } : {}) });
+      audio = new ApplicationAudio(content, () => this.elapsed, this.options.seed, this.options.characterModel, text => { this.print(text); return undefined; }, { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, ...(this.ownership.kind === "borrowed" ? { deferOutput: true } : {}) });
       const scene: SceneQueries = {
         trace: query => this.remote.scene.trace(query), pointContents: query => this.remote.scene.pointContents(query),
         boxLeaves: (bounds, limit) => this.remote.scene.boxLeaves(bounds, limit),

@@ -1,3 +1,4 @@
+import type { MusicControls } from "../../audio/music.ts";
 import { menuSoundPath } from "./audio/menu.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { Q3_FOOTSTEP_PATHS } from "../../content/q3/presentation/character-resources.ts";
@@ -53,6 +54,7 @@ interface StaticAudio {
 }
 export type ApplicationEffectSound = SourceEffectSound;
 export interface ApplicationAudioOptions {
+  readonly musicControls?: MusicControls;
   readonly deferOutput?: boolean;
   readonly deviceName?: string | null;
   readonly effectsVolume?: number;
@@ -88,7 +90,7 @@ export class ApplicationAudio {
     this.random = new GameRandom(seed);
     this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
     this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
-    this.music = new ApplicationMusic(this.engine, print);
+    this.music = new ApplicationMusic(this.engine, print, "source", options.musicControls);
     this.effectsVolume = options.effectsVolume ?? this.volume;
     this.musicVolume = options.musicVolume ?? this.music.volume;
     if (options.deferOutput === true) return;
@@ -160,7 +162,7 @@ export class ApplicationAudio {
     if (!applicationAudioCommands.includes(request.name)) return false;
     if (this.closed) throw new Error("Sound system is closed");
     const print = request.print ?? this.print;
-    if (request.name === "cd") { this.music.cdCommand(request.args, print); return true; }
+    if (request.name === "cd") { await this.music.cdCommand(request.args, print); return true; }
     if (request.name === "soundinfo" || request.name === "s_info") {
       const output = this.engine.outputConfiguration;
       print(`Sound output: ${this.engine.outputState}\n`);
@@ -194,7 +196,7 @@ export class ApplicationAudio {
       return true;
     }
     if (request.name === "stopsound" || request.name === "s_stop") {
-      this.music.stop(); this.engine.stopAll();
+      this.music.stopPlayback(); this.engine.stopAll();
       this.statics.length = 0; this.loops.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
       return true;
     }
@@ -502,7 +504,7 @@ export class ApplicationAudio {
 
   resetRound(): void {
     if (this.closed) throw new Error("Application audio closed");
-    this.music.stop();
+    this.music.stopPlayback();
     this.engine.resetRound();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
     this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;

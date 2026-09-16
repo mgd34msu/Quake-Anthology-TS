@@ -1,3 +1,4 @@
+import { MusicControls } from "../../audio/music.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { openInitialConfigurationContent, prepareInitialConfiguration, prepareProfileConfiguration, configurationDialect, configurationStore, type PreparedProfileConfiguration, type ConfigurationCommandRequest } from "./configuration.ts";
 import { SeatInput } from "../../input/seat.ts";
@@ -277,10 +278,14 @@ export class Application {
   private readonly sourceClientChanges: { added: SessionClient[]; removed: SessionClient[] } = { added: [], removed: [] };
   private readonly sourceSeatChanges: { added: SessionSeat[]; removed: SessionSeat[] } = { added: [], removed: [] };
 
+  private readonly musicControls: MusicControls;
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
     private readonly localSeats: Map<ClientId, SessionSeat>, inputConfig: ConfigStore,
-    private readonly ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly client: ClientBootstrap }) { this.inputConfig = inputConfig; }
+    private readonly ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly client: ClientBootstrap }) {
+    this.inputConfig = inputConfig;
+    this.musicControls = ownership.kind === "borrowed" ? ownership.client.musicControls : new MusicControls();
+  }
 
   private static sourceConfig(options: ApplicationOptions, content: LoadedApplicationContent): ConfigStore {
     const product = content.catalog.product(content.recipe.map.entities.content);
@@ -1164,7 +1169,7 @@ export class Application {
         this.publishLocalGuestSnapshots();
       }
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text),
-        { ...await loadAudioSettings(this.inputConfig), deferOutput: client !== null });
+        { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, deferOutput: client !== null });
       if (this.imageSettings?.cvars.find("volume") !== undefined) {
         if (this.preparedStartup === null) {
           this.imageSettings.cvars.set("volume", String(audio.effectsVolume));
@@ -1741,7 +1746,7 @@ export class Application {
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text),
-          { ...await loadAudioSettings(this.inputConfig), deferOutput: true });
+          { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, deferOutput: true });
         audio.bindHaptics(input);
         nextAudio = audio;
         await audio.prepareEnvironment(nextSimulation.scene);
