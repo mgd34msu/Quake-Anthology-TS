@@ -12,6 +12,10 @@ Separate source checks exercised the audio menu, world/travel/frontend transfer 
 
 Accepted source `b416aef` additionally reduces Q1 cap-membership allocations. All 5,000 retained complete traces matched; three component pairs reduced aggregate elapsed by 3.34%. This change is committed and pushed but is **not included in installed `74119b8`**. See the [comparison](../.artifacts/resume-20260915/cap-membership8b10/RESULT.md).
 
+Accepted and pushed source also includes inventory count reads (`20e1411`), model vertex construction (`d4a0888`) and canonical cvar snapshot reuse (`fcc6cbb`). None is included in installed `74119b8`; its receipt and executable hash above are unchanged. Component measurements found 93.82%/95.53% lower inventory count time for 8/32 entries, 13.012% lower MD2 preparation time, and 15.27% lower actual settings-signature time. MD5 results were mixed, including one pair 5.070% slower; no stable MD5 gain is established. See [performance evidence](functional-targets/performance.md#current-evidence-and-remaining-work).
+
+The separate fcc6 profile matched retained workload clocks, query counts and state apart from documented private mount identities. Presentation still averaged about 27 ms in that private setup; this is not a paired FPS result. GL finite-validation unrolling and normal-scan candidates were rejected for regressions. Actor-registry snapshot work and model-light ownership/music work remain pending, not accepted changes.
+
 ## Historical 94d7f5b renderer-transition proof
 
 The previously installed source was `94d7f5be60312aca3e558f7f7c3684719a0933b6`, tree `a25800d45847ead67842d9c23f45698f1ff1dbe9`. Installed at `2026-09-16T10:59:30.174Z`: SHA-256 `333dcb8b44f1468936526bcaa1880d7f79c694f4fe69dfd555ac1640d45f7b10`, 123,328,640 bytes, mode `0755`. Receipt: [installed build](../.artifacts/resume-20260915/final-94d7f5b/installed-build.json).
