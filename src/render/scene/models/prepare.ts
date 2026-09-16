@@ -152,10 +152,11 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         : sampled ?? { x: 1, y: 1, z: 1 });
       const base = vertex.color ?? color;
       const lit = unlit && shell === null ? base : { x: base.x * light.x, y: base.y * light.y, z: base.z * light.z, w: base.w };
-      return { ...vertex, lightmapCoord: { x: 0, y: 0 }, color: lit };
+      return { position: vertex.position, normal: vertex.normal, texCoord: vertex.texCoord, lightmapCoord: { x: 0, y: 0 }, color: lit };
     }) };
-    const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({ ...vertex,
-      position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal) })) };
+    const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({
+      position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal),
+      texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color })) };
     const depthHack = flags.kind === "q1" ? options.viewModel === true : flags.kind === "q2" ? (bits & 16) !== 0 : (bits & 8) !== 0;
     surfaces.push({ surfaceIndex: surfaces.length, fogSphere, name, entity, options, transform: entity.transform, image, localGeometry, geometry,
       depthRange: depthHack ? [0, 0.3] : [0, 1], cull: model.kind === "q1-spr" || model.kind === "q2-sp2" ? "none" : model.kind === "q1-mdl" || model.kind === "q2-md2" || model.kind === "md5" && (model.skinSelection.kind === "q1-mdl-replacement" || model.skinSelection.kind === "q2-md2-replacement") ? "front" : "back",
