@@ -138,7 +138,7 @@ export class SeatInput {
     const button = this.button(action);
     if (down) button.down(key, timeMilliseconds); else button.up(key, timeMilliseconds);
   }
-  private runBinding(binding: HeldBinding, down: boolean, now: number): void {
+  private runBinding(binding: HeldBinding, down: boolean, now: number, commands: Pick<CommandBuffer, "append"> = this.options.commands): void {
     const target = binding.target;
     if (target === null) return;
     if (target.kind === "action") {
@@ -154,9 +154,9 @@ export class SeatInput {
       remaining = remaining.slice(offset + 1);
       if (segment.length === 0) continue;
       if (segment.startsWith("+")) {
-        this.options.commands.append(`${down ? "+" : "-"}${segment.slice(1)} ${key} ${Math.trunc(now)}\n`, source);
+        commands.append(`${down ? "+" : "-"}${segment.slice(1)} ${key} ${Math.trunc(now)}\n`, source);
         hadButton = true;
-      } else if (down || hadButton) this.options.commands.append(`${segment}\n`, source);
+      } else if (down || hadButton) commands.append(`${segment}\n`, source);
     }
   }
   private digital(input: PhysicalInput, down: boolean, time: number, consumed = false): void {
@@ -215,8 +215,8 @@ export class SeatInput {
     }
     this.gamepad.clear(); this.gamepad.resetGyroCalibration();
   }
-  release(time: number): void {
-    for (const held of this.held.values()) this.runBinding(held, false, time);
+  release(time: number, commands: Pick<CommandBuffer, "append"> = this.options.commands): void {
+    for (const held of this.held.values()) this.runBinding(held, false, time, commands);
     this.held.clear();
     for (const button of this.buttons.values()) button.release(time);
     this.gamepad.clear(); this.mouse = { x: 0, y: 0 }; this.pendingImpulse = 0;

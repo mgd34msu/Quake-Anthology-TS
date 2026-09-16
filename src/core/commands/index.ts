@@ -329,7 +329,9 @@ export class CommandBuffer {
   }
   aliasNames(): readonly string[] { return Object.freeze(this.executionDialect === "q3" ? [] : this.aliases.map(alias => alias.name)); }
 
-  append(text: string, source?: CommandContext): void { this.appendFor(text, this.inputContext(source)); }
+  append(text: string, source?: CommandContext, dialect?: CommandDialect): void {
+    this.appendFor(text, this.inputContext(source), undefined, undefined, dialect);
+  }
   insert(text: string, source?: CommandContext): void { this.insertFor(text, this.inputContext(source)); }
   private inputContext(source: CommandContext | undefined): CommandContext {
     if (source === undefined) return this.frame?.source ?? this.context;

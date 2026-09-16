@@ -4,9 +4,9 @@ import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
 import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
-import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting } from "../../core/commands/index.ts";
+import { CommandBuffer, asciiFold, type CommandInvocation, type CommandCvarRouting, type CommandBufferOptions } from "../../core/commands/index.ts";
 import { SeatInput, physicalInputKey } from "../../input/seat.ts";
-import { defaultBindings, namedPhysicalInput, registerBindingCommands } from "../../input/bindings.ts";
+import { defaultBindings, namedPhysicalInput, registerBindingCommands, type BindingCommandSeat } from "../../input/bindings.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import type { SeatSettings } from "../../settings/config.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
@@ -137,6 +137,54 @@ export class PreparedStartup {
     return false;
   }
   noteWorldAction(): void { if (this.pending) this.worldAction = true; }
+  prepareClientCommands(options: CommandBufferOptions): {
+    readonly commands: CommandBuffer; readonly releaseCommands: Pick<CommandBuffer, "append">;
+    validatePublication(): void; publish(): void;
+  } {
+    const contexts = [this.source.context, this.commands.context, ...this.seats.map(seat => seat.context)];
+    const liveRegistries = new Set([this.source, this.movement, this.fallback,
+      ...this.seats.flatMap(seat => [seat.cvars, seat.mouse.cvars]),
+      ...contexts.flatMap(context => this.routing.visible(context))]);
+    const candidateRegistries = new Set([options.cvars,
+      ...[options.context, ...this.seats.map(seat => seat.context)].flatMap(context => options.cvarRouting?.visible(context) ?? [])]);
+    for (const registry of candidateRegistries) if (registry !== undefined && liveRegistries.has(registry))
+      throw new Error("Candidate client commands require isolated cvar owners");
+    const program = this.commands.prepareProgram(options);
+    const releaseDialect = this.commands.dialect;
+    const seats = this.seats.map(seat => {
+      const original = seat.input.bindings;
+      const bindings = new Map(original.map(binding => [physicalInputKey(binding.input), binding]));
+      const staged: BindingCommandSeat = {
+        get bindings() { return [...bindings.values()]; },
+        binding: input => bindings.get(physicalInputKey(input))?.target ?? null,
+        bind: binding => { bindings.set(physicalInputKey(binding.input), binding); },
+        unbind: input => { bindings.delete(physicalInputKey(input)); },
+        unbindAll: () => { bindings.clear(); },
+      };
+      return { seat, original, staged };
+    });
+    registerBindingCommands(program.commands, id => seats.find(entry => entry.seat.id.equals(id))?.staged ?? null,
+      text => options.print?.(text, program.commands.executionContext));
+    registerQ1ViewCommands(program.commands);
+    const validatePublication = (): void => {
+      program.validatePublication();
+      for (const { seat, original } of seats) {
+        const current = seat.input.bindings;
+        if (current.length !== original.length || current.some((binding, index) => binding !== original[index]))
+          throw new Error("Client bindings changed during preparation");
+      }
+    };
+    return { commands: program.commands,
+      releaseCommands: { append: (text, source) => program.commands.append(text, source, releaseDialect) },
+      validatePublication, publish: () => {
+      validatePublication();
+      program.publish();
+      for (const { seat, staged } of seats) {
+        seat.input.unbindAll();
+        for (const binding of staged.bindings) seat.input.bind(binding);
+      }
+    } };
+  }
   forwardCommands(forward: PreparedStartup["forward"]): void { this.forward = forward; }
   readScript(name: string, context: CommandContext): Promise<string | undefined> { return this.active?.readScript(name, context) ?? this.scripts.read(name, context); }
   onScriptComplete(event: import("../../core/commands/index.ts").ScriptCompletion): void { this.active?.onScriptComplete(event); }

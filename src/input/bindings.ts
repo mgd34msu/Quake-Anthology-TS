@@ -78,10 +78,12 @@ export function archivedBindings(input: SeatInput): readonly string[] {
   }
   return commands;
 }
-export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: SeatId) => SeatInput | null,
+export type BindingCommandSeat = Pick<SeatInput, "bindings" | "binding" | "bind" | "unbind" | "unbindAll">;
+
+export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: SeatId) => BindingCommandSeat | null,
   print: (text: string) => void): () => void {
   const registered: string[] = [];
-  const local = (invocation: CommandInvocation): SeatInput | null => {
+  const local = (invocation: CommandInvocation): BindingCommandSeat | null => {
     let origin = invocation.source.origin;
     while (origin.kind === "script") origin = origin.caller;
     return origin.kind === "local-seat" ? lookup(origin.seat) : null;

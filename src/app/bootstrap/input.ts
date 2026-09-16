@@ -527,9 +527,9 @@ export class ApplicationInput {
   get profileChanged(): boolean {
     return this.commands.dialect !== (this.actions.console?.dialect() ?? this.dialect) || this.locals.some(local => local.input.dialect !== this.dialect);
   }
-  releaseForProfileChange(): void {
+  releaseForProfileChange(commands?: Pick<CommandBuffer, "append">): void {
     this.releaseOffhand(true);
-    for (const local of this.locals) local.input.release(this.now());
+    for (const local of this.locals) local.input.release(this.now(), commands);
   }
   transferPlatformTo(next: ApplicationInput): void {
     next.pendingWindowEvents = this.pendingWindowEvents; this.pendingWindowEvents = [];
