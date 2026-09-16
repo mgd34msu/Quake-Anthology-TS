@@ -1,12 +1,12 @@
 # Console source comparison
 
-Accepted and installed source is `77db74b89998f8ebb0dc75111e7b0809b6747215`. The capture lifecycle ordering and fatal-cleanup correction is now delivered. This is a partial source-contract comparison, not a new audit of the historical 477-item ledger. Matching names and registration counts do not prove working commands.
+This is a partial source-contract comparison across Q1/QW, Q2 and Q3, including their source-defined expansion and mod behavior. It does not re-audit the historical 477-item ledger. Matching names and registration counts do not prove working commands.
+
+A command family is complete only when its public commands accept the source syntax, report useful current values, respect caller authority and change the correct live owner. Defaults, flags, persistence, selected-content behavior and feedback need actual user-flow evidence. Shared implementations may satisfy several donors without duplicating state.
 
 ## Current delivery boundary
 
-Accepted successors preserve console state while changing gameplay profiles, select mounted menu-music fallbacks and Q2 edition/expansion soundtrack cues, retain source-round bot resources and ordered reliable delivery, preserve Q3 peers across round admission, retain effects/audio owners and settle Q3 rounds through the shared actor loop. The server-browser control now stays in the Custom game column. Application restart/input integration is now accepted in `4b25a1c`, with six-client Team Arena warmup, manual/scheduled restarts, held input/fire, restored raw angles, centerview, wire epoch/snapshot ordering, resumed remote movement and cleanup checks. The wire test used `sv_pure=0`; pure admission is not qualified. Source-world impulse/QW punctuation, startup scripts and CLI execution retain their bounded accepted scopes. Console queries must show current values and source-authorized effects; shared owners must survive profile changes without duplicating state.
-
-Source-specific Q3 death policy is accepted: native Q3 uses kill/attack respawn instead of automatic campaign recovery, while tested Q1/Q2 autosave/recovery behavior remains. The invalid Q3 model-registration fallback is also accepted without weakening shared path validation. Persistent-shell integration, demo playback including `startdemos`, broader source parity, physical audibility and sustained performance remain open. Controlled compiled Q1/Q2/Q3 gameplay music PCM passed, with Q3 tested in local deathmatch; installation and physical-output qualification remain separate. See [execution status](execution-status.md#installed-executable-and-recent-fixes) for current evidence.
+See [execution status](execution-status.md#installed-executable-and-recent-fixes) for the current installed identity and bounded runtime evidence. The comparison below retains its historical scope; later accepted work may supersede individual gap descriptions. It does not establish complete console parity or change the requirement ledger.
 
 ## Per-family checklist
 

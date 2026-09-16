@@ -4,7 +4,7 @@ This full report preserves the 2026-09-13 source snapshot at `98074c6e`, includi
 
 Usability remains the highest product priority: visible values, direct editing, familiar commands, clear feedback, persistent settings and actual public-flow checks.
 
-Accepted and installed source is `77db74b89998f8ebb0dc75111e7b0809b6747215`. The capture lifecycle ordering and fatal-cleanup correction is now delivered. Accepted source includes console/profile continuity, menu/gameplay music selection, source-round bot/network/effects/audio support and Custom browser layout. Controlled compiled music PCM passed for Q1, Q2 and local Q3 deathmatch. Application restart/input and source-specific Q3 death behavior are now accepted; the restart wire test covers `sv_pure=0` only. Guest-command ownership remains pending; physical audio and full gameplay/performance parity remain open. See [execution status](execution-status.md#installed-executable-and-recent-fixes) and the [source comparison](console-source-parity.md). The historical report below retains its original cutoff and totals.
+Current delivery evidence and runtime limits are maintained in [execution status](execution-status.md#installed-executable-and-recent-fixes); the [console source comparison](console-source-parity.md) records its separate partial scope. The historical report below retains its original cutoff and totals.
 
 **ENGINE NOT COMPLETE.** One Bun application and shared actor, body, collision, combat, inventory, session, rendering, and device ownership are implemented. The complete Q1/Q2/Q3 feature union, every required content combination, every native compatibility profile, and full campaign and presentation fidelity are not achieved.
 

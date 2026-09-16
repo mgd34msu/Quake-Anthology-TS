@@ -8,9 +8,11 @@ Use existing shared services and extend their feature union. Preserve independen
 
 ## Highest product priority: usable controls and console
 
-Make client menus and console commands work without unnecessary steps. Show current values, use sensible defaults, support direct mouse/keyboard editing and familiar commands, preserve settings and provide clear feedback. Backend checks alone do not complete a feature: verify its public user flow.
+Make client menus and console commands work without unnecessary steps. Use sensible defaults for selected content, show current values, support direct mouse/keyboard editing and familiar commands, preserve settings and provide clear feedback.
 
-Accepted and installed source is `77db74b89998f8ebb0dc75111e7b0809b6747215`. The capture lifecycle ordering and fatal-cleanup correction is now delivered. Console/profile continuity, soundtrack selection and source-round supporting services are accepted; Application restart/input and source-specific Q3 death behavior are also accepted. Guest-command ownership remains pending. Controlled compiled music PCM is separate from physical audibility; a stale user prompt is not evidence of a new failure. See [execution status](execution-status.md#installed-executable-and-recent-fixes) for the current qualification boundary; the numbered backlog and historical counts below are unchanged.
+Acceptance must show that a user can find the control, see its value, change or reset it and verify persistence through the actual menu/runtime or console. Backend checks alone are insufficient. Use a focused check appropriate to the change; no separate elaborate test system is required.
+
+See [execution status](execution-status.md#installed-executable-and-recent-fixes) for the current installed identity and qualification boundary. The numbered backlog and historical counts below are unchanged.
 
 ## Ordered backlog
 
