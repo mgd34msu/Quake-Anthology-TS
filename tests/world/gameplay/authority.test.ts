@@ -489,3 +489,40 @@ test("native-only source reload resolves current historical actors without check
   expect(restored.referenceSaved({ slot: reused.id.slot, generation: reused.id.generation }, "current")).toBe(reused.id);
   original.close(); restored.close();
 });
+
+test("inventory count validates every borrowed entry and retains first-match source normalization", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("inventory-count"));
+  const actor = actors.allocate("q2:game", "q2:player");
+  const table = new SharedInventoryTable(actors);
+  let entries: readonly import("../../../src/contracts/gameplay.ts").InventoryEntry[] = [
+    { item: "q1:nails", count: 16777217, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } },
+    { item: "q1:nails", count: 3, capacity: 200 },
+    { item: "q2:cells", count: -2.5, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary64" } },
+    { item: "q3:rockets", count: 4294967295, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "int32" } },
+  ];
+  let reads = 0;
+  table.bind(actor, { read: () => { reads++; return entries; }, write: () => { throw Error("Unexpected inventory write"); } });
+  expect(table.count(actor.id, "q1:nails")).toBe(16777216);
+  expect(reads).toBe(1);
+  expect(table.count(actor.id, "q2:cells")).toBe(-2.5);
+  expect(table.count(actor.id, "q3:rockets")).toBe(-1);
+  expect(table.count(actor.id, "q1:missing")).toBe(0);
+  const first = entries[0]; if (first === undefined) throw Error("Fixture entry");
+  expect(first.count).toBe(16777217);
+  expect(Object.isFrozen(first)).toBe(false);
+  const snapshot = table.entries(actor.id);
+  expect(snapshot[0]).not.toBe(first);
+  expect(Object.isFrozen(snapshot[0])).toBe(true);
+  entries = [first, { item: "q2:cells", count: NaN, capacity: -1 }];
+  expect(() => table.count(actor.id, "q1:nails")).toThrow("quantity must be finite and nonnegative");
+  entries = [first, { item: "q2:cells", count: NaN, capacity: 1 }];
+  expect(() => table.count(actor.id, "q1:nails")).toThrow("counter must be finite");
+  entries = [first, { item: "q2:cells", count: Number.MAX_VALUE, capacity: 1, countPolicy: { kind: "source-counter", arithmetic: "binary32" } }];
+  expect(() => table.count(actor.id, "q1:missing")).toThrow("binary32 range");
+  actors.release(actor);
+  const before = reads;
+  expect(table.count(actor.id, "q1:nails")).toBe(0);
+  expect(reads).toBe(before);
+  const unbound = actors.allocate("q2:game", "q2:player");
+  expect(table.count(unbound.id, "q1:nails")).toBe(0);
+});

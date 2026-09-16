@@ -77,7 +77,17 @@ export class SharedInventoryTable implements InventoryTable {
     return owner !== null && this.stores.has(owner);
   }
 
-  count(actor: ActorId, item: ItemId): number { return this.entries(actor).find(entry => entry.item === item)?.count ?? 0; }
+  count(actor: ActorId, item: ItemId): number {
+    const owner = this.actors.resolveOwned(actor);
+    if (owner === null) return 0;
+    let result = 0, found = false;
+    for (const entry of this.stores.get(owner)?.read() ?? []) {
+      quantity(entry.capacity);
+      const count = sourceCount(entry, entry.count);
+      if (!found && entry.item === item) { result = count; found = true; }
+    }
+    return result;
+  }
 
   consume(actor: OwnedActor, item: ItemId, count: number): boolean {
     this.actors.assertOwned(actor); quantity(count);
