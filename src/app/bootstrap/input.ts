@@ -22,6 +22,7 @@ import { defaultBindings, registerBindingCommands, registerWheelCommands } from 
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
+import { ClientCommandBindings, type ClientCommandRegistration } from "../../input/client-commands.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
 import { InputCommandBuilder } from "../../input/user-command.ts";
 import { MouseInput } from "../../input/mouse.ts";
@@ -131,7 +132,7 @@ export class ApplicationInput {
   private readonly unregister: (() => void)[] = [];
   private readonly uiCallbacks = new Map<SeatInput, (event: SeatInputEvent, focus: SeatInputFocus) => boolean>();
   private readonly releaseUi: (() => void)[] = [];
-  private readonly clientCommands = new Set<string>();
+  private readonly clientCommands: ClientCommandBindings;
   private commandsActive = false;
   private readonly stagedCommands: ({ readonly kind: "console"; readonly text: string; readonly source: CommandContext }
     | { readonly kind: "reliable"; readonly text: string; readonly source: CommandContext; readonly dispatch: (text: string, source: CommandContext) => void })[] = [];
@@ -288,6 +289,8 @@ export class ApplicationInput {
         if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
       } });
+    this.clientCommands = new ClientCommandBindings(this.commands, locals.map(local => local.input.seat),
+      (command, seat) => this.actions.execute(command.argv[0] ?? "", command.args, seat, command.source));
     this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, settings, actions.print);
     try {
       if (previous === undefined) this.router.attachWindow(window);
@@ -320,7 +323,7 @@ export class ApplicationInput {
     });
     const lookup = (seat: SeatId): SeatInput | null => this.locals.find(local => local.player.seat.id.equals(seat))?.input ?? null;
     this.unregister.push(...settingBindings, registerWheelCommands(this.commands, (seat, mode, down) => this.seatUi.get(seat)?.wheel(mode, down)),
-      registerInputCommands(this.commands, lookup), ...(this.startup === undefined ? [registerBindingCommands(this.commands, lookup, print)] : []), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
+      registerInputCommands(this.commands, lookup, command => this.clientCommands.dispatch(command)), ...(this.startup === undefined ? [registerBindingCommands(this.commands, lookup, print)] : []), registerDiscoveryCommands(this.commands, print), registerLlmCommands(this.commands, print, actions.llm),
       registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source)),
       registerQ1ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source)));
     this.registerCommand("quit", () => actions.quit());
@@ -367,9 +370,7 @@ export class ApplicationInput {
       this.releaseUi.push(input.bindUiEvent(callback, this.now));
       input.setFocus({ kind: "game" }, this.now());
     }
-    const clientCommands = [...this.clientCommands];
-    this.clientCommands.clear();
-    this.registerClientCommands(clientCommands);
+    this.clientCommands.activate();
     for (const command of this.stagedCommands.splice(0)) {
       if (command.kind === "console") this.commands.append(command.text, command.source);
       else command.dispatch(command.text, command.source);
@@ -377,6 +378,7 @@ export class ApplicationInput {
   }
 
   private retireCommands(): void {
+    this.clientCommands.deactivate();
     for (const release of this.releaseUi.splice(0)) release();
     for (const unregister of this.unregister.splice(0)) unregister();
     this.commandsActive = false;
@@ -505,19 +507,7 @@ export class ApplicationInput {
     else this.arsenalSelections.set(seat, selection);
   }
 
-  registerClientCommands(names: readonly string[]): void {
-    for (const name of names) {
-      if (this.clientCommands.has(name)) continue;
-      this.clientCommands.add(name);
-      if (!this.commandsActive) continue;
-      if (name === "+scores" || name === "-scores" || name === "+zoom" || name === "-zoom") this.commands.unregister(name);
-      if (this.commands.exists(name)) continue;
-      this.registerCommand(name, invocation => {
-        let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
-        return this.actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null);
-      });
-    }
-  }
+  clientCommandRegistration(seat: SeatId): ClientCommandRegistration { return this.clientCommands.createOwner(seat); }
 
   attachUi(seat: SeatId, ui: ApplicationInputUi): () => void {
     if (!this.locals.some(local => local.player.seat.id.equals(seat))) throw new Error("UI seat has no local input");

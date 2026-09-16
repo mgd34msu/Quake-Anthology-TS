@@ -322,9 +322,21 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
   });
   let app: Application | null = null;
   try {
+    const modDirectory = userProductDirectory(root, 'q3a/lrctf');
+    mkdirSync(modDirectory, { recursive: true });
+    writeFileSync(join(modDirectory, 'autoexec.cfg'), 'set g_gametype 4\n');
     app = await Application.open(parsed.options, { print: () => undefined });
     expect(cgInit).toHaveBeenCalledTimes(2); expect(uiInit).toHaveBeenCalledTimes(2);
     const guest = app.simulation.q3Guest(); if (guest === null) throw new Error('Missing local guest authority');
+    const retainTeamState = (phase: string): void => {
+      const directory = process.env['QVM_LOCAL_ARTIFACT_DIR'];
+      if (directory === undefined) return;
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, `team-state-${phase}.json`), JSON.stringify({ gameType: guest.state.cvars.variableValue('g_gametype'),
+        teams: [guest.records.player(0).persistent[3], guest.records.player(1).persistent[3]] }, null, 2));
+    };
+    retainTeamState('opened');
+    expect(guest.state.cvars.variableValue('g_gametype')).toBe(4);
     const first = app.localPlayers[0], second = app.localPlayers[1];
     if (first === undefined || second === undefined) throw new Error('Missing local seats');
     expect(guest.players().map(player => player.client)).toEqual([first.seat.client.id, second.seat.client.id]);
@@ -374,6 +386,7 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
     expect(guest.state.getUserCommand(0)?.forwardmove).toBe(127); expect(guest.state.getUserCommand(1)?.forwardmove).toBe(0);
     expect((guest.state.getUserCommand(0)?.buttons ?? 0) & 1).toBe(1); expect((guest.state.getUserCommand(1)?.buttons ?? 0) & 1).toBe(0);
     expect(guest.records.player(0).origin).not.toEqual(before); expect(guest.records.player(0).ammo[2]).toBeLessThan(ammo);
+    retainTeamState('before-assertion');
     expect(guest.records.player(0).persistent[3]).toBe(1); expect(guest.records.player(1).persistent[3]).toBe(2);
     expect(worldSounds.some(sound => sound.fixedOrigin && sound.channel === 0)).toBe(true);
     expect(firstView.q3Client.source.actorAt(1022)).toBe(secondView.q3Client.source.actorAt(1022));
@@ -488,6 +501,11 @@ test('local LRCTF QVM seats render separate ABI viewports and isolate movement a
         '--renderer', 'cpu', '--hidden', '--width', '320', '--height', '240', '--user-content-root', root]);
       if (native.kind !== 'run') throw new Error('Missing native launch');
       app = await Application.open(native.options, { print: () => undefined, saveDirectory: join(root, 'native-saves') });
+      for (const player of app.localPlayers) {
+        const presentation = player.seat.presentation;
+        if (!(presentation instanceof WorldSeatPresentation)) throw new Error('Missing native presentation');
+        presentation.local.console.field.setText('/cl_run 0'); presentation.local.console.submit();
+      }
       await app.step(50);
       expect(app.simulation.q3Source()).not.toBeNull(); expect(app.simulation.q3Guest()).toBeNull();
       const nativeWorld = app.simulation, nativeClients = app.localPlayers.map(player => player.seat.client);

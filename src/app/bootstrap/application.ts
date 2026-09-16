@@ -1281,6 +1281,7 @@ export class Application {
       const { state, cvars } = seat;
       const client = await ApplicationQ3Client.create({ kind: "qvm", localServer: true, source: state.source, connection: state, cvars,
         assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.commands,
+        commandRegistration: input.clientCommandRegistration(local.player.seat.id),
         splitScreen: this.options.seats > 1,
         timeCvars: guest.state.cvars,
         assertCurrent: () => { if (simulation.q3Guest()?.isRetired !== false || local.player.seat.client.isClosed) throw new Error("Guest presentation world is retired"); },
@@ -1292,7 +1293,6 @@ export class Application {
           console: text => input.enqueueClientCommand(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }),
           print: text => { this.host.print(text); local.console.print(text); },
         } });
-      input.registerClientCommands([...client.commandNames]);
       seat.client = client;
       return { kind: "qvm", client, state };
     }
@@ -1300,6 +1300,7 @@ export class Application {
     const prediction = createSimulationPredictionHost(simulation, local.player.actor, local.player.seat.id);
     const initial = source.sourceState(); prediction.captureSource(initial);
     const client = await ApplicationQ3Client.create({ weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, queries: simulation.scene, initial, local, audio, movement: prediction,
+      commandRegistration: input.clientCommandRegistration(local.player.seat.id),
       splitScreen: this.options.seats > 1,
       timeCvars: source.host.cvars,
       ...(cvars === undefined ? {} : { cvars }),
@@ -1316,7 +1317,6 @@ export class Application {
         console: text => input.enqueueClientCommand(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }),
         print: text => { this.host.print(text); local.console.print(text); },
       } });
-    input.registerClientCommands([...client.commandNames]);
     return { kind: "native", client, prediction };
   }
 

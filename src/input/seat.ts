@@ -4,7 +4,7 @@ import type { CommandContext, CommandDialect } from "../contracts/common.ts";
 import type { SeatId } from "../contracts/identity.ts";
 import type { Vec2, Vec3 } from "../contracts/math.ts";
 import type { InputAction, InputBinding, InputBindingTarget, PhysicalInput, SeatInputEvent, SeatInputFocus } from "../contracts/ui.ts";
-import type { CommandBuffer } from "../core/commands/index.ts";
+import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts";
 import { commandSeparatorOffset, sourceCommandText } from "../core/commands/text.ts";
 import { InputButton } from "./buttons.ts";
 import { GamepadInput } from "./gamepad.ts";
@@ -235,11 +235,13 @@ export class SeatInput {
   }
 }
 
-export function registerInputCommands(commands: CommandBuffer, lookup: (seat: SeatId) => SeatInput | null): () => void {
+export function registerInputCommands(commands: CommandBuffer, lookup: (seat: SeatId) => SeatInput | null,
+  clientScores?: (command: CommandInvocation) => boolean): () => void {
   const names: string[] = [];
   for (const [name, action] of actionCommands) for (const down of [true, false]) {
     const commandName = `${down ? "+" : "-"}${name}`;
     if (commands.register(commandName, invocation => {
+      if (name === "scores" && clientScores?.(invocation)) return;
       let origin = invocation.source.origin;
       while (origin.kind === "script") origin = origin.caller;
       if (origin.kind !== "local-seat") return;

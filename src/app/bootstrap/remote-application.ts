@@ -647,6 +647,7 @@ export class RemoteApplication {
           else if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Q3 cgame belongs to a retired remote world");
         }, source: remote.cgameSource, connection,
           commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer, browser: this.q3Browser,
+          commandRegistration: input.clientCommandRegistration(local.player.seat.id),
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
           assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
@@ -660,7 +661,6 @@ export class RemoteApplication {
       }
     } catch (error) { q3?.close(); ui.close(); throw error; }
     if (q3 !== null) {
-      input.registerClientCommands([...q3.commandNames]);
       if (this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
     }
     const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));

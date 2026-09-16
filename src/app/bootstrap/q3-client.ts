@@ -12,6 +12,7 @@ import { QvmApplicationScalars } from "./q3-client/qvm-scalars.ts";
 import type { QvmApplicationScalarOptions } from "./q3-client/qvm-scalars.ts";
 import type { Q3ClientState } from "../../compat/qvm/client-state.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
+import type { ClientCommandRegistration } from "../../input/client-commands.ts";
 import type { NativeRenderer } from "./renderer.ts";
 import type { Q3PresentationSession } from "../../content/q3/presentation/client.ts";
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
@@ -95,6 +96,7 @@ interface ApplicationQ3ClientCommonOptions {
   viewport(): Rect;
   now(): number;
   readonly commands: { reliable(text: string): void; console(text: string): void; print(text: string): void };
+  readonly commandRegistration: ClientCommandRegistration;
   readonly hooks?: Pick<Q3ClientPresentationOptions, "character" | "event" | "predictItem" | "viewWeapon" | "playerWeapon">;
 }
 export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
@@ -267,7 +269,7 @@ export class ApplicationQ3Client {
     const session: Q3PresentationSession = { product: this.product, clientNumber: source.clientNumber, serverMessageSequence: source.serverMessageSequence ?? 0, lastExecutedServerCommand: source.lastExecutedServerCommand ?? 0,
         mode: { kind: "live" }, commands: source.commands, snapshots: source, cvars: this.cvars,
         getGameState: () => source.getGameState(), getServerCommand: sequence => source.getServerCommand(sequence), snapshotPing: number => source.snapshotPing?.(number) ?? 0,
-        addReliableCommand: o.commands.reliable, appendConsoleCommand: o.commands.console, registerCgameCommand: name => { this.commandNames.add(name); },
+        addReliableCommand: o.commands.reliable, appendConsoleCommand: o.commands.console, registerCgameCommand: name => { this.commandNames.add(name); o.commandRegistration.register(name); },
         setUserCommandValue: (weapon, sensitivity) => { this.selection = { weapon, sensitivity }; },
         assertCurrent: () => { o.assertCurrent?.(); if (this.closed) throw new Error("Q3 cgame belongs to a retired world"); }, print: o.commands.print };
     if (o.kind === "qvm") {
@@ -276,7 +278,7 @@ export class ApplicationQ3Client {
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ seat, services, media, session, connection: o.connection, queries: o.queries,
         commands: o.commandBuffer, browser: o.browser, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
-        removeCommand: name => { this.commandNames.delete(name); o.commandBuffer.unregister(name); },
+        removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
         scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });
       this.backend = { kind: "qvm", game };
       this.submissions.length = 0;
@@ -505,6 +507,7 @@ export class ApplicationQ3Client {
   async shutdown(): Promise<void> { if (this.backend?.kind === "qvm") await this.backend.game.shutdown(); this.close(); }
   close(): void {
     if (this.closed) return;
+    this.options.commandRegistration.close();
     this.timeMirror?.close(); this.timeMirror = null;
     this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
