@@ -5,7 +5,7 @@ import { InputRouter } from "../../src/input/router.ts";
 import { expect, spyOn, test } from "bun:test";
 import type { ExecutableRecipe } from "../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { InputBatch, Simulation, SimulationEvent, SimulationOutput } from "../../src/contracts/session.ts";
+import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput } from "../../src/contracts/session.ts";
 import { Q3Random } from "../../src/core/numeric.ts";
 import { EngineSession, ProviderRuntimeState, ResourceScope, SourceClock, eventTargetsSeat } from "../../src/world/session/index.ts";
 
@@ -243,6 +243,54 @@ test("invalid replacement leaves the published world and its resources usable", 
   expect(session.step(input)).toBe(output);
   foreign.session.close();
   session.close();
+});
+
+test("detached local world retirement preserves the connecting client and later remote presentation", () => {
+  const { session, simulation, input, output } = stepFixture("local");
+  const client = session.createClient(2), seat = session.createSeat(1, client);
+  const connection = client.connect("remote");
+  const closed: string[] = [];
+  const presentation = (): SeatPresentation => ({
+    state: { seat: seat.id, client: client.id, actor: { kind: "spectator" },
+      get ui(): SeatPresentation["state"]["ui"] { throw new Error("Retirement does not read UI state"); },
+      get presentation(): SeatPresentation["state"]["presentation"] { throw new Error("Retirement does not read the renderer binding"); } },
+    receive: () => undefined,
+    frame: () => { throw new Error("Retirement does not construct a frame"); },
+    render: () => undefined,
+  });
+  const world = session.attachWorld(simulation({ close: () => { closed.push("simulation"); throw new Error("old world cleanup"); } }));
+  seat.attachPresentation(presentation(), () => { closed.push("presentation"); return undefined; });
+  const oldResources = client.worldResources;
+  oldResources.defer(() => { closed.push("client world"); return undefined; });
+  session.step(input);
+  const retired = session.detachWorld();
+  expect(session.world).toBeNull();
+  expect(session.snapshot).toBeNull();
+  expect(seat.presentation).toBeNull();
+  expect(client.worldResources).not.toBe(oldResources);
+  expect(world.isClosed).toBe(false);
+  expect(oldResources.isClosed).toBe(false);
+  expect(closed).toEqual([]);
+  const remote = presentation();
+  const currentResources = client.worldResources;
+  const currentPresentation = seat.attachPresentation(remote, () => undefined);
+  session.publish(output);
+  expect(() => retired.close()).toThrow(AggregateError);
+  retired.close();
+  expect(closed).toEqual(["simulation", "presentation", "client world"]);
+  expect(world.isClosed).toBe(true);
+  expect(oldResources.isClosed).toBe(true);
+  expect(client.worldResources).toBe(currentResources);
+  expect(currentResources.isClosed).toBe(false);
+  expect(currentPresentation.isClosed).toBe(false);
+  expect(seat.presentation).toBe(remote);
+  expect(session.snapshot).toBe(output.snapshot);
+  expect(client.connection).toBe(connection);
+  expect(connection.isClosed).toBe(false);
+  session.close();
+  expect(currentResources.isClosed).toBe(true);
+  expect(currentPresentation.isClosed).toBe(true);
+  expect(connection.isClosed).toBe(true);
 });
 
 

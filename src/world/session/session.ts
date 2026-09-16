@@ -307,20 +307,23 @@ export class EngineSession implements SessionResource {
     return { world, retired: { close: () => closeAll(retired, "Retired world shutdown failed") } };
   }
 
-  closeWorld(): undefined {
-    const world = this.currentWorld;
+  detachWorld(): SessionResource {
+    const retired: SessionResource[] = [];
+    if (this.currentWorld !== null) retired.push(this.currentWorld);
     this.currentWorld = null;
     this.published = null;
-    const errors: unknown[] = [];
-    try { world?.close(); } catch (error) { errors.push(error); }
     for (const seat of this.seats.values()) {
-      try { seat.clearPresentation(); } catch (error) { errors.push(error); }
+      const previous = seat.replacePresentation(null);
+      if (previous !== null) retired.push(previous);
     }
     for (const client of this.clients.values()) {
-      if (!client.isClosed) { try { client.clearWorld(); } catch (error) { errors.push(error); } }
+      if (!client.isClosed) retired.push(client.replaceWorldResources());
     }
-    if (errors.length > 0) throw new AggregateError(errors, "World replacement failed");
-    return undefined;
+    return { close: () => closeAll(retired, "World replacement failed") };
+  }
+
+  closeWorld(): undefined {
+    return this.detachWorld().close();
   }
 
   prepareClient(slot: number, retiring?: SessionClient): SessionClient {
