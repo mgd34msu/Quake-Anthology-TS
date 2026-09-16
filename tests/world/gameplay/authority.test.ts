@@ -44,6 +44,47 @@ describe("shared actor and gameplay authority", () => {
     expect(authority.read(target.id)?.health).toBe(61);
     actors.close();
   });
+  test("registry snapshots remain immutable across source reuse, reentrant release and restore", () => {
+    const identities = createIdentityOwner("registry snapshots"), actors = new SessionActorRegistry(identities);
+    const first = actors.allocateAtSource("q1:game", 7, "q1:first");
+    const source = actors.sourceOf(first.id), observation = actors.observe(first.id), list = actors.observations();
+    if (source === null || observation === null) throw new Error("Missing actor snapshots");
+    expect(Object.isFrozen(source)).toBe(true); expect(Object.isFrozen(observation)).toBe(true);
+    expect(Reflect.set(source, "slot", 9)).toBe(false);
+    expect(Reflect.set(observation, "definition", "q1:changed")).toBe(false);
+    expect(actors.sourceOf(first.id)).toBe(source); expect(actors.observe(first.id)).toBe(observation);
+    expect(actors.observations()).not.toBe(list); expect(list[0]).toBe(observation);
+    actors.onRelease(actor => {
+      if (actor === first) {
+        expect(actors.sourceOf(first.id)).toBeNull(); expect(actors.observe(first.id)).toBeNull();
+        expect(actors.observations()).toHaveLength(0);
+        actors.allocateAtSource("q1:game", 7, "q1:replacement");
+      }
+      return undefined;
+    });
+    actors.release(first);
+    const replacement = actors.atSource("q1:game", 7);
+    if (replacement === null) throw new Error("Missing replacement");
+    expect(replacement.id.generation).toBeGreaterThan(first.id.generation);
+    expect(actors.observe(replacement.id)?.definition).toBe("q1:replacement");
+    expect(actors.sourceOf(replacement.id)).not.toBe(source);
+    expect(observation.definition).toBe("q1:first"); expect(source.slot).toBe(7);
+    expect(list[0]).toBe(observation);
+    const saved = actors.checkpoint(), sources = actors.sourceCheckpoint();
+    const restored = SessionActorRegistry.restore(identities, saved, sources);
+    const loaded = restored.atSource("q1:game", 7);
+    if (loaded === null) throw new Error("Missing restored actor");
+    expect(restored.observe(replacement.id)).toBeNull();
+    expect(restored.observe(loaded.id)?.definition).toBe("q1:replacement");
+    expect(Object.isFrozen(restored.sourceOf(loaded.id))).toBe(true);
+    expect(restored.sourceOf(loaded.id)).toBe(restored.sourceOf(loaded.id));
+    const loadedObservation = restored.observations()[0];
+    if (loadedObservation === undefined) throw new Error("Missing restored observation");
+    expect(restored.observe(loaded.id)).toBe(loadedObservation);
+    restored.close(); expect(restored.sourceOf(loaded.id)).toBeNull(); expect(restored.observations()).toHaveLength(0);
+    actors.close(); expect(actors.observe(replacement.id)).toBeNull();
+  });
+
   test("level travel and same-session loading cannot alias prior actor generations", () => {
     const identity = createIdentityOwner("travel");
     const before = new SessionActorRegistry(identity);
