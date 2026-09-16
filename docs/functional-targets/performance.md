@@ -12,6 +12,8 @@ Moving work off the main thread qualifies only if the measured result improves a
 
 ## Required comparison
 
+Use the evidence below for the behavior and costs affected by a change. It is not an exhaustive all-workload gate for every unit. Prioritize working implementation and measured performance, with focused checks proportional to the change. Live playthrough feedback will guide further code and test changes; fuller hardening follows. This sequencing does not relax fidelity or native compatibility requirements, or justify claims beyond the paths actually checked.
+
 | Evidence | Required record |
 |---|---|
 | Inputs | Exact source/build, assets, map, recipe, renderer, resolution, quality settings, device/driver, presentation mode, and environment. |
@@ -38,10 +40,12 @@ For a 60 Hz reference workload the whole-frame budget is 16.67 ms; for 120 Hz it
 
 Collision changes require complete trace results and error behavior, not just matching hit fractions. Rendering changes require triangle/surface order, UV seams, interpolation, lighting, transparency and visibility to remain correct. Compare prepared geometry where appropriate, then inspect corresponding CPU/GL frames. Audio changes require correct events, positions, gains, timing, and PCM delivery; dummy-device output alone does not prove physical audibility.
 
-## Current investigation
+## Current evidence and remaining work
 
-The existing isolated mixed-game route measures about 14 FPS. It establishes a serious unresolved problem on that test path. It does not identify the user's desktop bottleneck. In that measurement, simulation and presentation waits each cost roughly 27 ms per frame; total render work costs roughly 11 ms, including about 5 ms of submission. These values come from one workload and include nested timings.
+The earlier isolated mixed-game route measured about 14 FPS, with simulation and presentation waits each around 27 ms per frame and total render work around 11 ms, including about 5 ms of submission. Those nested timings describe that historical workload, not the current installed binary or the user's desktop bottleneck.
 
-Two experiments remain unshipped. An exact-envelope collision cache showed no gameplay improvement. Reusing face endpoint distances produced only a small, inconsistent CPU timing change. Neither establishes a useful speedup.
+Accepted body storage change `91fe177` removes binding callbacks for locally owned actor bodies. Two alternating fixed-work pairs reduced aggregate simulation elapsed by **6.055%** and application elapsed by **1.586%**. Geometry, state/events and complete query results matched the retained reference under the documented private-mount mapping. Tails were mixed: the first application's p95 and maximum worsened. This is a bounded route-cost improvement, not an FPS result. See the [body route receipt](../../.artifacts/resume-20260915/body-local-route7ac/RESULT.md).
 
-The next candidates are eliminating clipped geometry that is immediately discarded, retaining reusable model topology and transforms, and eliminating redundant GL state submission. Count the affected work before choosing an implementation. Recheck profiles after each accepted change because the dominant cost will move. Preserve the shared engine's complete feature set throughout.
+The redundant GL depth/blend state cache was removed in `7ac546e` after matching-work measurements showed no elapsed benefit. Lower call counts alone did not justify retaining it. See the [GL timing receipt](../../.artifacts/resume-20260915/gl-depth-blend-elapsed2/RESULT.md). The prepared-geometry fallback matched 5,000 queries exactly but accelerated none; that result establishes fallback correctness only, not a performance benefit. Earlier exact-envelope and endpoint-distance experiments likewise did not establish a useful speedup.
+
+Installed source remains `275406fa`; the accepted body change is not yet part of that binary. See [installed evidence](../execution-status.md#installed-executable-and-recent-fixes). Continue from measured costs in the affected path, preserve complete behavior, and recheck profiles after accepted changes. Whole-frame responsiveness, hitches and the broader workload matrix remain open.

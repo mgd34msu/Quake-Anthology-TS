@@ -84,7 +84,7 @@ T01 lifecycle, T23 LLM, the full composition matrix, scale calibration, and the 
 
 ## Common quality gates
 
-These apply to every target and add work beyond the historical requirement denominator.
+These apply to every target and add work beyond the historical requirement denominator. For each implementation unit, select focused checks proportional to the behavior it changes. Prioritize working features and measured performance; live playthrough feedback will change the code and tests, with fuller hardening afterward. The workload and comparison tables identify relevant evidence, not an exhaustive all-matrix gate on every change. Quality and native compatibility requirements remain in force, and unchecked paths remain open.
 
 1. **Correctness:** Compare source-observable behavior and real callers. Retain native numerical/order constraints where required. One shared interface over three untouched independent engines does not count as consolidation.
 2. **Mixed composition:** Exercise the target with independently selected world/campaign, movement, character, weapons, monsters, pickups, and equipment. Preserve explicit selections through travel, save, and UI configuration.
@@ -98,11 +98,11 @@ The frame-time budget and reference workload should be explicit before a perform
 
 ## Implementation order
 
-Current work follows the installed `142a1826` shared-client workflow: finish command, settings and capture lifetimes across local play, network clients, demos and the frontend, and preserve the intent of an initial `--menu` launch. These are bounded T01/T06/T20 improvements. The verified local/demo/menu/save/console flow does not close those targets or the full source and native matrix. Performance work remains open under T03/T11/T13.
+Current work extends the installed shared-client workflow: finish command, settings and capture lifetimes across local play, network clients, demos and the frontend, and preserve the intent of an initial `--menu` launch. These are bounded T01/T06/T20 improvements. The verified local/demo/menu/save/console flow does not close those targets or the full source and native matrix. Performance work remains open under T03/T11/T13.
 
 The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
 
-Performance changes accepted so far include archive-member indexing and reduced redundant GL state calls. Archive lookup measurements preserve the same ordered members. The GL run showed lower render-stage cost, but its wall-clock-driven route does not establish a matching-state FPS improvement. Several collision candidates were rejected because they failed exactness or showed no reliable benefit. Frame rate remains open; none of these prerequisites closes T03 or T11.
+Accepted performance changes include archive-member indexing and local actor body storage (`91fe177`). The body change reduced aggregate simulation elapsed by 6.055% and application elapsed by 1.586% in two fixed-work pairs, with mixed tails; it is accepted source, not yet in installed `275406fa`. The GL state cache was removed in `7ac546e` after no measured elapsed benefit. Prepared-geometry fallback matched 5,000 queries but accelerated none, so it provides no speedup evidence. See the [performance evidence and limits](performance.md#current-evidence-and-remaining-work). None of these results establishes an FPS improvement or closes T03/T11/T13.
 
 The historical checklist counts above remain unchanged pending requirement-level reassessment. Current implementation work also includes active powerup timers in the shared HUD. Each source timer must use its actual expiry and the viewing seat's player.
 
