@@ -154,12 +154,16 @@ export class StartupMenu {
       { id: "ui:startup:gyro", category: "input", kind: "button", label: "Gyro controls", enabled: () => this.gyroMenu !== null,
         activate: () => { if (this.gyroMenu !== null) this.controller.openMenu(this.gyroMenu); } }]);
     this.disposers.push(settings.dispose);
-    this.register(soundMenu, () => {
+    this.disposers.push(this.controller.register(soundMenu, () => {
       const bindings = (options.settings ?? []).filter(binding => binding.category === "audio");
-      const rect = (index: number) => ({ x: 64, y: 118 + (index + 2) * 38, width: 512, height: 34 });
-      return [...this.rows(["environment", "doppler"]).map((row, index) => this.row(row, index)),
-        ...bindings.map((binding, index) => settingControl(binding, rect(index), options.seat)), this.back()];
-    });
+      const rect = (index: number) => ({ x: 64, y: 118 + index * 38, width: 496, height: 34 });
+      const rows = this.rows(["environment", "doppler"]);
+      const controls = [...rows.map((row, index) => ({ ...this.row(row, index), rect: rect(index) })),
+        ...bindings.map((binding, index) => settingControl(binding, rect(index + rows.length), options.seat))];
+      return { id: soundMenu, title: "", fullScreen: false,
+        scroll: { rect: { x: 64, y: 118, width: 512, height: 298 }, contentHeight: controls.length * 38, controls: controls.map(control => control.id) },
+        controls: [...controls, this.back()], open: () => undefined, close: () => undefined };
+    }));
     this.register(selectMenu, () => {
       const row = this.selectionRow();
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
