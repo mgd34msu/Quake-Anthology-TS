@@ -378,7 +378,7 @@ test("native alias bounds reject geometry before lighting while retaining replac
     attachments: [{ tag: joint.name, entity: { ...child, transform: { ...child.transform, origin: { x: 2000, y: 0, z: 0 } } } }] };
   const frustum = [{ normal: { x: 1, y: 0, z: 0 }, distance: 1000 }];
   let parentLights = 0, childLights = 0;
-  const context = { camera, timeSeconds: 0, frustum, finalVertexLight: (current: SceneEntity) => {
+  const context = { camera, timeSeconds: 0, frustum, prepareVertexLighting: (current: SceneEntity) => () => {
     if (current.model.kind === "md5") parentLights++; else childLights++;
     return { x: 1, y: 1, z: 1 };
   } };

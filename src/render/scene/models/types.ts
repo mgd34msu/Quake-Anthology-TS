@@ -41,6 +41,8 @@ export interface ModelSourceOptions {
   readonly playerColors?: { readonly top: number; readonly bottom: number };
 }
 
+export type ModelVertexLighting = (normal: Vec3, position: Vec3, corner: number) => Vec3;
+
 export interface ModelPreparationContext {
   readonly skinningFrame?: ModelSkinningFrame;
   readonly modelPolicy?: ModelReplacementPolicy;
@@ -55,7 +57,7 @@ export interface ModelPreparationContext {
   /** Normalized alias-light modulation; Q3 keeps local normals for its stages. */
   lightVertex?(entity: SceneEntity, normal: Vec3, position: Vec3): Vec3;
   /** A resource/lighting join may supply the complete source vertex modulation. */
-  finalVertexLight?(entity: SceneEntity, normal: Vec3, position: Vec3, corner: number, options: ModelSourceOptions): Vec3;
+  prepareVertexLighting?(entity: SceneEntity, options: ModelSourceOptions): ModelVertexLighting;
   /** Palette byte colors used by Q2 RF_BEAM, independent of a model skin. */
   paletteColor?(entity: SceneEntity, index: number): Vec3;
 }

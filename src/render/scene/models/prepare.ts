@@ -17,7 +17,7 @@ import { DEFAULT_MODEL_REPLACEMENT_POLICY, selectModelEntity } from "./replaceme
 import { byteColor } from "./types.ts";
 import { md5ShadowEnvelope } from "./shadow-bounds.ts";
 import { q2BeamGeometry } from "../particles/legacy.ts";
-import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
+import type { ModelGroupContext, ModelImageSelection, ModelPreparationContext, ModelSourceOptions, ModelVertexLighting, PreparedModelEntity, PreparedModelSurface } from "./types.ts";
 
 function countFrames(model: DecodedModel): number {
   return model.kind === "brush-model" ? 1 : model.frames.length;
@@ -143,11 +143,13 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   const color = byteColor({ ...entity.color, w: alpha });
   let lod = 0;
   let fogSphere: PreparedModelSurface["fogSphere"] = null;
+  let vertexLighting: ModelVertexLighting | undefined;
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false): void {
+    vertexLighting ??= context.prepareVertexLighting?.(entity, options);
     const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => {
       const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
-      const light = context.finalVertexLight?.(entity, vertex.normal, vertex.position, corner, options) ?? (flags.kind === "q2"
+      const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
         ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
         : sampled ?? { x: 1, y: 1, z: 1 });
       const base = vertex.color ?? color;
