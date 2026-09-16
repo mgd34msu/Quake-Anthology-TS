@@ -79,7 +79,7 @@ async function orderForContent(catalog: InstalledCatalog, plan: ResolvedMountPla
   return [...order];
 }
 
-export async function resolveLaunch(options: ResolveLaunchOptions): Promise<ExecutableRecipe> {
+export async function prepareLaunchMountPlan(options: ResolveLaunchOptions): Promise<{ readonly selected: SelectedLaunch; readonly plan: ResolvedMountPlan }> {
   const choice = selectLaunch(options.choice, options.preset, options.id);
   const selected = { ...choice, weapons: choice.weapons.map(weapon => canonicalWeaponSource(choice.map.entities, weapon, options.catalog)) };
   validateEquipment(selected.equipment, options.catalog);
@@ -106,6 +106,11 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
   const artifactOrders: ResolvedMountPlan["prefixOrders"][number][] = [];
   for (const [prefix, content] of artifacts) artifactOrders.push({ prefix, mounts: await orderForContent(options.catalog, basePlan, content) });
   const plan: ResolvedMountPlan = { ...basePlan, prefixOrders: [...artifactOrders, ...basePlan.prefixOrders] };
+  return { selected, plan };
+}
+
+export async function resolveLaunch(options: ResolveLaunchOptions): Promise<ExecutableRecipe> {
+  const { selected, plan } = await prepareLaunchMountPlan(options);
   using mounted = await openMountPlan(plan, options.mounts);
   const resources = new Map<ResolvedResourceReference["id"], ResolvedResourceReference>();
   const resolveResource = async (request: ResourceRequest, kind: "map" | "artifact"): Promise<ResolvedResourceReference> => {
